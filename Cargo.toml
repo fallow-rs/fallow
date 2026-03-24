@@ -21,14 +21,14 @@ fallow-graph = { version = "2.8.1", path = "crates/graph" }
 fallow-types = { version = "2.8.1", path = "crates/types" }
 
 # Parsing & analysis
-oxc_allocator = "0.120"
-oxc_ast = "0.120"
-oxc_ast_visit = "0.120"
-oxc_parser = "0.120"
+oxc_allocator = "0.122"
+oxc_ast = "0.122"
+oxc_ast_visit = "0.122"
+oxc_parser = "0.122"
 oxc_resolver = "11"
-oxc_semantic = "0.120"
-oxc_span = "0.120"
-oxc_syntax = "0.120"
+oxc_semantic = "0.122"
+oxc_span = "0.122"
+oxc_syntax = "0.122"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
