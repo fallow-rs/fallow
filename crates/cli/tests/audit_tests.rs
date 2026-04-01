@@ -138,11 +138,7 @@ fn audit_pass_verdict_when_no_changes() {
 fn audit_json_has_summary_with_changes() {
     let dir = create_audit_fixture("summary");
 
-    fs::write(
-        dir.join("src/new.ts"),
-        "export const newThing = 'added';\n",
-    )
-    .unwrap();
+    fs::write(dir.join("src/new.ts"), "export const newThing = 'added';\n").unwrap();
 
     Command::new("git")
         .args(["add", "."])
