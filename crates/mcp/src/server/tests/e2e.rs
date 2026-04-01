@@ -16,6 +16,9 @@ fn fallow_binary() -> String {
     path.pop(); // crates/
     path.pop(); // project root
     path.push("target/debug/fallow");
+    if cfg!(windows) {
+        path.set_extension("exe");
+    }
     assert!(
         path.is_file(),
         "fallow binary not found at {path:?}. Build it first: cargo build -p fallow-cli"

@@ -19,6 +19,9 @@ pub fn fallow_bin() -> PathBuf {
             path.pop(); // crates/
             path.pop(); // project root
             path.push("target/debug/fallow");
+            if cfg!(windows) {
+                path.set_extension("exe");
+            }
             path
         },
         PathBuf::from,
