@@ -314,7 +314,7 @@ runs:
         steps.analyze.outputs.sarif != '' &&
         steps.ghas-check.outputs.available == 'true' &&
         always()
-      uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v4
+      uses: github/codeql-action/upload-sarif@c10b8064de6f491fea524254123dbe5e09572f13 # v4
       with:
         sarif_file: fallow-results.sarif
         category: fallow
