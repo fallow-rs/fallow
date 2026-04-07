@@ -37,7 +37,7 @@
     "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
-    "detect-libc": "2.0.0"
+    "detect-libc": "2.1.2"
   },
   "optionalDependencies": {
     "@fallow-cli/darwin-arm64": "2.18.0",
