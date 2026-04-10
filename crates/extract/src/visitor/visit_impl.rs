@@ -15,7 +15,7 @@ use crate::{
 use super::helpers::{
     extract_angular_component_metadata, extract_class_members, extract_concat_parts,
     extract_super_class_name, has_angular_class_decorator, is_meta_url_arg,
-    regex_pattern_to_suffix,
+    normalize_angular_asset_url, regex_pattern_to_suffix,
 };
 use super::{ModuleInfoExtractor, try_extract_dynamic_import, try_extract_require};
 
@@ -672,10 +672,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // templateUrl/styleUrl imports, inline template refs, host binding refs,
         // and inputs/outputs member names.
         if let Some(meta) = extract_angular_component_metadata(class) {
-            // Emit SideEffect imports for templateUrl and styleUrl/styleUrls
+            // Emit SideEffect imports for templateUrl and styleUrl/styleUrls.
+            // Angular resolves both `'app.html'` and `'./app.html'` relative to
+            // the component file; normalize bare filenames so downstream
+            // resolution doesn't misclassify them as npm packages.
             if let Some(ref template_url) = meta.template_url {
                 self.imports.push(ImportInfo {
-                    source: template_url.clone(),
+                    source: normalize_angular_asset_url(template_url),
                     imported_name: ImportedName::SideEffect,
                     local_name: String::new(),
                     is_type_only: false,
@@ -685,7 +688,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             }
             for style_url in &meta.style_urls {
                 self.imports.push(ImportInfo {
-                    source: style_url.clone(),
+                    source: normalize_angular_asset_url(style_url),
                     imported_name: ImportedName::SideEffect,
                     local_name: String::new(),
                     is_type_only: false,

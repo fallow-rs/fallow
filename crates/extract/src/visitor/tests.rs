@@ -2514,6 +2514,85 @@ fn angular_component_style_urls_array_emits_multiple_imports() {
 }
 
 #[test]
+fn angular_component_template_url_without_dot_slash_normalized() {
+    // Angular resolves `'app.component.html'` the same as `'./app.component.html'`.
+    // Fallow must normalize the bare form so downstream resolution doesn't
+    // misclassify it as an unlisted npm package. Regression test for #99.
+    let info = parse(
+        r"
+        import { Component } from '@angular/core';
+
+        @Component({
+            selector: 'app-root',
+            templateUrl: 'app.component.html',
+        })
+        export class AppComponent {}
+        ",
+    );
+    let template_import = info
+        .imports
+        .iter()
+        .find(|i| matches!(i.imported_name, ImportedName::SideEffect))
+        .unwrap();
+    assert_eq!(template_import.source, "./app.component.html");
+}
+
+#[test]
+fn angular_component_style_url_without_dot_slash_normalized() {
+    // Regression test for #99: bare `styleUrl` values must be normalized.
+    let info = parse(
+        r"
+        import { Component } from '@angular/core';
+
+        @Component({
+            selector: 'app-root',
+            templateUrl: 'app.component.html',
+            styleUrl: 'app.component.scss',
+        })
+        export class AppComponent {}
+        ",
+    );
+    let sources: Vec<&str> = info
+        .imports
+        .iter()
+        .filter(|i| matches!(i.imported_name, ImportedName::SideEffect))
+        .map(|i| i.source.as_str())
+        .collect();
+    assert!(sources.contains(&"./app.component.html"));
+    assert!(sources.contains(&"./app.component.scss"));
+}
+
+#[test]
+fn angular_component_style_urls_array_without_dot_slash_normalized() {
+    // Regression test for #99: bare entries in a `styleUrls` array must be
+    // normalized individually, and a mixed array must preserve relative entries.
+    let info = parse(
+        r"
+        import { Component } from '@angular/core';
+
+        @Component({
+            selector: 'app-root',
+            templateUrl: 'app.component.html',
+            styleUrls: ['app.component.scss', './theme.scss'],
+        })
+        export class AppComponent {}
+        ",
+    );
+    let sources: Vec<&str> = info
+        .imports
+        .iter()
+        .filter(|i| matches!(i.imported_name, ImportedName::SideEffect))
+        .map(|i| i.source.as_str())
+        .collect();
+    assert!(sources.contains(&"./app.component.html"));
+    assert!(sources.contains(&"./app.component.scss"));
+    assert!(sources.contains(&"./theme.scss"));
+    // The already-relative entry must not be double-prefixed.
+    assert!(!sources.contains(&".//theme.scss"));
+    assert!(!sources.contains(&"././theme.scss"));
+}
+
+#[test]
 fn angular_component_without_template_url_no_side_effect() {
     let info = parse(
         r"
