@@ -6,6 +6,7 @@
 
 #![warn(missing_docs)]
 
+mod asset_url;
 pub mod astro;
 pub mod cache;
 pub(crate) mod complexity;

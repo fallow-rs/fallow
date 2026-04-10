@@ -12,10 +12,12 @@ use crate::{
     MemberAccess, ReExportInfo, RequireCallInfo,
 };
 
+use crate::asset_url::normalize_asset_url;
+
 use super::helpers::{
     extract_angular_component_metadata, extract_class_members, extract_concat_parts,
     extract_super_class_name, has_angular_class_decorator, is_meta_url_arg,
-    normalize_angular_asset_url, regex_pattern_to_suffix,
+    regex_pattern_to_suffix,
 };
 use super::{ModuleInfoExtractor, try_extract_dynamic_import, try_extract_require};
 
@@ -678,7 +680,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             // resolution doesn't misclassify them as npm packages.
             if let Some(ref template_url) = meta.template_url {
                 self.imports.push(ImportInfo {
-                    source: normalize_angular_asset_url(template_url),
+                    source: normalize_asset_url(template_url),
                     imported_name: ImportedName::SideEffect,
                     local_name: String::new(),
                     is_type_only: false,
@@ -688,7 +690,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             }
             for style_url in &meta.style_urls {
                 self.imports.push(ImportInfo {
-                    source: normalize_angular_asset_url(style_url),
+                    source: normalize_asset_url(style_url),
                     imported_name: ImportedName::SideEffect,
                     local_name: String::new(),
                     is_type_only: false,

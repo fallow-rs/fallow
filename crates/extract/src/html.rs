@@ -13,6 +13,7 @@ use std::sync::LazyLock;
 
 use oxc_span::Span;
 
+use crate::asset_url::normalize_asset_url;
 use crate::sfc_template::angular::{self, ANGULAR_TPL_SENTINEL};
 use crate::{ImportInfo, ImportedName, MemberAccess, ModuleInfo};
 use fallow_types::discover::FileId;
@@ -72,13 +73,15 @@ pub(crate) fn parse_html_to_module(file_id: FileId, source: &str, content_hash: 
 
     let mut imports = Vec::new();
 
-    // Extract <script src="..."> references
+    // Extract <script src="..."> references.
+    // Bare filenames (e.g., `src="app.js"`) are normalized to `./app.js` so
+    // the resolver doesn't misclassify them as npm packages.
     for cap in SCRIPT_SRC_RE.captures_iter(&stripped) {
         if let Some(m) = cap.get(1) {
             let src = m.as_str().trim();
             if !src.is_empty() && !is_remote_url(src) {
                 imports.push(ImportInfo {
-                    source: src.to_string(),
+                    source: normalize_asset_url(src),
                     imported_name: ImportedName::SideEffect,
                     local_name: String::new(),
                     is_type_only: false,
@@ -89,14 +92,15 @@ pub(crate) fn parse_html_to_module(file_id: FileId, source: &str, content_hash: 
         }
     }
 
-    // Extract <link rel="stylesheet" href="..."> and <link rel="modulepreload" href="...">
+    // Extract <link rel="stylesheet" href="..."> and <link rel="modulepreload" href="...">.
     // Handle both attribute orders: rel before href, and href before rel.
+    // Bare filenames are normalized identically to `<script src>`.
     for cap in LINK_HREF_RE.captures_iter(&stripped) {
         if let Some(m) = cap.get(2) {
             let href = m.as_str().trim();
             if !href.is_empty() && !is_remote_url(href) {
                 imports.push(ImportInfo {
-                    source: href.to_string(),
+                    source: normalize_asset_url(href),
                     imported_name: ImportedName::SideEffect,
                     local_name: String::new(),
                     is_type_only: false,
@@ -111,7 +115,7 @@ pub(crate) fn parse_html_to_module(file_id: FileId, source: &str, content_hash: 
             let href = m.as_str().trim();
             if !href.is_empty() && !is_remote_url(href) {
                 imports.push(ImportInfo {
-                    source: href.to_string(),
+                    source: normalize_asset_url(href),
                     imported_name: ImportedName::SideEffect,
                     local_name: String::new(),
                     is_type_only: false,
@@ -323,6 +327,90 @@ mod tests {
         );
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "./src/global.css");
+    }
+
+    // ── Bare asset references normalized to relative paths ──────
+    // Regression tests for the same class of bug as #99 (Angular templateUrl).
+    // Browsers resolve `src="app.js"` and `href="styles.css"` relative to the
+    // HTML file, so emitting these as bare specifiers would misclassify them
+    // as unlisted npm packages.
+
+    #[test]
+    fn bare_script_src_normalized_to_relative() {
+        let info = parse_html_to_module(FileId(0), r#"<script src="app.js"></script>"#, 0);
+        assert_eq!(info.imports.len(), 1);
+        assert_eq!(info.imports[0].source, "./app.js");
+    }
+
+    #[test]
+    fn bare_module_script_src_normalized_to_relative() {
+        let info = parse_html_to_module(
+            FileId(0),
+            r#"<script type="module" src="main.ts"></script>"#,
+            0,
+        );
+        assert_eq!(info.imports.len(), 1);
+        assert_eq!(info.imports[0].source, "./main.ts");
+    }
+
+    #[test]
+    fn bare_stylesheet_link_href_normalized_to_relative() {
+        let info = parse_html_to_module(
+            FileId(0),
+            r#"<link rel="stylesheet" href="styles.css" />"#,
+            0,
+        );
+        assert_eq!(info.imports.len(), 1);
+        assert_eq!(info.imports[0].source, "./styles.css");
+    }
+
+    #[test]
+    fn bare_link_href_reversed_attrs_normalized_to_relative() {
+        let info = parse_html_to_module(
+            FileId(0),
+            r#"<link href="styles.css" rel="stylesheet" />"#,
+            0,
+        );
+        assert_eq!(info.imports.len(), 1);
+        assert_eq!(info.imports[0].source, "./styles.css");
+    }
+
+    #[test]
+    fn bare_modulepreload_link_href_normalized_to_relative() {
+        let info = parse_html_to_module(
+            FileId(0),
+            r#"<link rel="modulepreload" href="vendor.js" />"#,
+            0,
+        );
+        assert_eq!(info.imports.len(), 1);
+        assert_eq!(info.imports[0].source, "./vendor.js");
+    }
+
+    #[test]
+    fn bare_asset_with_subdir_normalized_to_relative() {
+        let info = parse_html_to_module(FileId(0), r#"<script src="assets/app.js"></script>"#, 0);
+        assert_eq!(info.imports.len(), 1);
+        assert_eq!(info.imports[0].source, "./assets/app.js");
+    }
+
+    #[test]
+    fn root_absolute_script_src_unchanged() {
+        // `/src/main.ts` is a web convention (Vite root-relative) and must
+        // stay absolute so the resolver's HTML special case applies.
+        let info = parse_html_to_module(FileId(0), r#"<script src="/src/main.ts"></script>"#, 0);
+        assert_eq!(info.imports.len(), 1);
+        assert_eq!(info.imports[0].source, "/src/main.ts");
+    }
+
+    #[test]
+    fn parent_relative_script_src_unchanged() {
+        let info = parse_html_to_module(
+            FileId(0),
+            r#"<script src="../shared/vendor.js"></script>"#,
+            0,
+        );
+        assert_eq!(info.imports.len(), 1);
+        assert_eq!(info.imports[0].source, "../shared/vendor.js");
     }
 
     #[test]

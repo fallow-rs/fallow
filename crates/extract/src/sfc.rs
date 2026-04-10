@@ -12,6 +12,7 @@ use oxc_parser::Parser;
 use oxc_span::SourceType;
 use rustc_hash::FxHashSet;
 
+use crate::asset_url::normalize_asset_url;
 use crate::parse::compute_unused_import_bindings;
 use crate::sfc_template::{SfcKind, collect_template_usage};
 use crate::visitor::ModuleInfoExtractor;
@@ -216,8 +217,10 @@ fn merge_script_into_module(
 }
 
 fn add_script_src_import(module: &mut ModuleInfo, source: &str) {
+    // Normalize bare filenames (e.g., `<script src="logic.ts">`) so the
+    // resolver treats them as file-relative references, not npm packages.
     module.imports.push(ImportInfo {
-        source: source.to_string(),
+        source: normalize_asset_url(source),
         imported_name: ImportedName::SideEffect,
         local_name: String::new(),
         is_type_only: false,

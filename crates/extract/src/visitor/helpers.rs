@@ -23,27 +23,6 @@ pub struct AngularComponentMetadata {
     pub input_output_members: Vec<String>,
 }
 
-/// Normalize an Angular `templateUrl`/`styleUrl` value so bare filenames are
-/// treated as relative paths, not npm package specifiers.
-///
-/// Angular resolves both `'app.component.html'` and `'./app.component.html'`
-/// relative to the component file — the `./` prefix is optional. Downstream
-/// import resolution classifies any specifier without `./`, `../`, or `/` as
-/// a bare package, so a bare filename would be reported as an unlisted npm
-/// dependency. Prepend `./` when the value is clearly a local path.
-///
-/// Paths that already start with `.`, `/`, contain a URL scheme (`://`), or
-/// use a scoped package prefix (`@scope/...`) are left untouched.
-pub fn normalize_angular_asset_url(url: &str) -> String {
-    if url.starts_with('.') || url.starts_with('/') || url.contains("://") {
-        return url.to_string();
-    }
-    if url.starts_with('@') && url.contains('/') {
-        return url.to_string();
-    }
-    format!("./{url}")
-}
-
 /// Angular signal-based API function names that implicitly mark class properties
 /// as framework-managed (Angular 17+). Properties initialized with these calls
 /// should be treated like decorated members.
@@ -613,78 +592,6 @@ pub(super) fn is_builtin_constructor(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── normalize_angular_asset_url ──────────────────────────
-
-    #[test]
-    fn normalize_angular_asset_bare_filename_gets_dot_slash() {
-        assert_eq!(
-            normalize_angular_asset_url("app.component.html"),
-            "./app.component.html"
-        );
-        assert_eq!(
-            normalize_angular_asset_url("app.component.scss"),
-            "./app.component.scss"
-        );
-    }
-
-    #[test]
-    fn normalize_angular_asset_bare_subdir_gets_dot_slash() {
-        assert_eq!(
-            normalize_angular_asset_url("templates/app.html"),
-            "./templates/app.html"
-        );
-    }
-
-    #[test]
-    fn normalize_angular_asset_dot_slash_unchanged() {
-        assert_eq!(
-            normalize_angular_asset_url("./app.component.html"),
-            "./app.component.html"
-        );
-    }
-
-    #[test]
-    fn normalize_angular_asset_parent_relative_unchanged() {
-        assert_eq!(
-            normalize_angular_asset_url("../shared/app.html"),
-            "../shared/app.html"
-        );
-    }
-
-    #[test]
-    fn normalize_angular_asset_absolute_path_unchanged() {
-        assert_eq!(
-            normalize_angular_asset_url("/src/app.html"),
-            "/src/app.html"
-        );
-    }
-
-    #[test]
-    fn normalize_angular_asset_url_scheme_unchanged() {
-        assert_eq!(
-            normalize_angular_asset_url("https://cdn.example.com/app.html"),
-            "https://cdn.example.com/app.html"
-        );
-    }
-
-    #[test]
-    fn normalize_angular_asset_scoped_package_unchanged() {
-        // Scoped package path aliases (webpack/esbuild) should stay bare so
-        // the resolver can handle them via node_modules / alias resolution.
-        assert_eq!(
-            normalize_angular_asset_url("@shared/header.html"),
-            "@shared/header.html"
-        );
-    }
-
-    #[test]
-    fn normalize_angular_asset_empty_string_edge_case() {
-        // Empty templateUrl is syntactically possible but semantically invalid
-        // in Angular. Document current behavior: the normalizer prepends `./`,
-        // producing `./` which the resolver will fail to match to a file.
-        assert_eq!(normalize_angular_asset_url(""), "./");
-    }
 
     // ── regex_pattern_to_suffix ──────────────────────────────
 

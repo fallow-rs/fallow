@@ -565,6 +565,29 @@ fn vue_script_src_attribute() {
 }
 
 #[test]
+fn vue_script_src_bare_filename_normalized() {
+    // Vue/Svelte <script src="..."> resolves relative to the SFC file, so a
+    // bare `logic.ts` must be normalized to `./logic.ts` and not reported as
+    // an unlisted npm package. Same bug shape as Angular templateUrl (#99).
+    let info = parse_sfc(
+        r#"<script src="logic.ts" lang="ts"></script><template><div/></template>"#,
+        "App.vue",
+    );
+    assert_eq!(info.imports.len(), 1);
+    assert_eq!(info.imports[0].source, "./logic.ts");
+}
+
+#[test]
+fn svelte_script_src_bare_filename_normalized() {
+    let info = parse_sfc(
+        r#"<script src="store.js"></script><div>hi</div>"#,
+        "App.svelte",
+    );
+    assert_eq!(info.imports.len(), 1);
+    assert_eq!(info.imports[0].source, "./store.js");
+}
+
+#[test]
 fn vue_script_inside_html_comment() {
     let info = parse_sfc(
         r#"
