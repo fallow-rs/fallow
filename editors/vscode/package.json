@@ -337,7 +337,7 @@
     "@vscode/test-electron": "2.5.2",
     "@vscode/vsce": "3.7.1",
     "mocha": "11.7.5",
-    "rolldown": "1.0.0-rc.12",
+    "rolldown": "1.0.0-rc.13",
     "ovsx": "0.10.10",
     "typescript": "6.0.2",
     "vitest": "4.1.2"
