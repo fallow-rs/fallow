@@ -1,0 +1,7 @@
+{
+  "name": "nuxt-css-alias",
+  "dependencies": {
+    "nuxt": "^3.0.0",
+    "vue": "^3.0.0"
+  }
+}

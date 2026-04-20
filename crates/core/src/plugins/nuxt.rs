@@ -289,21 +289,15 @@ impl Plugin for NuxtPlugin {
         }
 
         // css: [...] → always-used files or referenced dependencies
-        // Nuxt aliases: `~/` = srcDir (app/ or root), `~~/` = rootDir
-        // npm package CSS (e.g., `@unocss/reset/tailwind.css`) → referenced dependency
+        // Local paths (`~/`, `~~/`, `@/`, `@@/`, `./`, `/`) route through
+        // `normalize_nuxt_path` for the same workspace-root-relative resolution
+        // used by plugins/components/alias. Bare specifiers are npm package CSS.
         let css = config_parser::extract_config_string_array(source, config_path, &["css"]);
         for entry in &css {
-            if let Some(stripped) = entry.strip_prefix("~/") {
-                // ~ = srcDir: resolve to the configured source root, if any.
-                result
-                    .always_used_files
-                    .push(prefix_with_src_dir(&src_dir, stripped));
-            } else if let Some(stripped) = entry.strip_prefix("~~/") {
-                // ~~ = rootDir: always relative to project root
-                result.always_used_files.push(stripped.to_string());
-            } else if entry.starts_with('.') || entry.starts_with('/') {
-                // Relative or absolute local path
-                result.always_used_files.push(entry.clone());
+            if is_local_css_path(entry) {
+                if let Some(normalized) = normalize_nuxt_path(entry, config_path, root, &src_dir) {
+                    result.always_used_files.push(normalized);
+                }
             } else {
                 // npm package CSS (e.g., `@unocss/reset/tailwind.css`, `floating-vue/dist/style.css`)
                 let dep = crate::resolve::extract_package_name(entry);
@@ -461,6 +455,15 @@ fn default_nuxt_src_dir(root: &Path) -> String {
     } else {
         String::new()
     }
+}
+
+fn is_local_css_path(entry: &str) -> bool {
+    entry.starts_with("~/")
+        || entry.starts_with("~~/")
+        || entry.starts_with("@/")
+        || entry.starts_with("@@/")
+        || entry.starts_with('.')
+        || entry.starts_with('/')
 }
 
 fn extract_nuxt_src_dir(source: &str, config_path: &Path, root: &Path) -> Option<String> {
@@ -892,13 +895,74 @@ mod tests {
             });
         "#;
         let plugin = NuxtPlugin;
-        let result =
-            plugin.resolve_config(Path::new("nuxt.config.ts"), source, Path::new("/project"));
+        let result = plugin.resolve_config(
+            Path::new("/project/nuxt.config.ts"),
+            source,
+            Path::new("/project"),
+        );
         assert!(
             result
                 .always_used_files
-                .contains(&"./assets/global.css".to_string()),
-            "relative CSS path should be an always-used file"
+                .contains(&"assets/global.css".to_string()),
+            "relative CSS path should resolve to a workspace-root-relative always-used file: {:?}",
+            result.always_used_files
+        );
+    }
+
+    #[test]
+    fn resolve_config_css_relative_with_nested_config() {
+        // `./assets/global.css` in docs/nuxt.config.ts is config-relative, so it
+        // resolves to docs/assets/global.css at the workspace root.
+        let tmp = tempfile::tempdir().expect("create tempdir");
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("docs")).expect("create docs");
+        let config_path = root.join("docs/nuxt.config.ts");
+
+        let source = r#"
+            export default defineNuxtConfig({
+                css: ["./assets/global.css"]
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result = plugin.resolve_config(&config_path, source, root);
+
+        let expected = "docs/assets/global.css";
+        assert!(
+            result
+                .always_used_files
+                .iter()
+                .any(|p| p.replace('\\', "/") == expected),
+            "./assets/global.css should resolve relative to config dir: {:?}",
+            result.always_used_files
+        );
+    }
+
+    #[test]
+    fn resolve_config_css_tilde_with_srcdir_app() {
+        // Root-level config with explicit srcDir: 'app' plus `css: ['~/assets/main.css']`.
+        // Previously untested combination — covers the tests/904–1128 gap.
+        let tmp = tempfile::tempdir().expect("create tempdir");
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("app")).expect("create app");
+        let config_path = root.join("nuxt.config.ts");
+
+        let source = r#"
+            export default defineNuxtConfig({
+                srcDir: "app/",
+                css: ["~/assets/main.css"]
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result = plugin.resolve_config(&config_path, source, root);
+
+        let expected = "app/assets/main.css";
+        assert!(
+            result
+                .always_used_files
+                .iter()
+                .any(|p| p.replace('\\', "/") == expected),
+            "~/assets/main.css with srcDir:'app' should resolve to {expected}: {:?}",
+            result.always_used_files
         );
     }
 

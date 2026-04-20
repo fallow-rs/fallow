@@ -548,6 +548,28 @@ fn nuxt_configured_runtime_paths_reduce_false_positives_and_keep_dead_exports_vi
 }
 
 #[test]
+fn nuxt_css_tilde_alias_keeps_app_assets_alive() {
+    // nuxt.config.ts with css:['~/assets/main.css'] must not flag
+    // app/assets/main.css as unused (default Nuxt 4 srcDir = app/).
+    let root = fixture_path("nuxt-css-alias");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+
+    assert!(
+        !unused_files
+            .iter()
+            .any(|p| p.ends_with("app/assets/main.css")),
+        "app/assets/main.css should be kept alive by nuxt.config.ts css entry: {unused_files:?}"
+    );
+}
+
+#[test]
 fn nuxt_convention_exports_preserve_defaults_but_report_dead_helpers() {
     let root = fixture_path("nuxt-convention-exports");
     let config = create_config(root);
