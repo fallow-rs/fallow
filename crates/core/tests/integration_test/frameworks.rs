@@ -460,7 +460,12 @@ fn nuxt_default_scan_keeps_nested_plugin_index_but_not_nested_helpers() {
         );
     }
 
-    for expected_used in ["index.ts", "format-shared-greeting.ts", "shared-greeting.ts", "lower.ts"] {
+    for expected_used in [
+        "index.ts",
+        "format-shared-greeting.ts",
+        "shared-greeting.ts",
+        "lower.ts",
+    ] {
         assert!(
             !unused_file_names.contains(&expected_used.to_string()),
             "{expected_used} should stay reachable via Nuxt default scanning or #shared imports: {unused_file_names:?}"
