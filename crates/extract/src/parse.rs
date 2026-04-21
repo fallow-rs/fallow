@@ -474,7 +474,7 @@ pub fn compute_unused_import_bindings(
             continue;
         }
         // Look up the import binding in the module scope
-        let name = oxc_span::Ident::from(import.local_name.as_str());
+        let name = oxc_str::Ident::from(import.local_name.as_str());
         if let Some(symbol_id) = scoping.get_binding(root_scope, name)
             && scoping.get_resolved_references(symbol_id).count() == 0
         {

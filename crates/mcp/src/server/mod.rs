@@ -22,6 +22,13 @@ mod tests;
 #[derive(Clone)]
 pub struct FallowMcp {
     binary: String,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "read by the rmcp tool_router macro expansion and unit tests"
+        )
+    )]
     tool_router: ToolRouter<Self>,
 }
 

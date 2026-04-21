@@ -28,6 +28,7 @@ oxc_parser = "0.125"
 oxc_resolver = "11"
 oxc_semantic = "0.125"
 oxc_span = "0.125"
+oxc_str = "0.125"
 oxc_syntax = "0.125"
 oxc_coverage_instrument = "0.3"
 

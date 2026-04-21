@@ -1187,6 +1187,7 @@ fn write_istanbul_coverage_file(
                 s: BTreeMap::new(),
                 f,
                 b: BTreeMap::new(),
+                b_t: None,
                 input_source_map: None,
             },
         );
