@@ -3,7 +3,7 @@
   "displayName": "Fallow",
   "description": "Codebase intelligence for TypeScript and JavaScript. Real-time diagnostics for unused code, duplication, complexity hotspots, and architecture drift, with optional runtime evidence via Fallow Runtime.",
   "version": "2.44.0",
-  "packageManager": "pnpm@10.17.1",
+  "packageManager": "pnpm@10.33.0",
   "publisher": "fallow-rs",
   "license": "MIT",
   "repository": {
