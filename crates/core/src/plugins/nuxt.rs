@@ -35,6 +35,9 @@ const ENTRY_PATTERNS: &[&str] = &[
     // Nuxt only scans the top level of composables/utils by default.
     "composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "utils/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    // Nuxt auto-imports top-level shared utils/types from the root shared/ dir.
+    "shared/utils/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "shared/types/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "components/**/*.{vue,ts,tsx,js,jsx}",
     // Nuxt auto-scans modules/ for custom modules
     "modules/**/*.{ts,js}",

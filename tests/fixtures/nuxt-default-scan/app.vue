@@ -1,3 +1,11 @@
+<script setup lang="ts">
+const greeting = formatSharedGreeting('Nuxt default scan fixture')
+
+const payload: SharedGreeting = {
+  message: greeting,
+}
+</script>
+
 <template>
-  <div>Nuxt default scan fixture</div>
+  <div>{{ payload.message }}</div>
 </template>
