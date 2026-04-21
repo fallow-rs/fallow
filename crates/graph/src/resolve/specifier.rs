@@ -19,8 +19,11 @@ use super::types::{ResolveContext, ResolveResult};
 ///
 /// When React Native or Expo plugins are active, platform-specific extensions
 /// (e.g., `.web.tsx`, `.ios.ts`) are prepended to the extension list so that
-/// Metro-style platform resolution works correctly.
-pub(super) fn create_resolver(active_plugins: &[String]) -> Resolver {
+/// Metro-style platform resolution works correctly. User-supplied
+/// `extra_conditions` are prepended to the resolver's `condition_names`
+/// list, giving them priority over baseline conditions during package.json
+/// `exports` / `imports` matching.
+pub(super) fn create_resolver(active_plugins: &[String], extra_conditions: &[String]) -> Resolver {
     let mut options = ResolveOptions {
         extensions: build_extensions(active_plugins),
         // Support TypeScript's node16/nodenext module resolution where .ts files
@@ -34,7 +37,7 @@ pub(super) fn create_resolver(active_plugins: &[String]) -> Resolver {
             (".mjs".into(), vec![".mts".into(), ".mjs".into()]),
             (".cjs".into(), vec![".cts".into(), ".cjs".into()]),
         ],
-        condition_names: build_condition_names(active_plugins),
+        condition_names: build_condition_names(active_plugins, extra_conditions),
         main_fields: vec!["module".into(), "main".into()],
         ..Default::default()
     };

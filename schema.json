@@ -155,6 +155,11 @@
         "configObjectHeuristics": false
       }
     },
+    "resolve": {
+      "description": "Module resolver configuration (custom conditions, etc.).",
+      "$ref": "#/$defs/ResolveConfig",
+      "default": {}
+    },
     "production": {
       "description": "Production mode: exclude test/dev files, only start/build scripts.",
       "type": "boolean",
@@ -966,6 +971,19 @@
       "required": [
         "function"
       ]
+    },
+    "ResolveConfig": {
+      "description": "Module resolver configuration.\n\nControls how fallow resolves import specifiers against package.json\n`exports` / `imports` fields and tsconfig paths. Configured via the\n`resolve` section in `.fallowrc.json` or `fallow.toml`.\n\n# Examples\n\n```json\n{\n  \"resolve\": {\n    \"conditions\": [\"development\", \"worker\"]\n  }\n}\n```",
+      "type": "object",
+      "properties": {
+        "conditions": {
+          "description": "Additional export/import condition names to honor during module\nresolution. Merged with fallow's built-in conditions (`development`,\n`import`, `require`, `default`, `types`, `node`; plus `react-native`\nand `browser` when the React Native or Expo plugin is active).\n\nUser conditions are matched with higher priority than the baseline,\nso a package.json `exports` entry like:\n\n```json\n{ \"./api\": { \"worker\": \"./src/api.worker.ts\", \"import\": \"./dist/api.js\" } }\n```\n\nresolves to the `worker` branch when `\"worker\"` is listed here.\n\nSee <https://nodejs.org/api/packages.html#community-conditions-definitions>\nfor the set of community-defined conditions.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     },
     "ConfigOverride": {
       "description": "Per-file override entry.",

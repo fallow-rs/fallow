@@ -5,6 +5,7 @@ mod format;
 mod health;
 mod parsing;
 mod resolution;
+mod resolve;
 mod rules;
 mod used_class_members;
 
@@ -19,6 +20,7 @@ pub use flags::{FlagsConfig, SdkPattern};
 pub use format::OutputFormat;
 pub use health::{EmailMode, HealthConfig, OwnershipConfig};
 pub use resolution::{ConfigOverride, IgnoreExportRule, ResolvedConfig, ResolvedOverride};
+pub use resolve::ResolveConfig;
 pub use rules::{PartialRulesConfig, RulesConfig, Severity};
 pub use used_class_members::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 
@@ -132,6 +134,10 @@ pub struct FallowConfig {
     /// Feature flag detection configuration.
     #[serde(default)]
     pub flags: FlagsConfig,
+
+    /// Module resolver configuration (custom conditions, etc.).
+    #[serde(default)]
+    pub resolve: ResolveConfig,
 
     /// Production mode: exclude test/dev files, only start/build scripts.
     #[serde(default)]

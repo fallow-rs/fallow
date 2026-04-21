@@ -375,7 +375,8 @@ mod tests {
         use std::path::PathBuf;
 
         use fallow_config::{
-            DuplicatesConfig, FallowConfig, FlagsConfig, HealthConfig, OutputFormat, RulesConfig,
+            DuplicatesConfig, FallowConfig, FlagsConfig, HealthConfig, OutputFormat, ResolveConfig,
+            RulesConfig,
         };
 
         use super::*;
@@ -713,6 +714,7 @@ mod tests {
                 codeowners: None,
                 public_packages: vec![],
                 flags: FlagsConfig::default(),
+                resolve: ResolveConfig::default(),
                 sealed: false,
             }
             .resolve(root, OutputFormat::Human, 1, true, true)

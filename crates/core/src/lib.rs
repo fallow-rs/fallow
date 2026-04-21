@@ -216,6 +216,7 @@ pub fn analyze_with_parse_result(
         &plugin_result.path_aliases,
         &plugin_result.scss_include_paths,
         &config.root,
+        &config.resolve.conditions,
     );
     let resolve_ms = t.elapsed().as_secs_f64() * 1000.0;
     pb.finish_and_clear();
@@ -432,6 +433,7 @@ fn analyze_full(
         &plugin_result.path_aliases,
         &plugin_result.scss_include_paths,
         &config.root,
+        &config.resolve.conditions,
     );
     let resolve_ms = t.elapsed().as_secs_f64() * 1000.0;
     pb.finish_and_clear();

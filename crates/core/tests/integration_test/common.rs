@@ -36,6 +36,7 @@ pub fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
         codeowners: None,
         public_packages: vec![],
         flags: fallow_config::FlagsConfig::default(),
+        resolve: fallow_config::ResolveConfig::default(),
         sealed: false,
     }
     .resolve(root, OutputFormat::Human, 4, true, true)
@@ -67,6 +68,7 @@ pub fn create_config_with_cache(
         codeowners: None,
         public_packages: vec![],
         flags: fallow_config::FlagsConfig::default(),
+        resolve: fallow_config::ResolveConfig::default(),
         sealed: false,
     }
     .resolve(root, OutputFormat::Human, 4, false, true); // no_cache = false to enable caching

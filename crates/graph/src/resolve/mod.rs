@@ -50,6 +50,11 @@ use upgrades::apply_specifier_upgrades;
 
 /// Resolve all imports across all modules in parallel.
 #[must_use]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "resolver inputs come from disjoint sources (config, plugins, workspace, filesystem); \
+              bundling them into a struct would be a cross-cutting refactor outside this task"
+)]
 pub fn resolve_all_imports(
     modules: &[ModuleInfo],
     files: &[DiscoveredFile],
@@ -58,6 +63,7 @@ pub fn resolve_all_imports(
     path_aliases: &[(String, String)],
     scss_include_paths: &[PathBuf],
     root: &Path,
+    extra_conditions: &[String],
 ) -> Vec<ResolvedModule> {
     // Build workspace name → root index for pnpm store fallback.
     // Canonicalize roots to match path_to_id (which uses canonical paths).
@@ -110,7 +116,7 @@ pub fn resolve_all_imports(
     let file_paths: Vec<&Path> = files.iter().map(|f| f.path.as_path()).collect();
 
     // Create resolver ONCE and share across threads (oxc_resolver::Resolver is Send + Sync)
-    let resolver = create_resolver(active_plugins);
+    let resolver = create_resolver(active_plugins, extra_conditions);
 
     // Lazy canonical fallback — only needed when root is canonical (path_to_id uses raw paths).
     // When root is NOT canonical, path_to_id already uses canonical paths, no fallback needed.

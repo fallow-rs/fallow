@@ -9,6 +9,7 @@ use super::duplicates_config::DuplicatesConfig;
 use super::flags::FlagsConfig;
 use super::format::OutputFormat;
 use super::health::HealthConfig;
+use super::resolve::ResolveConfig;
 use super::rules::{PartialRulesConfig, RulesConfig, Severity};
 use super::used_class_members::UsedClassMemberRule;
 use crate::external_plugin::{ExternalPluginDef, discover_external_plugins};
@@ -82,6 +83,8 @@ pub struct ResolvedConfig {
     pub public_packages: Vec<String>,
     /// Feature flag detection configuration.
     pub flags: FlagsConfig,
+    /// Module resolver configuration (user-supplied import/export conditions).
+    pub resolve: ResolveConfig,
     /// When true, entry file exports are subject to unused-export detection
     /// instead of being automatically marked as used. Set via CLI `--include-entry-exports`.
     pub include_entry_exports: bool,
@@ -219,6 +222,7 @@ impl FallowConfig {
             codeowners: self.codeowners,
             public_packages: self.public_packages,
             flags: self.flags,
+            resolve: self.resolve,
             include_entry_exports: false,
         }
     }
@@ -300,6 +304,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
+            resolve: ResolveConfig::default(),
             sealed: false,
         };
         let resolved = config.resolve(
@@ -343,6 +348,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
+            resolve: ResolveConfig::default(),
             sealed: false,
         };
         let resolved = config.resolve(
@@ -402,6 +408,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
+            resolve: ResolveConfig::default(),
             sealed: false,
         };
         let resolved = config.resolve(
@@ -445,6 +452,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
+            resolve: ResolveConfig::default(),
             sealed: false,
         }
     }

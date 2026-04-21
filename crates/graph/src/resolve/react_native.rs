@@ -53,10 +53,25 @@ pub(super) fn build_extensions(active_plugins: &[String]) -> Vec<String> {
     }
 }
 
-/// Build the resolver `condition_names` list, optionally prepending React Native
-/// conditions when the RN/Expo plugin is active.
-pub(super) fn build_condition_names(active_plugins: &[String]) -> Vec<String> {
+/// Build the resolver `condition_names` list.
+///
+/// Baseline conditions (in priority order): `development`, `import`, `require`,
+/// `default`, `types`, `node`. `development` is included so that package.json
+/// `exports` / `imports` entries declaring a `development` branch (a widely
+/// used community condition, supported by Vite, Vitest, esbuild, and Rollup)
+/// resolve to their source files instead of compiled `dist/` output. See
+/// <https://nodejs.org/api/packages.html#community-conditions-definitions>.
+///
+/// When the React Native or Expo plugin is active, `react-native` and
+/// `browser` are prepended ahead of the baseline for Metro-style resolution.
+/// User-supplied `extra_conditions` are prepended ahead of everything else
+/// so they take highest priority.
+pub(super) fn build_condition_names(
+    active_plugins: &[String],
+    extra_conditions: &[String],
+) -> Vec<String> {
     let mut names = vec![
+        "development".into(),
         "import".into(),
         "require".into(),
         "default".into(),
@@ -67,6 +82,17 @@ pub(super) fn build_condition_names(active_plugins: &[String]) -> Vec<String> {
         names.insert(0, "react-native".into());
         names.insert(1, "browser".into());
     }
+    // User-supplied conditions win: prepend in reverse so the first entry in
+    // `extra_conditions` ends up first in the final list.
+    for extra in extra_conditions.iter().rev() {
+        names.insert(0, extra.clone());
+    }
+    // Dedup while preserving order: a user explicitly listing a baseline
+    // condition (e.g. to document priority) should not produce a duplicate
+    // entry. `oxc_resolver` is first-match-wins, so duplicates are harmless
+    // functionally but noisy and confusing in traces.
+    let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    names.retain(|name| seen.insert(name.clone()));
     names
 }
 
@@ -118,16 +144,79 @@ mod tests {
 
     #[test]
     fn test_rn_condition_names_prepended() {
-        let no_rn = build_condition_names(&[]);
+        let no_rn = build_condition_names(&[], &[]);
         let rn_plugins = vec!["react-native".to_string()];
-        let with_rn = build_condition_names(&rn_plugins);
+        let with_rn = build_condition_names(&rn_plugins, &[]);
 
-        // Without RN, first condition should be "import"
-        assert_eq!(no_rn[0], "import");
+        // Without RN, first condition should be "development"
+        assert_eq!(no_rn[0], "development");
 
         // With RN, "react-native" and "browser" should be prepended
         assert_eq!(with_rn[0], "react-native");
         assert_eq!(with_rn[1], "browser");
-        assert_eq!(with_rn[2], "import");
+        assert_eq!(with_rn[2], "development");
+    }
+
+    #[test]
+    fn test_development_condition_in_baseline() {
+        // `development` ships in the baseline so package.json exports that
+        // declare a development branch resolve to source files without
+        // requiring any user config. See issue #135.
+        let names = build_condition_names(&[], &[]);
+        assert!(
+            names.contains(&"development".to_string()),
+            "`development` must be part of the default condition set"
+        );
+    }
+
+    #[test]
+    fn test_extra_conditions_prepended_before_baseline() {
+        let names = build_condition_names(&[], &["worker".to_string(), "edge-light".to_string()]);
+        // First entry in extras wins over later extras AND over baseline.
+        assert_eq!(names[0], "worker");
+        assert_eq!(names[1], "edge-light");
+        assert_eq!(names[2], "development");
+    }
+
+    #[test]
+    fn test_extra_conditions_prepended_before_rn() {
+        let rn_plugins = vec!["react-native".to_string()];
+        let names = build_condition_names(&rn_plugins, &["worker".to_string()]);
+        assert_eq!(names[0], "worker");
+        assert_eq!(names[1], "react-native");
+        assert_eq!(names[2], "browser");
+        assert_eq!(names[3], "development");
+    }
+
+    #[test]
+    fn test_duplicate_baseline_condition_from_user_is_deduped() {
+        // Users may list a baseline condition like `development` in their
+        // config to make priority explicit. That should not produce a
+        // duplicate entry in the final list.
+        let names = build_condition_names(&[], &["development".to_string()]);
+        let dev_count = names.iter().filter(|n| *n == "development").count();
+        assert_eq!(dev_count, 1, "`development` should appear exactly once");
+        assert_eq!(
+            names[0], "development",
+            "user-supplied entry keeps its position"
+        );
+    }
+
+    #[test]
+    fn test_duplicate_user_conditions_are_deduped_preserving_first() {
+        // If a user accidentally repeats a condition, only the first
+        // occurrence survives.
+        let names = build_condition_names(
+            &[],
+            &[
+                "worker".to_string(),
+                "edge-light".to_string(),
+                "worker".to_string(),
+            ],
+        );
+        let worker_count = names.iter().filter(|n| *n == "worker").count();
+        assert_eq!(worker_count, 1);
+        assert_eq!(names[0], "worker");
+        assert_eq!(names[1], "edge-light");
     }
 }

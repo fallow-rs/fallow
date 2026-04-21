@@ -1,6 +1,6 @@
 use fallow_config::{
     BoundaryConfig, BoundaryPreset, BoundaryRule, BoundaryZone, DuplicatesConfig, FallowConfig,
-    FlagsConfig, HealthConfig, OutputFormat, RulesConfig, Severity,
+    FlagsConfig, HealthConfig, OutputFormat, ResolveConfig, RulesConfig, Severity,
 };
 
 use super::common::fixture_path;
@@ -34,6 +34,7 @@ fn create_boundary_config(
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
+        resolve: ResolveConfig::default(),
         sealed: false,
     }
     .resolve(root, OutputFormat::Human, 4, true, true)
@@ -168,6 +169,7 @@ fn no_violations_when_rule_is_off() {
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
+        resolve: ResolveConfig::default(),
         sealed: false,
     }
     .resolve(root, OutputFormat::Human, 4, true, true);
@@ -214,6 +216,7 @@ fn preset_detects_boundary_violation() {
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
+        resolve: ResolveConfig::default(),
         sealed: false,
     }
     .resolve(root, OutputFormat::Human, 4, true, true);
@@ -276,6 +279,7 @@ fn bulletproof_preset_detects_violation() {
         codeowners: None,
         public_packages: vec![],
         flags: FlagsConfig::default(),
+        resolve: ResolveConfig::default(),
         sealed: false,
     }
     .resolve(root, OutputFormat::Human, 4, true, true);

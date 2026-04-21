@@ -37,7 +37,7 @@ fn dummy_span() -> Span {
 /// (via `rustix`) which Miri does not support.
 #[cfg(not(miri))]
 fn with_empty_ctx<F: FnOnce(&ResolveContext)>(f: F) {
-    let resolver = specifier::create_resolver(&[]);
+    let resolver = specifier::create_resolver(&[], &[]);
     let path_to_id = FxHashMap::default();
     let raw_path_to_id = FxHashMap::default();
     let workspace_roots = FxHashMap::default();
@@ -1429,7 +1429,7 @@ fn specifier_pascal_scope_alias_returns_unresolvable() {
 #[cfg_attr(miri, ignore)] // oxc_resolver uses statx syscall unsupported by Miri
 fn specifier_plugin_alias_match_returns_unresolvable() {
     // Plugin-provided path aliases that fail resolution should also be Unresolvable
-    let resolver = specifier::create_resolver(&[]);
+    let resolver = specifier::create_resolver(&[], &[]);
     let path_to_id = FxHashMap::default();
     let raw_path_to_id = FxHashMap::default();
     let workspace_roots = FxHashMap::default();
@@ -1578,7 +1578,7 @@ fn specifier_at_at_slash_returns_unresolvable() {
 #[cfg_attr(miri, ignore)]
 fn create_resolver_without_plugins() {
     // Should create a resolver without panicking
-    let _resolver = specifier::create_resolver(&[]);
+    let _resolver = specifier::create_resolver(&[], &[]);
 }
 
 #[test]
@@ -1586,14 +1586,14 @@ fn create_resolver_without_plugins() {
 fn create_resolver_with_react_native_plugin() {
     // Should create a resolver with RN extensions without panicking
     let plugins = vec!["react-native".to_string()];
-    let _resolver = specifier::create_resolver(&plugins);
+    let _resolver = specifier::create_resolver(&plugins, &[]);
 }
 
 #[test]
 #[cfg_attr(miri, ignore)]
 fn create_resolver_with_expo_plugin() {
     let plugins = vec!["expo".to_string()];
-    let _resolver = specifier::create_resolver(&plugins);
+    let _resolver = specifier::create_resolver(&plugins, &[]);
 }
 
 #[test]
@@ -1604,7 +1604,15 @@ fn create_resolver_with_multiple_plugins() {
         "typescript".to_string(),
         "jest".to_string(),
     ];
-    let _resolver = specifier::create_resolver(&plugins);
+    let _resolver = specifier::create_resolver(&plugins, &[]);
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn create_resolver_with_custom_conditions() {
+    // User-supplied conditions should be accepted without panic.
+    let conditions = vec!["worker".to_string(), "edge-light".to_string()];
+    let _resolver = specifier::create_resolver(&[], &conditions);
 }
 
 // -----------------------------------------------------------------------
@@ -1631,7 +1639,7 @@ fn resolve_prefers_js_over_dts_when_both_exist() {
     // The importing file must exist for resolve_file to work
     std::fs::write(root.join("app.ts"), "import { helper } from './utils';").unwrap();
 
-    let resolver = specifier::create_resolver(&[]);
+    let resolver = specifier::create_resolver(&[], &[]);
     let from_file = root.join("app.ts");
     let result = resolver.resolve_file(&from_file, "./utils");
 
@@ -1663,7 +1671,7 @@ fn resolve_prefers_ts_over_dts_when_both_exist() {
     .unwrap();
     std::fs::write(root.join("app.ts"), "import { helper } from './utils';").unwrap();
 
-    let resolver = specifier::create_resolver(&[]);
+    let resolver = specifier::create_resolver(&[], &[]);
     let from_file = root.join("app.ts");
     let result = resolver.resolve_file(&from_file, "./utils");
 
@@ -1690,7 +1698,7 @@ fn resolve_falls_back_to_dts_when_no_runtime_file() {
     std::fs::write(root.join("types.d.ts"), "export declare const x: number;").unwrap();
     std::fs::write(root.join("app.ts"), "import { x } from './types';").unwrap();
 
-    let resolver = specifier::create_resolver(&[]);
+    let resolver = specifier::create_resolver(&[], &[]);
     let from_file = root.join("app.ts");
     let result = resolver.resolve_file(&from_file, "./types");
 
@@ -1704,5 +1712,118 @@ fn resolve_falls_back_to_dts_when_no_runtime_file() {
     assert_eq!(
         resolved_name, "types.d.ts",
         "should resolve to types.d.ts when no runtime file exists"
+    );
+}
+
+// -----------------------------------------------------------------------
+// Issue #135: package.json exports with `development` condition
+// -----------------------------------------------------------------------
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn resolve_honors_development_condition_by_default() {
+    // When a package.json `exports` map declares both a `development` and an
+    // `import` branch, fallow should honor `development` (common pattern in
+    // monorepos where `development` points at source files and `import` at
+    // compiled output). See issue #135.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("pkg/src")).unwrap();
+    std::fs::create_dir_all(root.join("pkg/dist")).unwrap();
+    std::fs::write(root.join("pkg/src/index.ts"), "export const src = 1;").unwrap();
+    std::fs::write(root.join("pkg/dist/index.js"), "export const dist = 1;").unwrap();
+    std::fs::write(
+        root.join("pkg/package.json"),
+        r#"{
+            "name": "pkg",
+            "exports": {
+                ".": {
+                    "development": "./src/index.ts",
+                    "import": "./dist/index.js"
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("app.ts"), "import { src } from 'pkg';").unwrap();
+    // Minimum-viable resolver sandbox: pkg is discoverable via a peer dir on
+    // the filesystem, so point the resolver at the project root for bare-
+    // specifier lookup.
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name": "app-root", "dependencies": {"pkg": "file:./pkg"}}"#,
+    )
+    .unwrap();
+    // oxc_resolver looks for bare specifiers under node_modules/, so symlink
+    // pkg into node_modules to exercise the real resolution path.
+    std::fs::create_dir_all(root.join("node_modules")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(root.join("pkg"), root.join("node_modules/pkg")).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(root.join("pkg"), root.join("node_modules/pkg")).unwrap();
+
+    let resolver = specifier::create_resolver(&[], &[]);
+    let from_file = root.join("app.ts");
+    let resolved = resolver
+        .resolve_file(&from_file, "pkg")
+        .expect("pkg should resolve via exports");
+    let resolved_path = resolved.into_path_buf();
+    assert!(
+        resolved_path.ends_with("pkg/src/index.ts")
+            || resolved_path.ends_with("pkg\\src\\index.ts"),
+        "expected development branch (src/index.ts), got {}",
+        resolved_path.display()
+    );
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn resolve_honors_user_supplied_conditions_before_baseline() {
+    // User-supplied conditions take priority over the baseline. Here the
+    // `worker` branch should win even though `development` and `import` both
+    // match. Validates the config-driven side of issue #135.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("pkg/src")).unwrap();
+    std::fs::write(
+        root.join("pkg/src/index.worker.ts"),
+        "export const worker = 1;",
+    )
+    .unwrap();
+    std::fs::write(root.join("pkg/src/index.ts"), "export const src = 1;").unwrap();
+    std::fs::write(
+        root.join("pkg/package.json"),
+        r#"{
+            "name": "pkg",
+            "exports": {
+                ".": {
+                    "worker": "./src/index.worker.ts",
+                    "development": "./src/index.ts",
+                    "import": "./src/index.ts"
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("app.ts"), "import 'pkg';").unwrap();
+    std::fs::write(root.join("package.json"), r#"{"name": "app-root"}"#).unwrap();
+    std::fs::create_dir_all(root.join("node_modules")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(root.join("pkg"), root.join("node_modules/pkg")).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(root.join("pkg"), root.join("node_modules/pkg")).unwrap();
+
+    let resolver = specifier::create_resolver(&[], &["worker".to_string()]);
+    let from_file = root.join("app.ts");
+    let resolved = resolver
+        .resolve_file(&from_file, "pkg")
+        .expect("pkg should resolve via exports");
+    let resolved_path = resolved.into_path_buf();
+    assert!(
+        resolved_path.ends_with("index.worker.ts"),
+        "expected user-supplied worker branch, got {}",
+        resolved_path.display()
     );
 }

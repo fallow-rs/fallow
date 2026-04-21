@@ -334,6 +334,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: fallow_config::FlagsConfig::default(),
+            resolve: fallow_config::ResolveConfig::default(),
             sealed: false,
         }
         .resolve(
@@ -588,6 +589,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: fallow_config::FlagsConfig::default(),
+            resolve: fallow_config::ResolveConfig::default(),
             sealed: false,
             overrides: vec![fallow_config::ConfigOverride {
                 files: vec!["**/*.test.ts".to_string()],
