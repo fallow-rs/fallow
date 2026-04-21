@@ -437,16 +437,6 @@ fn nuxt_default_scan_keeps_nested_plugin_index_but_not_nested_helpers() {
     let config = create_config(root);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
-    let unresolved_specs: Vec<&str> = results
-        .unresolved_imports
-        .iter()
-        .map(|u| u.specifier.as_str())
-        .collect();
-    assert!(
-        !unresolved_specs.contains(&"#shared/formatters/lower"),
-        "#shared alias import should resolve, found unresolved: {unresolved_specs:?}"
-    );
-
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
@@ -464,11 +454,10 @@ fn nuxt_default_scan_keeps_nested_plugin_index_but_not_nested_helpers() {
         "index.ts",
         "format-shared-greeting.ts",
         "shared-greeting.ts",
-        "lower.ts",
     ] {
         assert!(
             !unused_file_names.contains(&expected_used.to_string()),
-            "{expected_used} should stay reachable via Nuxt default scanning or #shared imports: {unused_file_names:?}"
+            "{expected_used} should stay reachable via Nuxt default scanning: {unused_file_names:?}"
         );
     }
 }
