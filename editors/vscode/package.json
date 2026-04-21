@@ -51,7 +51,7 @@
     "circular-dependencies"
   ],
   "engines": {
-    "vscode": "^1.110.0"
+    "vscode": "^1.115.0"
   },
   "activationEvents": [
     "workspaceContains:**/package.json"
