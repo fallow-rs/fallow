@@ -694,3 +694,105 @@ fn nuxt_module_owned_config_files_are_not_flagged_unused() {
         "@nuxt/content should not be reported as test-only: {test_only_dependencies:?}"
     );
 }
+
+fn copy_dir_recursive(source: &std::path::Path, target: &std::path::Path) {
+    std::fs::create_dir_all(target).expect("create target dir");
+    for entry in std::fs::read_dir(source).expect("read source dir") {
+        let entry = entry.expect("read dir entry");
+        let file_type = entry.file_type().expect("read file type");
+        let destination = target.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_recursive(&entry.path(), &destination);
+        } else {
+            std::fs::copy(entry.path(), destination).expect("copy fixture file");
+        }
+    }
+}
+
+#[test]
+fn nuxt_module_owned_config_overrides_are_not_flagged_unused() {
+    let source_root = fixture_path("nuxt-module-owned-configs");
+    let temp = tempfile::tempdir().expect("create temp dir");
+    copy_dir_recursive(&source_root, temp.path());
+
+    std::fs::write(
+        temp.path().join("nuxt.config.ts"),
+        r#"export default defineNuxtConfig({
+  modules: ['@nuxt/content', '@nuxt/ui', '@onmax/nuxt-better-auth'],
+  auth: {
+    clientConfig: 'app/custom/client-auth',
+    serverConfig: 'server/custom/server-auth'
+  }
+})"#,
+    )
+    .expect("write overridden nuxt config");
+    std::fs::create_dir_all(temp.path().join("app/custom")).expect("create custom app dir");
+    std::fs::create_dir_all(temp.path().join("server/custom")).expect("create custom server dir");
+    std::fs::write(
+        temp.path().join("app/custom/client-auth.ts"),
+        "import { defineClientAuth } from '@onmax/nuxt-better-auth/config'\n\nexport default defineClientAuth({})\n",
+    )
+    .expect("write custom client auth config");
+    std::fs::write(
+        temp.path().join("server/custom/server-auth.ts"),
+        "import { defineServerAuth } from '@onmax/nuxt-better-auth/config'\n\nexport default defineServerAuth({ emailAndPassword: { enabled: true } })\n",
+    )
+    .expect("write custom server auth config");
+
+    let config = create_config(temp.path().to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+
+    for expected_used in [
+        "content.config.ts",
+        "app.config.ts",
+        "app/custom/client-auth.ts",
+        "server/custom/server-auth.ts",
+    ] {
+        assert!(
+            !unused_file_names
+                .iter()
+                .any(|path| path.ends_with(expected_used)),
+            "{expected_used} should be kept alive by Nuxt module conventions: {unused_file_names:?}"
+        );
+    }
+
+    for expected_unused in ["app/auth.config.ts", "server/auth.config.ts"] {
+        assert!(
+            unused_file_names
+                .iter()
+                .any(|path| path.ends_with(expected_unused)),
+            "{expected_unused} should no longer be kept alive once Better Auth paths are overridden: {unused_file_names:?}"
+        );
+    }
+
+    let unused_exports: Vec<(String, String)> = results
+        .unused_exports
+        .iter()
+        .map(|e| {
+            (
+                e.path.to_string_lossy().replace('\\', "/"),
+                e.export_name.clone(),
+            )
+        })
+        .collect();
+
+    for expected_used in [
+        "content.config.ts",
+        "app.config.ts",
+        "app/custom/client-auth.ts",
+        "server/custom/server-auth.ts",
+    ] {
+        assert!(
+            !unused_exports
+                .iter()
+                .any(|(path, export)| path.ends_with(expected_used) && export == "default"),
+            "{expected_used}:default should be framework-used in Nuxt, found: {unused_exports:?}"
+        );
+    }
+}

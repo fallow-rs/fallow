@@ -121,10 +121,52 @@ const USED_EXPORTS_MIDDLEWARE: &[&str] = &["default"];
 const USED_EXPORTS_DEFAULT: &[&str] = &["default"];
 const MODULE_OWNED_DEFAULT_EXPORTS: &[&str] = &["default"];
 
-const NUXT_CONTENT_CONFIG_PATTERNS: &[&str] = &["content.config.{ts,js,mts,mjs,cts,cjs}"];
-const NUXT_BETTER_AUTH_CONFIG_PATTERNS: &[&str] = &[
-    "app/auth.config.{ts,js,mts,mjs,cts,cjs}",
-    "server/auth.config.{ts,js,mts,mjs,cts,cjs}",
+struct NuxtStaticConfigConvention {
+    pattern: &'static str,
+    used_exports: &'static [&'static str],
+}
+
+struct NuxtConfigPathConvention {
+    option_path: &'static [&'static str],
+    default_path: &'static str,
+    used_exports: &'static [&'static str],
+}
+
+struct NuxtModuleConvention {
+    package_name: &'static str,
+    static_configs: &'static [NuxtStaticConfigConvention],
+    configurable_paths: &'static [NuxtConfigPathConvention],
+}
+
+const NUXT_CONTENT_STATIC_CONFIGS: &[NuxtStaticConfigConvention] = &[NuxtStaticConfigConvention {
+    pattern: "content.config.{ts,js,mts,mjs,cts,cjs}",
+    used_exports: MODULE_OWNED_DEFAULT_EXPORTS,
+}];
+
+const NUXT_BETTER_AUTH_CONFIG_PATHS: &[NuxtConfigPathConvention] = &[
+    NuxtConfigPathConvention {
+        option_path: &["auth", "clientConfig"],
+        default_path: "app/auth.config",
+        used_exports: MODULE_OWNED_DEFAULT_EXPORTS,
+    },
+    NuxtConfigPathConvention {
+        option_path: &["auth", "serverConfig"],
+        default_path: "server/auth.config",
+        used_exports: MODULE_OWNED_DEFAULT_EXPORTS,
+    },
+];
+
+const NUXT_MODULE_CONVENTIONS: &[NuxtModuleConvention] = &[
+    NuxtModuleConvention {
+        package_name: "@nuxt/content",
+        static_configs: NUXT_CONTENT_STATIC_CONFIGS,
+        configurable_paths: &[],
+    },
+    NuxtModuleConvention {
+        package_name: "@onmax/nuxt-better-auth",
+        static_configs: &[],
+        configurable_paths: NUXT_BETTER_AUTH_CONFIG_PATHS,
+    },
 ];
 
 const DEFAULT_EXPORT_ENTRY_PATTERNS: &[&str] = &[
@@ -294,7 +336,7 @@ impl Plugin for NuxtPlugin {
             let dep = crate::resolve::extract_package_name(module);
             result.referenced_dependencies.push(dep);
         }
-        add_nuxt_module_conventions(&mut result, &modules);
+        add_nuxt_module_conventions(&mut result, &modules, source, config_path, root, &src_dir);
 
         // css: [...] → always-used files or referenced dependencies
         // Local paths (`~/`, `~~/`, `@/`, `@@/`, `./`, `/`) route through
@@ -517,34 +559,64 @@ fn add_default_used_export(result: &mut PluginResult, pattern: impl Into<String>
     result.push_used_export_rule(pattern, ["default"]);
 }
 
-fn add_nuxt_module_conventions(result: &mut PluginResult, modules: &[String]) {
-    let mut has_nuxt_content = false;
-    let mut has_nuxt_better_auth = false;
+fn add_nuxt_module_conventions(
+    result: &mut PluginResult,
+    modules: &[String],
+    source: &str,
+    config_path: &Path,
+    root: &Path,
+    src_dir: &str,
+) {
+    let mut applied = Vec::new();
 
     for module in modules {
-        match crate::resolve::extract_package_name(module).as_str() {
-            "@nuxt/content" => has_nuxt_content = true,
-            "@onmax/nuxt-better-auth" => has_nuxt_better_auth = true,
-            _ => {}
+        let package_name = crate::resolve::extract_package_name(module);
+        let Some(convention) = NUXT_MODULE_CONVENTIONS
+            .iter()
+            .find(|candidate| candidate.package_name == package_name)
+        else {
+            continue;
+        };
+        if applied.contains(&convention.package_name) {
+            continue;
         }
-    }
-
-    if has_nuxt_content {
-        add_module_owned_config_patterns(result, NUXT_CONTENT_CONFIG_PATTERNS);
-    }
-
-    if has_nuxt_better_auth {
-        add_module_owned_config_patterns(result, NUXT_BETTER_AUTH_CONFIG_PATTERNS);
+        applied.push(convention.package_name);
+        apply_nuxt_module_convention(result, convention, source, config_path, root, src_dir);
     }
 }
 
-fn add_module_owned_config_patterns(result: &mut PluginResult, patterns: &[&str]) {
-    result
-        .always_used_files
-        .extend(patterns.iter().map(|pattern| (*pattern).to_string()));
-    for pattern in patterns {
-        result.push_used_export_rule(*pattern, MODULE_OWNED_DEFAULT_EXPORTS.iter().copied());
+fn apply_nuxt_module_convention(
+    result: &mut PluginResult,
+    convention: &NuxtModuleConvention,
+    source: &str,
+    config_path: &Path,
+    root: &Path,
+    src_dir: &str,
+) {
+    for config in convention.static_configs {
+        add_module_owned_config_pattern(result, config.pattern.to_string(), config.used_exports);
     }
+
+    for config in convention.configurable_paths {
+        let raw = config_parser::extract_config_string(source, config_path, config.option_path)
+            .unwrap_or_else(|| config.default_path.to_string());
+        if let Some(normalized) = normalize_nuxt_path(&raw, config_path, root, src_dir) {
+            add_module_owned_config_pattern(
+                result,
+                script_entry_pattern(&normalized),
+                config.used_exports,
+            );
+        }
+    }
+}
+
+fn add_module_owned_config_pattern(
+    result: &mut PluginResult,
+    pattern: String,
+    used_exports: &[&str],
+) {
+    result.always_used_files.push(pattern.clone());
+    result.push_used_export_rule(pattern, used_exports.iter().copied());
 }
 
 fn add_prefixed_default_used_exports(result: &mut PluginResult, prefix: &str, patterns: &[&str]) {
@@ -781,8 +853,11 @@ mod tests {
             });
         "#;
         let plugin = NuxtPlugin;
-        let result =
-            plugin.resolve_config(Path::new("nuxt.config.ts"), source, Path::new("/project"));
+        let result = plugin.resolve_config(
+            Path::new("/project/nuxt.config.ts"),
+            source,
+            Path::new("/project"),
+        );
         assert!(
             result
                 .referenced_dependencies
@@ -793,6 +868,84 @@ mod tests {
                 .referenced_dependencies
                 .contains(&"@pinia/nuxt".to_string())
         );
+    }
+
+    #[test]
+    fn resolve_config_applies_module_owned_config_conventions() {
+        let source = r#"
+            export default defineNuxtConfig({
+                modules: ["@nuxt/content", "@onmax/nuxt-better-auth"]
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/nuxt.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+
+        for expected in [
+            "content.config.{ts,js,mts,mjs,cts,cjs}",
+            "app/auth.config.{ts,js,mts,cts,mjs,cjs}",
+            "server/auth.config.{ts,js,mts,cts,mjs,cjs}",
+        ] {
+            assert!(
+                result.always_used_files.contains(&expected.to_string()),
+                "{expected} should be treated as always used: {:?}",
+                result.always_used_files
+            );
+            assert!(
+                has_used_export_rule(&result, expected, &["default"]),
+                "{expected} should keep its default export alive"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_config_honors_module_owned_config_overrides() {
+        let source = r#"
+            export default defineNuxtConfig({
+                modules: ["@onmax/nuxt-better-auth"],
+                auth: {
+                    clientConfig: "app/custom/client-auth",
+                    serverConfig: "server/custom/server-auth"
+                }
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/nuxt.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+
+        for expected in [
+            "app/custom/client-auth.{ts,js,mts,cts,mjs,cjs}",
+            "server/custom/server-auth.{ts,js,mts,cts,mjs,cjs}",
+        ] {
+            assert!(
+                result.always_used_files.contains(&expected.to_string()),
+                "{expected} should be treated as always used: {:?}",
+                result.always_used_files
+            );
+            assert!(
+                has_used_export_rule(&result, expected, &["default"]),
+                "{expected} should keep its default export alive"
+            );
+        }
+
+        for default_pattern in [
+            "app/auth.config.{ts,js,mts,cts,mjs,cjs}",
+            "server/auth.config.{ts,js,mts,cts,mjs,cjs}",
+        ] {
+            assert!(
+                !result
+                    .always_used_files
+                    .contains(&default_pattern.to_string()),
+                "{default_pattern} should not stay active when overridden: {:?}",
+                result.always_used_files
+            );
+        }
     }
 
     #[test]
