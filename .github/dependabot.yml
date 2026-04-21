@@ -9,6 +9,8 @@ updates:
     groups:
       oxc:
         patterns: ["oxc_*"]
+      crypto-rng:
+        patterns: ["ed25519-dalek", "rand", "rand_core"]
     open-pull-requests-limit: 10
 
   - package-ecosystem: npm
