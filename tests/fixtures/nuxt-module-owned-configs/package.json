@@ -1,0 +1,10 @@
+{
+  "name": "nuxt-module-owned-configs",
+  "private": true,
+  "dependencies": {
+    "nuxt": "4.0.0",
+    "@nuxt/content": "3.13.0",
+    "@nuxt/ui": "4.6.1",
+    "@onmax/nuxt-better-auth": "0.0.2-alpha.31"
+  }
+}

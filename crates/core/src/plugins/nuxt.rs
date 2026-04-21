@@ -119,6 +119,13 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
 const USED_EXPORTS_SERVER_API: &[&str] = &["default", "defineEventHandler"];
 const USED_EXPORTS_MIDDLEWARE: &[&str] = &["default"];
 const USED_EXPORTS_DEFAULT: &[&str] = &["default"];
+const MODULE_OWNED_DEFAULT_EXPORTS: &[&str] = &["default"];
+
+const NUXT_CONTENT_CONFIG_PATTERNS: &[&str] = &["content.config.{ts,js,mts,mjs,cts,cjs}"];
+const NUXT_BETTER_AUTH_CONFIG_PATTERNS: &[&str] = &[
+    "app/auth.config.{ts,js,mts,mjs,cts,cjs}",
+    "server/auth.config.{ts,js,mts,mjs,cts,cjs}",
+];
 
 const DEFAULT_EXPORT_ENTRY_PATTERNS: &[&str] = &[
     "pages/**/*.{vue,ts,tsx,js,jsx}",
@@ -287,6 +294,7 @@ impl Plugin for NuxtPlugin {
             let dep = crate::resolve::extract_package_name(module);
             result.referenced_dependencies.push(dep);
         }
+        add_nuxt_module_conventions(&mut result, &modules);
 
         // css: [...] → always-used files or referenced dependencies
         // Local paths (`~/`, `~~/`, `@/`, `@@/`, `./`, `/`) route through
@@ -507,6 +515,36 @@ fn add_src_dir_support(result: &mut PluginResult, src_dir: &str) {
 
 fn add_default_used_export(result: &mut PluginResult, pattern: impl Into<String>) {
     result.push_used_export_rule(pattern, ["default"]);
+}
+
+fn add_nuxt_module_conventions(result: &mut PluginResult, modules: &[String]) {
+    let mut has_nuxt_content = false;
+    let mut has_nuxt_better_auth = false;
+
+    for module in modules {
+        match crate::resolve::extract_package_name(module).as_str() {
+            "@nuxt/content" => has_nuxt_content = true,
+            "@onmax/nuxt-better-auth" => has_nuxt_better_auth = true,
+            _ => {}
+        }
+    }
+
+    if has_nuxt_content {
+        add_module_owned_config_patterns(result, NUXT_CONTENT_CONFIG_PATTERNS);
+    }
+
+    if has_nuxt_better_auth {
+        add_module_owned_config_patterns(result, NUXT_BETTER_AUTH_CONFIG_PATTERNS);
+    }
+}
+
+fn add_module_owned_config_patterns(result: &mut PluginResult, patterns: &[&str]) {
+    result
+        .always_used_files
+        .extend(patterns.iter().map(|pattern| (*pattern).to_string()));
+    for pattern in patterns {
+        result.push_used_export_rule(*pattern, MODULE_OWNED_DEFAULT_EXPORTS.iter().copied());
+    }
 }
 
 fn add_prefixed_default_used_exports(result: &mut PluginResult, prefix: &str, patterns: &[&str]) {

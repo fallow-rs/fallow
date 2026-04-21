@@ -241,7 +241,7 @@ pub fn find_dead_code_full(
         && let Some(ref pkg) = pkg
     {
         results.test_only_dependencies =
-            find_test_only_dependencies(graph, pkg, config, workspaces);
+            find_test_only_dependencies(graph, pkg, config, plugin_result, workspaces);
     }
 
     // Detect architecture boundary violations

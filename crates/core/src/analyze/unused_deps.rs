@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::{PackageJson, ResolvedConfig};
+use fallow_config::{EntryPointRole, PackageJson, ResolvedConfig};
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
@@ -373,6 +373,7 @@ pub fn find_test_only_dependencies(
     graph: &ModuleGraph,
     pkg: &PackageJson,
     config: &ResolvedConfig,
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> Vec<TestOnlyDependency> {
     // Build a GlobSet from the production exclude patterns (test/dev/story files)
@@ -400,6 +401,7 @@ pub fn find_test_only_dependencies(
         .iter()
         .map(String::as_str)
         .collect();
+    let runtime_always_used = runtime_plugin_always_used_globset(plugin_result);
 
     let mut test_only_deps = Vec::new();
 
@@ -436,7 +438,10 @@ pub fn find_test_only_dependencies(
                     .path
                     .strip_prefix(&config.root)
                     .unwrap_or(&module.path);
-                test_globs.is_match(relative) || is_config_file(&module.path)
+                let runtime_used = runtime_always_used
+                    .as_ref()
+                    .is_some_and(|set| set.is_match(relative));
+                !runtime_used && (test_globs.is_match(relative) || is_config_file(&module.path))
             })
         });
 
@@ -453,6 +458,41 @@ pub fn find_test_only_dependencies(
     }
 
     test_only_deps
+}
+
+fn runtime_plugin_always_used_globset(
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
+) -> Option<globset::GlobSet> {
+    let plugin_result = plugin_result?;
+    let runtime_plugins: FxHashSet<&str> = plugin_result
+        .entry_point_roles
+        .iter()
+        .filter_map(|(plugin, role)| (*role == EntryPointRole::Runtime).then_some(plugin.as_str()))
+        .collect();
+    if runtime_plugins.is_empty() {
+        return None;
+    }
+
+    let mut builder = globset::GlobSetBuilder::new();
+    let mut added = false;
+    for (pattern, plugin_name) in plugin_result
+        .always_used
+        .iter()
+        .chain(plugin_result.discovered_always_used.iter())
+    {
+        if !runtime_plugins.contains(plugin_name.as_str()) {
+            continue;
+        }
+        if let Ok(glob) = globset::GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .build()
+        {
+            builder.add(glob);
+            added = true;
+        }
+    }
+
+    added.then(|| builder.build().ok()).flatten()
 }
 
 /// Check whether a package is listed in root deps or in the workspace that owns `file_path`.

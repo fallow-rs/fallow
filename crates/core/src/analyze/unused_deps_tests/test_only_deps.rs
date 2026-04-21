@@ -44,7 +44,7 @@ fn test_only_dep_from_root_test_file() {
     let pkg = make_pkg(&["vitest"], &[], &[]);
     let config = test_config(PathBuf::from("/project"));
 
-    let test_only = find_test_only_dependencies(&graph, &pkg, &config, &[]);
+    let test_only = find_test_only_dependencies(&graph, &pkg, &config, None, &[]);
 
     assert!(
         test_only.iter().any(|d| d.package_name == "vitest"),
@@ -94,7 +94,7 @@ fn test_only_dep_from_root_config_file() {
     let pkg = make_pkg(&["vitest"], &[], &[]);
     let config = test_config(PathBuf::from("/project"));
 
-    let test_only = find_test_only_dependencies(&graph, &pkg, &config, &[]);
+    let test_only = find_test_only_dependencies(&graph, &pkg, &config, None, &[]);
 
     assert!(
         test_only.iter().any(|d| d.package_name == "vitest"),
@@ -146,7 +146,7 @@ fn test_only_dep_from_workspace_config_file() {
     let pkg = make_pkg(&["vitest"], &[], &[]);
     let config = test_config(PathBuf::from("/project"));
 
-    let test_only = find_test_only_dependencies(&graph, &pkg, &config, &[]);
+    let test_only = find_test_only_dependencies(&graph, &pkg, &config, None, &[]);
 
     assert!(
         test_only.iter().any(|d| d.package_name == "vitest"),
@@ -197,7 +197,7 @@ fn not_test_only_when_imported_from_app_config() {
     let pkg = make_pkg(&["@angular/router"], &[], &[]);
     let config = test_config(PathBuf::from("/project"));
 
-    let test_only = find_test_only_dependencies(&graph, &pkg, &config, &[]);
+    let test_only = find_test_only_dependencies(&graph, &pkg, &config, None, &[]);
 
     assert!(
         test_only.is_empty(),
@@ -285,7 +285,7 @@ fn not_test_only_when_also_imported_from_source() {
     let pkg = make_pkg(&["some-lib"], &[], &[]);
     let config = test_config(PathBuf::from("/project"));
 
-    let test_only = find_test_only_dependencies(&graph, &pkg, &config, &[]);
+    let test_only = find_test_only_dependencies(&graph, &pkg, &config, None, &[]);
 
     assert!(
         test_only.is_empty(),
@@ -335,10 +335,122 @@ fn test_only_dep_from_workspace_jest_config() {
     let pkg = make_pkg(&["ts-jest"], &[], &[]);
     let config = test_config(PathBuf::from("/project"));
 
-    let test_only = find_test_only_dependencies(&graph, &pkg, &config, &[]);
+    let test_only = find_test_only_dependencies(&graph, &pkg, &config, None, &[]);
 
     assert!(
         test_only.iter().any(|d| d.package_name == "ts-jest"),
         "dep imported only from workspace-level jest.config.ts should be flagged"
+    );
+}
+
+#[test]
+fn runtime_plugin_owned_config_is_not_test_only() {
+    let files = vec![DiscoveredFile {
+        id: FileId(0),
+        path: PathBuf::from("/project/content.config.ts"),
+        size_bytes: 100,
+    }];
+
+    let entry_points = vec![EntryPoint {
+        path: PathBuf::from("/project/content.config.ts"),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/content.config.ts"),
+        exports: vec![],
+        re_exports: vec![],
+        resolved_imports: vec![ResolvedImport {
+            info: ImportInfo {
+                source: "@nuxt/content".to_string(),
+                imported_name: ImportedName::Named("defineContentConfig".to_string()),
+                local_name: "defineContentConfig".to_string(),
+                is_type_only: false,
+                span: oxc_span::Span::new(0, 20),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::NpmPackage("@nuxt/content".to_string()),
+        }],
+        resolved_dynamic_imports: vec![],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        has_cjs_exports: false,
+        unused_import_bindings: FxHashSet::default(),
+    }];
+
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+    let pkg = make_pkg(&["@nuxt/content"], &[], &[]);
+    let config = test_config(PathBuf::from("/project"));
+    let mut plugin_result = AggregatedPluginResult::default();
+    plugin_result
+        .entry_point_roles
+        .insert("nuxt".to_string(), fallow_config::EntryPointRole::Runtime);
+    plugin_result
+        .always_used
+        .push(("content.config.ts".to_string(), "nuxt".to_string()));
+
+    let test_only = find_test_only_dependencies(&graph, &pkg, &config, Some(&plugin_result), &[]);
+
+    assert!(
+        test_only.is_empty(),
+        "runtime plugin-owned config files should not make deps test-only"
+    );
+}
+
+#[test]
+fn test_plugin_config_stays_test_only_even_when_always_used() {
+    let files = vec![DiscoveredFile {
+        id: FileId(0),
+        path: PathBuf::from("/project/vitest.config.ts"),
+        size_bytes: 100,
+    }];
+
+    let entry_points = vec![EntryPoint {
+        path: PathBuf::from("/project/vitest.config.ts"),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/vitest.config.ts"),
+        exports: vec![],
+        re_exports: vec![],
+        resolved_imports: vec![ResolvedImport {
+            info: ImportInfo {
+                source: "vitest".to_string(),
+                imported_name: ImportedName::Named("defineConfig".to_string()),
+                local_name: "defineConfig".to_string(),
+                is_type_only: false,
+                span: oxc_span::Span::new(0, 20),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::NpmPackage("vitest".to_string()),
+        }],
+        resolved_dynamic_imports: vec![],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        has_cjs_exports: false,
+        unused_import_bindings: FxHashSet::default(),
+    }];
+
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+    let pkg = make_pkg(&["vitest"], &[], &[]);
+    let config = test_config(PathBuf::from("/project"));
+    let mut plugin_result = AggregatedPluginResult::default();
+    plugin_result
+        .entry_point_roles
+        .insert("vitest".to_string(), fallow_config::EntryPointRole::Test);
+    plugin_result
+        .always_used
+        .push(("vitest.config.ts".to_string(), "vitest".to_string()));
+
+    let test_only = find_test_only_dependencies(&graph, &pkg, &config, Some(&plugin_result), &[]);
+
+    assert!(
+        test_only.iter().any(|d| d.package_name == "vitest"),
+        "test plugin config files should still make deps test-only"
     );
 }

@@ -622,3 +622,75 @@ fn nuxt_convention_exports_preserve_defaults_but_report_dead_helpers() {
         );
     }
 }
+
+#[test]
+fn nuxt_module_owned_config_files_are_not_flagged_unused() {
+    let root = fixture_path("nuxt-module-owned-configs");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+
+    for expected_used in [
+        "content.config.ts",
+        "app/auth.config.ts",
+        "server/auth.config.ts",
+        "app.config.ts",
+    ] {
+        assert!(
+            !unused_file_names
+                .iter()
+                .any(|path| path.ends_with(expected_used)),
+            "{expected_used} should be kept alive by Nuxt module conventions: {unused_file_names:?}"
+        );
+    }
+
+    let unused_exports: Vec<(String, String)> = results
+        .unused_exports
+        .iter()
+        .map(|e| {
+            (
+                e.path.to_string_lossy().replace('\\', "/"),
+                e.export_name.clone(),
+            )
+        })
+        .collect();
+
+    for expected_used in [
+        "content.config.ts",
+        "app/auth.config.ts",
+        "server/auth.config.ts",
+        "app.config.ts",
+    ] {
+        assert!(
+            !unused_exports
+                .iter()
+                .any(|(path, export)| path.ends_with(expected_used) && export == "default"),
+            "{expected_used}:default should be framework-used in Nuxt, found: {unused_exports:?}"
+        );
+    }
+
+    let unused_dependencies: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|dep| dep.package_name.as_str())
+        .collect();
+    let test_only_dependencies: Vec<&str> = results
+        .test_only_dependencies
+        .iter()
+        .map(|dep| dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_dependencies.contains(&"@nuxt/content"),
+        "@nuxt/content should not be reported as unused: {unused_dependencies:?}"
+    );
+    assert!(
+        !test_only_dependencies.contains(&"@nuxt/content"),
+        "@nuxt/content should not be reported as test-only: {test_only_dependencies:?}"
+    );
+}
