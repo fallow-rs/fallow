@@ -220,7 +220,7 @@ runs:
       run: bash ${{ github.action_path }}/action/scripts/install.sh
 
     - name: Cache analysis results
-      uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
       with:
         path: ${{ inputs.root }}/.fallow
         key: fallow-cache-${{ runner.os }}-${{ hashFiles(format('{0}/**/package.json', inputs.root)) }}
