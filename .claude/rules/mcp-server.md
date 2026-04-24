@@ -36,6 +36,7 @@ MCP server exposing fallow analysis as tools for AI agents. Stdio transport, wra
 - Subprocess timeout: 120s default, configurable via `FALLOW_TIMEOUT_SECS` env var
 - Exit code 2+ errors: pass through CLI's structured JSON error from stdout when available; fall back to `{"error":true,"message":"...","exit_code":N}` from stderr
 - Exit code 1: treated as success (issues found, not an error)
+- Pre-spawn validation rejections (empty required field, out-of-range line, invalid mode, unknown issue type) return the same envelope with `exit_code: 0` via `validation_error_body` in `tools/mod.rs`. Clients should branch on `error: true`, not on `exit_code`, since `0` can mean either "never spawned" (validation) or "spawned and succeeded" (normal result).
 
 ## Actions injection
 All JSON output includes structured `actions` arrays on every finding:
