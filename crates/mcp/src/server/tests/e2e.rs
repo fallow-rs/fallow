@@ -255,6 +255,25 @@ async fn e2e_trace_clone_returns_json() {
     assert_eq!(json["line"].as_u64(), Some(2));
     assert!(json["matched_instance"].is_object());
     assert!(json["clone_groups"].is_array());
+
+    let matched_file = json["matched_instance"]["file"]
+        .as_str()
+        .expect("matched_instance.file should be a string");
+    assert!(
+        !matched_file.starts_with('/')
+            && !matched_file.contains(":\\")
+            && !matched_file.contains(":/"),
+        "matched_instance.file should be relative, got {matched_file}",
+    );
+    for group in json["clone_groups"].as_array().expect("clone_groups array") {
+        for inst in group["instances"].as_array().expect("instances array") {
+            let file = inst["file"].as_str().expect("instance.file string");
+            assert!(
+                !file.starts_with('/') && !file.contains(":\\") && !file.contains(":/"),
+                "instance.file should be relative, got {file}",
+            );
+        }
+    }
 }
 
 // ── End-to-end: health ───────────────────────────────────────────

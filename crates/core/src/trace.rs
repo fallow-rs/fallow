@@ -425,12 +425,16 @@ pub fn trace_clone(
 
         if let Some(matched) = matching {
             if matched_instance.is_none() {
-                matched_instance = Some(matched.clone());
+                matched_instance = Some(relativize_instance(matched, root));
             }
             clone_groups.push(TracedCloneGroup {
                 token_count: group.token_count,
                 line_count: group.line_count,
-                instances: group.instances.clone(),
+                instances: group
+                    .instances
+                    .iter()
+                    .map(|inst| relativize_instance(inst, root))
+                    .collect(),
             });
         }
     }
@@ -440,6 +444,20 @@ pub fn trace_clone(
         line,
         matched_instance,
         clone_groups,
+    }
+}
+
+/// Return a copy of `inst` with `file` rewritten relative to `root` (forward-slash normalized
+/// for cross-platform JSON parity with `serde_path::serialize`). If `inst.file` is already
+/// outside `root`, the path is left unchanged.
+fn relativize_instance(inst: &CloneInstance, root: &Path) -> CloneInstance {
+    let rel = inst.file.strip_prefix(root).map_or_else(
+        |_| inst.file.clone(),
+        |p| PathBuf::from(p.to_string_lossy().replace('\\', "/")),
+    );
+    CloneInstance {
+        file: rel,
+        ..inst.clone()
     }
 }
 
@@ -829,6 +847,70 @@ mod tests {
             trace_clone(&report, root, "src/a.ts", 21)
                 .matched_instance
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn trace_clone_returns_relative_instance_paths() {
+        use crate::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![
+                    CloneInstance {
+                        file: PathBuf::from("/project/src/a.ts"),
+                        start_line: 1,
+                        end_line: 10,
+                        start_col: 0,
+                        end_col: 0,
+                        fragment: "code".to_string(),
+                    },
+                    CloneInstance {
+                        file: PathBuf::from("/project/src/b.ts"),
+                        start_line: 1,
+                        end_line: 10,
+                        start_col: 0,
+                        end_col: 0,
+                        fragment: "code".to_string(),
+                    },
+                ],
+                token_count: 50,
+                line_count: 10,
+            }],
+            clone_families: vec![],
+            mirrored_directories: vec![],
+            stats: DuplicationStats {
+                total_files: 2,
+                files_with_clones: 2,
+                total_lines: 50,
+                duplicated_lines: 20,
+                total_tokens: 100,
+                duplicated_tokens: 100,
+                clone_groups: 1,
+                clone_instances: 2,
+                duplication_percentage: 40.0,
+            },
+        };
+        let trace = trace_clone(&report, Path::new("/project"), "src/a.ts", 5);
+        let matched = trace.matched_instance.as_ref().expect("match expected");
+        assert_eq!(matched.file, PathBuf::from("src/a.ts"));
+        for group in &trace.clone_groups {
+            for inst in &group.instances {
+                let as_str = inst.file.to_string_lossy();
+                assert!(
+                    !as_str.starts_with('/'),
+                    "instance file should be relative, got {as_str}",
+                );
+                assert!(
+                    !as_str.contains(":\\") && !as_str.contains(":/"),
+                    "instance file should not have a drive letter, got {as_str}",
+                );
+            }
+        }
+
+        let json = serde_json::to_string(&trace).expect("serializes");
+        assert!(
+            !json.contains("\"/project/"),
+            "serialized trace should not leak absolute paths: {json}",
         );
     }
 }
