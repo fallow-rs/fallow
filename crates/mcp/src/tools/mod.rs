@@ -118,6 +118,22 @@ pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
 /// Valid detection modes for the `find_dupes` tool.
 pub const VALID_DUPES_MODES: &[&str] = &["strict", "mild", "weak", "semantic"];
 
+/// Build a structured validation error body matching the shape `run_fallow` emits
+/// for CLI-level errors: `{"error": true, "message": "...", "exit_code": 0}`.
+///
+/// Used by arg builders to reject invalid input before spawning fallow. `exit_code`
+/// is `0` because no subprocess ran, disambiguating validation failures from CLI
+/// error exits (which use the real exit code). The returned string is compact JSON
+/// ready to be wrapped in `CallToolResult::error(vec![Content::text(body)])`.
+pub fn validation_error_body(message: impl Into<String>) -> String {
+    serde_json::json!({
+        "error": true,
+        "message": message.into(),
+        "exit_code": 0,
+    })
+    .to_string()
+}
+
 /// Read the subprocess timeout from `FALLOW_TIMEOUT_SECS` or fall back to the default.
 fn timeout_duration() -> Duration {
     std::env::var("FALLOW_TIMEOUT_SECS")

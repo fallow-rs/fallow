@@ -1,6 +1,9 @@
 use crate::params::AnalyzeParams;
 
-use super::{ISSUE_TYPE_FLAGS, push_baseline, push_global, push_regression, push_scope};
+use super::{
+    ISSUE_TYPE_FLAGS, push_baseline, push_global, push_regression, push_scope,
+    validation_error_body,
+};
 
 /// Build CLI arguments for the `analyze` tool.
 /// Returns `Err(message)` if an invalid issue type is provided.
@@ -41,7 +44,9 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
                     .map(|&(n, _)| n)
                     .collect::<Vec<_>>()
                     .join(", ");
-                return Err(format!("Unknown issue type '{t}'. Valid values: {valid}"));
+                return Err(validation_error_body(format!(
+                    "Unknown issue type '{t}'. Valid values: {valid}"
+                )));
             }
         }
     }

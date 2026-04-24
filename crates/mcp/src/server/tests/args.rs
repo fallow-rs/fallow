@@ -7,6 +7,28 @@ use crate::tools::{
     build_trace_dependency_args, build_trace_export_args, build_trace_file_args,
 };
 
+/// Parse a validation error body into its `message` field. Arg builders emit
+/// structured JSON (`{"error": true, "message": "...", "exit_code": 0}`) so the
+/// handler can forward it verbatim to MCP clients; tests decode it here.
+fn parse_validation_message(err: &str) -> String {
+    let v: serde_json::Value = serde_json::from_str(err)
+        .unwrap_or_else(|e| panic!("validation error should be JSON, got `{err}`: {e}"));
+    assert_eq!(
+        v["error"].as_bool(),
+        Some(true),
+        "expected error=true in {err}"
+    );
+    assert_eq!(
+        v["exit_code"].as_i64(),
+        Some(0),
+        "expected exit_code=0 in {err}"
+    );
+    v["message"]
+        .as_str()
+        .unwrap_or_else(|| panic!("expected string message in {err}"))
+        .to_string()
+}
+
 fn check_production_coverage(coverage: &str) -> CheckProductionCoverageParams {
     CheckProductionCoverageParams {
         coverage: coverage.to_string(),
@@ -148,8 +170,9 @@ fn analyze_args_invalid_issue_type_returns_error() {
         ..Default::default()
     };
     let err = build_analyze_args(&params).unwrap_err();
-    assert!(err.contains("Unknown issue type 'nonexistent-type'"));
-    assert!(err.contains("unused-files"));
+    let msg = parse_validation_message(&err);
+    assert!(msg.contains("Unknown issue type 'nonexistent-type'"));
+    assert!(msg.contains("unused-files"));
 }
 
 #[test]
@@ -182,7 +205,8 @@ fn analyze_args_mixed_valid_and_invalid_issue_types_fails_on_first_invalid() {
         ..Default::default()
     };
     let err = build_analyze_args(&params).unwrap_err();
-    assert!(err.contains("'bogus'"));
+    let msg = parse_validation_message(&err);
+    assert!(msg.contains("'bogus'"));
 }
 
 #[test]
@@ -369,11 +393,12 @@ fn find_dupes_args_invalid_mode_returns_error() {
         ..Default::default()
     };
     let err = build_find_dupes_args(&params).unwrap_err();
-    assert!(err.contains("Invalid mode 'aggressive'"));
-    assert!(err.contains("strict"));
-    assert!(err.contains("mild"));
-    assert!(err.contains("weak"));
-    assert!(err.contains("semantic"));
+    let msg = parse_validation_message(&err);
+    assert!(msg.contains("Invalid mode 'aggressive'"));
+    assert!(msg.contains("strict"));
+    assert!(msg.contains("mild"));
+    assert!(msg.contains("weak"));
+    assert!(msg.contains("semantic"));
 }
 
 #[test]
@@ -696,7 +721,7 @@ fn trace_clone_args_invalid_mode_returns_error() {
         threads: None,
     })
     .unwrap_err();
-    assert!(err.contains("Invalid mode 'bogus'"));
+    assert!(parse_validation_message(&err).contains("Invalid mode 'bogus'"));
 }
 
 #[test]
@@ -712,7 +737,10 @@ fn trace_args_reject_blank_required_values() {
         threads: None,
     })
     .unwrap_err();
-    assert_eq!(export_err, "file must not be empty");
+    assert_eq!(
+        parse_validation_message(&export_err),
+        "file must not be empty"
+    );
 
     let export_name_err = build_trace_export_args(&TraceExportParams {
         file: "src/utils.ts".to_string(),
@@ -725,7 +753,10 @@ fn trace_args_reject_blank_required_values() {
         threads: None,
     })
     .unwrap_err();
-    assert_eq!(export_name_err, "export_name must not be empty");
+    assert_eq!(
+        parse_validation_message(&export_name_err),
+        "export_name must not be empty"
+    );
 
     let file_err = build_trace_file_args(&TraceFileParams {
         file: "\t".to_string(),
@@ -737,7 +768,10 @@ fn trace_args_reject_blank_required_values() {
         threads: None,
     })
     .unwrap_err();
-    assert_eq!(file_err, "file must not be empty");
+    assert_eq!(
+        parse_validation_message(&file_err),
+        "file must not be empty"
+    );
 
     let dependency_err = build_trace_dependency_args(&TraceDependencyParams {
         package_name: String::new(),
@@ -749,7 +783,10 @@ fn trace_args_reject_blank_required_values() {
         threads: None,
     })
     .unwrap_err();
-    assert_eq!(dependency_err, "package_name must not be empty");
+    assert_eq!(
+        parse_validation_message(&dependency_err),
+        "package_name must not be empty"
+    );
 }
 
 #[test]
@@ -771,7 +808,84 @@ fn trace_clone_args_reject_zero_line() {
         threads: None,
     })
     .unwrap_err();
-    assert_eq!(err, "line must be greater than 0");
+    assert_eq!(
+        parse_validation_message(&err),
+        "line must be greater than 0"
+    );
+}
+
+// ── Validation error body shape ──────────────────────────────────
+
+#[test]
+fn validation_errors_use_structured_json_body() {
+    // Every arg-builder validation failure must emit the same JSON shape that
+    // `run_fallow` uses for CLI error exits, so MCP clients can decode one shape
+    // for both error sources. `exit_code` is 0 on validation paths (no subprocess).
+    let errors = [
+        build_trace_clone_args(&TraceCloneParams {
+            file: "src/original.ts".to_string(),
+            line: 0,
+            root: None,
+            config: None,
+            workspace: None,
+            mode: None,
+            min_tokens: None,
+            min_lines: None,
+            threshold: None,
+            skip_local: None,
+            cross_language: None,
+            ignore_imports: None,
+            no_cache: None,
+            threads: None,
+        })
+        .unwrap_err(),
+        build_trace_export_args(&TraceExportParams {
+            file: String::new(),
+            export_name: "foo".to_string(),
+            root: None,
+            config: None,
+            production: None,
+            workspace: None,
+            no_cache: None,
+            threads: None,
+        })
+        .unwrap_err(),
+        build_find_dupes_args(&FindDupesParams {
+            mode: Some("nope".to_string()),
+            ..Default::default()
+        })
+        .unwrap_err(),
+        build_analyze_args(&AnalyzeParams {
+            issue_types: Some(vec!["bogus".to_string()]),
+            ..Default::default()
+        })
+        .unwrap_err(),
+    ];
+
+    for body in &errors {
+        let v: serde_json::Value = serde_json::from_str(body)
+            .unwrap_or_else(|e| panic!("body should be valid JSON: `{body}` ({e})"));
+        assert_eq!(
+            v.as_object().map(serde_json::Map::len),
+            Some(3),
+            "exactly 3 keys expected in {body}"
+        );
+        assert_eq!(
+            v["error"],
+            serde_json::Value::Bool(true),
+            "error=true in {body}"
+        );
+        assert_eq!(
+            v["exit_code"],
+            serde_json::Value::from(0),
+            "exit_code=0 in {body}"
+        );
+        assert!(v["message"].is_string(), "message is a string in {body}");
+        assert!(
+            !v["message"].as_str().unwrap().is_empty(),
+            "message is non-empty in {body}",
+        );
+    }
 }
 
 // ── Argument building: health ─────────────────────────────────────

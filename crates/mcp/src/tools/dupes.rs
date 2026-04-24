@@ -1,6 +1,6 @@
 use crate::params::FindDupesParams;
 
-use super::{VALID_DUPES_MODES, push_baseline, push_global};
+use super::{VALID_DUPES_MODES, push_baseline, push_global, validation_error_body};
 
 /// Build CLI arguments for the `find_dupes` tool.
 /// Returns `Err(message)` if an invalid mode is provided.
@@ -25,9 +25,9 @@ pub fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, St
     }
     if let Some(ref mode) = params.mode {
         if !VALID_DUPES_MODES.contains(&mode.as_str()) {
-            return Err(format!(
+            return Err(validation_error_body(format!(
                 "Invalid mode '{mode}'. Valid values: strict, mild, weak, semantic"
-            ));
+            )));
         }
         args.extend(["--mode".to_string(), mode.clone()]);
     }

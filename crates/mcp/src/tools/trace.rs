@@ -1,6 +1,6 @@
 use crate::params::{TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams};
 
-use super::{VALID_DUPES_MODES, push_global, push_scope};
+use super::{VALID_DUPES_MODES, push_global, push_scope, validation_error_body};
 
 /// Build CLI arguments for the `trace_export` tool.
 pub fn build_trace_export_args(params: &TraceExportParams) -> Result<Vec<String>, String> {
@@ -82,7 +82,7 @@ pub fn build_trace_dependency_args(params: &TraceDependencyParams) -> Result<Vec
 pub fn build_trace_clone_args(params: &TraceCloneParams) -> Result<Vec<String>, String> {
     require_non_empty("file", &params.file)?;
     if params.line == 0 {
-        return Err("line must be greater than 0".to_string());
+        return Err(validation_error_body("line must be greater than 0"));
     }
 
     let mut args = vec![
@@ -104,9 +104,9 @@ pub fn build_trace_clone_args(params: &TraceCloneParams) -> Result<Vec<String>, 
     }
     if let Some(ref mode) = params.mode {
         if !VALID_DUPES_MODES.contains(&mode.as_str()) {
-            return Err(format!(
+            return Err(validation_error_body(format!(
                 "Invalid mode '{mode}'. Valid values: strict, mild, weak, semantic"
-            ));
+            )));
         }
         args.extend(["--mode".to_string(), mode.clone()]);
     }
@@ -138,7 +138,7 @@ pub fn build_trace_clone_args(params: &TraceCloneParams) -> Result<Vec<String>, 
 
 fn require_non_empty(field: &str, value: &str) -> Result<(), String> {
     if value.trim().is_empty() {
-        return Err(format!("{field} must not be empty"));
+        return Err(validation_error_body(format!("{field} must not be empty")));
     }
     Ok(())
 }
