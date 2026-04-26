@@ -7,9 +7,9 @@ Thanks for your interest in contributing to fallow! This guide covers everything
 ```bash
 git clone https://github.com/fallow-rs/fallow.git
 cd fallow
-git config core.hooksPath .githooks    # Enable pre-commit hooks (fmt + clippy)
+git config core.hooksPath .githooks    # Enable pre-commit + pre-push hooks
 cargo build --workspace
-cargo test --workspace
+./scripts/check.sh
 ```
 
 ## Development workflow
@@ -24,7 +24,8 @@ cargo build --release -p fallow-cli  # Release build (CLI only)
 ### Testing
 
 ```bash
-cargo test --workspace               # All tests
+./scripts/check.sh                  # CI-aligned local check suite
+cargo test --workspace               # All Rust tests
 cargo test -p fallow-core            # Single crate
 cargo clippy --workspace -- -D warnings
 cargo fmt --all -- --check
@@ -88,7 +89,8 @@ See the [Plugin Authoring Guide](docs/plugin-authoring.md) for the full trait AP
 
 - **Conventional commits**: `feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`
 - **Signed commits**: `git commit -S`
-- Pre-commit hooks run `cargo fmt` and `cargo clippy` automatically
+- Pre-commit hooks run `cargo fmt`, `cargo clippy`, and `typos` automatically
+- Pre-push hooks run `./scripts/check.sh`, rustdoc warnings, and fast Miri checks automatically
 
 ## Code style
 
@@ -103,7 +105,7 @@ See the [Plugin Authoring Guide](docs/plugin-authoring.md) for the full trait AP
 1. Fork the repository
 2. Create a feature branch from `main`
 3. Make your changes with conventional commit messages
-4. Ensure `cargo test --workspace` and `cargo clippy --workspace -- -D warnings` pass
+4. Ensure `./scripts/check.sh` passes locally
 5. Open a pull request against `main`
 
 ## Reporting issues

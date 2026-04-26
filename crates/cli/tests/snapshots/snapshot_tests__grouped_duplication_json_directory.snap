@@ -4,7 +4,7 @@ expression: json_str
 ---
 {
   "schema_version": 4,
-  "version": "2.51.0",
+  "version": "2.52.0",
   "elapsed_ms": 0,
   "clone_groups": [
     {

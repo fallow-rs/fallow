@@ -521,7 +521,9 @@ fallow uses syntactic analysis -- no type information. This is what makes it fas
 Missing a framework plugin? Found a false positive? [Open an issue](https://github.com/fallow-rs/fallow/issues).
 
 ```bash
-cargo build --workspace && cargo test --workspace
+git config core.hooksPath .githooks
+cargo build --workspace
+./scripts/check.sh
 ```
 
 ## License

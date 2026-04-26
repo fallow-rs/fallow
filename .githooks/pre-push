@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
+
+if [ -f "$HOME/.cargo/env" ]; then
+  # shellcheck disable=SC1090
+  . "$HOME/.cargo/env"
+fi
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+cd "$ROOT"
 
 echo "=== Pre-push CI check ==="
-
-# Quick checks first (fail fast)
-echo "→ cargo fmt"
-cargo fmt --all -- --check
-
-echo "→ cargo clippy"
-cargo clippy --workspace --all-targets -- -D warnings
-
-echo "→ cargo test"
-cargo test --workspace --all-targets
+"$ROOT/scripts/check.sh"
 
 echo "→ cargo doc (rustdoc warnings)"
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items 2>&1 | tail -1
@@ -25,4 +25,4 @@ else
     echo "→ miri (skipped — nightly or miri not installed)"
 fi
 
-echo "=== All checks passed ==="
+echo "=== All pre-push checks passed ==="
