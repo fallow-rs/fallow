@@ -1,19 +1,17 @@
 #!/usr/bin/env node
-import { mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
-import { join, dirname, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import {
+  benchmarkDir,
+  relativeTsImport,
+  resetProject,
+  runGenerator,
+  STANDARD_DIRS,
+  writePackageManifest,
+  writeTsConfig,
+} from './fixture-generator-helpers.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const fixturesDir = join(__dirname, 'fixtures', 'synthetic-circular');
-
-function mulberry32(seed) {
-  return function () {
-    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+const fixturesDir = join(benchmarkDir, 'fixtures', 'synthetic-circular');
 
 const SIZES = [
   { name: 'tiny',   files: 10,   cycleCount: 2,   maxCycleLen: 3  },
@@ -23,7 +21,7 @@ const SIZES = [
   { name: 'xlarge', files: 5000, cycleCount: 200, maxCycleLen: 8  },
 ];
 
-const DIRS = ['components', 'utils', 'hooks', 'services', 'types', 'models', 'helpers', 'lib'];
+const DIRS = STANDARD_DIRS;
 const ENTITIES = ['User', 'Order', 'Product', 'Invoice', 'Payment', 'Session', 'Account', 'Report'];
 const ACTIONS = ['validate', 'transform', 'process', 'normalize', 'sanitize', 'format', 'parse', 'convert'];
 
@@ -33,20 +31,13 @@ function filePath(i) {
 }
 
 function relImport(fromIdx, toIdx) {
-  const from = filePath(fromIdx);
-  const to = filePath(toIdx);
-  let rel = relative(dirname(from), to).replace(/\.ts$/, '');
-  if (!rel.startsWith('.')) rel = './' + rel;
-  return rel;
+  return relativeTsImport(filePath(fromIdx), filePath(toIdx));
 }
 
 function generateProject(size) {
   const { name, files: fileCount, cycleCount, maxCycleLen } = size;
   const projectDir = join(fixturesDir, name);
-  if (existsSync(projectDir)) rmSync(projectDir, { recursive: true });
-  const rand = mulberry32(42 + fileCount);
-  const srcDir = join(projectDir, 'src');
-  for (const dir of DIRS) mkdirSync(join(srcDir, dir), { recursive: true });
+  const { rand, srcDir } = resetProject(projectDir, 42 + fileCount, DIRS);
 
   // Build import graph: each file imports from a few others (acyclic forward references)
   const imports = new Map(); // fileIndex -> Set<fileIndex>
@@ -147,30 +138,16 @@ function generateProject(size) {
     '',
   ].join('\n'));
 
-  writeFileSync(join(projectDir, 'package.json'), JSON.stringify({
-    name: `bench-circular-${name}`,
-    version: '1.0.0',
-    private: true,
-    main: 'src/index.ts',
-  }, null, 2) + '\n');
-
-  writeFileSync(join(projectDir, 'tsconfig.json'), JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022', module: 'ESNext', moduleResolution: 'bundler',
-      strict: true, esModuleInterop: true, skipLibCheck: true,
-      outDir: 'dist', rootDir: 'src', declaration: true, baseUrl: '.',
-    },
-    include: ['src'],
-  }, null, 2) + '\n');
+  writePackageManifest(projectDir, `bench-circular-${name}`);
+  writeTsConfig(projectDir);
 
   return { name, fileCount, actualCycles, totalLines };
 }
 
-console.log('Generating synthetic circular dependency benchmark fixtures...\n');
-for (const size of SIZES) {
-  const start = performance.now();
-  const stats = generateProject(size);
-  const elapsed = performance.now() - start;
-  console.log(`  ${stats.name.padEnd(8)} ${String(stats.fileCount).padStart(5)} files  ${String(stats.actualCycles).padStart(4)} cycles  ${String(stats.totalLines).padStart(7)} lines  (${elapsed.toFixed(0)}ms)`);
-}
-console.log('\nDone. Run: npm run bench:circular:synthetic');
+runGenerator({
+  heading: 'Generating synthetic circular dependency benchmark fixtures...',
+  sizes: SIZES,
+  generateProject,
+  formatStats: (stats, elapsed) => `  ${stats.name.padEnd(8)} ${String(stats.fileCount).padStart(5)} files  ${String(stats.actualCycles).padStart(4)} cycles  ${String(stats.totalLines).padStart(7)} lines  (${elapsed.toFixed(0)}ms)`,
+  doneCommand: 'npm run bench:circular:synthetic',
+});

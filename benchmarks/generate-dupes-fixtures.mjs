@@ -1,19 +1,16 @@
 #!/usr/bin/env node
-import { mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
-import { join, dirname, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  benchmarkDir,
+  resetProject,
+  runGenerator,
+  STANDARD_DIRS,
+  writePackageManifest,
+  writeTsConfig,
+} from './fixture-generator-helpers.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const fixturesDir = join(__dirname, 'fixtures', 'synthetic-dupes');
-
-function mulberry32(seed) {
-  return function () {
-    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+const fixturesDir = join(benchmarkDir, 'fixtures', 'synthetic-dupes');
 
 const SIZES = [
   { name: 'tiny', files: 10, dupeGroups: 2, linesPerBlock: 15 },
@@ -23,7 +20,7 @@ const SIZES = [
   { name: 'xlarge', files: 5000, dupeGroups: 300, linesPerBlock: 30 },
 ];
 
-const DIRS = ['components', 'utils', 'hooks', 'services', 'types', 'models', 'helpers', 'lib'];
+const DIRS = STANDARD_DIRS;
 const TYPES = ['string', 'number', 'boolean', 'string[]', 'Record<string, unknown>'];
 const STATUSES = ['active', 'inactive', 'pending', 'archived', 'deleted'];
 const ACTIONS = ['validate', 'transform', 'process', 'normalize', 'sanitize', 'format', 'parse', 'convert'];
@@ -88,10 +85,7 @@ function generateUniqueBlock(rand, fileId) {
 function generateProject(size) {
   const { name, files: fileCount, dupeGroups, linesPerBlock } = size;
   const projectDir = join(fixturesDir, name);
-  if (existsSync(projectDir)) rmSync(projectDir, { recursive: true });
-  const rand = mulberry32(42 + fileCount);
-  const srcDir = join(projectDir, 'src');
-  for (const dir of DIRS) mkdirSync(join(srcDir, dir), { recursive: true });
+  const { rand, srcDir } = resetProject(projectDir, 42 + fileCount, DIRS);
 
   // Pre-generate duplicated code blocks
   const blocks = [];
@@ -160,30 +154,16 @@ function generateProject(size) {
   ].join('\n');
   writeFileSync(join(srcDir, 'index.ts'), entryContent);
 
-  writeFileSync(join(projectDir, 'package.json'), JSON.stringify({
-    name: `bench-dupes-${name}`,
-    version: '1.0.0',
-    private: true,
-    main: 'src/index.ts',
-  }, null, 2) + '\n');
-
-  writeFileSync(join(projectDir, 'tsconfig.json'), JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022', module: 'ESNext', moduleResolution: 'bundler',
-      strict: true, esModuleInterop: true, skipLibCheck: true,
-      outDir: 'dist', rootDir: 'src', declaration: true, baseUrl: '.',
-    },
-    include: ['src'],
-  }, null, 2) + '\n');
+  writePackageManifest(projectDir, `bench-dupes-${name}`);
+  writeTsConfig(projectDir);
 
   return { name, fileCount, dupeGroups, totalDuplicatedBlocks, totalLines };
 }
 
-console.log('Generating synthetic duplication benchmark fixtures...\n');
-for (const size of SIZES) {
-  const start = performance.now();
-  const stats = generateProject(size);
-  const elapsed = performance.now() - start;
-  console.log(`  ${stats.name.padEnd(8)} ${String(stats.fileCount).padStart(5)} files  ${String(stats.dupeGroups).padStart(4)} clone groups  ${String(stats.totalDuplicatedBlocks).padStart(5)} dupe blocks  ${String(stats.totalLines).padStart(7)} lines  (${elapsed.toFixed(0)}ms)`);
-}
-console.log('\nDone. Run: npm run bench:dupes:synthetic');
+runGenerator({
+  heading: 'Generating synthetic duplication benchmark fixtures...',
+  sizes: SIZES,
+  generateProject,
+  formatStats: (stats, elapsed) => `  ${stats.name.padEnd(8)} ${String(stats.fileCount).padStart(5)} files  ${String(stats.dupeGroups).padStart(4)} clone groups  ${String(stats.totalDuplicatedBlocks).padStart(5)} dupe blocks  ${String(stats.totalLines).padStart(7)} lines  (${elapsed.toFixed(0)}ms)`,
+  doneCommand: 'npm run bench:dupes:synthetic',
+});
