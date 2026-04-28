@@ -22,15 +22,15 @@ fallow-types = { version = "2.54.1", path = "crates/types" }
 fallow-cli = { version = "2.54.1", path = "crates/cli" }
 
 # Parsing & analysis
-oxc_allocator = "0.125"
-oxc_ast = "0.125"
-oxc_ast_visit = "0.125"
-oxc_parser = "0.125"
+oxc_allocator = "0.126"
+oxc_ast = "0.126"
+oxc_ast_visit = "0.126"
+oxc_parser = "0.126"
 oxc_resolver = "11"
-oxc_semantic = "0.125"
-oxc_span = "0.125"
-oxc_str = "0.125"
-oxc_syntax = "0.125"
+oxc_semantic = "0.126"
+oxc_span = "0.126"
+oxc_str = "0.126"
+oxc_syntax = "0.126"
 oxc_coverage_instrument = "0.3"
 
 # CLI
