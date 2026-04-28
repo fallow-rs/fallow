@@ -28,7 +28,7 @@ jobs:
         with:
           node-version: '22'
 
-      - uses: pnpm/action-setup@08c4be7e2e672a47d11bd04269e27e5f3e8529cb # v4
+      - uses: pnpm/action-setup@903f9c1a6ebcba6cf41d87230be49611ac97822e # v4
         with:
           version: 9
 
