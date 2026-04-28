@@ -2700,6 +2700,7 @@ minTokens = 100
         assert_eq!(config.duplicates.min_tokens, 200);
         assert_eq!(config.duplicates.min_lines, 20);
         assert!((config.duplicates.threshold - 10.5).abs() < f64::EPSILON);
+        assert_eq!(config.duplicates.ignore, vec!["**/*.test.ts"]);
         assert!(config.duplicates.skip_local);
         assert!(config.duplicates.cross_language);
         assert_eq!(

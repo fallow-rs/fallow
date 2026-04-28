@@ -4,5 +4,12 @@
     "tests/fixtures/**",
     "tests/conformance/fixtures/**",
     "editors/vscode/test/integration/fixtures/**"
-  ]
+  ],
+  "duplicates": {
+    "ignore": [
+      "tests/benchmark-corpus/**",
+      "crates/napi/index.d.ts",
+      "crates/napi/types/index.d.ts"
+    ]
+  }
 }

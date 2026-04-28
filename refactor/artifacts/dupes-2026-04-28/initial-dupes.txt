@@ -1,0 +1,75 @@
+● Duplicates (39 clone groups)
+
+    363 lines  2 instances
+    crates/napi/index.d.ts:1-363
+    crates/napi/types/index.d.ts:1-363
+
+    143 lines  2 instances
+    tests/benchmark-corpus/src/type1-exact/data-processor-a.ts:2-144
+    tests/benchmark-corpus/src/type1-exact/data-processor-b.ts:2-144
+
+    132 lines  2 instances
+    tests/benchmark-corpus/src/type1-exact/cache-manager-a.ts:2-133
+    tests/benchmark-corpus/src/type1-exact/cache-manager-b.ts:2-133
+
+    114 lines  3 instances
+    benchmarks/bench-circular.mjs:117-230
+    benchmarks/bench-dupes.mjs:124-199
+    benchmarks/bench.mjs:133-149
+
+     54 lines  2 instances
+    benchmarks/bench-circular.mjs:44-97
+    benchmarks/bench-dupes.mjs:30-72
+
+     38 lines  2 instances
+    benchmarks/bench-circular.mjs:71-104
+    benchmarks/bench-dupes.mjs:74-111
+
+     32 lines  2 instances
+    tests/benchmark-corpus/src/type3-near-miss/validator-a.ts:78-109
+    tests/benchmark-corpus/src/type3-near-miss/validator-b.ts:107-138
+
+     26 lines  2 instances
+    tests/benchmark-corpus/src/type3-near-miss/queue-a.ts:15-39
+    tests/benchmark-corpus/src/type3-near-miss/queue-b.ts:17-42
+
+     22 lines  2 instances
+    tests/benchmark-corpus/src/type3-near-miss/queue-a.ts:77-98
+    tests/benchmark-corpus/src/type3-near-miss/queue-b.ts:113-134
+
+     21 lines  3 instances
+    benchmarks/bench-circular.mjs:3-23
+    benchmarks/bench-dupes.mjs:3-21
+    benchmarks/bench.mjs:3-21
+
+  ... and 29 more clone groups
+  Identical code blocks detected via suffix-array analysis — https://docs.fallow.tools/explanations/duplication#clone-groups
+
+● Clone families (7 with multiple groups)
+
+  3 groups, 112 lines across benchmarks/bench-circular.mjs, benchmarks/bench-dupes.mjs
+    → Extract 3 shared clone groups (112 lines) from bench-circular.mjs, bench-dupes.mjs into benchmarks
+
+  6 groups, 189 lines across benchmarks/bench-circular.mjs, benchmarks/bench-dupes.mjs, benchmarks/bench.mjs
+    → Extract 6 shared clone groups (189 lines) from bench-circular.mjs, bench-dupes.mjs, bench.mjs into benchmarks
+
+  4 groups, 60 lines across benchmarks/bench-dupes.mjs, benchmarks/bench.mjs
+    → Extract 4 shared clone groups (60 lines) from bench-dupes.mjs, bench.mjs into benchmarks
+
+  4 groups, 34 lines across benchmarks/generate-circular-fixtures.mjs, benchmarks/generate-dupes-fixtures.mjs, benchmarks/generate-fixtures.mjs
+    → Extract shared function (13 lines) from generate-circular-fixtures.mjs, generate-dupes-fixtures.mjs, generate-fixtures.mjs
+    → Extract shared function (9 lines) from generate-circular-fixtures.mjs, generate-dupes-fixtures.mjs, generate-fixtures.mjs
+    → Extract shared function (6 lines) from generate-circular-fixtures.mjs, generate-dupes-fixtures.mjs, generate-fixtures.mjs
+    → Extract shared function (6 lines) from generate-circular-fixtures.mjs, generate-dupes-fixtures.mjs, generate-fixtures.mjs
+
+  7 groups, 72 lines across crates/napi/index.js
+    → Extract 7 shared clone groups (72 lines) from index.js into crates/napi
+
+  4 groups, 72 lines across tests/benchmark-corpus/src/type3-near-miss/queue-a.ts, tests/benchmark-corpus/src/type3-near-miss/queue-b.ts
+    → Extract 4 shared clone groups (72 lines) from queue-a.ts, queue-b.ts into tests/benchmark-corpus/src/type3-near-miss
+
+  3 groups, 54 lines across tests/benchmark-corpus/src/type3-near-miss/validator-a.ts, tests/benchmark-corpus/src/type3-near-miss/validator-b.ts
+    → Extract 3 shared clone groups (54 lines) from validator-a.ts, validator-b.ts into tests/benchmark-corpus/src/type3-near-miss
+
+  Groups of related clones across the same files — https://docs.fallow.tools/explanations/duplication#clone-families
+
