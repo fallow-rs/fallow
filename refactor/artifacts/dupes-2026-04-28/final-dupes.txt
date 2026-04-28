@@ -1,0 +1,3 @@
+loaded config: /Users/london_server/fallow/.fallowrc.json
+
+✓ No code duplication found (0.02s)
