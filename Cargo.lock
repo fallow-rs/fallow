@@ -3335,24 +3335,24 @@ dependencies = [
 
 [[package]]
 name = "srcmap-codec"
-version = "0.3.5"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12f32046d6b88620ca091671e1c5683606d5f42d2c4b890c624bda2473d89f4c"
+checksum = "bb59e0dc99488e5df4228114213cc2cfc1fa6071ab1b90706ba999fba866bee8"
 
 [[package]]
 name = "srcmap-scopes"
-version = "0.3.5"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26dfa4dec927a305440ad19f68a89c7c6841a7dbd95eae85dc1597603eba0341"
+checksum = "45412ac7dcc91d43395072a2aa2480022963895c9791e52b519ab922e03c401a"
 dependencies = [
  "srcmap-codec",
 ]
 
 [[package]]
 name = "srcmap-sourcemap"
-version = "0.3.5"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c5a53167f5e77d92d9585e60e1cb90eb7a45daefa5699125624c8dc12c3e547"
+checksum = "6cfb6ac3ef26caf22443bda4db17468e936a4adeaf073ac5235d9d367d98115d"
 dependencies = [
  "serde",
  "serde_json",
