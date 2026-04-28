@@ -349,6 +349,6 @@
     "rolldown": "1.0.0-rc.15",
     "ovsx": "0.10.11",
     "typescript": "6.0.2",
-    "vitest": "4.1.4"
+    "vitest": "4.1.5"
   }
 }
