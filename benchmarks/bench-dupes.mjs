@@ -1,103 +1,36 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync, readFileSync, rmSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import os from 'node:os';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  benchmarkDir,
+  buildFallowRelease,
+  countSourceFiles,
+  fmt,
+  fmtMem,
+  getVersion,
+  parseBenchmarkArgs,
+  printEnvironment,
+  runProjectBenchmarks,
+  stats,
+  timeRun,
+  timeRunWithMemory,
+} from './benchmark-helpers.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const rootDir = resolve(__dirname, '..');
-const args = process.argv.slice(2);
-const hasFilter = args.includes('--synthetic') || args.includes('--real-world');
-const runSynthetic = args.includes('--synthetic') || !hasFilter;
-const runRealWorld = args.includes('--real-world') || !hasFilter;
-const RUNS = parseInt(args.find(a => a.startsWith('--runs='))?.split('=')[1] ?? '5');
-const WARMUP = parseInt(args.find(a => a.startsWith('--warmup='))?.split('=')[1] ?? '2');
+const __dirname = benchmarkDir;
+const { runSynthetic, runRealWorld, RUNS, WARMUP } = parseBenchmarkArgs();
+const RUN_TIMEOUT = 600000;
 
-console.log('Building fallow (release)...');
-const buildResult = spawnSync('cargo', ['build', '--release'], { cwd: rootDir, stdio: 'pipe', timeout: 300000 });
-if (buildResult.status !== 0) { console.error('Build failed:', buildResult.stderr?.toString()); process.exit(1); }
-const fallowBin = join(rootDir, 'target', 'release', 'fallow');
+const fallowBin = buildFallowRelease();
 const jscpdBin = join(__dirname, 'node_modules', '.bin', 'jscpd');
 if (!existsSync(jscpdBin)) { console.error('jscpd not found. Run: cd benchmarks && npm install'); process.exit(1); }
 
-const fallowVersion = spawnSync(fallowBin, ['--version'], { stdio: 'pipe' }).stdout?.toString().trim();
-const jscpdVersion = spawnSync(jscpdBin, ['--version'], { stdio: 'pipe' }).stdout?.toString().trim();
-const rustVersion = spawnSync('rustc', ['--version'], { stdio: 'pipe' }).stdout?.toString().trim();
+const fallowVersion = getVersion(fallowBin);
+const jscpdVersion = getVersion(jscpdBin);
+const rustVersion = getVersion('rustc');
 
 console.log(`\n=== Fallow Dupes vs jscpd Benchmark Suite ===\n`);
-printEnvironment();
+printEnvironment(rustVersion);
 console.log(`Tools:\n  fallow dupes  ${fallowVersion}\n  jscpd         ${jscpdVersion}\nConfig: ${RUNS} runs, ${WARMUP} warmup\n`);
-
-function printEnvironment() {
-  const cpus = os.cpus();
-  console.log('Environment:');
-  console.log(`  CPU:     ${cpus[0].model.trim()} (${cpus.length} logical cores)`);
-  console.log(`  RAM:     ${(os.totalmem() / 1024 / 1024 / 1024).toFixed(1)} GB`);
-  console.log(`  OS:      ${os.platform()} ${os.release()} ${os.arch()}`);
-  console.log(`  Node:    ${process.version}`);
-  console.log(`  Rust:    ${rustVersion}`);
-  console.log('');
-}
-
-function countSourceFiles(dir) {
-  let count = 0;
-  const walk = d => {
-    try {
-      for (const e of readdirSync(d)) {
-        if (['node_modules', '.git', 'dist', 'report'].includes(e)) continue;
-        const f = join(d, e);
-        try { const s = statSync(f); if (s.isDirectory()) walk(f); else if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(e)) count++; } catch {}
-      }
-    } catch {}
-  };
-  walk(dir); return count;
-}
-
-function timeRun(cmd, cmdArgs, cwd) {
-  const start = performance.now();
-  const result = spawnSync(cmd, cmdArgs, {
-    cwd,
-    stdio: 'pipe',
-    timeout: 600000,
-    maxBuffer: 50 * 1024 * 1024,
-    env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
-  });
-  return {
-    elapsed: performance.now() - start,
-    status: result.status,
-    stdout: result.stdout?.toString() ?? '',
-    stderr: result.stderr?.toString() ?? '',
-  };
-}
-
-function timeRunWithMemory(cmd, cmdArgs, cwd) {
-  const isLinux = process.platform === 'linux';
-  const timeBin = '/usr/bin/time';
-  const timeArgs = isLinux ? ['-v', cmd, ...cmdArgs] : ['-l', cmd, ...cmdArgs];
-
-  const start = performance.now();
-  const result = spawnSync(timeBin, timeArgs, {
-    cwd,
-    stdio: 'pipe',
-    timeout: 600000,
-    maxBuffer: 50 * 1024 * 1024,
-    env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
-  });
-  const elapsed = performance.now() - start;
-  const stderr = result.stderr?.toString() ?? '';
-
-  let peakRssBytes = 0;
-  if (isLinux) {
-    const match = stderr.match(/Maximum resident set size \(kbytes\): (\d+)/);
-    if (match) peakRssBytes = parseInt(match[1]) * 1024;
-  } else {
-    const match = stderr.match(/(\d+)\s+maximum resident set size/);
-    if (match) peakRssBytes = parseInt(match[1]);
-  }
-
-  return { elapsed, status: result.status, stdout: result.stdout?.toString() ?? '', stderr, peakRssBytes };
-}
 
 function parseFallowCloneCount(stdout) {
   try {
@@ -124,23 +57,8 @@ function parseJscpdCloneCount(reportDir) {
   } catch { return { groups: '?', instances: '?', pct: '?' }; }
 }
 
-function stats(times) {
-  const sorted = [...times].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-  return {
-    min: sorted[0],
-    max: sorted.at(-1),
-    mean: sorted.reduce((a, b) => a + b, 0) / sorted.length,
-    median,
-  };
-}
-
-function fmt(ms) { return ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms / 1000).toFixed(2)}s`; }
-function fmtMem(bytes) { if (bytes === 0) return '?'; const mb = bytes / 1024 / 1024; return mb < 1024 ? `${mb.toFixed(1)} MB` : `${(mb / 1024).toFixed(2)} GB`; }
-
 function benchmarkProject(name, dir) {
-  const files = countSourceFiles(dir);
+  const files = countSourceFiles(dir, ['node_modules', '.git', 'dist', 'report']);
   console.log(`### ${name} (${files} source files)\n`);
 
   // fallow dupes: JSON output, no cache (cold)
@@ -161,9 +79,9 @@ function benchmarkProject(name, dir) {
 
   // Warmup
   for (let i = 0; i < WARMUP; i++) {
-    timeRun(fallowBin, fArgsCold, dir);
+    timeRun(fallowBin, fArgsCold, dir, RUN_TIMEOUT);
     if (existsSync(jscpdReportDir)) rmSync(jscpdReportDir, { recursive: true });
-    timeRun(jscpdBin, jArgs, dir);
+    timeRun(jscpdBin, jArgs, dir, RUN_TIMEOUT);
     if (existsSync(jscpdReportDir)) rmSync(jscpdReportDir, { recursive: true });
   }
 
@@ -174,12 +92,12 @@ function benchmarkProject(name, dir) {
   let fPeakRss = 0, jPeakRss = 0;
 
   for (let i = 0; i < RUNS; i++) {
-    const fr = timeRunWithMemory(fallowBin, fArgsCold, dir);
+    const fr = timeRunWithMemory(fallowBin, fArgsCold, dir, RUN_TIMEOUT);
     fTimesCold.push(fr.elapsed);
     if (i === 0) { fClones = parseFallowCloneCount(fr.stdout); fPeakRss = fr.peakRssBytes; }
 
     if (existsSync(jscpdReportDir)) rmSync(jscpdReportDir, { recursive: true });
-    const jr = timeRunWithMemory(jscpdBin, jArgs, dir);
+    const jr = timeRunWithMemory(jscpdBin, jArgs, dir, RUN_TIMEOUT);
     jTimes.push(jr.elapsed);
     if (i === 0) { jClones = parseJscpdCloneCount(jscpdReportDir); jPeakRss = jr.peakRssBytes; }
     if (existsSync(jscpdReportDir)) rmSync(jscpdReportDir, { recursive: true });
@@ -200,28 +118,24 @@ function benchmarkProject(name, dir) {
 
 const results = [];
 
-if (runSynthetic) {
-  const d = join(__dirname, 'fixtures', 'synthetic-dupes');
-  if (!existsSync(d)) {
-    console.log('No synthetic dupes fixtures. Run: npm run generate:dupes\n');
-  } else {
-    console.log('--- Synthetic Projects (Duplication) ---\n');
-    const order = ['tiny', 'small', 'medium', 'large', 'xlarge'];
-    for (const p of readdirSync(d).filter(x => existsSync(join(d, x, 'package.json'))).sort((a, b) => order.indexOf(a) - order.indexOf(b)))
-      results.push(benchmarkProject(p, join(d, p)));
-  }
-}
+runProjectBenchmarks({
+  enabled: runSynthetic,
+  dir: join(__dirname, 'fixtures', 'synthetic-dupes'),
+  missingMessage: 'No synthetic dupes fixtures. Run: npm run generate:dupes\n',
+  heading: '--- Synthetic Projects (Duplication) ---\n',
+  results,
+  benchmarkProject,
+  order: ['tiny', 'small', 'medium', 'large', 'xlarge'],
+});
 
-if (runRealWorld) {
-  const d = join(__dirname, 'fixtures', 'real-world');
-  if (!existsSync(d)) {
-    console.log('No real-world fixtures. Run: npm run download-fixtures\n');
-  } else {
-    console.log('--- Real-World Projects (Duplication) ---\n');
-    for (const p of readdirSync(d).filter(x => existsSync(join(d, x, 'package.json'))).sort())
-      results.push(benchmarkProject(p, join(d, p)));
-  }
-}
+runProjectBenchmarks({
+  enabled: runRealWorld,
+  dir: join(__dirname, 'fixtures', 'real-world'),
+  missingMessage: 'No real-world fixtures. Run: npm run download-fixtures\n',
+  heading: '--- Real-World Projects (Duplication) ---\n',
+  results,
+  benchmarkProject,
+});
 
 if (results.length > 0) {
   console.log('\n=== Summary ===\n');

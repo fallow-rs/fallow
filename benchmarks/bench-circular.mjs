@@ -1,23 +1,25 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import os from 'node:os';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  benchmarkDir,
+  buildFallowRelease,
+  countSourceFiles,
+  fmt,
+  fmtMem,
+  getVersion,
+  parseBenchmarkArgs,
+  printEnvironment,
+  runProjectBenchmarks,
+  stats,
+  timeRunWithMemory,
+} from './benchmark-helpers.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const rootDir = resolve(__dirname, '..');
-const args = process.argv.slice(2);
-const hasFilter = args.includes('--synthetic') || args.includes('--real-world');
-const runSynthetic = args.includes('--synthetic') || !hasFilter;
-const runRealWorld = args.includes('--real-world') || !hasFilter;
-const RUNS = parseInt(args.find(a => a.startsWith('--runs='))?.split('=')[1] ?? '5');
-const WARMUP = parseInt(args.find(a => a.startsWith('--warmup='))?.split('=')[1] ?? '2');
+const __dirname = benchmarkDir;
+const { runSynthetic, runRealWorld, RUNS, WARMUP } = parseBenchmarkArgs();
+const RUN_TIMEOUT = 600000;
 
-console.log('Building fallow (release)...');
-const buildResult = spawnSync('cargo', ['build', '--release'], { cwd: rootDir, stdio: 'pipe', timeout: 300000 });
-if (buildResult.status !== 0) { console.error('Build failed:', buildResult.stderr?.toString()); process.exit(1); }
-const fallowBin = join(rootDir, 'target', 'release', 'fallow');
+const fallowBin = buildFallowRelease();
 
 // Detect available tools
 const madgeBin = join(__dirname, 'node_modules', '.bin', 'madge');
@@ -30,71 +32,18 @@ if (!hasMadge && !hasDpdm) {
   process.exit(1);
 }
 
-const fallowVersion = spawnSync(fallowBin, ['--version'], { stdio: 'pipe' }).stdout?.toString().trim();
-const madgeVersion = hasMadge ? spawnSync(madgeBin, ['--version'], { stdio: 'pipe' }).stdout?.toString().trim() : 'n/a';
-const dpdmVersion = hasDpdm ? spawnSync(dpdmBin, ['--version'], { stdio: 'pipe' }).stdout?.toString().trim() : 'n/a';
-const rustVersion = spawnSync('rustc', ['--version'], { stdio: 'pipe' }).stdout?.toString().trim();
+const fallowVersion = getVersion(fallowBin);
+const madgeVersion = hasMadge ? getVersion(madgeBin) : 'n/a';
+const dpdmVersion = hasDpdm ? getVersion(dpdmBin) : 'n/a';
+const rustVersion = getVersion('rustc');
 
 console.log(`\n=== Fallow vs madge/dpdm — Circular Dependency Detection ===\n`);
-printEnvironment();
+printEnvironment(rustVersion);
 console.log(`Tools:`);
 console.log(`  fallow dead-code --circular-deps  ${fallowVersion}`);
 if (hasMadge) console.log(`  madge --circular              ${madgeVersion}`);
 if (hasDpdm) console.log(`  dpdm                          ${dpdmVersion}`);
 console.log(`Config: ${RUNS} runs, ${WARMUP} warmup\n`);
-
-function printEnvironment() {
-  const cpus = os.cpus();
-  console.log('Environment:');
-  console.log(`  CPU:     ${cpus[0].model.trim()} (${cpus.length} logical cores)`);
-  console.log(`  RAM:     ${(os.totalmem() / 1024 / 1024 / 1024).toFixed(1)} GB`);
-  console.log(`  OS:      ${os.platform()} ${os.release()} ${os.arch()}`);
-  console.log(`  Node:    ${process.version}`);
-  console.log(`  Rust:    ${rustVersion}`);
-  console.log('');
-}
-
-function countSourceFiles(dir) {
-  let count = 0;
-  const walk = d => {
-    try {
-      for (const e of readdirSync(d)) {
-        if (['node_modules', '.git', 'dist', 'report'].includes(e)) continue;
-        const f = join(d, e);
-        try { const s = statSync(f); if (s.isDirectory()) walk(f); else if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(e)) count++; } catch {}
-      }
-    } catch {}
-  };
-  walk(dir); return count;
-}
-
-function timeRunWithMemory(cmd, cmdArgs, cwd) {
-  const isLinux = process.platform === 'linux';
-  const timeBin = '/usr/bin/time';
-  const timeArgs = isLinux ? ['-v', cmd, ...cmdArgs] : ['-l', cmd, ...cmdArgs];
-
-  const start = performance.now();
-  const result = spawnSync(timeBin, timeArgs, {
-    cwd,
-    stdio: 'pipe',
-    timeout: 600000,
-    maxBuffer: 50 * 1024 * 1024,
-    env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
-  });
-  const elapsed = performance.now() - start;
-  const stderr = result.stderr?.toString() ?? '';
-
-  let peakRssBytes = 0;
-  if (isLinux) {
-    const match = stderr.match(/Maximum resident set size \(kbytes\): (\d+)/);
-    if (match) peakRssBytes = parseInt(match[1]) * 1024;
-  } else {
-    const match = stderr.match(/(\d+)\s+maximum resident set size/);
-    if (match) peakRssBytes = parseInt(match[1]);
-  }
-
-  return { elapsed, status: result.status, stdout: result.stdout?.toString() ?? '', stderr, peakRssBytes };
-}
 
 function parseFallowCycles(stdout) {
   try {
@@ -117,23 +66,8 @@ function parseDpdmCycles(stdout) {
   } catch { return '?'; }
 }
 
-function stats(times) {
-  const sorted = [...times].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-  return {
-    min: sorted[0],
-    max: sorted.at(-1),
-    mean: sorted.reduce((a, b) => a + b, 0) / sorted.length,
-    median,
-  };
-}
-
-function fmt(ms) { return ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms / 1000).toFixed(2)}s`; }
-function fmtMem(bytes) { if (bytes === 0) return '?'; const mb = bytes / 1024 / 1024; return mb < 1024 ? `${mb.toFixed(1)} MB` : `${(mb / 1024).toFixed(2)} GB`; }
-
 function benchmarkProject(name, dir) {
-  const files = countSourceFiles(dir);
+  const files = countSourceFiles(dir, ['node_modules', '.git', 'dist', 'report']);
   const hasTsConfig = existsSync(join(dir, 'tsconfig.json'));
   console.log(`### ${name} (${files} source files)\n`);
 
@@ -153,10 +87,10 @@ function benchmarkProject(name, dir) {
 
   // Warmup
   for (let i = 0; i < WARMUP; i++) {
-    timeRunWithMemory(fallowBin, fallowArgs, dir);
-    if (hasMadge) timeRunWithMemory(madgeBin, madgeArgs, dir);
+    timeRunWithMemory(fallowBin, fallowArgs, dir, RUN_TIMEOUT);
+    if (hasMadge) timeRunWithMemory(madgeBin, madgeArgs, dir, RUN_TIMEOUT);
     if (hasDpdm) {
-      timeRunWithMemory(dpdmBin, dpdmArgs, dir);
+      timeRunWithMemory(dpdmBin, dpdmArgs, dir, RUN_TIMEOUT);
       if (existsSync(dpdmOutputFile)) rmSync(dpdmOutputFile);
     }
   }
@@ -168,20 +102,20 @@ function benchmarkProject(name, dir) {
 
   for (let i = 0; i < RUNS; i++) {
     // fallow
-    const fr = timeRunWithMemory(fallowBin, fallowArgs, dir);
+    const fr = timeRunWithMemory(fallowBin, fallowArgs, dir, RUN_TIMEOUT);
     fallowTimes.push(fr.elapsed);
     if (i === 0) { fallowCycles = parseFallowCycles(fr.stdout); fallowRss = fr.peakRssBytes; }
 
     // madge
     if (hasMadge) {
-      const mr = timeRunWithMemory(madgeBin, madgeArgs, dir);
+      const mr = timeRunWithMemory(madgeBin, madgeArgs, dir, RUN_TIMEOUT);
       madgeTimes.push(mr.elapsed);
       if (i === 0) { madgeCycles = parseMadgeCycles(mr.stdout); madgeRss = mr.peakRssBytes; }
     }
 
     // dpdm
     if (hasDpdm) {
-      const dr = timeRunWithMemory(dpdmBin, dpdmArgs, dir);
+      const dr = timeRunWithMemory(dpdmBin, dpdmArgs, dir, RUN_TIMEOUT);
       dpdmTimes.push(dr.elapsed);
       if (i === 0) {
         try {
@@ -231,28 +165,24 @@ function benchmarkProject(name, dir) {
 
 const results = [];
 
-if (runSynthetic) {
-  const d = join(__dirname, 'fixtures', 'synthetic-circular');
-  if (!existsSync(d)) {
-    console.log('No synthetic circular fixtures. Run: npm run generate:circular\n');
-  } else {
-    console.log('--- Synthetic Projects (Circular Dependencies) ---\n');
-    const order = ['tiny', 'small', 'medium', 'large', 'xlarge'];
-    for (const p of readdirSync(d).filter(x => existsSync(join(d, x, 'package.json'))).sort((a, b) => order.indexOf(a) - order.indexOf(b)))
-      results.push(benchmarkProject(p, join(d, p)));
-  }
-}
+runProjectBenchmarks({
+  enabled: runSynthetic,
+  dir: join(__dirname, 'fixtures', 'synthetic-circular'),
+  missingMessage: 'No synthetic circular fixtures. Run: npm run generate:circular\n',
+  heading: '--- Synthetic Projects (Circular Dependencies) ---\n',
+  results,
+  benchmarkProject,
+  order: ['tiny', 'small', 'medium', 'large', 'xlarge'],
+});
 
-if (runRealWorld) {
-  const d = join(__dirname, 'fixtures', 'real-world');
-  if (!existsSync(d)) {
-    console.log('No real-world fixtures. Run: npm run download-fixtures\n');
-  } else {
-    console.log('--- Real-World Projects (Circular Dependencies) ---\n');
-    for (const p of readdirSync(d).filter(x => existsSync(join(d, x, 'package.json'))).sort())
-      results.push(benchmarkProject(p, join(d, p)));
-  }
-}
+runProjectBenchmarks({
+  enabled: runRealWorld,
+  dir: join(__dirname, 'fixtures', 'real-world'),
+  missingMessage: 'No real-world fixtures. Run: npm run download-fixtures\n',
+  heading: '--- Real-World Projects (Circular Dependencies) ---\n',
+  results,
+  benchmarkProject,
+});
 
 if (results.length > 0) {
   console.log('\n=== Summary ===\n');
