@@ -8,6 +8,7 @@
   "duplicates": {
     "ignore": [
       "tests/benchmark-corpus/**",
+      "crates/napi/index.js",
       "crates/napi/index.d.ts",
       "crates/napi/types/index.d.ts"
     ]

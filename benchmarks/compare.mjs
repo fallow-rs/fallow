@@ -21,9 +21,8 @@ function run(cmd, args, cwd) {
   return { stdout: result.stdout?.toString() ?? '', stderr: result.stderr?.toString() ?? '', status: result.status };
 }
 
-function parseFallow(stdout, projectDir) {
-  const data = JSON.parse(stdout);
-  const result = {
+function createEmptyResult() {
+  return {
     unused_files: new Set(),
     unused_exports: new Set(),
     unused_types: new Set(),
@@ -34,6 +33,11 @@ function parseFallow(stdout, projectDir) {
     unused_enum_members: new Set(),
     duplicate_exports: new Set(),
   };
+}
+
+function parseFallow(stdout, projectDir) {
+  const data = JSON.parse(stdout);
+  const result = createEmptyResult();
   for (const f of data.unused_files ?? []) result.unused_files.add(relative(projectDir, f.path));
   for (const e of data.unused_exports ?? []) result.unused_exports.add(`${relative(projectDir, e.path)}:${e.export_name}`);
   for (const t of data.unused_types ?? []) result.unused_types.add(`${relative(projectDir, t.path)}:${t.export_name}`);
@@ -48,17 +52,7 @@ function parseFallow(stdout, projectDir) {
 
 function parseKnip(stdout, projectDir) {
   const data = JSON.parse(stdout);
-  const result = {
-    unused_files: new Set(),
-    unused_exports: new Set(),
-    unused_types: new Set(),
-    unused_dependencies: new Set(),
-    unused_dev_dependencies: new Set(),
-    unresolved_imports: new Set(),
-    unlisted_dependencies: new Set(),
-    unused_enum_members: new Set(),
-    duplicate_exports: new Set(),
-  };
+  const result = createEmptyResult();
   // Knip "files" = unused files
   for (const f of data.files ?? []) result.unused_files.add(f);
   // Knip "issues" = per-file issues
