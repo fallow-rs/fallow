@@ -317,6 +317,7 @@ fn merge_script_into_module(
             extractor
                 .binding_target_names()
                 .iter()
+                .filter(|(local, _)| !local.starts_with("this."))
                 .map(|(local, target)| (local.clone(), target.clone())),
         );
     }

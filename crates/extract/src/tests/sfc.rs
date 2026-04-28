@@ -466,6 +466,49 @@ import { page } from './stores';
 }
 
 #[test]
+fn svelte_attach_tag_clears_unused_import_binding() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import { myAttach } from './attachments';
+</script>
+<div {@attach myAttach}></div>
+"#,
+        "App.svelte",
+    );
+
+    assert!(
+        !info
+            .unused_import_bindings
+            .contains(&"myAttach".to_string()),
+        "attach tag usage should mark myAttach as used, got: {:?}",
+        info.unused_import_bindings
+    );
+}
+
+#[test]
+fn svelte_event_handler_arrow_member_call_marks_bound_class_member_usage() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import { Counter } from './counter';
+const counter = new Counter();
+</script>
+<button onclick={() => counter.bump()}>Increment</button>
+"#,
+        "App.svelte",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Counter" && access.member == "bump"),
+        "event handler method call should be resolved to Counter.bump, got: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn vue_no_script_returns_empty() {
     let info = parse_sfc(
         "<template><div></div></template><style>div {}</style>",
