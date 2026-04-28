@@ -65,6 +65,162 @@ assert_valid_markdown() {
 }
 
 # =========================================================================
+# GitLab-specific install path tests
+# =========================================================================
+
+echo ""
+echo "=== GitLab install path ==="
+
+gitlab_install_script() {
+  awk '
+    /# Validate and install fallow/ { seen=1; next }
+    seen && /^[[:space:]]*-[[:space:]]*\|[[:space:]]*$/ { in_block=1; next }
+    in_block && /# Prepare jq scripts/ { exit }
+    in_block {
+      sub(/^      /, "")
+      print
+    }
+  ' "$DIR/../gitlab-ci.yml"
+}
+
+GITLAB_INSTALL_SCRIPT="$(gitlab_install_script)"
+INSTALL_TMP=$(mktemp -d)
+trap 'rm -rf "$INSTALL_TMP"' EXIT
+mkdir -p "$INSTALL_TMP/pinned" "$INSTALL_TMP/range" "$INSTALL_TMP/unsafe" "$INSTALL_TMP/empty"
+
+cat > "$INSTALL_TMP/pinned/package.json" <<'JSON'
+{"devDependencies":{"fallow":"2.7.3"}}
+JSON
+cat > "$INSTALL_TMP/range/package.json" <<'JSON'
+{"dependencies":{"fallow":"^2.52.0"}}
+JSON
+cat > "$INSTALL_TMP/unsafe/package.json" <<'JSON'
+{"devDependencies":{"fallow":"workspace:*"}}
+JSON
+
+run_gitlab_install() {
+  local root="$1"
+  local version="$2"
+  FALLOW_ROOT="$root" FALLOW_VERSION="$version" FALLOW_INSTALL_DRY_RUN=true bash -eo pipefail -c "$GITLAB_INSTALL_SCRIPT" 2>&1
+}
+
+OUT=$(run_gitlab_install "$INSTALL_TMP/pinned" "")
+assert_contains "$OUT" "Using fallow version from" "install: reads package.json pin"
+assert_contains "$OUT" "DRY RUN: npm install -g fallow@2.7.3" "install: installs project pin"
+
+OUT=$(run_gitlab_install "$INSTALL_TMP/range" "")
+assert_contains "$OUT" "DRY RUN: npm install -g fallow@^2.52.0" "install: supports package.json semver range"
+
+OUT=$(run_gitlab_install "$INSTALL_TMP/pinned" "latest")
+assert_contains "$OUT" "Using fallow version from FALLOW_VERSION: latest" "install: explicit FALLOW_VERSION wins"
+assert_contains "$OUT" "DRY RUN: npm install -g fallow" "install: explicit latest installs latest"
+
+OUT=$(run_gitlab_install "$INSTALL_TMP/unsafe" "")
+assert_contains "$OUT" "Ignoring unsupported fallow package.json spec" "install: warns on unsupported package spec"
+assert_contains "$OUT" "DRY RUN: npm install -g fallow" "install: unsupported package spec falls back to latest"
+
+OUT=$(run_gitlab_install "$INSTALL_TMP/empty" "")
+assert_contains "$OUT" "DRY RUN: npm install -g fallow" "install: no package spec falls back to latest"
+
+OUT=$(run_gitlab_install "$INSTALL_TMP/empty" "2.0.0 - 2.5.0")
+assert_contains "$OUT" "DRY RUN: npm install -g fallow@2.0.0 - 2.5.0" "install: supports npm hyphen ranges"
+
+OUT=$(run_gitlab_install "$INSTALL_TMP/empty" "file:../fallow")
+cmd_status=$?
+if [ "$cmd_status" -ne 0 ]; then
+  pass "install: invalid file spec fails"
+else
+  fail "install: invalid file spec fails" "expected non-zero exit"
+fi
+assert_contains "$OUT" "Invalid version specifier" "install: invalid file spec explains failure"
+
+OUT=$(run_gitlab_install "$INSTALL_TMP/empty" "2.0.0 -g malicious")
+cmd_status=$?
+if [ "$cmd_status" -ne 0 ]; then
+  pass "install: rejects dash-prefixed extra args in spec"
+else
+  fail "install: rejects dash-prefixed extra args in spec" "expected non-zero exit"
+fi
+
+# =========================================================================
+# Behavioral parity between action/scripts/install.sh and ci/gitlab-ci.yml
+# =========================================================================
+#
+# Both implementations must agree on every spec input. Logic drift between
+# the two copies is a covert privilege escalation vector specific to one CI
+# provider. Catches divergence even when comments or indentation differ.
+
+echo ""
+echo "=== Install path parity (action vs gitlab) ==="
+
+ACTION_INSTALL_SH="$DIR/../../action/scripts/install.sh"
+
+# Drive both implementations through their dry-run path with the same matrix
+# of inputs and assert each one's exit code and final install_arg agree.
+parity_run_action() {
+  local root="$1"
+  local version="$2"
+  INPUT_ROOT="$root" FALLOW_VERSION="$version" FALLOW_INSTALL_DRY_RUN=true \
+    bash "$ACTION_INSTALL_SH" 2>&1
+}
+
+parity_run_gitlab() {
+  local root="$1"
+  local version="$2"
+  FALLOW_ROOT="$root" FALLOW_VERSION="$version" FALLOW_INSTALL_DRY_RUN=true \
+    bash -eo pipefail -c "$GITLAB_INSTALL_SCRIPT" 2>&1
+}
+
+extract_install_arg() {
+  printf '%s\n' "$1" | grep -Eo 'DRY RUN: npm install -g .*' | head -n 1 \
+    | sed 's/^DRY RUN: npm install -g //'
+}
+
+assert_parity() {
+  local name="$1" root="$2" version="$3"
+  local action_out gitlab_out action_status gitlab_status
+  # ci/tests/run.sh does not run under `set -e`, so we can capture the inner
+  # exit code directly. Wrapping with `|| true` would mask divergence in the
+  # exit-code half of the comparison.
+  action_out="$(parity_run_action "$root" "$version")"
+  action_status=$?
+  gitlab_out="$(parity_run_gitlab "$root" "$version")"
+  gitlab_status=$?
+
+  local action_arg gitlab_arg
+  action_arg="$(extract_install_arg "$action_out")"
+  gitlab_arg="$(extract_install_arg "$gitlab_out")"
+
+  if [ "$action_status" = "$gitlab_status" ] && [ "$action_arg" = "$gitlab_arg" ]; then
+    pass "parity: $name"
+  else
+    fail "parity: $name" \
+      "action exit=$action_status arg='$action_arg' / gitlab exit=$gitlab_status arg='$gitlab_arg'"
+  fi
+}
+
+# Both must agree on the safe inputs.
+assert_parity "reads pinned package.json" "$INSTALL_TMP/pinned" ""
+assert_parity "reads semver range from package.json" "$INSTALL_TMP/range" ""
+assert_parity "explicit FALLOW_VERSION=latest wins" "$INSTALL_TMP/pinned" "latest"
+assert_parity "no spec falls back to latest" "$INSTALL_TMP/empty" ""
+assert_parity "explicit semver range is honoured" "$INSTALL_TMP/empty" "^2.52.0"
+assert_parity "explicit hyphen range is honoured" "$INSTALL_TMP/empty" "2.0.0 - 2.5.0"
+# And on every shape the validator must reject. If the two implementations
+# diverge here, one CI provider would silently accept an unsafe spec.
+assert_parity "rejects file: scheme" "$INSTALL_TMP/empty" "file:../fallow"
+assert_parity "rejects npm: alias" "$INSTALL_TMP/empty" "npm:lodash@1.0.0"
+assert_parity "rejects git+ssh URL" "$INSTALL_TMP/empty" "git+ssh://x.example/y.git"
+assert_parity "rejects workspace: protocol" "$INSTALL_TMP/empty" "workspace:*"
+assert_parity "rejects dash-prefixed extra args" "$INSTALL_TMP/empty" "2.0.0 -g malicious"
+assert_parity "rejects semicolon command separator" "$INSTALL_TMP/empty" "2.0.0;rm -rf /"
+assert_parity "rejects dollar-paren command sub" "$INSTALL_TMP/empty" '2.0.0$(touch /tmp/x)'
+assert_parity "rejects backtick command sub" "$INSTALL_TMP/empty" '2.0.0`touch /tmp/x`'
+# Unsupported package.json spec (e.g. workspace:*) must produce the same
+# fall-back-to-latest decision in both implementations.
+assert_parity "unsupported package.json spec falls back" "$INSTALL_TMP/unsafe" ""
+
+# =========================================================================
 # GitLab-specific summary jq tests
 # =========================================================================
 
@@ -446,6 +602,11 @@ assert_contains "$(cat "$CI_YAML")" "FALLOW_REVIEW" "has FALLOW_REVIEW variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_MAX_COMMENTS" "has FALLOW_MAX_COMMENTS variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_COMMENT" "has FALLOW_COMMENT variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_CODEQUALITY" "has FALLOW_CODEQUALITY variable"
+assert_contains "$(cat "$CI_YAML")" "project_fallow_spec" "reads package.json fallow pin"
+assert_contains "$(cat "$CI_YAML")" "is_safe_version_spec" "validates fallow install spec"
+assert_contains "$(cat "$CI_YAML")" "FALLOW_INSTALL_DRY_RUN" "supports install dry-run testing"
+assert_contains "$(cat "$CI_YAML")" "GIT_STRATEGY" "overrides shared template git strategy"
+assert_contains "$(cat "$CI_YAML")" "GIT_DEPTH" "fetches full history for changed-since"
 assert_contains "$(cat "$CI_YAML")" "CI_MERGE_REQUEST_DIFF_BASE_SHA" "auto changed-since uses diff base SHA"
 assert_contains "$(cat "$CI_YAML")" "comment.sh" "references comment.sh"
 assert_contains "$(cat "$CI_YAML")" "review.sh" "references review.sh"
@@ -463,7 +624,7 @@ SCRIPTS_DIR="$DIR/../scripts"
 
 echo "  comment.sh:"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "PRIVATE-TOKEN" "supports GITLAB_TOKEN"
-assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "JOB-TOKEN" "supports CI_JOB_TOKEN"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "CI_JOB_TOKEN is read-only" "explains CI_JOB_TOKEN write limitation"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "fallow-results" "uses fallow-results marker"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "PUT" "can update existing comment"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "POST" "can create new comment"

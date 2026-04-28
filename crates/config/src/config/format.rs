@@ -15,6 +15,8 @@ pub enum OutputFormat {
     /// Markdown for PR comments.
     Markdown,
     /// `CodeClimate` JSON for GitLab Code Quality.
+    ///
+    /// CLI aliases: `codeclimate`, `gitlab-codequality`, `gitlab-code-quality`.
     CodeClimate,
     /// Shields.io-compatible SVG badge (health command only).
     Badge,

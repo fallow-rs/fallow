@@ -138,6 +138,25 @@ fn check_codeclimate_format_is_array() {
     assert!(json.is_array(), "codeclimate output should be a JSON array");
 }
 
+#[test]
+fn check_gitlab_codequality_alias_is_array() {
+    let output = run_fallow(
+        "check",
+        "basic-project",
+        &["--format", "gitlab-codequality", "--quiet"],
+    );
+    let json: serde_json::Value = serde_json::from_str(&output.stdout).unwrap_or_else(|e| {
+        panic!(
+            "failed to parse gitlab-codequality JSON: {e}\nstdout: {}",
+            output.stdout
+        )
+    });
+    assert!(
+        json.is_array(),
+        "gitlab-codequality output should be a JSON array"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Issue type filtering
 // ---------------------------------------------------------------------------

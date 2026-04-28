@@ -16,6 +16,7 @@
 #
 # Or include locally if you vendor the file:
 #
+#   # fallow ci-template gitlab --vendor
 #   include:
 #     - local: 'ci/gitlab-ci.yml'
 #
@@ -65,8 +66,14 @@
 # ---------------------------------------------------------------------------
 
 variables:
+  # Git checkout. Fallow needs a working tree, and changed-file analysis needs
+  # enough history to diff against the MR base SHA. These override shared
+  # templates that set GIT_STRATEGY=none or a shallow clone.
+  GIT_STRATEGY: "fetch"
+  GIT_DEPTH: "0"
+
   # Core
-  FALLOW_VERSION: "latest"
+  FALLOW_VERSION: ""             # Empty reads package.json fallow dependency, then falls back to latest
   FALLOW_COMMAND: ""            # dead-code, dupes, health, fix, or empty (runs all)
   FALLOW_ROOT: "."
   FALLOW_CONFIG: ""             # Path to .fallowrc.json or fallow.toml
@@ -81,12 +88,11 @@ variables:
   FALLOW_CODEQUALITY: "true"    # Generate GitLab Code Quality report (inline MR annotations)
   FALLOW_MAX_COMMENTS: "50"     # Maximum number of inline review comments
 
-  # MR integration auth — uses GITLAB_TOKEN (PAT) or CI_JOB_TOKEN
-  # GITLAB_TOKEN (PAT with api scope) is recommended for full features:
-  #   - Inline MR discussions with suggestion blocks
-  #   - Cleanup of previous fallow comments on re-runs
-  # CI_JOB_TOKEN works for posting comments but cannot delete comments from
-  # previous pipeline runs (each run has a different identity).
+  # MR integration auth.
+  # GITLAB_TOKEN (PAT/project access token with api scope) is required for
+  # summary comments and inline MR discussions. GitLab's documented
+  # CI_JOB_TOKEN permissions allow reading MR notes, but not creating,
+  # updating, or deleting them.
 
   # Diff-based filtering
   FALLOW_CHANGED_SINCE: ""      # Git ref for incremental analysis (auto-set in MR context)
@@ -174,16 +180,106 @@ variables:
       fi
     # Validate and install fallow
     - |
-      if ! echo "$FALLOW_VERSION" | grep -qE '^(latest|[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9.]+)*)$'; then
-        echo "ERROR: Invalid version: ${FALLOW_VERSION}. Use 'latest' or semver like '2.0.0'."
+      trim() {
+        local value="$1"
+        value="${value#"${value%%[![:space:]]*}"}"
+        value="${value%"${value##*[![:space:]]}"}"
+        printf '%s' "$value"
+      }
+
+      is_safe_version_spec() {
+        local spec
+        spec="$(trim "$1")"
+        if [ "$spec" = "latest" ]; then
+          return 0
+        fi
+        local start_re='^[0-9xX*~^<>=]'
+        local safe_re='^[0-9A-Za-z.*~^<>=| -]+$'
+        # Accept semver versions and ranges, while rejecting protocols, paths,
+        # package aliases, git URLs, or injected npm arguments.
+        [[ "$spec" =~ $start_re ]] &&
+          [[ "$spec" =~ $safe_re ]] &&
+          [[ ! "$spec" =~ : ]] &&
+          [[ ! "$spec" =~ / ]] &&
+          [[ ! "$spec" =~ [[:space:]]-[A-Za-z] ]]
+      }
+
+      is_exact_version() {
+        [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9.]+)?$ ]]
+      }
+
+      project_fallow_spec() {
+        local package_json="$1/package.json"
+        if [ ! -f "$package_json" ]; then
+          return 0
+        fi
+
+        node - "$package_json" <<'NODE'
+      const fs = require("node:fs");
+      const packageJson = process.argv[2];
+      const pkg = JSON.parse(fs.readFileSync(packageJson, "utf8"));
+      for (const section of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
+        const spec = pkg[section]?.fallow;
+        if (typeof spec === "string" && spec.trim()) {
+          console.log(spec.trim());
+          process.exit(0);
+        }
+      }
+      NODE
+      }
+
+      requested_version="$(trim "${FALLOW_VERSION:-}")"
+      root="${FALLOW_ROOT:-.}"
+      project_spec="$(project_fallow_spec "$root" 2>/dev/null || true)"
+      project_spec="$(trim "$project_spec")"
+      install_spec=""
+
+      if [ -n "$requested_version" ]; then
+        install_spec="$requested_version"
+        echo "Using fallow version from FALLOW_VERSION: ${install_spec}"
+      elif [ -n "$project_spec" ]; then
+        if is_safe_version_spec "$project_spec"; then
+          install_spec="$project_spec"
+          echo "Using fallow version from ${root}/package.json: ${install_spec}"
+        else
+          echo "WARNING: Ignoring unsupported fallow package.json spec '${project_spec}'. Use a semver version or range, or set FALLOW_VERSION explicitly."
+          install_spec="latest"
+        fi
+      else
+        install_spec="latest"
+      fi
+
+      if ! is_safe_version_spec "$install_spec"; then
+        echo "ERROR: Invalid version specifier: ${install_spec}. Use 'latest' or a semver version/range like '2.52.2' or '^2.52.0'."
         exit 2
       fi
-      if [ "$FALLOW_VERSION" = "latest" ]; then
-        npm install -g fallow || { echo "ERROR: Failed to install fallow"; exit 2; }
+
+      printf '%s\n' "$install_spec" > /tmp/fallow-version-spec
+
+      if [ "$install_spec" = "latest" ]; then
+        install_arg="fallow"
       else
-        npm install -g "fallow@${FALLOW_VERSION}" || { echo "ERROR: Failed to install fallow@${FALLOW_VERSION}"; exit 2; }
+        install_arg="fallow@${install_spec}"
       fi
-      echo "Installed fallow $(fallow --version 2>/dev/null || echo 'unknown')"
+
+      # FALLOW_INSTALL_DRY_RUN is an internal hook used by ci/tests/run.sh to
+      # exercise this block without invoking npm. Not a documented user knob.
+      if [ "${FALLOW_INSTALL_DRY_RUN:-}" = "true" ]; then
+        echo "DRY RUN: npm install -g ${install_arg}"
+        exit 0
+      fi
+
+      npm install -g "$install_arg" || { echo "ERROR: Failed to install ${install_arg}"; exit 2; }
+
+      installed_version="$(fallow --version 2>/dev/null || echo 'unknown version')"
+      echo "Installed fallow ${installed_version}"
+
+      if [ -z "$requested_version" ] && [ -n "$project_spec" ] && is_exact_version "$project_spec"; then
+        installed_semver="$(printf '%s\n' "$installed_version" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9.]+)?' | head -n 1 || true)"
+        if [ -n "$installed_semver" ] && [ "$installed_semver" != "$project_spec" ]; then
+          echo "WARNING: Installed fallow ${installed_semver}, but ${root}/package.json pins ${project_spec}. Set FALLOW_VERSION or align package.json to keep local and CI results comparable."
+        fi
+      fi
     # Prepare jq scripts and bash scripts for MR integration
     - |
       export FALLOW_JQ_DIR="/tmp/fallow-jq"
@@ -219,12 +315,13 @@ variables:
             fi
           done
         else
-          if [ -z "$FALLOW_SCRIPTS_REF" ] && [ "$FALLOW_VERSION" != "latest" ]; then
-            FALLOW_SCRIPTS_REF="v${FALLOW_VERSION}"
+          FALLOW_RESOLVED_VERSION="$(cat /tmp/fallow-version-spec 2>/dev/null || printf '%s' "${FALLOW_VERSION:-}")"
+          if [ -z "$FALLOW_SCRIPTS_REF" ] && echo "$FALLOW_RESOLVED_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9.]+)?$'; then
+            FALLOW_SCRIPTS_REF="v${FALLOW_RESOLVED_VERSION}"
           fi
 
           if [ -z "$FALLOW_SCRIPTS_REF" ]; then
-            echo "ERROR: FALLOW_COMMENT/FALLOW_REVIEW require vendored ci/ + action/ scripts or a pinned FALLOW_SCRIPTS_REF when FALLOW_VERSION=latest."
+            echo "ERROR: FALLOW_COMMENT/FALLOW_REVIEW require vendored ci/ + action/ scripts or a pinned FALLOW_SCRIPTS_REF when fallow is installed from latest or a semver range."
             exit 2
           fi
 

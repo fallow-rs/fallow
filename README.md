@@ -337,14 +337,28 @@ Keep committed baselines outside `.fallow/`; that directory is for cache and loc
 # GitHub Action
 - uses: fallow-rs/fallow@v2
 
-# GitLab CI -- include the template and extend
+# GitLab CI -- remote include
 include:
   - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/vX.Y.Z/ci/gitlab-ci.yml'
 fallow:
   extends: .fallow
+```
 
-# Or run directly on any CI
-- run: npx fallow --ci
+```yaml
+# GitLab CI -- vendored include when runners cannot reach GitHub raw
+# Run once locally: npx fallow ci-template gitlab --vendor
+# Commit the generated ci/ + action/ files.
+include:
+  - local: 'ci/gitlab-ci.yml'
+
+fallow:
+  extends: .fallow
+```
+
+```yaml
+# Any CI
+script:
+  - npx fallow --ci
 ```
 
 `--ci` enables SARIF output, quiet mode, and non-zero exit on issues. Also supports:
@@ -356,7 +370,7 @@ fallow:
 - `--baseline` / `--save-baseline` -- fail only on **new** issues
 - `--fail-on-regression` / `--tolerance 2%` -- fail only if issues **grew** beyond tolerance
 - `--format sarif` -- upload to GitHub Code Scanning
-- `--format codeclimate` -- GitLab Code Quality inline MR annotations
+- `--format codeclimate` / `--format gitlab-codequality` -- GitLab Code Quality inline MR annotations
 - `--format annotations` -- GitHub Actions inline PR annotations (no Action required)
 - `--format json` / `--format markdown` -- for custom workflows (JSON includes machine-actionable `actions` per issue)
 - `--format badge` -- shields.io-compatible SVG health badge (`fallow health --format badge > badge.svg`)
@@ -379,14 +393,22 @@ The GitLab CI template can post rich comments directly on merge requests -- summ
 | `FALLOW_REVIEW` | `"false"` | Post inline MR discussions at the relevant lines, with `suggestion` blocks for unused exports |
 | `FALLOW_MAX_COMMENTS` | `"50"` | Maximum number of inline review comments |
 | `FALLOW_SCRIPTS_REF` | `""` | Pinned tag or commit for remote MR-integration scripts; leave empty to prefer vendored local `ci/` + `action/` scripts |
+| `FALLOW_VERSION` | `""` | Fallow version to install. Empty reads the project's `package.json` `fallow` dependency, then falls back to `latest`; set explicitly to override the local pin |
 
-In MR pipelines, `--changed-since` is set automatically to scope analysis to changed files. Previous fallow comments are cleaned up on re-runs.
+In MR pipelines, `--changed-since` is set automatically to scope analysis to changed files. Previous fallow comments are cleaned up on re-runs when `GITLAB_TOKEN` has permission to delete them.
 
 The comment merging pipeline groups unused exports per file and deduplicates clone reports, keeping MR threads readable.
 
-For remote includes, pin the template to a release tag and keep `FALLOW_SCRIPTS_REF` on the same tag or commit. When you vendor `ci/` and `action/` into your repo, the template now prefers those local scripts and skips the remote fetch path entirely.
+For remote includes, pin the template to a release tag and keep `FALLOW_SCRIPTS_REF` on the same tag or commit. If your GitLab runners cannot reach `raw.githubusercontent.com`, run `npx fallow ci-template gitlab --vendor` locally, commit the generated `ci/` and `action/` files, and use GitLab's local include syntax. The vendored template prefers local scripts and skips the remote fetch path entirely.
 
-A `GITLAB_TOKEN` (PAT with `api` scope) is recommended for full features (suggestion blocks, cleanup of previous comments). `CI_JOB_TOKEN` works for posting but cannot delete comments from prior runs.
+A `GITLAB_TOKEN` (PAT or project access token with `api` scope) is required for summary comments and inline MR discussions. GitLab's documented `CI_JOB_TOKEN` permissions allow reading MR notes, but not creating, updating, or deleting them. `CI_JOB_TOKEN` is still useful for GitLab package registry authentication.
+
+GitLab setup gotchas:
+
+- The template sets `GIT_STRATEGY: "fetch"` so shared templates that set `GIT_STRATEGY=none` do not leave fallow without a working tree.
+- The template sets `GIT_DEPTH: "0"` so `--changed-since` can diff against the MR base SHA without shallow-clone ambiguity.
+- For private GitLab npm registries, create `.npmrc` during the job with `${CI_PROJECT_ID}` and `${CI_JOB_TOKEN}` rather than committing tokens.
+- For pnpm projects with `minimumReleaseAge`, add `fallow` and `@fallow-cli/*` to `minimumReleaseAgeExclude` when you need to consume a just-published fallow release immediately.
 
 ```yaml
 # .gitlab-ci.yml -- full example with rich MR comments

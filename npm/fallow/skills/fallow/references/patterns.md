@@ -184,6 +184,13 @@ fallow:
 
 Generates Code Quality reports (inline MR annotations) automatically. In MR pipelines, `--changed-since` is automatically set to the target branch — no manual configuration needed.
 
+If runners cannot reach `raw.githubusercontent.com`, run `fallow ci-template gitlab --vendor`, commit the generated `ci/` and `action/` files, and use GitLab's local include syntax:
+
+```yaml
+include:
+  - local: 'ci/gitlab-ci.yml'
+```
+
 ### GitLab CI: With MR Summary Comments
 
 ```yaml
@@ -196,7 +203,7 @@ fallow:
     FALLOW_COMMENT: "true"
 ```
 
-Posts a summary comment on the MR with issue counts and findings. In MR pipelines, `--changed-since` is auto-detected from `$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`, so only issues from changed files are reported. Requires `GITLAB_TOKEN` CI/CD variable (project access token with `api` scope) or enabling job token API access.
+Posts a summary comment on the MR with issue counts and findings. In MR pipelines, `--changed-since` is auto-detected from `$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`, so only issues from changed files are reported. Requires `GITLAB_TOKEN` CI/CD variable (project access token with `api` scope); `CI_JOB_TOKEN` is read-only for MR notes in the official GitLab API.
 
 ### GitLab CI: With Inline Code Review Comments
 

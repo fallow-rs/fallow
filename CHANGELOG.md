@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **GitLab CI now respects package.json fallow pins to match GitHub Action behavior.** When `FALLOW_VERSION` is empty, the GitLab template reads the project's `package.json` `fallow` dependency, validates the spec with the same injection-safe whitelist as the GitHub Action, supports semver ranges, falls back to `latest` for unsupported package specs, and warns when an exact package pin drifts from the installed CLI version. The default value of `FALLOW_VERSION` changed from `"latest"` to `""`; pipelines that omit `FALLOW_VERSION` and have a `fallow` entry in `package.json` will now install that pinned version on the next run instead of `latest`. Set `FALLOW_VERSION: "latest"` explicitly to keep the previous behaviour.
+
 ## [2.53.0] - 2026-04-28
 
 ### Added

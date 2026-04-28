@@ -2,7 +2,7 @@
 set -eo pipefail
 
 # Post inline MR discussions with rich markdown formatting and suggestion blocks
-# Required env: GITLAB_TOKEN or CI_JOB_TOKEN, CI_API_V4_URL, CI_PROJECT_ID,
+# Required env: GITLAB_TOKEN, CI_API_V4_URL, CI_PROJECT_ID,
 #   CI_MERGE_REQUEST_IID, CI_COMMIT_SHA, CI_MERGE_REQUEST_DIFF_BASE_SHA,
 #   FALLOW_COMMAND, FALLOW_ROOT, MAX_COMMENTS, FALLOW_JQ_DIR
 
@@ -19,11 +19,11 @@ if [[ "${FALLOW_ROOT:-}" =~ \.\. ]]; then
 fi
 
 # Auth header
-if [ -n "${GITLAB_TOKEN:-}" ]; then
-  AUTH_HEADER="PRIVATE-TOKEN: ${GITLAB_TOKEN}"
-else
-  AUTH_HEADER="JOB-TOKEN: ${CI_JOB_TOKEN}"
+if [ -z "${GITLAB_TOKEN:-}" ]; then
+  echo "WARNING: GITLAB_TOKEN is required to create/delete MR discussions; CI_JOB_TOKEN is read-only for MR notes in the official GitLab API. Skipping inline MR review."
+  exit 0
 fi
+AUTH_HEADER="PRIVATE-TOKEN: ${GITLAB_TOKEN}"
 
 NOTES_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
 DISCUSSIONS_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/discussions"

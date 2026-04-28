@@ -554,7 +554,7 @@ variables:
   FALLOW_REVIEW: "true"
 ```
 
-Both require a `GITLAB_TOKEN` CI/CD variable (project access token with `api` scope) or job token API access enabled.
+Both require a `GITLAB_TOKEN` CI/CD variable (project access token with `api` scope). `CI_JOB_TOKEN` is read-only for MR notes in the official GitLab API, so it is not enough for summary comments or inline discussions.
 
 ---
 

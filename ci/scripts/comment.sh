@@ -2,16 +2,16 @@
 set -eo pipefail
 
 # Post or update an MR comment with analysis results
-# Required env: GITLAB_TOKEN or CI_JOB_TOKEN, CI_API_V4_URL, CI_PROJECT_ID,
+# Required env: GITLAB_TOKEN, CI_API_V4_URL, CI_PROJECT_ID,
 #   CI_MERGE_REQUEST_IID, FALLOW_COMMAND, FALLOW_JQ_DIR
 # Optional env: CHANGED_SINCE, INPUT_ROOT (for scoping results to changed files)
 
 # Auth header
-if [ -n "${GITLAB_TOKEN:-}" ]; then
-  AUTH_HEADER="PRIVATE-TOKEN: ${GITLAB_TOKEN}"
-else
-  AUTH_HEADER="JOB-TOKEN: ${CI_JOB_TOKEN}"
+if [ -z "${GITLAB_TOKEN:-}" ]; then
+  echo "WARNING: GITLAB_TOKEN is required to create or update MR comments; CI_JOB_TOKEN is read-only for MR notes in the official GitLab API. Skipping MR summary comment."
+  exit 0
 fi
+AUTH_HEADER="PRIVATE-TOKEN: ${GITLAB_TOKEN}"
 
 API_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
 

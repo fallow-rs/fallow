@@ -13,6 +13,7 @@ mod api;
 mod audit;
 mod baseline;
 mod check;
+mod ci_template;
 mod codeowners;
 mod combined;
 mod config;
@@ -662,6 +663,17 @@ enum Command {
     /// Dump the CLI interface as machine-readable JSON for agent introspection
     Schema,
 
+    /// Print or vendor CI integration templates.
+    ///
+    /// Use `fallow ci-template gitlab` to print the GitLab CI template, or
+    /// `fallow ci-template gitlab --vendor` to write the template plus the
+    /// jq/bash helper files that enable MR comments without downloading from
+    /// raw.githubusercontent.com at pipeline runtime.
+    CiTemplate {
+        #[command(subcommand)]
+        subcommand: CiTemplateCli,
+    },
+
     /// Migrate configuration from knip or jscpd to fallow
     Migrate {
         /// Generate TOML instead of JSONC
@@ -782,6 +794,22 @@ enum LicenseCli {
 }
 
 #[derive(clap::Subcommand)]
+enum CiTemplateCli {
+    /// Print or vendor the GitLab CI template and MR integration helpers.
+    Gitlab {
+        /// Write ci/ and action/ helper files under DIR instead of printing the template.
+        ///
+        /// Passing --vendor without a DIR writes into the current directory.
+        #[arg(long, value_name = "DIR", num_args = 0..=1, default_missing_value = ".")]
+        vendor: Option<PathBuf>,
+
+        /// Overwrite existing files that differ from the bundled template.
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+#[derive(clap::Subcommand)]
 enum CoverageCli {
     /// Resumable first-run setup: license + sidecar + recipe + analysis.
     Setup {
@@ -884,7 +912,11 @@ enum Format {
     Sarif,
     Compact,
     Markdown,
-    #[value(name = "codeclimate")]
+    #[value(
+        name = "codeclimate",
+        alias = "gitlab-codequality",
+        alias = "gitlab-code-quality"
+    )]
     CodeClimate,
     Badge,
 }
@@ -961,7 +993,7 @@ fn format_from_env() -> Option<Format> {
         "sarif" => Some(Format::Sarif),
         "compact" => Some(Format::Compact),
         "markdown" | "md" => Some(Format::Markdown),
-        "codeclimate" => Some(Format::CodeClimate),
+        "codeclimate" | "gitlab-codequality" | "gitlab-code-quality" => Some(Format::CodeClimate),
         "badge" => Some(Format::Badge),
         _ => None,
     }
@@ -1339,6 +1371,7 @@ fn main() -> ExitCode {
                     | Command::ConfigSchema
                     | Command::PluginSchema
                     | Command::Schema
+                    | Command::CiTemplate { .. }
                     | Command::Config { .. }
                     | Command::List { .. }
                     | Command::Flags { .. }
@@ -1660,6 +1693,14 @@ fn dispatch_subcommand(
         }),
         Command::ConfigSchema => init::run_config_schema(),
         Command::PluginSchema => init::run_plugin_schema(),
+        Command::CiTemplate { subcommand } => match subcommand {
+            CiTemplateCli::Gitlab { vendor, force } => {
+                ci_template::run_gitlab_template(&ci_template::GitlabTemplateOptions {
+                    vendor_dir: vendor,
+                    force,
+                })
+            }
+        },
         Command::Config { path } => config::run_config(root, cli.config.as_deref(), path),
         Command::List {
             entry_points,
@@ -2233,7 +2274,9 @@ mod tests {
                 "sarif" => Some(Format::Sarif),
                 "compact" => Some(Format::Compact),
                 "markdown" | "md" => Some(Format::Markdown),
-                "codeclimate" => Some(Format::CodeClimate),
+                "codeclimate" | "gitlab-codequality" | "gitlab-code-quality" => {
+                    Some(Format::CodeClimate)
+                }
                 "badge" => Some(Format::Badge),
                 _ => None,
             }
@@ -2246,6 +2289,14 @@ mod tests {
         assert!(matches!(parse("markdown"), Some(Format::Markdown)));
         assert!(matches!(parse("md"), Some(Format::Markdown)));
         assert!(matches!(parse("codeclimate"), Some(Format::CodeClimate)));
+        assert!(matches!(
+            parse("gitlab-codequality"),
+            Some(Format::CodeClimate)
+        ));
+        assert!(matches!(
+            parse("gitlab-code-quality"),
+            Some(Format::CodeClimate)
+        ));
         assert!(matches!(parse("badge"), Some(Format::Badge)));
         assert!(parse("xml").is_none());
         assert!(parse("").is_none());
