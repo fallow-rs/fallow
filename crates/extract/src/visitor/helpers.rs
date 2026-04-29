@@ -507,13 +507,46 @@ pub fn extract_class_instance_bindings(class: &Class<'_>) -> Vec<(String, String
 }
 
 /// Extract a simple referenced type name from a TypeScript type node.
+///
+/// Beyond the bare `TSTypeReference` and parenthesized cases, the helper also
+/// peels back nullable wrappers commonly produced by repository-hydration code
+/// paths so the underlying class is still reachable for member tracking:
+///
+/// - `T | null`, `T | undefined`, `T | null | undefined` — extracts `T` when
+///   exactly one branch reduces to a class and the rest are `null`/`undefined`.
+///   Catches the dominant nullable-return pattern `let x: Aggregate | undefined`.
+///
+/// The peel stays strictly syntactic. Wider unions (e.g. `T | U` between two
+/// classes) are intentionally unsupported — there is no single class for the
+/// caller to bind to. `Array<T>`, `Set<T>`, etc. are deliberately not unwrapped:
+/// the binding refers to the collection, not its element.
 #[must_use]
 pub fn extract_type_reference_name(ty: &TSType<'_>) -> Option<String> {
     match ty {
         TSType::TSTypeReference(type_ref) => extract_type_name(&type_ref.type_name),
         TSType::TSParenthesizedType(paren) => extract_type_reference_name(&paren.type_annotation),
+        TSType::TSUnionType(union) => extract_nullable_union_name(union),
         _ => None,
     }
+}
+
+/// Return the single non-nullish branch of a union when every other branch is
+/// `null` or `undefined`. Anything else (multi-class unions, literal unions,
+/// intersections) returns `None` — callers expect a single underlying class.
+fn extract_nullable_union_name(union: &oxc_ast::ast::TSUnionType<'_>) -> Option<String> {
+    let mut found: Option<String> = None;
+    for branch in &union.types {
+        match branch {
+            TSType::TSNullKeyword(_) | TSType::TSUndefinedKeyword(_) => {}
+            other => {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(extract_type_reference_name(other)?);
+            }
+        }
+    }
+    found
 }
 
 fn extract_static_expression_name(expr: &Expression<'_>) -> Option<String> {

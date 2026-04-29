@@ -293,3 +293,39 @@ fn enum_type_level_usage_no_false_positives() {
         "Right should not be unused (keyof typeof in mapped type), found: {unused_enum_member_names:?}"
     );
 }
+
+// ── Typed-binding nullable unions ─────────
+
+#[test]
+fn typed_binding_through_nullable_unions_credits_class_methods() {
+    let root = fixture_path("typed-binding-wrappers");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .collect();
+
+    // `let pending: Aggregate | undefined; pending.rename();` reaches rename
+    // through the nullable-union branch of `extract_type_reference_name`.
+    assert!(
+        !unused.contains(&"Aggregate.rename".to_string()),
+        "Aggregate.rename should be credited through `Aggregate | undefined`, found unused: {unused:?}"
+    );
+
+    // `const ready: Promise<Aggregate> = ...; ready.archive();` is a member
+    // access on the Promise object, not on Aggregate. It should not credit
+    // Aggregate.archive.
+    assert!(
+        unused.contains(&"Aggregate.archive".to_string()),
+        "Aggregate.archive should not be credited through `Promise<Aggregate>`, found unused: {unused:?}"
+    );
+
+    // unusedMethod has no call site in any form and should still be reported.
+    assert!(
+        unused.contains(&"Aggregate.unusedMethod".to_string()),
+        "Aggregate.unusedMethod should still be flagged as unused, found unused: {unused:?}"
+    );
+}

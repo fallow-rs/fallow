@@ -704,6 +704,160 @@ fn array_destructured_no_factory_not_tracked() {
     );
 }
 
+// ── Typed-binding nullable unions ─────
+
+#[test]
+fn type_annotation_nullable_union_undefined_binds_class() {
+    let info = parse(
+        r"
+            import { Aggregate } from './aggregate';
+            let x: Aggregate | undefined;
+            x = loadAggregate();
+            x.someMutation();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Aggregate" && a.member == "someMutation"),
+        "x.someMutation() should map to Aggregate.someMutation through `Aggregate | undefined`, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn type_annotation_nullable_union_null_binds_class() {
+    let info = parse(
+        r"
+            import { Aggregate } from './aggregate';
+            let x: Aggregate | null;
+            x.someMutation();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Aggregate" && a.member == "someMutation"),
+        "x.someMutation() should map through `Aggregate | null`, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn type_annotation_three_way_nullable_union_binds_class() {
+    let info = parse(
+        r"
+            import { Aggregate } from './aggregate';
+            let x: Aggregate | null | undefined;
+            x.someMutation();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Aggregate" && a.member == "someMutation"),
+        "x.someMutation() should map through `Aggregate | null | undefined`, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn type_annotation_promise_not_unwrapped() {
+    let info = parse(
+        r"
+            import { Aggregate } from './aggregate';
+            const result: Promise<Aggregate> = repo.findById(id);
+            result.someMutation();
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "Aggregate" && a.member == "someMutation"),
+        "Promise<Aggregate> should not bind Promise object members to Aggregate, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn type_annotation_promise_nullable_union_not_unwrapped() {
+    let info = parse(
+        r"
+            import { Aggregate } from './aggregate';
+            const result: Promise<Aggregate | undefined> = repo.findById(id);
+            result.someMutation();
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "Aggregate" && a.member == "someMutation"),
+        "Promise<Aggregate | undefined> should not bind Promise object members to Aggregate, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn type_annotation_multi_class_union_not_bound() {
+    let info = parse(
+        r"
+            import { Aggregate, Other } from './aggregate';
+            let x: Aggregate | Other;
+            x.someMutation();
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| (a.object == "Aggregate" || a.object == "Other") && a.member == "someMutation"),
+        "ambiguous `Aggregate | Other` union should not pick a class, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn type_annotation_array_generic_not_unwrapped() {
+    let info = parse(
+        r"
+            import { Aggregate } from './aggregate';
+            let xs: Array<Aggregate>;
+            xs.someMutation();
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "Aggregate" && a.member == "someMutation"),
+        "Array<Aggregate> binds the array, not its element type, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn type_annotation_qualified_promise_not_unwrapped() {
+    // `Foo.Promise<Aggregate>` is not the global Promise; binding should fall back
+    // to the bare reference name (`Foo.Promise`), not unwrap to `Aggregate`.
+    let info = parse(
+        r"
+            import { Aggregate, Foo } from './foo';
+            let x: Foo.Promise<Aggregate>;
+            x.someMutation();
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "Aggregate" && a.member == "someMutation"),
+        "qualified `Foo.Promise<Aggregate>` should not unwrap to Aggregate, found: {:?}",
+        info.member_accesses
+    );
+}
+
 // ── this.field chained member access ────────────────────────
 
 #[test]
