@@ -7,7 +7,7 @@ use bitcode::{Decode, Encode};
 use crate::MemberKind;
 
 /// Cache version — bump when the cache format or cached extraction semantics change.
-pub(super) const CACHE_VERSION: u32 = 57;
+pub(super) const CACHE_VERSION: u32 = 58;
 
 /// Maximum cache file size to deserialize (256 MB).
 pub(super) const MAX_CACHE_SIZE: usize = 256 * 1024 * 1024;
