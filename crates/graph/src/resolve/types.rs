@@ -13,9 +13,15 @@ use fallow_types::discover::FileId;
 pub enum ResolveResult {
     /// Resolved to a file within the project.
     InternalModule(FileId),
+    /// Resolved to all files that form a Go package (a directory of `.go` files).
+    ///
+    /// Go imports resolve to an entire package directory rather than a single
+    /// file. Every file listed here gets a namespace-import edge so all exported
+    /// symbols in the package are credited as used.
+    GoPackage(Vec<FileId>),
     /// Resolved to a file outside the project (`node_modules`, `.json`, etc.).
     ExternalFile(PathBuf),
-    /// Bare specifier — an npm package.
+    /// Bare specifier — an npm package (or Go stdlib / external module).
     NpmPackage(String),
     /// Could not resolve.
     Unresolvable(String),

@@ -17,6 +17,7 @@
 
 mod dynamic_imports;
 pub(crate) mod fallbacks;
+pub mod go;
 mod path_info;
 mod re_exports;
 mod react_native;
@@ -42,6 +43,7 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::ModuleInfo;
 
 use dynamic_imports::{resolve_dynamic_imports, resolve_dynamic_patterns};
+use go::{GoResolveContext, build_go_dir_index, discover_go_modules, resolve_go_imports};
 use re_exports::resolve_re_exports;
 use require_imports::resolve_require_imports;
 use specifier::create_resolver;
@@ -127,6 +129,10 @@ pub fn resolve_all_imports(
         None
     };
 
+    // Go: build directory → FileIds index and load go.mod module path (once, pre-parallel).
+    let go_dir_index = build_go_dir_index(files);
+    let go_modules = discover_go_modules(root);
+
     // Dedup set for broken-tsconfig warnings. See `ResolveContext::tsconfig_warned`.
     let tsconfig_warned: Mutex<FxHashSet<String>> = Mutex::new(FxHashSet::default());
 
@@ -158,12 +164,29 @@ pub fn resolve_all_imports(
                 return None;
             };
 
-            let mut all_imports = resolve_static_imports(&ctx, file_path, &module.imports);
-            all_imports.extend(resolve_require_imports(
-                &ctx,
-                file_path,
-                &module.require_calls,
-            ));
+            let all_imports = if file_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|ext| ext == "go")
+            {
+                // Go files use their own module-path-aware resolver.
+                // Reconstruct GoResolveContext inside the closure so rayon's
+                // Send bound is satisfied (all fields are &-references to data
+                // that outlives the parallel block).
+                let go_ctx = GoResolveContext {
+                    modules: &go_modules,
+                    dir_to_go_files: &go_dir_index,
+                };
+                resolve_go_imports(&go_ctx, file_path, &module.imports)
+            } else {
+                let mut imports = resolve_static_imports(&ctx, file_path, &module.imports);
+                imports.extend(resolve_require_imports(
+                    &ctx,
+                    file_path,
+                    &module.require_calls,
+                ));
+                imports
+            };
 
             let from_dir = if canonical_paths.is_empty() {
                 // Root is canonical — raw paths are canonical

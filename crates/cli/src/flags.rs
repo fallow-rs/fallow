@@ -146,13 +146,26 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         // Custom SDK patterns, env prefixes, and config object heuristics
         // require re-reading source because they weren't applied at parse time.
         if has_custom_config && let Ok(source) = std::fs::read_to_string(path) {
-            let custom_flags = fallow_core::extract::flags::extract_flags_from_source(
-                &source,
-                path,
-                &extra_sdk,
-                &config.flags.env_prefixes,
-                config.flags.config_object_heuristics,
-            );
+            let custom_flags = if path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext == "go")
+            {
+                fallow_core::extract::go::extract_go_flags_from_source(
+                    &source,
+                    path,
+                    &extra_sdk,
+                    &config.flags.env_prefixes,
+                )
+            } else {
+                fallow_core::extract::flags::extract_flags_from_source(
+                    &source,
+                    path,
+                    &extra_sdk,
+                    &config.flags.env_prefixes,
+                    config.flags.config_object_heuristics,
+                )
+            };
             // Only add flags not already found by built-in extraction (dedup by line+name)
             for flag_use in &custom_flags {
                 let already_found = module.flag_uses.iter().any(|existing| {

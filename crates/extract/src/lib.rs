@@ -12,6 +12,7 @@ pub mod cache;
 pub(crate) mod complexity;
 pub mod css;
 pub mod flags;
+pub mod go;
 pub mod html;
 pub mod inventory;
 pub mod mdx;

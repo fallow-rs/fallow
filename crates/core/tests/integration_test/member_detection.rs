@@ -75,6 +75,3782 @@ fn exported_instance_class_members_are_credited_to_class() {
     );
 }
 
+#[test]
+fn go_receiver_methods_are_credited_through_instance_bindings() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import "github.com/acme/example/pkg/shared"
+
+func main() {
+    svc := shared.Service{}
+    svc.Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct {
+    Name string
+    hidden string
+}
+
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through svc.Run(), found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Name".to_string())),
+        "Service.Name should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_constructor_bindings() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import "github.com/acme/example/pkg/shared"
+
+func main() {
+    svc := shared.NewService()
+    svc.Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func NewService() Service { return Service{} }
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through shared.NewService().Run(), found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_alias_bindings() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import "github.com/acme/example/pkg/shared"
+
+func main() {
+    svc := shared.NewService()
+    alias := svc
+    alias.Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func NewService() Service { return Service{} }
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through alias.Run(), found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_typed_var_constructor_bindings() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import "github.com/acme/example/pkg/shared"
+
+type Runner interface {
+    Run()
+}
+
+func main() {
+    var svc Runner = shared.NewService()
+    svc.Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func NewService() Service { return Service{} }
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through typed var Runner = shared.NewService(), found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_imported_generic_typed_var_helper_results() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+type Runner interface {
+    Run()
+}
+
+func main() {
+    var svc Runner = shared.NewBox[int]()
+    svc.Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/box.go"),
+        r#"package shared
+
+type Box[T any] struct{}
+
+func NewBox[T any]() Box[T] { return Box[T]{} }
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through typed var Runner = shared.NewBox[int](), found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_generic_local_helper_interface_chains() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+type Runner interface {
+    Run()
+}
+
+func buildRunner() Runner {
+    return wrapRunner(NewBox[int]())
+}
+
+func wrapRunner(r Runner) Runner {
+    return r
+}
+
+func main() {
+    buildRunner().Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("box.go"),
+        r#"package main
+
+type Box[T any] struct{}
+
+func NewBox[T any]() Box[T] { return Box[T]{} }
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through a generic local helper interface chain, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_imported_generic_helper_interface_chains() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+type Runner interface {
+    Run()
+}
+
+func buildRunner() Runner {
+    return wrapRunner(shared.NewBox[int]())
+}
+
+func wrapRunner(r Runner) Runner {
+    return r
+}
+
+func main() {
+    buildRunner().Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/box.go"),
+        r#"package shared
+
+type Box[T any] struct{}
+
+func NewBox[T any]() Box[T] { return Box[T]{} }
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through an imported generic helper interface chain, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_go_work_imported_generic_helper_interface_chains() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("app")).expect("create app");
+    fs::create_dir_all(root.join("lib/pkg/shared")).expect("create lib");
+    fs::write(
+        root.join("go.work"),
+        "go 1.25\n\nuse (\n    ./app\n    ./lib\n)\n",
+    )
+    .expect("write go.work");
+    fs::write(
+        root.join("app/go.mod"),
+        "module github.com/acme/app\n\ngo 1.25\n",
+    )
+    .expect("write app/go.mod");
+    fs::write(
+        root.join("lib/go.mod"),
+        "module github.com/acme/lib\n\ngo 1.25\n",
+    )
+    .expect("write lib/go.mod");
+    fs::write(
+        root.join("app/main.go"),
+        r#"package main
+
+import shared "github.com/acme/lib/pkg/shared"
+
+type Runner interface {
+    Run()
+}
+
+func buildRunner() Runner {
+    return wrapRunner(shared.NewBox[int]())
+}
+
+func wrapRunner(r Runner) Runner {
+    return r
+}
+
+func main() {
+    buildRunner().Run()
+}
+"#,
+    )
+    .expect("write app/main.go");
+    fs::write(
+        root.join("lib/pkg/shared/box.go"),
+        r#"package shared
+
+type Box[T any] struct{}
+
+func NewBox[T any]() Box[T] { return Box[T]{} }
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write lib box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through a go.work imported generic helper interface chain, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_go_work_imported_generic_method_expressions() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("app")).expect("create app");
+    fs::create_dir_all(root.join("lib/pkg/shared")).expect("create lib");
+    fs::write(
+        root.join("go.work"),
+        "go 1.25\n\nuse (\n    ./app\n    ./lib\n)\n",
+    )
+    .expect("write go.work");
+    fs::write(
+        root.join("app/go.mod"),
+        "module github.com/acme/app\n\ngo 1.25\n",
+    )
+    .expect("write app/go.mod");
+    fs::write(
+        root.join("lib/go.mod"),
+        "module github.com/acme/lib\n\ngo 1.25\n",
+    )
+    .expect("write lib/go.mod");
+    fs::write(
+        root.join("app/main.go"),
+        r#"package main
+
+import shared "github.com/acme/lib/pkg/shared"
+
+var _ = shared.Box[int].Run
+
+func main() {
+    _ = shared.Box[int]{}
+}
+"#,
+    )
+    .expect("write app/main.go");
+    fs::write(
+        root.join("lib/pkg/shared/box.go"),
+        r#"package shared
+
+type Box[T any] struct{}
+
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write lib box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through a go.work imported generic method expression, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_go_work_imported_generic_type_assertions() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("app")).expect("create app");
+    fs::create_dir_all(root.join("lib/pkg/shared")).expect("create lib");
+    fs::write(
+        root.join("go.work"),
+        "go 1.25\n\nuse (\n    ./app\n    ./lib\n)\n",
+    )
+    .expect("write go.work");
+    fs::write(
+        root.join("app/go.mod"),
+        "module github.com/acme/app\n\ngo 1.25\n",
+    )
+    .expect("write app/go.mod");
+    fs::write(
+        root.join("lib/go.mod"),
+        "module github.com/acme/lib\n\ngo 1.25\n",
+    )
+    .expect("write lib/go.mod");
+    fs::write(
+        root.join("app/main.go"),
+        r#"package main
+
+import shared "github.com/acme/lib/pkg/shared"
+
+func use(v any) {
+    box := v.(shared.Box[int])
+    box.Run()
+}
+
+func main() {
+    use(shared.Box[int]{})
+}
+"#,
+    )
+    .expect("write app/main.go");
+    fs::write(
+        root.join("lib/pkg/shared/box.go"),
+        r#"package shared
+
+type Box[T any] struct{}
+
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write lib box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through a go.work imported generic type assertion, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_go_work_imported_generic_type_switches() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("app")).expect("create app");
+    fs::create_dir_all(root.join("lib/pkg/shared")).expect("create lib");
+    fs::write(
+        root.join("go.work"),
+        "go 1.25\n\nuse (\n    ./app\n    ./lib\n)\n",
+    )
+    .expect("write go.work");
+    fs::write(
+        root.join("app/go.mod"),
+        "module github.com/acme/app\n\ngo 1.25\n",
+    )
+    .expect("write app/go.mod");
+    fs::write(
+        root.join("lib/go.mod"),
+        "module github.com/acme/lib\n\ngo 1.25\n",
+    )
+    .expect("write lib/go.mod");
+    fs::write(
+        root.join("app/main.go"),
+        r#"package main
+
+import shared "github.com/acme/lib/pkg/shared"
+
+func use(v any) {
+    switch box := v.(type) {
+    case shared.Box[int]:
+        box.Run()
+    }
+}
+
+func main() {
+    use(shared.Box[int]{})
+}
+"#,
+    )
+    .expect("write app/main.go");
+    fs::write(
+        root.join("lib/pkg/shared/box.go"),
+        r#"package shared
+
+type Box[T any] struct{}
+
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write lib box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through a go.work imported generic type switch, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_imported_generic_interface_usage() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func use(r shared.Runner[int]) {
+    r.Run()
+}
+
+func main() {
+    use(shared.Box[int]{})
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/box.go"),
+        r#"package shared
+
+type Runner[T any] interface {
+    Run()
+}
+
+type Box[T any] struct{}
+
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through imported generic interface usage, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_go_work_imported_generic_interface_usage() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("app")).expect("create app");
+    fs::create_dir_all(root.join("lib/pkg/shared")).expect("create lib");
+    fs::write(
+        root.join("go.work"),
+        "go 1.25\n\nuse (\n    ./app\n    ./lib\n)\n",
+    )
+    .expect("write go.work");
+    fs::write(
+        root.join("app/go.mod"),
+        "module github.com/acme/app\n\ngo 1.25\n",
+    )
+    .expect("write app/go.mod");
+    fs::write(
+        root.join("lib/go.mod"),
+        "module github.com/acme/lib\n\ngo 1.25\n",
+    )
+    .expect("write lib/go.mod");
+    fs::write(
+        root.join("app/main.go"),
+        r#"package main
+
+import shared "github.com/acme/lib/pkg/shared"
+
+func use(r shared.Runner[int]) {
+    r.Run()
+}
+
+func main() {
+    use(shared.Box[int]{})
+}
+"#,
+    )
+    .expect("write app/main.go");
+    fs::write(
+        root.join("lib/pkg/shared/box.go"),
+        r#"package shared
+
+type Runner[T any] interface {
+    Run()
+}
+
+type Box[T any] struct{}
+
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write lib box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through go.work imported generic interface usage, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_generic_interface_usage_is_narrowed_by_unexported_direct_calls() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func use(r shared.Runner[int]) {
+    r.Run()
+}
+
+func main() {
+    use(shared.Box[int]{})
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/box.go"),
+        r#"package shared
+
+type Runner[T any] interface {
+    Run()
+}
+
+type Box[T any] struct{}
+
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+
+type Crate[T any] struct{}
+
+func (c Crate[T]) Run() {}
+func (c Crate[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through a narrowed unexported generic interface call, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Run".to_string())),
+        "Crate.Run should remain unused when the unexported call site is concrete, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Stop".to_string())),
+        "Crate.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_work_generic_interface_usage_is_narrowed_by_unexported_direct_calls() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("app")).expect("create app");
+    fs::create_dir_all(root.join("lib/pkg/shared")).expect("create lib");
+    fs::write(
+        root.join("go.work"),
+        "go 1.25\n\nuse (\n    ./app\n    ./lib\n)\n",
+    )
+    .expect("write go.work");
+    fs::write(
+        root.join("app/go.mod"),
+        "module github.com/acme/app\n\ngo 1.25\n",
+    )
+    .expect("write app/go.mod");
+    fs::write(
+        root.join("lib/go.mod"),
+        "module github.com/acme/lib\n\ngo 1.25\n",
+    )
+    .expect("write lib/go.mod");
+    fs::write(
+        root.join("app/main.go"),
+        r#"package main
+
+import shared "github.com/acme/lib/pkg/shared"
+
+func use(r shared.Runner[int]) {
+    r.Run()
+}
+
+func main() {
+    use(shared.Box[int]{})
+}
+"#,
+    )
+    .expect("write app/main.go");
+    fs::write(
+        root.join("lib/pkg/shared/box.go"),
+        r#"package shared
+
+type Runner[T any] interface {
+    Run()
+}
+
+type Box[T any] struct{}
+
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+
+type Crate[T any] struct{}
+
+func (c Crate[T]) Run() {}
+func (c Crate[T]) Stop() {}
+"#,
+    )
+    .expect("write lib box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through a narrowed go.work generic interface call, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Run".to_string())),
+        "Crate.Run should remain unused when the go.work unexported call site is concrete, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Stop".to_string())),
+        "Crate.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_generic_interface_usage_is_narrowed_by_unexported_helper_call_args() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func use(r shared.Runner[int]) {
+    r.Run()
+}
+
+func buildRunner() shared.Runner[int] {
+    return shared.NewBox[int]()
+}
+
+func main() {
+    use(buildRunner())
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/box.go"),
+        r#"package shared
+
+type Runner[T any] interface {
+    Run()
+}
+
+type Box[T any] struct{}
+
+func NewBox[T any]() Box[T] { return Box[T]{} }
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+
+type Crate[T any] struct{}
+
+func (c Crate[T]) Run() {}
+func (c Crate[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through a narrowed helper-call interface arg, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Run".to_string())),
+        "Crate.Run should remain unused when the helper arg resolves concretely, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Stop".to_string())),
+        "Crate.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_work_generic_interface_usage_is_narrowed_by_unexported_helper_call_args() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("app")).expect("create app");
+    fs::create_dir_all(root.join("lib/pkg/shared")).expect("create lib");
+    fs::write(
+        root.join("go.work"),
+        "go 1.25\n\nuse (\n    ./app\n    ./lib\n)\n",
+    )
+    .expect("write go.work");
+    fs::write(
+        root.join("app/go.mod"),
+        "module github.com/acme/app\n\ngo 1.25\n",
+    )
+    .expect("write app/go.mod");
+    fs::write(
+        root.join("lib/go.mod"),
+        "module github.com/acme/lib\n\ngo 1.25\n",
+    )
+    .expect("write lib/go.mod");
+    fs::write(
+        root.join("app/main.go"),
+        r#"package main
+
+import shared "github.com/acme/lib/pkg/shared"
+
+func use(r shared.Runner[int]) {
+    r.Run()
+}
+
+func buildRunner() shared.Runner[int] {
+    return shared.NewBox[int]()
+}
+
+func main() {
+    use(buildRunner())
+}
+"#,
+    )
+    .expect("write app/main.go");
+    fs::write(
+        root.join("lib/pkg/shared/box.go"),
+        r#"package shared
+
+type Runner[T any] interface {
+    Run()
+}
+
+type Box[T any] struct{}
+
+func NewBox[T any]() Box[T] { return Box[T]{} }
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+
+type Crate[T any] struct{}
+
+func (c Crate[T]) Run() {}
+func (c Crate[T]) Stop() {}
+"#,
+    )
+    .expect("write lib box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through a narrowed go.work helper-call interface arg, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Run".to_string())),
+        "Crate.Run should remain unused when the go.work helper arg resolves concretely, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Stop".to_string())),
+        "Crate.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_generic_interface_usage_is_narrowed_by_bound_helper_call_args() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func use(r shared.Runner[int]) {
+    r.Run()
+}
+
+func buildRunner() shared.Runner[int] {
+    return shared.NewBox[int]()
+}
+
+func main() {
+    svc := buildRunner()
+    use(svc)
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/box.go"),
+        r#"package shared
+
+type Runner[T any] interface {
+    Run()
+}
+
+type Box[T any] struct{}
+
+func NewBox[T any]() Box[T] { return Box[T]{} }
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+
+type Crate[T any] struct{}
+
+func (c Crate[T]) Run() {}
+func (c Crate[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through a narrowed bound helper arg, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Run".to_string())),
+        "Crate.Run should remain unused when the bound helper arg resolves concretely, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Stop".to_string())),
+        "Crate.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_work_generic_interface_usage_is_narrowed_by_bound_helper_call_args() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("app")).expect("create app");
+    fs::create_dir_all(root.join("lib/pkg/shared")).expect("create lib");
+    fs::write(
+        root.join("go.work"),
+        "go 1.25\n\nuse (\n    ./app\n    ./lib\n)\n",
+    )
+    .expect("write go.work");
+    fs::write(
+        root.join("app/go.mod"),
+        "module github.com/acme/app\n\ngo 1.25\n",
+    )
+    .expect("write app/go.mod");
+    fs::write(
+        root.join("lib/go.mod"),
+        "module github.com/acme/lib\n\ngo 1.25\n",
+    )
+    .expect("write lib/go.mod");
+    fs::write(
+        root.join("app/main.go"),
+        r#"package main
+
+import shared "github.com/acme/lib/pkg/shared"
+
+func use(r shared.Runner[int]) {
+    r.Run()
+}
+
+func buildRunner() shared.Runner[int] {
+    return shared.NewBox[int]()
+}
+
+func main() {
+    svc := buildRunner()
+    use(svc)
+}
+"#,
+    )
+    .expect("write app/main.go");
+    fs::write(
+        root.join("lib/pkg/shared/box.go"),
+        r#"package shared
+
+type Runner[T any] interface {
+    Run()
+}
+
+type Box[T any] struct{}
+
+func NewBox[T any]() Box[T] { return Box[T]{} }
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+
+type Crate[T any] struct{}
+
+func (c Crate[T]) Run() {}
+func (c Crate[T]) Stop() {}
+"#,
+    )
+    .expect("write lib box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through a narrowed go.work bound helper arg, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Run".to_string())),
+        "Crate.Run should remain unused when the go.work bound helper arg resolves concretely, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Stop".to_string())),
+        "Crate.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_generic_interface_usage_is_narrowed_through_consistent_if_bindings() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func use(r shared.Runner[int]) {
+    r.Run()
+}
+
+func main() {
+    flag := true
+    var svc shared.Runner[int]
+    if flag {
+        svc = shared.NewBox[int]()
+    } else {
+        svc = shared.Box[int]{}
+    }
+    use(svc)
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/box.go"),
+        r#"package shared
+
+type Runner[T any] interface {
+    Run()
+}
+
+type Box[T any] struct{}
+
+func NewBox[T any]() Box[T] { return Box[T]{} }
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+
+type Crate[T any] struct{}
+
+func (c Crate[T]) Run() {}
+func (c Crate[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through consistent if-merged bindings, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Run".to_string())),
+        "Crate.Run should remain unused when the if merge stays concrete, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Stop".to_string())),
+        "Crate.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_generic_interface_usage_stays_conservative_with_multiple_implementers() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func Use(r shared.Runner[int]) {
+    r.Run()
+}
+
+func main() {
+    Use(shared.Box[int]{})
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/box.go"),
+        r#"package shared
+
+type Runner[T any] interface {
+    Run()
+}
+
+type Box[T any] struct{}
+
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+
+type Crate[T any] struct{}
+
+func (c Crate[T]) Run() {}
+func (c Crate[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through generic interface usage, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&("Crate".to_string(), "Run".to_string())),
+        "Crate.Run should also be credited conservatively for ambiguous generic interface usage, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Stop".to_string())),
+        "Crate.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_work_generic_interface_usage_stays_conservative_with_multiple_implementers() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("app")).expect("create app");
+    fs::create_dir_all(root.join("lib/pkg/shared")).expect("create lib");
+    fs::write(
+        root.join("go.work"),
+        "go 1.25\n\nuse (\n    ./app\n    ./lib\n)\n",
+    )
+    .expect("write go.work");
+    fs::write(
+        root.join("app/go.mod"),
+        "module github.com/acme/app\n\ngo 1.25\n",
+    )
+    .expect("write app/go.mod");
+    fs::write(
+        root.join("lib/go.mod"),
+        "module github.com/acme/lib\n\ngo 1.25\n",
+    )
+    .expect("write lib/go.mod");
+    fs::write(
+        root.join("app/main.go"),
+        r#"package main
+
+import shared "github.com/acme/lib/pkg/shared"
+
+func Use(r shared.Runner[int]) {
+    r.Run()
+}
+
+func main() {
+    Use(shared.Box[int]{})
+}
+"#,
+    )
+    .expect("write app/main.go");
+    fs::write(
+        root.join("lib/pkg/shared/box.go"),
+        r#"package shared
+
+type Runner[T any] interface {
+    Run()
+}
+
+type Box[T any] struct{}
+
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+
+type Crate[T any] struct{}
+
+func (c Crate[T]) Run() {}
+func (c Crate[T]) Stop() {}
+"#,
+    )
+    .expect("write lib box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through go.work generic interface usage, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&("Crate".to_string(), "Run".to_string())),
+        "Crate.Run should also be credited conservatively for go.work generic interface usage, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Stop".to_string())),
+        "Crate.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_when_local_generic_type_implements_imported_generic_interface()
+{
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func Use(r shared.Runner[int]) {
+    r.Run()
+}
+
+func main() {
+    Use(Box[int]{})
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("box.go"),
+        r#"package main
+
+type Box[T any] struct{}
+
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+    fs::write(
+        root.join("pkg/shared/runner.go"),
+        r#"package shared
+
+type Runner[T any] interface {
+    Run()
+}
+"#,
+    )
+    .expect("write runner.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through a local generic type implementing an imported generic interface, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_when_local_generic_type_implements_go_work_imported_generic_interface()
+ {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("app")).expect("create app");
+    fs::create_dir_all(root.join("lib/pkg/shared")).expect("create lib");
+    fs::write(
+        root.join("go.work"),
+        "go 1.25\n\nuse (\n    ./app\n    ./lib\n)\n",
+    )
+    .expect("write go.work");
+    fs::write(
+        root.join("app/go.mod"),
+        "module github.com/acme/app\n\ngo 1.25\n",
+    )
+    .expect("write app/go.mod");
+    fs::write(
+        root.join("lib/go.mod"),
+        "module github.com/acme/lib\n\ngo 1.25\n",
+    )
+    .expect("write lib/go.mod");
+    fs::write(
+        root.join("app/main.go"),
+        r#"package main
+
+import shared "github.com/acme/lib/pkg/shared"
+
+func Use(r shared.Runner[int]) {
+    r.Run()
+}
+
+func main() {
+    Use(Box[int]{})
+}
+"#,
+    )
+    .expect("write app/main.go");
+    fs::write(
+        root.join("app/box.go"),
+        r#"package main
+
+type Box[T any] struct{}
+
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write app/box.go");
+    fs::write(
+        root.join("lib/pkg/shared/runner.go"),
+        r#"package shared
+
+type Runner[T any] interface {
+    Run()
+}
+"#,
+    )
+    .expect("write lib runner.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through a local generic type implementing a go.work imported generic interface, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_local_generic_implementers_of_imported_generic_interface_stay_conservative() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func Use(r shared.Runner[int]) {
+    r.Run()
+}
+
+func main() {
+    Use(Box[int]{})
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("box.go"),
+        r#"package main
+
+type Box[T any] struct{}
+
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+
+type Crate[T any] struct{}
+
+func (c Crate[T]) Run() {}
+func (c Crate[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+    fs::write(
+        root.join("pkg/shared/runner.go"),
+        r#"package shared
+
+type Runner[T any] interface {
+    Run()
+}
+"#,
+    )
+    .expect("write runner.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through imported generic interface usage, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&("Crate".to_string(), "Run".to_string())),
+        "Crate.Run should also be credited conservatively for imported generic interface implementers, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Stop".to_string())),
+        "Crate.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_work_local_generic_implementers_of_imported_generic_interface_stay_conservative() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("app")).expect("create app");
+    fs::create_dir_all(root.join("lib/pkg/shared")).expect("create lib");
+    fs::write(
+        root.join("go.work"),
+        "go 1.25\n\nuse (\n    ./app\n    ./lib\n)\n",
+    )
+    .expect("write go.work");
+    fs::write(
+        root.join("app/go.mod"),
+        "module github.com/acme/app\n\ngo 1.25\n",
+    )
+    .expect("write app/go.mod");
+    fs::write(
+        root.join("lib/go.mod"),
+        "module github.com/acme/lib\n\ngo 1.25\n",
+    )
+    .expect("write lib/go.mod");
+    fs::write(
+        root.join("app/main.go"),
+        r#"package main
+
+import shared "github.com/acme/lib/pkg/shared"
+
+func Use(r shared.Runner[int]) {
+    r.Run()
+}
+
+func main() {
+    Use(Box[int]{})
+}
+"#,
+    )
+    .expect("write app/main.go");
+    fs::write(
+        root.join("app/box.go"),
+        r#"package main
+
+type Box[T any] struct{}
+
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+
+type Crate[T any] struct{}
+
+func (c Crate[T]) Run() {}
+func (c Crate[T]) Stop() {}
+"#,
+    )
+    .expect("write app/box.go");
+    fs::write(
+        root.join("lib/pkg/shared/runner.go"),
+        r#"package shared
+
+type Runner[T any] interface {
+    Run()
+}
+"#,
+    )
+    .expect("write lib runner.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through go.work imported generic interface usage, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&("Crate".to_string(), "Run".to_string())),
+        "Crate.Run should also be credited conservatively for go.work imported generic interface implementers, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Crate".to_string(), "Stop".to_string())),
+        "Crate.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_local_helper_returns() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import "github.com/acme/example/pkg/shared"
+
+type Runner interface {
+    Run()
+}
+
+func buildRunner() Runner {
+    return shared.NewService()
+}
+
+func main() {
+    svc := buildRunner()
+    svc.Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func NewService() Service { return Service{} }
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through buildRunner(), found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_consistent_multi_return_helpers() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import "github.com/acme/example/pkg/shared"
+
+type Runner interface {
+    Run()
+}
+
+func buildRunner(flag bool) Runner {
+    if flag {
+        return shared.NewService()
+    }
+    return shared.Service{}
+}
+
+func main() {
+    svc := buildRunner(true)
+    svc.Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func NewService() Service { return Service{} }
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through consistent multi-return helper flow, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_forward_helper_chains() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import "github.com/acme/example/pkg/shared"
+
+type Runner interface {
+    Run()
+}
+
+func buildRunner() Runner {
+    return makeRunner()
+}
+
+func main() {
+    svc := buildRunner()
+    svc.Run()
+}
+
+func makeRunner() Runner {
+    return shared.NewService()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func NewService() Service { return Service{} }
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through forward helper chain, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_passthrough_helpers() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import "github.com/acme/example/pkg/shared"
+
+type Runner interface {
+    Run()
+}
+
+func wrapRunner(runner Runner) Runner {
+    return runner
+}
+
+func main() {
+    svc := wrapRunner(shared.NewService())
+    svc.Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func NewService() Service { return Service{} }
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through passthrough helper, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_consistent_if_branch_bindings() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import "github.com/acme/example/pkg/shared"
+
+type Runner interface {
+    Run()
+}
+
+func main() {
+    var svc Runner
+    if true {
+        svc = shared.NewService()
+    } else {
+        svc = shared.Service{}
+    }
+    svc.Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func NewService() Service { return Service{} }
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through consistent if-branch bindings, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_consistent_switch_bindings() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import "github.com/acme/example/pkg/shared"
+
+type Runner interface {
+    Run()
+}
+
+func main() {
+    var svc Runner
+    switch 1 {
+    case 1:
+        svc = shared.NewService()
+    default:
+        svc = shared.Service{}
+    }
+    svc.Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func NewService() Service { return Service{} }
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through consistent switch bindings, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_local_helper_binding_returns() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import "github.com/acme/example/pkg/shared"
+
+type Runner interface {
+    Run()
+}
+
+func buildRunner() Runner {
+    svc := shared.NewService()
+    return svc
+}
+
+func main() {
+    svc := buildRunner()
+    svc.Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func NewService() Service { return Service{} }
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through helper local-binding returns, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_multi_param_helper_routing() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import "github.com/acme/example/pkg/shared"
+
+type Runner interface {
+    Run()
+}
+
+func chooseRunner(label string, runner Runner) Runner {
+    alias := runner
+    return alias
+}
+
+func main() {
+    svc := chooseRunner("primary", shared.NewService())
+    svc.Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func NewService() Service { return Service{} }
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through multi-param helper routing, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_type_assertions() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/app")).expect("create pkg/app");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import "github.com/acme/example/pkg/app"
+
+func main() {
+    app.UseRunner(app.Service{})
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/app/service.go"),
+        r#"package app
+
+type Runner interface {
+    Run()
+}
+
+type Service struct{}
+
+func (s Service) Run() {}
+func (s Service) Stop() {}
+
+func UseRunner(r Runner) {
+    svc := r.(Service)
+    svc.Run()
+}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through a type assertion, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_imported_type_assertions() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func use(v any) {
+    svc := v.(shared.Service)
+    svc.Run()
+}
+
+func main() {
+    use(shared.Service{})
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through an imported type assertion, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_go_work_imported_type_assertions() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("app")).expect("create app");
+    fs::create_dir_all(root.join("lib/pkg/shared")).expect("create lib/pkg/shared");
+    fs::write(
+        root.join("go.work"),
+        "go 1.25\n\nuse (\n    ./app\n    ./lib\n)\n",
+    )
+    .expect("write go.work");
+    fs::write(
+        root.join("app/go.mod"),
+        "module github.com/acme/app\n\ngo 1.25\n",
+    )
+    .expect("write app/go.mod");
+    fs::write(
+        root.join("lib/go.mod"),
+        "module github.com/acme/lib\n\ngo 1.25\n",
+    )
+    .expect("write lib/go.mod");
+    fs::write(
+        root.join("app/main.go"),
+        r#"package main
+
+import shared "github.com/acme/lib/pkg/shared"
+
+func use(v any) {
+    svc := v.(shared.Service)
+    svc.Run()
+}
+
+func main() {
+    use(shared.Service{})
+}
+"#,
+    )
+    .expect("write app/main.go");
+    fs::write(
+        root.join("lib/pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write lib/pkg/shared/service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through a go.work imported type assertion, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_imported_type_switches() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func use(v any) {
+    switch svc := v.(type) {
+    case shared.Service:
+        svc.Run()
+    }
+}
+
+func main() {
+    use(shared.Service{})
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through an imported type switch, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_imported_method_expressions() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+var _ = shared.Service.Run
+
+func main() {
+    _ = shared.Service{}
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through an imported method expression, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_imported_generic_method_expressions() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+var _ = shared.Box[int].Run
+
+func main() {
+    _ = shared.Box[int]{}
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/box.go"),
+        r#"package shared
+
+type Box[T any] struct{}
+
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through an imported generic method expression, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_same_package_generic_method_expressions() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+var _ = Box[int].Run
+
+func main() {
+    _ = Box[int]{}
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("box.go"),
+        r#"package main
+
+type Box[T any] struct{}
+
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through a same-package generic method expression, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_same_package_generic_helper_call_results() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+func main() {
+    NewBox[int]().Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("box.go"),
+        r#"package main
+
+type Box[T any] struct{}
+
+func NewBox[T any]() Box[T] { return Box[T]{} }
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through a same-package generic helper call result, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_across_same_package_files() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("service.go"),
+        r#"package main
+
+type Runner interface {
+    Run()
+}
+
+type Service struct{}
+
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+    fs::write(
+        root.join("use.go"),
+        r#"package main
+
+func use(v Runner) {
+    svc := v.(Service)
+    svc.Run()
+}
+
+func main() {
+    use(Service{})
+}
+"#,
+    )
+    .expect("write use.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited across same-package files, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_interface_usage() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+func main() {
+    use(Service{})
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("service.go"),
+        r#"package main
+
+type Runner interface {
+    Run()
+}
+
+type Service struct{}
+
+func (s Service) Run() {}
+func (s Service) Stop() {}
+
+func use(r Runner) {
+    r.Run()
+}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through interface usage, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_direct_helper_call_results_prefer_concrete_receiver_methods() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func main() {
+    _ = shared.KeepOther()
+    shared.BuildRunner().Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Runner interface {
+    Run()
+}
+
+type Service struct{}
+
+func (s Service) Run() {}
+func (s Service) Stop() {}
+
+type OtherService struct{}
+
+func (s OtherService) Run() {}
+func (s OtherService) Stop() {}
+
+func BuildRunner() Runner {
+    return Service{}
+}
+
+func KeepOther() OtherService {
+    return OtherService{}
+}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through the direct helper call result, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("OtherService".to_string(), "Run".to_string())),
+        "OtherService.Run should remain unused when the helper returns Service, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("OtherService".to_string(), "Stop".to_string())),
+        "OtherService.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_imported_interface_usage() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func use(r shared.Runner) {
+    r.Run()
+}
+
+func main() {
+    use(shared.Service{})
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Runner interface {
+    Run()
+}
+
+type Service struct{}
+
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through imported interface usage, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_imported_composite_literal_calls() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func main() {
+    shared.Service{}.Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through an imported composite literal call, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_parenthesized_addressed_imported_composite_literal_calls()
+ {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func main() {
+    (&shared.Service{}).Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/service.go"),
+        r#"package shared
+
+type Service struct{}
+
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through a parenthesized addressed imported composite literal call, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_imported_generic_composite_literal_calls() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func main() {
+    shared.Box[int]{}.Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/box.go"),
+        r#"package shared
+
+type Box[T any] struct{}
+
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through an imported generic composite literal call, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_imported_generic_helper_call_results() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func main() {
+    shared.NewBox[int]().Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/box.go"),
+        r#"package shared
+
+type Box[T any] struct{}
+
+func NewBox[T any]() Box[T] { return Box[T]{} }
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through an imported generic helper call result, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_parenthesized_addressed_imported_generic_helper_call_results()
+ {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func main() {
+    (&shared.NewBox[int]()).Run()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/shared/box.go"),
+        r#"package shared
+
+type Box[T any] struct{}
+
+func NewBox[T any]() Box[T] { return Box[T]{} }
+func (b Box[T]) Run() {}
+func (b Box[T]) Stop() {}
+"#,
+    )
+    .expect("write box.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Box".to_string(), "Run".to_string())),
+        "Box.Run should be credited through a parenthesized addressed imported generic helper call result, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Box".to_string(), "Stop".to_string())),
+        "Box.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_when_local_type_implements_imported_interface() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/shared")).expect("create pkg/shared");
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import shared "github.com/acme/example/pkg/shared"
+
+func use(r shared.Runner) {
+    r.Run()
+}
+
+func main() {
+    use(Service{})
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("service.go"),
+        r#"package main
+
+type Service struct{}
+
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write service.go");
+    fs::write(
+        root.join("pkg/shared/runner.go"),
+        r#"package shared
+
+type Runner interface {
+    Run()
+}
+"#,
+    )
+    .expect("write runner.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through an imported interface implemented locally, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_through_go_work_imported_interface_usage() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("app")).expect("create app");
+    fs::create_dir_all(root.join("lib/pkg/shared")).expect("create lib");
+    fs::write(
+        root.join("go.work"),
+        "go 1.25\n\nuse (\n    ./app\n    ./lib\n)\n",
+    )
+    .expect("write go.work");
+    fs::write(
+        root.join("app/go.mod"),
+        "module github.com/acme/app\n\ngo 1.25\n",
+    )
+    .expect("write app/go.mod");
+    fs::write(
+        root.join("lib/go.mod"),
+        "module github.com/acme/lib\n\ngo 1.25\n",
+    )
+    .expect("write lib/go.mod");
+    fs::write(
+        root.join("app/main.go"),
+        r#"package main
+
+import shared "github.com/acme/lib/pkg/shared"
+
+func use(r shared.Runner) {
+    r.Run()
+}
+
+func main() {
+    use(shared.Service{})
+}
+"#,
+    )
+    .expect("write app/main.go");
+    fs::write(
+        root.join("lib/pkg/shared/service.go"),
+        r#"package shared
+
+type Runner interface {
+    Run()
+}
+
+type Service struct{}
+
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write lib service");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through go.work imported interface usage, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
+fn go_receiver_methods_are_credited_when_local_type_implements_go_work_imported_interface() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("app")).expect("create app");
+    fs::create_dir_all(root.join("lib/pkg/shared")).expect("create lib");
+    fs::write(
+        root.join("go.work"),
+        "go 1.25\n\nuse (\n    ./app\n    ./lib\n)\n",
+    )
+    .expect("write go.work");
+    fs::write(
+        root.join("app/go.mod"),
+        "module github.com/acme/app\n\ngo 1.25\n",
+    )
+    .expect("write app/go.mod");
+    fs::write(
+        root.join("lib/go.mod"),
+        "module github.com/acme/lib\n\ngo 1.25\n",
+    )
+    .expect("write lib/go.mod");
+    fs::write(
+        root.join("app/main.go"),
+        r#"package main
+
+import shared "github.com/acme/lib/pkg/shared"
+
+func use(r shared.Runner) {
+    r.Run()
+}
+
+func main() {
+    use(Service{})
+}
+"#,
+    )
+    .expect("write app/main.go");
+    fs::write(
+        root.join("app/service.go"),
+        r#"package main
+
+type Service struct{}
+
+func (s Service) Run() {}
+func (s Service) Stop() {}
+"#,
+    )
+    .expect("write app/service.go");
+    fs::write(
+        root.join("lib/pkg/shared/runner.go"),
+        r#"package shared
+
+type Runner interface {
+    Run()
+}
+"#,
+    )
+    .expect("write lib runner");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.clone(), m.member_name.clone()))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&("Service".to_string(), "Run".to_string())),
+        "Service.Run should be credited through a local type implementing a go.work imported interface, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&("Service".to_string(), "Stop".to_string())),
+        "Service.Stop should remain unused, found: {unused_class_members:?}"
+    );
+}
+
 // ── Cross-package enum/class member access (issue #178) ────────
 
 #[test]

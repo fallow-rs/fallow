@@ -153,3 +153,49 @@ fn route_convention_files_are_skipped() {
         "co-located route helper should still report private-type-leak, found: {helper_leaks:?}"
     );
 }
+
+#[test]
+fn go_exported_signatures_report_same_file_private_types() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    std::fs::write(
+        dir.path().join("go.mod"),
+        "module example.com/private-leaks\n\ngo 1.25.0\n",
+    )
+    .expect("write go.mod");
+    std::fs::write(
+        dir.path().join("api.go"),
+        r#"package privateleaks
+
+type privateOptions struct{}
+type PublicBacking struct{}
+
+func Build(opts privateOptions) PublicBacking { return PublicBacking{} }
+
+type Service struct {
+    opts privateOptions
+}
+"#,
+    )
+    .expect("write api.go");
+
+    let config = create_private_type_leak_config(dir.path().to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let leaks: Vec<(&str, &str)> = results
+        .private_type_leaks
+        .iter()
+        .map(|leak| (leak.export_name.as_str(), leak.type_name.as_str()))
+        .collect();
+
+    assert!(
+        leaks.contains(&("Build", "privateOptions")),
+        "Build should report privateOptions as a private type leak, found: {leaks:?}"
+    );
+    assert!(
+        leaks.contains(&("Service", "privateOptions")),
+        "Service should report privateOptions as a private type leak, found: {leaks:?}"
+    );
+    assert!(
+        !leaks.contains(&("Build", "PublicBacking")),
+        "exported backing types should not be reported as private leaks: {leaks:?}"
+    );
+}

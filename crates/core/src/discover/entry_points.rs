@@ -60,6 +60,23 @@ pub fn warn_skipped_entry_summary(skipped_entries: &FxHashMap<String, usize>) {
     }
 }
 
+fn is_go_runtime_entry(file: &DiscoveredFile) -> bool {
+    let Some(name) = file.path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if name.ends_with("_test.go") || file.path.extension().and_then(|e| e.to_str()) != Some("go") {
+        return false;
+    }
+    if name == "main.go" {
+        return true;
+    }
+
+    let Ok(source) = std::fs::read_to_string(&file.path) else {
+        return false;
+    };
+    source.contains("package main") && source.contains("func main(")
+}
+
 /// Entry points grouped by reachability role.
 #[derive(Debug, Clone, Default)]
 pub struct CategorizedEntryPoints {
@@ -510,7 +527,39 @@ fn discover_entry_points_with_warnings_impl(
         );
     }
 
-    // 5. Default index files (if no other entries found)
+    // 5. Go entry points — activated automatically when the project contains .go files.
+    // This is separate from the plugin enabler mechanism (which uses npm deps); Go projects
+    // have no package.json, so we detect them by file extension instead.
+    {
+        let has_go = files.iter().any(|f| {
+            f.path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|ext| ext == "go")
+        });
+        if has_go {
+            for file in files {
+                let Some(name) = file.path.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                if is_go_runtime_entry(file) {
+                    discovery.entries.push(EntryPoint {
+                        path: file.path.clone(),
+                        source: EntryPointSource::Plugin {
+                            name: "go".to_string(),
+                        },
+                    });
+                } else if name.ends_with("_test.go") {
+                    discovery.entries.push(EntryPoint {
+                        path: file.path.clone(),
+                        source: EntryPointSource::TestFile,
+                    });
+                }
+            }
+        }
+    }
+
+    // 6. Default index files (if no other entries found)
     if discovery.entries.is_empty() {
         discovery.entries = apply_default_fallback(files, &config.root, None);
     }
@@ -1033,7 +1082,7 @@ mod tests {
         /// Non-source extensions should NOT be in the SOURCE_EXTENSIONS list.
         #[test]
         fn non_source_extensions_not_in_list(
-            ext in prop::sample::select(vec!["py", "rb", "rs", "go", "java", "xml", "yaml", "toml", "md", "txt", "png", "jpg", "wasm", "lock"]),
+            ext in prop::sample::select(vec!["py", "rb", "rs", "java", "xml", "yaml", "toml", "md", "txt", "png", "jpg", "wasm", "lock"]),
         ) {
             prop_assert!(
                 !SOURCE_EXTENSIONS.contains(&ext),
@@ -1078,6 +1127,37 @@ mod tests {
 
         assert!(set.is_match("composables/useFoo.ts"));
         assert!(!set.is_match("composables/nested/useFoo.ts"));
+    }
+
+    #[test]
+    fn detects_go_runtime_entry_in_non_main_filename() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("server.go");
+        std::fs::write(&path, "package main\n\nfunc helper() {}\nfunc main() {}\n")
+            .expect("write go file");
+
+        let file = DiscoveredFile {
+            id: FileId(0),
+            path,
+            size_bytes: 0,
+        };
+
+        assert!(is_go_runtime_entry(&file));
+    }
+
+    #[test]
+    fn ignores_non_main_go_runtime_helpers() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("helpers.go");
+        std::fs::write(&path, "package main\n\nfunc helper() {}\n").expect("write go file");
+
+        let file = DiscoveredFile {
+            id: FileId(0),
+            path,
+            size_bytes: 0,
+        };
+
+        assert!(!is_go_runtime_entry(&file));
     }
 
     #[test]

@@ -41,6 +41,8 @@ bitcode = { workspace = true }
 
 # Logging
 tracing = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

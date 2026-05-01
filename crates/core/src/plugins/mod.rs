@@ -34,6 +34,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "expo",
     "expo-router",
     "gatsby",
+    "go",
     "hardhat",
     "nestjs",
     "next-intl",
@@ -925,6 +926,7 @@ mod eslint;
 mod expo;
 mod expo_router;
 mod gatsby;
+mod golang;
 mod graphql_codegen;
 mod hardhat;
 mod husky;

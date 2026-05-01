@@ -198,6 +198,77 @@ fn health_reports_angular_inline_template_complexity() {
 }
 
 #[test]
+fn health_reports_go_complexity_findings() {
+    let dir = tempdir().expect("create temp dir");
+    write_file(
+        &dir.path().join("go.mod"),
+        "module example.com/health-go\n\ngo 1.25.0\n",
+    );
+    write_file(
+        &dir.path().join("main.go"),
+        r#"package main
+
+func main() {
+    if work(true, false, true) > 0 {
+        println("ok")
+    }
+}
+
+func work(a, b, c bool) int {
+    if a && b || c {
+        for i := 0; i < 3; i++ {
+            switch i {
+            case 0:
+                return i
+            case 1:
+                return i
+            default:
+                return 0
+            }
+        }
+    }
+
+    return 1
+}
+"#,
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "3",
+            "--max-cognitive",
+            "3",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+
+    assert_eq!(output.code, 1, "Go complexity should exceed the thresholds");
+    let json = parse_json(&output);
+    let findings = json["findings"].as_array().expect("findings array");
+    let work = findings
+        .iter()
+        .find(|finding| finding["name"] == "work")
+        .unwrap_or_else(|| panic!("expected Go finding, got: {findings:#?}"));
+
+    assert_eq!(work["cyclomatic"].as_u64(), Some(7));
+    assert_eq!(work["cognitive"].as_u64(), Some(8));
+    assert!(
+        work["path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("main.go")),
+        "Go finding should point at main.go: {work:#?}"
+    );
+}
+
+#[test]
 fn health_inline_template_complexity_can_be_suppressed() {
     let dir = tempdir().unwrap();
     let fixture = fixture_path("angular-inline-template-complexity");

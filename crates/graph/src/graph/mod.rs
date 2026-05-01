@@ -589,6 +589,64 @@ mod tests {
     }
 
     #[test]
+    fn go_same_package_files_become_reachable_from_main() {
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/main.go"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/use.go"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: PathBuf::from("/project/service.go"),
+                size_bytes: 100,
+            },
+        ];
+
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/main.go"),
+            source: EntryPointSource::Plugin {
+                name: "go".to_string(),
+            },
+        }];
+
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/main.go"),
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/project/use.go"),
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: PathBuf::from("/project/service.go"),
+                ..Default::default()
+            },
+        ];
+
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+        assert!(graph.modules[0].is_entry_point());
+        assert!(
+            graph.modules[1].is_reachable(),
+            "use.go should be reachable"
+        );
+        assert!(
+            graph.modules[2].is_reachable(),
+            "service.go should be reachable"
+        );
+    }
+
+    #[test]
     fn graph_has_namespace_import_out_of_bounds() {
         let graph = build_simple_graph();
         assert!(!graph.has_namespace_import(FileId(999)));

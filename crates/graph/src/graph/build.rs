@@ -1,5 +1,7 @@
 //! Phase 1 (populate_edges) and Phase 2 (populate_references) of graph construction.
 
+use std::path::PathBuf;
+
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
@@ -16,7 +18,31 @@ struct EdgeAccumulator {
     package_usage: FxHashMap<String, Vec<FileId>>,
     type_only_package_usage: FxHashMap<String, Vec<FileId>>,
     namespace_imported: fixedbitset::FixedBitSet,
+    go_package_files: FxHashMap<(PathBuf, bool), Vec<FileId>>,
     total_capacity: usize,
+}
+
+fn is_test_go_file(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with("_test.go"))
+}
+
+fn build_go_package_files(files: &[DiscoveredFile]) -> FxHashMap<(PathBuf, bool), Vec<FileId>> {
+    let mut packages: FxHashMap<(PathBuf, bool), Vec<FileId>> = FxHashMap::default();
+    for file in files {
+        if file.path.extension().and_then(|ext| ext.to_str()) != Some("go") {
+            continue;
+        }
+        let Some(dir) = file.path.parent() else {
+            continue;
+        };
+        packages
+            .entry((dir.to_path_buf(), is_test_go_file(&file.path)))
+            .or_default()
+            .push(file.id);
+    }
+    packages
 }
 
 /// Insert into the namespace-imported bitset with bounds checking.
@@ -80,6 +106,23 @@ fn collect_import_edge(
                     is_type_only: import.info.is_type_only,
                 });
         }
+        ResolveResult::GoPackage(target_ids) => {
+            // A Go package import resolves to all .go files in the target directory.
+            // Selector extraction (`pkg.Symbol`) narrows these namespace edges later.
+            // Dot imports use an empty local name and therefore stay conservative.
+            for &target_id in target_ids {
+                record_namespace_import(target_id, &mut acc.namespace_imported, acc.total_capacity);
+                edges_by_target
+                    .entry(target_id)
+                    .or_default()
+                    .push(ImportedSymbol {
+                        imported_name: import.info.imported_name.clone(),
+                        local_name: import.info.local_name.clone(),
+                        import_span: import.info.span,
+                        is_type_only: import.info.is_type_only,
+                    });
+            }
+        }
         ResolveResult::NpmPackage(name) => {
             record_package_usage(acc, name, file_id, import.info.is_type_only);
         }
@@ -138,6 +181,28 @@ fn collect_edges_for_module(
                 .or_default()
                 .push(ImportedSymbol {
                     imported_name: ImportedName::Namespace,
+                    local_name: String::new(),
+                    import_span: oxc_span::Span::new(0, 0),
+                    is_type_only: false,
+                });
+        }
+    }
+
+    if resolved.path.extension().and_then(|ext| ext.to_str()) == Some("go")
+        && let Some(dir) = resolved.path.parent()
+        && let Some(package_files) = acc
+            .go_package_files
+            .get(&(dir.to_path_buf(), is_test_go_file(&resolved.path)))
+    {
+        for &target_id in package_files {
+            if target_id == file_id {
+                continue;
+            }
+            edges_by_target
+                .entry(target_id)
+                .or_default()
+                .push(ImportedSymbol {
+                    imported_name: ImportedName::SideEffect,
                     local_name: String::new(),
                     import_span: oxc_span::Span::new(0, 0),
                     is_type_only: false,
@@ -272,6 +337,7 @@ impl ModuleGraph {
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
             namespace_imported: fixedbitset::FixedBitSet::with_capacity(total_capacity),
+            go_package_files: build_go_package_files(files),
             total_capacity,
         };
 
@@ -514,6 +580,7 @@ mod tests {
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
             namespace_imported: fixedbitset::FixedBitSet::with_capacity(4),
+            go_package_files: FxHashMap::default(),
             total_capacity: 4,
         };
         record_package_usage(&mut acc, "react", FileId(0), false);
@@ -527,6 +594,7 @@ mod tests {
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
             namespace_imported: fixedbitset::FixedBitSet::with_capacity(4),
+            go_package_files: FxHashMap::default(),
             total_capacity: 4,
         };
         record_package_usage(&mut acc, "react", FileId(1), true);
@@ -540,6 +608,7 @@ mod tests {
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
             namespace_imported: fixedbitset::FixedBitSet::with_capacity(4),
+            go_package_files: FxHashMap::default(),
             total_capacity: 4,
         };
         record_package_usage(&mut acc, "lodash", FileId(0), false);
@@ -555,6 +624,7 @@ mod tests {
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
             namespace_imported: fixedbitset::FixedBitSet::with_capacity(cap),
+            go_package_files: FxHashMap::default(),
             total_capacity: cap,
         }
     }
@@ -641,6 +711,47 @@ mod tests {
         ));
         // Side-effect should NOT set namespace bitset
         assert!(!acc.namespace_imported.contains(1));
+    }
+
+    #[test]
+    fn collect_import_edge_go_package_preserves_namespace_local_name() {
+        let mut acc = make_acc(6);
+        let mut edges: FxHashMap<FileId, Vec<ImportedSymbol>> = FxHashMap::default();
+        let import = make_import(
+            ImportedName::Namespace,
+            ResolveResult::GoPackage(vec![FileId(2), FileId(3)]),
+        );
+        collect_import_edge(&import, FileId(0), &mut edges, &mut acc);
+
+        assert!(acc.namespace_imported.contains(2));
+        assert!(acc.namespace_imported.contains(3));
+        assert_eq!(edges[&FileId(2)][0].local_name, "localVar");
+        assert!(matches!(
+            edges[&FileId(2)][0].imported_name,
+            ImportedName::Namespace
+        ));
+    }
+
+    #[test]
+    fn collect_import_edge_go_package_dot_import_stays_conservative() {
+        let mut acc = make_acc(4);
+        let mut edges: FxHashMap<FileId, Vec<ImportedSymbol>> = FxHashMap::default();
+        let import = ResolvedImport {
+            info: fallow_types::extract::ImportInfo {
+                source: "./target".to_string(),
+                imported_name: ImportedName::Namespace,
+                local_name: String::new(),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::new(0, 10),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::GoPackage(vec![FileId(1)]),
+        };
+        collect_import_edge(&import, FileId(0), &mut edges, &mut acc);
+
+        assert!(acc.namespace_imported.contains(1));
+        assert!(edges[&FileId(1)][0].local_name.is_empty());
     }
 
     #[test]
@@ -748,6 +859,30 @@ mod tests {
         assert_eq!(sorted.len(), 2);
         assert_eq!(sorted[0].0, FileId(1));
         assert_eq!(sorted[1].0, FileId(3));
+    }
+
+    #[test]
+    fn collect_edges_for_go_file_adds_same_package_side_effect_edges() {
+        let resolved = ResolvedModule {
+            file_id: FileId(0),
+            path: std::path::PathBuf::from("/project/pkg/main.go"),
+            ..Default::default()
+        };
+        let mut acc = make_acc(4);
+        acc.go_package_files.insert(
+            (std::path::PathBuf::from("/project/pkg"), false),
+            vec![FileId(0), FileId(1), FileId(2)],
+        );
+
+        let sorted = collect_edges_for_module(&resolved, FileId(0), &mut acc);
+
+        assert_eq!(sorted.len(), 2);
+        assert_eq!(sorted[0].0, FileId(1));
+        assert_eq!(sorted[1].0, FileId(2));
+        for (_, symbols) in sorted {
+            assert_eq!(symbols.len(), 1);
+            assert!(matches!(symbols[0].imported_name, ImportedName::SideEffect));
+        }
     }
 
     #[test]

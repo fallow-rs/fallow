@@ -90,9 +90,9 @@ fn imported_export_name(imported_name: &crate::extract::ImportedName) -> Option<
     }
 }
 
-fn push_local_export_key<'a>(
-    local_to_export_keys: &mut FxHashMap<&'a str, Vec<ExportKey>>,
-    local_name: &'a str,
+fn push_local_export_key(
+    local_to_export_keys: &mut FxHashMap<String, Vec<ExportKey>>,
+    local_name: String,
     export_key: ExportKey,
 ) {
     let entry = local_to_export_keys.entry(local_name).or_default();
@@ -101,11 +101,55 @@ fn push_local_export_key<'a>(
     }
 }
 
-fn build_local_to_export_keys(resolved: &ResolvedModule) -> FxHashMap<&str, Vec<ExportKey>> {
+fn is_go_package_sibling(source: &std::path::Path, candidate: &std::path::Path) -> bool {
+    if source == candidate {
+        return false;
+    }
+    if source.extension().and_then(|ext| ext.to_str()) != Some("go")
+        || candidate.extension().and_then(|ext| ext.to_str()) != Some("go")
+    {
+        return false;
+    }
+    if source.parent() != candidate.parent() {
+        return false;
+    }
+    source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with("_test.go"))
+        == candidate
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with("_test.go"))
+}
+
+fn build_local_to_export_keys(
+    graph: &ModuleGraph,
+    resolved: &ResolvedModule,
+) -> FxHashMap<String, Vec<ExportKey>> {
     let mut local_to_export_keys = FxHashMap::default();
 
     for import in &resolved.resolved_imports {
         let Some(imported_name) = imported_export_name(&import.info.imported_name) else {
+            if let ResolveResult::GoPackage(target_ids) = &import.target
+                && !import.info.local_name.is_empty()
+            {
+                for &target_id in target_ids {
+                    let Some(module) = graph.modules.get(target_id.0 as usize) else {
+                        continue;
+                    };
+                    for export in &module.exports {
+                        let ExportName::Named(export_name) = &export.name else {
+                            continue;
+                        };
+                        push_local_export_key(
+                            &mut local_to_export_keys,
+                            format!("{}.{}", import.info.local_name, export_name),
+                            ExportKey::new(target_id, export.name.to_string()),
+                        );
+                    }
+                }
+            }
             continue;
         };
         let ResolveResult::InternalModule(target_file_id) = &import.target else {
@@ -113,22 +157,73 @@ fn build_local_to_export_keys(resolved: &ResolvedModule) -> FxHashMap<&str, Vec<
         };
         push_local_export_key(
             &mut local_to_export_keys,
-            import.info.local_name.as_str(),
+            import.info.local_name.clone(),
             ExportKey::new(*target_file_id, imported_name),
         );
     }
 
-    for export in &resolved.exports {
-        if let Some(local_name) = export.local_name.as_deref() {
+    if let Some(module) = graph.modules.get(resolved.file_id.0 as usize) {
+        for export in &module.exports {
             push_local_export_key(
                 &mut local_to_export_keys,
-                local_name,
+                export.name.to_string(),
                 ExportKey::new(resolved.file_id, export.name.to_string()),
             );
         }
     }
 
+    if resolved.path.extension().and_then(|ext| ext.to_str()) == Some("go") {
+        for module in &graph.modules {
+            if !is_go_package_sibling(resolved.path.as_path(), module.path.as_path()) {
+                continue;
+            }
+            for export in &module.exports {
+                let ExportName::Named(local_name) = &export.name else {
+                    continue;
+                };
+                push_local_export_key(
+                    &mut local_to_export_keys,
+                    local_name.clone(),
+                    ExportKey::new(module.file_id, export.name.to_string()),
+                );
+            }
+        }
+    }
+
     local_to_export_keys
+}
+
+fn resolve_go_qualified_export_keys(
+    graph: &ModuleGraph,
+    resolved: &ResolvedModule,
+    object: &str,
+) -> Vec<ExportKey> {
+    let Some((package_local, export_name)) = object.split_once('.') else {
+        return Vec::new();
+    };
+
+    let mut keys = Vec::new();
+    for import in &resolved.resolved_imports {
+        if import.info.local_name != package_local {
+            continue;
+        }
+        let ResolveResult::GoPackage(target_ids) = &import.target else {
+            continue;
+        };
+        for &target_id in target_ids {
+            let Some(module) = graph.modules.get(target_id.0 as usize) else {
+                continue;
+            };
+            if module
+                .exports
+                .iter()
+                .any(|export| export.name.matches_str(export_name))
+            {
+                push_export_key(&mut keys, ExportKey::new(target_id, export_name));
+            }
+        }
+    }
+    keys
 }
 
 /// Walk the re-export chain starting at `(start_file, start_name)` and return
@@ -268,7 +363,7 @@ fn build_instance_export_targets(
     let mut targets_by_instance: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
 
     for resolved in resolved_modules {
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_to_export_keys = build_local_to_export_keys(graph, resolved);
         for access in &resolved.member_accesses {
             let Some(instance_export_name) = access.object.strip_prefix(INSTANCE_EXPORT_SENTINEL)
             else {
@@ -334,12 +429,13 @@ fn propagate_accesses_through_instance_exports(
 /// `extends` clause (resolved through the importing module's
 /// `local_to_export_keys`). Output is deduplicated per-parent.
 fn build_parent_to_children(
+    graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
 ) -> FxHashMap<ExportKey, Vec<ExportKey>> {
     let mut parent_to_children: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
 
     for resolved in resolved_modules {
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_to_export_keys = build_local_to_export_keys(graph, resolved);
 
         for export in &resolved.exports {
             if let Some(super_local) = &export.super_class {
@@ -375,11 +471,12 @@ fn build_parent_to_children(
 /// Self-access propagations are computed on a snapshot first and applied after
 /// the external-access loop so the mutable borrows stay disjoint.
 fn propagate_class_inheritance(
+    graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
     self_accessed_members: &mut FxHashMap<FileId, FxHashSet<String>>,
 ) {
-    let parent_to_children = build_parent_to_children(resolved_modules);
+    let parent_to_children = build_parent_to_children(graph, resolved_modules);
     if parent_to_children.is_empty() {
         return;
     }
@@ -479,13 +576,16 @@ pub fn find_unused_members(
             continue;
         }
 
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_to_export_keys = build_local_to_export_keys(graph, resolved);
         for heritage in *class_heritage {
             if heritage.implements.is_empty() {
                 continue;
             }
 
-            let implementer_key = ExportKey::new(resolved.file_id, heritage.export_name.clone());
+            let Some(implementer_keys) = local_to_export_keys.get(heritage.export_name.as_str())
+            else {
+                continue;
+            };
             for interface_name in &heritage.implements {
                 let Some(interface_keys) = local_to_export_keys.get(interface_name.as_str()) else {
                     continue;
@@ -494,8 +594,10 @@ pub fn find_unused_members(
                     let implementers = interface_to_implementers
                         .entry(interface_key.clone())
                         .or_default();
-                    if !implementers.contains(&implementer_key) {
-                        implementers.push(implementer_key.clone());
+                    for implementer_key in implementer_keys {
+                        if !implementers.contains(implementer_key) {
+                            implementers.push(implementer_key.clone());
+                        }
                     }
                 }
             }
@@ -517,7 +619,7 @@ pub fn find_unused_members(
     let mut whole_object_used_exports: FxHashSet<ExportKey> = FxHashSet::default();
 
     for resolved in resolved_modules {
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_to_export_keys = build_local_to_export_keys(graph, resolved);
 
         for access in &resolved.member_accesses {
             if access.object.starts_with(INSTANCE_EXPORT_SENTINEL) {
@@ -532,7 +634,17 @@ pub fn find_unused_members(
                 continue;
             }
 
-            if let Some(export_keys) = local_to_export_keys.get(access.object.as_str()) {
+            let direct_export_keys = local_to_export_keys.get(access.object.as_str());
+            if direct_export_keys.is_none() && access.object.contains('.') {
+                for export_key in
+                    resolve_go_qualified_export_keys(graph, resolved, access.object.as_str())
+                {
+                    accessed_members
+                        .entry(export_key)
+                        .or_default()
+                        .insert(access.member.clone());
+                }
+            } else if let Some(export_keys) = direct_export_keys {
                 for export_key in export_keys {
                     accessed_members
                         .entry(export_key.clone())
@@ -693,7 +805,7 @@ pub fn find_unused_members(
             if component_bindings.is_empty() {
                 continue;
             }
-            let local_to_export_keys = build_local_to_export_keys(resolved);
+            let local_to_export_keys = build_local_to_export_keys(graph, resolved);
             for import in &resolved.resolved_imports {
                 let ResolveResult::InternalModule(target_id) = &import.target else {
                     continue;
@@ -705,7 +817,7 @@ pub fn find_unused_members(
                     let Some(type_name) = component_bindings.get(object) else {
                         continue;
                     };
-                    let Some(export_keys) = local_to_export_keys.get(type_name) else {
+                    let Some(export_keys) = local_to_export_keys.get(*type_name) else {
                         continue;
                     };
                     for export_key in export_keys {
@@ -720,6 +832,7 @@ pub fn find_unused_members(
     }
 
     propagate_class_inheritance(
+        graph,
         resolved_modules,
         &mut accessed_members,
         &mut self_accessed_members,
@@ -735,13 +848,20 @@ pub fn find_unused_members(
                 continue;
             }
 
-            // If the export itself is unused, skip member analysis (whole export is dead)
-            if export.references.is_empty() && !graph.has_namespace_import(module.file_id) {
+            let export_name = export.name.to_string();
+            let export_key = ExportKey::new(module.file_id, export_name.clone());
+            let externally_accessed_members = accessed_members.get(&export_key);
+
+            // If the export itself is unused, skip member analysis (whole export is dead).
+            // Go packages can reference sibling-file exports without an import edge, so keep
+            // member analysis active when we have concrete member accesses for this export.
+            if export.references.is_empty()
+                && !graph.has_namespace_import(module.file_id)
+                && externally_accessed_members.is_none()
+            {
                 continue;
             }
 
-            let export_name = export.name.to_string();
-            let export_key = ExportKey::new(module.file_id, export_name.clone());
             let (super_class, implemented_interfaces) = class_heritage_by_export
                 .get(&export_key)
                 .map_or((None, &[][..]), |(super_class, interfaces)| {
@@ -767,10 +887,7 @@ pub fn find_unused_members(
                 }
 
                 // Check if this member is accessed anywhere via external import
-                if accessed_members
-                    .get(&export_key)
-                    .is_some_and(|s| s.contains(&member.name))
-                {
+                if externally_accessed_members.is_some_and(|s| s.contains(&member.name)) {
                     continue;
                 }
 
@@ -859,7 +976,7 @@ mod tests {
     use crate::graph::{ExportSymbol, ModuleGraph, SymbolReference};
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
     use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
-    use fallow_types::extract::ClassHeritageInfo;
+    use fallow_types::extract::{ClassHeritageInfo, ExportInfo};
     use oxc_span::Span;
     use std::path::PathBuf;
 
@@ -2511,5 +2628,420 @@ mod tests {
         );
         assert!(enum_members.is_empty());
         assert!(class_members.is_empty());
+    }
+
+    #[test]
+    fn go_qualified_member_access_marks_imported_type_member_used() {
+        let mut graph = build_graph(&[
+            ("/src/main.go", true),
+            ("/src/pkg/shared/service.go", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_export_with_members(
+            "Service",
+            vec![
+                make_member("Run", MemberKind::ClassMethod),
+                make_member("Stop", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )];
+
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/src/main.go"),
+            resolved_imports: vec![ResolvedImport {
+                info: ImportInfo {
+                    source: "github.com/acme/example/pkg/shared".to_string(),
+                    imported_name: ImportedName::Namespace,
+                    local_name: "shared".to_string(),
+                    is_type_only: false,
+                    from_style: false,
+                    span: Span::new(0, 30),
+                    source_span: Span::default(),
+                },
+                target: ResolveResult::GoPackage(vec![FileId(1)]),
+            }],
+            member_accesses: vec![MemberAccess {
+                object: "shared.Service".to_string(),
+                member: "Run".to_string(),
+            }],
+            ..Default::default()
+        }];
+
+        let (_, class_members) = find_unused_members(
+            &graph,
+            &resolved_modules,
+            &[],
+            &SuppressionContext::empty(),
+            &FxHashMap::default(),
+            &[],
+        );
+
+        let unused_names: FxHashSet<String> = class_members
+            .iter()
+            .map(|member| format!("{}.{}", member.parent_name, member.member_name))
+            .collect();
+
+        assert!(
+            !unused_names.contains("Service.Run"),
+            "Run should be credited through shared.Service.Run: {unused_names:?}"
+        );
+        assert!(
+            unused_names.contains("Service.Stop"),
+            "Stop should remain unused: {unused_names:?}"
+        );
+    }
+
+    #[test]
+    fn go_same_package_member_access_marks_sibling_type_member_used() {
+        let mut graph = build_graph(&[
+            ("/src/main.go", true),
+            ("/src/use.go", false),
+            ("/src/service.go", false),
+        ]);
+        graph.modules[2].set_reachable(true);
+        graph.modules[2].exports = vec![make_export_with_members(
+            "Service",
+            vec![
+                make_member("Run", MemberKind::ClassMethod),
+                make_member("Stop", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )];
+
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(1),
+            path: PathBuf::from("/src/use.go"),
+            member_accesses: vec![MemberAccess {
+                object: "Service".to_string(),
+                member: "Run".to_string(),
+            }],
+            ..Default::default()
+        }];
+
+        let (_, class_members) = find_unused_members(
+            &graph,
+            &resolved_modules,
+            &[],
+            &SuppressionContext::empty(),
+            &FxHashMap::default(),
+            &[],
+        );
+
+        let unused_names: FxHashSet<String> = class_members
+            .iter()
+            .map(|member| format!("{}.{}", member.parent_name, member.member_name))
+            .collect();
+
+        assert!(
+            !unused_names.contains("Service.Run"),
+            "Run should be credited through same-package sibling access: {unused_names:?}"
+        );
+        assert!(
+            unused_names.contains("Service.Stop"),
+            "Stop should remain unused: {unused_names:?}"
+        );
+    }
+
+    #[test]
+    fn go_imported_interface_usage_propagates_to_implementer_methods() {
+        let mut graph = build_graph(&[
+            ("/src/main.go", true),
+            ("/src/pkg/shared/service.go", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![
+            make_export_with_members(
+                "Runner",
+                vec![make_member("Run", MemberKind::ClassMethod)],
+                Some(0),
+            ),
+            make_export_with_members(
+                "Service",
+                vec![
+                    make_member("Run", MemberKind::ClassMethod),
+                    make_member("Stop", MemberKind::ClassMethod),
+                ],
+                Some(0),
+            ),
+        ];
+
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/src/main.go"),
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "github.com/acme/example/pkg/shared".to_string(),
+                        imported_name: ImportedName::Namespace,
+                        local_name: "shared".to_string(),
+                        is_type_only: false,
+                        from_style: false,
+                        span: Span::new(0, 30),
+                        source_span: Span::default(),
+                    },
+                    target: ResolveResult::GoPackage(vec![FileId(1)]),
+                }],
+                member_accesses: vec![MemberAccess {
+                    object: "shared.Runner".to_string(),
+                    member: "Run".to_string(),
+                }],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/src/pkg/shared/service.go"),
+                exports: vec![
+                    ExportInfo {
+                        name: ExportName::Named("Runner".to_string()),
+                        local_name: Some("Runner".to_string()),
+                        is_type_only: false,
+                        visibility: VisibilityTag::None,
+                        span: Span::new(0, 0),
+                        members: vec![make_member("Run", MemberKind::ClassMethod)],
+                        super_class: None,
+                    },
+                    ExportInfo {
+                        name: ExportName::Named("Service".to_string()),
+                        local_name: Some("Service".to_string()),
+                        is_type_only: false,
+                        visibility: VisibilityTag::None,
+                        span: Span::new(0, 0),
+                        members: vec![
+                            make_member("Run", MemberKind::ClassMethod),
+                            make_member("Stop", MemberKind::ClassMethod),
+                        ],
+                        super_class: None,
+                    },
+                ],
+                ..Default::default()
+            },
+        ];
+        let modules = vec![ModuleInfo {
+            file_id: FileId(1),
+            exports: vec![
+                ExportInfo {
+                    name: ExportName::Named("Runner".to_string()),
+                    local_name: Some("Runner".to_string()),
+                    is_type_only: false,
+                    visibility: VisibilityTag::None,
+                    span: Span::new(0, 0),
+                    members: vec![make_member("Run", MemberKind::ClassMethod)],
+                    super_class: None,
+                },
+                ExportInfo {
+                    name: ExportName::Named("Service".to_string()),
+                    local_name: Some("Service".to_string()),
+                    is_type_only: false,
+                    visibility: VisibilityTag::None,
+                    span: Span::new(0, 0),
+                    members: vec![
+                        make_member("Run", MemberKind::ClassMethod),
+                        make_member("Stop", MemberKind::ClassMethod),
+                    ],
+                    super_class: None,
+                },
+            ],
+            imports: vec![],
+            re_exports: vec![],
+            dynamic_imports: vec![],
+            dynamic_import_patterns: vec![],
+            require_calls: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            content_hash: 0,
+            suppressions: vec![],
+            unused_import_bindings: vec![],
+            type_referenced_import_bindings: vec![],
+            value_referenced_import_bindings: vec![],
+            line_offsets: vec![],
+            complexity: vec![],
+            flag_uses: vec![],
+            class_heritage: vec![ClassHeritageInfo {
+                export_name: "Service".to_string(),
+                super_class: None,
+                implements: vec!["Runner".to_string()],
+                instance_bindings: vec![],
+            }],
+            local_type_declarations: vec![],
+            public_signature_type_references: vec![],
+        }];
+
+        let (_, class_members) = find_unused_members(
+            &graph,
+            &resolved_modules,
+            &modules,
+            &SuppressionContext::empty(),
+            &FxHashMap::default(),
+            &[],
+        );
+
+        let unused_names: FxHashSet<String> = class_members
+            .iter()
+            .map(|member| format!("{}.{}", member.parent_name, member.member_name))
+            .collect();
+
+        assert!(
+            !unused_names.contains("Service.Run"),
+            "Run should be credited through imported interface usage: {unused_names:?}"
+        );
+        assert!(
+            unused_names.contains("Service.Stop"),
+            "Stop should remain unused: {unused_names:?}"
+        );
+    }
+
+    #[test]
+    fn go_local_type_implementing_imported_interface_propagates_member_usage() {
+        let mut graph = build_graph(&[
+            ("/src/main.go", true),
+            ("/src/service.go", false),
+            ("/src/pkg/shared/runner.go", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[2].set_reachable(true);
+        graph.modules[1].exports = vec![make_export_with_members(
+            "Service",
+            vec![
+                make_member("Run", MemberKind::ClassMethod),
+                make_member("Stop", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )];
+        graph.modules[2].exports = vec![make_export_with_members(
+            "Runner",
+            vec![make_member("Run", MemberKind::ClassMethod)],
+            Some(0),
+        )];
+
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/src/main.go"),
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "github.com/acme/example/pkg/shared".to_string(),
+                        imported_name: ImportedName::Namespace,
+                        local_name: "shared".to_string(),
+                        is_type_only: false,
+                        from_style: false,
+                        span: Span::new(0, 30),
+                        source_span: Span::default(),
+                    },
+                    target: ResolveResult::GoPackage(vec![FileId(2)]),
+                }],
+                member_accesses: vec![MemberAccess {
+                    object: "shared.Runner".to_string(),
+                    member: "Run".to_string(),
+                }],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/src/service.go"),
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "github.com/acme/example/pkg/shared".to_string(),
+                        imported_name: ImportedName::Namespace,
+                        local_name: "shared".to_string(),
+                        is_type_only: false,
+                        from_style: false,
+                        span: Span::new(0, 30),
+                        source_span: Span::default(),
+                    },
+                    target: ResolveResult::GoPackage(vec![FileId(2)]),
+                }],
+                exports: vec![ExportInfo {
+                    name: ExportName::Named("Service".to_string()),
+                    local_name: Some("Service".to_string()),
+                    is_type_only: false,
+                    visibility: VisibilityTag::None,
+                    span: Span::new(0, 0),
+                    members: vec![
+                        make_member("Run", MemberKind::ClassMethod),
+                        make_member("Stop", MemberKind::ClassMethod),
+                    ],
+                    super_class: None,
+                }],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: PathBuf::from("/src/pkg/shared/runner.go"),
+                exports: vec![ExportInfo {
+                    name: ExportName::Named("Runner".to_string()),
+                    local_name: Some("Runner".to_string()),
+                    is_type_only: false,
+                    visibility: VisibilityTag::None,
+                    span: Span::new(0, 0),
+                    members: vec![make_member("Run", MemberKind::ClassMethod)],
+                    super_class: None,
+                }],
+                ..Default::default()
+            },
+        ];
+        let modules = vec![ModuleInfo {
+            file_id: FileId(1),
+            exports: vec![ExportInfo {
+                name: ExportName::Named("Service".to_string()),
+                local_name: Some("Service".to_string()),
+                is_type_only: false,
+                visibility: VisibilityTag::None,
+                span: Span::new(0, 0),
+                members: vec![
+                    make_member("Run", MemberKind::ClassMethod),
+                    make_member("Stop", MemberKind::ClassMethod),
+                ],
+                super_class: None,
+            }],
+            imports: vec![],
+            re_exports: vec![],
+            dynamic_imports: vec![],
+            dynamic_import_patterns: vec![],
+            require_calls: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            content_hash: 0,
+            suppressions: vec![],
+            unused_import_bindings: vec![],
+            type_referenced_import_bindings: vec![],
+            value_referenced_import_bindings: vec![],
+            line_offsets: vec![],
+            complexity: vec![],
+            flag_uses: vec![],
+            class_heritage: vec![ClassHeritageInfo {
+                export_name: "Service".to_string(),
+                super_class: None,
+                implements: vec!["shared.Runner".to_string()],
+                instance_bindings: vec![],
+            }],
+            local_type_declarations: vec![],
+            public_signature_type_references: vec![],
+        }];
+
+        let (_, class_members) = find_unused_members(
+            &graph,
+            &resolved_modules,
+            &modules,
+            &SuppressionContext::empty(),
+            &FxHashMap::default(),
+            &[],
+        );
+
+        let unused_names: FxHashSet<String> = class_members
+            .iter()
+            .map(|member| format!("{}.{}", member.parent_name, member.member_name))
+            .collect();
+
+        assert!(
+            !unused_names.contains("Service.Run"),
+            "Run should be credited through imported interface implementation: {unused_names:?}"
+        );
+        assert!(
+            unused_names.contains("Service.Stop"),
+            "Stop should remain unused: {unused_names:?}"
+        );
     }
 }

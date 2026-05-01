@@ -208,6 +208,197 @@ fn duplicate_exports_detected() {
     );
 }
 
+#[test]
+fn go_project_detects_used_and_unused_exports() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("pkg/utils")).expect("create pkg/utils");
+    fs::create_dir_all(root.join("pkg/orphan")).expect("create pkg/orphan");
+
+    fs::write(
+        root.join("go.mod"),
+        "module github.com/acme/example\n\ngo 1.25\n",
+    )
+    .expect("write go.mod");
+    fs::write(
+        root.join("main.go"),
+        r#"package main
+
+import "github.com/acme/example/pkg/utils"
+
+func main() {
+    utils.Foo()
+}
+"#,
+    )
+    .expect("write main.go");
+    fs::write(
+        root.join("pkg/utils/foo.go"),
+        r#"package utils
+
+func Foo() {}
+"#,
+    )
+    .expect("write foo.go");
+    fs::write(
+        root.join("pkg/utils/bar.go"),
+        r#"package utils
+
+func Bar() {}
+"#,
+    )
+    .expect("write bar.go");
+    fs::write(
+        root.join("pkg/orphan/orphan.go"),
+        r#"package orphan
+
+func Lost() {}
+"#,
+    )
+    .expect("write orphan.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_exports: Vec<(&str, String)> = results
+        .unused_exports
+        .iter()
+        .map(|e| {
+            (
+                e.export_name.as_str(),
+                e.path.file_name().unwrap().to_string_lossy().to_string(),
+            )
+        })
+        .collect();
+
+    assert!(
+        !unused_exports
+            .iter()
+            .any(|(name, file)| *name == "Foo" && file == "foo.go"),
+        "Foo should be used via utils.Foo(), found unused exports: {unused_exports:?}"
+    );
+    assert!(
+        unused_exports
+            .iter()
+            .any(|(name, file)| *name == "Bar" && file == "bar.go"),
+        "Bar should be reported as unused, found unused exports: {unused_exports:?}"
+    );
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+    assert!(
+        unused_files.contains(&"orphan.go".to_string()),
+        "orphan.go should be reported as unused, found: {unused_files:?}"
+    );
+}
+
+#[test]
+fn go_work_workspace_resolves_cross_module_package_usage() {
+    use std::fs;
+
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    fs::create_dir_all(root.join("app")).expect("create app");
+    fs::create_dir_all(root.join("lib/pkg/shared")).expect("create lib/pkg/shared");
+    fs::create_dir_all(root.join("lib/pkg/orphan")).expect("create lib/pkg/orphan");
+
+    fs::write(
+        root.join("go.work"),
+        "go 1.25\n\nuse (\n    ./app\n    ./lib\n)\n",
+    )
+    .expect("write go.work");
+    fs::write(
+        root.join("app/go.mod"),
+        "module github.com/acme/app\n\ngo 1.25\n",
+    )
+    .expect("write app/go.mod");
+    fs::write(
+        root.join("app/main.go"),
+        r#"package main
+
+import "github.com/acme/lib/pkg/shared"
+
+func main() {
+    shared.Foo()
+}
+"#,
+    )
+    .expect("write app/main.go");
+    fs::write(
+        root.join("lib/go.mod"),
+        "module github.com/acme/lib\n\ngo 1.25\n",
+    )
+    .expect("write lib/go.mod");
+    fs::write(
+        root.join("lib/pkg/shared/foo.go"),
+        r#"package shared
+
+func Foo() {}
+"#,
+    )
+    .expect("write foo.go");
+    fs::write(
+        root.join("lib/pkg/shared/bar.go"),
+        r#"package shared
+
+func Bar() {}
+"#,
+    )
+    .expect("write bar.go");
+    fs::write(
+        root.join("lib/pkg/orphan/orphan.go"),
+        r#"package orphan
+
+func Lost() {}
+"#,
+    )
+    .expect("write orphan.go");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_exports: Vec<(&str, String)> = results
+        .unused_exports
+        .iter()
+        .map(|e| {
+            (
+                e.export_name.as_str(),
+                e.path.file_name().unwrap().to_string_lossy().to_string(),
+            )
+        })
+        .collect();
+
+    assert!(
+        !unused_exports
+            .iter()
+            .any(|(name, file)| *name == "Foo" && file == "foo.go"),
+        "Foo should be used across go.work modules, found unused exports: {unused_exports:?}"
+    );
+    assert!(
+        unused_exports
+            .iter()
+            .any(|(name, file)| *name == "Bar" && file == "bar.go"),
+        "Bar should remain unused across go.work modules, found unused exports: {unused_exports:?}"
+    );
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+    assert!(
+        unused_files.contains(&"orphan.go".to_string()),
+        "orphan.go should be reported as unused inside the workspace, found: {unused_files:?}"
+    );
+}
+
 // ── Default export detection ───────────────────────────────────
 
 #[test]

@@ -391,24 +391,14 @@ pub(super) fn attach_symbol_reference(
     // Namespace imports: narrow to specific member accesses when possible,
     // otherwise conservatively mark all exports as used.
     if matches!(sym.imported_name, ImportedName::Namespace) {
-        if sym.local_name.is_empty() {
-            // No local name available — mark all (conservative)
-            mark_all_exports_referenced(
-                &mut target_module.exports,
-                source_id,
-                sym.import_span,
-                ReferenceKind::NamespaceImport,
-            );
-        } else {
-            narrow_namespace_references(
-                target_module,
-                source_id,
-                &sym.local_name,
-                sym.import_span,
-                module_by_id,
-                entry_point_ids,
-            );
-        }
+        narrow_namespace_references(
+            target_module,
+            source_id,
+            &sym.local_name,
+            sym.import_span,
+            module_by_id,
+            entry_point_ids,
+        );
     }
 
     // CSS Module default imports: member accesses like `styles.primary` mark
@@ -995,6 +985,176 @@ mod tests {
                 export.name
             );
         }
+    }
+
+    #[test]
+    fn go_package_namespace_narrows_to_selected_exports() {
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: std::path::PathBuf::from("/project/main.go"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: std::path::PathBuf::from("/project/pkg/utils/foo.go"),
+                size_bytes: 50,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: std::path::PathBuf::from("/project/pkg/utils/bar.go"),
+                size_bytes: 50,
+            },
+        ];
+        let entry_points = vec![fallow_types::discover::EntryPoint {
+            path: std::path::PathBuf::from("/project/main.go"),
+            source: fallow_types::discover::EntryPointSource::Plugin {
+                name: "go".to_string(),
+            },
+        }];
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: std::path::PathBuf::from("/project/main.go"),
+                resolved_imports: vec![ResolvedImport {
+                    info: fallow_types::extract::ImportInfo {
+                        source: "github.com/acme/project/pkg/utils".to_string(),
+                        imported_name: ImportedName::Namespace,
+                        local_name: "utils".to_string(),
+                        is_type_only: false,
+                        from_style: false,
+                        span: oxc_span::Span::new(0, 10),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::GoPackage(vec![FileId(1), FileId(2)]),
+                }],
+                member_accesses: vec![fallow_types::extract::MemberAccess {
+                    object: "utils".to_string(),
+                    member: "Foo".to_string(),
+                }],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: std::path::PathBuf::from("/project/pkg/utils/foo.go"),
+                exports: vec![fallow_types::extract::ExportInfo {
+                    name: ExportName::Named("Foo".to_string()),
+                    local_name: Some("Foo".to_string()),
+                    is_type_only: false,
+                    visibility: VisibilityTag::None,
+                    span: oxc_span::Span::new(0, 20),
+                    members: vec![],
+                    super_class: None,
+                }],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: std::path::PathBuf::from("/project/pkg/utils/bar.go"),
+                exports: vec![fallow_types::extract::ExportInfo {
+                    name: ExportName::Named("Bar".to_string()),
+                    local_name: Some("Bar".to_string()),
+                    is_type_only: false,
+                    visibility: VisibilityTag::None,
+                    span: oxc_span::Span::new(0, 20),
+                    members: vec![],
+                    super_class: None,
+                }],
+                ..Default::default()
+            },
+        ];
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+        let foo_export = &graph.modules[1].exports[0];
+        assert!(!foo_export.references.is_empty());
+
+        let bar_export = &graph.modules[2].exports[0];
+        assert!(bar_export.references.is_empty());
+    }
+
+    #[test]
+    fn go_package_dot_import_narrows_to_selected_exports() {
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: std::path::PathBuf::from("/project/main.go"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: std::path::PathBuf::from("/project/pkg/utils/foo.go"),
+                size_bytes: 50,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: std::path::PathBuf::from("/project/pkg/utils/bar.go"),
+                size_bytes: 50,
+            },
+        ];
+        let entry_points = vec![fallow_types::discover::EntryPoint {
+            path: std::path::PathBuf::from("/project/main.go"),
+            source: fallow_types::discover::EntryPointSource::Plugin {
+                name: "go".to_string(),
+            },
+        }];
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: std::path::PathBuf::from("/project/main.go"),
+                resolved_imports: vec![ResolvedImport {
+                    info: fallow_types::extract::ImportInfo {
+                        source: "github.com/acme/project/pkg/utils".to_string(),
+                        imported_name: ImportedName::Namespace,
+                        local_name: String::new(),
+                        is_type_only: false,
+                        from_style: false,
+                        span: oxc_span::Span::new(0, 10),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::GoPackage(vec![FileId(1), FileId(2)]),
+                }],
+                member_accesses: vec![fallow_types::extract::MemberAccess {
+                    object: String::new(),
+                    member: "Foo".to_string(),
+                }],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: std::path::PathBuf::from("/project/pkg/utils/foo.go"),
+                exports: vec![fallow_types::extract::ExportInfo {
+                    name: ExportName::Named("Foo".to_string()),
+                    local_name: Some("Foo".to_string()),
+                    is_type_only: false,
+                    visibility: VisibilityTag::None,
+                    span: oxc_span::Span::new(0, 20),
+                    members: vec![],
+                    super_class: None,
+                }],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: std::path::PathBuf::from("/project/pkg/utils/bar.go"),
+                exports: vec![fallow_types::extract::ExportInfo {
+                    name: ExportName::Named("Bar".to_string()),
+                    local_name: Some("Bar".to_string()),
+                    is_type_only: false,
+                    visibility: VisibilityTag::None,
+                    span: oxc_span::Span::new(0, 20),
+                    members: vec![],
+                    super_class: None,
+                }],
+                ..Default::default()
+            },
+        ];
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+        let foo_export = &graph.modules[1].exports[0];
+        assert!(!foo_export.references.is_empty());
+
+        let bar_export = &graph.modules[2].exports[0];
+        assert!(bar_export.references.is_empty());
     }
 
     #[test]
