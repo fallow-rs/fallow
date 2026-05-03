@@ -72,6 +72,9 @@ pub fn extract_script_file_refs(script: &str) -> Vec<String> {
 /// Check if a token looks like a file path argument (has a directory separator or a
 /// JS/TS file extension).
 pub fn looks_like_file_path(token: &str) -> bool {
+    if !crate::scripts::could_be_file_path(token) {
+        return false;
+    }
     let extensions = [".js", ".ts", ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".tsx"];
     if extensions.iter().any(|ext| token.ends_with(ext)) {
         return true;
@@ -86,6 +89,9 @@ pub fn looks_like_file_path(token: &str) -> bool {
 /// Check if a token looks like a standalone script file reference (must have a
 /// JS/TS extension and a path-like structure, not a bare command name).
 pub fn looks_like_script_file(token: &str) -> bool {
+    if !crate::scripts::could_be_file_path(token) {
+        return false;
+    }
     let extensions = [".js", ".ts", ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".tsx"];
     if !extensions.iter().any(|ext| token.ends_with(ext)) {
         return false;
@@ -188,6 +194,36 @@ mod tests {
         // Bare names without path separator should not match
         assert!(!looks_like_script_file("webpack.js"));
         assert!(!looks_like_script_file("build"));
+    }
+
+    // Negative-guard tests (shared with scripts::could_be_file_path):
+    // tokens whose syntax precludes a Unix path must not be classified as
+    // script file references, even when their suffix matches a known
+    // extension.
+
+    #[test]
+    fn looks_like_file_path_rejects_gha_fragments() {
+        assert!(!looks_like_file_path("${{ env.URL }}/api.ts"));
+        assert!(!looks_like_file_path("}}/api/health.ts"));
+    }
+
+    #[test]
+    fn looks_like_file_path_rejects_backslash_and_bracket_class() {
+        assert!(!looks_like_file_path(r"path\to\file.ts"));
+        assert!(!looks_like_file_path(".[]"));
+        assert!(!looks_like_file_path("prefix/[^unclosed.ts"));
+    }
+
+    #[test]
+    fn looks_like_file_path_passes_nextjs_dynamic_route() {
+        assert!(looks_like_file_path("app/[id]/page.tsx"));
+        assert!(looks_like_file_path("pages/[...slug].ts"));
+    }
+
+    #[test]
+    fn looks_like_script_file_rejects_gha_and_regex_fragments() {
+        assert!(!looks_like_script_file("${{ env.X }}/path.ts"));
+        assert!(!looks_like_script_file(r"path\file.ts"));
     }
 
     mod proptests {

@@ -343,9 +343,10 @@ fn is_env_assignment(token: &str) -> bool {
 
 /// Reject tokens whose syntax precludes a Unix path (GHA expressions,
 /// backslash escapes, malformed `[...]`). Used as a pre-filter before
-/// globset compilation. Lenient: passes bare names without extensions
-/// (e.g. `deploy.log`, `Makefile`).
-fn could_be_file_path(token: &str) -> bool {
+/// globset compilation and as a shared single-source-of-truth negative
+/// guard for sibling script extractors. Lenient: passes bare names
+/// without extensions (e.g. `deploy.log`, `Makefile`).
+pub fn could_be_file_path(token: &str) -> bool {
     // GitHub Actions expressions split on whitespace into chunks like
     // `}}/path"`. Reject any token containing `${{`, or a stray `}}` that
     // is not balanced by `{{` (which would be a Mustache/Handlebars
