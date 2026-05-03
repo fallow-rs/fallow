@@ -626,16 +626,81 @@ pub fn find_private_type_leaks(
     leaks
 }
 
+/// Add dynamic-import edges that act as re-exports to the existing
+/// `re_export_sources` map. Caller has already populated it from static
+/// `re_exports`. A dynamic import counts as a re-export only when the wrapper
+/// module also exports the same name, mirroring the static `export { X } from`
+/// shape.
+fn collect_dynamic_reexport_sources(
+    resolved_modules: &[crate::resolve::ResolvedModule],
+    graph: &ModuleGraph,
+    module_idx_by_file_id: &FxHashMap<FileId, usize>,
+    re_export_sources: &mut FxHashMap<usize, FxHashSet<usize>>,
+) {
+    use crate::extract::ExportName;
+    use fallow_types::extract::ImportedName;
+
+    for resolved in resolved_modules {
+        let Some(&wrapper_idx) = module_idx_by_file_id.get(&resolved.file_id) else {
+            continue;
+        };
+        let wrapper_exports = &graph.modules[wrapper_idx].exports;
+
+        for dynamic_import in &resolved.resolved_dynamic_imports {
+            let crate::resolve::ResolveResult::InternalModule(source_file_id) =
+                &dynamic_import.target
+            else {
+                continue;
+            };
+
+            // Only count as a re-export when the wrapper exports the same shape.
+            let matches_export = match &dynamic_import.info.imported_name {
+                ImportedName::Named(name) => wrapper_exports
+                    .iter()
+                    .any(|e| matches!(&e.name, ExportName::Named(n) if n == name)),
+                ImportedName::Default => wrapper_exports
+                    .iter()
+                    .any(|e| matches!(&e.name, ExportName::Default)),
+                ImportedName::Namespace | ImportedName::SideEffect => false,
+            };
+            if !matches_export {
+                continue;
+            }
+
+            let Some(&source_idx) = module_idx_by_file_id.get(source_file_id) else {
+                continue;
+            };
+            re_export_sources
+                .entry(wrapper_idx)
+                .or_default()
+                .insert(source_idx);
+        }
+    }
+}
+
 /// Find exports that appear with the same name in multiple files (potential duplicates).
 ///
 /// Barrel re-exports (files that only re-export from other modules via `export { X } from './source'`)
 /// are excluded — having an index.ts re-export the same name as the source module is the normal
 /// barrel file pattern, not a true duplicate.
+///
+/// `resolved_modules` is the set of modules with their resolved dynamic imports.
+/// Pass `&[]` to opt out of dynamic-import re-export detection (existing static
+/// `export { X } from '...'` re-exports are still recognized).
 pub fn find_duplicate_exports(
     graph: &ModuleGraph,
     suppressions: &SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
+    resolved_modules: &[crate::resolve::ResolvedModule],
 ) -> Vec<DuplicateExport> {
+    // Build a map from FileId to module index for dynamic re-export source lookup.
+    let module_idx_by_file_id: FxHashMap<FileId, usize> = graph
+        .modules
+        .iter()
+        .enumerate()
+        .map(|(idx, m)| (m.file_id, idx))
+        .collect();
+
     // Build a set of re-export relationships: (re-exporting module idx) -> set of (source module idx)
     let mut re_export_sources: FxHashMap<usize, FxHashSet<usize>> = FxHashMap::default();
     for (idx, module) in graph.modules.iter().enumerate() {
@@ -646,6 +711,21 @@ pub fn find_duplicate_exports(
                 .insert(re.source_file.0 as usize);
         }
     }
+
+    // Extend re_export_sources with dynamic imports that act as re-exports.
+    //
+    // The Next.js `dynamic(() => import('./Foo').then(m => m.Foo))` idiom is
+    // semantically equivalent to `export { Foo } from './Foo'`. We treat module
+    // A as dynamically re-exporting from module S when A has a resolved dynamic
+    // import targeting `InternalModule(S)` AND A also exports the name being
+    // imported. The export-side check guards against false negatives where a
+    // module dynamically imports something but does not actually re-export it.
+    collect_dynamic_reexport_sources(
+        resolved_modules,
+        graph,
+        &module_idx_by_file_id,
+        &mut re_export_sources,
+    );
 
     struct ExportEntry {
         module_idx: usize,
@@ -1018,7 +1098,7 @@ mod tests {
     fn duplicate_exports_empty_graph() {
         let graph = build_graph(&[]);
         let suppressions = SuppressionContext::empty();
-        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default(), &[]);
         assert!(result.is_empty());
     }
 
@@ -1028,7 +1108,7 @@ mod tests {
         graph.modules[1].set_reachable(true);
         graph.modules[1].exports = vec![make_export("foo", 10, 20), make_export("bar", 30, 40)];
         let suppressions = SuppressionContext::empty();
-        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default(), &[]);
         assert!(result.is_empty());
     }
 
@@ -1047,7 +1127,7 @@ mod tests {
         graph.reverse_deps[1] = vec![FileId(0)];
         graph.reverse_deps[2] = vec![FileId(0)];
         let suppressions = SuppressionContext::empty();
-        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default(), &[]);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].export_name, "helper");
         assert_eq!(result[0].locations.len(), 2);
@@ -1079,7 +1159,7 @@ mod tests {
             members: vec![],
         }];
         let suppressions = SuppressionContext::empty();
-        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default(), &[]);
         assert!(result.is_empty());
     }
 
@@ -1095,7 +1175,7 @@ mod tests {
         graph.modules[2].set_reachable(true);
         graph.modules[2].exports = vec![make_export("helper", 10, 20)]; // real
         let suppressions = SuppressionContext::empty();
-        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default(), &[]);
         assert!(result.is_empty());
     }
 
@@ -1111,7 +1191,7 @@ mod tests {
         // Module 2 stays unreachable
         graph.modules[2].exports = vec![make_export("helper", 10, 20)];
         let suppressions = SuppressionContext::empty();
-        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default(), &[]);
         assert!(result.is_empty());
     }
 
@@ -1122,7 +1202,7 @@ mod tests {
         graph.modules[1].set_reachable(true);
         graph.modules[1].exports = vec![make_export("helper", 10, 20)];
         let suppressions = SuppressionContext::empty();
-        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default(), &[]);
         assert!(result.is_empty());
     }
 
@@ -1145,7 +1225,7 @@ mod tests {
         graph.modules[2].set_reachable(true);
         graph.modules[2].exports = vec![make_export("helper", 5, 15)];
         let suppressions = SuppressionContext::empty();
-        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default(), &[]);
         assert!(result.is_empty());
     }
 
@@ -1170,7 +1250,7 @@ mod tests {
         supp_map.insert(FileId(2), &supp);
         let suppressions = SuppressionContext::from_map(supp_map);
 
-        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default(), &[]);
         assert!(result.is_empty());
     }
 
@@ -1191,7 +1271,7 @@ mod tests {
         graph.reverse_deps[2] = vec![FileId(0)];
         graph.reverse_deps[3] = vec![FileId(0)];
         let suppressions = SuppressionContext::empty();
-        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default(), &[]);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].export_name, "sharedFn");
         assert_eq!(result[0].locations.len(), 3);
@@ -1213,7 +1293,7 @@ mod tests {
         // No shared importer: each is imported by a different parent
         // (or not imported at all — just reachable via framework routing)
         let suppressions = SuppressionContext::empty();
-        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default(), &[]);
         assert!(
             result.is_empty(),
             "unrelated leaf files should not be flagged as duplicates"
@@ -1235,7 +1315,7 @@ mod tests {
         // a.ts imports b.ts directly
         graph.reverse_deps[2] = vec![FileId(1)];
         let suppressions = SuppressionContext::empty();
-        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default(), &[]);
         assert_eq!(
             result.len(),
             1,
@@ -1255,7 +1335,7 @@ mod tests {
         graph.modules[2].set_reachable(true);
         graph.modules[2].exports = vec![make_export("bar", 10, 20)];
         let suppressions = SuppressionContext::empty();
-        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default(), &[]);
         assert!(result.is_empty());
     }
 
@@ -1271,7 +1351,7 @@ mod tests {
         ];
         graph.reverse_deps[1] = vec![FileId(0)];
         let suppressions = SuppressionContext::empty();
-        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default(), &[]);
         assert!(
             result.is_empty(),
             "value+type merging should not be flagged as duplicate"
@@ -1294,7 +1374,7 @@ mod tests {
         graph.reverse_deps[1] = vec![FileId(0)];
         graph.reverse_deps[2] = vec![FileId(0)];
         let suppressions = SuppressionContext::empty();
-        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default(), &[]);
         assert!(
             result.is_empty(),
             "cross-file value+type should not be flagged"
@@ -1316,12 +1396,255 @@ mod tests {
         graph.reverse_deps[1] = vec![FileId(0)];
         graph.reverse_deps[2] = vec![FileId(0)];
         let suppressions = SuppressionContext::empty();
-        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default(), &[]);
         assert_eq!(
             result.len(),
             1,
             "same-namespace duplicates should still be flagged"
         );
+    }
+
+    // ---- Next.js dynamic() re-export tests ----
+
+    /// Build a `ResolvedModule` shell for use in dynamic-import test fixtures.
+    /// All side-channel fields default to empty.
+    fn make_resolved_module(file_id: u32, path: &str) -> crate::resolve::ResolvedModule {
+        crate::resolve::ResolvedModule {
+            file_id: FileId(file_id),
+            path: std::path::PathBuf::from(path),
+            exports: vec![],
+            re_exports: vec![],
+            resolved_imports: vec![],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            unused_import_bindings: FxHashSet::default(),
+            type_referenced_import_bindings: vec![],
+            value_referenced_import_bindings: vec![],
+        }
+    }
+
+    /// Build a resolved dynamic import `target_id` of the given import shape.
+    fn dynamic_import_to(
+        target_id: u32,
+        imported_name: crate::extract::ImportedName,
+    ) -> crate::resolve::ResolvedImport {
+        crate::resolve::ResolvedImport {
+            info: fallow_types::extract::ImportInfo {
+                source: "./target".to_string(),
+                imported_name,
+                local_name: "_local".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::new(0, 1),
+                source_span: oxc_span::Span::default(),
+            },
+            target: crate::resolve::ResolveResult::InternalModule(FileId(target_id)),
+        }
+    }
+
+    #[test]
+    fn dynamic_import_then_member_not_flagged_as_duplicate() {
+        // Foo-lazy.tsx exports `Foo` via `dynamic(() => import('./Foo').then(m => m.Foo))`.
+        // The lazy wrapper is semantically a re-export — must NOT be flagged.
+        use crate::extract::ImportedName;
+
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/Foo.tsx", false),
+            ("/src/Foo-lazy.tsx", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_export("Foo", 10, 30)];
+        graph.modules[2].set_reachable(true);
+        graph.modules[2].exports = vec![make_export("Foo", 10, 30)];
+        graph.reverse_deps[1] = vec![FileId(0)];
+        graph.reverse_deps[2] = vec![FileId(0)];
+
+        let mut foo_lazy = make_resolved_module(2, "/src/Foo-lazy.tsx");
+        foo_lazy.resolved_dynamic_imports =
+            vec![dynamic_import_to(1, ImportedName::Named("Foo".to_string()))];
+
+        let resolved_modules = vec![make_resolved_module(1, "/src/Foo.tsx"), foo_lazy];
+        let suppressions = SuppressionContext::empty();
+        let result = find_duplicate_exports(
+            &graph,
+            &suppressions,
+            &FxHashMap::default(),
+            &resolved_modules,
+        );
+        assert!(
+            result.is_empty(),
+            "dynamic(import().then(m=>m.Foo)) wrapper must not be flagged as duplicate-export"
+        );
+    }
+
+    #[test]
+    fn dynamic_import_without_then_default_not_flagged_as_duplicate() {
+        // `dynamic(() => import('./Foo'))` (default-import variant).
+        // Both modules have a default export so the wrapper is a real re-export.
+        use crate::extract::{ExportName, ImportedName, VisibilityTag};
+        use crate::graph::ExportSymbol;
+
+        let make_default_export = || ExportSymbol {
+            name: ExportName::Default,
+            is_type_only: false,
+            visibility: VisibilityTag::None,
+            span: oxc_span::Span::new(0, 10),
+            references: vec![],
+            members: vec![],
+        };
+
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/Foo.tsx", false),
+            ("/src/Foo-lazy.tsx", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_default_export()];
+        graph.modules[2].set_reachable(true);
+        graph.modules[2].exports = vec![make_default_export()];
+        graph.reverse_deps[1] = vec![FileId(0)];
+        graph.reverse_deps[2] = vec![FileId(0)];
+
+        let mut foo_lazy = make_resolved_module(2, "/src/Foo-lazy.tsx");
+        foo_lazy.resolved_dynamic_imports = vec![dynamic_import_to(1, ImportedName::Default)];
+
+        let resolved_modules = vec![make_resolved_module(1, "/src/Foo.tsx"), foo_lazy];
+        let suppressions = SuppressionContext::empty();
+        let result = find_duplicate_exports(
+            &graph,
+            &suppressions,
+            &FxHashMap::default(),
+            &resolved_modules,
+        );
+        assert!(
+            result.is_empty(),
+            "dynamic(import('./Foo')) wrapper with matching default export must not be flagged"
+        );
+    }
+
+    #[test]
+    fn dynamic_import_named_without_matching_export_still_flagged() {
+        // Wrapper has a Named dynamic import of "Foo" but does NOT export "Foo".
+        // It exports "Bar". The duplicate-export detector should still flag the
+        // unrelated "Foo" duplication between the source and a third module.
+        use crate::extract::ImportedName;
+
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/Foo.tsx", false),
+            ("/src/other-foo.tsx", false),
+            ("/src/wrapper.tsx", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_export("Foo", 10, 30)];
+        graph.modules[2].set_reachable(true);
+        graph.modules[2].exports = vec![make_export("Foo", 10, 30)];
+        graph.modules[3].set_reachable(true);
+        graph.modules[3].exports = vec![make_export("Bar", 10, 30)];
+        graph.reverse_deps[1] = vec![FileId(0)];
+        graph.reverse_deps[2] = vec![FileId(0)];
+        graph.reverse_deps[3] = vec![FileId(0)];
+
+        // Wrapper dynamically imports "Foo" from Foo.tsx but exports only "Bar".
+        let mut wrapper = make_resolved_module(3, "/src/wrapper.tsx");
+        wrapper.resolved_dynamic_imports =
+            vec![dynamic_import_to(1, ImportedName::Named("Foo".to_string()))];
+
+        let resolved_modules = vec![
+            make_resolved_module(1, "/src/Foo.tsx"),
+            make_resolved_module(2, "/src/other-foo.tsx"),
+            wrapper,
+        ];
+        let suppressions = SuppressionContext::empty();
+        let result = find_duplicate_exports(
+            &graph,
+            &suppressions,
+            &FxHashMap::default(),
+            &resolved_modules,
+        );
+        assert_eq!(
+            result.len(),
+            1,
+            "Foo duplication between unrelated modules must be flagged"
+        );
+        assert_eq!(result[0].export_name, "Foo");
+    }
+
+    #[test]
+    fn dynamic_import_default_without_default_export_still_flagged() {
+        // Wrapper has a Default dynamic import targeting source, but does not
+        // have a Default export of its own — only a Named "helper". The
+        // dynamic import is for some other purpose, not re-export. Both modules
+        // exporting "helper" must still be flagged as a duplicate.
+        use crate::extract::ImportedName;
+
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/source.ts", false),
+            ("/src/wrapper.ts", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_export("helper", 10, 20)];
+        graph.modules[2].set_reachable(true);
+        graph.modules[2].exports = vec![make_export("helper", 10, 20)];
+        graph.reverse_deps[1] = vec![FileId(0)];
+        graph.reverse_deps[2] = vec![FileId(0)];
+
+        // Wrapper dynamically imports source.ts as Default, but exports only
+        // a Named "helper" — the dynamic import is not re-exporting anything.
+        let mut wrapper = make_resolved_module(2, "/src/wrapper.ts");
+        wrapper.resolved_dynamic_imports = vec![dynamic_import_to(1, ImportedName::Default)];
+
+        let resolved_modules = vec![make_resolved_module(1, "/src/source.ts"), wrapper];
+        let suppressions = SuppressionContext::empty();
+        let result = find_duplicate_exports(
+            &graph,
+            &suppressions,
+            &FxHashMap::default(),
+            &resolved_modules,
+        );
+        assert_eq!(
+            result.len(),
+            1,
+            "Default dynamic import without matching Default export must not suppress duplicate-export"
+        );
+        assert_eq!(result[0].export_name, "helper");
+    }
+
+    #[test]
+    fn duplicate_without_dynamic_link_still_flagged() {
+        // Two modules both export "helper" with no dynamic-import link between
+        // them. Pre-existing duplicate-export behaviour must hold even when
+        // resolved_modules is supplied.
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/a.ts", false),
+            ("/src/b.ts", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_export("helper", 10, 20)];
+        graph.modules[2].set_reachable(true);
+        graph.modules[2].exports = vec![make_export("helper", 10, 20)];
+        graph.reverse_deps[1] = vec![FileId(0)];
+        graph.reverse_deps[2] = vec![FileId(0)];
+
+        let resolved_modules = vec![
+            make_resolved_module(1, "/src/a.ts"),
+            make_resolved_module(2, "/src/b.ts"),
+        ];
+        let suppressions = SuppressionContext::empty();
+        let result = find_duplicate_exports(
+            &graph,
+            &suppressions,
+            &FxHashMap::default(),
+            &resolved_modules,
+        );
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].export_name, "helper");
     }
 
     // ---- find_unused_exports tests (exercises compile_ignore_matchers, compile_plugin_matchers,

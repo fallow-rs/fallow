@@ -394,6 +394,7 @@ pub fn find_dead_code_full(
                                             graph,
                                             &suppressions,
                                             &line_offsets_by_file,
+                                            resolved_modules,
                                         )
                                     } else {
                                         Vec::new()
