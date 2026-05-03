@@ -1,0 +1,7 @@
+{
+  "name": "@sagri/mrv",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "vitest": "^4.0.0"
+  }
+}

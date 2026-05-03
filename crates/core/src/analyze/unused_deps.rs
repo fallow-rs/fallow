@@ -704,6 +704,16 @@ pub fn find_unlisted_dependencies(
         })
         .unwrap_or_default();
 
+    // Collect virtual package suffixes from active plugins (e.g., Vitest /__mocks__)
+    let virtual_suffixes: Vec<&str> = plugin_result
+        .map(|pr| {
+            pr.virtual_package_suffixes
+                .iter()
+                .map(String::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
+
     // Collect tooling dependencies from active plugins — these are framework-provided
     // packages (e.g., Nuxt provides `ofetch`, `h3`, `vue-router` at runtime) that may
     // be imported in user code without being listed in package.json.
@@ -754,6 +764,15 @@ pub fn find_unlisted_dependencies(
                     .strip_suffix('/')
                     .is_some_and(|base| package_name == base)
         }) {
+            continue;
+        }
+        // Plain `ends_with` is sufficient for suffixes; unlike prefixes, suffix
+        // entries always include the leading boundary character (e.g. `/__mocks__`)
+        // so there is no bare-equality case to special-case.
+        if virtual_suffixes
+            .iter()
+            .any(|suffix| package_name.ends_with(suffix))
+        {
             continue;
         }
         // Quick check: if an external dependency is listed in any root or workspace

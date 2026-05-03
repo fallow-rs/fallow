@@ -633,6 +633,15 @@ pub trait Plugin: Send + Sync {
         &[]
     }
 
+    /// Package name suffixes that are virtual modules provided by this framework
+    /// at build time (e.g., test runner mock conventions).
+    /// Imports matching these suffixes should not be flagged as unlisted dependencies.
+    /// Each entry is matched as a suffix against the extracted package name
+    /// (e.g., `"/__mocks__"` matches `@aws-sdk/__mocks__` and `some-pkg/__mocks__`).
+    fn virtual_package_suffixes(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// Import suffixes for build-time generated relative imports.
     ///
     /// Unresolved relative imports whose specifier ends with one of these suffixes
@@ -1149,6 +1158,7 @@ mod tests {
             plugin.tooling_dependencies().is_empty() || !plugin.tooling_dependencies().is_empty()
         );
         assert!(plugin.virtual_module_prefixes().is_empty());
+        assert!(plugin.virtual_package_suffixes().is_empty());
         assert!(plugin.path_aliases(Path::new("/project")).is_empty());
         assert!(
             plugin.package_json_config_key().is_none()
@@ -1236,6 +1246,11 @@ mod tests {
     #[test]
     fn default_virtual_module_prefixes_is_empty() {
         assert!(MinimalPlugin.virtual_module_prefixes().is_empty());
+    }
+
+    #[test]
+    fn default_virtual_package_suffixes_is_empty() {
+        assert!(MinimalPlugin.virtual_package_suffixes().is_empty());
     }
 
     #[test]

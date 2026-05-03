@@ -43,6 +43,14 @@ const FIXTURE_PATTERNS: &[&str] = &[
     "**/fixtures/**/*.{ts,tsx,js,jsx,json}",
 ];
 
+/// Package name suffixes that identify Vitest manual-mock virtual paths.
+///
+/// Vitest's manual-mock convention places mock factories at `<package>/__mocks__/<module>.ts`
+/// and test setups sometimes import from `@<scope>/__mocks__` paths (via package.json `imports`
+/// aliases or workspace virtual paths). These specifiers do not exist on npm and must not be
+/// flagged as unlisted dependencies.
+const VIRTUAL_PACKAGE_SUFFIXES: &[&str] = &["/__mocks__"];
+
 /// Built-in Vitest reporter names that should not be treated as dependencies.
 const BUILTIN_REPORTERS: &[&str] = &[
     "default",
@@ -111,6 +119,10 @@ impl Plugin for VitestPlugin {
 
     fn fixture_glob_patterns(&self) -> &'static [&'static str] {
         FIXTURE_PATTERNS
+    }
+
+    fn virtual_package_suffixes(&self) -> &'static [&'static str] {
+        VIRTUAL_PACKAGE_SUFFIXES
     }
 
     fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
@@ -261,6 +273,55 @@ mod tests {
             source,
             std::path::Path::new("/project"),
         )
+    }
+
+    #[test]
+    fn mocks_path_suffix_is_present() {
+        let suffixes = VitestPlugin.virtual_package_suffixes();
+        assert!(
+            suffixes.contains(&"/__mocks__"),
+            "VitestPlugin should declare /__mocks__ as a virtual package suffix"
+        );
+    }
+
+    #[test]
+    fn scoped_mocks_package_matches_suffix() {
+        let suffixes = VitestPlugin.virtual_package_suffixes();
+        let candidates = [
+            "@aws-sdk/__mocks__",
+            "@sentry/__mocks__",
+            "@supabase/__mocks__",
+            "@mapbox/__mocks__",
+            "@ai-sdk/__mocks__",
+            "some-pkg/__mocks__",
+        ];
+        for candidate in &candidates {
+            assert!(
+                suffixes.iter().any(|s| candidate.ends_with(s)),
+                "{candidate} should be matched by a virtual package suffix"
+            );
+        }
+    }
+
+    #[test]
+    fn non_mocks_package_does_not_match_suffix() {
+        let suffixes = VitestPlugin.virtual_package_suffixes();
+        // Includes adversarial cases that share the substring `__mocks__` but
+        // don't end with `/__mocks__`, plus a package whose own name contains it.
+        let non_mocks = [
+            "@aws-sdk/client-s3",
+            "vitest",
+            "@vitest/coverage-v8",
+            "__mocks__-helper",
+            "my__mocks__pkg",
+            "@scope/__mocks__-utils",
+        ];
+        for candidate in &non_mocks {
+            assert!(
+                !suffixes.iter().any(|s| candidate.ends_with(s)),
+                "{candidate} should NOT be matched by a virtual package suffix"
+            );
+        }
     }
 
     #[test]

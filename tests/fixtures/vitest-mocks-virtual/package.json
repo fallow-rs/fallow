@@ -1,0 +1,7 @@
+{
+  "name": "vitest-mocks-virtual",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  }
+}

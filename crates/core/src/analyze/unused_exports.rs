@@ -1371,6 +1371,7 @@ mod tests {
             tooling_dependencies: vec![],
             script_used_packages: FxHashSet::default(),
             virtual_module_prefixes: vec![],
+            virtual_package_suffixes: vec![],
             generated_import_patterns: vec![],
             path_aliases: vec![],
             active_plugins: vec![],

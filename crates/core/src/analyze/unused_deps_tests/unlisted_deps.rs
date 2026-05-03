@@ -407,6 +407,68 @@ fn unlisted_dep_detected_across_multiple_files() {
     );
 }
 
+// ---- virtual_package_suffixes suppression ----
+
+#[test]
+fn vitest_mocks_package_not_reported_as_unlisted_via_suffix() {
+    // Imports like `@aws-sdk/__mocks__` should not be flagged when Vitest plugin
+    // contributes `/__mocks__` as a virtual package suffix.
+    let (graph, resolved_modules) = build_graph_with_npm_imports(&[("@aws-sdk/__mocks__", false)]);
+    let pkg = make_pkg(&[], &["vitest"], &[]);
+    let config = test_config(PathBuf::from("/project"));
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let mut plugin_result = AggregatedPluginResult::default();
+    plugin_result
+        .virtual_package_suffixes
+        .push("/__mocks__".to_string());
+
+    let unlisted = find_unlisted_dependencies(
+        &graph,
+        &pkg,
+        &config,
+        &[],
+        Some(&plugin_result),
+        &resolved_modules,
+        &line_offsets,
+    );
+
+    assert!(
+        unlisted.is_empty(),
+        "no unlisted deps expected when /__mocks__ suffix matches; got: {:?}",
+        unlisted.iter().map(|d| &d.package_name).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn plain_mocks_package_not_reported_as_unlisted_via_suffix() {
+    let (graph, resolved_modules) = build_graph_with_npm_imports(&[("some-pkg/__mocks__", false)]);
+    let pkg = make_pkg(&[], &[], &[]);
+    let config = test_config(PathBuf::from("/project"));
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let mut plugin_result = AggregatedPluginResult::default();
+    plugin_result
+        .virtual_package_suffixes
+        .push("/__mocks__".to_string());
+
+    let unlisted = find_unlisted_dependencies(
+        &graph,
+        &pkg,
+        &config,
+        &[],
+        Some(&plugin_result),
+        &resolved_modules,
+        &line_offsets,
+    );
+
+    assert!(
+        unlisted.is_empty(),
+        "no unlisted deps expected when /__mocks__ suffix matches unscoped; got: {:?}",
+        unlisted.iter().map(|d| &d.package_name).collect::<Vec<_>>()
+    );
+}
+
 // ---- Additional coverage: find_unlisted_dependencies with optional dep listed ----
 
 #[test]

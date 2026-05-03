@@ -487,6 +487,19 @@ fn nuxt_contributes_virtual_module_prefixes() {
     );
 }
 
+#[test]
+fn vitest_contributes_mocks_virtual_package_suffix() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg_dev(&["vitest"]);
+    let result = registry.run(&pkg, Path::new("/project"), &[]);
+    assert!(
+        result
+            .virtual_package_suffixes
+            .contains(&"/__mocks__".to_string()),
+        "vitest should contribute '/__mocks__' virtual package suffix"
+    );
+}
+
 // ── process_static_patterns: always_used aggregation ─────────
 
 #[test]
@@ -2431,6 +2444,7 @@ fn aggregated_result_default_is_empty() {
     assert!(result.tooling_dependencies.is_empty());
     assert!(result.script_used_packages.is_empty());
     assert!(result.virtual_module_prefixes.is_empty());
+    assert!(result.virtual_package_suffixes.is_empty());
     assert!(result.path_aliases.is_empty());
     assert!(result.active_plugins.is_empty());
 }

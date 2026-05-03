@@ -1,0 +1,5 @@
+{
+  "name": "vitest-mocks-workspace",
+  "private": true,
+  "workspaces": ["apps/*"]
+}

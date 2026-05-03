@@ -58,6 +58,9 @@ pub struct AggregatedPluginResult {
     /// Import prefixes for virtual modules provided by active frameworks.
     /// Imports matching these prefixes should not be flagged as unlisted dependencies.
     pub virtual_module_prefixes: Vec<String>,
+    /// Package name suffixes that identify virtual or convention-based specifiers.
+    /// Extracted package names ending with any of these suffixes are not flagged as unlisted.
+    pub virtual_package_suffixes: Vec<String>,
     /// Import suffixes for build-time generated relative imports.
     /// Unresolved imports ending with these suffixes are suppressed.
     pub generated_import_patterns: Vec<String>,

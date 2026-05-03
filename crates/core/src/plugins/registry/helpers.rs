@@ -49,6 +49,9 @@ pub fn process_static_patterns(
     for prefix in plugin.virtual_module_prefixes() {
         result.virtual_module_prefixes.push((*prefix).to_string());
     }
+    for suffix in plugin.virtual_package_suffixes() {
+        result.virtual_package_suffixes.push((*suffix).to_string());
+    }
     for pattern in plugin.generated_import_patterns() {
         result
             .generated_import_patterns

@@ -1064,6 +1064,20 @@ fn run_plugins(
         result.virtual_module_prefixes.iter().cloned().collect();
     let mut seen_generated: rustc_hash::FxHashSet<String> =
         result.generated_import_patterns.iter().cloned().collect();
+    let mut seen_suffixes: rustc_hash::FxHashSet<String> =
+        result.virtual_package_suffixes.iter().cloned().collect();
+
+    fn extend_unique(
+        target: &mut Vec<String>,
+        seen: &mut rustc_hash::FxHashSet<String>,
+        items: Vec<String>,
+    ) {
+        for item in items {
+            if seen.insert(item.clone()) {
+                target.push(item);
+            }
+        }
+    }
     for (ws_result, ws_prefix) in ws_results {
         // Prefix helper: workspace-relative patterns need the workspace prefix
         // to be matchable from the monorepo root. But patterns that are already
@@ -1118,22 +1132,25 @@ fn run_plugins(
         result
             .tooling_dependencies
             .extend(ws_result.tooling_dependencies);
-        // Virtual module prefixes (e.g., Docusaurus @theme/, @site/) are
-        // package-name prefixes, not file paths — no workspace prefix needed.
-        for prefix in ws_result.virtual_module_prefixes {
-            if !seen_prefixes.contains(&prefix) {
-                seen_prefixes.insert(prefix.clone());
-                result.virtual_module_prefixes.push(prefix);
-            }
-        }
-        // Generated import patterns (e.g., SvelteKit /$types) are suffix
-        // matches on specifiers, not file paths — no workspace prefix needed.
-        for pattern in ws_result.generated_import_patterns {
-            if !seen_generated.contains(&pattern) {
-                seen_generated.insert(pattern.clone());
-                result.generated_import_patterns.push(pattern);
-            }
-        }
+        // Virtual import boundaries — prefixes (e.g., Docusaurus `@theme/`),
+        // generated import patterns (e.g., SvelteKit `/$types`), and package-name
+        // suffixes (e.g., Vitest `/__mocks__`) — match against import specifiers
+        // or package names, never file paths, so no workspace prefix is applied.
+        extend_unique(
+            &mut result.virtual_module_prefixes,
+            &mut seen_prefixes,
+            ws_result.virtual_module_prefixes,
+        );
+        extend_unique(
+            &mut result.generated_import_patterns,
+            &mut seen_generated,
+            ws_result.generated_import_patterns,
+        );
+        extend_unique(
+            &mut result.virtual_package_suffixes,
+            &mut seen_suffixes,
+            ws_result.virtual_package_suffixes,
+        );
         // Path aliases from workspace plugins (e.g., SvelteKit $lib/ → src/lib).
         // Prefix the replacement directory so it resolves from the monorepo root.
         for (prefix, replacement) in ws_result.path_aliases {
