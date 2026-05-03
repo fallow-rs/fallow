@@ -341,8 +341,48 @@ fn is_env_assignment(token: &str) -> bool {
     })
 }
 
+/// Reject tokens whose syntax precludes a Unix path (GHA expressions,
+/// backslash escapes, malformed `[...]`). Used as a pre-filter before
+/// globset compilation. Lenient: passes bare names without extensions
+/// (e.g. `deploy.log`, `Makefile`).
+fn could_be_file_path(token: &str) -> bool {
+    // GitHub Actions expressions split on whitespace into chunks like
+    // `}}/path"`. Reject any token containing `${{`, or a stray `}}` that
+    // is not balanced by `{{` (which would be a Mustache/Handlebars
+    // template path like `templates/{{name}}.hbs`).
+    if token.contains("${{") || (token.contains("}}") && !token.contains("{{")) {
+        return false;
+    }
+
+    // Backslash is not valid in Unix paths. Catches regex escapes like
+    // `)\./[^` from `grep -oP '...\./...'`.
+    if token.contains('\\') {
+        return false;
+    }
+
+    // Reject empty `[]` and unclosed `[^...` character classes. Only the
+    // first `[` is checked; that suffices for the in-the-wild fragments
+    // (`.[]`, `)\./[^`) and a token already rejected by the backslash
+    // guard never reaches here.
+    if let Some(open) = token.find('[') {
+        let after_open = &token[open + 1..];
+        let close_offset = after_open.find(']');
+        if !matches!(close_offset, Some(offset) if offset > 0) {
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Check if a token looks like a file path (has a known extension or path separator).
+/// Stricter than `could_be_file_path` — used by CI command extractors to recognize
+/// definitely-path-shaped tokens.
 fn looks_like_file_path(token: &str) -> bool {
+    if !could_be_file_path(token) {
+        return false;
+    }
+
     const EXTENSIONS: &[&str] = &[
         ".js", ".ts", ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".tsx", ".json", ".yaml", ".yml",
         ".toml",
@@ -998,6 +1038,69 @@ mod tests {
         assert!(!super::looks_like_file_path("webpack"));
         assert!(!super::looks_like_file_path("--mode"));
         assert!(!super::looks_like_file_path("production"));
+    }
+
+    #[test]
+    fn looks_like_file_path_github_actions_expression_not_file() {
+        // Fragments of `${{ env.X }}/path` expressions.
+        assert!(!super::looks_like_file_path(
+            r#""${{ env.ENVIRONMENT_URL }}/api/health/ready""#
+        ));
+        assert!(!super::looks_like_file_path("}}/api/health/ready\""));
+        assert!(!super::looks_like_file_path("${{ env.BASE_URL }}"));
+    }
+
+    #[test]
+    fn looks_like_file_path_jq_array_iterator_not_file() {
+        // `.[]` from `jq -c '.[]'`. Empty char class fires the guard.
+        assert!(!super::looks_like_file_path(".[]"));
+        assert!(!super::looks_like_file_path("'.[]'"));
+    }
+
+    #[test]
+    fn looks_like_file_path_regex_fragment_not_file() {
+        // `)\./[^` from `grep -oP '(?<=Module )\./[^ ]+...'`. Backslash
+        // and unclosed-class guards both fire.
+        assert!(!super::looks_like_file_path(r")\./[^"));
+        assert!(!super::looks_like_file_path(r"path\with\backslash"));
+        assert!(!super::looks_like_file_path("prefix/[^unclosed"));
+    }
+
+    #[test]
+    fn looks_like_file_path_valid_nextjs_dynamic_route() {
+        assert!(super::looks_like_file_path("app/[id]/page.tsx"));
+        assert!(super::looks_like_file_path("pages/[...slug].ts"));
+    }
+
+    // --- could_be_file_path tests (lenient negative-only filter) ---
+
+    #[test]
+    fn could_be_file_path_passes_bare_names() {
+        // Lenient: tokens without extensions or path separators pass.
+        assert!(super::could_be_file_path("deploy.log"));
+        assert!(super::could_be_file_path("Makefile"));
+        assert!(super::could_be_file_path("Cargo.lock"));
+    }
+
+    #[test]
+    fn could_be_file_path_passes_balanced_mustache() {
+        // Mustache/Handlebars template paths balance `{{ }}` and must pass.
+        // The `}}` guard only fires when `}}` appears without a matching `{{`.
+        assert!(super::could_be_file_path("templates/{{name}}.hbs"));
+        assert!(super::could_be_file_path("{{partial}}.html"));
+    }
+
+    #[test]
+    fn could_be_file_path_rejects_ghs_fragments() {
+        // GHA expression split-fragments and standalone `}}` tokens.
+        assert!(!super::could_be_file_path("${{ env.X }}"));
+        assert!(!super::could_be_file_path("}}/path"));
+    }
+
+    #[test]
+    fn could_be_file_path_rejects_regex_and_jq_fragments() {
+        assert!(!super::could_be_file_path(r")\./[^"));
+        assert!(!super::could_be_file_path(".[]"));
     }
 
     // --- extract_config_arg tests ---

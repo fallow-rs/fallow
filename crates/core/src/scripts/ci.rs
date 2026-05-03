@@ -9,7 +9,7 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::{parse_script, resolve_binary_to_package};
+use super::{could_be_file_path, parse_script, resolve_binary_to_package};
 
 /// Result of scanning CI config files: package names used by CI tooling AND
 /// project-relative file paths referenced as command-line arguments.
@@ -86,7 +86,17 @@ fn extract_ci_signals(
                 let pkg = resolve_binary_to_package(&cmd.binary, root, bin_map);
                 analysis.used_packages.insert(pkg);
             }
-            analysis.entry_files.extend(cmd.config_args);
+            // `parse_script` already routes `cmd.file_args` through
+            // `looks_like_file_path`, so they are pre-filtered.
+            // `cmd.config_args` come from `extract_config_arg` (e.g. the
+            // value after `--config`/`-c`) and bypass that gate, so jq
+            // array iterators or Perl regex fragments passed via flags
+            // can leak through. Re-filter here.
+            analysis.entry_files.extend(
+                cmd.config_args
+                    .into_iter()
+                    .filter(|s| could_be_file_path(s)),
+            );
             analysis.entry_files.extend(cmd.file_args);
         }
     }
@@ -363,6 +373,94 @@ jobs:
         );
         let packages = &analysis.used_packages;
         assert!(packages.contains("@cyclonedx/cyclonedx-npm"));
+    }
+
+    #[test]
+    fn github_actions_expression_fragments_not_entry_files() {
+        // Regression: tokens like `}}/api/health/ready"` produced by splitting
+        // `"${{ env.ENVIRONMENT_URL }}/api/health/ready"` on whitespace contain
+        // `}}` and must not be recorded as entry file paths.
+        let content = r#"
+jobs:
+  health-check:
+    steps:
+      - run: |
+          RESPONSE_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -m 15 "${{ env.ENVIRONMENT_URL }}/api/health/ready")
+          echo "$RESPONSE_CODE"
+"#;
+        let mut analysis = CiAnalysis::default();
+        extract_ci_signals(
+            content,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &mut analysis,
+        );
+        for path in &analysis.entry_files {
+            assert!(
+                !path.contains("${{") && !path.contains("}}"),
+                "entry_files must not contain GitHub Actions expression fragments, got: {path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn jq_array_iterator_not_entry_file() {
+        // Regression: `jq -c '.[]'` and `jq -r '.[]'` in CI run blocks must not
+        // produce entry-file candidates. `'.[]'` is a jq array-iterator; globset
+        // rejects it as an empty character class `[]`.
+        let content = r#"
+jobs:
+  process:
+    steps:
+      - run: |
+          jq -c '.[]' /tmp/x.json | while read item; do echo "$item"; done
+          result=$(jq -r '.[]' data.json)
+"#;
+        let mut analysis = CiAnalysis::default();
+        extract_ci_signals(
+            content,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &mut analysis,
+        );
+        for path in &analysis.entry_files {
+            assert!(
+                !path.contains(".[]"),
+                "entry_files must not contain jq array-iterator fragments, got: {path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn grep_perl_regex_fragment_not_entry_file() {
+        // Regression: `grep -oP '(?<=Module )\./[^ ]+(?= has finished with an error)'`
+        // in CI run blocks splits on whitespace into tokens including `)\./[^`.
+        // That fragment contains a backslash (`\.`) and an unclosed character class
+        // (`[^`) — neither is a valid file path.
+        let content = r"
+jobs:
+  deploy:
+    steps:
+      - run: |
+          grep -oP '(?<=Module )\./[^ ]+(?= has finished with an error)' deploy.log
+";
+        let mut analysis = CiAnalysis::default();
+        extract_ci_signals(
+            content,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &mut analysis,
+        );
+        for path in &analysis.entry_files {
+            assert!(
+                !path.contains(r"\./"),
+                "entry_files must not contain regex escape fragments, got: {path:?}"
+            );
+            assert!(
+                !path.contains("[^"),
+                "entry_files must not contain unclosed character class fragments, got: {path:?}"
+            );
+        }
     }
 
     // ── helper tests ───────────────────────────────────────────────
