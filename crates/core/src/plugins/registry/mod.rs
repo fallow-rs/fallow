@@ -15,10 +15,14 @@ use helpers::{
     process_static_patterns,
 };
 
+// ESLint is included because each workspace owns its own eslint.config.{mjs,js,...}
+// that may import a shared workspace eslint-config package. Those transitive deps
+// (e.g. eslint-config-next, eslint-plugin-react) are declared in the workspace's
+// devDependencies and will be flagged as unused if we skip config parsing here.
 fn must_parse_workspace_config_when_root_active(plugin_name: &str) -> bool {
     matches!(
         plugin_name,
-        "docusaurus" | "jest" | "tanstack-router" | "vitest"
+        "eslint" | "docusaurus" | "jest" | "tanstack-router" | "vitest"
     )
 }
 

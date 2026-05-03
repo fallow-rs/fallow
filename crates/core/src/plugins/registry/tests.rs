@@ -1553,6 +1553,91 @@ fn run_workspace_fast_returns_empty_for_no_active_plugins() {
     assert!(result.always_used.is_empty());
 }
 
+/// Regression: monorepo where ESLint is active at the root level.
+///
+/// Layout:
+///   <root>/
+///     node_modules/@scope/eslint-config/
+///       package.json  (main: "index.js")
+///       index.js      (imports eslint-plugin-react)
+///     apps/foo/
+///       package.json  (devDeps: eslint, eslint-plugin-react)
+///       eslint.config.mjs  (imports @scope/eslint-config)
+///
+/// When ESLint is already in `skip_config_plugins` (root-level plugin ran),
+/// the workspace eslint.config.mjs must still be parsed so that
+/// eslint-plugin-react appears in referenced_dependencies.
+#[test]
+fn run_workspace_fast_eslint_config_parsed_when_eslint_active_at_root() {
+    let registry = PluginRegistry::default();
+    let matchers = registry.precompile_config_matchers();
+
+    let tmp = tempfile::tempdir().unwrap();
+    let monorepo_root = tmp.path();
+
+    // Shared eslint-config package hoisted to root node_modules
+    let shared_pkg_dir = monorepo_root.join("node_modules/@scope/eslint-config");
+    std::fs::create_dir_all(&shared_pkg_dir).unwrap();
+    std::fs::write(
+        shared_pkg_dir.join("package.json"),
+        r#"{"name": "@scope/eslint-config", "main": "index.js"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        shared_pkg_dir.join("index.js"),
+        r"
+            import reactPlugin from 'eslint-plugin-react';
+            export default [{ plugins: { react: reactPlugin } }];
+        ",
+    )
+    .unwrap();
+
+    // Workspace with its own eslint.config.mjs
+    let app_dir = monorepo_root.join("apps/foo");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let config_path = app_dir.join("eslint.config.mjs");
+    std::fs::write(
+        &config_path,
+        r"
+            import sharedConfig from '@scope/eslint-config';
+            export default [...sharedConfig];
+        ",
+    )
+    .unwrap();
+
+    let pkg: PackageJson = serde_json::from_value(serde_json::json!({
+        "devDependencies": {
+            "eslint": "^9",
+            "eslint-plugin-react": "^7",
+            "@scope/eslint-config": "*"
+        }
+    }))
+    .unwrap();
+
+    // Simulate root-level ESLint being active: "eslint" is in skip_config_plugins
+    let mut skip_config_plugins = FxHashSet::default();
+    skip_config_plugins.insert("eslint");
+
+    let workspace_relative = vec![(config_path, "eslint.config.mjs".to_string())];
+    let result = registry.run_workspace_fast(
+        &pkg,
+        &app_dir,
+        monorepo_root,
+        &matchers,
+        &workspace_relative,
+        &skip_config_plugins,
+    );
+
+    assert!(
+        result
+            .referenced_dependencies
+            .contains(&"eslint-plugin-react".to_string()),
+        "eslint-plugin-react must be listed as referenced even when ESLint is in skip_config_plugins; \
+         got: {:?}",
+        result.referenced_dependencies
+    );
+}
+
 #[test]
 fn run_workspace_fast_detects_active_plugins() {
     let registry = PluginRegistry::default();
