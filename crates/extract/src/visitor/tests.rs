@@ -3768,6 +3768,82 @@ fn angular_output_from_observable_marks_as_decorated() {
     );
 }
 
+// ── Angular signal/plural query call-graph tracing (issue #274) ──
+
+/// All eight Angular query patterns (4 signal + 4 decorator) should produce
+/// `MemberAccess { object: "ChildComponent", member: <method> }` entries so
+/// the analyzer's call-graph traces methods on the queried child.
+#[test]
+fn angular_signal_and_plural_queries_trace_child_method_calls() {
+    let info = parse(
+        r"
+        import {
+            Component,
+            ContentChild,
+            ContentChildren,
+            QueryList,
+            ViewChild,
+            ViewChildren,
+            contentChild,
+            contentChildren,
+            viewChild,
+            viewChildren
+        } from '@angular/core';
+
+        import { ChildComponent } from './child.component';
+
+        @Component({
+            selector: 'app-parent',
+            template: '<app-child #vc />'
+        })
+        export class ParentComponent {
+            readonly vc = viewChild<ChildComponent>('vc');
+            readonly vcs = viewChildren<ChildComponent>('vcs');
+            readonly cc = contentChild<ChildComponent>(ChildComponent);
+            readonly ccs = contentChildren<ChildComponent>(ChildComponent);
+
+            @ViewChild('dvc') readonly dvc?: ChildComponent;
+            @ViewChildren('dvcs') readonly dvcs?: QueryList<ChildComponent>;
+            @ContentChild(ChildComponent) readonly dcc?: ChildComponent;
+            @ContentChildren(ChildComponent) readonly dccs?: QueryList<ChildComponent>;
+
+            triggerRefresh(): void {
+                this.vc()?.refreshViewChild();
+                this.vcs().forEach((c) => c.refreshViewChildren());
+                this.cc()?.refreshContentChild();
+                this.ccs().forEach((c) => c.refreshContentChildren());
+
+                this.dvc?.refreshDecoratorViewChild();
+                this.dvcs?.forEach((c) => c.refreshDecoratorViewChildren());
+                this.dcc?.refreshDecoratorContentChild();
+                this.dccs?.forEach((c) => c.refreshDecoratorContentChildren());
+            }
+        }
+        ",
+    );
+    let traced: std::collections::HashSet<&str> = info
+        .member_accesses
+        .iter()
+        .filter(|a| a.object == "ChildComponent")
+        .map(|a| a.member.as_str())
+        .collect();
+    for method in &[
+        "refreshViewChild",
+        "refreshViewChildren",
+        "refreshContentChild",
+        "refreshContentChildren",
+        "refreshDecoratorViewChild",
+        "refreshDecoratorViewChildren",
+        "refreshDecoratorContentChild",
+        "refreshDecoratorContentChildren",
+    ] {
+        assert!(
+            traced.contains(method),
+            "expected ChildComponent.{method} to be traced via Angular query (got {traced:?})"
+        );
+    }
+}
+
 // ── Angular combined metadata extraction ──────────────────────
 
 #[test]

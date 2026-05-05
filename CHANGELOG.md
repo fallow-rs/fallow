@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Angular signal-based query factories and plural decorator queries are now traced for `unused-class-members`.** `viewChild()`, `viewChildren()`, `contentChild()`, `contentChildren()` properties (`readonly vc = viewChild<ChildComponent>('vc')`) and `@ViewChildren` / `@ContentChildren` properties typed as `QueryList<T>` previously produced false `unused-class-member` findings on the child component's methods because the call-graph could not see through `this.vc()?.refresh()` (signal queries return a callable signal) or `this.dvcs?.forEach(c => c.refresh())` (the iteration parameter had no resolved type). The visitor now extracts the query's element type — explicit `<T>` type argument or first identifier argument for the signal factories, peeled `QueryList<T>` annotation for the plural decorators — and registers it against a synthetic call-form binding (`this.vc()` → `T`) for the singular signal queries, and against an iterable map (`this.vcs()` / `this.dvcs` → `T`) for the plural cases. `forEach` arrow callbacks on a registered iterable bind their first parameter to the element type so the existing bound-member-access pipeline credits the child's methods. The pre-existing `@ViewChild` and `@ContentChild` paths continue to work unchanged. Thanks [@OmerGronich](https://github.com/OmerGronich) for the eight-pattern reproducer. (Closes [#274](https://github.com/fallow-rs/fallow/issues/274))
+
 ## [2.64.0] - 2026-05-04
 
 ### Added

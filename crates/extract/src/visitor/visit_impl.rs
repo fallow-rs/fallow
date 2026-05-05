@@ -22,10 +22,11 @@ use crate::asset_url::normalize_asset_url;
 use crate::html::is_remote_url;
 
 use super::helpers::{
-    extract_angular_component_metadata, extract_class_members, extract_concat_parts,
-    extract_custom_elements_define, extract_implemented_interface_names,
-    extract_nested_type_bindings, extract_super_class_name, extract_type_annotation_name,
-    has_angular_class_decorator, is_meta_url_arg, lit_custom_element_decorator,
+    extract_angular_component_metadata, extract_angular_signal_query, extract_class_members,
+    extract_concat_parts, extract_custom_elements_define, extract_implemented_interface_names,
+    extract_nested_type_bindings, extract_query_list_element_type, extract_super_class_name,
+    extract_type_annotation_name, has_angular_class_decorator,
+    has_angular_plural_query_decorator, is_meta_url_arg, lit_custom_element_decorator,
     regex_pattern_to_suffix,
 };
 use super::{
@@ -561,6 +562,57 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Recognize `<receiver>.forEach(c => ...)` (and the optional-chained
+    /// `<receiver>?.forEach(c => ...)`) where `<receiver>` was previously
+    /// registered as an iterable with a known element type, and bind the
+    /// arrow callback's first parameter to that element type. The binding is
+    /// stored in `binding_target_names` so subsequent `c.method()` accesses
+    /// flow through the existing bound-member-access resolution at end-of-visit.
+    fn bind_iterable_callback_parameter(&mut self, expr: &CallExpression<'_>) {
+        let (receiver_expr, method_name) = match &expr.callee {
+            Expression::StaticMemberExpression(member) => (&member.object, &member.property.name),
+            Expression::ChainExpression(chain) => match &chain.expression {
+                ChainElement::StaticMemberExpression(member) => {
+                    (&member.object, &member.property.name)
+                }
+                _ => return,
+            },
+            _ => return,
+        };
+        if method_name.as_str() != "forEach" {
+            return;
+        }
+        let Some(receiver_name) = static_member_object_name(receiver_expr) else {
+            return;
+        };
+        let Some(element_type) = self.iterable_element_types.get(&receiver_name).cloned() else {
+            return;
+        };
+        let Some(first_arg) = expr.arguments.first() else {
+            return;
+        };
+        let param_name = match first_arg {
+            Argument::ArrowFunctionExpression(arrow) => arrow
+                .params
+                .items
+                .first()
+                .and_then(|p| match &p.pattern {
+                    BindingPattern::BindingIdentifier(id) => Some(id.name.to_string()),
+                    _ => None,
+                }),
+            Argument::FunctionExpression(func) => {
+                func.params.items.first().and_then(|p| match &p.pattern {
+                    BindingPattern::BindingIdentifier(id) => Some(id.name.to_string()),
+                    _ => None,
+                })
+            }
+            _ => None,
+        };
+        if let Some(name) = param_name {
+            self.binding_target_names.insert(name, element_type);
+        }
+    }
+
     fn is_named_import_from(&self, local_name: &str, source: &str, imported_name: &str) -> bool {
         self.imports.iter().any(|import| {
             import.source == source
@@ -752,6 +804,16 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if let Some(name) = prop.key.static_name() {
             if let Some(type_annotation) = prop.type_annotation.as_deref() {
                 self.record_typed_binding(format!("this.{name}").as_str(), type_annotation);
+
+                // `@ViewChildren ... readonly dvcs?: QueryList<ChildComponent>`:
+                // peel the element type out of the `QueryList<T>` annotation so
+                // `this.dvcs?.forEach(c => c.method())` can resolve `c` to `T`.
+                if has_angular_plural_query_decorator(&prop.decorators)
+                    && let Some(element_type) = extract_query_list_element_type(type_annotation)
+                {
+                    self.iterable_element_types
+                        .insert(format!("this.{name}"), element_type);
+                }
             }
 
             if let Some(Expression::NewExpression(new_expr)) = &prop.value
@@ -767,6 +829,24 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             {
                 self.binding_target_names
                     .insert(format!("this.{name}"), type_name);
+            }
+
+            // Angular signal queries: `readonly vc = viewChild<T>(...)` etc.
+            // Singular factories produce `Signal<T>`, called as `this.vc()`,
+            // so the synthetic key `this.<name>()` is bound to `T`. Plural
+            // factories produce `Signal<readonly T[]>`, iterated via
+            // `this.vcs().forEach(c => c.method())`, so the same call-form
+            // key is recorded as an iterable whose element type is `T`.
+            if let Some(value) = prop.value.as_ref()
+                && let Some(query) = extract_angular_signal_query(value)
+            {
+                let call_key = format!("this.{name}()");
+                if query.plural {
+                    self.iterable_element_types
+                        .insert(call_key, query.type_arg);
+                } else {
+                    self.binding_target_names.insert(call_key, query.type_arg);
+                }
             }
         }
 
@@ -1303,6 +1383,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if let Some((_tag, class_name)) = extract_custom_elements_define(expr) {
             self.side_effect_registered_class_names.insert(class_name);
         }
+
+        // Angular plural-query iteration: `this.vcs().forEach(c => c.m())`,
+        // `this.dvcs?.forEach(c => c.m())`. When the receiver was registered
+        // as an iterable with a known element type, bind the arrow callback's
+        // first parameter to that type so the inner `c.m()` member access
+        // resolves through `binding_target_names`.
+        self.bind_iterable_callback_parameter(expr);
 
         if let Some(mock_source) =
             vitest_mock_source(expr).and_then(|source| vitest_auto_mock_source(&source))
@@ -1865,6 +1952,28 @@ fn static_member_object_name(expr: &Expression<'_>) -> Option<String> {
             static_member_object_name(&member.object)?,
             member.property.name
         )),
+        // `this.vc()` — Angular signal query call. The synthetic name
+        // `this.vc()` is registered in `binding_target_names` so the
+        // surrounding chain `this.vc()?.method()` can be resolved through
+        // the existing bound-member-access pipeline. Restricted to zero-arg
+        // calls so non-getter call sites do not steal the member access.
+        Expression::CallExpression(call) if call.arguments.is_empty() => {
+            Some(format!("{}()", static_member_object_name(&call.callee)?))
+        }
+        // `(this.vc()?.method)` and similar optional chains wrap the
+        // member-access in a `ChainExpression`; descend into the wrapped form
+        // so `this.vc()?.refresh()` resolves the same way as `this.vc().refresh()`.
+        Expression::ChainExpression(chain) => match &chain.expression {
+            ChainElement::CallExpression(call) if call.arguments.is_empty() => {
+                Some(format!("{}()", static_member_object_name(&call.callee)?))
+            }
+            ChainElement::StaticMemberExpression(member) => Some(format!(
+                "{}.{}",
+                static_member_object_name(&member.object)?,
+                member.property.name
+            )),
+            _ => None,
+        },
         _ => None,
     }
 }

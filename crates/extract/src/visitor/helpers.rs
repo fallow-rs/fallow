@@ -375,6 +375,119 @@ fn is_angular_signal_initializer(value: &Expression<'_>) -> bool {
     }
 }
 
+/// Result of recognizing an Angular signal-query property initializer.
+pub(super) struct AngularSignalQuery {
+    /// The element type `T` from `viewChild<T>(...)` etc.
+    pub type_arg: String,
+    /// `true` for `viewChildren`/`contentChildren` (returns a signal of an
+    /// array of children), `false` for the singular factories.
+    pub plural: bool,
+}
+
+/// Recognize `viewChild<T>(...)` / `viewChildren<T>(...)` /
+/// `contentChild<T>(...)` / `contentChildren<T>(...)` initializers and return
+/// the element type `T` plus whether the factory is plural.
+///
+/// Falls back to the first call-argument identifier when no explicit type
+/// argument is supplied (e.g. `contentChild(ChildComponent)`), matching how
+/// Angular infers `T` from the locator class.
+pub(super) fn extract_angular_signal_query(value: &Expression<'_>) -> Option<AngularSignalQuery> {
+    let Expression::CallExpression(call) = value else {
+        return None;
+    };
+    let Expression::Identifier(id) = &call.callee else {
+        return None;
+    };
+    let plural = match id.name.as_str() {
+        "viewChild" | "contentChild" => false,
+        "viewChildren" | "contentChildren" => true,
+        _ => return None,
+    };
+    if let Some(type_args) = call.type_arguments.as_deref()
+        && let Some(first) = type_args.params.first()
+        && let Some(name) = extract_type_reference_name(first)
+        && !is_builtin_constructor(&name)
+    {
+        return Some(AngularSignalQuery {
+            type_arg: name,
+            plural,
+        });
+    }
+    if let Some(Argument::Identifier(arg_id)) = call.arguments.first()
+        && !is_builtin_constructor(arg_id.name.as_str())
+    {
+        return Some(AngularSignalQuery {
+            type_arg: arg_id.name.to_string(),
+            plural,
+        });
+    }
+    None
+}
+
+/// Peel `QueryList<T>` (and the nullable variants `QueryList<T> | undefined`,
+/// `QueryList<T> | null`) out of a TypeScript type annotation, returning `T`
+/// when `T` is a single class identifier.
+///
+/// Used for `@ViewChildren` / `@ContentChildren` properties where the type
+/// annotation is the only place the element type appears.
+pub(super) fn extract_query_list_element_type(
+    annotation: &TSTypeAnnotation<'_>,
+) -> Option<String> {
+    extract_query_list_from_type(&annotation.type_annotation)
+}
+
+fn extract_query_list_from_type(ty: &TSType<'_>) -> Option<String> {
+    match ty {
+        TSType::TSTypeReference(type_ref) => {
+            let name = extract_type_name(&type_ref.type_name)?;
+            if name != "QueryList" {
+                return None;
+            }
+            let type_args = type_ref.type_arguments.as_deref()?;
+            let first = type_args.params.first()?;
+            let element = extract_type_reference_name(first)?;
+            if is_builtin_constructor(&element) {
+                None
+            } else {
+                Some(element)
+            }
+        }
+        TSType::TSParenthesizedType(paren) => extract_query_list_from_type(&paren.type_annotation),
+        TSType::TSUnionType(union) => {
+            let mut found: Option<String> = None;
+            for branch in &union.types {
+                match branch {
+                    TSType::TSNullKeyword(_) | TSType::TSUndefinedKeyword(_) => {}
+                    other => {
+                        if found.is_some() {
+                            return None;
+                        }
+                        found = extract_query_list_from_type(other);
+                        found.as_ref()?;
+                    }
+                }
+            }
+            found
+        }
+        _ => None,
+    }
+}
+
+/// Recognize a `@ViewChildren(...)` or `@ContentChildren(...)` decorator on a
+/// class property. Used in conjunction with [`extract_query_list_element_type`]
+/// to wire up `forEach`-style iteration through the property.
+pub(super) fn has_angular_plural_query_decorator(decorators: &[oxc_ast::ast::Decorator<'_>]) -> bool {
+    decorators.iter().any(|decorator| {
+        let Expression::CallExpression(call) = &decorator.expression else {
+            return false;
+        };
+        let Expression::Identifier(id) = &call.callee else {
+            return false;
+        };
+        matches!(id.name.as_str(), "ViewChildren" | "ContentChildren")
+    })
+}
+
 /// Extract class members (methods and properties) from a class declaration.
 ///
 /// When `is_angular_class` is true, properties initialized with Angular signal

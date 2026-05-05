@@ -93,6 +93,14 @@ pub(crate) struct ModuleInfoExtractor {
     /// Used so `x.method()` or `this.service.method()` can be mapped back to the
     /// imported/exported class or interface that owns the member.
     binding_target_names: FxHashMap<String, String>,
+    /// Iterable receivers whose element type is known (Angular plural queries:
+    /// `viewChildren<T>()` / `contentChildren<T>()` initializers and
+    /// `@ViewChildren`/`@ContentChildren` decorated `QueryList<T>` properties).
+    /// When the visitor sees `<receiver>.forEach(c => c.method())` (or the
+    /// optional-chained `?.forEach`), the arrow's first parameter is bound to
+    /// `T` so the inner `c.method` access can be resolved. Keys are the same
+    /// dotted/parenthesized form produced by `static_member_object_name`.
+    iterable_element_types: FxHashMap<String, String>,
     /// Object literal aliases resolved after the full AST walk so later import
     /// declarations can still seed namespace bindings.
     object_binding_candidates: Vec<ObjectBindingCandidate>,
