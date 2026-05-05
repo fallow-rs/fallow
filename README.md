@@ -475,7 +475,7 @@ See the [full configuration reference](https://docs.fallow.tools/configuration/o
 
 | Category | Plugins |
 |---|---|
-| **Frameworks** | Next.js, Nuxt, Remix, Qwik, SvelteKit, Gatsby, Astro, Angular, NestJS, Expo, Expo Router, Electron, and more |
+| **Frameworks** | Next.js, Nuxt, Remix, Qwik, SvelteKit, Gatsby, Astro, Angular, NestJS, Lit, Expo, Expo Router, Electron, and more |
 | **Bundlers** | Vite, Webpack, Rspack, Rsbuild, Rollup, Rolldown, Tsup, Tsdown, Parcel |
 | **Testing** | Vitest, Jest, Playwright, Cypress, Storybook, Mocha, Ava, tap, tsd |
 | **CSS** | Tailwind, PostCSS, UnoCSS, PandaCSS |
