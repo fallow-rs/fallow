@@ -136,9 +136,7 @@ mod tests {
     fn lifecycle_rules_scope_lit_members_to_lit_element_subclasses() {
         let rules = LitPlugin.used_class_member_rules();
         let lit_rule = rules.iter().find_map(|r| match r {
-            UsedClassMemberRule::Scoped(s) if s.extends.as_deref() == Some("LitElement") => {
-                Some(s)
-            }
+            UsedClassMemberRule::Scoped(s) if s.extends.as_deref() == Some("LitElement") => Some(s),
             _ => None,
         });
         let lit_rule = lit_rule.expect("LitElement-scoped rule missing");
