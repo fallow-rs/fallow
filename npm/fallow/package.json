@@ -41,7 +41,8 @@
     "scripts",
     "skills",
     "!skills/_artifacts",
-    "README.md"
+    "README.md",
+    "schema.json"
   ],
   "scripts": {
     "postinstall": "node scripts/postinstall.js",

@@ -504,6 +504,18 @@ jobs:
             exit 1
           fi
 
+      # Bundle the JSON schema into the fallow npm package so consumers
+      # can reference it from `node_modules/fallow/schema.json`. Without
+      # this, users either pin to a remote URL that drifts from the
+      # installed CLI version, or have to run `fallow config-schema`
+      # themselves and refresh on every upgrade. See
+      # https://github.com/fallow-rs/fallow/issues/275.
+      #
+      # `--ignore-scripts` is set on the publish below, so we copy at
+      # workflow level rather than relying on a prepublishOnly hook.
+      - name: Bundle schema.json into fallow package
+        run: cp schema.json npm/fallow/schema.json
+
       - name: Publish fallow
         run: |
           VERSION="${TAG_REF#refs/tags/v}"
