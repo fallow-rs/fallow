@@ -32,6 +32,23 @@ fn lit_custom_element_class_exports_credited_through_decorator_and_define() {
         !unused_export_names.contains(&"AliasedElement"),
         "namespace-aliased @customElement form should also be credited, found: {unused_export_names:?}"
     );
+
+    // Anonymous `export default @customElement(...) class extends LitElement {}`
+    // has no class identifier and unset local_name; the visitor flips the pending
+    // Default export directly during visit_class.
+    let anonymous_default_unused = results
+        .unused_exports
+        .iter()
+        .any(|e| e.path.ends_with("anonymous-default.ts") && e.export_name == "default");
+    assert!(
+        !anonymous_default_unused,
+        "anonymous default-exported @customElement class should be credited, unused exports were: {:?}",
+        results
+            .unused_exports
+            .iter()
+            .map(|e| (e.path.to_string_lossy().into_owned(), e.export_name.clone()))
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]

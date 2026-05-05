@@ -1663,11 +1663,21 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // Detect Lit `@customElement('tag')` decorator. The class is registered
         // as a Web Component at module load time without anyone importing the
         // class identifier, so its export must be flagged as side-effect-used.
-        if let Some(id) = class.id.as_ref()
-            && has_lit_class_decorator(class)
-        {
-            self.side_effect_registered_class_names
-                .insert(id.name.to_string());
+        if has_lit_class_decorator(class) {
+            if let Some(id) = class.id.as_ref() {
+                self.side_effect_registered_class_names
+                    .insert(id.name.to_string());
+            } else if let Some(export) = self.exports.last_mut()
+                && matches!(export.name, crate::ExportName::Default)
+                && export.local_name.is_none()
+            {
+                // Anonymous `export default @customElement(...) class extends LitElement {}`
+                // has no class identifier to key off and an unset local_name on the
+                // Default export, so the post-walk finalizer can't match. Flip the
+                // pending Default export directly while we still have a reference to
+                // the registered class context.
+                export.is_side_effect_used = true;
+            }
         }
 
         // Detect Angular @Component decorator and extract all metadata:
