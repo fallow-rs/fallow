@@ -1,0 +1,10 @@
+{
+  "name": "@fixture/charts",
+  "private": true,
+  "scripts": {
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}

@@ -117,6 +117,39 @@ fn vitest_config_default_export_is_framework_used_with_include_entry_exports() {
 }
 
 #[test]
+fn vite_config_default_export_is_framework_used_with_include_entry_exports() {
+    // Issue #282: vite.config.* default export is consumed by Vite itself; under
+    // --include-entry-exports it must not be reported. Mirrors #271 for vitest.
+    let root = fixture_path("vite-include-entry-exports-workspace");
+    let mut config = create_config(root);
+    config.include_entry_exports = true;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_exports: Vec<(String, String)> = results
+        .unused_exports
+        .iter()
+        .map(|export| {
+            (
+                export
+                    .path
+                    .strip_prefix(&config.root)
+                    .unwrap_or(&export.path)
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+                export.export_name.clone(),
+            )
+        })
+        .collect();
+
+    assert!(
+        !unused_exports.iter().any(|(path, export)| {
+            path == "packages/web/charts/vite.config.mts" && export == "default"
+        }),
+        "Vite config default export should be framework-used, found: {unused_exports:?}"
+    );
+}
+
+#[test]
 fn storybook_exports_are_framework_used_with_include_entry_exports() {
     let root = fixture_path("storybook-include-entry-exports");
     let mut config = create_config(root);

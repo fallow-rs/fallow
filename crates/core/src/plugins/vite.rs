@@ -6,6 +6,8 @@
 use super::config_parser;
 use super::{Plugin, PluginResult};
 
+const CONFIG_EXPORTS: &[&str] = &["default"];
+
 fn additional_data_entry_pattern(
     root: &std::path::Path,
     source: &fallow_extract::css::CssImportSource,
@@ -94,6 +96,10 @@ define_plugin!(
     // Vite plugins create virtual modules with `virtual:` prefix
     // (e.g., `virtual:pwa-register`, `virtual:emoji-mart-lang-importer`)
     virtual_module_prefixes: &["virtual:"],
+    // Under --include-entry-exports, the default export of vite.config.* is the
+    // entry: Vite's CLI consumes it. Marking it framework-used prevents the
+    // false-positive in #282 (mirrors the vitest fix in #271).
+    used_exports: [("vite.config.{ts,js,mts,mjs}", CONFIG_EXPORTS)],
     resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
 

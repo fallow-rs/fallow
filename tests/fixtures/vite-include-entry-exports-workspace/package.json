@@ -1,0 +1,7 @@
+{
+  "name": "vite-include-entry-exports-workspace",
+  "private": true,
+  "workspaces": [
+    "packages/web/charts"
+  ]
+}
