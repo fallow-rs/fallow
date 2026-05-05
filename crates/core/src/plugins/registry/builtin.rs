@@ -12,7 +12,8 @@ use super::super::{
     expo_router::ExpoRouterPlugin, gatsby::GatsbyPlugin, graphql_codegen::GraphqlCodegenPlugin,
     hardhat::HardhatPlugin, husky::HuskyPlugin, i18next::I18nextPlugin, jest::JestPlugin,
     karma::KarmaPlugin, knex::KnexPlugin, kysely::KyselyPlugin, lefthook::LefthookPlugin,
-    lint_staged::LintStagedPlugin, markdownlint::MarkdownlintPlugin, mocha::MochaPlugin,
+    lint_staged::LintStagedPlugin, lit::LitPlugin, markdownlint::MarkdownlintPlugin,
+    mocha::MochaPlugin,
     msw::MswPlugin, nestjs::NestJsPlugin, next_intl::NextIntlPlugin, nextjs::NextJsPlugin,
     nitro::NitroPlugin, nodemon::NodemonPlugin, nuxt::NuxtPlugin, nx::NxPlugin, nyc::NycPlugin,
     openapi_ts::OpenapiTsPlugin, oxlint::OxlintPlugin, pandacss::PandaCssPlugin,
@@ -60,6 +61,7 @@ pub fn create_builtin_plugins() -> Vec<Box<dyn Plugin>> {
         Box::new(I18nextPlugin),
         Box::new(QwikPlugin),
         Box::new(ConvexPlugin),
+        Box::new(LitPlugin),
         // Bundlers
         Box::new(VitePlugin),
         Box::new(WebpackPlugin),

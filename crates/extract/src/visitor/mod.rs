@@ -168,10 +168,7 @@ impl ModuleInfoExtractor {
             let Some(local_name) = export.local_name.as_deref() else {
                 continue;
             };
-            if self
-                .side_effect_registered_class_names
-                .contains(local_name)
-            {
+            if self.side_effect_registered_class_names.contains(local_name) {
                 export.is_side_effect_used = true;
             }
         }

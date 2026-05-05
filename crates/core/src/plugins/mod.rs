@@ -630,6 +630,17 @@ pub trait Plugin: Send + Sync {
         &[]
     }
 
+    /// Heritage-scoped class member rules. Each rule applies only to classes
+    /// matching its `extends` and/or `implements` clause. Used for frameworks
+    /// where lifecycle members are runtime-invoked only on classes that extend
+    /// a known base (e.g. Lit's `render`/`updated` on classes extending
+    /// `LitElement`, native Web Components' `connectedCallback` on classes
+    /// extending `HTMLElement`). Default: empty. Plugins override when they
+    /// need scoping; flat names should still come from `used_class_members`.
+    fn used_class_member_rules(&self) -> Vec<UsedClassMemberRule> {
+        Vec::new()
+    }
+
     /// Glob patterns for test fixture files consumed by this framework.
     /// These files are implicitly used by the test runner and should not be
     /// flagged as unused. Unlike `always_used()`, this carries semantic intent
@@ -969,6 +980,7 @@ mod knex;
 mod kysely;
 mod lefthook;
 mod lint_staged;
+mod lit;
 mod markdownlint;
 mod mocha;
 mod msw;

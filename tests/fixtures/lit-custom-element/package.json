@@ -1,0 +1,7 @@
+{
+  "name": "lit-custom-element-fixture",
+  "main": "src/app.ts",
+  "dependencies": {
+    "lit": "^3.0.0"
+  }
+}

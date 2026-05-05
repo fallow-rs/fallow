@@ -87,6 +87,8 @@ mod workspace_internal_deps;
 
 #[path = "integration_test/inheritance_members.rs"]
 mod inheritance_members;
+#[path = "integration_test/lit_custom_element.rs"]
+mod lit_custom_element;
 #[path = "integration_test/scoped_used_class_members.rs"]
 mod scoped_used_class_members;
 #[path = "integration_test/scss_partials.rs"]

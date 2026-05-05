@@ -959,8 +959,14 @@ pub fn find_unused_members(
                     continue;
                 }
 
-                // If the export itself is unused, skip member analysis (whole export is dead)
-                if export.references.is_empty() && !graph.has_namespace_import(module.file_id) {
+                // If the export itself is unused, skip member analysis (whole export is dead).
+                // Side-effect-registered exports (Lit @customElement, customElements.define)
+                // are alive at runtime even with empty cross-file references; their members
+                // are runtime-invoked by the browser/Lit framework so member analysis must run.
+                if export.references.is_empty()
+                    && !export.is_side_effect_used
+                    && !graph.has_namespace_import(module.file_id)
+                {
                     continue;
                 }
 

@@ -300,9 +300,7 @@ pub fn has_lit_class_decorator(class: &Class<'_>) -> bool {
         };
         match &call.callee {
             Expression::Identifier(id) => id.name == "customElement",
-            Expression::StaticMemberExpression(member) => {
-                member.property.name == "customElement"
-            }
+            Expression::StaticMemberExpression(member) => member.property.name == "customElement",
             _ => false,
         }
     })

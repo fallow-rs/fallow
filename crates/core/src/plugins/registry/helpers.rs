@@ -43,6 +43,9 @@ pub fn process_static_patterns(
             .used_class_members
             .push(UsedClassMemberRule::from(*member));
     }
+    for rule in plugin.used_class_member_rules() {
+        result.used_class_members.push(rule);
+    }
     for dep in plugin.tooling_dependencies() {
         result.tooling_dependencies.push((*dep).to_string());
     }
