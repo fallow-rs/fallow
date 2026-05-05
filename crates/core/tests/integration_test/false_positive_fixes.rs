@@ -298,3 +298,53 @@ fn interface_member_usage_does_not_flag_implementer_members() {
         "unrelated members should still be reported: {unused_members:?}"
     );
 }
+
+// ── Prisma config file (issue #281) ─────────────────────────
+
+#[test]
+fn prisma_config_ts_is_recognized_as_entry_point() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("prisma")).expect("prisma dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "prisma-config-entry",
+            "private": true,
+            "devDependencies": {
+                "prisma": "6.0.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("prisma/schema.prisma"),
+        "generator client { provider = \"prisma-client-js\" }\n",
+    )
+    .expect("schema.prisma");
+    std::fs::write(
+        root.join("prisma.config.ts"),
+        r#"import { defineConfig } from "prisma/config";
+
+export default defineConfig({
+    schema: "prisma/schema.prisma",
+});
+"#,
+    )
+    .expect("prisma.config.ts");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused.iter().any(|p| p.ends_with("prisma.config.ts")),
+        "prisma.config.ts is the Prisma 6.x config-file location and should not be reported \
+         as unused. Got: {unused:?}"
+    );
+}
