@@ -165,6 +165,7 @@ jobs:
 
       - name: Check npm package contents
         run: |
+          cp schema.json npm/fallow/schema.json
           npm pack --dry-run --json ./npm/fallow > /tmp/fallow-pack.json
           node <<'NODE'
           const fs = require('fs');
@@ -177,6 +178,7 @@ jobs:
             'skills/fallow/references/cli-reference.md',
             'skills/fallow/references/gotchas.md',
             'skills/fallow/references/patterns.md',
+            'schema.json',
           ];
           const missing = required.filter((file) => !files.has(file));
           if (missing.length > 0) {
