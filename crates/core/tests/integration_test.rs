@@ -80,6 +80,8 @@ mod test_only_deps;
 mod type_only_deps;
 #[path = "integration_test/unused_enum_members.rs"]
 mod unused_enum_members;
+#[path = "integration_test/web_components.rs"]
+mod web_components;
 #[path = "integration_test/workspace_cross_imports.rs"]
 mod workspace_cross_imports;
 #[path = "integration_test/workspace_internal_deps.rs"]

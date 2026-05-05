@@ -17,6 +17,25 @@ use crate::suppress::{IssueKind, SuppressionContext};
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
+const NATIVE_CUSTOM_ELEMENT_LIFECYCLE_MEMBERS: &[&str] = &[
+    "connectedCallback",
+    "disconnectedCallback",
+    "attributeChangedCallback",
+    "adoptedCallback",
+    "connectedMoveCallback",
+    "observedAttributes",
+    "formAssociated",
+    "formAssociatedCallback",
+    "formDisabledCallback",
+    "formResetCallback",
+    "formStateRestoreCallback",
+];
+
+fn is_native_custom_element_lifecycle_method(member_name: &str, super_class: Option<&str>) -> bool {
+    super_class == Some("HTMLElement")
+        && NATIVE_CUSTOM_ELEMENT_LIFECYCLE_MEMBERS.contains(&member_name)
+}
+
 /// Find unused enum and class members in exported symbols.
 ///
 /// Collects all `Identifier.member` static member accesses from all modules,
@@ -1023,16 +1042,17 @@ pub fn find_unused_members(
                         continue;
                     }
 
-                    // Skip React class component lifecycle methods — they are called by the
-                    // React runtime, not user code, so they should never be flagged as unused.
-                    // Also skip Angular lifecycle hooks (OnInit, OnDestroy, etc.).
-                    // The user allowlist extends these built-ins with framework-invoked names
-                    // contributed by plugins and top-level config (ag-Grid's `agInit`, etc.).
+                    // Skip lifecycle methods called by runtimes or the browser, not user code:
+                    // React class component lifecycle, Angular lifecycle hooks, and native
+                    // Custom Elements lifecycle on direct HTMLElement subclasses. The user
+                    // allowlist extends these built-ins with framework-invoked names contributed
+                    // by plugins and top-level config (ag-Grid's `agInit`, etc.).
                     if matches!(
                         member.kind,
                         MemberKind::ClassMethod | MemberKind::ClassProperty
                     ) && (is_react_lifecycle_method(&member.name)
                         || is_angular_lifecycle_method(&member.name)
+                        || is_native_custom_element_lifecycle_method(&member.name, super_class)
                         || allowlist.matches(
                             member.name.as_str(),
                             super_class,

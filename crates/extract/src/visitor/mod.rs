@@ -13,12 +13,13 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::suppress::Suppression;
 use crate::{
-    DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, MemberAccess,
-    MemberInfo, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
+    DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
+    MemberAccess, MemberInfo, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
     ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference,
 };
+use helpers::LitCustomElementDecorator;
 
 #[derive(Debug, Clone)]
 struct LocalClassExportInfo {
@@ -39,6 +40,18 @@ struct LocalSignatureTypeReference {
 struct ObjectBindingCandidate {
     binding_path: String,
     source_name: String,
+}
+
+#[derive(Debug, Clone)]
+enum SideEffectRegistrationTarget {
+    LocalClass(String),
+    AnonymousDefaultExport(usize),
+}
+
+#[derive(Debug, Clone)]
+struct LitCustomElementCandidate {
+    decorator: LitCustomElementDecorator,
+    target: SideEffectRegistrationTarget,
 }
 
 /// One Angular `@Component({ template: \`...\` })` decorator captured during
@@ -118,11 +131,14 @@ pub(crate) struct ModuleInfoExtractor {
     /// findings on the host `.ts` file's `complexity` vec.
     pub(crate) inline_template_findings: Vec<InlineTemplateFinding>,
     /// Local class names registered as Web Components via either a Lit
-    /// `@customElement('tag')` decorator or a `customElements.define('tag', X)`
-    /// call. Used in `into_module_info` / `merge_into` to flip
-    /// `is_side_effect_used` on matching exports so they survive
-    /// unused-export detection.
+    /// `customElements.define('tag', X)` call. Used in `into_module_info` /
+    /// `merge_into` to flip `is_side_effect_used` on matching exports so they
+    /// survive unused-export detection.
     pub(crate) side_effect_registered_class_names: FxHashSet<String>,
+    /// Classes with a syntactic `@customElement(...)` decorator. These are
+    /// resolved after the full walk so the decorator binding can be checked
+    /// against imports regardless of source order.
+    lit_custom_element_candidates: Vec<LitCustomElementCandidate>,
 }
 
 impl ModuleInfoExtractor {
@@ -153,14 +169,74 @@ impl ModuleInfoExtractor {
         &self.binding_target_names
     }
 
-    /// Set `is_side_effect_used = true` on each export whose local binding
-    /// name was recorded as side-effect-registered (Lit `@customElement`
-    /// decorator or `customElements.define` call). Runs as a post-walk pass
-    /// so it covers both `export class X {}` (export pushed during the class
-    /// declaration) and `class X {}; export { X }` / `export default X`
-    /// patterns where the export and the registration site are visited at
-    /// different points in the traversal.
+    fn is_lit_custom_element_decorator(&self, decorator: &LitCustomElementDecorator) -> bool {
+        const LIT_DECORATOR_SOURCES: &[&str] =
+            &["lit/decorators.js", "lit/decorators/custom-element.js"];
+
+        self.imports.iter().any(|import| {
+            LIT_DECORATOR_SOURCES.contains(&import.source.as_str())
+                && match decorator {
+                    LitCustomElementDecorator::Named { local_name } => {
+                        import.local_name == *local_name
+                            && matches!(
+                                &import.imported_name,
+                                ImportedName::Named(name) if name == "customElement"
+                            )
+                    }
+                    LitCustomElementDecorator::Namespace { local_name } => {
+                        import.local_name == *local_name
+                            && matches!(import.imported_name, ImportedName::Namespace)
+                    }
+                }
+        })
+    }
+
+    fn apply_lit_custom_element_candidates(&mut self) {
+        if self.lit_custom_element_candidates.is_empty() {
+            return;
+        }
+
+        let mut class_names = Vec::new();
+        let mut anonymous_default_indices = Vec::new();
+        for candidate in &self.lit_custom_element_candidates {
+            if !self.is_lit_custom_element_decorator(&candidate.decorator) {
+                continue;
+            }
+            match &candidate.target {
+                SideEffectRegistrationTarget::LocalClass(class_name) => {
+                    class_names.push(class_name.clone());
+                }
+                SideEffectRegistrationTarget::AnonymousDefaultExport(index) => {
+                    anonymous_default_indices.push(*index);
+                }
+            }
+        }
+
+        self.side_effect_registered_class_names.extend(class_names);
+        for index in anonymous_default_indices {
+            if let Some(export) = self.exports.get_mut(index) {
+                export.is_side_effect_used = true;
+            }
+        }
+    }
+
+    fn record_lit_custom_element_candidate(
+        &mut self,
+        decorator: LitCustomElementDecorator,
+        target: SideEffectRegistrationTarget,
+    ) {
+        self.lit_custom_element_candidates
+            .push(LitCustomElementCandidate { decorator, target });
+    }
+
+    /// Set `is_side_effect_used = true` on each export whose local binding name
+    /// was recorded as side-effect-registered. Runs as a post-walk pass so it
+    /// covers both `export class X {}` (export pushed during the class
+    /// declaration) and `class X {}; export { X }` / `export default X` patterns
+    /// where the export and the registration site are visited at different
+    /// points in the traversal.
     fn apply_side_effect_registrations(&mut self) {
+        self.apply_lit_custom_element_candidates();
         if self.side_effect_registered_class_names.is_empty() {
             return;
         }

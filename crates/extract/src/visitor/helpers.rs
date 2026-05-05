@@ -285,23 +285,38 @@ pub fn has_angular_class_decorator(class: &Class<'_>) -> bool {
     })
 }
 
-/// Check if a class has a Lit `@customElement('tag-name')` decorator.
+#[derive(Debug, Clone)]
+pub(super) enum LitCustomElementDecorator {
+    Named { local_name: String },
+    Namespace { local_name: String },
+}
+
+/// Extract the local binding used by a syntactic `@customElement('tag-name')`
+/// decorator.
 ///
-/// Matches both the bare-import form (`import { customElement } from
-/// 'lit/decorators.js'; @customElement('x')`) and the namespace-import form
-/// (`import * as decorators from 'lit/decorators.js'; @decorators.customElement('x')`).
-/// The decorator triggers `customElements.define('x', ClassRef)` at module
-/// load time, registering the class as a Web Component without anyone
-/// importing the class identifier.
-pub fn has_lit_class_decorator(class: &Class<'_>) -> bool {
-    class.decorators.iter().any(|d| {
+/// Import validation happens after the full AST walk, so this only captures the
+/// decorator callee shape. The caller later verifies that the captured binding
+/// came from Lit's decorator modules before crediting the class as used.
+pub(super) fn lit_custom_element_decorator(class: &Class<'_>) -> Option<LitCustomElementDecorator> {
+    class.decorators.iter().find_map(|d| {
         let Expression::CallExpression(call) = &d.expression else {
-            return false;
+            return None;
         };
         match &call.callee {
-            Expression::Identifier(id) => id.name == "customElement",
-            Expression::StaticMemberExpression(member) => member.property.name == "customElement",
-            _ => false,
+            Expression::Identifier(id) => Some(LitCustomElementDecorator::Named {
+                local_name: id.name.to_string(),
+            }),
+            Expression::StaticMemberExpression(member)
+                if member.property.name == "customElement" =>
+            {
+                let Expression::Identifier(object) = &member.object else {
+                    return None;
+                };
+                Some(LitCustomElementDecorator::Namespace {
+                    local_name: object.name.to_string(),
+                })
+            }
+            _ => None,
         }
     })
 }

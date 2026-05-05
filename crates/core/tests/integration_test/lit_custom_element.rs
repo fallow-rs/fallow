@@ -32,6 +32,11 @@ fn lit_custom_element_class_exports_credited_through_decorator_and_define() {
         !unused_export_names.contains(&"AliasedElement"),
         "namespace-aliased @customElement form should also be credited, found: {unused_export_names:?}"
     );
+    // Named import alias form (`import { customElement as ce }`).
+    assert!(
+        !unused_export_names.contains(&"NamedImportAliasedElement"),
+        "named-import-aliased @customElement form should also be credited, found: {unused_export_names:?}"
+    );
 
     // Anonymous `export default @customElement(...) class extends LitElement {}`
     // has no class identifier and unset local_name; the visitor flips the pending

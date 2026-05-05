@@ -2,9 +2,10 @@
 //!
 //! Activates on `lit`, `lit-element`, or `@lit/reactive-element` dependencies.
 //! Tracks Lit's runtime tooling deps (so they are not flagged as unused) and
-//! whitelists the lifecycle methods that Lit and the native Custom Elements
-//! spec invoke at runtime, scoped to classes that extend `LitElement`,
-//! `ReactiveElement`, or `HTMLElement`.
+//! whitelists the lifecycle methods that Lit invokes at runtime, scoped to
+//! classes that extend `LitElement` or `ReactiveElement`. Native Custom
+//! Elements lifecycle methods on `HTMLElement` subclasses are handled by the
+//! member analyzer so they work without a Lit dependency.
 //!
 //! The decorator-form (`@customElement`) and `customElements.define(...)` form
 //! both flow through `crates/extract/src/visitor` which marks the registered
@@ -33,21 +34,6 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
     "@lit-labs/preact-signals",
     "@lit-labs/signals",
     "@lit-labs/virtualizer",
-];
-
-/// Native Custom Elements lifecycle members called by the browser at runtime.
-const NATIVE_LIFECYCLE_MEMBERS: &[&str] = &[
-    "connectedCallback",
-    "disconnectedCallback",
-    "attributeChangedCallback",
-    "adoptedCallback",
-    "connectedMoveCallback",
-    "observedAttributes",
-    "formAssociated",
-    "formAssociatedCallback",
-    "formDisabledCallback",
-    "formResetCallback",
-    "formStateRestoreCallback",
 ];
 
 /// Lit lifecycle and reactive members called by the framework at runtime,
@@ -105,7 +91,6 @@ impl Plugin for LitPlugin {
         vec![
             scoped_rule("LitElement", LIT_LIFECYCLE_MEMBERS),
             scoped_rule("ReactiveElement", LIT_LIFECYCLE_MEMBERS),
-            scoped_rule("HTMLElement", NATIVE_LIFECYCLE_MEMBERS),
         ]
     }
 }
@@ -146,20 +131,12 @@ mod tests {
     }
 
     #[test]
-    fn lifecycle_rules_scope_native_members_to_html_element_subclasses() {
+    fn lifecycle_rules_do_not_depend_on_native_html_element_scope() {
         let rules = LitPlugin.used_class_member_rules();
-        let html_rule = rules.iter().find_map(|r| match r {
-            UsedClassMemberRule::Scoped(s) if s.extends.as_deref() == Some("HTMLElement") => {
-                Some(s)
-            }
-            _ => None,
-        });
-        let html_rule = html_rule.expect("HTMLElement-scoped rule missing");
-        assert!(html_rule.members.iter().any(|m| m == "connectedCallback"));
-        assert!(
-            html_rule.members.iter().any(|m| m == "observedAttributes"),
-            "observedAttributes lifecycle missing"
-        );
+        assert!(rules.iter().all(|r| match r {
+            UsedClassMemberRule::Scoped(s) => s.extends.as_deref() != Some("HTMLElement"),
+            UsedClassMemberRule::Name(_) => true,
+        }));
     }
 
     #[test]
