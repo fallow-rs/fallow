@@ -23,9 +23,9 @@ use crate::html::is_remote_url;
 
 use super::helpers::{
     extract_angular_component_metadata, extract_class_members, extract_concat_parts,
-    extract_implemented_interface_names, extract_nested_type_bindings, extract_super_class_name,
-    extract_type_annotation_name, has_angular_class_decorator, is_meta_url_arg,
-    regex_pattern_to_suffix,
+    extract_custom_elements_define, extract_implemented_interface_names,
+    extract_nested_type_bindings, extract_super_class_name, extract_type_annotation_name,
+    has_angular_class_decorator, has_lit_class_decorator, is_meta_url_arg, regex_pattern_to_suffix,
 };
 use super::{
     ModuleInfoExtractor, try_extract_arrow_wrapped_import, try_extract_dynamic_import,
@@ -1293,6 +1293,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 ));
         }
 
+        // Detect `customElements.define('tag', ClassRef)` Web Component
+        // registration. The class identifier IS referenced syntactically (so
+        // oxc_semantic counts the in-file ref) but no other file imports the
+        // class by name, so the cross-file references list stays empty. Mark
+        // the class export as side-effect-used so unused-export ignores it.
+        if let Some((_tag, class_name)) = extract_custom_elements_define(expr) {
+            self.side_effect_registered_class_names.insert(class_name);
+        }
+
         if let Some(mock_source) =
             vitest_mock_source(expr).and_then(|source| vitest_auto_mock_source(&source))
         {
@@ -1651,6 +1660,16 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_class(&mut self, class: &Class<'a>) {
+        // Detect Lit `@customElement('tag')` decorator. The class is registered
+        // as a Web Component at module load time without anyone importing the
+        // class identifier, so its export must be flagged as side-effect-used.
+        if let Some(id) = class.id.as_ref()
+            && has_lit_class_decorator(class)
+        {
+            self.side_effect_registered_class_names
+                .insert(id.name.to_string());
+        }
+
         // Detect Angular @Component decorator and extract all metadata:
         // templateUrl/styleUrl imports, inline template refs, host binding refs,
         // and inputs/outputs member names.

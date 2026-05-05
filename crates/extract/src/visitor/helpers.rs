@@ -285,6 +285,59 @@ pub fn has_angular_class_decorator(class: &Class<'_>) -> bool {
     })
 }
 
+/// Check if a class has a Lit `@customElement('tag-name')` decorator.
+///
+/// Matches both the bare-import form (`import { customElement } from
+/// 'lit/decorators.js'; @customElement('x')`) and the namespace-import form
+/// (`import * as decorators from 'lit/decorators.js'; @decorators.customElement('x')`).
+/// The decorator triggers `customElements.define('x', ClassRef)` at module
+/// load time, registering the class as a Web Component without anyone
+/// importing the class identifier.
+pub fn has_lit_class_decorator(class: &Class<'_>) -> bool {
+    class.decorators.iter().any(|d| {
+        let Expression::CallExpression(call) = &d.expression else {
+            return false;
+        };
+        match &call.callee {
+            Expression::Identifier(id) => id.name == "customElement",
+            Expression::StaticMemberExpression(member) => {
+                member.property.name == "customElement"
+            }
+            _ => false,
+        }
+    })
+}
+
+/// Extract the registered tag name from a `customElements.define('tag', ClassRef)`
+/// call expression at the module top level.
+///
+/// Returns `Some((tag_name, class_local_name))` when the call's callee is the
+/// static member `customElements.define` and the arguments are
+/// `(StringLiteral, Identifier)`. The class identifier names a same-file class
+/// declaration whose export should be credited as side-effect-used.
+pub fn extract_custom_elements_define(
+    call: &oxc_ast::ast::CallExpression<'_>,
+) -> Option<(String, String)> {
+    let Expression::StaticMemberExpression(member) = &call.callee else {
+        return None;
+    };
+    let Expression::Identifier(obj) = &member.object else {
+        return None;
+    };
+    if obj.name != "customElements" || member.property.name != "define" {
+        return None;
+    }
+    let tag = match call.arguments.first()? {
+        Argument::StringLiteral(lit) => lit.value.to_string(),
+        _ => return None,
+    };
+    let class_name = match call.arguments.get(1)? {
+        Argument::Identifier(id) => id.name.to_string(),
+        _ => return None,
+    };
+    Some((tag, class_name))
+}
+
 /// Check if a property initializer is an Angular signal API call.
 ///
 /// Matches `input()`, `input.required()`, `output()`, `outputFromObservable()`,

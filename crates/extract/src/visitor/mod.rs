@@ -117,6 +117,12 @@ pub(crate) struct ModuleInfoExtractor {
     /// `line_offsets` is available) and synthesises `<template>` complexity
     /// findings on the host `.ts` file's `complexity` vec.
     pub(crate) inline_template_findings: Vec<InlineTemplateFinding>,
+    /// Local class names registered as Web Components via either a Lit
+    /// `@customElement('tag')` decorator or a `customElements.define('tag', X)`
+    /// call. Used in `into_module_info` / `merge_into` to flip
+    /// `is_side_effect_used` on matching exports so they survive
+    /// unused-export detection.
+    pub(crate) side_effect_registered_class_names: FxHashSet<String>,
 }
 
 impl ModuleInfoExtractor {
@@ -145,6 +151,30 @@ impl ModuleInfoExtractor {
 
     pub(crate) fn binding_target_names(&self) -> &FxHashMap<String, String> {
         &self.binding_target_names
+    }
+
+    /// Set `is_side_effect_used = true` on each export whose local binding
+    /// name was recorded as side-effect-registered (Lit `@customElement`
+    /// decorator or `customElements.define` call). Runs as a post-walk pass
+    /// so it covers both `export class X {}` (export pushed during the class
+    /// declaration) and `class X {}; export { X }` / `export default X`
+    /// patterns where the export and the registration site are visited at
+    /// different points in the traversal.
+    fn apply_side_effect_registrations(&mut self) {
+        if self.side_effect_registered_class_names.is_empty() {
+            return;
+        }
+        for export in &mut self.exports {
+            let Some(local_name) = export.local_name.as_deref() else {
+                continue;
+            };
+            if self
+                .side_effect_registered_class_names
+                .contains(local_name)
+            {
+                export.is_side_effect_used = true;
+            }
+        }
     }
 
     fn enrich_local_class_exports(&mut self) {
@@ -306,6 +336,7 @@ impl ModuleInfoExtractor {
         self.resolve_object_binding_candidates();
         self.resolve_bound_member_accesses();
         self.map_local_signature_refs_to_exports();
+        self.apply_side_effect_registrations();
         ModuleInfo {
             file_id,
             exports: self.exports,
@@ -355,6 +386,7 @@ impl ModuleInfoExtractor {
         self.resolve_object_binding_candidates();
         self.resolve_bound_member_accesses();
         self.map_local_signature_refs_to_exports();
+        self.apply_side_effect_registrations();
         info.imports.extend(self.imports);
         info.exports.extend(self.exports);
         info.re_exports.extend(self.re_exports);
