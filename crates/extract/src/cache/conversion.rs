@@ -60,6 +60,7 @@ pub fn cached_to_module(
                     has_decorator: m.has_decorator,
                 })
                 .collect(),
+            is_side_effect_used: false,
             super_class: e.super_class.clone(),
         })
         .collect();

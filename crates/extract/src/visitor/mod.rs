@@ -289,6 +289,7 @@ impl ModuleInfoExtractor {
             visibility: VisibilityTag::None,
             span,
             members: vec![],
+            is_side_effect_used: false,
             super_class: None,
         });
     }

@@ -987,6 +987,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         visibility: VisibilityTag::None,
                         span: spec.span,
                         members: vec![],
+                        is_side_effect_used: false,
                         super_class: None,
                     });
                 }
@@ -1079,6 +1080,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             name: ExportName::Default,
             local_name,
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: decl.span,
             members,
@@ -1473,6 +1475,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                                     visibility: VisibilityTag::None,
                                     span: p.span,
                                     members: vec![],
+                                    is_side_effect_used: false,
                                     super_class: None,
                                 });
                             }
@@ -1488,6 +1491,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         visibility: VisibilityTag::None,
                         span: expr.span,
                         members: vec![],
+                        is_side_effect_used: false,
                         super_class: None,
                     });
                 }
@@ -1505,6 +1509,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     visibility: VisibilityTag::None,
                     span: expr.span,
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 });
             }

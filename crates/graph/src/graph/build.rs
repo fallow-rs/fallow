@@ -870,6 +870,7 @@ mod tests {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 }],
                 ..Default::default()
@@ -911,6 +912,7 @@ mod tests {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             }],
             re_exports: vec![crate::resolve::ResolvedReExport {

@@ -548,6 +548,7 @@ mod tests {
                         visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
+                        is_side_effect_used: false,
                         super_class: None,
                     },
                     ExportInfo {
@@ -557,6 +558,7 @@ mod tests {
                         visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(21, 40),
                         members: vec![],
+                        is_side_effect_used: false,
                         super_class: None,
                     },
                 ],
@@ -572,6 +574,7 @@ mod tests {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 15),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 }],
                 ..Default::default()

@@ -62,6 +62,7 @@ fn graph_re_export_chain_propagates_references() {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             }],
             re_exports: vec![ResolvedReExport {
@@ -87,6 +88,7 @@ fn graph_re_export_chain_propagates_references() {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             }],
             ..Default::default()
@@ -176,6 +178,7 @@ fn barrel_re_export_creates_export_symbol() {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             }],
             ..Default::default()
@@ -290,6 +293,7 @@ fn barrel_unused_re_export_has_no_references() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
@@ -299,6 +303,7 @@ fn barrel_unused_re_export_has_no_references() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(25, 45),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
             ],
@@ -408,6 +413,7 @@ fn type_only_re_export_creates_type_only_export_symbol() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
@@ -417,6 +423,7 @@ fn type_only_re_export_creates_type_only_export_symbol() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(25, 45),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
             ],
@@ -519,6 +526,7 @@ fn default_re_export_creates_default_export_symbol() {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             }],
             ..Default::default()
@@ -638,6 +646,7 @@ fn multi_level_re_export_chain_propagation() {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             }],
             ..Default::default()
@@ -744,6 +753,7 @@ fn entry_point_named_re_export_propagates_to_source() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 30),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
@@ -753,6 +763,7 @@ fn entry_point_named_re_export_propagates_to_source() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(35, 65),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
             ],
@@ -836,6 +847,7 @@ fn entry_point_star_re_export_propagates_to_source() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
@@ -845,6 +857,7 @@ fn entry_point_star_re_export_propagates_to_source() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(25, 45),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
             ],
@@ -924,6 +937,7 @@ fn entry_point_star_re_export_does_not_mark_default_as_used() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
@@ -933,6 +947,7 @@ fn entry_point_star_re_export_does_not_mark_default_as_used() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(25, 45),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
             ],
@@ -1035,6 +1050,7 @@ fn entry_point_multi_level_named_re_export_chain() {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             }],
             ..Default::default()
@@ -1165,6 +1181,7 @@ fn star_re_export_through_multiple_barrel_layers() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
@@ -1174,6 +1191,7 @@ fn star_re_export_through_multiple_barrel_layers() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(25, 45),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
             ],
@@ -1293,6 +1311,7 @@ fn entry_point_star_re_export_through_multiple_barrel_layers() {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             }],
             ..Default::default()
@@ -1386,6 +1405,7 @@ fn named_re_export_with_rename() {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             }],
             ..Default::default()
@@ -1468,6 +1488,7 @@ fn entry_point_star_re_export_source_has_only_default() {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             }],
             ..Default::default()
@@ -1617,6 +1638,7 @@ fn star_re_export_cycle_terminates() {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 10),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             }],
             re_exports: vec![ResolvedReExport {
@@ -1784,6 +1806,7 @@ fn mixed_star_and_named_re_exports_from_same_source() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
@@ -1793,6 +1816,7 @@ fn mixed_star_and_named_re_exports_from_same_source() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(25, 45),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
             ],
@@ -1891,6 +1915,7 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 30),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
@@ -1900,6 +1925,7 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(35, 65),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
@@ -1909,6 +1935,7 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(70, 100),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
             ],
@@ -2000,6 +2027,7 @@ fn entry_point_star_re_export_skips_default() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
@@ -2009,6 +2037,7 @@ fn entry_point_star_re_export_skips_default() {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(25, 45),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
             ],
@@ -2087,6 +2116,7 @@ fn no_re_exports_skips_chain_resolution() {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             }],
             ..Default::default()
@@ -2197,6 +2227,7 @@ fn star_re_export_many_consumers_no_quadratic_blowup() {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             },
             fallow_types::extract::ExportInfo {
@@ -2206,6 +2237,7 @@ fn star_re_export_many_consumers_no_quadratic_blowup() {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(25, 45),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             },
         ],

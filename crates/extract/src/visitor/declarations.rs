@@ -48,6 +48,7 @@ impl ModuleInfoExtractor {
                             visibility: VisibilityTag::None,
                             span: id.span,
                             members: vec![],
+                            is_side_effect_used: false,
                             super_class: None,
                         });
                     }
@@ -79,6 +80,7 @@ impl ModuleInfoExtractor {
                         name: ExportName::Named(id.name.to_string()),
                         local_name: Some(id.name.to_string()),
                         is_type_only,
+                        is_side_effect_used: false,
                         visibility: VisibilityTag::None,
                         span: id.span,
                         members,
@@ -120,6 +122,7 @@ impl ModuleInfoExtractor {
                     visibility: VisibilityTag::None,
                     span: enumd.id.span,
                     members,
+                    is_side_effect_used: false,
                     super_class: None,
                 });
             }
@@ -137,6 +140,7 @@ impl ModuleInfoExtractor {
                             visibility: VisibilityTag::None,
                             span: id.span,
                             members: vec![],
+                            is_side_effect_used: false,
                             super_class: None,
                         });
                     }
@@ -148,6 +152,7 @@ impl ModuleInfoExtractor {
                             visibility: VisibilityTag::None,
                             span: lit.span,
                             members: vec![],
+                            is_side_effect_used: false,
                             super_class: None,
                         });
                     }
@@ -170,6 +175,7 @@ impl ModuleInfoExtractor {
                 visibility: VisibilityTag::None,
                 span: id.span,
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             });
         }

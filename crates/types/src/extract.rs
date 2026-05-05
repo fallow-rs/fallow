@@ -243,6 +243,14 @@ pub struct ExportInfo {
     pub local_name: Option<String>,
     /// Whether this is a type-only export (`export type`).
     pub is_type_only: bool,
+    /// Whether this export is registered through a runtime side effect at module
+    /// load time (e.g. a Lit `@customElement('tag')` class decorator or a
+    /// `customElements.define('tag', ClassRef)` call). Such classes are
+    /// referenced by their registered tag string, not by their identifier, so
+    /// no other file imports them by name. The unused-export detector treats
+    /// this flag as an effective reference.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_side_effect_used: bool,
     /// Visibility tag from JSDoc/TSDoc comment (`@public`, `@internal`, `@alpha`, `@beta`).
     /// Exports with any visibility tag are never reported as unused.
     #[serde(default, skip_serializing_if = "VisibilityTag::is_none")]

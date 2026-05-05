@@ -354,6 +354,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
                         visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
+                        is_side_effect_used: false,
                         super_class: None,
                     },
                     ExportInfo {
@@ -363,6 +364,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
                         visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(25, 45),
                         members: vec![],
+                        is_side_effect_used: false,
                         super_class: None,
                     },
                 ]
@@ -442,6 +444,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                         has_decorator: false,
                     },
                 ],
+                is_side_effect_used: false,
                 super_class: None,
             },
             ExportInfo {
@@ -470,6 +473,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                         has_decorator: false,
                     },
                 ],
+                is_side_effect_used: false,
                 super_class: None,
             },
             ExportInfo {
@@ -479,6 +483,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(800, 1200),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             },
             ExportInfo {
@@ -488,6 +493,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(10, 80),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             },
             ExportInfo {
@@ -497,6 +503,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(720, 780),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             },
         ],

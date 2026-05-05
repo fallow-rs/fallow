@@ -251,6 +251,7 @@ pub fn extract_css_module_exports(source: &str) -> Vec<ExportInfo> {
                     visibility: VisibilityTag::None,
                     span: Span::default(),
                     members: Vec::new(),
+                    is_side_effect_used: false,
                     super_class: None,
                 });
             }
