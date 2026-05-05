@@ -288,7 +288,7 @@ fn migrate_from_file(path: &Path) -> Result<MigrationResult, String> {
     })
 }
 
-/// Load a JSON or JSONC file, stripping comments if present.
+/// Load a JSON or JSONC file, stripping comments and trailing commas if present.
 fn load_json_or_jsonc(path: &Path) -> Result<serde_json::Value, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
@@ -304,7 +304,60 @@ fn load_json_or_jsonc(path: &Path) -> Result<serde_json::Value, String> {
         .read_to_string(&mut stripped)
         .map_err(|e| format!("failed to strip comments from {}: {e}", path.display()))?;
 
-    serde_json::from_str(&stripped).map_err(|e| format!("failed to parse {}: {e}", path.display()))
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&stripped) {
+        return Ok(value);
+    }
+
+    // Real-world JSONC (e.g. knip.jsonc, tsconfig.json) frequently uses
+    // trailing commas. serde_json rejects them, so strip them as a final
+    // pass before reporting a parse error to the user.
+    let cleaned = strip_trailing_commas(&stripped);
+    serde_json::from_str(&cleaned).map_err(|e| format!("failed to parse {}: {e}", path.display()))
+}
+
+/// Strip JSONC-style trailing commas (`,` immediately before `}` or `]`)
+/// without touching commas inside string literals.
+fn strip_trailing_commas(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    let mut last_emit = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == b'"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        if b == b'"' {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if b == b',' {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && (bytes[j] == b'}' || bytes[j] == b']') {
+                out.push_str(&input[last_emit..i]);
+                last_emit = i + 1;
+            }
+        }
+        i += 1;
+    }
+
+    out.push_str(&input[last_emit..]);
+    out
 }
 
 /// Extract a string-or-array field as a `Vec<String>`.

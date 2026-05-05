@@ -6,7 +6,7 @@ use super::knip::migrate_knip;
 use super::toml_gen::generate_toml;
 use super::{
     MigrationResult, MigrationWarning, load_json_or_jsonc, migrate_auto_detect, migrate_from_file,
-    string_or_array,
+    string_or_array, strip_trailing_commas,
 };
 
 fn empty_config() -> serde_json::Map<String, serde_json::Value> {
@@ -309,6 +309,112 @@ fn load_json_or_jsonc_invalid_json_and_invalid_jsonc() {
     assert!(err.contains("failed to parse"));
 
     let _ = std::fs::remove_dir_all(&tmpdir);
+}
+
+#[test]
+fn load_json_or_jsonc_accepts_trailing_commas() {
+    // Reproduces issue #276: knip.jsonc with trailing commas was rejected
+    // as `trailing comma at line 6 column 3`.
+    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-jsonc-trailing");
+    let _ = std::fs::remove_dir_all(&tmpdir);
+    std::fs::create_dir_all(&tmpdir).unwrap();
+    let path = tmpdir.join("knip.jsonc");
+    std::fs::write(
+        &path,
+        r#"{
+  "entry": [
+    "src/index.ts",
+    "src/main.ts",
+  ],
+  "ignore": [
+    "dist/**",
+  ],
+}"#,
+    )
+    .unwrap();
+
+    let value = load_json_or_jsonc(&path).expect("trailing commas should parse");
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "entry": ["src/index.ts", "src/main.ts"],
+            "ignore": ["dist/**"],
+        })
+    );
+
+    let _ = std::fs::remove_dir_all(&tmpdir);
+}
+
+#[test]
+fn load_json_or_jsonc_handles_comments_and_trailing_commas_together() {
+    // knip.jsonc users routinely combine line comments with trailing
+    // commas — both must be accepted in the same file.
+    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-jsonc-mixed");
+    let _ = std::fs::remove_dir_all(&tmpdir);
+    std::fs::create_dir_all(&tmpdir).unwrap();
+    let path = tmpdir.join("knip.jsonc");
+    std::fs::write(
+        &path,
+        r#"{
+  // Entry points
+  "entry": ["src/index.ts",],
+  /* block comment */
+  "ignore": ["dist/**",],
+}"#,
+    )
+    .unwrap();
+
+    let value = load_json_or_jsonc(&path).expect("comments + trailing commas should parse");
+    assert_eq!(value.get("entry").unwrap(), &serde_json::json!(["src/index.ts"]));
+    assert_eq!(value.get("ignore").unwrap(), &serde_json::json!(["dist/**"]));
+
+    let _ = std::fs::remove_dir_all(&tmpdir);
+}
+
+// -- strip_trailing_commas helper ----------------------------------------
+
+#[test]
+fn strip_trailing_commas_drops_simple_object_comma() {
+    assert_eq!(strip_trailing_commas(r#"{"a":1,}"#), r#"{"a":1}"#);
+}
+
+#[test]
+fn strip_trailing_commas_drops_simple_array_comma() {
+    assert_eq!(strip_trailing_commas(r#"[1,2,3,]"#), r#"[1,2,3]"#);
+}
+
+#[test]
+fn strip_trailing_commas_preserves_separator_commas() {
+    assert_eq!(
+        strip_trailing_commas(r#"{"a":1,"b":2}"#),
+        r#"{"a":1,"b":2}"#,
+    );
+}
+
+#[test]
+fn strip_trailing_commas_ignores_commas_inside_strings() {
+    // Trailing comma inside a string literal must be preserved verbatim.
+    let input = r#"{"msg":"hello, world,"}"#;
+    assert_eq!(strip_trailing_commas(input), input);
+}
+
+#[test]
+fn strip_trailing_commas_handles_escaped_quote_in_string() {
+    // Escaped quotes inside the string must not flip in_string state, so
+    // the comma inside `"hi,\","` stays put while the trailing comma
+    // before `}` is stripped.
+    let input = r#"{"msg":"he said \"hi,\",","n":1,}"#;
+    let expected = r#"{"msg":"he said \"hi,\",","n":1}"#;
+    assert_eq!(strip_trailing_commas(input), expected);
+}
+
+#[test]
+fn strip_trailing_commas_handles_whitespace_before_brace() {
+    // Pretty-printed input puts the comma on its own line before the
+    // closing brace — still must be stripped.
+    let input = "{\n  \"a\": 1,\n}";
+    let expected = "{\n  \"a\": 1\n}";
+    assert_eq!(strip_trailing_commas(input), expected);
 }
 
 // -- migrate_from_file tests ---------------------------------------------
