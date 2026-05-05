@@ -348,7 +348,10 @@ fn strip_trailing_commas(input: &str) -> String {
             while j < bytes.len() && bytes[j].is_ascii_whitespace() {
                 j += 1;
             }
-            if j < bytes.len() && (bytes[j] == b'}' || bytes[j] == b']') {
+            if j < bytes.len()
+                && (bytes[j] == b'}' || bytes[j] == b']')
+                && comma_follows_json_value(bytes, i)
+            {
                 out.push_str(&input[last_emit..i]);
                 last_emit = i + 1;
             }
@@ -358,6 +361,19 @@ fn strip_trailing_commas(input: &str) -> String {
 
     out.push_str(&input[last_emit..]);
     out
+}
+
+fn comma_follows_json_value(bytes: &[u8], comma_index: usize) -> bool {
+    let Some(prev) = bytes[..comma_index]
+        .iter()
+        .rev()
+        .copied()
+        .find(|b| !b.is_ascii_whitespace())
+    else {
+        return false;
+    };
+
+    matches!(prev, b'"' | b'}' | b']' | b'0'..=b'9' | b'e' | b'l')
 }
 
 /// Extract a string-or-array field as a `Vec<String>`.

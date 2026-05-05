@@ -312,6 +312,20 @@ fn load_json_or_jsonc_invalid_json_and_invalid_jsonc() {
 }
 
 #[test]
+fn load_json_or_jsonc_rejects_malformed_leading_comma() {
+    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-jsonc-leading-comma");
+    let _ = std::fs::remove_dir_all(&tmpdir);
+    std::fs::create_dir_all(&tmpdir).unwrap();
+    let path = tmpdir.join("knip.jsonc");
+    std::fs::write(&path, "{,}").unwrap();
+
+    let err = load_json_or_jsonc(&path).unwrap_err();
+    assert!(err.contains("failed to parse"));
+
+    let _ = std::fs::remove_dir_all(&tmpdir);
+}
+
+#[test]
 fn load_json_or_jsonc_accepts_trailing_commas() {
     // Reproduces issue #276: knip.jsonc with trailing commas was rejected
     // as `trailing comma at line 6 column 3`.
@@ -365,8 +379,14 @@ fn load_json_or_jsonc_handles_comments_and_trailing_commas_together() {
     .unwrap();
 
     let value = load_json_or_jsonc(&path).expect("comments + trailing commas should parse");
-    assert_eq!(value.get("entry").unwrap(), &serde_json::json!(["src/index.ts"]));
-    assert_eq!(value.get("ignore").unwrap(), &serde_json::json!(["dist/**"]));
+    assert_eq!(
+        value.get("entry").unwrap(),
+        &serde_json::json!(["src/index.ts"])
+    );
+    assert_eq!(
+        value.get("ignore").unwrap(),
+        &serde_json::json!(["dist/**"])
+    );
 
     let _ = std::fs::remove_dir_all(&tmpdir);
 }
@@ -380,7 +400,13 @@ fn strip_trailing_commas_drops_simple_object_comma() {
 
 #[test]
 fn strip_trailing_commas_drops_simple_array_comma() {
-    assert_eq!(strip_trailing_commas(r#"[1,2,3,]"#), r#"[1,2,3]"#);
+    assert_eq!(strip_trailing_commas(r"[1,2,3,]"), r"[1,2,3]");
+}
+
+#[test]
+fn strip_trailing_commas_preserves_malformed_leading_comma() {
+    assert_eq!(strip_trailing_commas(r"{,}"), r"{,}");
+    assert_eq!(strip_trailing_commas(r"[, ]"), r"[, ]");
 }
 
 #[test]
