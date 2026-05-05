@@ -468,6 +468,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: crate::extract::ExportName::Named("localFn".to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: oxc_span::Span::new(10, 50),
             references: vec![],
@@ -517,6 +518,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: crate::extract::ExportName::Named("helper".to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 0),
             references: vec![],

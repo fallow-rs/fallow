@@ -771,6 +771,7 @@ mod tests {
             graph.modules[0].exports = vec![ExportSymbol {
                 name: ExportName::Named("myExport".to_string()),
                 is_type_only: false,
+                is_side_effect_used: false,
                 visibility: VisibilityTag::None,
                 span: Span::new(10, 30),
                 references: vec![],

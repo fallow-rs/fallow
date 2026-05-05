@@ -166,6 +166,7 @@ fn build_module_node(
                 .map(|e| ExportSymbol {
                     name: e.name.clone(),
                     is_type_only: e.is_type_only,
+                    is_side_effect_used: e.is_side_effect_used,
                     visibility: e.visibility,
                     span: e.span,
                     references: Vec::new(),
@@ -204,6 +205,7 @@ fn build_module_node(
             exports.push(ExportSymbol {
                 name: export_name,
                 is_type_only: re.info.is_type_only,
+                is_side_effect_used: false,
                 visibility: VisibilityTag::None,
                 // Use the real span from the visitor when available; falls back
                 // to (0, 0) for re-exports synthesized inside the graph layer.

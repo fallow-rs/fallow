@@ -120,6 +120,7 @@ pub(in crate::graph) fn propagate_star_re_export(
             source.exports.push(ExportSymbol {
                 name: export_name,
                 is_type_only: false,
+                is_side_effect_used: false,
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 0),
                 references: refs.clone(),

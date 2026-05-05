@@ -1164,6 +1164,7 @@ mod tests {
         ExportSymbol {
             name: ExportName::Named(name.to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: Span::new(0, 10),
             references,

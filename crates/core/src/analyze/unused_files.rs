@@ -180,6 +180,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: ExportName::Named("helper".to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: Span::new(0, 10),
             references: vec![SymbolReference {
@@ -203,6 +204,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: ExportName::Named("helper".to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: Span::new(0, 10),
             references: vec![SymbolReference {

@@ -283,7 +283,7 @@ pub fn find_unused_exports(
             for export in &module.exports {
                 // For unreachable modules, only references from reachable files count —
                 // references from other unreachable modules don't save an export.
-                let is_referenced = if module.is_reachable() {
+                let has_cross_file_ref = if module.is_reachable() {
                     !export.references.is_empty()
                 } else {
                     export
@@ -291,6 +291,12 @@ pub fn find_unused_exports(
                         .iter()
                         .any(|r| reachable_files.contains(&r.from_file.0))
                 };
+                // Treat side-effect-registered exports (Lit @customElement,
+                // customElements.define) as referenced even when no other file
+                // imports them by name. The class is alive at runtime via the
+                // registration call inside its own module.
+                let is_referenced =
+                    has_cross_file_ref || (module.is_reachable() && export.is_side_effect_used);
                 // Handle @expected-unused: if the export IS used (has references from
                 // reachable modules), report as stale. If it's NOT used, suppress it
                 // silently (the tag is working as intended). Note: re-exports through
@@ -1065,6 +1071,7 @@ mod tests {
         ExportSymbol {
             name: ExportName::Named(name.to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: Span::new(span_start, span_end),
             references: vec![],
@@ -1081,6 +1088,7 @@ mod tests {
         ExportSymbol {
             name: ExportName::Named(name.to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: Span::new(span_start, span_end),
             references: vec![SymbolReference {
@@ -1144,6 +1152,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: ExportName::Default,
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: Span::new(10, 20),
             references: vec![],
@@ -1153,6 +1162,7 @@ mod tests {
         graph.modules[2].exports = vec![ExportSymbol {
             name: ExportName::Default,
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: Span::new(10, 20),
             references: vec![],
@@ -1491,6 +1501,7 @@ mod tests {
         let make_default_export = || ExportSymbol {
             name: ExportName::Default,
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 10),
             references: vec![],
@@ -1750,6 +1761,7 @@ mod tests {
         ExportSymbol {
             name: ExportName::Named(name.to_string()),
             is_type_only: true,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: Span::new(span_start, span_end),
             references: vec![],
@@ -1831,6 +1843,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: ExportName::Named("publicFn".to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::Public,
             span: Span::new(10, 20),
             references: vec![],
@@ -2500,6 +2513,7 @@ mod tests {
             ExportSymbol {
                 name: ExportName::Named("usedByUnreachable".to_string()),
                 is_type_only: false,
+                is_side_effect_used: false,
                 visibility: VisibilityTag::None,
                 span: Span::new(10, 30),
                 references: vec![SymbolReference {
@@ -2550,6 +2564,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: ExportName::Named("usedByReachable".to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: Span::new(10, 28),
             references: vec![SymbolReference {
@@ -2589,6 +2604,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: ExportName::Named("internalHelper".to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::Internal,
             span: Span::new(10, 30),
             references: vec![],
@@ -2621,6 +2637,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: ExportName::Named("betaFeature".to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::Beta,
             span: Span::new(10, 30),
             references: vec![],
@@ -2653,6 +2670,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: ExportName::Named("alphaFeature".to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::Alpha,
             span: Span::new(10, 30),
             references: vec![],

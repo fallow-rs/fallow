@@ -160,6 +160,11 @@ pub struct ExportSymbol {
     pub name: ExportName,
     /// Whether this is a type-only export.
     pub is_type_only: bool,
+    /// Whether this export is registered through a runtime side effect at module
+    /// load time (e.g. a Lit `@customElement('tag')` decorator or a
+    /// `customElements.define('tag', ClassRef)` call). The unused-export
+    /// detector treats this as an effective reference.
+    pub is_side_effect_used: bool,
     /// Visibility tag from JSDoc/TSDoc comment (`@public`, `@internal`, `@alpha`, `@beta`).
     /// Exports with any visibility tag are never reported as unused.
     pub visibility: VisibilityTag,
@@ -341,6 +346,7 @@ mod tests {
         let sym = ExportSymbol {
             name: ExportName::Named("myFunction".to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 50),
             references: vec![],
@@ -356,6 +362,7 @@ mod tests {
         let sym = ExportSymbol {
             name: ExportName::Default,
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 20),
             references: vec![],
@@ -369,6 +376,7 @@ mod tests {
         let sym = ExportSymbol {
             name: ExportName::Named("api".to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::Public,
             span: oxc_span::Span::new(0, 10),
             references: vec![],
@@ -382,6 +390,7 @@ mod tests {
         let sym = ExportSymbol {
             name: ExportName::Named("MyInterface".to_string()),
             is_type_only: true,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 30),
             references: vec![],
@@ -395,6 +404,7 @@ mod tests {
         let sym = ExportSymbol {
             name: ExportName::Named("helper".to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 20),
             references: vec![
@@ -480,6 +490,7 @@ mod tests {
             exports: vec![ExportSymbol {
                 name: ExportName::Named("localFn".to_string()),
                 is_type_only: false,
+                is_side_effect_used: false,
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 20),
                 references: vec![],
