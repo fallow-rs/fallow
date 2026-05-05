@@ -430,9 +430,7 @@ pub(super) fn extract_angular_signal_query(value: &Expression<'_>) -> Option<Ang
 ///
 /// Used for `@ViewChildren` / `@ContentChildren` properties where the type
 /// annotation is the only place the element type appears.
-pub(super) fn extract_query_list_element_type(
-    annotation: &TSTypeAnnotation<'_>,
-) -> Option<String> {
+pub(super) fn extract_query_list_element_type(annotation: &TSTypeAnnotation<'_>) -> Option<String> {
     extract_query_list_from_type(&annotation.type_annotation)
 }
 
@@ -476,7 +474,9 @@ fn extract_query_list_from_type(ty: &TSType<'_>) -> Option<String> {
 /// Recognize a `@ViewChildren(...)` or `@ContentChildren(...)` decorator on a
 /// class property. Used in conjunction with [`extract_query_list_element_type`]
 /// to wire up `forEach`-style iteration through the property.
-pub(super) fn has_angular_plural_query_decorator(decorators: &[oxc_ast::ast::Decorator<'_>]) -> bool {
+pub(super) fn has_angular_plural_query_decorator(
+    decorators: &[oxc_ast::ast::Decorator<'_>],
+) -> bool {
     decorators.iter().any(|decorator| {
         let Expression::CallExpression(call) = &decorator.expression else {
             return false;

@@ -3821,7 +3821,7 @@ fn angular_signal_and_plural_queries_trace_child_method_calls() {
         }
         ",
     );
-    let traced: std::collections::HashSet<&str> = info
+    let traced: rustc_hash::FxHashSet<&str> = info
         .member_accesses
         .iter()
         .filter(|a| a.object == "ChildComponent")

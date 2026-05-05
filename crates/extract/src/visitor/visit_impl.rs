@@ -25,9 +25,8 @@ use super::helpers::{
     extract_angular_component_metadata, extract_angular_signal_query, extract_class_members,
     extract_concat_parts, extract_custom_elements_define, extract_implemented_interface_names,
     extract_nested_type_bindings, extract_query_list_element_type, extract_super_class_name,
-    extract_type_annotation_name, has_angular_class_decorator,
-    has_angular_plural_query_decorator, is_meta_url_arg, lit_custom_element_decorator,
-    regex_pattern_to_suffix,
+    extract_type_annotation_name, has_angular_class_decorator, has_angular_plural_query_decorator,
+    is_meta_url_arg, lit_custom_element_decorator, regex_pattern_to_suffix,
 };
 use super::{
     ModuleInfoExtractor, SideEffectRegistrationTarget, try_extract_arrow_wrapped_import,
@@ -592,14 +591,12 @@ impl ModuleInfoExtractor {
             return;
         };
         let param_name = match first_arg {
-            Argument::ArrowFunctionExpression(arrow) => arrow
-                .params
-                .items
-                .first()
-                .and_then(|p| match &p.pattern {
+            Argument::ArrowFunctionExpression(arrow) => {
+                arrow.params.items.first().and_then(|p| match &p.pattern {
                     BindingPattern::BindingIdentifier(id) => Some(id.name.to_string()),
                     _ => None,
-                }),
+                })
+            }
             Argument::FunctionExpression(func) => {
                 func.params.items.first().and_then(|p| match &p.pattern {
                     BindingPattern::BindingIdentifier(id) => Some(id.name.to_string()),
@@ -842,8 +839,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             {
                 let call_key = format!("this.{name}()");
                 if query.plural {
-                    self.iterable_element_types
-                        .insert(call_key, query.type_arg);
+                    self.iterable_element_types.insert(call_key, query.type_arg);
                 } else {
                     self.binding_target_names.insert(call_key, query.type_arg);
                 }
