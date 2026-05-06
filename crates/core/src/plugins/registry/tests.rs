@@ -201,6 +201,33 @@ fn no_plugins_for_empty_deps() {
     );
 }
 
+#[test]
+fn react_router_contributes_discovery_hidden_dirs_when_active() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg_dev(&["@react-router/dev"]);
+    let dirs = registry.discovery_hidden_dirs(&pkg, Path::new("/project"));
+
+    assert_eq!(dirs, vec![".client".to_string(), ".server".to_string()]);
+}
+
+#[test]
+fn remix_contributes_discovery_hidden_dirs_when_active() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg(&["@remix-run/react"]);
+    let dirs = registry.discovery_hidden_dirs(&pkg, Path::new("/project"));
+
+    assert_eq!(dirs, vec![".client".to_string(), ".server".to_string()]);
+}
+
+#[test]
+fn discovery_hidden_dirs_empty_without_router_plugins() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg(&["react", "react-dom"]);
+    let dirs = registry.discovery_hidden_dirs(&pkg, Path::new("/project"));
+
+    assert!(dirs.is_empty());
+}
+
 // ── Aggregation: entry patterns, tooling deps ────────────────
 
 #[test]

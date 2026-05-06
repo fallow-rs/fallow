@@ -1,7 +1,9 @@
 {
   "name": "remix-conventions",
   "dependencies": {
+    "@prisma/client": "^5.0.0",
     "@remix-run/node": "^2.0.0",
-    "@remix-run/react": "^2.0.0"
+    "@remix-run/react": "^2.0.0",
+    "browser-analytics": "^1.0.0"
   }
 }

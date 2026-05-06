@@ -17,6 +17,7 @@ pub(crate) use entry_points::{
     discover_workspace_entry_points_with_warnings_from_pkg, warn_skipped_entry_summary,
 };
 pub use infrastructure::discover_infrastructure_entry_points;
+pub(crate) use walk::{HiddenDirScope, discover_files_with_additional_hidden_dirs};
 pub use walk::{PRODUCTION_EXCLUDE_PATTERNS, SOURCE_EXTENSIONS, discover_files};
 
 /// Hidden (dot-prefixed) directories that should be included in file discovery.

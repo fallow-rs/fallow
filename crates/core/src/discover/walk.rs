@@ -1,5 +1,5 @@
 use std::ffi::OsStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use fallow_config::ResolvedConfig;
@@ -7,6 +7,23 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 use ignore::WalkBuilder;
 
 use super::ALLOWED_HIDDEN_DIRS;
+
+/// Package-scoped hidden directories that source discovery should traverse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HiddenDirScope {
+    root: PathBuf,
+    dirs: Vec<String>,
+}
+
+impl HiddenDirScope {
+    pub fn new(root: PathBuf, dirs: Vec<String>) -> Self {
+        Self { root, dirs }
+    }
+
+    fn allows(&self, path: &Path, name: &OsStr) -> bool {
+        path.starts_with(&self.root) && self.dirs.iter().any(|dir| OsStr::new(dir) == name)
+    }
+}
 
 /// Per-thread file collector for the parallel walker.
 struct FileVisitor<'a> {
@@ -113,12 +130,29 @@ pub fn is_allowed_hidden_dir(name: &OsStr) -> bool {
     ALLOWED_HIDDEN_DIRS.iter().any(|&d| OsStr::new(d) == name)
 }
 
+fn is_allowed_scoped_hidden_dir(
+    name: &OsStr,
+    path: &Path,
+    additional_hidden_dir_scopes: &[HiddenDirScope],
+) -> bool {
+    additional_hidden_dir_scopes
+        .iter()
+        .any(|scope| scope.allows(path, name))
+}
+
 /// Check if a hidden directory entry should be allowed through the filter.
 ///
 /// Returns `true` if the entry is not hidden or is on the allowlist.
 /// Hidden files (not directories) are always allowed through since the type
 /// filter handles them.
 fn is_allowed_hidden(entry: &ignore::DirEntry) -> bool {
+    is_allowed_hidden_with_scopes(entry, &[])
+}
+
+fn is_allowed_hidden_with_scopes(
+    entry: &ignore::DirEntry,
+    additional_hidden_dir_scopes: &[HiddenDirScope],
+) -> bool {
     let name = entry.file_name();
     let name_str = name.to_string_lossy();
 
@@ -134,9 +168,19 @@ fn is_allowed_hidden(entry: &ignore::DirEntry) -> bool {
 
     // Hidden directory — check against the allowlist
     is_allowed_hidden_dir(name)
+        || is_allowed_scoped_hidden_dir(name, entry.path(), additional_hidden_dir_scopes)
 }
 
 /// Discover all source files in the project.
+///
+/// # Panics
+///
+/// Panics if the file type glob or progress template is invalid (compile-time constants).
+pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
+    discover_files_with_additional_hidden_dirs(config, &[])
+}
+
+/// Discover all source files in the project, with package-scoped hidden dirs.
 ///
 /// # Panics
 ///
@@ -145,7 +189,10 @@ fn is_allowed_hidden(entry: &ignore::DirEntry) -> bool {
     clippy::cast_possible_truncation,
     reason = "file count is bounded by project size, well under u32::MAX"
 )]
-pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
+pub fn discover_files_with_additional_hidden_dirs(
+    config: &ResolvedConfig,
+    additional_hidden_dir_scopes: &[HiddenDirScope],
+) -> Vec<DiscoveredFile> {
     let _span = tracing::info_span!("discover_files").entered();
 
     let mut types_builder = ignore::types::TypesBuilder::new();
@@ -164,8 +211,13 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
         .git_global(true)
         .git_exclude(true)
         .types(types)
-        .threads(config.threads)
-        .filter_entry(is_allowed_hidden);
+        .threads(config.threads);
+    if additional_hidden_dir_scopes.is_empty() {
+        walk_builder.filter_entry(is_allowed_hidden);
+    } else {
+        let scopes = additional_hidden_dir_scopes.to_vec();
+        walk_builder.filter_entry(move |entry| is_allowed_hidden_with_scopes(entry, &scopes));
+    }
 
     // Build production exclude matcher if needed
     let production_excludes = if config.production {
@@ -529,6 +581,69 @@ mod tests {
                 names.contains(&".changeset/config.js".to_string()),
                 "files in .changeset should be discovered"
             );
+        }
+
+        #[test]
+        fn default_discovery_excludes_client_and_server_hidden_directories() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let app = dir.path().join("app");
+            std::fs::create_dir_all(app.join(".client")).unwrap();
+            std::fs::create_dir_all(app.join(".server")).unwrap();
+            std::fs::write(app.join(".client/analytics.ts"), "export const a = 1;").unwrap();
+            std::fs::write(app.join(".server/db.ts"), "export const db = {};").unwrap();
+            std::fs::write(app.join("root.tsx"), "export default function Root() {}").unwrap();
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let files = discover_files(&config);
+            let names = file_names(&files, dir.path());
+
+            assert!(names.contains(&"app/root.tsx".to_string()));
+            assert!(!names.contains(&"app/.client/analytics.ts".to_string()));
+            assert!(!names.contains(&"app/.server/db.ts".to_string()));
+        }
+
+        #[test]
+        fn scoped_hidden_dirs_include_client_and_server_under_package_root() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let package = dir.path().join("packages/app");
+            std::fs::create_dir_all(package.join("app/.client")).unwrap();
+            std::fs::create_dir_all(package.join("app/.server")).unwrap();
+            std::fs::write(
+                package.join("app/.client/analytics.ts"),
+                "export const track = () => {};",
+            )
+            .unwrap();
+            std::fs::write(package.join("app/.server/db.ts"), "export const db = {};").unwrap();
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let scopes = [HiddenDirScope::new(
+                package,
+                vec![".client".to_string(), ".server".to_string()],
+            )];
+            let files = discover_files_with_additional_hidden_dirs(&config, &scopes);
+            let names = file_names(&files, dir.path());
+
+            assert!(names.contains(&"packages/app/app/.client/analytics.ts".to_string()));
+            assert!(names.contains(&"packages/app/app/.server/db.ts".to_string()));
+        }
+
+        #[test]
+        fn scoped_hidden_dirs_do_not_include_unscoped_packages() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let active = dir.path().join("packages/active");
+            let inactive = dir.path().join("packages/inactive");
+            std::fs::create_dir_all(active.join("app/.server")).unwrap();
+            std::fs::create_dir_all(inactive.join("app/.server")).unwrap();
+            std::fs::write(active.join("app/.server/db.ts"), "export const db = {};").unwrap();
+            std::fs::write(inactive.join("app/.server/db.ts"), "export const db = {};").unwrap();
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let scopes = [HiddenDirScope::new(active, vec![".server".to_string()])];
+            let files = discover_files_with_additional_hidden_dirs(&config, &scopes);
+            let names = file_names(&files, dir.path());
+
+            assert!(names.contains(&"packages/active/app/.server/db.ts".to_string()));
+            assert!(!names.contains(&"packages/inactive/app/.server/db.ts".to_string()));
         }
 
         #[test]

@@ -1,5 +1,9 @@
 {
   "name": "react-router-conventions",
+  "dependencies": {
+    "@prisma/client": "^5.0.0",
+    "browser-analytics": "^1.0.0"
+  },
   "devDependencies": {
     "@react-router/dev": "^7.0.0"
   }

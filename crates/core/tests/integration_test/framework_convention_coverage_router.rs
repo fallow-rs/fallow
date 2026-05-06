@@ -3,11 +3,54 @@ use super::framework_convention_coverage_common::{
     collect_unused_exports, collect_unused_files, has_unused_export,
 };
 
+fn assert_bundle_boundary_modules_are_traversed(
+    root: &std::path::Path,
+    results: &fallow_core::results::AnalysisResults,
+) {
+    let unresolved: Vec<(String, String)> = results
+        .unresolved_imports
+        .iter()
+        .map(|import| {
+            (
+                import
+                    .path
+                    .strip_prefix(root)
+                    .unwrap_or(&import.path)
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+                import.specifier.clone(),
+            )
+        })
+        .collect();
+
+    for specifier in ["../.client/analytics", "../.server/db"] {
+        assert!(
+            !unresolved
+                .iter()
+                .any(|(path, spec)| path == "app/routes/_index.tsx" && spec == specifier),
+            "{specifier} should resolve through .client/.server discovery, found: {unresolved:?}"
+        );
+    }
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|dep| dep.package_name.as_str())
+        .collect();
+    for dep in ["@prisma/client", "browser-analytics"] {
+        assert!(
+            !unused_dep_names.contains(&dep),
+            "{dep} is imported from .client/.server code and should be marked used: {unused_dep_names:?}"
+        );
+    }
+}
+
 #[test]
 fn react_router_route_config_root_and_route_exports_are_covered() {
     let root = fixture_path("react-router-conventions");
     let config = create_config(root.clone());
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    assert_bundle_boundary_modules_are_traversed(&root, &results);
 
     let unused_files = collect_unused_files(&root, &results);
     assert!(
@@ -49,6 +92,7 @@ fn remix_root_and_client_data_exports_are_covered() {
     let root = fixture_path("remix-conventions");
     let config = create_config(root.clone());
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    assert_bundle_boundary_modules_are_traversed(&root, &results);
 
     let unused_exports = collect_unused_exports(&root, &results);
     for (path, export) in [

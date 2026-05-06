@@ -30,6 +30,8 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
     "@remix-run/serve",
 ];
 
+const BUNDLE_BOUNDARY_DIRS: &[&str] = &[".client", ".server"];
+
 macro_rules! route_module_exports {
     ($($export:literal),+ $(,)?) => {
         const ROUTE_EXPORTS: &[&str] = &[$($export),+];
@@ -58,6 +60,7 @@ define_plugin! {
     entry_patterns: ENTRY_PATTERNS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
+    discovery_hidden_dirs: BUNDLE_BOUNDARY_DIRS,
     used_exports: [
         ("app/routes/**/*.{ts,tsx,js,jsx}", ROUTE_EXPORTS),
         ("app/root.{ts,tsx,js,jsx}", ROOT_EXPORTS),
@@ -85,5 +88,11 @@ mod tests {
                 && names.contains(&"clientLoader")
                 && names.contains(&"clientAction")
         }));
+    }
+
+    #[test]
+    fn discovery_hidden_dirs_include_bundle_boundaries() {
+        let plugin = RemixPlugin;
+        assert_eq!(plugin.discovery_hidden_dirs(), [".client", ".server"]);
     }
 }

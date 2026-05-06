@@ -92,6 +92,30 @@ impl PluginRegistry {
         }
     }
 
+    /// Hidden directory names that should be traversed before full plugin execution.
+    ///
+    /// Source discovery runs before plugin config parsing, so this helper only uses
+    /// package-activation checks and static plugin metadata.
+    #[must_use]
+    pub fn discovery_hidden_dirs(&self, pkg: &PackageJson, root: &Path) -> Vec<String> {
+        let all_deps = pkg.all_dependency_names();
+        let mut seen = FxHashSet::default();
+        let mut dirs = Vec::new();
+
+        for plugin in &self.plugins {
+            if !plugin.is_enabled_with_deps(&all_deps, root) {
+                continue;
+            }
+            for dir in plugin.discovery_hidden_dirs() {
+                if seen.insert(*dir) {
+                    dirs.push((*dir).to_string());
+                }
+            }
+        }
+
+        dirs
+    }
+
     /// Run all plugins against a project, returning aggregated results.
     ///
     /// This discovers which plugins are active, collects their static patterns,

@@ -1,3 +1,9 @@
+import { trackRouteView } from "../.client/analytics";
+import { db } from "../.server/db";
+
+void db;
+trackRouteView("index");
+
 export async function loader() {
   return null;
 }

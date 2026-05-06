@@ -649,6 +649,14 @@ pub trait Plugin: Send + Sync {
         &[]
     }
 
+    /// Hidden directory names that should be traversed when this plugin is active.
+    ///
+    /// These are consulted before normal plugin execution because source discovery
+    /// runs first. Keep entries static and package-convention scoped.
+    fn discovery_hidden_dirs(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// Dependencies that are tooling (used via CLI/config, not source imports).
     /// These should not be flagged as unused devDependencies.
     fn tooling_dependencies(&self) -> &'static [&'static str] {
@@ -791,6 +799,7 @@ macro_rules! define_plugin {
         $(, always_used: $always:expr)?
         $(, tooling_dependencies: $tooling:expr)?
         $(, fixture_glob_patterns: $fixtures:expr)?
+        $(, discovery_hidden_dirs: $hidden_dirs:expr)?
         $(, virtual_module_prefixes: $virtual:expr)?
         $(, virtual_package_suffixes: $virtual_suffixes:expr)?
         $(, used_exports: [$( ($pat:expr, $exports:expr) ),* $(,)?])?
@@ -813,6 +822,7 @@ macro_rules! define_plugin {
             $( fn always_used(&self) -> &'static [&'static str] { $always } )?
             $( fn tooling_dependencies(&self) -> &'static [&'static str] { $tooling } )?
             $( fn fixture_glob_patterns(&self) -> &'static [&'static str] { $fixtures } )?
+            $( fn discovery_hidden_dirs(&self) -> &'static [&'static str] { $hidden_dirs } )?
             $( fn virtual_module_prefixes(&self) -> &'static [&'static str] { $virtual } )?
             $( fn virtual_package_suffixes(&self) -> &'static [&'static str] { $virtual_suffixes } )?
 
@@ -850,6 +860,7 @@ macro_rules! define_plugin {
         $(, always_used: $always:expr)?
         $(, tooling_dependencies: $tooling:expr)?
         $(, fixture_glob_patterns: $fixtures:expr)?
+        $(, discovery_hidden_dirs: $hidden_dirs:expr)?
         $(, virtual_module_prefixes: $virtual:expr)?
         $(, virtual_package_suffixes: $virtual_suffixes:expr)?
         $(, package_json_config_key: $pkg_key:expr)?
@@ -873,6 +884,7 @@ macro_rules! define_plugin {
             $( fn always_used(&self) -> &'static [&'static str] { $always } )?
             $( fn tooling_dependencies(&self) -> &'static [&'static str] { $tooling } )?
             $( fn fixture_glob_patterns(&self) -> &'static [&'static str] { $fixtures } )?
+            $( fn discovery_hidden_dirs(&self) -> &'static [&'static str] { $hidden_dirs } )?
             $( fn virtual_module_prefixes(&self) -> &'static [&'static str] { $virtual } )?
             $( fn virtual_package_suffixes(&self) -> &'static [&'static str] { $virtual_suffixes } )?
 
@@ -907,6 +919,7 @@ macro_rules! define_plugin {
         $(, always_used: $always:expr)?
         $(, tooling_dependencies: $tooling:expr)?
         $(, fixture_glob_patterns: $fixtures:expr)?
+        $(, discovery_hidden_dirs: $hidden_dirs:expr)?
         $(, virtual_module_prefixes: $virtual:expr)?
         $(, virtual_package_suffixes: $virtual_suffixes:expr)?
         $(, used_exports: [$( ($pat:expr, $exports:expr) ),* $(,)?])?
@@ -928,6 +941,7 @@ macro_rules! define_plugin {
             $( fn always_used(&self) -> &'static [&'static str] { $always } )?
             $( fn tooling_dependencies(&self) -> &'static [&'static str] { $tooling } )?
             $( fn fixture_glob_patterns(&self) -> &'static [&'static str] { $fixtures } )?
+            $( fn discovery_hidden_dirs(&self) -> &'static [&'static str] { $hidden_dirs } )?
             $( fn virtual_module_prefixes(&self) -> &'static [&'static str] { $virtual } )?
             $( fn virtual_package_suffixes(&self) -> &'static [&'static str] { $virtual_suffixes } )?
 
