@@ -429,20 +429,24 @@ enum Command {
     /// Find code duplication / clones across the project
     Dupes {
         /// Detection mode: strict, mild, weak, or semantic
-        #[arg(long, default_value = "mild")]
-        mode: DupesMode,
+        /// (defaults to the value in `.fallowrc.jsonc`, or `mild` if unset).
+        #[arg(long)]
+        mode: Option<DupesMode>,
 
         /// Minimum token count for a clone
-        #[arg(long, default_value = "50")]
-        min_tokens: usize,
+        /// (defaults to the value in `.fallowrc.jsonc`, or `50` if unset).
+        #[arg(long)]
+        min_tokens: Option<usize>,
 
         /// Minimum line count for a clone
-        #[arg(long, default_value = "5")]
-        min_lines: usize,
+        /// (defaults to the value in `.fallowrc.jsonc`, or `5` if unset).
+        #[arg(long)]
+        min_lines: Option<usize>,
 
         /// Fail if duplication exceeds this percentage (0 = no limit)
-        #[arg(long, default_value = "0")]
-        threshold: f64,
+        /// (defaults to the value in `.fallowrc.jsonc`, or `0` if unset).
+        #[arg(long)]
+        threshold: Option<f64>,
 
         /// Only report cross-directory duplicates
         #[arg(long)]
@@ -2449,10 +2453,10 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
 }
 
 struct DupesDispatchArgs {
-    mode: DupesMode,
-    min_tokens: usize,
-    min_lines: usize,
-    threshold: f64,
+    mode: Option<DupesMode>,
+    min_tokens: Option<usize>,
+    min_lines: Option<usize>,
+    threshold: Option<f64>,
     skip_local: bool,
     cross_language: bool,
     ignore_imports: bool,

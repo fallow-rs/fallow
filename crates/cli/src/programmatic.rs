@@ -557,10 +557,13 @@ pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<se
         no_cache: resolved.no_cache,
         threads: resolved.threads,
         quiet: true,
-        mode: options.mode.to_cli(),
-        min_tokens: options.min_tokens,
-        min_lines: options.min_lines,
-        threshold: options.threshold,
+        // The programmatic API requires callers to provide concrete values
+        // (the public `DuplicationOptions` has no Optional scalars), so we
+        // forward each as an explicit override.
+        mode: Some(options.mode.to_cli()),
+        min_tokens: Some(options.min_tokens),
+        min_lines: Some(options.min_lines),
+        threshold: Some(options.threshold),
         skip_local: options.skip_local,
         cross_language: options.cross_language,
         ignore_imports: options.ignore_imports,

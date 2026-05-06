@@ -35,10 +35,16 @@ pub struct DupesOptions<'a> {
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
-    pub mode: DupesMode,
-    pub min_tokens: usize,
-    pub min_lines: usize,
-    pub threshold: f64,
+    /// CLI override for detection mode. `None` falls back to the value from
+    /// the config file (or its default if unspecified there).
+    pub mode: Option<DupesMode>,
+    /// CLI override for minimum token count. `None` falls back to config.
+    pub min_tokens: Option<usize>,
+    /// CLI override for minimum line count. `None` falls back to config.
+    pub min_lines: Option<usize>,
+    /// CLI override for failure threshold percentage. `None` falls back to
+    /// config (where `0.0` disables the gate).
+    pub threshold: Option<f64>,
     pub skip_local: bool,
     pub cross_language: bool,
     pub ignore_imports: bool,
@@ -82,24 +88,32 @@ fn parse_trace_spec(spec: &str) -> Result<(&str, usize), &'static str> {
 }
 
 /// Build a `DuplicatesConfig` from CLI options, merging with values from the config file.
+///
+/// CLI scalar fields (`mode`, `min_tokens`, `min_lines`, `threshold`) are
+/// `Option<T>` so an absent flag falls through to the value declared in
+/// `toml_dupes`. This is what lets users set e.g. `duplicates.minLines = 8`
+/// in `.fallowrc.jsonc` and have `fallow dupes` honor it. Boolean toggles
+/// (`skip_local`, `cross_language`, `ignore_imports`) use OR-merge, so any
+/// `true` (CLI or config) wins.
 fn build_dupes_config(
     opts: &DupesOptions<'_>,
     toml_dupes: &fallow_config::DuplicatesConfig,
 ) -> fallow_config::DuplicatesConfig {
+    let mode = opts.mode.map_or(toml_dupes.mode, |m| match m {
+        DupesMode::Strict => fallow_config::DetectionMode::Strict,
+        DupesMode::Mild => fallow_config::DetectionMode::Mild,
+        DupesMode::Weak => fallow_config::DetectionMode::Weak,
+        DupesMode::Semantic => fallow_config::DetectionMode::Semantic,
+    });
     fallow_config::DuplicatesConfig {
         enabled: true,
-        mode: match opts.mode {
-            DupesMode::Strict => fallow_config::DetectionMode::Strict,
-            DupesMode::Mild => fallow_config::DetectionMode::Mild,
-            DupesMode::Weak => fallow_config::DetectionMode::Weak,
-            DupesMode::Semantic => fallow_config::DetectionMode::Semantic,
-        },
-        min_tokens: opts.min_tokens,
-        min_lines: opts.min_lines,
-        threshold: opts.threshold,
+        mode,
+        min_tokens: opts.min_tokens.unwrap_or(toml_dupes.min_tokens),
+        min_lines: opts.min_lines.unwrap_or(toml_dupes.min_lines),
+        threshold: opts.threshold.unwrap_or(toml_dupes.threshold),
         ignore: toml_dupes.ignore.clone(),
         ignore_defaults: toml_dupes.ignore_defaults,
-        skip_local: opts.skip_local,
+        skip_local: opts.skip_local || toml_dupes.skip_local,
         cross_language: opts.cross_language || toml_dupes.cross_language,
         ignore_imports: opts.ignore_imports || toml_dupes.ignore_imports,
         normalization: toml_dupes.normalization.clone(),
@@ -348,7 +362,9 @@ fn execute_dupes_inner(
         default_ignore_skips,
         config,
         elapsed,
-        threshold: opts.threshold,
+        // Use the merged threshold so the failure gate honors `.fallowrc.jsonc`
+        // when `--threshold` is omitted on the CLI.
+        threshold: dupes_config.threshold,
         explain_skipped: opts.explain_skipped,
     })
 }
@@ -635,6 +651,12 @@ mod tests {
         }
     }
 
+    /// Build a `DupesOptions` with the legacy CLI-default scalars preset
+    /// (`min_tokens=50`, `min_lines=5`, `threshold=0.0`). Tests that exercise
+    /// CLI-override semantics still need a concrete value, so we wrap each
+    /// scalar in `Some(...)` here. Tests that want the config-fallback path
+    /// should mutate the returned struct's scalars to `None` before calling
+    /// `build_dupes_config`.
     fn default_opts_for_config(root: &Path, mode: DupesMode) -> DupesOptions<'_> {
         DupesOptions {
             root,
@@ -643,10 +665,10 @@ mod tests {
             no_cache: true,
             threads: 1,
             quiet: true,
-            mode,
-            min_tokens: 50,
-            min_lines: 5,
-            threshold: 0.0,
+            mode: Some(mode),
+            min_tokens: Some(50),
+            min_lines: Some(5),
+            threshold: Some(0.0),
             skip_local: false,
             cross_language: false,
             ignore_imports: false,
@@ -874,8 +896,8 @@ mod tests {
     fn build_config_uses_cli_min_tokens_and_lines() {
         let root = PathBuf::from("/project");
         let mut opts = default_opts_for_config(&root, DupesMode::Mild);
-        opts.min_tokens = 100;
-        opts.min_lines = 10;
+        opts.min_tokens = Some(100);
+        opts.min_lines = Some(10);
         let toml = DuplicatesConfig::default();
         let config = build_dupes_config(&opts, &toml);
         assert_eq!(config.min_tokens, 100);
@@ -886,7 +908,7 @@ mod tests {
     fn build_config_uses_cli_threshold() {
         let root = PathBuf::from("/project");
         let mut opts = default_opts_for_config(&root, DupesMode::Mild);
-        opts.threshold = 7.5;
+        opts.threshold = Some(7.5);
         let toml = DuplicatesConfig::default();
         let config = build_dupes_config(&opts, &toml);
         assert!((config.threshold - 7.5).abs() < f64::EPSILON);
@@ -900,6 +922,106 @@ mod tests {
         let toml = DuplicatesConfig::default();
         let config = build_dupes_config(&opts, &toml);
         assert!(config.skip_local);
+    }
+
+    // ── Config-fallback tests ────────────────────────────────────────
+    // These regression tests cover the bug where CLI scalars wiped out
+    // the values declared in `.fallowrc.jsonc`. With `Option<T>` opts,
+    // a `None` must fall through to the toml value.
+
+    #[test]
+    fn build_config_falls_back_to_toml_min_lines_when_cli_unset() {
+        let root = PathBuf::from("/project");
+        let mut opts = default_opts_for_config(&root, DupesMode::Mild);
+        opts.min_lines = None;
+        let toml = DuplicatesConfig {
+            min_lines: 8,
+            ..DuplicatesConfig::default()
+        };
+        let config = build_dupes_config(&opts, &toml);
+        assert_eq!(
+            config.min_lines, 8,
+            "config minLines must win when --min-lines is omitted"
+        );
+    }
+
+    #[test]
+    fn build_config_falls_back_to_toml_min_tokens_when_cli_unset() {
+        let root = PathBuf::from("/project");
+        let mut opts = default_opts_for_config(&root, DupesMode::Mild);
+        opts.min_tokens = None;
+        let toml = DuplicatesConfig {
+            min_tokens: 200,
+            ..DuplicatesConfig::default()
+        };
+        let config = build_dupes_config(&opts, &toml);
+        assert_eq!(
+            config.min_tokens, 200,
+            "config minTokens must win when --min-tokens is omitted"
+        );
+    }
+
+    #[test]
+    fn build_config_falls_back_to_toml_threshold_when_cli_unset() {
+        let root = PathBuf::from("/project");
+        let mut opts = default_opts_for_config(&root, DupesMode::Mild);
+        opts.threshold = None;
+        let toml = DuplicatesConfig {
+            threshold: 12.5,
+            ..DuplicatesConfig::default()
+        };
+        let config = build_dupes_config(&opts, &toml);
+        assert!(
+            (config.threshold - 12.5).abs() < f64::EPSILON,
+            "config threshold must win when --threshold is omitted"
+        );
+    }
+
+    #[test]
+    fn build_config_falls_back_to_toml_mode_when_cli_unset() {
+        let root = PathBuf::from("/project");
+        let mut opts = default_opts_for_config(&root, DupesMode::Mild);
+        opts.mode = None;
+        let toml = DuplicatesConfig {
+            mode: fallow_config::DetectionMode::Strict,
+            ..DuplicatesConfig::default()
+        };
+        let config = build_dupes_config(&opts, &toml);
+        assert!(
+            matches!(config.mode, fallow_config::DetectionMode::Strict),
+            "config mode must win when --mode is omitted"
+        );
+    }
+
+    #[test]
+    fn build_config_cli_min_lines_overrides_toml() {
+        let root = PathBuf::from("/project");
+        let mut opts = default_opts_for_config(&root, DupesMode::Mild);
+        opts.min_lines = Some(3);
+        let toml = DuplicatesConfig {
+            min_lines: 8,
+            ..DuplicatesConfig::default()
+        };
+        let config = build_dupes_config(&opts, &toml);
+        assert_eq!(
+            config.min_lines, 3,
+            "explicit --min-lines must override config minLines"
+        );
+    }
+
+    #[test]
+    fn build_config_skip_local_or_merges_with_toml() {
+        let root = PathBuf::from("/project");
+        let opts = default_opts_for_config(&root, DupesMode::Mild);
+        let toml = DuplicatesConfig {
+            skip_local: true,
+            ..DuplicatesConfig::default()
+        };
+        let config = build_dupes_config(&opts, &toml);
+        assert!(
+            config.skip_local,
+            "config skipLocal=true must win even when --skip-local is omitted"
+        );
     }
 
     #[test]

@@ -688,12 +688,17 @@ fn run_combined_dupes(
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: opts.quiet,
-        mode: opts
-            .dupes_mode
-            .unwrap_or_else(|| DupesMode::from(dupes_cfg.mode)),
-        min_tokens: dupes_cfg.min_tokens,
-        min_lines: dupes_cfg.min_lines,
-        threshold: opts.dupes_threshold.unwrap_or(dupes_cfg.threshold),
+        // Combined mode has already resolved CLI overrides against
+        // `dupes_cfg`; pass each as an explicit `Some(...)` so
+        // `build_dupes_config` treats them as authoritative instead of
+        // re-merging with the toml values a second time.
+        mode: Some(
+            opts.dupes_mode
+                .unwrap_or_else(|| DupesMode::from(dupes_cfg.mode)),
+        ),
+        min_tokens: Some(dupes_cfg.min_tokens),
+        min_lines: Some(dupes_cfg.min_lines),
+        threshold: Some(opts.dupes_threshold.unwrap_or(dupes_cfg.threshold)),
         skip_local: dupes_cfg.skip_local,
         cross_language: dupes_cfg.cross_language,
         ignore_imports: dupes_cfg.ignore_imports,

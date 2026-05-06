@@ -2061,10 +2061,13 @@ fn run_audit_dupes<'a>(
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: opts.quiet,
-        mode: DupesMode::from(dupes_cfg.mode),
-        min_tokens: dupes_cfg.min_tokens,
-        min_lines: dupes_cfg.min_lines,
-        threshold: dupes_cfg.threshold,
+        // The audit pipeline has already merged config + global flags into
+        // `dupes_cfg`; pass them as explicit overrides so `build_dupes_config`
+        // doesn't re-merge with stale toml values.
+        mode: Some(DupesMode::from(dupes_cfg.mode)),
+        min_tokens: Some(dupes_cfg.min_tokens),
+        min_lines: Some(dupes_cfg.min_lines),
+        threshold: Some(dupes_cfg.threshold),
         skip_local: dupes_cfg.skip_local,
         cross_language: dupes_cfg.cross_language,
         ignore_imports: dupes_cfg.ignore_imports,
