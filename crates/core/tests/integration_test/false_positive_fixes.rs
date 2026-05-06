@@ -515,71 +515,6 @@ model User {
     );
 }
 
-// ── Node module.register() loader hooks (issue #293) ─────────────
-
-#[test]
-fn node_module_register_hook_credits_dev_dependency() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let root = dir.path();
-
-    std::fs::create_dir_all(root.join("resources/loaders")).expect("loader dir");
-    std::fs::create_dir_all(root.join("src")).expect("src dir");
-    std::fs::write(
-        root.join("package.json"),
-        r#"{
-            "name": "node-register-loader",
-            "private": true,
-            "scripts": {
-                "test-script": "node --import ./resources/loaders/ts.js ./src/test-script.ts"
-            },
-            "devDependencies": {
-                "@swc-node/register": "1.11.1",
-                "unused-dev-tool": "1.0.0"
-            }
-        }"#,
-    )
-    .expect("package json");
-    std::fs::write(
-        root.join("tsconfig.json"),
-        r#"{
-            "compilerOptions": {
-                "allowJs": true,
-                "module": "ESNext",
-                "moduleResolution": "bundler",
-                "target": "ES2022"
-            },
-            "include": ["resources/**/*.js", "src/**/*.ts"]
-        }"#,
-    )
-    .expect("tsconfig");
-    std::fs::write(
-        root.join("resources/loaders/ts.js"),
-        "import { register } from 'node:module';\n\
-         import { pathToFileURL } from 'node:url';\n\
-         register('@swc-node/register/esm', pathToFileURL('./'));\n",
-    )
-    .expect("loader");
-    std::fs::write(root.join("src/test-script.ts"), "export const value = 1;\n").expect("script");
-
-    let config = create_config(root.to_path_buf());
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
-
-    let unused_dev: Vec<String> = results
-        .unused_dev_dependencies
-        .iter()
-        .map(|d| d.package_name.clone())
-        .collect();
-    assert!(
-        !unused_dev.contains(&"@swc-node/register".to_owned()),
-        "@swc-node/register is loaded via module.register() and should be credited. \
-         unused_dev={unused_dev:?}"
-    );
-    assert!(
-        unused_dev.contains(&"unused-dev-tool".to_owned()),
-        "control dev dependency should still be reported unused. unused_dev={unused_dev:?}"
-    );
-}
-
 #[test]
 fn prisma_multifile_schema_credits_generator_provider() {
     let dir = tempfile::tempdir().expect("temp dir");
@@ -781,5 +716,55 @@ model User {
         unused_dev.contains(&"prisma-erd-generator".to_owned()),
         "prisma-erd-generator only appears inside a Prisma block comment and should remain \
          reportable as unused. unused_dev={unused_dev:?}"
+    );
+}
+
+// ── node:module register() loader hook (issue #293) ──────────────
+
+#[test]
+fn node_module_register_loader_is_credited_as_used_dependency() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::create_dir_all(root.join("resources/loaders")).expect("loaders dir");
+
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "register-loader-fixture",
+            "private": true,
+            "devDependencies": {
+                "@swc-node/register": "1.11.1"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"module":"esnext","moduleResolution":"bundler"},"include":["src/**/*","resources/**/*"]}"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("resources/loaders/ts.js"),
+        "import { register } from 'node:module';\n\
+         import { pathToFileURL } from 'node:url';\n\
+         register('@swc-node/register/esm', pathToFileURL('./'));\n",
+    )
+    .expect("loader file");
+    std::fs::write(root.join("src/index.ts"), "export const hello = 'world';\n").expect("entry");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dev: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dev.contains(&"@swc-node/register"),
+        "@swc-node/register is loaded via `register('@swc-node/register/esm', ...)` and should \
+         not be flagged as unused. unused_dev={unused_dev:?}"
     );
 }

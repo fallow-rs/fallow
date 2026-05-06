@@ -199,6 +199,30 @@ impl ModuleInfoExtractor {
         })
     }
 
+    /// Whether `local_name` is bound to the `register` export of `node:module`
+    /// (or a namespace import of `node:module` when `via_namespace` is true).
+    ///
+    /// Loader registrations like
+    /// `import { register } from 'node:module'; register('@swc-node/register/esm', ...)`
+    /// load the loader module by specifier; without this lookup the loader
+    /// dependency is reported as unused (issue #293).
+    pub(crate) fn is_node_module_register(&self, local_name: &str, via_namespace: bool) -> bool {
+        const NODE_MODULE_SOURCES: &[&str] = &["node:module", "module"];
+
+        self.imports.iter().any(|import| {
+            NODE_MODULE_SOURCES.contains(&import.source.as_str())
+                && import.local_name == local_name
+                && if via_namespace {
+                    matches!(import.imported_name, ImportedName::Namespace)
+                } else {
+                    matches!(
+                        &import.imported_name,
+                        ImportedName::Named(name) if name == "register"
+                    )
+                }
+        })
+    }
+
     fn apply_lit_custom_element_candidates(&mut self) {
         if self.lit_custom_element_candidates.is_empty() {
             return;

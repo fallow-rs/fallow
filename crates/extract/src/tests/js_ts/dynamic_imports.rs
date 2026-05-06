@@ -410,3 +410,99 @@ fn then_callback_non_import_callee_ignored() {
     let info = parse_source("fetch('/api').then(r => r.json());");
     assert!(info.dynamic_imports.is_empty());
 }
+
+// ── node:module register() loader hook (issue #293) ──────────
+
+#[test]
+fn node_module_register_named_import_credits_loader() {
+    let info = parse_source(
+        "import { register } from 'node:module';\n\
+         import { pathToFileURL } from 'node:url';\n\
+         register('@swc-node/register/esm', pathToFileURL('./'));",
+    );
+    let loader = info
+        .dynamic_imports
+        .iter()
+        .find(|imp| imp.source == "@swc-node/register/esm")
+        .expect("register('@swc-node/register/esm') should record a dynamic import");
+    assert!(loader.local_name.is_none());
+    assert!(loader.destructured_names.is_empty());
+}
+
+#[test]
+fn node_module_register_aliased_named_import_credits_loader() {
+    let info = parse_source(
+        "import { register as registerLoader } from 'node:module';\n\
+         registerLoader('tsx/esm', import.meta.url);",
+    );
+    assert!(
+        info.dynamic_imports
+            .iter()
+            .any(|imp| imp.source == "tsx/esm"),
+        "alias `register as registerLoader` should still credit the loader"
+    );
+}
+
+#[test]
+fn node_module_register_namespace_import_credits_loader() {
+    let info = parse_source(
+        "import * as Module from 'node:module';\n\
+         Module.register('@swc-node/register/esm', import.meta.url);",
+    );
+    assert!(
+        info.dynamic_imports
+            .iter()
+            .any(|imp| imp.source == "@swc-node/register/esm"),
+        "`Module.register(...)` via namespace import should credit the loader"
+    );
+}
+
+#[test]
+fn node_module_register_unprefixed_module_specifier_supported() {
+    // CommonJS-style `require('module')` and ESM `from 'module'` (without
+    // `node:`) are both legal Node specifiers for the same builtin.
+    let info = parse_source(
+        "import { register } from 'module';\n\
+         register('tsx/esm', import.meta.url);",
+    );
+    assert!(
+        info.dynamic_imports
+            .iter()
+            .any(|imp| imp.source == "tsx/esm")
+    );
+}
+
+#[test]
+fn unrelated_register_call_not_credited() {
+    // `register` from some other library must not be treated as a loader hook.
+    let info = parse_source(
+        "import { register } from './service-locator';\n\
+         register('not-a-loader', config);",
+    );
+    assert!(
+        info.dynamic_imports.is_empty(),
+        "register() from a non-`node:module` import should not record a dynamic import"
+    );
+}
+
+#[test]
+fn node_module_register_non_string_first_argument_ignored() {
+    let info = parse_source(
+        "import { register } from 'node:module';\n\
+         register(loaderUrl, import.meta.url);",
+    );
+    assert!(info.dynamic_imports.is_empty());
+}
+
+#[test]
+fn node_module_register_template_literal_specifier_supported() {
+    let info = parse_source(
+        "import { register } from 'node:module';\n\
+         register(`tsx/esm`, import.meta.url);",
+    );
+    assert!(
+        info.dynamic_imports
+            .iter()
+            .any(|imp| imp.source == "tsx/esm")
+    );
+}

@@ -113,6 +113,23 @@ fn vitest_auto_mock_source(source: &str) -> Option<String> {
     Some(format!("{dir}/__mocks__/{file_name}"))
 }
 
+/// Specifier source string from the first argument of a `register(...)` call.
+///
+/// `node:module`'s `register` hook (issue #293) loads a loader module by
+/// specifier (a bare package, package subpath, or relative URL). Returns the
+/// raw string when the first argument is a string or no-substitution template
+/// literal so the caller can credit it as a dynamic import.
+fn node_module_register_specifier(call: &CallExpression<'_>) -> Option<String> {
+    match call.arguments.first()? {
+        Argument::StringLiteral(value) => Some(value.value.to_string()),
+        Argument::TemplateLiteral(value) if value.expressions.is_empty() => value
+            .quasis
+            .first()
+            .map(|quasi| quasi.value.raw.to_string()),
+        _ => None,
+    }
+}
+
 #[derive(Default)]
 struct PlaywrightFixtureMemberCollector {
     fixture_by_local: FxHashMap<String, String>,
@@ -618,9 +635,34 @@ impl ModuleInfoExtractor {
         })
     }
 
-    fn is_node_module_register_import(&self, local_name: &str) -> bool {
-        self.is_named_import_from(local_name, "node:module", "register")
-            || self.is_named_import_from(local_name, "module", "register")
+    /// Record `register('loader', ...)` from `node:module` as a dynamic import.
+    /// The loader package is loaded by specifier rather than imported, so without
+    /// this hook it would be reported as an unused dev dependency (issue #293).
+    /// Recognizes both `import { register }` and `import * as Module from
+    /// 'node:module'` forms.
+    fn try_record_node_module_register(&mut self, expr: &CallExpression<'_>) {
+        let register_match = match &expr.callee {
+            Expression::Identifier(ident) => {
+                self.is_node_module_register(ident.name.as_str(), false)
+            }
+            Expression::StaticMemberExpression(member) => {
+                member.property.name == "register"
+                    && matches!(&member.object, Expression::Identifier(obj)
+                        if self.is_node_module_register(obj.name.as_str(), true))
+            }
+            _ => false,
+        };
+        if register_match
+            && let Some(source) = node_module_register_specifier(expr)
+            && !source.is_empty()
+        {
+            self.dynamic_imports.push(DynamicImportInfo {
+                source,
+                span: expr.span,
+                destructured_names: Vec::new(),
+                local_name: None,
+            });
+        }
     }
 
     fn extract_angular_inject_target(&self, call: &CallExpression<'_>) -> Option<String> {
@@ -1403,28 +1445,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             });
         }
 
+        self.try_record_node_module_register(expr);
+
         // Detect require()
         if let Expression::Identifier(ident) = &expr.callee
             && ident.name == "require"
             && let Some(Argument::StringLiteral(lit)) = expr.arguments.first()
             && !self.handled_require_spans.contains(&expr.span)
-        {
-            self.require_calls.push(RequireCallInfo {
-                source: lit.value.to_string(),
-                span: expr.span,
-                destructured_names: Vec::new(),
-                local_name: None,
-            });
-        }
-
-        // Detect node:module `register('specifier', ...)` Module Customization Hook calls.
-        // The first string argument is a module specifier loaded at runtime; treat it
-        // like a side-effect require so the package is credited as used. Gated by an
-        // import check against the Node `module` builtin so same-named app helpers are
-        // ignored.
-        if let Expression::Identifier(ident) = &expr.callee
-            && self.is_node_module_register_import(ident.name.as_str())
-            && let Some(Argument::StringLiteral(lit)) = expr.arguments.first()
         {
             self.require_calls.push(RequireCallInfo {
                 source: lit.value.to_string(),
