@@ -91,3 +91,73 @@ export { default as Layout } from '../layouts/Layout.astro';
     );
     assert_eq!(info.re_exports.len(), 1);
 }
+
+#[test]
+fn astro_template_script_src_followed() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Page.astro"),
+        r#"---
+import Layout from '../layouts/Layout.astro';
+---
+<Layout>
+  <script src="../scripts/foo.ts"></script>
+</Layout>
+"#,
+        0,
+        false,
+    );
+    assert!(
+        info.imports
+            .iter()
+            .any(|i| i.source == "../scripts/foo.ts"),
+        "<script src> in template should be followed (issue #295)"
+    );
+    assert!(
+        info.imports
+            .iter()
+            .any(|i| i.source == "../layouts/Layout.astro"),
+        "frontmatter imports should still be extracted"
+    );
+}
+
+#[test]
+fn astro_template_inline_script_imports_followed() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Page.astro"),
+        r"---
+---
+<script>
+  import '../scripts/bar';
+</script>
+",
+        0,
+        false,
+    );
+    assert!(
+        info.imports.iter().any(|i| i.source == "../scripts/bar"),
+        "side-effect import inside inline <script> should be followed (issue #295)"
+    );
+}
+
+#[test]
+fn astro_template_script_combines_both_patterns() {
+    // Reproduces the exact issue #295 case: a single .astro file with both a
+    // src= reference and a side-effect import inside an inline <script>.
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("index.astro"),
+        r#"---
+---
+<script src="../scripts/foo.ts"></script>
+<script>
+  import '../scripts/bar';
+</script>
+"#,
+        0,
+        false,
+    );
+    assert!(info.imports.iter().any(|i| i.source == "../scripts/foo.ts"));
+    assert!(info.imports.iter().any(|i| i.source == "../scripts/bar"));
+}

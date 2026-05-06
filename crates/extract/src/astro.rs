@@ -1,6 +1,9 @@
-//! Astro component frontmatter extraction.
+//! Astro component frontmatter and template-script extraction.
 //!
-//! Extracts the TypeScript code between `---` delimiters in `.astro` files.
+//! Extracts the TypeScript code between `---` delimiters in `.astro` files,
+//! and follows `<script src="...">` and inline `<script>` blocks in the
+//! component template so the targets stay reachable from the .astro file
+//! (Astro bundles them into the page output at build time).
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -8,12 +11,15 @@ use std::sync::LazyLock;
 use oxc_allocator::Allocator;
 use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
-use oxc_span::SourceType;
+use oxc_span::{Span, SourceType};
 
-use crate::ModuleInfo;
-use crate::sfc::SfcScript;
+use crate::asset_url::normalize_asset_url;
+use crate::html::is_remote_url;
+use crate::sfc::{SfcScript, extract_sfc_scripts};
 use crate::visitor::ModuleInfoExtractor;
+use crate::{ImportInfo, ImportedName, ModuleInfo};
 use fallow_types::discover::FileId;
+
 
 /// Regex to extract Astro frontmatter (content between `---` delimiters at file start).
 static ASTRO_FRONTMATTER_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -43,7 +49,17 @@ pub(crate) fn is_astro_file(path: &Path) -> bool {
         .is_some_and(|ext| ext == "astro")
 }
 
-/// Parse an Astro file by extracting the frontmatter section.
+/// Byte offset where the Astro component template begins (after the closing
+/// frontmatter `---`). Returns `0` for files without frontmatter, so the whole
+/// source is scanned.
+fn template_start_offset(source: &str) -> usize {
+    ASTRO_FRONTMATTER_RE
+        .find(source)
+        .map_or(0, |m| m.end())
+}
+
+/// Parse an Astro file by extracting the frontmatter section and any
+/// `<script>` blocks in the component template.
 pub(crate) fn parse_astro_to_module(
     file_id: FileId,
     source: &str,
@@ -52,20 +68,81 @@ pub(crate) fn parse_astro_to_module(
     let suppressions = crate::suppress::parse_suppressions_from_source(source);
     let line_offsets = fallow_types::extract::compute_line_offsets(source);
 
-    if let Some(script) = extract_astro_frontmatter(source) {
+    let mut info = if let Some(script) = extract_astro_frontmatter(source) {
         let source_type = SourceType::ts();
         let allocator = Allocator::default();
         let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
         let mut extractor = ModuleInfoExtractor::new();
         extractor.visit_program(&parser_return.program);
-        let mut info = extractor.into_module_info(file_id, content_hash, suppressions);
-        info.line_offsets = line_offsets;
-        return info;
+        extractor.into_module_info(file_id, content_hash, suppressions)
+    } else {
+        ModuleInfoExtractor::new().into_module_info(file_id, content_hash, suppressions)
+    };
+
+    info.line_offsets = line_offsets;
+
+    // Astro components mount per-page client JS via `<script src="...">` and
+    // inline `<script>` blocks in the template body. Scan the post-frontmatter
+    // section so the targets stay reachable.
+    extract_template_script_imports(source, template_start_offset(source), &mut info);
+
+    info
+}
+
+/// Scan the Astro component template (everything after the closing frontmatter
+/// `---` delimiter) for `<script src="...">` and inline `<script>` blocks, and
+/// merge their references into `info.imports`.
+fn extract_template_script_imports(source: &str, template_offset: usize, info: &mut ModuleInfo) {
+    if template_offset >= source.len() {
+        return;
+    }
+    let template = &source[template_offset..];
+    let scripts = extract_sfc_scripts(template);
+    if scripts.is_empty() {
+        return;
     }
 
-    let mut info = ModuleInfoExtractor::new().into_module_info(file_id, content_hash, suppressions);
-    info.line_offsets = line_offsets;
-    info
+    let allocator = Allocator::default();
+    for script in &scripts {
+        if let Some(src) = &script.src {
+            let trimmed = src.trim();
+            if !trimmed.is_empty() && !is_remote_url(trimmed) {
+                info.imports.push(ImportInfo {
+                    source: normalize_asset_url(trimmed),
+                    imported_name: ImportedName::SideEffect,
+                    local_name: String::new(),
+                    is_type_only: false,
+                    from_style: false,
+                    span: Span::default(),
+                    source_span: Span::default(),
+                });
+            }
+            // <script src="..."> with a body is unusual; Astro treats the body
+            // as ignored when src is set, so don't parse it.
+            continue;
+        }
+
+        if script.body.trim().is_empty() {
+            continue;
+        }
+
+        // Astro client `<script>` blocks default to TypeScript-compatible JS
+        // (the build pipeline runs them through esbuild). Match the frontmatter
+        // path and parse as TS unless an explicit `lang="*sx"` enables JSX.
+        let source_type = if script.is_jsx {
+            if script.is_typescript {
+                SourceType::tsx()
+            } else {
+                SourceType::jsx()
+            }
+        } else {
+            SourceType::ts()
+        };
+        let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
+        let mut extractor = ModuleInfoExtractor::new();
+        extractor.visit_program(&parser_return.program);
+        extractor.merge_into(info);
+    }
 }
 
 // Astro tests exercise regex-based frontmatter extraction — no unsafe code,
@@ -280,5 +357,91 @@ mod tests {
     #[test]
     fn is_astro_file_rejects_no_extension() {
         assert!(!is_astro_file(Path::new("Makefile")));
+    }
+
+    // ── Template <script> extraction (issue #295) ────────────────
+
+    #[test]
+    fn template_script_src_emits_side_effect_import() {
+        let source = "---\n---\n<script src=\"../scripts/foo.ts\"></script>";
+        let info = parse_astro_to_module(FileId(0), source, 0);
+        assert!(
+            info.imports.iter().any(|i| i.source == "../scripts/foo.ts"
+                && matches!(i.imported_name, ImportedName::SideEffect)),
+            "expected side-effect import for <script src>, got: {:?}",
+            info.imports.iter().map(|i| &i.source).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn template_script_src_without_frontmatter() {
+        let source = "<html><body><script src=\"./foo.ts\"></script></body></html>";
+        let info = parse_astro_to_module(FileId(0), source, 0);
+        assert!(info.imports.iter().any(|i| i.source == "./foo.ts"));
+    }
+
+    #[test]
+    fn template_inline_script_imports_followed() {
+        let source = "---\n---\n<script>\n  import '../scripts/bar';\n</script>";
+        let info = parse_astro_to_module(FileId(0), source, 0);
+        assert!(
+            info.imports.iter().any(|i| i.source == "../scripts/bar"),
+            "expected inline-script import to be extracted, got: {:?}",
+            info.imports.iter().map(|i| &i.source).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn template_script_src_remote_url_skipped() {
+        let source = "---\n---\n<script src=\"https://cdn.example.com/x.js\"></script>";
+        let info = parse_astro_to_module(FileId(0), source, 0);
+        assert!(info.imports.is_empty());
+    }
+
+    #[test]
+    fn template_script_src_bare_filename_normalized() {
+        let source = "---\n---\n<script src=\"logic.ts\"></script>";
+        let info = parse_astro_to_module(FileId(0), source, 0);
+        assert!(info.imports.iter().any(|i| i.source == "./logic.ts"));
+    }
+
+    #[test]
+    fn template_script_inside_html_comment_skipped() {
+        let source = "---\n---\n<!-- <script src=\"./bad.ts\"></script> -->\n<script src=\"./good.ts\"></script>";
+        let info = parse_astro_to_module(FileId(0), source, 0);
+        assert!(info.imports.iter().any(|i| i.source == "./good.ts"));
+        assert!(!info.imports.iter().any(|i| i.source == "./bad.ts"));
+    }
+
+    #[test]
+    fn template_script_combined_with_frontmatter_imports() {
+        let source = "---\nimport Layout from '../layouts/Layout.astro';\n---\n<script src=\"./client.ts\"></script>";
+        let info = parse_astro_to_module(FileId(0), source, 0);
+        assert!(info.imports.iter().any(|i| i.source == "../layouts/Layout.astro"));
+        assert!(info.imports.iter().any(|i| i.source == "./client.ts"));
+    }
+
+    #[test]
+    fn template_script_src_with_body_uses_src_only() {
+        // Per Astro's HTML semantics, when `src` is set the body is ignored.
+        let source = "---\n---\n<script src=\"./external.ts\">import './ignored';</script>";
+        let info = parse_astro_to_module(FileId(0), source, 0);
+        assert!(info.imports.iter().any(|i| i.source == "./external.ts"));
+        assert!(!info.imports.iter().any(|i| i.source == "./ignored"));
+    }
+
+    #[test]
+    fn template_inline_script_typescript_syntax() {
+        // Inline <script> defaults to TS so type annotations parse cleanly.
+        let source = "---\n---\n<script>\n  import { foo } from './bar';\n  const x: number = foo();\n</script>";
+        let info = parse_astro_to_module(FileId(0), source, 0);
+        assert!(info.imports.iter().any(|i| i.source == "./bar"));
+    }
+
+    #[test]
+    fn template_empty_script_block_no_panic() {
+        let source = "---\n---\n<script></script>";
+        let info = parse_astro_to_module(FileId(0), source, 0);
+        assert!(info.imports.is_empty());
     }
 }
