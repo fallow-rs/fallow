@@ -10,6 +10,14 @@ mod unused_files;
 mod unused_members;
 mod unused_overrides;
 
+// Re-exported for cross-module test helpers that share the unused-dep filter
+// logic. Today only `crate::plugins::ember::tests::is_covered` consumes it
+// (a `#[cfg(test)]` site), so gate the re-export the same way to avoid an
+// `unused_imports` warning in release builds. Drop the cfg if a non-test
+// consumer appears.
+#[cfg(test)]
+pub(crate) use unused_deps::matches_virtual_prefix;
+
 use rustc_hash::FxHashMap;
 
 use fallow_config::{PackageJson, ResolvedConfig, Severity};

@@ -19,6 +19,26 @@ use super::predicates::{
 };
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
+/// Return `true` if a virtual-module `prefix` from the active plugin set covers
+/// `spec`. Two shapes are recognised:
+///
+/// - **Plain prefix match** (`@docusaurus/`, `@theme/`, `#imports`, `$app/`):
+///   any specifier that `starts_with(prefix)` is covered. This handles the
+///   common case where a plugin registers an entire namespace.
+/// - **Trailing-slash exact-bare match** (`ember/`): the bare specifier `ember`
+///   also matches (via the second branch's `strip_suffix('/')` shortcut),
+///   while real npm packages like `ember-cli` and `ember-data` deliberately
+///   do not — a no-slash entry would prefix-match them and silence legitimate
+///   missing-dep reports.
+///
+/// Centralised here so the `unresolved-import` and `unlisted-dependency`
+/// suppression sites use the same matcher as plugin test helpers (see
+/// `Plugin::virtual_module_prefixes` consumers in `crates/core/src/plugins/`).
+#[must_use]
+pub fn matches_virtual_prefix(prefix: &str, spec: &str) -> bool {
+    spec.starts_with(prefix) || prefix.strip_suffix('/').is_some_and(|base| spec == base)
+}
+
 /// Return `true` if a workspace `package.json` path is covered by `ignorePatterns`.
 ///
 /// Mirrors the source-walker behavior in `fallow_core::discover::walk`: the glob
@@ -811,12 +831,10 @@ pub fn find_unlisted_dependencies(
         if plugin_tooling.contains(package_name.as_str()) {
             continue;
         }
-        if virtual_prefixes.iter().any(|prefix| {
-            package_name.starts_with(prefix)
-                || prefix
-                    .strip_suffix('/')
-                    .is_some_and(|base| package_name == base)
-        }) {
+        if virtual_prefixes
+            .iter()
+            .any(|prefix| matches_virtual_prefix(prefix, package_name))
+        {
             continue;
         }
         // Plain `ends_with` is sufficient for suffixes; unlike prefixes, suffix
@@ -896,10 +914,16 @@ pub fn find_unresolved_imports(
                 // (e.g., Nuxt's #imports, #app, #components, #build).
                 // Note: `spec` is the full import specifier (e.g., `$app/navigation`),
                 // not the extracted package name, so trailing-slash prefixes like `$app/`
-                // always match when the import has a subpath.
+                // always match when the import has a subpath. The shared
+                // `matches_virtual_prefix` helper also exact-matches bare
+                // specifiers like `ember` against a `prefix/` entry, mirroring
+                // the unlisted-dependency suppression site (and the plugin
+                // test helpers in `crates/core/src/plugins/`) so a single
+                // `prefix/` entry covers both the bare import and every
+                // subpath.
                 if virtual_prefixes
                     .iter()
-                    .any(|prefix| spec.starts_with(prefix))
+                    .any(|prefix| matches_virtual_prefix(prefix, spec))
                 {
                     continue;
                 }
@@ -916,7 +940,6 @@ pub fn find_unresolved_imports(
                         continue;
                     }
                 }
-
                 let (line, col) = byte_offset_to_line_col(
                     line_offsets_by_file,
                     module.file_id,

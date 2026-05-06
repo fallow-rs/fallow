@@ -34,6 +34,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "convex",
     "docusaurus",
     "electron",
+    "ember",
     "expo",
     "expo-router",
     "gatsby",
@@ -984,6 +985,7 @@ mod dependency_cruiser;
 mod docusaurus;
 mod drizzle;
 mod electron;
+mod ember;
 mod eslint;
 mod expo;
 mod expo_router;
