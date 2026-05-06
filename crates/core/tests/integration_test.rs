@@ -137,3 +137,6 @@ mod issue_515_re_export_cycles;
 mod script_multiplexers;
 #[path = "integration_test/visibility_tags.rs"]
 mod visibility_tags;
+
+#[path = "integration_test/ember_classic.rs"]
+mod ember_classic;
