@@ -27,8 +27,11 @@ pub(super) struct ChurnFetchResult {
 
 /// Validate git prerequisites and return churn data for hotspot analysis.
 ///
-/// Uses disk cache when available. Returns `None` (with an error printed) if
-/// the repo is invalid, `--since` is malformed, or git analysis fails.
+/// Uses disk cache when available. Returns `None` if the repo is missing,
+/// `--since` is malformed, or git analysis fails. A missing git repo is treated
+/// as unavailable data rather than a hard error so combined-mode `--format
+/// json` never emits a second JSON document alongside the combined report
+/// (#294); a non-fatal note goes to stderr unless `--quiet` is set.
 pub(super) fn fetch_churn_data(
     opts: &HealthOptions<'_>,
     cache_dir: &std::path::Path,
@@ -36,7 +39,9 @@ pub(super) fn fetch_churn_data(
     use fallow_core::churn;
 
     if !churn::is_git_repo(opts.root) {
-        let _ = emit_error("hotspot analysis requires a git repository", 2, opts.output);
+        if !opts.quiet {
+            eprintln!("note: hotspot analysis skipped — no git repository found at project root");
+        }
         return None;
     }
 

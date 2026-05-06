@@ -1,7 +1,9 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{parse_json, run_fallow, run_fallow_combined, run_fallow_in_root, run_fallow_raw};
+use common::{
+    fallow_bin, parse_json, run_fallow, run_fallow_combined, run_fallow_in_root, run_fallow_raw,
+};
 
 // ---------------------------------------------------------------------------
 // --fail-on-issues across commands
@@ -431,5 +433,76 @@ fn no_package_json_returns_empty_results() {
         json["total_issues"].as_u64().unwrap_or(0),
         0,
         "should have 0 issues without package.json"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Combined-mode JSON contract: stdout is exactly one JSON document even when
+// the project is outside a Git repository (regression for #294).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn combined_json_outside_git_repo_emits_single_document() {
+    use std::process::Command;
+
+    // Build a minimal TS project in a tempdir whose parent chain has no `.git`,
+    // so the hotspot pipeline's `is_git_repo` check returns false. We isolate
+    // from any inherited `GIT_DIR` / `GIT_WORK_TREE` set by parent test hooks
+    // and from any global git config that could redirect rev-parse upward.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"no-git-combined","type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"target":"ES2020","module":"ES2020","strict":true},"include":["src"]}"#,
+    )
+    .expect("write tsconfig.json");
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "export function add(a: number, b: number): number { return a + b; }\n",
+    )
+    .expect("write index.ts");
+
+    let mut cmd = Command::new(fallow_bin());
+    cmd.arg("--root")
+        .arg(root)
+        .arg("--format")
+        .arg("json")
+        .arg("--quiet")
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null");
+    let output = cmd.output().expect("failed to run fallow binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // The bug in #294 was that stdout contained an inline `{"error": true,
+    // "message": "hotspot analysis requires a git repository", ...}` followed
+    // by the combined report — two top-level JSON values. Parsing as a single
+    // value catches that exactly: serde_json rejects trailing input.
+    serde_json::from_str::<serde_json::Value>(&stdout).unwrap_or_else(|e| {
+        panic!(
+            "combined mode outside a git repo must emit exactly one JSON document on stdout: {e}\nstdout was:\n{stdout}\nstderr was:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
+
+    // And the parsed envelope should be the combined report — schema_version is
+    // the canonical marker.
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("already parsed");
+    assert!(
+        json.get("schema_version").is_some(),
+        "stdout should be the combined report envelope, got: {json}"
+    );
+    assert!(
+        json.get("error").is_none(),
+        "combined report must not surface a top-level `error` key from a nested hotspot bail-out"
     );
 }
