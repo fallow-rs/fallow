@@ -8,9 +8,13 @@ branding:
 
 inputs:
   command:
-    description: 'Command to run: dead-code (unused code), dupes (code duplication), health (complexity), fix (auto-remove unused code). Default runs all analyses. Legacy alias: check = dead-code.'
+    description: 'Command to run: dead-code (unused code), dupes (code duplication), health (complexity), audit (severity-aware PR quality gate combining dead-code + complexity + duplication scoped to changed files; gates on rule severity, not raw counts), fix (auto-remove unused code). Default runs all analyses. Legacy alias: check = dead-code. Migrating from default (combined) to audit: combined gates on total issue count; audit gates on rule severity from .fallowrc.json plus the `gate` input (new-only/all).'
     required: false
     default: ''
+  gate:
+    description: 'Audit severity gate: new-only (default) fails only on findings introduced by this PR; all fails on every finding in changed files. Only used when command: audit. Mirrors `fallow audit --gate`.'
+    required: false
+    default: 'new-only'
   root:
     description: 'Project root directory'
     required: false
@@ -228,14 +232,20 @@ inputs:
 
 outputs:
   results:
-    description: 'Path to JSON results file'
+    description: 'Path to JSON results file. For command: audit, the file is a hybrid shape: top-level audit protocol fields (command, verdict, attribution, summary, base_ref, head_sha) plus sub-results re-keyed to combined-mode keys (.check, .dupes, .health) so existing downstream tooling works unchanged. Dispatch on the top-level command field to detect audit runs; the top-level schema_version describes the audit protocol from the CLI.'
     value: ${{ steps.analyze.outputs.results }}
   sarif:
     description: 'Path to SARIF results file'
     value: ${{ steps.analyze.outputs.sarif }}
   issues:
-    description: 'Number of issues (dead-code), clone groups (dupes), or fixes proposed/applied (fix)'
+    description: 'Number of issues (dead-code), clone groups (dupes), introduced findings (audit, new-only) or total findings in changed files (audit, all), or fixes proposed/applied (fix). For audit, prefer outputs.verdict for gating.'
     value: ${{ steps.analyze.outputs.issues }}
+  verdict:
+    description: 'Audit verdict (pass/warn/fail). Empty when command is not audit.'
+    value: ${{ steps.analyze.outputs.verdict }}
+  gate:
+    description: 'Audit gate that was applied (new-only/all). Empty when command is not audit.'
+    value: ${{ steps.analyze.outputs.gate }}
 
 runs:
   using: 'composite'
@@ -260,6 +270,7 @@ runs:
       shell: bash
       env:
         INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_GATE: ${{ inputs.gate }}
         INPUT_ROOT: ${{ inputs.root }}
         INPUT_CONFIG: ${{ inputs.config }}
         INPUT_FORMAT: ${{ inputs.format }}
@@ -308,6 +319,7 @@ runs:
         INPUT_SAVE_SNAPSHOT: ${{ inputs.save-snapshot }}
         INPUT_TREND: ${{ inputs.trend }}
         INPUT_ISSUE_TYPES: ${{ inputs.issue-types }}
+        INPUT_INCLUDE_ENTRY_EXPORTS: ${{ inputs.include-entry-exports }}
         INPUT_FAIL_ON_REGRESSION: ${{ inputs.fail-on-regression }}
         INPUT_TOLERANCE: ${{ inputs.tolerance }}
         INPUT_REGRESSION_BASELINE: ${{ inputs.regression-baseline }}
@@ -421,9 +433,21 @@ runs:
       env:
         INPUT_COMMAND: ${{ inputs.command }}
         INPUT_FAIL_ON_ISSUES: ${{ inputs.fail-on-issues }}
+        INPUT_GATE: ${{ inputs.gate }}
         ISSUES: ${{ steps.analyze.outputs.issues }}
+        VERDICT: ${{ steps.analyze.outputs.verdict }}
       run: |
-        if [ "$INPUT_FAIL_ON_ISSUES" = "true" ] && [ "$ISSUES" -gt 0 ]; then
+        if [ "$INPUT_FAIL_ON_ISSUES" != "true" ]; then exit 0; fi
+        if [ "$INPUT_COMMAND" = "audit" ]; then
+          # Audit gates on rule severity. Verdict already encodes the gate decision:
+          # pass -> no issues, warn -> warn-tier only (don't fail), fail -> error-tier (fail).
+          if [ "$VERDICT" = "fail" ]; then
+            echo "::error::Fallow audit failed (gate: ${INPUT_GATE:-new-only}, ${ISSUES} finding(s) at error severity)"
+            exit 1
+          fi
+          exit 0
+        fi
+        if [ "$ISSUES" -gt 0 ]; then
           case "$INPUT_COMMAND" in
             dead-code|check) echo "::error::Fallow found ${ISSUES} unused code issues" ;;
             dupes)           echo "::error::Fallow found ${ISSUES} clone groups" ;;

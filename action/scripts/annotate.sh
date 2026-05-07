@@ -56,7 +56,8 @@ case "$FALLOW_COMMAND" in
   health)
     jq -r -f "${ACTION_JQ_DIR}/annotations-health.jq" "$RESULTS_FILE" > "$ANNOTATIONS_FILE" 2>/dev/null || true ;;
   fix) ;;
-  "")
+  audit|"")
+    # Audit JSON is re-keyed in analyze.sh to use combined-mode keys (check/health/dupes).
     {
       jq '.check // empty' "$RESULTS_FILE" | jq -r -f "${ACTION_JQ_DIR}/annotations-check.jq" 2>/dev/null || true
       jq '.health // empty' "$RESULTS_FILE" | jq -r -f "${ACTION_JQ_DIR}/annotations-health.jq" 2>/dev/null || true

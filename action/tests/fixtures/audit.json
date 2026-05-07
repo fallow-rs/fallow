@@ -1,0 +1,139 @@
+{
+  "schema_version": 3,
+  "version": "2.66.2",
+  "command": "audit",
+  "verdict": "fail",
+  "changed_files_count": 1,
+  "base_ref": "HEAD~1",
+  "head_sha": "db31aa2",
+  "elapsed_ms": 226,
+  "summary": {
+    "dead_code_issues": 2,
+    "dead_code_has_errors": true,
+    "complexity_findings": 0,
+    "max_cyclomatic": null,
+    "duplication_clone_groups": 0
+  },
+  "attribution": {
+    "gate": "new-only",
+    "dead_code_introduced": 1,
+    "dead_code_inherited": 1,
+    "complexity_introduced": 0,
+    "complexity_inherited": 0,
+    "duplication_introduced": 0,
+    "duplication_inherited": 0
+  },
+  "check": {
+    "schema_version": 5,
+    "version": "2.66.2",
+    "elapsed_ms": 113,
+    "total_issues": 1,
+    "entry_points": {
+      "total": 0,
+      "sources": {}
+    },
+    "summary": {
+      "total_issues": 2,
+      "unused_files": 1,
+      "unused_exports": 0,
+      "unused_types": 0,
+      "private_type_leaks": 0,
+      "unused_dependencies": 1,
+      "unused_enum_members": 0,
+      "unused_class_members": 0,
+      "unresolved_imports": 0,
+      "unlisted_dependencies": 0,
+      "duplicate_exports": 0,
+      "type_only_dependencies": 0,
+      "test_only_dependencies": 0,
+      "circular_dependencies": 0,
+      "boundary_violations": 0,
+      "stale_suppressions": 0
+    },
+    "unused_files": [
+      {
+        "path": "b.ts",
+        "actions": [
+          {
+            "type": "delete-file",
+            "auto_fixable": false,
+            "description": "Delete this file",
+            "note": "File deletion may remove runtime functionality not visible to static analysis"
+          },
+          {
+            "type": "suppress-file",
+            "auto_fixable": false,
+            "description": "Suppress with a file-level comment at the top of the file",
+            "comment": "// fallow-ignore-file unused-file"
+          }
+        ],
+        "introduced": true
+      }
+    ],
+    "unused_exports": [],
+    "unused_types": [],
+    "private_type_leaks": [],
+    "unused_dependencies": [],
+    "unused_dev_dependencies": [],
+    "unused_optional_dependencies": [],
+    "unused_enum_members": [],
+    "unused_class_members": [],
+    "unresolved_imports": [],
+    "unlisted_dependencies": [],
+    "duplicate_exports": [],
+    "type_only_dependencies": [],
+    "test_only_dependencies": [],
+    "circular_dependencies": [],
+    "boundary_violations": [],
+    "stale_suppressions": []
+  },
+  "dupes": {
+    "clone_groups": [],
+    "clone_families": [],
+    "stats": {
+      "total_files": 0,
+      "files_with_clones": 0,
+      "total_lines": 0,
+      "duplicated_lines": 0,
+      "total_tokens": 0,
+      "duplicated_tokens": 0,
+      "clone_groups": 0,
+      "clone_instances": 0,
+      "duplication_percentage": 0.0
+    }
+  },
+  "health": {
+    "findings": [],
+    "summary": {
+      "files_analyzed": 1,
+      "functions_analyzed": 0,
+      "functions_above_threshold": 0,
+      "max_cyclomatic_threshold": 20,
+      "max_cognitive_threshold": 15,
+      "max_crap_threshold": 30.0,
+      "severity_critical_count": 0,
+      "severity_high_count": 0,
+      "severity_moderate_count": 0
+    },
+    "vital_signs": {
+      "dead_file_pct": 100.0,
+      "dead_export_pct": 0.0,
+      "avg_cyclomatic": 0.0,
+      "p90_cyclomatic": 0,
+      "unused_dep_count": 1,
+      "unused_deps_per_k_files": 1000.0,
+      "circular_dep_count": 0,
+      "circular_deps_per_k_files": 0.0,
+      "counts": {
+        "total_files": 1,
+        "total_exports": 1,
+        "dead_files": 1,
+        "dead_exports": 0,
+        "total_lines": 2,
+        "files_scored": 0,
+        "total_deps": 0
+      },
+      "total_loc": 2
+    }
+  }
+}

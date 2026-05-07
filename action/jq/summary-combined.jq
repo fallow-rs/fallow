@@ -43,6 +43,27 @@ def prod_hot_paths: (.health.runtime_coverage.hot_paths // []);
 (.health.vital_signs // {}) as $vitals |
 (.health.summary // {}) as $summary |
 (.dupes.stats // {}) as $dupes_stats |
+# Audit verdict header: surfaces verdict + new-vs-inherited attribution
+# whenever the input came from `fallow audit`. Combined-mode runs (no audit
+# fields present) skip this entirely so existing PR comments are unchanged.
+(.verdict // null) as $verdict |
+(.attribution // null) as $attribution |
+((($attribution.dead_code_introduced // 0) + ($attribution.complexity_introduced // 0) + ($attribution.duplication_introduced // 0)) // 0) as $introduced |
+((($attribution.dead_code_inherited // 0) + ($attribution.complexity_inherited // 0) + ($attribution.duplication_inherited // 0)) // 0) as $inherited |
+($attribution.gate // "new-only") as $audit_gate |
+(if $verdict then
+  (if $verdict == "pass" then ":white_check_mark: **Audit passed**"
+   elif $verdict == "warn" then ":warning: **Audit passed with warnings**"
+   else ":x: **Audit failed**" end) as $headline |
+  "> \($headline) · gate: `\($audit_gate)`" +
+  (if $audit_gate == "new-only" then
+    " · \($introduced) new finding\(if $introduced == 1 then "" else "s" end) introduced by this PR" +
+    (if $inherited > 0 then " · \($inherited) inherited (not gated)" else "" end)
+  else
+    " · \($introduced + $inherited) finding\(if ($introduced + $inherited) == 1 then "" else "s" end) in changed files"
+  end) +
+  "\n\n"
+else "" end) as $audit_header |
 
 # Health delta header (only when --score is present)
 (if .health.health_score then
@@ -67,6 +88,7 @@ else "" end) +
 
 if $total == 0 then
   "# \ud83c\udf3f Fallow\n\n" +
+  $audit_header +
   (if $prod_advisory > 0 or $hot_paths > 0 then
     "> [!NOTE]\n> **No blocking issues found**\n\n" +
     ":white_check_mark: No code issues \u00b7 :white_check_mark: No duplication \u00b7 :white_check_mark: No blocking health findings" +
@@ -82,6 +104,7 @@ if $total == 0 then
   else "" end)
 else
   "# \ud83c\udf3f Fallow\n\n" +
+  $audit_header +
 
   # One-line status
   (if $check > 0 then ":warning: **\($check)** code issues" else ":white_check_mark: No code issues" end) +

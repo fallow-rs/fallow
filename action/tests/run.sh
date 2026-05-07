@@ -788,6 +788,93 @@ echo "  review-body.jq without env vars (backwards compat):"
 OUT=$(jq -r -f "$JQ_DIR/review-body.jq" "$FIXTURES/combined.json" 2>&1)
 assert_contains "$OUT" "fallow-review" "marker present without env vars"
 
+# --- Audit command tests ---
+
+echo ""
+echo "=== Audit command (issue #302) ==="
+
+echo "  audit fixture shape:"
+assert_json_value "$(cat "$FIXTURES/audit.json")" '.command' "audit" "audit: command field preserved at top level"
+assert_json_value "$(cat "$FIXTURES/audit.json")" '.verdict' "fail" "audit: verdict field preserved at top level"
+assert_json_value "$(cat "$FIXTURES/audit.json")" '.attribution.gate' "new-only" "audit: attribution.gate preserved at top level"
+assert_json_value "$(cat "$FIXTURES/audit.json")" '.check.total_issues' "1" "audit: re-keyed to .check.total_issues"
+assert_json_value "$(cat "$FIXTURES/audit.json")" '(.dupes | type)' "object" "audit: re-keyed to .dupes"
+assert_json_value "$(cat "$FIXTURES/audit.json")" '(.health | type)' "object" "audit: re-keyed to .health"
+assert_json_value "$(cat "$FIXTURES/audit.json")" '(.dead_code // null)' "null" "audit: original dead_code key removed"
+assert_json_value "$(cat "$FIXTURES/audit.json")" '(.complexity // null)' "null" "audit: original complexity key removed"
+assert_json_value "$(cat "$FIXTURES/audit.json")" '(.duplication // null)' "null" "audit: original duplication key removed"
+
+echo "  summary-combined.jq with audit verdict header:"
+OUT=$(jq -r -f "$JQ_DIR/summary-combined.jq" "$FIXTURES/audit.json" 2>&1)
+assert_contains "$OUT" "Audit failed" "audit: shows verdict in PR comment"
+assert_contains "$OUT" "gate: \`new-only\`" "audit: shows gate in PR comment"
+assert_contains "$OUT" "1 new finding introduced" "audit: shows introduced count"
+assert_contains "$OUT" "1 inherited" "audit: shows inherited count when present"
+
+echo "  summary-combined.jq with audit pass verdict:"
+OUT_CLEAN=$(jq -r -f "$JQ_DIR/summary-combined.jq" "$FIXTURES/audit-clean.json" 2>&1)
+assert_contains "$OUT_CLEAN" "Audit passed" "audit clean: shows pass verdict"
+assert_contains "$OUT_CLEAN" "0 new finding" "audit clean: shows zero new findings"
+assert_not_contains "$OUT_CLEAN" "inherited" "audit clean: no inherited mention when none"
+
+echo "  summary-combined.jq with audit warn verdict:"
+OUT_WARN=$(jq '.verdict = "warn"' "$FIXTURES/audit.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_WARN" "Audit passed with warnings" "audit warn: shows warn verdict"
+
+echo "  summary-combined.jq with gate=all:"
+OUT_ALL=$(jq '.attribution.gate = "all" | .attribution.dead_code_introduced = 0 | .attribution.dead_code_inherited = 0' "$FIXTURES/audit.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_ALL" "gate: \`all\`" "audit gate=all: shows gate"
+assert_contains "$OUT_ALL" "in changed files" "audit gate=all: phrasing reflects all-mode"
+assert_not_contains "$OUT_ALL" "introduced by this PR" "audit gate=all: no introduced phrasing"
+
+echo "  summary-combined.jq backwards-compat (combined-mode without verdict):"
+OUT_COMBINED=$(jq -r -f "$JQ_DIR/summary-combined.jq" "$FIXTURES/combined.json" 2>&1)
+assert_not_contains "$OUT_COMBINED" "Audit" "combined: no audit banner when verdict absent"
+assert_not_contains "$OUT_COMBINED" "gate:" "combined: no gate banner when verdict absent"
+
+echo "  summary-combined.jq backwards-compat (clean combined-mode without verdict):"
+OUT_COMBINED_CLEAN=$(jq -r -f "$JQ_DIR/summary-combined.jq" "$FIXTURES/combined-clean.json" 2>&1)
+assert_not_contains "$OUT_COMBINED_CLEAN" "Audit" "combined clean: no audit banner"
+
+echo "  annotations on re-keyed audit JSON:"
+OUT=$(jq '.check' "$FIXTURES/audit.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT" "::warning" "audit: annotations work on re-keyed dead-code"
+assert_contains "$OUT" "Unused file" "audit: annotation has expected title"
+
+echo "  analyze.sh validates INPUT_GATE as closed enum:"
+ANALYZE_DIR=$(mktemp -d)
+cd "$ANALYZE_DIR"
+OUT=$(INPUT_COMMAND=audit INPUT_GATE=invalid INPUT_ROOT=. INPUT_FORMAT=json EVENT_NAME=push \
+  bash "$DIR/../scripts/analyze.sh" 2>&1)
+ANALYZE_STATUS=$?
+cd "$DIR"
+rm -rf "$ANALYZE_DIR"
+[ "$ANALYZE_STATUS" -ne 0 ] && pass "audit: invalid gate exits non-zero" || fail "audit: invalid gate exits non-zero" "expected non-zero exit, got $ANALYZE_STATUS"
+assert_contains "$OUT" "Invalid gate: invalid" "audit: invalid gate has clear error message"
+
+echo "  analyze.sh rejects audit on non-PR event without changed-since:"
+ANALYZE_DIR=$(mktemp -d)
+cd "$ANALYZE_DIR"
+OUT=$(INPUT_COMMAND=audit INPUT_GATE=new-only INPUT_ROOT=. INPUT_FORMAT=json \
+  INPUT_AUTO_CHANGED_SINCE=true EVENT_NAME=push \
+  bash "$DIR/../scripts/analyze.sh" 2>&1)
+ANALYZE_STATUS=$?
+cd "$DIR"
+rm -rf "$ANALYZE_DIR"
+[ "$ANALYZE_STATUS" -ne 0 ] && pass "audit: non-PR event without base errors" || fail "audit: non-PR event without base errors" "expected non-zero exit, got $ANALYZE_STATUS"
+assert_contains "$OUT" "needs an explicit base" "audit: non-PR event error message is clear"
+
+echo "  analyze.sh issue-count extraction (gate=new-only):"
+WORK=$(mktemp -d)
+cp "$FIXTURES/audit.json" "$WORK/fallow-results.json"
+ISSUES=$(cd "$WORK" && jq -r '((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0))' fallow-results.json)
+[ "$ISSUES" = "1" ] && pass "audit new-only: issue count = introduced (1)" || fail "audit new-only: issue count" "expected 1, got $ISSUES"
+
+echo "  analyze.sh issue-count extraction (gate=all):"
+ISSUES_ALL=$(cd "$WORK" && jq -r '((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0))' fallow-results.json)
+[ "$ISSUES_ALL" = "2" ] && pass "audit all: issue count = total in changed files (2)" || fail "audit all: issue count" "expected 2, got $ISSUES_ALL"
+rm -rf "$WORK"
+
 # --- Summary ---
 
 echo ""

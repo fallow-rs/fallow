@@ -116,6 +116,14 @@ build_command_args() {
         ARGS+=(--yes)
       fi
       ;;
+    audit)
+      ARGS+=(--gate "${INPUT_GATE:-new-only}")
+      [ -n "${INPUT_MAX_CRAP:-}" ] && ARGS+=(--max-crap "$INPUT_MAX_CRAP")
+      [ "${INPUT_PRODUCTION_DEAD_CODE:-}" = "true" ] && ARGS+=(--production-dead-code)
+      [ "${INPUT_PRODUCTION_HEALTH:-}" = "true" ] && ARGS+=(--production-health)
+      [ "${INPUT_PRODUCTION_DUPES:-}" = "true" ] && ARGS+=(--production-dupes)
+      [ "${INPUT_INCLUDE_ENTRY_EXPORTS:-}" = "true" ] && ARGS+=(--include-entry-exports)
+      ;;
     "")
       if [ "${INPUT_FORMAT:-}" = "sarif" ] && [ "${HAS_SARIF_FILE:-false}" = "true" ]; then
         ARGS+=(--sarif-file fallow-results.sarif)
@@ -140,8 +148,15 @@ build_command_args() {
 # --- Validation ---
 
 case "$INPUT_COMMAND" in
-  ""|dead-code|check|dupes|health|fix) ;;
-  *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be dead-code, dupes, health, fix, or empty (runs all)."; exit 2 ;;
+  ""|dead-code|check|dupes|health|audit|fix) ;;
+  *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be dead-code, dupes, health, audit, fix, or empty (runs all)."; exit 2 ;;
+esac
+
+# Validate gate input as a closed enum (only consulted when command=audit)
+INPUT_GATE="${INPUT_GATE:-new-only}"
+case "$INPUT_GATE" in
+  new-only|all) ;;
+  *) echo "::error::Invalid gate: ${INPUT_GATE}. Must be new-only or all."; exit 2 ;;
 esac
 
 for name_val in "min-tokens:${INPUT_MIN_TOKENS:-}" "min-lines:${INPUT_MIN_LINES:-}" \
@@ -184,6 +199,16 @@ if [ -z "${INPUT_CHANGED_SINCE:-}" ] && [ "${INPUT_AUTO_CHANGED_SINCE:-}" = "tru
    [ -n "${PR_BASE_SHA:-}" ]; then
   INPUT_CHANGED_SINCE="$PR_BASE_SHA"
   echo "::notice::Auto-scoping analysis to files changed since PR base (${PR_BASE_SHA:0:7})"
+fi
+
+# Audit on non-PR events needs an explicit base. Don't silently fall through
+# to fallow's auto-detect, because misconfigured workflows produce confusing
+# "verdict: pass" results that simply analyzed nothing.
+if [ "$INPUT_COMMAND" = "audit" ] && [ -z "${INPUT_CHANGED_SINCE:-}" ]; then
+  if [ "${EVENT_NAME:-}" != "pull_request" ] && [ "${EVENT_NAME:-}" != "pull_request_target" ]; then
+    echo "::error::command: audit on event '${EVENT_NAME:-unknown}' needs an explicit base. Set 'changed-since: <ref>' (e.g. origin/main) on the action, or pass --base via the 'args' input."
+    exit 2
+  fi
 fi
 
 # Propagate the effective changed-since value so downstream steps can filter
@@ -278,6 +303,90 @@ if [ -s fallow-stderr.log ]; then
   done < fallow-stderr.log
 fi
 
+# --- Audit-specific post-processing ---
+# Audit produces top-level verdict/attribution and sub-result objects keyed
+# `dead_code`, `complexity`, `duplication`. Re-key sub-results to `check`,
+# `health`, `dupes` so existing summary/comment/annotation jq scripts work
+# unchanged. Preserve top-level audit fields (command, verdict, attribution,
+# gate, base_ref, head_sha, summary) so AI consumers can still distinguish
+# audit runs from combined runs.
+
+VERDICT=""
+GATE=""
+
+if [ "$INPUT_COMMAND" = "audit" ]; then
+  VERDICT=$(jq -r '.verdict // ""' fallow-results.json)
+  GATE=$(jq -r '.attribution.gate // ""' fallow-results.json)
+
+  # When gate=new-only, prune dead-code findings to only `introduced: true` entries
+  # so PR annotations/comments reflect what the gate actually fails on. Health and
+  # duplication findings do not carry per-finding `introduced` today, so they pass
+  # through as-is and rely on attribution counts to communicate gate effects.
+  if [ "$GATE" = "new-only" ]; then
+    jq '
+      def keep_introduced(arr):
+        (arr // []) | map(select(.introduced != false));
+      .dead_code //= {}
+      | .dead_code.unused_files                = keep_introduced(.dead_code.unused_files)
+      | .dead_code.unused_exports              = keep_introduced(.dead_code.unused_exports)
+      | .dead_code.unused_types                = keep_introduced(.dead_code.unused_types)
+      | .dead_code.private_type_leaks          = keep_introduced(.dead_code.private_type_leaks)
+      | .dead_code.unused_dependencies         = keep_introduced(.dead_code.unused_dependencies)
+      | .dead_code.unused_dev_dependencies     = keep_introduced(.dead_code.unused_dev_dependencies)
+      | .dead_code.unused_optional_dependencies = keep_introduced(.dead_code.unused_optional_dependencies)
+      | .dead_code.unused_enum_members         = keep_introduced(.dead_code.unused_enum_members)
+      | .dead_code.unused_class_members        = keep_introduced(.dead_code.unused_class_members)
+      | .dead_code.unresolved_imports          = keep_introduced(.dead_code.unresolved_imports)
+      | .dead_code.unlisted_dependencies       = keep_introduced(.dead_code.unlisted_dependencies)
+      | .dead_code.duplicate_exports           = keep_introduced(.dead_code.duplicate_exports)
+      | .dead_code.circular_dependencies       = keep_introduced(.dead_code.circular_dependencies)
+      | .dead_code.boundary_violations         = keep_introduced(.dead_code.boundary_violations)
+      | .dead_code.type_only_dependencies      = keep_introduced(.dead_code.type_only_dependencies)
+      | .dead_code.test_only_dependencies      = keep_introduced(.dead_code.test_only_dependencies)
+      | .dead_code.stale_suppressions          = keep_introduced(.dead_code.stale_suppressions)
+    ' fallow-results.json > fallow-results.tmp.json && mv fallow-results.tmp.json fallow-results.json || {
+      echo "::error::Audit JSON prune transform failed"
+      rm -f fallow-results.tmp.json
+      exit 2
+    }
+  fi
+
+  # Re-key sub-results to combined-mode keys, recompute dead-code total_issues
+  # against the (possibly pruned) finding arrays, and surface verdict + attribution
+  # at the top level so downstream consumers can detect the audit run.
+  jq '
+    def list_sum(o):
+      ((o.unused_files // []) | length)
+      + ((o.unused_exports // []) | length)
+      + ((o.unused_types // []) | length)
+      + ((o.private_type_leaks // []) | length)
+      + ((o.unused_dependencies // []) | length)
+      + ((o.unused_dev_dependencies // []) | length)
+      + ((o.unused_optional_dependencies // []) | length)
+      + ((o.unused_enum_members // []) | length)
+      + ((o.unused_class_members // []) | length)
+      + ((o.unresolved_imports // []) | length)
+      + ((o.unlisted_dependencies // []) | length)
+      + ((o.duplicate_exports // []) | length)
+      + ((o.circular_dependencies // []) | length)
+      + ((o.boundary_violations // []) | length)
+      + ((o.type_only_dependencies // []) | length)
+      + ((o.test_only_dependencies // []) | length)
+      + ((o.stale_suppressions // []) | length);
+    .dead_code   as $dc
+    | .complexity  as $cx
+    | .duplication as $du
+    | .check  = ($dc | if . then . + {total_issues: list_sum(.)} else null end)
+    | .dupes  = $du
+    | .health = $cx
+    | del(.dead_code, .complexity, .duplication)
+  ' fallow-results.json > fallow-results.tmp.json && mv fallow-results.tmp.json fallow-results.json || {
+    echo "::error::Audit JSON re-key transform failed"
+    rm -f fallow-results.tmp.json
+    exit 2
+  }
+fi
+
 # --- Extract issue count ---
 
 case "$INPUT_COMMAND" in
@@ -285,6 +394,13 @@ case "$INPUT_COMMAND" in
   dupes)           ISSUES=$(jq -r '.stats.clone_groups' fallow-results.json) ;;
   health)          ISSUES=$(jq -r '((.summary.functions_above_threshold // 0) + ((.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
   fix)             ISSUES=$(jq -r '(.fixes | length)' fallow-results.json) ;;
+  audit)
+    if [ "$GATE" = "all" ]; then
+      ISSUES=$(jq -r '((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0))' fallow-results.json)
+    else
+      ISSUES=$(jq -r '((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0))' fallow-results.json)
+    fi
+    ;;
   "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (.dupes.stats.clone_groups // 0) + (.health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
 esac
 
@@ -296,6 +412,8 @@ fi
 echo "issues=${ISSUES}" >> "$GITHUB_OUTPUT"
 echo "results=fallow-results.json" >> "$GITHUB_OUTPUT"
 echo "command=${INPUT_COMMAND}" >> "$GITHUB_OUTPUT"
+echo "verdict=${VERDICT}" >> "$GITHUB_OUTPUT"
+echo "gate=${GATE}" >> "$GITHUB_OUTPUT"
 
 if [ -f fallow-results.sarif ]; then
   echo "sarif=fallow-results.sarif" >> "$GITHUB_OUTPUT"
@@ -306,6 +424,7 @@ if [ "$ISSUES" -gt 0 ]; then
     dead-code|check) echo "::warning::Fallow found ${ISSUES} unused code issues" ;;
     dupes)           echo "::warning::Fallow found ${ISSUES} clone groups" ;;
     health)          echo "::warning::Fallow found ${ISSUES} high complexity functions" ;;
+    audit)           echo "::warning::Fallow audit verdict: ${VERDICT} (${ISSUES} ${GATE:-new-only} finding(s))" ;;
     fix)             echo "::warning::Fallow proposed ${ISSUES} fixes" ;;
     "")              echo "::warning::Fallow found ${ISSUES} issues" ;;
   esac
