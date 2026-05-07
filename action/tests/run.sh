@@ -875,6 +875,81 @@ ISSUES_ALL=$(cd "$WORK" && jq -r '((.summary.dead_code_issues // 0) + (.summary.
 [ "$ISSUES_ALL" = "2" ] && pass "audit all: issue count = total in changed files (2)" || fail "audit all: issue count" "expected 2, got $ISSUES_ALL"
 rm -rf "$WORK"
 
+echo "  full prune+rekey pipeline against raw CLI audit JSON:"
+# Exercises the same jq the analyze.sh script runs in production. If you change
+# either jq block in analyze.sh, update this test snippet to match.
+PIPELINE_OUT=$(mktemp)
+jq '
+  def keep_introduced(arr):
+    (arr // []) | map(select(.introduced != false));
+  .dead_code //= {}
+  | .dead_code.unused_files                = keep_introduced(.dead_code.unused_files)
+  | .dead_code.unused_exports              = keep_introduced(.dead_code.unused_exports)
+  | .dead_code.unused_dependencies         = keep_introduced(.dead_code.unused_dependencies)
+  | .dead_code.unused_dev_dependencies     = keep_introduced(.dead_code.unused_dev_dependencies)
+  | (if .complexity then .complexity.findings = keep_introduced(.complexity.findings) else . end)
+  | (if .duplication then .duplication.clone_groups = keep_introduced(.duplication.clone_groups) else . end)
+' "$FIXTURES/audit-raw.json" | jq '
+  def list_sum(o):
+    ((o.unused_files // []) | length)
+    + ((o.unused_exports // []) | length)
+    + ((o.unused_dependencies // []) | length)
+    + ((o.unused_dev_dependencies // []) | length);
+  .dead_code   as $dc
+  | .complexity  as $cx
+  | .duplication as $du
+  | .check  = ($dc | if . then . + {total_issues: list_sum(.)} else null end)
+  | .dupes  = $du
+  | .health = $cx
+  | del(.dead_code, .complexity, .duplication)
+' > "$PIPELINE_OUT"
+HAS_CHECK=$(jq -r '(.check | type)' "$PIPELINE_OUT")
+[ "$HAS_CHECK" = "object" ] && pass "pipeline: emits .check after rekey" || fail "pipeline: .check" "expected object, got $HAS_CHECK"
+HAS_DEAD_CODE=$(jq -r '(.dead_code // null) | type' "$PIPELINE_OUT")
+[ "$HAS_DEAD_CODE" = "null" ] && pass "pipeline: drops .dead_code after rekey" || fail "pipeline: .dead_code" "expected null, got $HAS_DEAD_CODE"
+TOP_VERDICT=$(jq -r '.verdict' "$PIPELINE_OUT")
+[ "$TOP_VERDICT" = "fail" ] && pass "pipeline: preserves top-level verdict" || fail "pipeline: verdict" "expected fail, got $TOP_VERDICT"
+TOP_COMMAND=$(jq -r '.command' "$PIPELINE_OUT")
+[ "$TOP_COMMAND" = "audit" ] && pass "pipeline: preserves top-level command" || fail "pipeline: command" "expected audit, got $TOP_COMMAND"
+ALL_INTRODUCED=$(jq -r '[.check.unused_files[].introduced] | all' "$PIPELINE_OUT")
+[ "$ALL_INTRODUCED" = "true" ] && pass "pipeline: prune kept only introduced=true entries" || fail "pipeline: prune" "expected true, got $ALL_INTRODUCED"
+rm -f "$PIPELINE_OUT"
+
+echo "  analyze.sh validates INPUT_GATE only when command=audit:"
+NONAUDIT_DIR=$(mktemp -d)
+cd "$NONAUDIT_DIR"
+INPUT_COMMAND=health INPUT_GATE=invalid INPUT_ROOT=. INPUT_FORMAT=json EVENT_NAME=push \
+  bash "$DIR/../scripts/analyze.sh" 2>&1 | /usr/bin/grep -c "Invalid gate" > /tmp/invalid-gate-hits.txt 2>&1 || true
+HITS=$(cat /tmp/invalid-gate-hits.txt 2>/dev/null || echo 0)
+cd "$DIR"
+rm -rf "$NONAUDIT_DIR"
+[ "$HITS" = "0" ] && pass "non-audit command does not validate INPUT_GATE" || fail "non-audit gate validation" "expected 0 hits, got $HITS"
+rm -f /tmp/invalid-gate-hits.txt
+
+echo "  analyze.sh prunes complexity/duplication findings under gate=new-only:"
+PRUNE_INPUT='{
+  "dead_code": {"unused_files": []},
+  "complexity": {"findings": [
+    {"name": "old", "introduced": false},
+    {"name": "new", "introduced": true}
+  ]},
+  "duplication": {"clone_groups": [
+    {"id": "old", "introduced": false},
+    {"id": "new", "introduced": true}
+  ]}
+}'
+PRUNED=$(echo "$PRUNE_INPUT" | jq '
+  def keep_introduced(arr):
+    (arr // []) | map(select(.introduced != false));
+  .dead_code //= {}
+  | (if .complexity then .complexity.findings = keep_introduced(.complexity.findings) else . end)
+  | (if .duplication then .duplication.clone_groups = keep_introduced(.duplication.clone_groups) else . end)
+')
+CX_KEPT=$(echo "$PRUNED" | jq -r '.complexity.findings[].name' | tr '\n' ',')
+[ "$CX_KEPT" = "new," ] && pass "prune: complexity drops introduced=false" || fail "prune complexity" "expected 'new,', got '$CX_KEPT'"
+DU_KEPT=$(echo "$PRUNED" | jq -r '.duplication.clone_groups[].id' | tr '\n' ',')
+[ "$DU_KEPT" = "new," ] && pass "prune: duplication drops introduced=false" || fail "prune duplication" "expected 'new,', got '$DU_KEPT'"
+
 # --- Summary ---
 
 echo ""

@@ -1,0 +1,77 @@
+{
+  "schema_version": 3,
+  "version": "2.66.2",
+  "command": "audit",
+  "verdict": "pass",
+  "changed_files_count": 2,
+  "base_ref": "origin/main",
+  "head_sha": "abc1234567890",
+  "elapsed_ms": 412,
+  "summary": {
+    "dead_code_issues": 0,
+    "dead_code_has_errors": false,
+    "complexity_findings": 0,
+    "max_cyclomatic": null,
+    "duplication_clone_groups": 0
+  },
+  "attribution": {
+    "gate": "new-only",
+    "dead_code_introduced": 0,
+    "dead_code_inherited": 0,
+    "complexity_introduced": 0,
+    "complexity_inherited": 0,
+    "duplication_introduced": 0,
+    "duplication_inherited": 0
+  },
+  "check": {
+    "schema_version": 3,
+    "version": "2.66.2",
+    "total_issues": 0,
+    "summary": {
+      "files_analyzed": 12,
+      "modules_analyzed": 12
+    },
+    "unused_files": [],
+    "unused_exports": [],
+    "unused_types": [],
+    "private_type_leaks": [],
+    "unused_dependencies": [],
+    "unused_dev_dependencies": [],
+    "unused_optional_dependencies": [],
+    "unused_enum_members": [],
+    "unused_class_members": [],
+    "unresolved_imports": [],
+    "unlisted_dependencies": [],
+    "duplicate_exports": [],
+    "circular_dependencies": [],
+    "boundary_violations": [],
+    "type_only_dependencies": [],
+    "test_only_dependencies": [],
+    "stale_suppressions": []
+  },
+  "dupes": {
+    "stats": {
+      "clone_groups": 0,
+      "clone_instances": 0,
+      "duplicated_lines": 0,
+      "duplication_percentage": 0,
+      "files_with_clones": 0
+    },
+    "clone_groups": [],
+    "clone_families": []
+  },
+  "health": {
+    "summary": {
+      "files_analyzed": 12,
+      "functions_analyzed": 80,
+      "functions_above_threshold": 0,
+      "max_cyclomatic_threshold": 20,
+      "max_cognitive_threshold": 15
+    },
+    "vital_signs": {
+      "maintainability_avg": 92.5,
+      "avg_cyclomatic": 4.2
+    },
+    "findings": []
+  }
+}

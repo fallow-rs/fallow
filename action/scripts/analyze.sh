@@ -152,12 +152,15 @@ case "$INPUT_COMMAND" in
   *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be dead-code, dupes, health, audit, fix, or empty (runs all)."; exit 2 ;;
 esac
 
-# Validate gate input as a closed enum (only consulted when command=audit)
+# Validate gate input as a closed enum (only when command=audit, since users on
+# other commands shouldn't hard-error on a stray gate value from inherited env)
 INPUT_GATE="${INPUT_GATE:-new-only}"
-case "$INPUT_GATE" in
-  new-only|all) ;;
-  *) echo "::error::Invalid gate: ${INPUT_GATE}. Must be new-only or all."; exit 2 ;;
-esac
+if [ "$INPUT_COMMAND" = "audit" ]; then
+  case "$INPUT_GATE" in
+    new-only|all) ;;
+    *) echo "::error::Invalid gate: ${INPUT_GATE}. Must be new-only or all."; exit 2 ;;
+  esac
+fi
 
 for name_val in "min-tokens:${INPUT_MIN_TOKENS:-}" "min-lines:${INPUT_MIN_LINES:-}" \
                "max-cyclomatic:${INPUT_MAX_CYCLOMATIC:-}" "max-cognitive:${INPUT_MAX_COGNITIVE:-}" \
@@ -318,10 +321,12 @@ if [ "$INPUT_COMMAND" = "audit" ]; then
   VERDICT=$(jq -r '.verdict // ""' fallow-results.json)
   GATE=$(jq -r '.attribution.gate // ""' fallow-results.json)
 
-  # When gate=new-only, prune dead-code findings to only `introduced: true` entries
-  # so PR annotations/comments reflect what the gate actually fails on. Health and
-  # duplication findings do not carry per-finding `introduced` today, so they pass
-  # through as-is and rely on attribution counts to communicate gate effects.
+  # When gate=new-only, prune findings to only `introduced: true` entries across
+  # all three categories so PR annotations/comments reflect what the gate
+  # actually fails on. The CLI annotates dead_code findings, complexity (health)
+  # findings, and duplication clone_groups with `introduced: true|false` whenever
+  # the audit base-snapshot pass runs. Findings without an `introduced` field
+  # (older CLI binaries) are kept by the `!= false` predicate.
   if [ "$GATE" = "new-only" ]; then
     jq '
       def keep_introduced(arr):
@@ -344,6 +349,8 @@ if [ "$INPUT_COMMAND" = "audit" ]; then
       | .dead_code.type_only_dependencies      = keep_introduced(.dead_code.type_only_dependencies)
       | .dead_code.test_only_dependencies      = keep_introduced(.dead_code.test_only_dependencies)
       | .dead_code.stale_suppressions          = keep_introduced(.dead_code.stale_suppressions)
+      | (if .complexity then .complexity.findings = keep_introduced(.complexity.findings) else . end)
+      | (if .duplication then .duplication.clone_groups = keep_introduced(.duplication.clone_groups) else . end)
     ' fallow-results.json > fallow-results.tmp.json && mv fallow-results.tmp.json fallow-results.json || {
       echo "::error::Audit JSON prune transform failed"
       rm -f fallow-results.tmp.json

@@ -655,6 +655,90 @@ assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "DELETE" "cleans up previous c
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "unused-export" "handles unused export suggestions"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "FALLOW_SHARED_JQ_DIR" "can use shared jq scripts"
 
+# =========================================================================
+# Audit command (issue #302 follow-up)
+# =========================================================================
+
+echo ""
+echo "=== Audit command ==="
+
+CI_YAML_CONTENT=$(cat "$CI_YAML")
+COMMENT_CONTENT=$(cat "$SCRIPTS_DIR/comment.sh")
+REVIEW_CONTENT=$(cat "$SCRIPTS_DIR/review.sh")
+
+echo "  audit fixtures present:"
+CMD=$(jq -r '.command' "$FIXTURES/audit.json" 2>/dev/null)
+[ "$CMD" = "audit" ] && pass "audit fixture: command preserved" || fail "audit fixture: command preserved" "expected audit, got $CMD"
+VERD=$(jq -r '.verdict' "$FIXTURES/audit.json" 2>/dev/null)
+[ "$VERD" = "fail" ] && pass "audit fixture: verdict preserved" || fail "audit fixture: verdict preserved" "expected fail, got $VERD"
+GATE=$(jq -r '.attribution.gate' "$FIXTURES/audit.json" 2>/dev/null)
+[ "$GATE" = "new-only" ] && pass "audit fixture: gate preserved" || fail "audit fixture: gate preserved" "expected new-only, got $GATE"
+
+echo "  gitlab-ci.yml accepts audit:"
+assert_contains "$CI_YAML_CONTENT" "dead-code|check|dupes|health|audit|fix" "FALLOW_COMMAND validation includes audit"
+assert_contains "$CI_YAML_CONTENT" 'FALLOW_AUDIT_GATE: "new-only"' "default FALLOW_AUDIT_GATE present"
+assert_contains "$CI_YAML_CONTENT" 'Invalid audit gate' "validates FALLOW_AUDIT_GATE as closed enum"
+assert_contains "$CI_YAML_CONTENT" "needs an explicit base" "errors on audit non-MR pipeline without base"
+assert_contains "$CI_YAML_CONTENT" 'ARGS+=(--gate "$FALLOW_AUDIT_GATE")' "passes --gate to fallow audit"
+assert_contains "$CI_YAML_CONTENT" "Audit JSON re-key transform failed" "fail-fast on jq re-key error"
+assert_contains "$CI_YAML_CONTENT" 'VERDICT" = "fail"' "verdict-driven fail check for audit"
+
+echo "  comment.sh routes audit to summary-combined:"
+assert_contains "$COMMENT_CONTENT" 'audit|"")' "comment.sh routes audit to combined summary"
+
+echo "  review.sh handles audit input:"
+assert_contains "$REVIEW_CONTENT" 'audit|"")' "review.sh handles audit"
+
+echo "  full prune+rekey pipeline against raw CLI audit JSON:"
+# Exercises the same jq blocks gitlab-ci.yml runs in production. If those
+# heredoc'd jq blocks change, update this test snippet to match.
+PIPELINE_OUT=$(mktemp)
+jq '
+  def keep_introduced(arr):
+    (arr // []) | map(select(.introduced != false));
+  .dead_code //= {}
+  | .dead_code.unused_files                = keep_introduced(.dead_code.unused_files)
+  | .dead_code.unused_exports              = keep_introduced(.dead_code.unused_exports)
+  | .dead_code.unused_dependencies         = keep_introduced(.dead_code.unused_dependencies)
+  | .dead_code.unused_dev_dependencies     = keep_introduced(.dead_code.unused_dev_dependencies)
+  | (if .complexity then .complexity.findings = keep_introduced(.complexity.findings) else . end)
+  | (if .duplication then .duplication.clone_groups = keep_introduced(.duplication.clone_groups) else . end)
+' "$FIXTURES/audit-raw.json" | jq '
+  def list_sum(o):
+    ((o.unused_files // []) | length)
+    + ((o.unused_exports // []) | length)
+    + ((o.unused_dependencies // []) | length)
+    + ((o.unused_dev_dependencies // []) | length);
+  .dead_code   as $dc
+  | .complexity  as $cx
+  | .duplication as $du
+  | .check  = ($dc | if . then . + {total_issues: list_sum(.)} else null end)
+  | .dupes  = $du
+  | .health = $cx
+  | del(.dead_code, .complexity, .duplication)
+' > "$PIPELINE_OUT"
+HAS_CHECK=$(jq -r '(.check | type)' "$PIPELINE_OUT")
+[ "$HAS_CHECK" = "object" ] && pass "pipeline: emits .check after rekey" || fail "pipeline: .check" "expected object, got $HAS_CHECK"
+HAS_DEAD_CODE=$(jq -r '(.dead_code // null) | type' "$PIPELINE_OUT")
+[ "$HAS_DEAD_CODE" = "null" ] && pass "pipeline: drops .dead_code after rekey" || fail "pipeline: .dead_code" "expected null, got $HAS_DEAD_CODE"
+TOP_VERDICT=$(jq -r '.verdict' "$PIPELINE_OUT")
+[ "$TOP_VERDICT" = "fail" ] && pass "pipeline: preserves top-level verdict" || fail "pipeline: verdict" "expected fail, got $TOP_VERDICT"
+TOP_COMMAND=$(jq -r '.command' "$PIPELINE_OUT")
+[ "$TOP_COMMAND" = "audit" ] && pass "pipeline: preserves top-level command" || fail "pipeline: command" "expected audit, got $TOP_COMMAND"
+ALL_INTRODUCED=$(jq -r '[.check.unused_files[].introduced] | all' "$PIPELINE_OUT")
+[ "$ALL_INTRODUCED" = "true" ] && pass "pipeline: prune kept only introduced=true entries" || fail "pipeline: prune" "expected true, got $ALL_INTRODUCED"
+rm -f "$PIPELINE_OUT"
+
+echo "  summary-combined.jq verdict banner with audit fixture:"
+SUMMARY_JQ="$SHARED_JQ_DIR/summary-combined.jq"
+OUT=$(jq -r -f "$SUMMARY_JQ" "$FIXTURES/audit.json" 2>&1)
+assert_contains "$OUT" "Audit failed" "audit fixture: shows verdict banner"
+assert_contains "$OUT" 'gate: `new-only`' "audit fixture: shows gate"
+assert_contains "$OUT" "introduced by this PR" "audit fixture: shows introduced phrasing"
+
+OUT_CLEAN=$(jq -r -f "$SUMMARY_JQ" "$FIXTURES/audit-clean.json" 2>&1)
+assert_contains "$OUT_CLEAN" "Audit passed" "audit clean: pass verdict"
+
 # --- Summary ---
 
 echo ""
