@@ -32,7 +32,7 @@ case "$FALLOW_COMMAND" in
   dupes)           JQ_FILE=$(pick_jq "summary-dupes.jq") ;;
   health)          JQ_FILE=$(pick_jq "summary-health.jq") ;;
   fix)             JQ_FILE=$(pick_jq "summary-fix.jq") ;;
-  "")              JQ_FILE=$(pick_jq "summary-combined.jq") ;;
+  audit|"")        JQ_FILE=$(pick_jq "summary-combined.jq") ;;
   *)               echo "ERROR: Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;
 esac
 

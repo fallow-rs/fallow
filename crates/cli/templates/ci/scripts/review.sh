@@ -123,8 +123,8 @@ case "$FALLOW_COMMAND" in
     COMMENTS=$(jq -f "$(pick_jq review-comments-dupes.jq)" "$RESULTS_FILE" 2>&1) || { echo "jq dupes error: $COMMENTS"; COMMENTS="[]"; } ;;
   health)
     COMMENTS=$(jq -f "$(pick_jq review-comments-health.jq)" "$RESULTS_FILE" 2>&1) || { echo "jq health error: $COMMENTS"; COMMENTS="[]"; } ;;
-  "")
-    # Combined: extract each section and run through its jq script
+  audit|"")
+    # Audit JSON is re-keyed in the template to use combined-mode keys (check/health/dupes).
     WORK_DIR=$(mktemp -d)
     jq '.check // {}' "$RESULTS_FILE" > "$WORK_DIR/check.json" 2>/dev/null
     jq '.dupes // {}' "$RESULTS_FILE" > "$WORK_DIR/dupes.json" 2>/dev/null

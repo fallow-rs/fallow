@@ -729,15 +729,25 @@ ALL_INTRODUCED=$(jq -r '[.check.unused_files[].introduced] | all' "$PIPELINE_OUT
 [ "$ALL_INTRODUCED" = "true" ] && pass "pipeline: prune kept only introduced=true entries" || fail "pipeline: prune" "expected true, got $ALL_INTRODUCED"
 rm -f "$PIPELINE_OUT"
 
-echo "  summary-combined.jq verdict banner with audit fixture:"
+echo "  summary-combined.jq verdict banner with audit fixture (shared/GitHub variant):"
 SUMMARY_JQ="$SHARED_JQ_DIR/summary-combined.jq"
 OUT=$(jq -r -f "$SUMMARY_JQ" "$FIXTURES/audit.json" 2>&1)
 assert_contains "$OUT" "Audit failed" "audit fixture: shows verdict banner"
 assert_contains "$OUT" 'gate: `new-only`' "audit fixture: shows gate"
-assert_contains "$OUT" "introduced by this PR" "audit fixture: shows introduced phrasing"
+assert_contains "$OUT" "introduced by this PR" "audit fixture: shows introduced phrasing (GitHub: PR)"
 
 OUT_CLEAN=$(jq -r -f "$SUMMARY_JQ" "$FIXTURES/audit-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "Audit passed" "audit clean: pass verdict"
+
+echo "  summary-combined.jq verdict banner with audit fixture (GitLab variant):"
+GITLAB_SUMMARY_JQ="$CI_JQ_DIR/summary-combined.jq"
+OUT_GL=$(jq -r -f "$GITLAB_SUMMARY_JQ" "$FIXTURES/audit.json" 2>&1)
+assert_contains "$OUT_GL" "Audit failed" "GitLab audit: shows verdict banner"
+assert_contains "$OUT_GL" 'gate: `new-only`' "GitLab audit: shows gate"
+assert_contains "$OUT_GL" "introduced by this MR" "GitLab audit: shows MR phrasing"
+
+OUT_GL_COMBINED=$(jq -r -f "$GITLAB_SUMMARY_JQ" "$FIXTURES/combined.json" 2>&1)
+assert_not_contains "$OUT_GL_COMBINED" "Audit" "GitLab combined: no audit banner when verdict absent"
 
 # --- Summary ---
 

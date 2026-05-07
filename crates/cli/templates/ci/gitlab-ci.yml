@@ -74,7 +74,7 @@ variables:
 
   # Core
   FALLOW_VERSION: ""             # Empty reads package.json fallow dependency, then falls back to latest
-  FALLOW_COMMAND: ""            # dead-code, dupes, health, fix, or empty (runs all)
+  FALLOW_COMMAND: ""            # dead-code, dupes, health, audit, fix, or empty (runs all)
   FALLOW_ROOT: "."
   FALLOW_CONFIG: ""             # Path to .fallowrc.json, .fallowrc.jsonc, or fallow.toml
   FALLOW_PRODUCTION: ""                # "true"/"false" enables production for every analysis. Empty defers to config.
@@ -105,6 +105,7 @@ variables:
 
   # Dead-code specific
   FALLOW_ISSUE_TYPES: ""        # Comma-separated: unused-files,unused-exports,...
+  FALLOW_INCLUDE_ENTRY_EXPORTS: "false"  # Report unused exports in entry files (also applies to audit)
   FALLOW_FAIL_ON_REGRESSION: "false"
   FALLOW_TOLERANCE: "0"
   FALLOW_REGRESSION_BASELINE: ""
@@ -139,6 +140,9 @@ variables:
   FALLOW_MIN_COMMITS: ""
   FALLOW_SAVE_SNAPSHOT: ""       # save snapshot to .fallow/snapshots/ for trend tracking; cache this path across pipelines
   FALLOW_TREND: "false"          # compare against most recent snapshot; requires FALLOW_SAVE_SNAPSHOT on a prior run
+
+  # Audit specific (only used when FALLOW_COMMAND=audit)
+  FALLOW_AUDIT_GATE: "new-only"  # Audit verdict gate: new-only fails only on findings introduced by this MR; all fails on every finding in changed files
 
   # Fix specific
   FALLOW_DRY_RUN: "true"
@@ -370,9 +374,17 @@ variables:
 
       # ── Validate inputs ──────────────────────────────────────────────
       case "$FALLOW_COMMAND" in
-        ""|dead-code|check|dupes|health|fix) ;;
+        ""|dead-code|check|dupes|health|audit|fix) ;;
         *) echo "ERROR: Invalid command: ${FALLOW_COMMAND}"; exit 2 ;;
       esac
+
+      FALLOW_AUDIT_GATE="${FALLOW_AUDIT_GATE:-new-only}"
+      if [ "$FALLOW_COMMAND" = "audit" ]; then
+        case "$FALLOW_AUDIT_GATE" in
+          new-only|all) ;;
+          *) echo "ERROR: Invalid audit gate: ${FALLOW_AUDIT_GATE}. Must be new-only or all."; exit 2 ;;
+        esac
+      fi
 
       for name_val in "min-tokens:$FALLOW_MIN_TOKENS" "min-lines:$FALLOW_MIN_LINES" \
                       "max-cyclomatic:$FALLOW_MAX_CYCLOMATIC" "max-cognitive:$FALLOW_MAX_COGNITIVE" \
@@ -399,6 +411,16 @@ variables:
         if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
           FALLOW_CHANGED_SINCE="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
           echo "Auto-scoping to changed files (--changed-since ${FALLOW_CHANGED_SINCE:0:12})"
+        fi
+      fi
+
+      # Audit on non-MR pipelines needs an explicit base. Don't silently fall through
+      # to fallow's auto-detect, because misconfigured pipelines produce confusing
+      # "verdict: pass" results that simply analyzed nothing.
+      if [ "$FALLOW_COMMAND" = "audit" ] && [ -z "$FALLOW_CHANGED_SINCE" ]; then
+        if [ -z "${CI_MERGE_REQUEST_IID:-}" ]; then
+          echo "ERROR: FALLOW_COMMAND=audit on non-MR pipeline needs an explicit base. Set FALLOW_CHANGED_SINCE (e.g. origin/main) or pass --base via FALLOW_ARGS."
+          exit 2
         fi
       fi
 
@@ -438,6 +460,7 @@ variables:
               ARGS+=("--${t}")
             done
           fi
+          [ "$FALLOW_INCLUDE_ENTRY_EXPORTS" = "true" ] && ARGS+=(--include-entry-exports)
           [ "$FALLOW_FAIL_ON_REGRESSION" = "true" ] && ARGS+=(--fail-on-regression)
           [ -n "$FALLOW_TOLERANCE" ] && [ "$FALLOW_TOLERANCE" != "0" ] && ARGS+=(--tolerance "$FALLOW_TOLERANCE")
           [ -n "$FALLOW_REGRESSION_BASELINE" ] && ARGS+=(--regression-baseline "$FALLOW_REGRESSION_BASELINE")
@@ -483,6 +506,14 @@ variables:
         fix)
           [ "$FALLOW_DRY_RUN" = "true" ] && ARGS+=(--dry-run) || ARGS+=(--yes)
           ;;
+        audit)
+          ARGS+=(--gate "$FALLOW_AUDIT_GATE")
+          [ -n "$FALLOW_MAX_CRAP" ] && ARGS+=(--max-crap "$FALLOW_MAX_CRAP")
+          [ "$FALLOW_PRODUCTION_DEAD_CODE" = "true" ] && ARGS+=(--production-dead-code)
+          [ "$FALLOW_PRODUCTION_HEALTH" = "true" ] && ARGS+=(--production-health)
+          [ "$FALLOW_PRODUCTION_DUPES" = "true" ] && ARGS+=(--production-dupes)
+          [ "$FALLOW_INCLUDE_ENTRY_EXPORTS" = "true" ] && ARGS+=(--include-entry-exports)
+          ;;
         "")
           ARGS+=(--dupes-mode "$FALLOW_DUPES_MODE")
           [ -n "$FALLOW_THRESHOLD" ]         && ARGS+=(--dupes-threshold "$FALLOW_THRESHOLD")
@@ -520,19 +551,107 @@ variables:
         echo "---"
       fi
 
+      # ── Audit-specific post-processing ───────────────────────────────
+      # Re-key audit sub-results to combined-mode keys (dead_code -> check,
+      # complexity -> health, duplication -> dupes) so existing summary,
+      # comment, and review jq scripts work unchanged. Preserve top-level
+      # audit fields (command, verdict, attribution, gate, summary, base_ref,
+      # head_sha) so AI consumers can still detect audit runs. Under
+      # gate=new-only, prune findings to introduced != false entries.
+      VERDICT=""
+      AUDIT_GATE=""
+      if [ "$FALLOW_COMMAND" = "audit" ]; then
+        VERDICT=$(jq -r '.verdict // ""' fallow-results.json)
+        AUDIT_GATE=$(jq -r '.attribution.gate // ""' fallow-results.json)
+
+        if [ "$AUDIT_GATE" = "new-only" ]; then
+          jq '
+            def keep_introduced(arr):
+              (arr // []) | map(select(.introduced != false));
+            .dead_code //= {}
+            | .dead_code.unused_files                = keep_introduced(.dead_code.unused_files)
+            | .dead_code.unused_exports              = keep_introduced(.dead_code.unused_exports)
+            | .dead_code.unused_types                = keep_introduced(.dead_code.unused_types)
+            | .dead_code.private_type_leaks          = keep_introduced(.dead_code.private_type_leaks)
+            | .dead_code.unused_dependencies         = keep_introduced(.dead_code.unused_dependencies)
+            | .dead_code.unused_dev_dependencies     = keep_introduced(.dead_code.unused_dev_dependencies)
+            | .dead_code.unused_optional_dependencies = keep_introduced(.dead_code.unused_optional_dependencies)
+            | .dead_code.unused_enum_members         = keep_introduced(.dead_code.unused_enum_members)
+            | .dead_code.unused_class_members        = keep_introduced(.dead_code.unused_class_members)
+            | .dead_code.unresolved_imports          = keep_introduced(.dead_code.unresolved_imports)
+            | .dead_code.unlisted_dependencies       = keep_introduced(.dead_code.unlisted_dependencies)
+            | .dead_code.duplicate_exports           = keep_introduced(.dead_code.duplicate_exports)
+            | .dead_code.circular_dependencies       = keep_introduced(.dead_code.circular_dependencies)
+            | .dead_code.boundary_violations         = keep_introduced(.dead_code.boundary_violations)
+            | .dead_code.type_only_dependencies      = keep_introduced(.dead_code.type_only_dependencies)
+            | .dead_code.test_only_dependencies      = keep_introduced(.dead_code.test_only_dependencies)
+            | .dead_code.stale_suppressions          = keep_introduced(.dead_code.stale_suppressions)
+            | (if .complexity then .complexity.findings = keep_introduced(.complexity.findings) else . end)
+            | (if .duplication then .duplication.clone_groups = keep_introduced(.duplication.clone_groups) else . end)
+          ' fallow-results.json > fallow-results.tmp.json && mv fallow-results.tmp.json fallow-results.json || {
+            echo "ERROR: Audit JSON prune transform failed"
+            rm -f fallow-results.tmp.json
+            exit 2
+          }
+        fi
+
+        jq '
+          def list_sum(o):
+            ((o.unused_files // []) | length)
+            + ((o.unused_exports // []) | length)
+            + ((o.unused_types // []) | length)
+            + ((o.private_type_leaks // []) | length)
+            + ((o.unused_dependencies // []) | length)
+            + ((o.unused_dev_dependencies // []) | length)
+            + ((o.unused_optional_dependencies // []) | length)
+            + ((o.unused_enum_members // []) | length)
+            + ((o.unused_class_members // []) | length)
+            + ((o.unresolved_imports // []) | length)
+            + ((o.unlisted_dependencies // []) | length)
+            + ((o.duplicate_exports // []) | length)
+            + ((o.circular_dependencies // []) | length)
+            + ((o.boundary_violations // []) | length)
+            + ((o.type_only_dependencies // []) | length)
+            + ((o.test_only_dependencies // []) | length)
+            + ((o.stale_suppressions // []) | length);
+          .dead_code   as $dc
+          | .complexity  as $cx
+          | .duplication as $du
+          | .check  = ($dc | if . then . + {total_issues: list_sum(.)} else null end)
+          | .dupes  = $du
+          | .health = $cx
+          | del(.dead_code, .complexity, .duplication)
+        ' fallow-results.json > fallow-results.tmp.json && mv fallow-results.tmp.json fallow-results.json || {
+          echo "ERROR: Audit JSON re-key transform failed"
+          rm -f fallow-results.tmp.json
+          exit 2
+        }
+      fi
+
       # ── Extract issue count ──────────────────────────────────────────
       case "$FALLOW_COMMAND" in
         dead-code|check) ISSUES=$(jq -r '.total_issues // 0' fallow-results.json) ;;
         dupes)           ISSUES=$(jq -r '.stats.clone_groups // 0' fallow-results.json) ;;
         health)          ISSUES=$(jq -r '((.summary.functions_above_threshold // 0) + ((.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
         fix)             ISSUES=$(jq -r '(.fixes | length)' fallow-results.json) ;;
+        audit)
+          if [ "$AUDIT_GATE" = "all" ]; then
+            ISSUES=$(jq -r '((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0))' fallow-results.json)
+          else
+            ISSUES=$(jq -r '((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0))' fallow-results.json)
+          fi
+          ;;
         "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (.dupes.stats.clone_groups // 0) + (.health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
       esac
 
       if ! echo "$ISSUES" | grep -qE '^[0-9]+$'; then
         echo "ERROR: Unexpected issue count: ${ISSUES}"; exit 2
       fi
-      echo "Found ${ISSUES} issues"
+      if [ "$FALLOW_COMMAND" = "audit" ]; then
+        echo "Audit verdict: ${VERDICT} (gate: ${AUDIT_GATE}, ${ISSUES} ${AUDIT_GATE} finding(s))"
+      else
+        echo "Found ${ISSUES} issues"
+      fi
 
       # ── GitLab Code Quality report (CodeClimate format) ──────────────
       # Uses fallow's native --format codeclimate for inline MR annotations.
@@ -587,15 +706,25 @@ variables:
       fi
 
       # ── Fail check ───────────────────────────────────────────────────
-      if [ "$FALLOW_FAIL_ON_ISSUES" = "true" ] && [ "$ISSUES" -gt 0 ]; then
-        case "$FALLOW_COMMAND" in
-          dead-code|check) echo "ERROR: Fallow found ${ISSUES} unused code issues" ;;
-          dupes)           echo "ERROR: Fallow found ${ISSUES} clone groups" ;;
-          health)          echo "ERROR: Fallow found ${ISSUES} health findings" ;;
-          fix)             echo "ERROR: Fallow found ${ISSUES} fixable issues" ;;
-          "")              echo "ERROR: Fallow found ${ISSUES} issues" ;;
-        esac
-        exit 1
+      if [ "$FALLOW_FAIL_ON_ISSUES" = "true" ]; then
+        if [ "$FALLOW_COMMAND" = "audit" ]; then
+          # Audit gates on rule severity. Verdict already encodes the gate
+          # decision: pass -> no issues, warn -> warn-tier only (don't fail),
+          # fail -> error-tier (fail).
+          if [ "$VERDICT" = "fail" ]; then
+            echo "ERROR: Fallow audit failed (gate: ${AUDIT_GATE:-new-only}, ${ISSUES} finding(s) at error severity)"
+            exit 1
+          fi
+        elif [ "$ISSUES" -gt 0 ]; then
+          case "$FALLOW_COMMAND" in
+            dead-code|check) echo "ERROR: Fallow found ${ISSUES} unused code issues" ;;
+            dupes)           echo "ERROR: Fallow found ${ISSUES} clone groups" ;;
+            health)          echo "ERROR: Fallow found ${ISSUES} health findings" ;;
+            fix)             echo "ERROR: Fallow found ${ISSUES} fixable issues" ;;
+            "")              echo "ERROR: Fallow found ${ISSUES} issues" ;;
+          esac
+          exit 1
+        fi
       fi
       FALLOW_SCRIPT_EOF
       chmod +x /tmp/fallow-run.sh
