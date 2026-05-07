@@ -272,6 +272,29 @@ else
     "asymmetric: action=$ACTION_HAS_ERROR_TRAP, gitlab=$CI_HAS_ERROR_TRAP"
 fi
 
+# Verdict-driven threshold for audit: both wrappers must gate on
+# `verdict == "fail"` for audit (severity-aware), not on raw issue count.
+# Otherwise warn-tier findings fail CI even though the verdict says "warn"
+# (the original issue #302 bug).
+ACTION_HAS_VERDICT_GATE=$(grep -cE 'VERDICT.*=.*"fail"|VERDICT" = "fail"' "$ACTION_ANALYZE_SH" "$DIR/../../action.yml" 2>/dev/null | awk -F: '{s+=$2} END {print s}')
+CI_HAS_VERDICT_GATE=$(grep -cE 'VERDICT.*=.*"fail"|VERDICT" = "fail"' "$CI_TEMPLATE_YAML" 2>/dev/null || echo 0)
+if [ "$ACTION_HAS_VERDICT_GATE" != "0" ] && [ "$CI_HAS_VERDICT_GATE" != "0" ]; then
+  pass "parity: both wrappers gate audit on verdict, not raw count"
+else
+  fail "parity: verdict-driven threshold" \
+    "asymmetric: action=$ACTION_HAS_VERDICT_GATE, gitlab=$CI_HAS_VERDICT_GATE"
+fi
+
+# Both wrappers must extract verdict + gate from audit JSON before issue count.
+ACTION_HAS_VERDICT_EXTRACT=$(grep -cE 'VERDICT=\$\(jq -r .*\.verdict' "$ACTION_ANALYZE_SH" 2>/dev/null || echo 0)
+CI_HAS_VERDICT_EXTRACT=$(grep -cE 'VERDICT=\$\(jq -r .*\.verdict' "$CI_TEMPLATE_YAML" 2>/dev/null || echo 0)
+if [ "$ACTION_HAS_VERDICT_EXTRACT" != "0" ] && [ "$CI_HAS_VERDICT_EXTRACT" != "0" ]; then
+  pass "parity: both wrappers extract verdict from audit JSON"
+else
+  fail "parity: verdict extraction" \
+    "asymmetric: action=$ACTION_HAS_VERDICT_EXTRACT, gitlab=$CI_HAS_VERDICT_EXTRACT"
+fi
+
 # =========================================================================
 # GitLab-specific summary jq tests
 # =========================================================================

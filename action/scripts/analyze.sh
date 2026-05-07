@@ -308,7 +308,17 @@ if [ -s fallow-stderr.log ]; then
   done < fallow-stderr.log
 fi
 
-# --- Extract issue count ---
+# --- Extract verdict / gate (audit only) and issue count ---
+# Audit's verdict (pass/warn/fail) is the load-bearing severity-aware signal:
+# warn means "warn-tier issues only, do not fail CI". Threshold step gates on
+# verdict for audit; raw issue counts only gate non-audit commands.
+
+VERDICT=""
+GATE=""
+if [ "$INPUT_COMMAND" = "audit" ]; then
+  VERDICT=$(jq -r '.verdict // ""' fallow-results.json)
+  GATE=$(jq -r '.attribution.gate // ""' fallow-results.json)
+fi
 
 case "$INPUT_COMMAND" in
   dead-code|check) ISSUES=$(jq -r '.total_issues' fallow-results.json) ;;
@@ -327,6 +337,8 @@ fi
 echo "issues=${ISSUES}" >> "$GITHUB_OUTPUT"
 echo "results=fallow-results.json" >> "$GITHUB_OUTPUT"
 echo "command=${INPUT_COMMAND}" >> "$GITHUB_OUTPUT"
+echo "verdict=${VERDICT}" >> "$GITHUB_OUTPUT"
+echo "gate=${GATE}" >> "$GITHUB_OUTPUT"
 
 if [ -f fallow-results.sarif ]; then
   echo "sarif=fallow-results.sarif" >> "$GITHUB_OUTPUT"

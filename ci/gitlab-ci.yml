@@ -553,7 +553,17 @@ variables:
         echo "---"
       fi
 
-      # ── Extract issue count ──────────────────────────────────────────
+      # ── Extract verdict / gate (audit only) and issue count ─────────
+      # Audit's verdict (pass/warn/fail) is the load-bearing severity-aware
+      # signal: warn means "warn-tier only, do not fail". Fail check gates
+      # on verdict for audit; raw counts only gate non-audit commands.
+      VERDICT=""
+      AUDIT_GATE=""
+      if [ "$FALLOW_COMMAND" = "audit" ]; then
+        VERDICT=$(jq -r '.verdict // ""' fallow-results.json)
+        AUDIT_GATE=$(jq -r '.attribution.gate // ""' fallow-results.json)
+      fi
+
       case "$FALLOW_COMMAND" in
         dead-code|check) ISSUES=$(jq -r '.total_issues // 0' fallow-results.json) ;;
         dupes)           ISSUES=$(jq -r '.stats.clone_groups // 0' fallow-results.json) ;;
@@ -623,16 +633,26 @@ variables:
       fi
 
       # ── Fail check ───────────────────────────────────────────────────
-      if [ "$FALLOW_FAIL_ON_ISSUES" = "true" ] && [ "$ISSUES" -gt 0 ]; then
-        case "$FALLOW_COMMAND" in
-          dead-code|check) echo "ERROR: Fallow found ${ISSUES} unused code issues" ;;
-          dupes)           echo "ERROR: Fallow found ${ISSUES} clone groups" ;;
-          health)          echo "ERROR: Fallow found ${ISSUES} health findings" ;;
-          audit)           echo "ERROR: Fallow audit found ${ISSUES} introduced issues in changed files" ;;
-          fix)             echo "ERROR: Fallow found ${ISSUES} fixable issues" ;;
-          "")              echo "ERROR: Fallow found ${ISSUES} issues" ;;
-        esac
-        exit 1
+      if [ "$FALLOW_FAIL_ON_ISSUES" = "true" ]; then
+        if [ "$FALLOW_COMMAND" = "audit" ]; then
+          # Audit gates on rule severity. Verdict encodes the gate decision:
+          # pass -> no issues, warn -> warn-tier only (do not fail),
+          # fail -> error-tier (fail). Counting introduced findings instead
+          # would re-introduce the bug issue #302 was filed to fix.
+          if [ "$VERDICT" = "fail" ]; then
+            echo "ERROR: Fallow audit failed (gate: ${AUDIT_GATE:-new-only}, ${ISSUES} finding(s) at error severity in changed files)"
+            exit 1
+          fi
+        elif [ "$ISSUES" -gt 0 ]; then
+          case "$FALLOW_COMMAND" in
+            dead-code|check) echo "ERROR: Fallow found ${ISSUES} unused code issues" ;;
+            dupes)           echo "ERROR: Fallow found ${ISSUES} clone groups" ;;
+            health)          echo "ERROR: Fallow found ${ISSUES} health findings" ;;
+            fix)             echo "ERROR: Fallow found ${ISSUES} fixable issues" ;;
+            "")              echo "ERROR: Fallow found ${ISSUES} issues" ;;
+          esac
+          exit 1
+        fi
       fi
       FALLOW_SCRIPT_EOF
       chmod +x /tmp/fallow-run.sh

@@ -162,6 +162,52 @@ else
 fi
 assert_contains "$OUT" "dead-code-baseline" "analyze: baseline error points to audit baselines"
 
+# Audit verdict + gate are emitted to GITHUB_OUTPUT for the Check threshold step.
+# Without this, the threshold step gates on raw introduced count, re-introducing
+# the issue #302 bug where warn-tier findings fail CI.
+cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+# Synthesize an audit JSON with verdict=warn, dead_code_introduced=1.
+# Mimics the warn-tier scenario from issue #302: a project with
+# `unused-exports: warn` has a PR introducing a new unused export.
+case "$*" in
+  *audit*)
+    printf '%s\n' '{"command":"audit","verdict":"warn","attribution":{"gate":"new-only","dead_code_introduced":1,"dead_code_inherited":0,"complexity_introduced":0,"complexity_inherited":0,"duplication_introduced":0,"duplication_inherited":0},"summary":{"dead_code_issues":1,"dead_code_has_errors":false,"complexity_findings":0,"max_cyclomatic":null,"duplication_clone_groups":0}}'
+    ;;
+  *) printf '{"total_issues":0}\n' ;;
+esac
+SH
+chmod +x "$ANALYZE_TMP/bin/fallow"
+
+cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="audit" INPUT_FORMAT="json" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+VERDICT=$(grep '^verdict=' "$ANALYZE_TMP/output" | cut -d= -f2)
+GATE=$(grep '^gate=' "$ANALYZE_TMP/output" | cut -d= -f2)
+ISSUES=$(grep '^issues=' "$ANALYZE_TMP/output" | cut -d= -f2)
+[ "$VERDICT" = "warn" ] && pass "analyze: emits verdict to GITHUB_OUTPUT for audit" || fail "analyze: verdict output" "expected warn, got '$VERDICT'"
+[ "$GATE" = "new-only" ] && pass "analyze: emits gate to GITHUB_OUTPUT for audit" || fail "analyze: gate output" "expected new-only, got '$GATE'"
+[ "$ISSUES" = "1" ] && pass "analyze: still emits issues count for audit" || fail "analyze: issues output" "expected 1, got '$ISSUES'"
+
+# Non-audit commands must NOT emit verdict / gate (empty values are fine).
+cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *dead-code*) printf '{"total_issues":3}\n' ;;
+  *) printf '{"check":{"total_issues":3}}\n' ;;
+esac
+SH
+chmod +x "$ANALYZE_TMP/bin/fallow"
+cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="dead-code" INPUT_FORMAT="json" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+VERDICT=$(grep '^verdict=' "$ANALYZE_TMP/output" | cut -d= -f2)
+[ -z "$VERDICT" ] && pass "analyze: verdict empty for non-audit command" || fail "analyze: non-audit verdict" "expected empty, got '$VERDICT'"
+
 # --- Summary jq tests ---
 
 echo ""

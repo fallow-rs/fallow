@@ -250,8 +250,14 @@ outputs:
     description: 'Path to SARIF results file'
     value: ${{ steps.analyze.outputs.sarif }}
   issues:
-    description: 'Number of issues (dead-code), clone groups (dupes), introduced findings counted by the audit verdict (audit), or fixes proposed/applied (fix). Audit count is gate-aware: with `gate: new-only` (default) it sums attribution.*_introduced; with `gate: all` it sums summary.* totals.'
+    description: 'Number of issues (dead-code), clone groups (dupes), introduced findings counted by the audit verdict (audit), or fixes proposed/applied (fix). Audit count is gate-aware: with `gate: new-only` (default) it sums attribution.*_introduced; with `gate: all` it sums summary.* totals. For audit, prefer `outputs.verdict` for severity-aware gating.'
     value: ${{ steps.analyze.outputs.issues }}
+  verdict:
+    description: 'Audit verdict (pass/warn/fail). Empty when command is not audit. The threshold step gates on this for audit so warn-tier findings do not fail CI.'
+    value: ${{ steps.analyze.outputs.verdict }}
+  gate:
+    description: 'Audit gate that was applied (new-only/all). Empty when command is not audit.'
+    value: ${{ steps.analyze.outputs.gate }}
 
 runs:
   using: 'composite'
@@ -443,14 +449,27 @@ runs:
       env:
         INPUT_COMMAND: ${{ inputs.command }}
         INPUT_FAIL_ON_ISSUES: ${{ inputs.fail-on-issues }}
+        INPUT_GATE: ${{ inputs.gate }}
         ISSUES: ${{ steps.analyze.outputs.issues }}
+        VERDICT: ${{ steps.analyze.outputs.verdict }}
       run: |
-        if [ "$INPUT_FAIL_ON_ISSUES" = "true" ] && [ "$ISSUES" -gt 0 ]; then
+        if [ "$INPUT_FAIL_ON_ISSUES" != "true" ]; then exit 0; fi
+        if [ "$INPUT_COMMAND" = "audit" ]; then
+          # Audit gates on rule severity. Verdict already encodes the gate
+          # decision: pass -> no issues, warn -> warn-tier only (do not fail),
+          # fail -> error-tier (fail). Counting introduced findings instead
+          # would re-introduce the bug issue #302 was filed to fix.
+          if [ "$VERDICT" = "fail" ]; then
+            echo "::error::Fallow audit failed (gate: ${INPUT_GATE:-new-only}, ${ISSUES} finding(s) at error severity in changed files)"
+            exit 1
+          fi
+          exit 0
+        fi
+        if [ "$ISSUES" -gt 0 ]; then
           case "$INPUT_COMMAND" in
             dead-code|check) echo "::error::Fallow found ${ISSUES} unused code issues" ;;
             dupes)           echo "::error::Fallow found ${ISSUES} clone groups" ;;
             health)          echo "::error::Fallow found ${ISSUES} health findings" ;;
-            audit)           echo "::error::Fallow audit found ${ISSUES} introduced issues in changed files" ;;
             fix)             echo "::error::Fallow found ${ISSUES} fixable issues" ;;
             "")              echo "::error::Fallow found ${ISSUES} issues" ;;
           esac
