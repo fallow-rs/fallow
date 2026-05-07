@@ -246,7 +246,7 @@ fn push_local_export_key<'a>(
 fn build_local_to_export_keys(resolved: &ResolvedModule) -> FxHashMap<&str, Vec<ExportKey>> {
     let mut local_to_export_keys = FxHashMap::default();
 
-    for import in &resolved.resolved_imports {
+    for import in resolved.all_resolved_imports() {
         let Some(imported_name) = imported_export_name(&import.info.imported_name) else {
             continue;
         };
@@ -889,7 +889,7 @@ pub fn find_unused_members(
                 }
             }
             // Case 2: sentinel accesses on an imported file (external templateUrl)
-            for import in &resolved.resolved_imports {
+            for import in resolved.all_resolved_imports() {
                 if let ResolveResult::InternalModule(target_id) = &import.target
                     && let Some(refs) = angular_tpl_refs.get(target_id)
                 {
@@ -931,7 +931,7 @@ pub fn find_unused_members(
                 continue;
             }
             let local_to_export_keys = build_local_to_export_keys(resolved);
-            for import in &resolved.resolved_imports {
+            for import in resolved.all_resolved_imports() {
                 let ResolveResult::InternalModule(target_id) = &import.target else {
                     continue;
                 };

@@ -407,6 +407,67 @@ fn unlisted_dep_detected_across_multiple_files() {
     );
 }
 
+#[test]
+fn dynamic_import_unlisted_dep_has_import_site() {
+    let files = vec![DiscoveredFile {
+        id: FileId(0),
+        path: PathBuf::from("/project/src/index.ts"),
+        size_bytes: 100,
+    }];
+    let entry_points = vec![EntryPoint {
+        path: PathBuf::from("/project/src/index.ts"),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/src/index.ts"),
+        exports: vec![],
+        re_exports: vec![],
+        resolved_imports: vec![],
+        resolved_dynamic_imports: vec![ResolvedImport {
+            info: ImportInfo {
+                source: "unlisted-pkg".to_string(),
+                imported_name: ImportedName::SideEffect,
+                local_name: String::new(),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::new(14, 40),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::NpmPackage("unlisted-pkg".to_string()),
+        }],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        has_cjs_exports: false,
+        unused_import_bindings: FxHashSet::default(),
+        type_referenced_import_bindings: vec![],
+        value_referenced_import_bindings: vec![],
+    }];
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+    let pkg = make_pkg(&[], &[], &[]);
+    let config = test_config(PathBuf::from("/project"));
+    let offsets = vec![0, 12];
+    let mut line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+    line_offsets.insert(FileId(0), offsets.as_slice());
+
+    let unlisted = find_unlisted_dependencies(
+        &graph,
+        &pkg,
+        &config,
+        &[],
+        None,
+        &resolved_modules,
+        &line_offsets,
+    );
+
+    assert_eq!(unlisted.len(), 1);
+    assert_eq!(unlisted[0].package_name, "unlisted-pkg");
+    assert_eq!(unlisted[0].imported_from.len(), 1);
+    assert_eq!(unlisted[0].imported_from[0].line, 2);
+    assert_eq!(unlisted[0].imported_from[0].col, 2);
+}
+
 // ---- virtual_package_suffixes suppression ----
 
 #[test]

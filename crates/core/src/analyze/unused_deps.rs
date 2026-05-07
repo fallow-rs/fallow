@@ -725,7 +725,7 @@ pub fn find_unlisted_dependencies(
     // so we can recover the import location when building UnlistedDependency results.
     let mut import_spans_by_file: FxHashMap<FileId, Vec<(&str, u32)>> = FxHashMap::default();
     for rm in resolved_modules {
-        for import in &rm.resolved_imports {
+        for import in rm.all_resolved_imports() {
             if let crate::resolve::ResolveResult::NpmPackage(name) = &import.target {
                 import_spans_by_file
                     .entry(rm.file_id)
@@ -839,7 +839,7 @@ pub fn find_unresolved_imports(
     let mut unresolved = Vec::new();
 
     for module in resolved_modules {
-        for import in &module.resolved_imports {
+        for import in module.all_resolved_imports() {
             if let crate::resolve::ResolveResult::Unresolvable(spec) = &import.target {
                 // Skip virtual module imports using the `virtual:` convention
                 // (e.g., `virtual:pwa-register`, `virtual:uno.css`)

@@ -79,11 +79,7 @@ fn credit_workspace_package_usage(
 
     let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
     for module in resolved {
-        for import in module
-            .resolved_imports
-            .iter()
-            .chain(module.resolved_dynamic_imports.iter())
-        {
+        for import in module.all_resolved_imports() {
             if matches!(import.target, resolve::ResolveResult::InternalModule(_))
                 && let Some(package_name) =
                     workspace_package_name(&import.info.source, &workspace_names)

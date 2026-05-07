@@ -28,6 +28,58 @@ fn dynamic_import_makes_module_reachable() {
 }
 
 #[test]
+fn dynamic_import_literal_edges_match_static_imports() {
+    let root = fixture_path("dynamic-import-literals");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+
+    assert!(
+        !unused_file_names.contains(&"notes.ts".to_string()),
+        "parent-relative literal dynamic import should keep notes.ts reachable: {unused_file_names:?}"
+    );
+    assert!(
+        unused_file_names.contains(&"orphan.ts".to_string()),
+        "unreferenced files should still be reported: {unused_file_names:?}"
+    );
+
+    let unresolved_specs: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|import| import.specifier.as_str())
+        .collect();
+    assert!(
+        unresolved_specs.contains(&"./missing"),
+        "missing literal dynamic import should be reported unresolved: {unresolved_specs:?}"
+    );
+
+    let unlisted_names: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|dep| dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unlisted_names.contains(&"@some/package"),
+        "listed package used through literal dynamic import should not be unlisted: {unlisted_names:?}"
+    );
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|dep| dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dep_names.contains(&"@some/package"),
+        "literal dynamic package import should credit dependency usage: {unused_dep_names:?}"
+    );
+}
+
+#[test]
 fn vitest_vi_mock_makes_auto_mock_reachable() {
     let root = fixture_path("vitest-auto-mocks");
     let config = create_config(root.clone());

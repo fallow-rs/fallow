@@ -90,6 +90,19 @@ impl Default for ResolvedModule {
     }
 }
 
+impl ResolvedModule {
+    /// Iterate over all concrete resolved imports in source order buckets.
+    ///
+    /// Includes static `import`/`require` edges and literal dynamic `import()`
+    /// edges. Dynamic import patterns are intentionally excluded because they
+    /// resolve to sets of files rather than single import specifiers.
+    pub fn all_resolved_imports(&self) -> impl Iterator<Item = &ResolvedImport> {
+        self.resolved_imports
+            .iter()
+            .chain(self.resolved_dynamic_imports.iter())
+    }
+}
+
 /// Shared context for resolving import specifiers.
 ///
 /// Groups the immutable lookup tables and caches that are shared across all

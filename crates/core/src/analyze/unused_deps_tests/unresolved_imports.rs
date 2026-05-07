@@ -49,6 +49,56 @@ fn unresolved_import_detected() {
 }
 
 #[test]
+fn unresolved_dynamic_import_detected_with_real_location() {
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/src/index.ts"),
+        exports: vec![],
+        re_exports: vec![],
+        resolved_imports: vec![],
+        resolved_dynamic_imports: vec![ResolvedImport {
+            info: ImportInfo {
+                source: "./missing-dynamic".to_string(),
+                imported_name: ImportedName::SideEffect,
+                local_name: String::new(),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::new(14, 41),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::Unresolvable("./missing-dynamic".to_string()),
+        }],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        has_cjs_exports: false,
+        unused_import_bindings: FxHashSet::default(),
+        type_referenced_import_bindings: vec![],
+        value_referenced_import_bindings: vec![],
+    }];
+
+    let config = test_config(PathBuf::from("/project"));
+    let suppressions = SuppressionContext::empty();
+    let offsets = vec![0, 12];
+    let mut line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+    line_offsets.insert(FileId(0), offsets.as_slice());
+
+    let unresolved = find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &[],
+        &[],
+        &line_offsets,
+    );
+
+    assert_eq!(unresolved.len(), 1);
+    assert_eq!(unresolved[0].specifier, "./missing-dynamic");
+    assert_eq!(unresolved[0].line, 2);
+    assert_eq!(unresolved[0].col, 2);
+}
+
+#[test]
 fn unresolved_virtual_module_not_reported() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
@@ -271,6 +321,63 @@ fn unresolved_import_suppressed_by_inline_comment() {
     assert!(
         unresolved.is_empty(),
         "suppressed unresolved import should not be reported"
+    );
+}
+
+#[test]
+fn unresolved_dynamic_import_suppressed_by_inline_comment() {
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/src/index.ts"),
+        exports: vec![],
+        re_exports: vec![],
+        resolved_imports: vec![],
+        resolved_dynamic_imports: vec![ResolvedImport {
+            info: ImportInfo {
+                source: "./broken-dynamic".to_string(),
+                imported_name: ImportedName::SideEffect,
+                local_name: String::new(),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::new(14, 40),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::Unresolvable("./broken-dynamic".to_string()),
+        }],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        has_cjs_exports: false,
+        unused_import_bindings: FxHashSet::default(),
+        type_referenced_import_bindings: vec![],
+        value_referenced_import_bindings: vec![],
+    }];
+
+    let config = test_config(PathBuf::from("/project"));
+    let supps = vec![Suppression {
+        line: 2,
+        comment_line: 1,
+        kind: Some(suppress::IssueKind::UnresolvedImport),
+    }];
+    let mut supp_map: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
+    supp_map.insert(FileId(0), &supps);
+    let suppressions = SuppressionContext::from_map(supp_map);
+    let offsets = vec![0, 12];
+    let mut line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+    line_offsets.insert(FileId(0), offsets.as_slice());
+
+    let unresolved = find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &[],
+        &[],
+        &line_offsets,
+    );
+
+    assert!(
+        unresolved.is_empty(),
+        "suppressed dynamic unresolved import should not be reported"
     );
 }
 

@@ -24,20 +24,14 @@ pub fn augment_external_style_package_usage(
     for module in resolved_modules {
         let mut synthetic_packages = FxHashSet::default();
         let existing_packages: FxHashSet<String> = module
-            .resolved_imports
-            .iter()
-            .chain(module.resolved_dynamic_imports.iter())
+            .all_resolved_imports()
             .filter_map(|import| match &import.target {
                 ResolveResult::NpmPackage(name) => Some(name.clone()),
                 _ => None,
             })
             .collect();
 
-        for import in module
-            .resolved_imports
-            .iter()
-            .chain(module.resolved_dynamic_imports.iter())
-        {
+        for import in module.all_resolved_imports() {
             let ResolveResult::ExternalFile(path) = &import.target else {
                 continue;
             };
@@ -149,7 +143,7 @@ impl<'a> ExternalStylePackageScanner<'a> {
         );
 
         if let Some(resolved_module) = resolved.first() {
-            for import in &resolved_module.resolved_imports {
+            for import in resolved_module.all_resolved_imports() {
                 match &import.target {
                     ResolveResult::NpmPackage(name) => {
                         packages.insert(name.clone());
