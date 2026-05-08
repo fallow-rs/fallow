@@ -274,7 +274,13 @@ fn load_github_state(
                         .push(id);
                 }
             }
-            if let Some(fingerprint) = extract_marker(body, "fallow-resolved-fingerprint:") {
+            // Only honour resolved-fingerprint markers when the comment was
+            // posted by a bot. A human commenter who pastes the marker into
+            // their own comment could otherwise trick the apply step into
+            // skipping a real "Resolved in <sha>" reply on a stale finding.
+            if is_github_bot_comment(comment)
+                && let Some(fingerprint) = extract_marker(body, "fallow-resolved-fingerprint:")
+            {
                 state.github_resolved_markers.insert(fingerprint);
             }
         }
@@ -513,7 +519,13 @@ fn load_gitlab_state(
                         .or_default()
                         .push(discussion_id.to_owned());
                 }
-                if let Some(fingerprint) = extract_marker(body, "fallow-resolved-fingerprint:") {
+                // Same authorship gate as GitHub: only honour resolved
+                // markers from bot-authored notes so a human cannot suppress
+                // legitimate "Resolved in <sha>" replies by impersonating the
+                // marker in their own comment.
+                if is_gitlab_bot_note(note)
+                    && let Some(fingerprint) = extract_marker(body, "fallow-resolved-fingerprint:")
+                {
                     state.gitlab_resolved_markers.insert(fingerprint);
                 }
             }
@@ -673,6 +685,15 @@ fn gitlab_put_json(
     })
 }
 
+/// Maximum per-attempt sleep, even when the server's `Retry-After` is larger.
+///
+/// A misbehaving server (or a malicious upstream proxy) sending
+/// `Retry-After: 86400` would otherwise stall the runner for a whole day.
+/// 60s is enough headroom for genuine GitHub / GitLab rate-limit recovery
+/// while bounding worst-case workflow latency at `RETRY_MAX_WAIT_SECONDS *
+/// FALLOW_API_RETRIES = 180s` for the default retry count.
+const RETRY_MAX_WAIT_SECONDS: u64 = 60;
+
 /// Wrap an HTTP request closure with rate-limit-aware retry.
 ///
 /// Mirrors the bash `gh_api_retry` / `curl_retry` helpers in the action and
@@ -682,7 +703,9 @@ fn gitlab_put_json(
 ///
 /// `FALLOW_API_RETRIES` (default 3) caps the total attempts; `FALLOW_API_RETRY_DELAY`
 /// (default 2s) is the floor between attempts. The actual sleep uses
-/// `Retry-After` from the server when present, falling back to the floor.
+/// `Retry-After` from the server when present, falling back to the floor;
+/// either way it's clamped to `RETRY_MAX_WAIT_SECONDS` so a runaway server
+/// can't strand the runner.
 fn with_rate_limit_retry<F>(provider: &str, mut op: F) -> Result<Value, String>
 where
     F: FnMut() -> Result<http::Response<ureq::Body>, ureq::Error>,
@@ -696,7 +719,7 @@ where
             Ok(mut response) => {
                 let status = response.status().as_u16();
                 if status == 429 && attempt < max_attempts {
-                    let wait = retry_after_seconds(&response).unwrap_or(floor_delay);
+                    let wait = compute_retry_wait(response.headers(), floor_delay, provider);
                     eprintln!(
                         "fallow: {provider} rate-limited; retrying in {wait}s ({attempt}/{max_attempts})"
                     );
@@ -708,6 +731,30 @@ where
             Err(e) => return Err(format!("{provider} request failed: {e}")),
         }
     }
+}
+
+/// Pick a sleep duration for a 429 retry attempt.
+///
+/// Precedence (highest first):
+/// 1. `Retry-After` integer-seconds, clamped to `[1, RETRY_MAX_WAIT_SECONDS]`.
+/// 2. `Retry-After` HTTP-date: not parsed; emit a one-time warning and fall
+///    back to the floor delay so the user knows their server's Retry-After
+///    contract was ignored.
+/// 3. `floor_delay` from `FALLOW_API_RETRY_DELAY`, clamped to the ceiling.
+fn compute_retry_wait(headers: &http::HeaderMap, floor_delay: u64, provider: &str) -> u64 {
+    if let Some(seconds) = parse_retry_after(headers) {
+        return seconds.clamp(1, RETRY_MAX_WAIT_SECONDS);
+    }
+    if let Some(raw) = headers
+        .get("Retry-After")
+        .and_then(|value| value.to_str().ok())
+    {
+        eprintln!(
+            "fallow: {provider} returned non-numeric Retry-After {raw:?}; \
+             falling back to {floor_delay}s floor"
+        );
+    }
+    floor_delay.clamp(1, RETRY_MAX_WAIT_SECONDS)
 }
 
 fn retries_from_env() -> u32 {
@@ -723,13 +770,6 @@ fn retry_delay_from_env() -> u64 {
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(2)
-}
-
-/// Parse `Retry-After`. Per RFC 9110 section 10.2.3 the value is either an
-/// integer count of seconds or an HTTP-date. We read seconds; HTTP-date
-/// callers fall back to the floor delay.
-fn retry_after_seconds(response: &http::Response<ureq::Body>) -> Option<u64> {
-    parse_retry_after(response.headers())
 }
 
 fn parse_retry_after(headers: &http::HeaderMap) -> Option<u64> {
@@ -753,6 +793,67 @@ fn read_json_response(
     response
         .read_json::<Value>()
         .map_err(|e| format!("{provider} response was not valid JSON: {e}"))
+}
+
+/// Determine whether a GitHub PR review comment was authored by a bot account.
+///
+/// We trust resolved-fingerprint markers only from bot identities so a human
+/// commenter can't paste `<!-- fallow-resolved-fingerprint: <fp> -->` into
+/// their own comment and trick the apply step into skipping a legitimate
+/// "Resolved in <sha>" reply on a stale finding.
+///
+/// GitHub identifies bot identities through `user.type == "Bot"` (e.g.
+/// `github-actions[bot]`, `dependabot[bot]`, custom GitHub Apps). The
+/// fallback `FALLOW_BOT_LOGIN` env var lets self-hosted runners pin a
+/// specific human-account login that posts on behalf of fallow when no Bot
+/// type is available (uncommon but supported for legacy setups).
+fn is_github_bot_comment(comment: &Value) -> bool {
+    let user = comment.get("user");
+    let user_type = user.and_then(|u| u.get("type")).and_then(Value::as_str);
+    if user_type == Some("Bot") {
+        return true;
+    }
+    let login = user.and_then(|u| u.get("login")).and_then(Value::as_str);
+    if let Some(login) = login
+        && let Ok(allow) = std::env::var("FALLOW_BOT_LOGIN")
+        && !allow.trim().is_empty()
+        && login == allow.trim()
+    {
+        return true;
+    }
+    false
+}
+
+/// Determine whether a GitLab MR discussion note was authored by a bot.
+///
+/// GitLab marks bot-authored notes with `system: true` (system-generated)
+/// or, for project access tokens, the author's `bot: true` flag. Personal
+/// access tokens posting on behalf of a human carry the human's identity;
+/// callers that use a PAT must set `FALLOW_BOT_LOGIN` to the human's
+/// username (or the project access token's bot username) to opt in.
+fn is_gitlab_bot_note(note: &Value) -> bool {
+    if note.get("system").and_then(Value::as_bool).unwrap_or(false) {
+        return true;
+    }
+    let author = note.get("author");
+    if author
+        .and_then(|a| a.get("bot"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    let username = author
+        .and_then(|a| a.get("username"))
+        .and_then(Value::as_str);
+    if let Some(username) = username
+        && let Ok(allow) = std::env::var("FALLOW_BOT_LOGIN")
+        && !allow.trim().is_empty()
+        && username == allow.trim()
+    {
+        return true;
+    }
+    false
 }
 
 fn extract_marker(body: &str, marker: &str) -> Option<String> {
@@ -839,6 +940,63 @@ mod tests {
     }
 
     #[test]
+    fn github_bot_check_accepts_bot_user_type() {
+        let comment = serde_json::json!({
+            "user": { "type": "Bot", "login": "github-actions[bot]" },
+        });
+        assert!(is_github_bot_comment(&comment));
+    }
+
+    #[test]
+    fn github_bot_check_rejects_human_user_type() {
+        // Critical security test: a human pasting a resolved-fingerprint
+        // marker into their own comment must not be honoured.
+        let comment = serde_json::json!({
+            "user": { "type": "User", "login": "alice" },
+            "body": "<!-- fallow-resolved-fingerprint: abc123 -->",
+        });
+        assert!(!is_github_bot_comment(&comment));
+    }
+
+    #[test]
+    #[allow(unsafe_code, reason = "test-only env mutation, single-threaded run")]
+    fn github_bot_check_accepts_explicit_login_override() {
+        let comment = serde_json::json!({
+            "user": { "type": "User", "login": "fallow-bot-account" },
+        });
+        // SAFETY: tests run sequentially within the bin target.
+        unsafe {
+            std::env::set_var("FALLOW_BOT_LOGIN", "fallow-bot-account");
+        }
+        assert!(is_github_bot_comment(&comment));
+        // SAFETY: see above.
+        unsafe {
+            std::env::remove_var("FALLOW_BOT_LOGIN");
+        }
+    }
+
+    #[test]
+    fn gitlab_bot_check_accepts_system_and_bot_flag() {
+        let system_note = serde_json::json!({ "system": true });
+        assert!(is_gitlab_bot_note(&system_note));
+        let bot_author = serde_json::json!({
+            "system": false,
+            "author": { "bot": true, "username": "project-bot" },
+        });
+        assert!(is_gitlab_bot_note(&bot_author));
+    }
+
+    #[test]
+    fn gitlab_bot_check_rejects_human_author() {
+        // Same security premise as GitHub.
+        let human = serde_json::json!({
+            "system": false,
+            "author": { "bot": false, "username": "alice" },
+        });
+        assert!(!is_gitlab_bot_note(&human));
+    }
+
+    #[test]
     fn parse_retry_after_reads_integer_seconds() {
         assert_eq!(parse_retry_after(&headers_with_retry_after("12")), Some(12));
     }
@@ -846,6 +1004,33 @@ mod tests {
     #[test]
     fn parse_retry_after_returns_none_for_missing_header() {
         assert_eq!(parse_retry_after(&http::HeaderMap::new()), None);
+    }
+
+    #[test]
+    fn compute_retry_wait_clamps_huge_retry_after() {
+        // A malicious or misconfigured server returning a day-long
+        // Retry-After must NOT strand the runner.
+        let headers = headers_with_retry_after("86400");
+        assert_eq!(
+            compute_retry_wait(&headers, 2, "GitHub"),
+            RETRY_MAX_WAIT_SECONDS
+        );
+    }
+
+    #[test]
+    fn compute_retry_wait_clamps_zero_retry_after() {
+        // A zero Retry-After (no wait) is a server bug; floor at 1s so we
+        // don't tight-loop.
+        let headers = headers_with_retry_after("0");
+        assert_eq!(compute_retry_wait(&headers, 5, "GitLab"), 1);
+    }
+
+    #[test]
+    fn compute_retry_wait_falls_back_to_floor_for_http_date() {
+        // HTTP-date Retry-After values aren't parsed; we fall back to the
+        // floor with a stderr warning (asserted via the public delay value).
+        let headers = headers_with_retry_after("Wed, 21 Oct 2026 07:28:00 GMT");
+        assert_eq!(compute_retry_wait(&headers, 7, "GitHub"), 7);
     }
 
     #[test]
