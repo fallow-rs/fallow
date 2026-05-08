@@ -75,7 +75,7 @@ gitlab_install_script() {
   awk '
     /# Validate and install fallow/ { seen=1; next }
     seen && /^[[:space:]]*-[[:space:]]*\|[[:space:]]*$/ { in_block=1; next }
-    in_block && /# Prepare jq scripts/ { exit }
+    in_block && /# Prepare bash scripts/ { exit }
     in_block {
       sub(/^      /, "")
       print
