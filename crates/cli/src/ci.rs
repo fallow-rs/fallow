@@ -415,7 +415,15 @@ fn apply_github_reconcile(
         .or_else(|| std::env::var("PR_HEAD_SHA").ok());
 
     for fingerprint in &plan.stale {
-        if !state.github_resolved_markers.contains(fingerprint) {
+        // Idempotency: check the (fingerprint, sha) marker, not the bare
+        // fingerprint. Re-runs on the same commit must not post duplicate
+        // "Resolved in <sha>" replies; legacy markers without a SHA suffix
+        // still match on bare fingerprint to keep first-run-after-upgrade
+        // clean.
+        let marker_key = resolved_marker_key(fingerprint, sha.as_deref());
+        let already_resolved = state.github_resolved_markers.contains(&marker_key)
+            || state.github_resolved_markers.contains(fingerprint);
+        if !already_resolved {
             for comment_id in state
                 .github_comments_by_fingerprint
                 .get(fingerprint)
@@ -547,13 +555,18 @@ fn apply_gitlab_reconcile(
     let encoded_project = url_encode_path_segment(&project_id);
 
     for fingerprint in &plan.stale {
+        // Idempotency: same approach as GitHub apply. (fingerprint, sha)
+        // marker, with bare-fingerprint legacy fallback.
+        let marker_key = resolved_marker_key(fingerprint, sha.as_deref());
+        let already_resolved = state.gitlab_resolved_markers.contains(&marker_key)
+            || state.gitlab_resolved_markers.contains(fingerprint);
         for discussion_id in state
             .gitlab_discussions_by_fingerprint
             .get(fingerprint)
             .into_iter()
             .flatten()
         {
-            if !state.gitlab_resolved_markers.contains(fingerprint) {
+            if !already_resolved {
                 let body = resolved_body(fingerprint, sha.as_deref());
                 let payload = serde_json::json!({ "body": body });
                 let url = format!(
@@ -687,12 +700,24 @@ fn extract_marker(body: &str, marker: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_owned())
 }
 
+/// Compute the idempotency marker for a (fingerprint, sha) pair. The marker
+/// is what we look up to decide whether a resolution comment for this
+/// fingerprint at this commit already exists, so re-runs of the workflow on
+/// the same commit don't post duplicate "Resolved in <sha>" comments.
+fn resolved_marker_key(fingerprint: &str, sha: Option<&str>) -> String {
+    match sha.and_then(|value| value.get(..7)) {
+        Some(short) => format!("{fingerprint}@{short}"),
+        None => fingerprint.to_owned(),
+    }
+}
+
 fn resolved_body(fingerprint: &str, sha: Option<&str>) -> String {
+    let marker = resolved_marker_key(fingerprint, sha);
     match sha.and_then(|value| value.get(..7)) {
         Some(short) => {
-            format!("Resolved in `{short}`.\n\n<!-- fallow-resolved-fingerprint: {fingerprint} -->")
+            format!("Resolved in `{short}`.\n\n<!-- fallow-resolved-fingerprint: {marker} -->")
         }
-        None => format!("Resolved.\n\n<!-- fallow-resolved-fingerprint: {fingerprint} -->"),
+        None => format!("Resolved.\n\n<!-- fallow-resolved-fingerprint: {marker} -->"),
     }
 }
 
@@ -743,9 +768,28 @@ mod tests {
     }
 
     #[test]
-    fn resolved_body_includes_short_sha_and_marker() {
+    fn resolved_marker_key_includes_short_sha() {
+        // (fingerprint, sha) marker keeps re-runs idempotent on the same
+        // commit while letting a force-push to a new SHA produce a fresh
+        // resolution comment.
+        assert_eq!(
+            resolved_marker_key("abc", Some("1234567890")),
+            "abc@1234567"
+        );
+        assert_eq!(resolved_marker_key("abc", None), "abc");
+        assert_ne!(
+            resolved_marker_key("abc", Some("1111111")),
+            resolved_marker_key("abc", Some("2222222"))
+        );
+    }
+
+    #[test]
+    fn resolved_body_includes_short_sha_and_per_sha_marker() {
         let body = resolved_body("abc", Some("1234567890"));
         assert!(body.contains("`1234567`"));
-        assert!(body.contains("fallow-resolved-fingerprint: abc"));
+        // Marker now encodes both fingerprint AND short SHA so re-runs on
+        // the same commit can detect prior posts; force-push to new SHA
+        // produces a new marker.
+        assert!(body.contains("fallow-resolved-fingerprint: abc@1234567"));
     }
 }
