@@ -694,12 +694,22 @@ fn gitlab_put_json(
 /// FALLOW_API_RETRIES = 180s` for the default retry count.
 const RETRY_MAX_WAIT_SECONDS: u64 = 60;
 
-/// Wrap an HTTP request closure with rate-limit-aware retry.
+/// Return `true` for HTTP statuses worth retrying (rate-limit + transient
+/// 5xx). Persistent server faults (`500`, `501`) and all 4xx other than `429`
+/// surface immediately so a real bug doesn't burn the full retry budget.
+const fn should_retry_status(status: u16) -> bool {
+    status == 429 || matches!(status, 502..=504)
+}
+
+/// Wrap an HTTP request closure with rate-limit + transient-5xx retry.
 ///
 /// Mirrors the bash `gh_api_retry` / `curl_retry` helpers in the action and
 /// CI scripts so the binary is no less robust than the bash glue around it
 /// when a workflow re-runs against a rate-limited GitHub Enterprise or a
-/// GitLab instance under load.
+/// GitLab instance under load. Retries on `429 Too Many Requests` and on
+/// `502/503/504` (Bad Gateway, Service Unavailable, Gateway Timeout); other
+/// 5xx codes (`500`, `501`, ...) surface immediately so persistent server
+/// faults don't burn the full retry budget.
 ///
 /// `FALLOW_API_RETRIES` (default 3) caps the total attempts; `FALLOW_API_RETRY_DELAY`
 /// (default 2s) is the floor between attempts. The actual sleep uses
@@ -718,10 +728,15 @@ where
         match op() {
             Ok(mut response) => {
                 let status = response.status().as_u16();
-                if status == 429 && attempt < max_attempts {
+                if should_retry_status(status) && attempt < max_attempts {
                     let wait = compute_retry_wait(response.headers(), floor_delay, provider);
+                    let label = if status == 429 {
+                        "rate-limited"
+                    } else {
+                        "transient server error"
+                    };
                     eprintln!(
-                        "fallow: {provider} rate-limited; retrying in {wait}s ({attempt}/{max_attempts})"
+                        "fallow: {provider} {label} ({status}); retrying in {wait}s ({attempt}/{max_attempts})"
                     );
                     std::thread::sleep(std::time::Duration::from_secs(wait));
                     continue;
@@ -1041,6 +1056,34 @@ mod tests {
             parse_retry_after(&headers_with_retry_after("Wed, 21 Oct 2026 07:28:00 GMT")),
             None
         );
+    }
+
+    #[test]
+    fn should_retry_status_covers_429_and_transient_5xx() {
+        // 429 (rate-limit) and 502/503/504 (transient gateway errors) are the
+        // statuses both bash gh_api_retry / curl_retry helpers and this
+        // function retry on. Reverting the 5xx branch to 429-only would fail
+        // the 502/503/504 assertions.
+        assert!(should_retry_status(429));
+        assert!(should_retry_status(502));
+        assert!(should_retry_status(503));
+        assert!(should_retry_status(504));
+    }
+
+    #[test]
+    fn should_retry_status_skips_persistent_5xx_and_4xx() {
+        // Persistent server faults (500, 501) and all 4xx other than 429
+        // surface immediately so a real bug doesn't burn the full retry
+        // budget on the runner.
+        assert!(!should_retry_status(500));
+        assert!(!should_retry_status(501));
+        assert!(!should_retry_status(505));
+        assert!(!should_retry_status(400));
+        assert!(!should_retry_status(401));
+        assert!(!should_retry_status(403));
+        assert!(!should_retry_status(404));
+        assert!(!should_retry_status(422));
+        assert!(!should_retry_status(200));
     }
 
     #[test]

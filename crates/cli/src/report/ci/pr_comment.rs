@@ -14,17 +14,6 @@ use serde_json::Value;
 /// state.
 static WORKSPACE_MARKER: OnceLock<String> = OnceLock::new();
 
-/// Set the workspace name used to disambiguate the sticky marker. Idempotent
-/// after the first set; later calls are no-ops, matching `OnceLock`'s
-/// semantics. Called from `main()` after CLI parsing.
-#[allow(
-    dead_code,
-    reason = "called from main.rs bin target; lib target sees no caller"
-)]
-pub fn set_workspace_marker(value: impl Into<String>) {
-    let _ = WORKSPACE_MARKER.set(value.into());
-}
-
 /// Set the workspace marker from a `--workspace` selection list.
 ///
 /// Single workspace -> the name itself, sanitised for marker grammar.
