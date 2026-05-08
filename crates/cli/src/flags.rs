@@ -83,7 +83,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     };
 
     // Discover files
-    let files = fallow_core::discover::discover_files(&config);
+    let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
     if files.is_empty() {
         return emit_error("no files discovered", 2, opts.output);
     }

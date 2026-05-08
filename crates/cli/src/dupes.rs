@@ -206,7 +206,8 @@ fn execute_dupes_inner(
     )?;
 
     let dupes_config = build_dupes_config(opts, &config.duplicates);
-    let files = pre_discovered.unwrap_or_else(|| fallow_core::discover::discover_files(&config));
+    let files = pre_discovered
+        .unwrap_or_else(|| fallow_core::discover::discover_files_with_plugin_scopes(&config));
 
     let changed_files_from_since = resolve_changed_since(opts);
     let effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>> =

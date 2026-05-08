@@ -118,7 +118,7 @@ pub fn run_cross_reference(
     unfiltered_results: &fallow_core::results::AnalysisResults,
     quiet: bool,
 ) {
-    let files = fallow_core::discover::discover_files(config);
+    let files = fallow_core::discover::discover_files_with_plugin_scopes(config);
     let dupe_report =
         fallow_core::duplicates::find_duplicates(&config.root, &files, &config.duplicates);
     let cross_ref = fallow_core::cross_reference::cross_reference(&dupe_report, unfiltered_results);

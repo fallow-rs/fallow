@@ -408,7 +408,7 @@ fn collect_inventory(
     exclude_matcher: &GlobSet,
     path_prefix: Option<&str>,
 ) -> Vec<InventoryFunction> {
-    let files = fallow_core::discover::discover_files(config);
+    let files = fallow_core::discover::discover_files_with_plugin_scopes(config);
     let mut seen: FxHashSet<(String, String, u32)> = FxHashSet::default();
     let mut out: Vec<InventoryFunction> = Vec::new();
     for file in files {

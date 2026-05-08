@@ -200,7 +200,7 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
 
     // Discover and parse files
     let t = Instant::now();
-    let files = fallow_core::discover::discover_files(&config);
+    let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     let cache = if config.no_cache {

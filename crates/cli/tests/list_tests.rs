@@ -915,3 +915,54 @@ fn list_nextjs_project_app_page_is_plugin_entry_point() {
         "page.tsx should be discovered by nextjs plugin. Got source: {source}"
     );
 }
+
+// ── Plugin-scoped hidden directory traversal ────────────────────
+
+#[test]
+fn list_files_includes_plugin_scoped_hidden_dirs_for_react_router() {
+    // React Router's `.client` and `.server` convention folders must surface in
+    // `fallow list --files`; otherwise commands that consume the file walk lose
+    // visibility into a real chunk of the project.
+    let output = run_list("react-router-conventions", &["--files", "--format", "json"]);
+    assert_eq!(output.code, 0, "stderr was: {}", output.stderr);
+
+    let json = parse_json(&output);
+    let files: Vec<&str> = json["files"]
+        .as_array()
+        .expect("files array")
+        .iter()
+        .map(|v| v.as_str().expect("file path string"))
+        .collect();
+
+    assert!(
+        files.contains(&"app/.client/analytics.ts"),
+        "expected app/.client/analytics.ts in files: {files:?}"
+    );
+    assert!(
+        files.contains(&"app/.server/db.ts"),
+        "expected app/.server/db.ts in files: {files:?}"
+    );
+}
+
+#[test]
+fn list_files_includes_plugin_scoped_hidden_dirs_for_remix() {
+    let output = run_list("remix-conventions", &["--files", "--format", "json"]);
+    assert_eq!(output.code, 0, "stderr was: {}", output.stderr);
+
+    let json = parse_json(&output);
+    let files: Vec<&str> = json["files"]
+        .as_array()
+        .expect("files array")
+        .iter()
+        .map(|v| v.as_str().expect("file path string"))
+        .collect();
+
+    assert!(
+        files.contains(&"app/.client/analytics.ts"),
+        "expected app/.client/analytics.ts in files: {files:?}"
+    );
+    assert!(
+        files.contains(&"app/.server/db.ts"),
+        "expected app/.server/db.ts in files: {files:?}"
+    );
+}

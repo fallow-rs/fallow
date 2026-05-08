@@ -1798,3 +1798,40 @@ fn health_human_output_snapshot() {
     let redacted = redact_all(&output.stdout, &root);
     insta::assert_snapshot!("health_human_complexity", redacted);
 }
+
+// ---------------------------------------------------------------------------
+// Plugin-scoped hidden directory traversal
+// ---------------------------------------------------------------------------
+
+#[test]
+fn health_file_scores_include_plugin_scoped_hidden_dirs_for_react_router() {
+    // `fallow health --file-scores` must analyze React Router's `.client` /
+    // `.server` convention folders; otherwise its file-level metrics ignore a
+    // real chunk of the project.
+    let output = run_fallow(
+        "health",
+        "react-router-conventions",
+        &["--file-scores", "--format", "json", "--quiet"],
+    );
+    assert_eq!(output.code, 0, "stderr was: {}", output.stderr);
+
+    let json = parse_json(&output);
+    let files_analyzed = json["summary"]["files_analyzed"]
+        .as_u64()
+        .expect("files_analyzed is a number");
+    assert!(
+        files_analyzed >= 5,
+        "expected files_analyzed >= 5 (root + routes + .client + .server), got {files_analyzed}"
+    );
+
+    let scored_paths: Vec<&str> = json["file_scores"]
+        .as_array()
+        .expect("file_scores array")
+        .iter()
+        .filter_map(|fs| fs["path"].as_str())
+        .collect();
+    assert!(
+        scored_paths.contains(&"app/.client/analytics.ts"),
+        "expected app/.client/analytics.ts in file_scores: {scored_paths:?}"
+    );
+}

@@ -304,7 +304,7 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
         ctx.quiet,
         fallow_config::ProductionAnalysis::Health,
     )?;
-    let files = fallow_core::discover::discover_files(&config);
+    let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
     let cache = if config.no_cache {
         None
     } else {

@@ -426,7 +426,7 @@ fn apply_line_suppressions(
 #[must_use]
 pub fn find_duplicates_in_project(root: &Path, config: &DuplicatesConfig) -> DuplicationReport {
     let resolved = crate::default_config(root);
-    let files = discover::discover_files(&resolved);
+    let files = discover::discover_files_with_plugin_scopes(&resolved);
     find_duplicates(root, &files, config)
 }
 

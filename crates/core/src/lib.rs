@@ -332,7 +332,7 @@ pub fn analyze_with_parse_result(
     );
     let root_pkg = load_root_package_json(config);
     let discovery_hidden_dir_scopes =
-        collect_discovery_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces_vec);
+        discover::collect_plugin_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces_vec);
 
     // Stage 1: Discover files (cheap — needed for file registry and resolution)
     let t = Instant::now();
@@ -558,7 +558,7 @@ fn analyze_full(
     );
     let root_pkg = load_root_package_json(config);
     let discovery_hidden_dir_scopes =
-        collect_discovery_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces_vec);
+        discover::collect_plugin_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces_vec);
 
     // Stage 1: Discover all source files
     let t = Instant::now();
@@ -793,39 +793,6 @@ fn load_workspace_packages(
                 .map(|pkg| (ws, pkg))
         })
         .collect()
-}
-
-fn collect_discovery_hidden_dir_scopes(
-    config: &ResolvedConfig,
-    root_pkg: Option<&PackageJson>,
-    workspaces: &[fallow_config::WorkspaceInfo],
-) -> Vec<discover::HiddenDirScope> {
-    let registry = plugins::PluginRegistry::new(config.external_plugins.clone());
-    let mut scopes = Vec::new();
-
-    if let Some(pkg) = root_pkg {
-        push_discovery_hidden_dir_scope(&mut scopes, &registry, pkg, &config.root);
-    }
-
-    for ws in workspaces {
-        if let Ok(pkg) = PackageJson::load(&ws.root.join("package.json")) {
-            push_discovery_hidden_dir_scope(&mut scopes, &registry, &pkg, &ws.root);
-        }
-    }
-
-    scopes
-}
-
-fn push_discovery_hidden_dir_scope(
-    scopes: &mut Vec<discover::HiddenDirScope>,
-    registry: &plugins::PluginRegistry,
-    pkg: &PackageJson,
-    root: &Path,
-) {
-    let dirs = registry.discovery_hidden_dirs(pkg, root);
-    if !dirs.is_empty() {
-        scopes.push(discover::HiddenDirScope::new(root.to_path_buf(), dirs));
-    }
 }
 
 fn analyze_all_scripts(

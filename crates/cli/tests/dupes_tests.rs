@@ -247,3 +247,38 @@ fn dupes_human_output_snapshot() {
     let redacted = redact_all(&output.stdout, &root);
     insta::assert_snapshot!("dupes_human_output", redacted);
 }
+
+// ---------------------------------------------------------------------------
+// Plugin-scoped hidden directory traversal
+// ---------------------------------------------------------------------------
+
+/// Standalone `fallow dupes` must include React Router's `.client` / `.server`
+/// folders in its file walk. The threshold is dropped to the minimum so the
+/// small fixture files survive dupes' token / line filters and surface in
+/// `stats.total_files`.
+#[test]
+fn dupes_includes_plugin_scoped_hidden_dirs_for_react_router() {
+    let output = run_fallow(
+        "dupes",
+        "react-router-conventions",
+        &[
+            "--format",
+            "json",
+            "--quiet",
+            "--min-tokens",
+            "1",
+            "--min-lines",
+            "1",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr was: {}", output.stderr);
+
+    let json = parse_json(&output);
+    let total_files = json["stats"]["total_files"]
+        .as_u64()
+        .expect("stats.total_files is a number");
+    assert!(
+        total_files >= 5,
+        "expected stats.total_files >= 5 (root + routes + .client + .server), got {total_files}"
+    );
+}

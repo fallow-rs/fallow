@@ -3,6 +3,10 @@ mod infrastructure;
 mod parse_scripts;
 mod walk;
 
+use std::path::Path;
+
+use fallow_config::{PackageJson, ResolvedConfig};
+
 // Re-export types from fallow-types
 pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 
@@ -17,8 +21,66 @@ pub(crate) use entry_points::{
     discover_workspace_entry_points_with_warnings_from_pkg, warn_skipped_entry_summary,
 };
 pub use infrastructure::discover_infrastructure_entry_points;
-pub(crate) use walk::{HiddenDirScope, discover_files_with_additional_hidden_dirs};
-pub use walk::{PRODUCTION_EXCLUDE_PATTERNS, SOURCE_EXTENSIONS, discover_files};
+pub use walk::{
+    HiddenDirScope, PRODUCTION_EXCLUDE_PATTERNS, SOURCE_EXTENSIONS, discover_files,
+    discover_files_with_additional_hidden_dirs,
+};
+
+/// Collect package-scoped hidden directory traversal rules for active plugins.
+///
+/// Source discovery runs before full plugin execution, so this consults
+/// package-activation checks and static plugin metadata only. Callers that have
+/// already loaded the root `package.json` and discovered workspaces should pass
+/// them in to avoid redoing the work; standalone CLI command paths can use
+/// [`discover_files_with_plugin_scopes`] instead.
+#[must_use]
+pub fn collect_plugin_hidden_dir_scopes(
+    config: &ResolvedConfig,
+    root_pkg: Option<&PackageJson>,
+    workspaces: &[fallow_config::WorkspaceInfo],
+) -> Vec<HiddenDirScope> {
+    let registry = crate::plugins::PluginRegistry::new(config.external_plugins.clone());
+    let mut scopes = Vec::new();
+
+    if let Some(pkg) = root_pkg {
+        push_plugin_hidden_dir_scope(&mut scopes, &registry, pkg, &config.root);
+    }
+
+    for ws in workspaces {
+        if let Ok(pkg) = PackageJson::load(&ws.root.join("package.json")) {
+            push_plugin_hidden_dir_scope(&mut scopes, &registry, &pkg, &ws.root);
+        }
+    }
+
+    scopes
+}
+
+fn push_plugin_hidden_dir_scope(
+    scopes: &mut Vec<HiddenDirScope>,
+    registry: &crate::plugins::PluginRegistry,
+    pkg: &PackageJson,
+    root: &Path,
+) {
+    let dirs = registry.discovery_hidden_dirs(pkg, root);
+    if !dirs.is_empty() {
+        scopes.push(HiddenDirScope::new(root.to_path_buf(), dirs));
+    }
+}
+
+/// Discover files with plugin-aware hidden directory traversal.
+///
+/// Convenience wrapper for command paths (list, dupes, health, flags, coverage)
+/// that don't already have workspaces / root `package.json` on hand. Internally
+/// loads the root `package.json` and discovers workspaces so plugin-contributed
+/// hidden directories (e.g. React Router's `.client` / `.server` folders) are
+/// traversed consistently across every command.
+#[must_use]
+pub fn discover_files_with_plugin_scopes(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
+    let root_pkg = PackageJson::load(&config.root.join("package.json")).ok();
+    let workspaces = fallow_config::discover_workspaces(&config.root);
+    let scopes = collect_plugin_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces);
+    discover_files_with_additional_hidden_dirs(config, &scopes)
+}
 
 /// Hidden (dot-prefixed) directories that should be included in file discovery.
 ///

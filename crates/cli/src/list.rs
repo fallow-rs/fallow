@@ -36,7 +36,7 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
     // Run plugin detection when plugin output is requested or when entry-point
     // discovery needs plugin-provided entry points.
     let plugin_result = if opts.plugins || opts.entry_points || show_all {
-        let disc = fallow_core::discover::discover_files(&config);
+        let disc = fallow_core::discover::discover_files_with_plugin_scopes(&config);
         let file_paths: Vec<std::path::PathBuf> = disc.iter().map(|f| f.path.clone()).collect();
         let registry = fallow_core::plugins::PluginRegistry::new(config.external_plugins.clone());
 
@@ -67,7 +67,9 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
     // Discover files once if needed by files, entry_points, or boundaries
     let need_files = needs_file_discovery(opts.files, show_all, opts.entry_points, opts.boundaries);
     let discovered = if need_files {
-        Some(fallow_core::discover::discover_files(&config))
+        Some(fallow_core::discover::discover_files_with_plugin_scopes(
+            &config,
+        ))
     } else {
         None
     };
