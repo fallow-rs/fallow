@@ -277,7 +277,7 @@ fn load_github_state(
             // Only honour resolved-fingerprint markers when the comment was
             // posted by a bot. A human commenter who pastes the marker into
             // their own comment could otherwise trick the apply step into
-            // skipping a real "Resolved in <sha>" reply on a stale finding.
+            // skipping a real "Resolved in `<sha>`" reply on a stale finding.
             if is_github_bot_comment(comment)
                 && let Some(fingerprint) = extract_marker(body, "fallow-resolved-fingerprint:")
             {
@@ -423,7 +423,7 @@ fn apply_github_reconcile(
     for fingerprint in &plan.stale {
         // Idempotency: check the (fingerprint, sha) marker, not the bare
         // fingerprint. Re-runs on the same commit must not post duplicate
-        // "Resolved in <sha>" replies; legacy markers without a SHA suffix
+        // "Resolved in `<sha>`" replies; legacy markers without a SHA suffix
         // still match on bare fingerprint to keep first-run-after-upgrade
         // clean.
         let marker_key = resolved_marker_key(fingerprint, sha.as_deref());
@@ -521,7 +521,7 @@ fn load_gitlab_state(
                 }
                 // Same authorship gate as GitHub: only honour resolved
                 // markers from bot-authored notes so a human cannot suppress
-                // legitimate "Resolved in <sha>" replies by impersonating the
+                // legitimate "Resolved in `<sha>`" replies by impersonating the
                 // marker in their own comment.
                 if is_gitlab_bot_note(note)
                     && let Some(fingerprint) = extract_marker(body, "fallow-resolved-fingerprint:")
@@ -800,7 +800,7 @@ fn read_json_response(
 /// We trust resolved-fingerprint markers only from bot identities so a human
 /// commenter can't paste `<!-- fallow-resolved-fingerprint: <fp> -->` into
 /// their own comment and trick the apply step into skipping a legitimate
-/// "Resolved in <sha>" reply on a stale finding.
+/// "Resolved in `<sha>`" reply on a stale finding.
 ///
 /// GitHub identifies bot identities through `user.type == "Bot"` (e.g.
 /// `github-actions[bot]`, `dependabot[bot]`, custom GitHub Apps). The
@@ -869,7 +869,7 @@ fn extract_marker(body: &str, marker: &str) -> Option<String> {
 /// Compute the idempotency marker for a (fingerprint, sha) pair. The marker
 /// is what we look up to decide whether a resolution comment for this
 /// fingerprint at this commit already exists, so re-runs of the workflow on
-/// the same commit don't post duplicate "Resolved in <sha>" comments.
+/// the same commit don't post duplicate "Resolved in `<sha>`" comments.
 fn resolved_marker_key(fingerprint: &str, sha: Option<&str>) -> String {
     match sha.and_then(|value| value.get(..7)) {
         Some(short) => format!("{fingerprint}@{short}"),
