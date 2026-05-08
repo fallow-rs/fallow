@@ -75,6 +75,12 @@ render_with_fallow() {
   fi
   export FALLOW_DIFF_FILTER="${FALLOW_DIFF_FILTER:-added}"
   FALLOW_MAX_COMMENTS="$MAX" fallow "${args[@]}" > "$output" 2> fallow-review-stderr.log || true
+  # Surface fallow's structured-error envelope before the schema check so the
+  # CLI message lands in the workflow log rather than a generic warning.
+  if jq -e '.error == true' "$output" > /dev/null 2>&1; then
+    echo "::warning::fallow render failed: $(jq -r '.message // "unknown error"' "$output")"
+    return 1
+  fi
   jq -e '
     .meta.schema == "fallow-review-envelope/v1"
     and .meta.provider == "github"
@@ -98,6 +104,7 @@ if render_with_fallow review-github fallow-review.json; then
   if [ "$TOTAL" -eq 0 ]; then
     BODY=$(jq -r '.body' fallow-review.json)
     REVIEW_COMMENT_ID=$(gh_api_retry \
+      --paginate \
       "repos/${GH_REPO}/issues/${PR_NUMBER}/comments?per_page=100" \
       --jq '.[] | select(.body | contains("<!-- fallow-review -->")) | .id' \
       2>/dev/null | head -1 || true)
@@ -118,7 +125,7 @@ if render_with_fallow review-github fallow-review.json; then
     exit 0
   fi
 
-  EXISTING_FPS=$(gh_api_retry "repos/${GH_REPO}/pulls/${PR_NUMBER}/comments?per_page=100" --jq '.[].body' 2>/dev/null \
+  EXISTING_FPS=$(gh_api_retry --paginate "repos/${GH_REPO}/pulls/${PR_NUMBER}/comments?per_page=100" --jq '.[].body' 2>/dev/null \
     | sed -n 's/.*fallow-fingerprint: \([^ ]*\) .*/\1/p' \
     | jq -R -s 'split("\n") | map(select(length > 0))' || echo '[]')
   jq --argjson existing "${EXISTING_FPS:-[]}" '

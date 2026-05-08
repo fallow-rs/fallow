@@ -56,6 +56,35 @@ curl_retry() {
   done
 }
 
+# Walk the GitLab REST API's Link-header pagination, concatenating every page
+# of a JSON array into a single combined array on stdout. Last positional arg
+# is the initial URL; preceding args are passed to curl_retry verbatim. Without
+# this, a >100-comment MR can silently lose existing fingerprints outside the
+# first page and re-post duplicate inline review notes on every run.
+curl_paginate() {
+  local args=("$@")
+  local last=$(( ${#args[@]} - 1 ))
+  local url="${args[$last]}"
+  unset 'args[last]'
+  local headers body
+  headers=$(mktemp)
+  body=$(mktemp)
+  local combined='[]'
+  while [ -n "$url" ]; do
+    if ! curl_retry -D "$headers" "${args[@]}" "$url" > "$body"; then
+      rm -f "$headers" "$body"
+      return 1
+    fi
+    combined=$(jq -s 'add' <(printf '%s' "$combined") "$body")
+    url=$(grep -i '^link:' "$headers" \
+      | tr ',' '\n' \
+      | sed -n 's/.*<\([^>]*\)>.*rel="next".*/\1/p' \
+      | head -1)
+  done
+  rm -f "$headers" "$body"
+  printf '%s' "$combined"
+}
+
 load_gitlab_diff_refs() {
   if [ -n "${FALLOW_GITLAB_BASE_SHA:-}" ] && [ -n "${FALLOW_GITLAB_HEAD_SHA:-}" ]; then
     return 0
@@ -111,6 +140,12 @@ render_with_fallow() {
   load_gitlab_diff_refs
   export FALLOW_DIFF_FILTER="${FALLOW_DIFF_FILTER:-added}"
   FALLOW_MAX_COMMENTS="$MAX" fallow "${args[@]}" > "$output" 2> fallow-review-stderr.log || true
+  # Surface fallow's structured-error envelope before the schema check so the
+  # CLI message lands in the GitLab job log rather than a generic warning.
+  if jq -e '.error == true' "$output" > /dev/null 2>&1; then
+    echo "WARNING: fallow render failed: $(jq -r '.message // "unknown error"' "$output")"
+    return 1
+  fi
   jq -e '
     .meta.schema == "fallow-review-envelope/v1"
     and .meta.provider == "gitlab"
@@ -134,7 +169,7 @@ if render_with_fallow review-gitlab fallow-review.json; then
   TOTAL=$(jq '.comments | length' fallow-review.json)
   if [ "$TOTAL" -eq 0 ]; then
     BODY=$(jq -r '.body' fallow-review.json)
-    EXISTING_NOTE_ID=$(curl_retry \
+    EXISTING_NOTE_ID=$(curl_paginate \
       --header "${AUTH_HEADER}" \
       "${NOTES_URL}?per_page=100" \
       | jq -r '.[] | select(.body | contains("<!-- fallow-review -->")) | .id' \
@@ -162,7 +197,7 @@ if render_with_fallow review-gitlab fallow-review.json; then
     exit 0
   fi
 
-  EXISTING_FPS=$(curl_retry --header "${AUTH_HEADER}" "${DISCUSSIONS_URL}?per_page=100" 2>/dev/null \
+  EXISTING_FPS=$(curl_paginate --header "${AUTH_HEADER}" "${DISCUSSIONS_URL}?per_page=100" 2>/dev/null \
     | jq -r '.[].notes[].body? // empty' \
     | sed -n 's/.*fallow-fingerprint: \([^ ]*\) .*/\1/p' \
     | jq -R -s 'split("\n") | map(select(length > 0))' || echo '[]')
