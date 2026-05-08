@@ -22,8 +22,7 @@ curl_retry() {
   local attempts="${FALLOW_API_RETRIES:-3}"
   local delay="${FALLOW_API_RETRY_DELAY:-2}"
   local attempt=1
-  local err
-  local out
+  local err out
   err=$(mktemp)
   out=$(mktemp)
   while true; do
@@ -32,7 +31,13 @@ curl_retry() {
       rm -f "$err" "$out"
       return 0
     fi
-    if [ "$attempt" -ge "$attempts" ] || ! grep -Eqi '429|rate limit|Retry-After' "$err"; then
+    # Match the Rust `with_rate_limit_retry` decision: 429 + 502/503/504 are
+    # transient and worth retrying; persistent 5xx (500, 501, 505) and all
+    # other 4xx surface immediately. curl -sf emits stderr like
+    # `curl: (22) The requested URL returned error: 502 Bad Gateway`, so we
+    # match either the explicit code or the rate-limit / Retry-After hints.
+    if [ "$attempt" -ge "$attempts" ] \
+        || ! grep -Eqi 'error: (429|502|503|504)|rate limit|Retry-After' "$err"; then
       cat "$err" >&2
       rm -f "$err" "$out"
       return 1
@@ -62,7 +67,11 @@ curl_paginate() {
       rm -f "$headers" "$body"
       return 1
     fi
-    combined=$(jq -s 'add' <(printf '%s' "$combined") "$body")
+    # Defensively skip non-array pages (e.g. an error envelope) so the
+    # caller degrades to "no existing notes seen" instead of crashing on
+    # `array + object` jq errors. The call sites mask exit non-zero, but
+    # surfacing a successful empty-array beats a silent re-post-of-duplicates.
+    combined=$(jq -s 'map(arrays) | add // []' <(printf '%s' "$combined") "$body")
     url=$(grep -i '^link:' "$headers" \
       | tr ',' '\n' \
       | sed -n 's/.*<\([^>]*\)>.*rel="next".*/\1/p' \

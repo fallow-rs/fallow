@@ -23,7 +23,11 @@ gh_api_retry() {
       rm -f "$err" "$out"
       return 0
     fi
-    if [ "$attempt" -ge "$attempts" ] || ! grep -Eqi 'HTTP 429|rate limit|secondary rate limit|Retry-After' "$err"; then
+    # Match the Rust `with_rate_limit_retry` decision: 429 + 502/503/504 are
+    # transient and worth retrying; persistent 5xx (500, 501, 505) and all
+    # other 4xx surface immediately so a real bug doesn't burn the budget.
+    if [ "$attempt" -ge "$attempts" ] \
+        || ! grep -Eqi 'HTTP (429|502|503|504)|rate limit|secondary rate limit|Retry-After' "$err"; then
       cat "$err" >&2
       rm -f "$err" "$out"
       return 1
