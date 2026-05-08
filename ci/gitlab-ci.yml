@@ -82,6 +82,8 @@ variables:
   FALLOW_PRODUCTION_HEALTH: ""         # Combined/audit mode: "true"/"false" overrides FALLOW_PRODUCTION for health. Empty defers to it.
   FALLOW_PRODUCTION_DUPES: ""          # Combined/audit mode: "true"/"false" overrides FALLOW_PRODUCTION for duplication. Empty defers to it.
   FALLOW_FAIL_ON_ISSUES: "true"
+  FALLOW_MIN_SEVERITY: ""       # Only fail at or above this complexity severity ('moderate'|'high'|'critical'); empty applies all severities
+  FALLOW_INCLUDE_ENTRY_EXPORTS: "false"  # Report unused exports in entry files instead of auto-marking them as used; mirrors --include-entry-exports
   FALLOW_ARGS: ""               # Extra CLI arguments (space-separated)
   FALLOW_COMMENT: "false"       # Post results as MR summary comment
   FALLOW_REVIEW: "false"        # Post inline MR discussions with rich comments and suggestions
@@ -430,6 +432,7 @@ variables:
               ARGS+=("--${t}")
             done
           fi
+          [ "$FALLOW_INCLUDE_ENTRY_EXPORTS" = "true" ] && ARGS+=(--include-entry-exports)
           [ "$FALLOW_FAIL_ON_REGRESSION" = "true" ] && ARGS+=(--fail-on-regression)
           [ -n "$FALLOW_TOLERANCE" ] && [ "$FALLOW_TOLERANCE" != "0" ] && ARGS+=(--tolerance "$FALLOW_TOLERANCE")
           [ -n "$FALLOW_REGRESSION_BASELINE" ] && ARGS+=(--regression-baseline "$FALLOW_REGRESSION_BASELINE")
@@ -464,6 +467,7 @@ variables:
           [ "$FALLOW_COMPLEXITY" = "true" ]   && ARGS+=(--complexity)
           [ -n "$FALLOW_SINCE" ]              && ARGS+=(--since "$FALLOW_SINCE")
           [ -n "$FALLOW_MIN_COMMITS" ]        && ARGS+=(--min-commits "$FALLOW_MIN_COMMITS")
+          [ -n "$FALLOW_MIN_SEVERITY" ]       && ARGS+=(--min-severity "$FALLOW_MIN_SEVERITY")
           if [ -n "$FALLOW_SAVE_SNAPSHOT" ]; then
             if [ "$FALLOW_SAVE_SNAPSHOT" = "true" ]; then
               ARGS+=(--save-snapshot)
@@ -484,6 +488,7 @@ variables:
           [ -n "$FALLOW_COVERAGE" ]           && ARGS+=(--coverage "$FALLOW_COVERAGE")
           [ -n "$FALLOW_COVERAGE_ROOT" ]      && ARGS+=(--coverage-root "$FALLOW_COVERAGE_ROOT")
           [ -n "$FALLOW_AUDIT_GATE" ]         && ARGS+=(--gate "$FALLOW_AUDIT_GATE")
+          [ "$FALLOW_INCLUDE_ENTRY_EXPORTS" = "true" ] && ARGS+=(--include-entry-exports)
           ;;
         fix)
           [ "$FALLOW_DRY_RUN" = "true" ] && ARGS+=(--dry-run) || ARGS+=(--yes)
