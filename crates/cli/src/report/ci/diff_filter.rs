@@ -4,6 +4,17 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::pr_comment::CiIssue;
 
+/// Refuse to parse a unified diff larger than this. The cap matches the
+/// SARIF upload limit (10 MiB) and is also far above what any sane PR
+/// produces. A pathologically large diff (binary blob, vendored dump) would
+/// otherwise eat memory proportional to its size before we can inspect it.
+const MAX_DIFF_BYTES: u64 = 10 * 1024 * 1024;
+
+/// Stop indexing added lines past this count. A 1M-line "diff" is a sign of
+/// a regenerated lockfile or vendored bundle and is not useful for filtering;
+/// emit a warning and proceed with whatever we already indexed.
+const MAX_ADDED_LINES: usize = 1_000_000;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiffFilterMode {
     Added,
@@ -39,6 +50,8 @@ impl DiffIndex {
         let mut index = Self::default();
         let mut current_file: Option<String> = None;
         let mut new_line = 0_u64;
+        let mut added_count: usize = 0;
+        let mut warned_overflow = false;
 
         for line in diff.lines() {
             if let Some(path) = line.strip_prefix("+++ b/") {
@@ -60,11 +73,20 @@ impl DiffIndex {
                 continue;
             };
             if line.starts_with('+') && !line.starts_with("+++") {
-                index
-                    .added_lines
-                    .entry(path.clone())
-                    .or_default()
-                    .insert(new_line);
+                if added_count < MAX_ADDED_LINES {
+                    index
+                        .added_lines
+                        .entry(path.clone())
+                        .or_default()
+                        .insert(new_line);
+                    added_count += 1;
+                } else if !warned_overflow {
+                    eprintln!(
+                        "fallow: diff exceeds {MAX_ADDED_LINES} added lines; \
+                         indexed prefix only, later additions skipped"
+                    );
+                    warned_overflow = true;
+                }
                 new_line += 1;
             } else if !line.starts_with('-') {
                 new_line += 1;
@@ -116,14 +138,56 @@ fn parse_new_hunk_start(header: &str) -> Option<u64> {
 
 #[must_use]
 pub fn filter_issues_from_env(issues: Vec<CiIssue>) -> Vec<CiIssue> {
-    let Some(path) = std::env::var_os("FALLOW_DIFF_FILE") else {
+    let Some(raw_path) = std::env::var_os("FALLOW_DIFF_FILE") else {
         return issues;
     };
-    let Ok(diff) = std::fs::read_to_string(Path::new(&path)) else {
+    filter_issues_from_path(
+        issues,
+        Path::new(&raw_path),
+        DiffFilterMode::from_env(),
+        context_radius_from_env(),
+    )
+}
+
+#[must_use]
+pub fn filter_issues_from_path(
+    issues: Vec<CiIssue>,
+    path: &Path,
+    mode: DiffFilterMode,
+    radius: u64,
+) -> Vec<CiIssue> {
+    // Reject diffs above the size cap before reading them into memory. A
+    // pathological diff (vendored dump, binary blob mistakenly committed)
+    // would otherwise allocate proportional memory before we can filter.
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.len() > MAX_DIFF_BYTES => {
+            eprintln!(
+                "fallow: FALLOW_DIFF_FILE '{}' is {} bytes (cap {MAX_DIFF_BYTES}); \
+                 skipping diff filter, reporting all findings",
+                path.display(),
+                meta.len()
+            );
+            return issues;
+        }
+        Ok(_) => {}
+        Err(err) => {
+            eprintln!(
+                "fallow: FALLOW_DIFF_FILE '{}' could not be stat'd ({err}); \
+                 skipping diff filter, reporting all findings",
+                path.display()
+            );
+            return issues;
+        }
+    }
+
+    let Ok(diff) = std::fs::read_to_string(path) else {
+        eprintln!(
+            "fallow: FALLOW_DIFF_FILE '{}' could not be read; \
+             skipping diff filter, reporting all findings",
+            path.display()
+        );
         return issues;
     };
-    let mode = DiffFilterMode::from_env();
-    let radius = context_radius_from_env();
     let index = DiffIndex::from_unified_diff(&diff);
     issues
         .into_iter()
@@ -133,7 +197,74 @@ pub fn filter_issues_from_env(issues: Vec<CiIssue>) -> Vec<CiIssue> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write as _;
+
     use super::*;
+
+    #[test]
+    fn from_unified_diff_caps_added_lines_at_threshold() {
+        // Synthesize a diff with MAX_ADDED_LINES + 100 added lines and verify
+        // we stop indexing past the cap. The exact split: index size <= cap.
+        let header =
+            "diff --git a/big.txt b/big.txt\n--- a/big.txt\n+++ b/big.txt\n@@ -0,0 +1,100 @@\n";
+        let mut body = String::with_capacity(MAX_ADDED_LINES * 16);
+        for _ in 0..(MAX_ADDED_LINES + 100) {
+            body.push_str("+x\n");
+        }
+        let mut diff = String::with_capacity(header.len() + body.len());
+        diff.push_str(header);
+        diff.push_str(&body);
+
+        let index = DiffIndex::from_unified_diff(&diff);
+        let total: usize = index.added_lines.values().map(FxHashSet::len).sum();
+        assert!(
+            total <= MAX_ADDED_LINES,
+            "indexed {total} lines, cap is {MAX_ADDED_LINES}"
+        );
+    }
+
+    #[test]
+    fn filter_issues_from_path_skips_oversize_diff() {
+        // Write a diff just over the byte cap and verify the cap-check
+        // short-circuits, returning issues unfiltered with a warning.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("oversize.diff");
+        let mut file = std::fs::File::create(&path).expect("create");
+        let chunk = "+ filler line\n";
+        let bytes_per_chunk = chunk.len() as u64;
+        let chunks_needed = (MAX_DIFF_BYTES / bytes_per_chunk) + 100_000;
+        for _ in 0..chunks_needed {
+            file.write_all(chunk.as_bytes()).expect("write");
+        }
+        drop(file);
+
+        let issue = CiIssue {
+            rule_id: "r".into(),
+            description: "d".into(),
+            severity: "minor".into(),
+            path: "src/a.ts".into(),
+            line: 1,
+            fingerprint: "abc".into(),
+        };
+        let kept = filter_issues_from_path(vec![issue], &path, DiffFilterMode::Added, 3);
+        assert_eq!(kept.len(), 1, "oversize diff must fall through unfiltered");
+    }
+
+    #[test]
+    fn filter_issues_from_path_handles_missing_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("does-not-exist.diff");
+        let issue = CiIssue {
+            rule_id: "r".into(),
+            description: "d".into(),
+            severity: "minor".into(),
+            path: "src/a.ts".into(),
+            line: 1,
+            fingerprint: "abc".into(),
+        };
+        let kept = filter_issues_from_path(vec![issue], &path, DiffFilterMode::Added, 3);
+        assert_eq!(kept.len(), 1, "missing diff must fall through unfiltered");
+    }
 
     #[test]
     fn added_mode_keeps_only_added_lines() {
