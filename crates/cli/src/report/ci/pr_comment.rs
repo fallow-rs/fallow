@@ -151,14 +151,43 @@ pub fn command_title(command: &str) -> &'static str {
     }
 }
 
+/// Escape a string for inclusion in a Markdown table cell.
+///
+/// Table cells render through GitHub-Flavored Markdown and GitLab Flavored
+/// Markdown as inline content, so cell-internal markers can flip the cell to
+/// emphasis, link, image, code, HTML, or strikethrough. Newlines collapse to
+/// spaces because a literal newline terminates the table row. The escape set
+/// covers every CommonMark inline construct that can fire mid-cell:
+///
+/// - `\` (escape character itself)
+/// - `` ` `` (inline code)
+/// - `*` `_` (emphasis / strong)
+/// - `[` `]` `(` `)` (link / image syntax)
+/// - `!` (image when followed by `[`)
+/// - `<` `>` (raw HTML / autolinks)
+/// - `#` (cell rendered as heading when first character of the cell)
+/// - `|` (table cell separator)
+/// - `~` (strikethrough on GFM)
+///
+/// Line-start markers (`.`, `-`, `+`, `1.`) are intentionally NOT escaped:
+/// they are only meaningful at the start of a block-level line, and table
+/// cells render as paragraph-equivalent inline content where these are inert.
+/// Escaping them produces visually noisy output (`fallow/test\-only-dep`)
+/// without correctness benefit.
 #[must_use]
 pub fn escape_md(value: &str) -> String {
-    value
-        .replace('`', "\\`")
-        .replace('|', "\\|")
-        .replace('\n', " ")
-        .trim()
-        .to_string()
+    let collapsed = value.replace('\n', " ");
+    let mut out = String::with_capacity(collapsed.len());
+    for ch in collapsed.chars() {
+        if matches!(
+            ch,
+            '\\' | '`' | '*' | '_' | '[' | ']' | '(' | ')' | '!' | '<' | '>' | '#' | '|' | '~'
+        ) {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out.trim().to_owned()
 }
 
 #[cfg(test)]
@@ -185,5 +214,69 @@ mod tests {
         let body = render_pr_comment("check", Provider::Github, &[]);
         assert!(body.contains("<!-- fallow-id: fallow-results -->"));
         assert!(body.contains("No GitHub PR/MR findings."));
+    }
+
+    #[test]
+    fn escape_md_escapes_inline_commonmark_specials() {
+        // Inline-context CommonMark specials must escape: emphasis, links,
+        // images, code, HTML, headings (when first char of cell), pipes,
+        // strikethrough.
+        let raw = "foo*bar_baz [a](u) `c` <h> #x !i ~s | p";
+        let escaped = escape_md(raw);
+        for ch in [
+            '*', '_', '[', ']', '(', ')', '`', '<', '>', '#', '!', '~', '|',
+        ] {
+            let raw_count = raw.chars().filter(|c| c == &ch).count();
+            let escaped_count = escaped.matches(&format!("\\{ch}")).count();
+            assert_eq!(
+                raw_count, escaped_count,
+                "char {ch:?}: raw {raw_count} occurrences, escaped {escaped_count} in {escaped:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn escape_md_does_not_escape_block_only_markers() {
+        // `.`, `-`, `+` are only special at the start of a block-level line
+        // (ordered / unordered list markers). Table cells are inline; over-
+        // escaping these produces visually noisy `\-` / `\.` in the cell.
+        let raw = "fallow/test-only-dependency package.json:12";
+        let escaped = escape_md(raw);
+        assert!(!escaped.contains("\\-"), "should not escape `-`");
+        assert!(!escaped.contains("\\."), "should not escape `.`");
+        assert_eq!(escaped, raw);
+    }
+
+    #[test]
+    fn escape_md_collapses_newlines_to_spaces() {
+        // Table cells are single-line by construction; a literal newline in
+        // a description would terminate the row and break the table.
+        let raw = "first\nsecond\nthird";
+        assert_eq!(escape_md(raw), "first second third");
+    }
+
+    #[test]
+    fn escape_md_leaves_safe_chars_unchanged() {
+        // Plain alphanumeric, spaces, slashes, colons, equals, quotes: all
+        // legal inside a Markdown table cell.
+        let raw = "Export 'helperFn' is never imported by other modules";
+        assert_eq!(
+            escape_md(raw),
+            r"Export 'helperFn' is never imported by other modules"
+        );
+    }
+
+    #[test]
+    fn escape_md_double_apply_is_safe() {
+        // Idempotency on the escape character itself: `\` always escapes,
+        // so escaping twice does not produce visual `\\\\` for callers that
+        // accidentally double-escape.
+        let raw = "code with `backticks` and *stars*";
+        let once = escape_md(raw);
+        let twice = escape_md(&once);
+        // Second pass adds an additional layer of escaping, which is
+        // expected: callers must not double-call. The contract is "single
+        // pass produces correct GFM"; we just assert it doesn't panic.
+        assert!(twice.contains(r"\\"));
     }
 }

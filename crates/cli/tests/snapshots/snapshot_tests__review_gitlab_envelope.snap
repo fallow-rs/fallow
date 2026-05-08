@@ -36,7 +36,7 @@ expression: json_str
       "fingerprint": "66616a09b329d842"
     },
     {
-      "body": "**warn** `fallow/type-only-dependency`: Package 'zod' is only imported via type-only imports (consider moving to devDependencies)\n\n<!-- fallow-fingerprint: 34d2064787c07f45 -->",
+      "body": "**warn** `fallow/type-only-dependency`: Package 'zod' is only imported via type-only imports \\(consider moving to devDependencies\\)\n\n<!-- fallow-fingerprint: 34d2064787c07f45 -->",
       "position": {
         "position_type": "text",
         "old_path": "package.json",
@@ -46,7 +46,7 @@ expression: json_str
       "fingerprint": "34d2064787c07f45"
     },
     {
-      "body": "**warn** `fallow/test-only-dependency`: Package 'msw' is only imported by test files (consider moving to devDependencies)\n\n<!-- fallow-fingerprint: ebc538b211ef05f5 -->",
+      "body": "**warn** `fallow/test-only-dependency`: Package 'msw' is only imported by test files \\(consider moving to devDependencies\\)\n\n<!-- fallow-fingerprint: ebc538b211ef05f5 -->",
       "position": {
         "position_type": "text",
         "old_path": "package.json",

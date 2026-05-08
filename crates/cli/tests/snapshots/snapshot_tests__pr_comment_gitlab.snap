@@ -15,8 +15,8 @@ Found **15** findings.
 | major | `fallow/unused-dependency` | `package.json`:5 | Package 'lodash' is in dependencies but never imported |
 | minor | `fallow/unused-dev-dependency` | `package.json`:5 | Package 'jest' is in devDependencies but never imported |
 | minor | `fallow/unused-optional-dependency` | `package.json`:5 | Package 'fsevents' is in optionalDependencies but never imported |
-| minor | `fallow/type-only-dependency` | `package.json`:8 | Package 'zod' is only imported via type-only imports (consider moving to devDependencies) |
-| minor | `fallow/test-only-dependency` | `package.json`:12 | Package 'msw' is only imported by test files (consider moving to devDependencies) |
+| minor | `fallow/type-only-dependency` | `package.json`:8 | Package 'zod' is only imported via type-only imports \(consider moving to devDependencies\) |
+| minor | `fallow/test-only-dependency` | `package.json`:12 | Package 'msw' is only imported by test files \(consider moving to devDependencies\) |
 | major | `fallow/circular-dependency` | `src/a.ts`:3 | Circular dependency: src/a.ts → src/b.ts |
 | major | `fallow/unresolved-import` | `src/app.ts`:3 | Import './missing-module' could not be resolved |
 | major | `fallow/unlisted-dependency` | `src/cli.ts`:2 | Package 'chalk' is imported but not listed in package.json |
