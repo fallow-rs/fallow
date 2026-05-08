@@ -2787,7 +2787,7 @@
           "type": "array",
           "items": { "type": "string" }
         },
-        "severity": { "type": "string", "enum": ["minor", "major"] },
+        "severity": { "type": "string", "enum": ["info", "minor", "major", "critical", "blocker"] },
         "fingerprint": { "type": "string" },
         "location": {
           "type": "object",
