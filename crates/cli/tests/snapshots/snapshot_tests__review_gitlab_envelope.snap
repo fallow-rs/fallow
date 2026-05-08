@@ -96,7 +96,7 @@ expression: json_str
       "fingerprint": "da73cab5c65b029d"
     },
     {
-      "body": "**error** `fallow/unused-file`: File is not reachable from any entry point\n\n<!-- fallow-fingerprint: e3912cb6bb9b0212 -->",
+      "body": "**error** `fallow/unused-file`: File is not reachable from any entry point\n\n<!-- fallow-fingerprint: e3912cb6bb9b0212 -->\n\n> Run `fallow fix --files` or delete this file.",
       "position": {
         "position_type": "text",
         "old_path": "src/dead.ts",
