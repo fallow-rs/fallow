@@ -1747,10 +1747,16 @@ fn main() -> ExitCode {
     // edit the same `<!-- fallow-id: fallow-results -->` marker on the same
     // PR/MR and race each other's bodies. Setting `FALLOW_WORKSPACE` here is
     // read by `report::ci::pr_comment::sticky_marker_id` at render time.
+    // Auto-suffix the sticky-comment marker with a stable identifier derived
+    // from the --workspace selection, so parallel monorepo jobs don't race
+    // each other on the same PR/MR. One workspace: name as-is. N>1: hash
+    // the sorted joined list into a short hex suffix so two jobs running
+    // `--workspace web,admin` and `--workspace api,worker` end up with
+    // distinct markers (`fallow-results-w-<hex>`).
     if let Some(workspaces) = cli.workspace.as_ref()
-        && let [single] = workspaces.as_slice()
+        && !workspaces.is_empty()
     {
-        report::ci::pr_comment::set_workspace_marker(single);
+        report::ci::pr_comment::set_workspace_marker_from_list(workspaces);
     }
 
     // Handle schema commands before tracing setup (no side effects)

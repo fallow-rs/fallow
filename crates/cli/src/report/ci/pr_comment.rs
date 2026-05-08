@@ -25,6 +25,49 @@ pub fn set_workspace_marker(value: impl Into<String>) {
     let _ = WORKSPACE_MARKER.set(value.into());
 }
 
+/// Set the workspace marker from a `--workspace` selection list.
+///
+/// Single workspace -> the name itself, sanitised for marker grammar.
+/// N>1 workspaces -> a stable 6-char hex hash of the sorted, comma-joined
+/// list, prefixed with `w-`. Sort + join is deterministic so the same
+/// selection produces the same suffix across runs; two jobs with disjoint
+/// selections get distinct markers and don't race.
+#[allow(
+    dead_code,
+    reason = "called from main.rs bin target; lib target sees no caller"
+)]
+pub fn set_workspace_marker_from_list(values: &[String]) {
+    let trimmed: Vec<&str> = values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .collect();
+    if trimmed.is_empty() {
+        return;
+    }
+    let marker = if let [single] = trimmed.as_slice() {
+        (*single).to_owned()
+    } else {
+        let mut sorted = trimmed.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        sorted.sort();
+        let joined = sorted.join(",");
+        format!("w-{}", short_hex_hash(&joined))
+    };
+    let _ = WORKSPACE_MARKER.set(marker);
+}
+
+/// 6-char FNV-1a hex digest. Stable across Rust versions (FNV is content-
+/// determined), short enough for a marker suffix, wide enough that the
+/// chance of two real-world workspace selections colliding is ~1/16M.
+fn short_hex_hash(value: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in value.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{:06x}", (hash & 0x00ff_ffff) as u32)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Provider {
     Github,
@@ -406,6 +449,19 @@ mod tests {
         // regardless of whether a workspace suffix follows.
         assert!(body.contains("<!-- fallow-id: fallow-results"));
         assert!(body.contains("No GitHub PR/MR findings."));
+    }
+
+    #[test]
+    fn short_hex_hash_is_deterministic_and_six_chars() {
+        let a = short_hex_hash("api,worker");
+        assert_eq!(a.len(), 6);
+        // Same input -> same hash across calls.
+        assert_eq!(a, short_hex_hash("api,worker"));
+        // Different input -> different hash (modulo collision; the
+        // workspace-marker assertion is "monorepo with 2-10 distinct
+        // workspaces should not race", which a 6-hex-char suffix
+        // satisfies at ~1/16M collision rate).
+        assert_ne!(a, short_hex_hash("admin,web"));
     }
 
     #[test]
