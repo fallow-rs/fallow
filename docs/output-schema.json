@@ -11,7 +11,10 @@
     { "$ref": "#/definitions/DupesOutput" },
     { "$ref": "#/definitions/AuditOutput" },
     { "$ref": "#/definitions/ExplainOutput" },
-    { "$ref": "#/definitions/CoverageSetupOutput" }
+    { "$ref": "#/definitions/CoverageSetupOutput" },
+    { "$ref": "#/definitions/CodeClimateOutput" },
+    { "$ref": "#/definitions/ReviewEnvelopeOutput" },
+    { "$ref": "#/definitions/ReviewReconcileOutput" }
   ],
 
   "definitions": {
@@ -2763,6 +2766,144 @@
       "properties": {
         "entries": { "type": "integer", "description": "Total number of entries in the loaded baseline file." },
         "matched": { "type": "integer", "description": "Number of baseline entries that matched current issues and were filtered." }
+      }
+    },
+
+    "CodeClimateOutput": {
+      "title": "fallow --format codeclimate / gitlab-codequality",
+      "description": "CodeClimate-compatible issue array. GitLab Code Quality consumes the same shape.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/CodeClimateIssue" }
+    },
+
+    "CodeClimateIssue": {
+      "type": "object",
+      "required": ["type", "check_name", "description", "categories", "severity", "fingerprint", "location"],
+      "properties": {
+        "type": { "type": "string", "const": "issue" },
+        "check_name": { "type": "string", "pattern": "^fallow/" },
+        "description": { "type": "string" },
+        "categories": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "severity": { "type": "string", "enum": ["minor", "major"] },
+        "fingerprint": { "type": "string" },
+        "location": {
+          "type": "object",
+          "required": ["path", "lines"],
+          "properties": {
+            "path": { "type": "string" },
+            "lines": {
+              "type": "object",
+              "required": ["begin"],
+              "properties": {
+                "begin": { "type": "integer", "minimum": 1 }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "ReviewEnvelopeOutput": {
+      "title": "fallow --format review-github / review-gitlab",
+      "description": "Typed review envelope consumed by action/scripts/review.sh and ci/scripts/review.sh.",
+      "type": "object",
+      "required": ["body", "comments", "meta"],
+      "properties": {
+        "event": { "type": "string", "const": "COMMENT", "description": "GitHub review event. Omitted for GitLab." },
+        "body": { "type": "string" },
+        "comments": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              { "$ref": "#/definitions/GitHubReviewComment" },
+              { "$ref": "#/definitions/GitLabReviewComment" }
+            ]
+          }
+        },
+        "meta": {
+          "type": "object",
+          "required": ["schema", "provider"],
+          "properties": {
+            "schema": { "type": "string", "const": "fallow-review-envelope/v1" },
+            "provider": { "type": "string", "enum": ["github", "gitlab"] },
+            "check_conclusion": { "type": "string", "enum": ["success", "neutral", "failure"] }
+          }
+        }
+      }
+    },
+
+    "GitHubReviewComment": {
+      "type": "object",
+      "required": ["path", "line", "side", "body", "fingerprint"],
+      "properties": {
+        "path": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "side": {
+          "type": "string",
+          "const": "RIGHT",
+          "description": "GitHub review comments target current-state/new-side lines; deletion-side comments are not modeled yet."
+        },
+        "body": { "type": "string" },
+        "fingerprint": { "type": "string" }
+      }
+    },
+
+    "GitLabReviewComment": {
+      "type": "object",
+      "required": ["body", "position", "fingerprint"],
+      "properties": {
+        "body": { "type": "string" },
+        "position": { "$ref": "#/definitions/GitLabReviewPosition" },
+        "fingerprint": { "type": "string" }
+      }
+    },
+
+    "GitLabReviewPosition": {
+      "type": "object",
+      "required": ["position_type", "old_path", "new_path", "new_line"],
+      "properties": {
+        "base_sha": { "type": "string" },
+        "start_sha": { "type": "string" },
+        "head_sha": { "type": "string" },
+        "position_type": { "type": "string", "const": "text" },
+        "old_path": { "type": "string" },
+        "new_path": { "type": "string" },
+        "new_line": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "ReviewReconcileOutput": {
+      "title": "fallow ci reconcile-review --format json",
+      "type": "object",
+      "required": ["schema", "provider", "target", "dry_run", "comments", "current_fingerprints", "existing_fingerprints", "new_fingerprints", "stale_fingerprints", "new", "stale", "resolution_comments_posted", "threads_resolved", "apply_errors"],
+      "properties": {
+        "schema": { "type": "string", "const": "fallow-review-reconcile/v1" },
+        "provider": { "type": "string", "enum": ["github", "gitlab"] },
+        "target": { "type": ["string", "null"] },
+        "dry_run": { "type": "boolean" },
+        "comments": { "type": "integer", "minimum": 0 },
+        "current_fingerprints": { "type": "integer", "minimum": 0 },
+        "existing_fingerprints": { "type": "integer", "minimum": 0 },
+        "new_fingerprints": { "type": "integer", "minimum": 0 },
+        "stale_fingerprints": { "type": "integer", "minimum": 0 },
+        "new": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "stale": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "provider_warning": { "type": ["string", "null"] },
+        "resolution_comments_posted": { "type": "integer", "minimum": 0 },
+        "threads_resolved": { "type": "integer", "minimum": 0 },
+        "apply_errors": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
       }
     },
 

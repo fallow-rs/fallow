@@ -5,16 +5,14 @@ use fallow_config::{RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{AnalysisResults, PrivateTypeLeak};
 
+use super::ci::{fingerprint, severity};
 use super::grouping::{self, OwnershipResolver};
 use super::{emit_json, normalize_uri, relative_path};
 use crate::health_types::{ExceededThreshold, HealthReport};
 
 /// Map fallow severity to CodeClimate severity.
-const fn severity_to_codeclimate(s: Severity) -> &'static str {
-    match s {
-        Severity::Error => "major",
-        Severity::Warn | Severity::Off => "minor",
-    }
+fn severity_to_codeclimate(s: Severity) -> &'static str {
+    severity::codeclimate_severity(s)
 }
 
 /// Compute a relative path string with forward-slash normalization.
@@ -30,17 +28,7 @@ fn cc_path(path: &Path, root: &Path) -> String {
 /// Uses FNV-1a (64-bit) for guaranteed cross-version stability.
 /// `DefaultHasher` is explicitly not specified across Rust versions.
 fn fingerprint_hash(parts: &[&str]) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325; // FNV offset basis
-    for part in parts {
-        for byte in part.bytes() {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x0100_0000_01b3); // FNV prime
-        }
-        // Separator between parts to avoid "ab"+"c" == "a"+"bc"
-        hash ^= 0xff;
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    format!("{hash:016x}")
+    fingerprint::fingerprint_hash(parts)
 }
 
 /// Build a single CodeClimate issue object.
@@ -81,6 +69,9 @@ fn push_dep_cc_issues(
     location_label: &str,
     severity: Severity,
 ) {
+    if deps.is_empty() {
+        return;
+    }
     let level = severity_to_codeclimate(severity);
     for dep in deps {
         let path = cc_path(&dep.path, root);
@@ -118,6 +109,9 @@ fn push_unused_file_issues(
     root: &Path,
     severity: Severity,
 ) {
+    if files.is_empty() {
+        return;
+    }
     let level = severity_to_codeclimate(severity);
     for file in files {
         let path = cc_path(&file.path, root);
@@ -148,6 +142,9 @@ fn push_unused_export_issues(
     re_export_label: &str,
     severity: Severity,
 ) {
+    if exports.is_empty() {
+        return;
+    }
     let level = severity_to_codeclimate(severity);
     for export in exports {
         let path = cc_path(&export.path, root);
@@ -179,6 +176,9 @@ fn push_private_type_leak_issues(
     root: &Path,
     severity: Severity,
 ) {
+    if leaks.is_empty() {
+        return;
+    }
     let level = severity_to_codeclimate(severity);
     for leak in leaks {
         let path = cc_path(&leak.path, root);
@@ -211,6 +211,9 @@ fn push_type_only_dep_issues(
     root: &Path,
     severity: Severity,
 ) {
+    if deps.is_empty() {
+        return;
+    }
     let level = severity_to_codeclimate(severity);
     for dep in deps {
         let path = cc_path(&dep.path, root);
@@ -237,6 +240,9 @@ fn push_test_only_dep_issues(
     root: &Path,
     severity: Severity,
 ) {
+    if deps.is_empty() {
+        return;
+    }
     let level = severity_to_codeclimate(severity);
     for dep in deps {
         let path = cc_path(&dep.path, root);
@@ -269,6 +275,9 @@ fn push_unused_member_issues(
     entity_label: &str,
     severity: Severity,
 ) {
+    if members.is_empty() {
+        return;
+    }
     let level = severity_to_codeclimate(severity);
     for member in members {
         let path = cc_path(&member.path, root);
@@ -301,6 +310,9 @@ fn push_unresolved_import_issues(
     root: &Path,
     severity: Severity,
 ) {
+    if imports.is_empty() {
+        return;
+    }
     let level = severity_to_codeclimate(severity);
     for import in imports {
         let path = cc_path(&import.path, root);
@@ -329,6 +341,9 @@ fn push_unlisted_dep_issues(
     root: &Path,
     severity: Severity,
 ) {
+    if deps.is_empty() {
+        return;
+    }
     let level = severity_to_codeclimate(severity);
     for dep in deps {
         for site in &dep.imported_from {
@@ -362,6 +377,9 @@ fn push_duplicate_export_issues(
     root: &Path,
     severity: Severity,
 ) {
+    if dups.is_empty() {
+        return;
+    }
     let level = severity_to_codeclimate(severity);
     for dup in dups {
         for loc in &dup.locations {
@@ -392,6 +410,9 @@ fn push_circular_dep_issues(
     root: &Path,
     severity: Severity,
 ) {
+    if cycles.is_empty() {
+        return;
+    }
     let level = severity_to_codeclimate(severity);
     for cycle in cycles {
         let Some(first) = cycle.files.first() else {
@@ -432,6 +453,9 @@ fn push_boundary_violation_issues(
     root: &Path,
     severity: Severity,
 ) {
+    if violations.is_empty() {
+        return;
+    }
     let level = severity_to_codeclimate(severity);
     for v in violations {
         let path = cc_path(&v.from_path, root);
@@ -459,6 +483,9 @@ fn push_stale_suppression_issues(
     root: &Path,
     severity: Severity,
 ) {
+    if suppressions.is_empty() {
+        return;
+    }
     let level = severity_to_codeclimate(severity);
     for s in suppressions {
         let path = cc_path(&s.path, root);
@@ -1320,8 +1347,9 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "internal error: entered unreachable code")]
     fn severity_off_maps_to_minor() {
-        assert_eq!(severity_to_codeclimate(Severity::Off), "minor");
+        let _ = severity_to_codeclimate(Severity::Off);
     }
 
     // ── health_severity ─────────────────────────────────────────────

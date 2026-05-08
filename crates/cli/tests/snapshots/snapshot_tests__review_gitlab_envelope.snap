@@ -1,0 +1,163 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: json_str
+---
+{
+  "body": "### Fallow dead-code report\n\n15 inline findings selected for GitLab review.\n\n<!-- fallow-review -->",
+  "comments": [
+    {
+      "body": "**error** `fallow/unused-dependency`: Package 'lodash' is in dependencies but never imported\n\n<!-- fallow-fingerprint: 1d04d08d81daf650 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "package.json",
+        "new_path": "package.json",
+        "new_line": 5
+      },
+      "fingerprint": "1d04d08d81daf650"
+    },
+    {
+      "body": "**warn** `fallow/unused-dev-dependency`: Package 'jest' is in devDependencies but never imported\n\n<!-- fallow-fingerprint: 2a4393b133ea1523 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "package.json",
+        "new_path": "package.json",
+        "new_line": 5
+      },
+      "fingerprint": "2a4393b133ea1523"
+    },
+    {
+      "body": "**warn** `fallow/unused-optional-dependency`: Package 'fsevents' is in optionalDependencies but never imported\n\n<!-- fallow-fingerprint: 66616a09b329d842 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "package.json",
+        "new_path": "package.json",
+        "new_line": 5
+      },
+      "fingerprint": "66616a09b329d842"
+    },
+    {
+      "body": "**warn** `fallow/type-only-dependency`: Package 'zod' is only imported via type-only imports (consider moving to devDependencies)\n\n<!-- fallow-fingerprint: 34d2064787c07f45 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "package.json",
+        "new_path": "package.json",
+        "new_line": 8
+      },
+      "fingerprint": "34d2064787c07f45"
+    },
+    {
+      "body": "**warn** `fallow/test-only-dependency`: Package 'msw' is only imported by test files (consider moving to devDependencies)\n\n<!-- fallow-fingerprint: ebc538b211ef05f5 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "package.json",
+        "new_path": "package.json",
+        "new_line": 12
+      },
+      "fingerprint": "ebc538b211ef05f5"
+    },
+    {
+      "body": "**error** `fallow/circular-dependency`: Circular dependency: src/a.ts → src/b.ts\n\n<!-- fallow-fingerprint: 405f0abed155920d -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/a.ts",
+        "new_path": "src/a.ts",
+        "new_line": 3
+      },
+      "fingerprint": "405f0abed155920d"
+    },
+    {
+      "body": "**error** `fallow/unresolved-import`: Import './missing-module' could not be resolved\n\n<!-- fallow-fingerprint: 231a7ed9e16a19a6 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/app.ts",
+        "new_path": "src/app.ts",
+        "new_line": 3
+      },
+      "fingerprint": "231a7ed9e16a19a6"
+    },
+    {
+      "body": "**error** `fallow/unlisted-dependency`: Package 'chalk' is imported but not listed in package.json\n\n<!-- fallow-fingerprint: 2ef210a41606f3aa -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/cli.ts",
+        "new_path": "src/cli.ts",
+        "new_line": 2
+      },
+      "fingerprint": "2ef210a41606f3aa"
+    },
+    {
+      "body": "**error** `fallow/duplicate-export`: Export 'Config' appears in multiple modules\n\n<!-- fallow-fingerprint: da73cab5c65b029d -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/config.ts",
+        "new_path": "src/config.ts",
+        "new_line": 15
+      },
+      "fingerprint": "da73cab5c65b029d"
+    },
+    {
+      "body": "**error** `fallow/unused-file`: File is not reachable from any entry point\n\n<!-- fallow-fingerprint: e3912cb6bb9b0212 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/dead.ts",
+        "new_path": "src/dead.ts",
+        "new_line": 1
+      },
+      "fingerprint": "e3912cb6bb9b0212"
+    },
+    {
+      "body": "**error** `fallow/unused-enum-member`: Enum member 'Status.Deprecated' is never referenced\n\n<!-- fallow-fingerprint: 090d4d65832bf868 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/enums.ts",
+        "new_path": "src/enums.ts",
+        "new_line": 8
+      },
+      "fingerprint": "090d4d65832bf868"
+    },
+    {
+      "body": "**error** `fallow/unused-class-member`: Class member 'UserService.legacyMethod' is never referenced\n\n<!-- fallow-fingerprint: 25579ea7b6940453 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/service.ts",
+        "new_path": "src/service.ts",
+        "new_line": 42
+      },
+      "fingerprint": "25579ea7b6940453"
+    },
+    {
+      "body": "**error** `fallow/unused-type`: Type export 'OldType' is never imported by other modules\n\n<!-- fallow-fingerprint: deb0e9de35cc06d9 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/types.ts",
+        "new_path": "src/types.ts",
+        "new_line": 5
+      },
+      "fingerprint": "deb0e9de35cc06d9"
+    },
+    {
+      "body": "**error** `fallow/duplicate-export`: Export 'Config' appears in multiple modules\n\n<!-- fallow-fingerprint: cc6a09c8dc227321 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/types.ts",
+        "new_path": "src/types.ts",
+        "new_line": 30
+      },
+      "fingerprint": "cc6a09c8dc227321"
+    },
+    {
+      "body": "**error** `fallow/unused-export`: Export 'helperFn' is never imported by other modules\n\n<!-- fallow-fingerprint: ebe2360218821412 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/utils.ts",
+        "new_path": "src/utils.ts",
+        "new_line": 10
+      },
+      "fingerprint": "ebe2360218821412"
+    }
+  ],
+  "meta": {
+    "schema": "fallow-review-envelope/v1",
+    "provider": "gitlab"
+  }
+}

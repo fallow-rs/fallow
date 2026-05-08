@@ -61,7 +61,7 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
             "file": "// fallow-ignore-file [issue-type]",
             "note": "Omit [issue-type] to suppress all issue types. Unknown tokens are silently ignored."
         },
-        "output_formats": ["human", "json", "sarif", "compact", "markdown", "codeclimate", "gitlab-codequality", "badge"],
+        "output_formats": ["human", "json", "sarif", "compact", "markdown", "codeclimate", "gitlab-codequality", "pr-comment-github", "pr-comment-gitlab", "review-github", "review-gitlab", "badge"],
         "exit_codes": {
             "0": "Success (no error-severity issues found)",
             "1": "Error-severity issues found (per rules config, or --fail-on-issues promotes warn→error)",
@@ -182,7 +182,7 @@ fn issue_types_schema() -> serde_json::Value {
 
 fn environment_variables_schema() -> serde_json::Value {
     serde_json::json!({
-        "FALLOW_FORMAT": "Default output format (json/human/sarif/compact/markdown/codeclimate/gitlab-codequality/badge). CLI --format flag overrides this.",
+        "FALLOW_FORMAT": "Default output format (json/human/sarif/compact/markdown/codeclimate/gitlab-codequality/pr-comment-github/pr-comment-gitlab/review-github/review-gitlab/badge). CLI --format flag overrides this.",
         "FALLOW_QUIET": "Set to \"1\" or \"true\" to suppress progress output. CLI --quiet flag overrides this.",
         "FALLOW_PRODUCTION": "Set to true/false to override production mode for all analyses.",
         "FALLOW_PRODUCTION_DEAD_CODE": "Set to true/false to override production mode for dead-code analysis.",
@@ -315,6 +315,10 @@ mod tests {
             "markdown",
             "codeclimate",
             "gitlab-codequality",
+            "pr-comment-github",
+            "pr-comment-gitlab",
+            "review-github",
+            "review-gitlab",
             "badge",
         ] {
             assert!(

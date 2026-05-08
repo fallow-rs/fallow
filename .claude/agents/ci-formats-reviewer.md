@@ -50,7 +50,7 @@ Review changes to fallow's CI-oriented output formats. Each format serves a spec
 2. **Determinism**: Same input produces identical output across runs
 3. **Severity mapping**: Consistent translation from fallow severity to format-specific severity
 4. **Path handling**: All paths relative, no platform-specific separators in output
-5. **Integration testing**: Do consumers (action/jq/, ci/jq/) still parse the output correctly after changes?
+5. **Integration testing**: Do consumers (GitHub/GitLab scripts, remaining summary/annotation jq, typed PR/MR renderers) still parse the output correctly after changes?
 
 ## Key files
 

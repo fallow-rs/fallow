@@ -270,6 +270,12 @@ fi
 # Bare invocations may emit an error JSON (e.g., health on a non-git repo)
 # followed by the actual combined results. Use jq -s 'last' to extract only
 # the final JSON object so downstream parsing sees a single valid result.
+{
+  printf 'FALLOW_ANALYSIS_ARGS=('
+  printf '%q ' "${ARGS[@]}" "${EXTRA_ARGS[@]}"
+  printf ')\n'
+} > fallow-analysis-args.sh
+
 if ! fallow "${ARGS[@]}" "${EXTRA_ARGS[@]}" > fallow-results-raw.json 2> fallow-stderr.log; then
   if [ ! -s fallow-results-raw.json ] || ! jq -e '.' fallow-results-raw.json > /dev/null 2>&1; then
     echo "::error::Fallow failed to run"
@@ -289,7 +295,8 @@ fi
 
 # --- Fallback SARIF generation ---
 
-if [ "${INPUT_FORMAT:-}" = "sarif" ] && [ "$INPUT_COMMAND" != "fix" ] && \
+if { [ "${INPUT_FORMAT:-}" = "sarif" ] || [ "${INPUT_SARIF:-}" = "true" ]; } && \
+   [ "$INPUT_COMMAND" != "fix" ] && \
    { [ ! -f fallow-results.sarif ] || ! jq -e '.' fallow-results.sarif > /dev/null 2>&1; }; then
   ARGS=()
   build_common_args sarif

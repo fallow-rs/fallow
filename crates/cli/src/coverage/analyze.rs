@@ -88,6 +88,10 @@ fn validate_output_format(output: OutputFormat) -> Result<(), String> {
         | OutputFormat::Markdown
         | OutputFormat::Sarif
         | OutputFormat::CodeClimate
+        | OutputFormat::PrCommentGithub
+        | OutputFormat::PrCommentGitlab
+        | OutputFormat::ReviewGithub
+        | OutputFormat::ReviewGitlab
         | OutputFormat::Badge => Err(format!(
             "fallow coverage analyze only supports --format json or --format human (got {output:?}). Use `fallow coverage analyze --format json` and pipe to your own converter for {output:?}."
         )),
@@ -1311,6 +1315,10 @@ mod tests {
             OutputFormat::Markdown,
             OutputFormat::Sarif,
             OutputFormat::CodeClimate,
+            OutputFormat::PrCommentGithub,
+            OutputFormat::PrCommentGitlab,
+            OutputFormat::ReviewGithub,
+            OutputFormat::ReviewGitlab,
             OutputFormat::Badge,
         ] {
             let err = validate_output_format(fmt).expect_err("must reject");

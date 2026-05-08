@@ -19,9 +19,13 @@ inputs:
     description: 'Path to config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml)'
     required: false
   format:
-    description: 'Output format (human, json, sarif, compact, markdown, codeclimate, badge)'
+    description: 'Output format (human, json, sarif, compact, markdown, codeclimate, pr-comment-github, pr-comment-gitlab, review-github, review-gitlab, badge)'
     required: false
     default: 'sarif'
+  sarif:
+    description: 'Upload SARIF to GitHub Code Scanning. Requires Code Scanning availability (public repo or a plan with GitHub Advanced Security).'
+    required: false
+    default: 'false'
   production:
     description: 'Production mode: exclude test/dev files, only analyze start/build scripts'
     required: false
@@ -285,6 +289,7 @@ runs:
         INPUT_ROOT: ${{ inputs.root }}
         INPUT_CONFIG: ${{ inputs.config }}
         INPUT_FORMAT: ${{ inputs.format }}
+        INPUT_SARIF: ${{ inputs.sarif }}
         INPUT_PRODUCTION: ${{ inputs.production }}
         INPUT_PRODUCTION_DEAD_CODE: ${{ inputs.production-dead-code }}
         INPUT_PRODUCTION_HEALTH: ${{ inputs.production-health }}
@@ -377,7 +382,7 @@ runs:
       id: ghas-check
       if: >-
         inputs.command != 'fix' &&
-        inputs.format == 'sarif' &&
+        inputs.sarif == 'true' &&
         steps.analyze.outputs.sarif != '' &&
         always()
       shell: bash
@@ -395,7 +400,7 @@ runs:
     - name: Upload SARIF
       if: >-
         inputs.command != 'fix' &&
-        inputs.format == 'sarif' &&
+        inputs.sarif == 'true' &&
         steps.analyze.outputs.sarif != '' &&
         steps.ghas-check.outputs.available == 'true' &&
         always()
@@ -417,7 +422,6 @@ runs:
         PR_NUMBER: ${{ github.event.pull_request.number }}
         GH_REPO: ${{ github.repository }}
         FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
-        ACTION_JQ_DIR: ${{ github.action_path }}/action/jq
         CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
         INPUT_ROOT: ${{ inputs.root }}
       run: bash ${{ github.action_path }}/action/scripts/comment.sh
@@ -428,8 +432,7 @@ runs:
         github.event_name == 'pull_request' &&
         inputs.command != 'fix' &&
         always() &&
-        steps.analyze.outputs.issues != '' &&
-        steps.analyze.outputs.issues != '0'
+        steps.analyze.outputs.issues != ''
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
@@ -439,7 +442,6 @@ runs:
         FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
         FALLOW_ROOT: ${{ inputs.root }}
         MAX_COMMENTS: ${{ inputs.max-annotations }}
-        ACTION_JQ_DIR: ${{ github.action_path }}/action/jq
         CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
       run: bash ${{ github.action_path }}/action/scripts/review.sh
 

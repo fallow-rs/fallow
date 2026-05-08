@@ -393,11 +393,17 @@ script:
 - `--fail-on-regression` / `--tolerance 2%` -- fail only if issues **grew** beyond tolerance
 - `--format sarif` -- upload to GitHub Code Scanning
 - `--format codeclimate` / `--format gitlab-codequality` -- GitLab Code Quality inline MR annotations
+- `--format pr-comment-github` / `--format pr-comment-gitlab` -- typed sticky PR/MR comment markdown
+- `--format review-github` / `--format review-gitlab` -- typed inline review envelopes for CI scripts
 - `--format annotations` -- GitHub Actions inline PR annotations (no Action required)
 - `--format json` / `--format markdown` -- for custom workflows (JSON includes machine-actionable `actions` per issue)
 - `--format badge` -- shields.io-compatible SVG health badge (`fallow health --format badge > badge.svg`)
 
 Both the GitHub Action and GitLab CI template auto-detect your package manager (npm/pnpm/yarn) from lock files, so install/uninstall commands in review comments match your project.
+
+SARIF upload requires GitHub Code Scanning, which is available on public repositories and on private repositories with GitHub Advanced Security enabled. If it is unavailable, the action skips upload with a warning and leaves the job summary and primary output intact.
+
+GitHub inline review comments target the current PR file state (`side: RIGHT`). Findings on deleted lines are not modeled yet; fallow's diagnostics are current-state oriented in normal use.
 
 Adopt incrementally -- surface issues without blocking CI, then promote when ready:
 
@@ -412,12 +418,12 @@ The GitLab CI template can post rich comments directly on merge requests -- summ
 | Variable | Default | Description |
 |---|---|---|
 | `FALLOW_COMMENT` | `"false"` | Post a summary comment on the MR with collapsible sections per analysis |
-| `FALLOW_REVIEW` | `"false"` | Post inline MR discussions at the relevant lines, with `suggestion` blocks for unused exports |
+| `FALLOW_REVIEW` | `"false"` | Post inline MR discussions at the relevant lines, with `suggestion` blocks for unused exports and unused imports |
 | `FALLOW_MAX_COMMENTS` | `"50"` | Maximum number of inline review comments |
 | `FALLOW_SCRIPTS_REF` | `""` | Pinned tag or commit for remote MR-integration scripts; leave empty to prefer vendored local `ci/` + `action/` scripts |
 | `FALLOW_VERSION` | `""` | Fallow version to install. Empty reads the project's `package.json` `fallow` dependency, then falls back to `latest`; set explicitly to override the local pin |
 
-In MR pipelines, `--changed-since` is set automatically to scope analysis to changed files. Previous fallow comments are cleaned up on re-runs when `GITLAB_TOKEN` has permission to delete them.
+In MR pipelines, `--changed-since` is set automatically to scope analysis to changed files. Fallow edits sticky comments in place and fingerprints inline review comments so repeated runs can skip duplicates.
 
 The comment merging pipeline groups unused exports per file and deduplicates clone reports, keeping MR threads readable.
 

@@ -2285,6 +2285,38 @@ pub fn print_audit_result(result: &AuditResult, quiet: bool, explain: bool) -> E
         }
         OutputFormat::Sarif => print_audit_sarif(result),
         OutputFormat::CodeClimate => print_audit_codeclimate(result),
+        OutputFormat::PrCommentGithub => {
+            let value = build_audit_codeclimate(result);
+            report::ci::pr_comment::print_pr_comment(
+                "audit",
+                report::ci::pr_comment::Provider::Github,
+                &value,
+            )
+        }
+        OutputFormat::PrCommentGitlab => {
+            let value = build_audit_codeclimate(result);
+            report::ci::pr_comment::print_pr_comment(
+                "audit",
+                report::ci::pr_comment::Provider::Gitlab,
+                &value,
+            )
+        }
+        OutputFormat::ReviewGithub => {
+            let value = build_audit_codeclimate(result);
+            report::ci::review::print_review_envelope(
+                "audit",
+                report::ci::pr_comment::Provider::Github,
+                &value,
+            )
+        }
+        OutputFormat::ReviewGitlab => {
+            let value = build_audit_codeclimate(result);
+            report::ci::review::print_review_envelope(
+                "audit",
+                report::ci::pr_comment::Provider::Gitlab,
+                &value,
+            )
+        }
         OutputFormat::Badge => {
             eprintln!("Error: badge format is not supported for the audit command");
             return ExitCode::from(2);
@@ -2675,6 +2707,11 @@ fn print_audit_sarif(result: &AuditResult) -> ExitCode {
 // ── CodeClimate format ───────────────────────────────────────────
 
 fn print_audit_codeclimate(result: &AuditResult) -> ExitCode {
+    let value = build_audit_codeclimate(result);
+    report::emit_json(&value, "CodeClimate audit")
+}
+
+fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
     let mut all_issues = Vec::new();
 
     if let Some(ref check) = result.check
@@ -2698,7 +2735,7 @@ fn print_audit_codeclimate(result: &AuditResult) -> ExitCode {
         all_issues.extend(items);
     }
 
-    report::emit_json(&serde_json::Value::Array(all_issues), "CodeClimate audit")
+    serde_json::Value::Array(all_issues)
 }
 
 // ── Entry point ──────────────────────────────────────────────────

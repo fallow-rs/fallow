@@ -1,4 +1,5 @@
 mod badge;
+pub mod ci;
 mod codeclimate;
 mod compact;
 pub mod dupes_grouping;
@@ -203,6 +204,22 @@ pub fn print_results(
             ExitCode::SUCCESS
         }
         OutputFormat::CodeClimate => codeclimate::print_codeclimate(results, ctx.root, ctx.rules),
+        OutputFormat::PrCommentGithub => {
+            let value = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
+            ci::pr_comment::print_pr_comment("dead-code", ci::pr_comment::Provider::Github, &value)
+        }
+        OutputFormat::PrCommentGitlab => {
+            let value = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
+            ci::pr_comment::print_pr_comment("dead-code", ci::pr_comment::Provider::Gitlab, &value)
+        }
+        OutputFormat::ReviewGithub => {
+            let value = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
+            ci::review::print_review_envelope("dead-code", ci::pr_comment::Provider::Github, &value)
+        }
+        OutputFormat::ReviewGitlab => {
+            let value = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
+            ci::review::print_review_envelope("dead-code", ci::pr_comment::Provider::Gitlab, &value)
+        }
         OutputFormat::Badge => {
             eprintln!("Error: badge format is only supported for the health command");
             ExitCode::from(2)
@@ -250,6 +267,22 @@ fn print_grouped_results(
         OutputFormat::Sarif => sarif::print_grouped_sarif(original, ctx.root, ctx.rules, resolver),
         OutputFormat::CodeClimate => {
             codeclimate::print_grouped_codeclimate(original, ctx.root, ctx.rules, resolver)
+        }
+        OutputFormat::PrCommentGithub => {
+            let value = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
+            ci::pr_comment::print_pr_comment("dead-code", ci::pr_comment::Provider::Github, &value)
+        }
+        OutputFormat::PrCommentGitlab => {
+            let value = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
+            ci::pr_comment::print_pr_comment("dead-code", ci::pr_comment::Provider::Gitlab, &value)
+        }
+        OutputFormat::ReviewGithub => {
+            let value = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
+            ci::review::print_review_envelope("dead-code", ci::pr_comment::Provider::Github, &value)
+        }
+        OutputFormat::ReviewGitlab => {
+            let value = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
+            ci::review::print_review_envelope("dead-code", ci::pr_comment::Provider::Gitlab, &value)
         }
         OutputFormat::Badge => {
             eprintln!("Error: badge format is only supported for the health command");
@@ -303,6 +336,22 @@ pub fn print_duplication_report(
             ExitCode::SUCCESS
         }
         OutputFormat::CodeClimate => codeclimate::print_duplication_codeclimate(report, ctx.root),
+        OutputFormat::PrCommentGithub => {
+            let value = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            ci::pr_comment::print_pr_comment("dupes", ci::pr_comment::Provider::Github, &value)
+        }
+        OutputFormat::PrCommentGitlab => {
+            let value = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            ci::pr_comment::print_pr_comment("dupes", ci::pr_comment::Provider::Gitlab, &value)
+        }
+        OutputFormat::ReviewGithub => {
+            let value = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            ci::review::print_review_envelope("dupes", ci::pr_comment::Provider::Github, &value)
+        }
+        OutputFormat::ReviewGitlab => {
+            let value = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            ci::review::print_review_envelope("dupes", ci::pr_comment::Provider::Gitlab, &value)
+        }
         OutputFormat::Badge => {
             eprintln!("Error: badge format is only supported for the health command");
             ExitCode::from(2)
@@ -340,6 +389,22 @@ fn print_grouped_duplication_report(
         OutputFormat::Sarif => sarif::print_grouped_duplication_sarif(report, ctx.root, resolver),
         OutputFormat::CodeClimate => {
             codeclimate::print_grouped_duplication_codeclimate(report, ctx.root, resolver)
+        }
+        OutputFormat::PrCommentGithub => {
+            let value = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            ci::pr_comment::print_pr_comment("dupes", ci::pr_comment::Provider::Github, &value)
+        }
+        OutputFormat::PrCommentGitlab => {
+            let value = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            ci::pr_comment::print_pr_comment("dupes", ci::pr_comment::Provider::Gitlab, &value)
+        }
+        OutputFormat::ReviewGithub => {
+            let value = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            ci::review::print_review_envelope("dupes", ci::pr_comment::Provider::Github, &value)
+        }
+        OutputFormat::ReviewGitlab => {
+            let value = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            ci::review::print_review_envelope("dupes", ci::pr_comment::Provider::Gitlab, &value)
         }
         OutputFormat::Compact => {
             compact::print_duplication_compact(report, ctx.root);
@@ -447,6 +512,22 @@ pub fn print_health_report(
             }
             None => codeclimate::print_health_codeclimate(report, ctx.root),
         },
+        OutputFormat::PrCommentGithub => {
+            let value = codeclimate::build_health_codeclimate(report, ctx.root);
+            ci::pr_comment::print_pr_comment("health", ci::pr_comment::Provider::Github, &value)
+        }
+        OutputFormat::PrCommentGitlab => {
+            let value = codeclimate::build_health_codeclimate(report, ctx.root);
+            ci::pr_comment::print_pr_comment("health", ci::pr_comment::Provider::Gitlab, &value)
+        }
+        OutputFormat::ReviewGithub => {
+            let value = codeclimate::build_health_codeclimate(report, ctx.root);
+            ci::review::print_review_envelope("health", ci::pr_comment::Provider::Github, &value)
+        }
+        OutputFormat::ReviewGitlab => {
+            let value = codeclimate::build_health_codeclimate(report, ctx.root);
+            ci::review::print_review_envelope("health", ci::pr_comment::Provider::Gitlab, &value)
+        }
         OutputFormat::Badge => {
             warn_grouping_unsupported(grouping, "badge");
             badge::print_health_badge(report)

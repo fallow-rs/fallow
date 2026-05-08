@@ -1,6 +1,5 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 485
 expression: redact_sarif_version(&json_str)
 ---
 {
@@ -63,7 +62,7 @@ expression: redact_sarif_version(&json_str)
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#private-type-leaks",
               "defaultConfiguration": {
-                "level": "warning"
+                "level": "none"
               }
             },
             {
@@ -258,6 +257,9 @@ expression: redact_sarif_version(&json_str)
               }
             }
           ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "91a2114ca2762404"
+          },
           "properties": {
             "is_re_export": true
           }

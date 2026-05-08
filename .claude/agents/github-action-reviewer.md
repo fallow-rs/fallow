@@ -28,8 +28,8 @@ Review changes to fallow's GitHub Action. This is a composite action used in CI 
 - `action/scripts/comment.sh` (PR comment posting)
 - `action/scripts/review.sh` (PR review with inline suggestions)
 - `action/scripts/summary.sh` (workflow summary)
-- `action/jq/` (all jq filter scripts)
-- `action/tests/` (jq unit tests)
+- `action/jq/` (remaining summary, annotation, and changed-file jq helpers)
+- `action/tests/` (shell integration tests for remaining jq plus typed PR/review scripts)
 
 ## Veto rights
 

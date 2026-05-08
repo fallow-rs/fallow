@@ -23,31 +23,6 @@ const GITLAB_FILES: &[VendoredFile] = &[
         executable: false,
     },
     VendoredFile {
-        path: "ci/jq/summary-check.jq",
-        content: include_str!("../templates/ci/jq/summary-check.jq"),
-        executable: false,
-    },
-    VendoredFile {
-        path: "ci/jq/summary-health.jq",
-        content: include_str!("../templates/ci/jq/summary-health.jq"),
-        executable: false,
-    },
-    VendoredFile {
-        path: "ci/jq/summary-audit.jq",
-        content: include_str!("../templates/ci/jq/summary-audit.jq"),
-        executable: false,
-    },
-    VendoredFile {
-        path: "ci/jq/summary-combined.jq",
-        content: include_str!("../templates/ci/jq/summary-combined.jq"),
-        executable: false,
-    },
-    VendoredFile {
-        path: "ci/jq/review-comments-dupes.jq",
-        content: include_str!("../templates/ci/jq/review-comments-dupes.jq"),
-        executable: false,
-    },
-    VendoredFile {
         path: "ci/scripts/comment.sh",
         content: include_str!("../templates/ci/scripts/comment.sh"),
         executable: true,
@@ -56,46 +31,6 @@ const GITLAB_FILES: &[VendoredFile] = &[
         path: "ci/scripts/review.sh",
         content: include_str!("../templates/ci/scripts/review.sh"),
         executable: true,
-    },
-    VendoredFile {
-        path: "action/jq/summary-dupes.jq",
-        content: include_str!("../templates/action/jq/summary-dupes.jq"),
-        executable: false,
-    },
-    VendoredFile {
-        path: "action/jq/summary-fix.jq",
-        content: include_str!("../templates/action/jq/summary-fix.jq"),
-        executable: false,
-    },
-    VendoredFile {
-        path: "action/jq/summary-audit.jq",
-        content: include_str!("../templates/action/jq/summary-audit.jq"),
-        executable: false,
-    },
-    VendoredFile {
-        path: "action/jq/review-comments-check.jq",
-        content: include_str!("../templates/action/jq/review-comments-check.jq"),
-        executable: false,
-    },
-    VendoredFile {
-        path: "action/jq/review-comments-health.jq",
-        content: include_str!("../templates/action/jq/review-comments-health.jq"),
-        executable: false,
-    },
-    VendoredFile {
-        path: "action/jq/review-body.jq",
-        content: include_str!("../templates/action/jq/review-body.jq"),
-        executable: false,
-    },
-    VendoredFile {
-        path: "action/jq/merge-comments.jq",
-        content: include_str!("../templates/action/jq/merge-comments.jq"),
-        executable: false,
-    },
-    VendoredFile {
-        path: "action/jq/filter-changed.jq",
-        content: include_str!("../templates/action/jq/filter-changed.jq"),
-        executable: false,
     },
 ];
 
@@ -187,11 +122,6 @@ mod tests {
         assert!(dir.path().join("ci/gitlab-ci.yml").is_file());
         assert!(dir.path().join("ci/scripts/comment.sh").is_file());
         assert!(dir.path().join("ci/scripts/review.sh").is_file());
-        assert!(
-            dir.path()
-                .join("action/jq/review-comments-check.jq")
-                .is_file()
-        );
     }
 
     #[test]
@@ -241,7 +171,7 @@ mod tests {
     // surfaces when a real GitLab pipeline runs against the vendored bundle.
     #[test]
     fn gitlab_ci_template_for_loops_match_vendored_files() {
-        let prefixes = ["ci/jq/", "action/jq/", "ci/scripts/"];
+        let prefixes = ["ci/scripts/"];
         let lines: Vec<&str> = GITLAB_TEMPLATE.lines().collect();
         let mut referenced: Vec<String> = Vec::new();
         for (idx, line) in lines.iter().enumerate() {

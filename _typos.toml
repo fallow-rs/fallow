@@ -15,6 +15,7 @@ fpr = "fpr"
 
 [default.extend-words]
 ba = "ba"
+daa = "daa"
 ist = "ist"
 Informations = "Informations"
 Konfiguration = "Konfiguration"

@@ -219,9 +219,16 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     let elapsed = start.elapsed();
 
     // Badge format is health-only
-    if matches!(opts.output, OutputFormat::Badge) {
+    if matches!(
+        opts.output,
+        OutputFormat::PrCommentGithub
+            | OutputFormat::PrCommentGitlab
+            | OutputFormat::ReviewGithub
+            | OutputFormat::ReviewGitlab
+            | OutputFormat::Badge
+    ) {
         return emit_error(
-            "badge format is only available for the health command",
+            "flags supports human, json, compact, sarif, markdown, and codeclimate output",
             2,
             opts.output,
         );
@@ -247,7 +254,11 @@ fn print_flags_result(
         OutputFormat::Sarif => print_flags_sarif(flags, config),
         OutputFormat::Markdown => print_flags_markdown(flags, config),
         OutputFormat::CodeClimate => print_flags_codeclimate(flags, config),
-        OutputFormat::Badge => unreachable!("handled above"),
+        OutputFormat::PrCommentGithub
+        | OutputFormat::PrCommentGitlab
+        | OutputFormat::ReviewGithub
+        | OutputFormat::ReviewGitlab
+        | OutputFormat::Badge => unreachable!("handled above"),
     }
 }
 

@@ -18,6 +18,14 @@ pub enum OutputFormat {
     ///
     /// CLI aliases: `codeclimate`, `gitlab-codequality`, `gitlab-code-quality`.
     CodeClimate,
+    /// GitHub-flavored sticky PR comment markdown.
+    PrCommentGithub,
+    /// GitLab-flavored sticky MR comment markdown.
+    PrCommentGitlab,
+    /// GitHub PR review JSON envelope.
+    ReviewGithub,
+    /// GitLab MR review JSON envelope.
+    ReviewGitlab,
     /// Shields.io-compatible SVG badge (health command only).
     Badge,
 }
@@ -44,6 +52,22 @@ mod tests {
             OutputFormat::CodeClimate,
             OutputFormat::CodeClimate
         ));
+        assert!(matches!(
+            OutputFormat::PrCommentGithub,
+            OutputFormat::PrCommentGithub
+        ));
+        assert!(matches!(
+            OutputFormat::PrCommentGitlab,
+            OutputFormat::PrCommentGitlab
+        ));
+        assert!(matches!(
+            OutputFormat::ReviewGithub,
+            OutputFormat::ReviewGithub
+        ));
+        assert!(matches!(
+            OutputFormat::ReviewGitlab,
+            OutputFormat::ReviewGitlab
+        ));
         assert!(matches!(OutputFormat::Badge, OutputFormat::Badge));
     }
 
@@ -62,6 +86,14 @@ mod tests {
         assert_eq!(markdown, "Markdown");
         let codeclimate = format!("{:?}", OutputFormat::CodeClimate);
         assert_eq!(codeclimate, "CodeClimate");
+        let pr_comment_github = format!("{:?}", OutputFormat::PrCommentGithub);
+        assert_eq!(pr_comment_github, "PrCommentGithub");
+        let pr_comment_gitlab = format!("{:?}", OutputFormat::PrCommentGitlab);
+        assert_eq!(pr_comment_gitlab, "PrCommentGitlab");
+        let review_github = format!("{:?}", OutputFormat::ReviewGithub);
+        assert_eq!(review_github, "ReviewGithub");
+        let review_gitlab = format!("{:?}", OutputFormat::ReviewGitlab);
+        assert_eq!(review_gitlab, "ReviewGitlab");
         let badge = format!("{:?}", OutputFormat::Badge);
         assert_eq!(badge, "Badge");
     }
@@ -88,6 +120,10 @@ mod tests {
             OutputFormat::Compact,
             OutputFormat::Markdown,
             OutputFormat::CodeClimate,
+            OutputFormat::PrCommentGithub,
+            OutputFormat::PrCommentGitlab,
+            OutputFormat::ReviewGithub,
+            OutputFormat::ReviewGitlab,
             OutputFormat::Badge,
         ];
         for variant in variants {
@@ -128,6 +164,10 @@ mod tests {
             OutputFormat::Compact,
             OutputFormat::Markdown,
             OutputFormat::CodeClimate,
+            OutputFormat::PrCommentGithub,
+            OutputFormat::PrCommentGitlab,
+            OutputFormat::ReviewGithub,
+            OutputFormat::ReviewGitlab,
             OutputFormat::Badge,
         ]
         .iter()

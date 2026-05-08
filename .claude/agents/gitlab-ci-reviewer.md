@@ -25,8 +25,8 @@ Review changes to fallow's GitLab CI integration. This is an includable CI templ
 - `ci/gitlab-ci.yml` (template definition)
 - `ci/scripts/comment.sh` (MR comment posting)
 - `ci/scripts/review.sh` (MR inline review discussions)
-- `ci/jq/` (all jq filter scripts)
-- `ci/tests/` (jq unit tests)
+- `ci/jq/` (remaining GitLab summary jq helpers)
+- `ci/tests/` (shell integration tests for remaining jq plus typed MR/review scripts)
 
 ## Veto rights
 

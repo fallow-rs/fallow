@@ -499,7 +499,13 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
 fn print_dupes_performance(result: &DupesResult, output: OutputFormat) {
     if !matches!(
         output,
-        OutputFormat::Human | OutputFormat::Compact | OutputFormat::Markdown
+        OutputFormat::Human
+            | OutputFormat::Compact
+            | OutputFormat::Markdown
+            | OutputFormat::PrCommentGithub
+            | OutputFormat::PrCommentGitlab
+            | OutputFormat::ReviewGithub
+            | OutputFormat::ReviewGitlab
     ) {
         return;
     }
@@ -571,7 +577,12 @@ pub fn print_default_ignore_note(result: &DupesResult, quiet: bool) {
     if quiet
         || !matches!(
             result.config.output,
-            OutputFormat::Human | OutputFormat::Markdown
+            OutputFormat::Human
+                | OutputFormat::Markdown
+                | OutputFormat::PrCommentGithub
+                | OutputFormat::PrCommentGitlab
+                | OutputFormat::ReviewGithub
+                | OutputFormat::ReviewGitlab
         )
     {
         return;

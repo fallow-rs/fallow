@@ -7,6 +7,10 @@ use fallow_cli::report::{
     build_duplication_markdown, build_grouped_duplication_json, build_health_codeclimate,
     build_health_json, build_health_markdown, build_health_sarif, build_json, build_markdown,
     build_sarif,
+    ci::{
+        pr_comment::{Provider, issues_from_codeclimate, render_pr_comment},
+        review::render_review_envelope,
+    },
 };
 use fallow_config::RulesConfig;
 use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
@@ -1366,6 +1370,54 @@ fn codeclimate_workspace_dep_snapshot() {
     let cc = build_codeclimate(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_workspace_deps", json_str);
+}
+
+// ── PR/MR CI renderer snapshots ─────────────────────────────────
+
+#[test]
+fn pr_comment_github_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = sample_results(&root);
+    let codeclimate = build_codeclimate(&results, &root, &RulesConfig::default());
+    let issues = issues_from_codeclimate(&codeclimate);
+    let output = render_pr_comment("check", Provider::Github, &issues);
+
+    insta::assert_snapshot!("pr_comment_github", output);
+}
+
+#[test]
+fn pr_comment_gitlab_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = sample_results(&root);
+    let codeclimate = build_codeclimate(&results, &root, &RulesConfig::default());
+    let issues = issues_from_codeclimate(&codeclimate);
+    let output = render_pr_comment("check", Provider::Gitlab, &issues);
+
+    insta::assert_snapshot!("pr_comment_gitlab", output);
+}
+
+#[test]
+fn review_github_envelope_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = sample_results(&root);
+    let codeclimate = build_codeclimate(&results, &root, &RulesConfig::default());
+    let issues = issues_from_codeclimate(&codeclimate);
+    let envelope = render_review_envelope("check", Provider::Github, &issues);
+    let json_str = serde_json::to_string_pretty(&envelope).expect("should serialize");
+
+    insta::assert_snapshot!("review_github_envelope", json_str);
+}
+
+#[test]
+fn review_gitlab_envelope_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = sample_results(&root);
+    let codeclimate = build_codeclimate(&results, &root, &RulesConfig::default());
+    let issues = issues_from_codeclimate(&codeclimate);
+    let envelope = render_review_envelope("check", Provider::Gitlab, &issues);
+    let json_str = serde_json::to_string_pretty(&envelope).expect("should serialize");
+
+    insta::assert_snapshot!("review_gitlab_envelope", json_str);
 }
 
 // ── Cross-format parity: circular deps ──────────────────────────

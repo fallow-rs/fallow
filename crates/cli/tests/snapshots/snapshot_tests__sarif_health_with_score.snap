@@ -1,6 +1,5 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 2148
 expression: redact_health_sarif_version(&json_str)
 ---
 {
@@ -192,7 +191,10 @@ expression: redact_health_sarif_version(&json_str)
                 }
               }
             }
-          ]
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "c3976b43718b2197"
+          }
         }
       ]
     }

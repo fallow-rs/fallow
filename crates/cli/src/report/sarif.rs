@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use fallow_config::{RulesConfig, Severity};
@@ -8,7 +8,9 @@ use fallow_core::results::{
     StaleSuppression, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency, UnresolvedImport,
     UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
 };
+use rustc_hash::FxHashMap;
 
+use super::ci::{fingerprint, severity};
 use super::grouping::{self, OwnershipResolver};
 use super::{emit_json, relative_uri};
 use crate::explain;
@@ -20,13 +22,42 @@ struct SarifFields {
     message: String,
     uri: String,
     region: Option<(u32, u32)>,
+    source_path: Option<PathBuf>,
     properties: Option<serde_json::Value>,
 }
 
-const fn severity_to_sarif_level(s: Severity) -> &'static str {
+#[derive(Default)]
+struct SourceSnippetCache {
+    files: FxHashMap<PathBuf, Vec<String>>,
+}
+
+impl SourceSnippetCache {
+    fn line(&mut self, path: &Path, line: u32) -> Option<String> {
+        if line == 0 {
+            return None;
+        }
+        if !self.files.contains_key(path) {
+            let lines = std::fs::read_to_string(path)
+                .ok()
+                .map(|source| source.lines().map(str::to_owned).collect())
+                .unwrap_or_default();
+            self.files.insert(path.to_path_buf(), lines);
+        }
+        self.files
+            .get(path)
+            .and_then(|lines| lines.get(line.saturating_sub(1) as usize))
+            .cloned()
+    }
+}
+
+fn severity_to_sarif_level(s: Severity) -> &'static str {
+    severity::sarif_level(s)
+}
+
+fn configured_sarif_level(s: Severity) -> &'static str {
     match s {
-        Severity::Error => "error",
-        Severity::Warn | Severity::Off => "warning",
+        Severity::Error | Severity::Warn => severity_to_sarif_level(s),
+        Severity::Off => "none",
     }
 }
 
@@ -41,6 +72,17 @@ fn sarif_result(
     uri: &str,
     region: Option<(u32, u32)>,
 ) -> serde_json::Value {
+    sarif_result_with_snippet(rule_id, level, message, uri, region, None)
+}
+
+fn sarif_result_with_snippet(
+    rule_id: &str,
+    level: &str,
+    message: &str,
+    uri: &str,
+    region: Option<(u32, u32)>,
+    snippet: Option<&str>,
+) -> serde_json::Value {
     let mut physical_location = serde_json::json!({
         "artifactLocation": { "uri": uri }
     });
@@ -50,11 +92,23 @@ fn sarif_result(
             "startColumn": col
         });
     }
+    let line = region.map_or_else(String::new, |(line, _)| line.to_string());
+    let col = region.map_or_else(String::new, |(_, col)| col.to_string());
+    let normalized_snippet = snippet
+        .map(fingerprint::normalize_snippet)
+        .filter(|snippet| !snippet.is_empty());
+    let partial_fingerprint = normalized_snippet.as_ref().map_or_else(
+        || fingerprint::fingerprint_hash(&[rule_id, uri, &line, &col]),
+        |snippet| fingerprint::finding_fingerprint(rule_id, uri, snippet),
+    );
     serde_json::json!({
         "ruleId": rule_id,
         "level": level,
         "message": { "text": message },
-        "locations": [{ "physicalLocation": physical_location }]
+        "locations": [{ "physicalLocation": physical_location }],
+        "partialFingerprints": {
+            fingerprint::FINGERPRINT_KEY: partial_fingerprint
+        }
     })
 }
 
@@ -62,16 +116,23 @@ fn sarif_result(
 fn push_sarif_results<T>(
     sarif_results: &mut Vec<serde_json::Value>,
     items: &[T],
-    extract: impl Fn(&T) -> SarifFields,
+    snippets: &mut SourceSnippetCache,
+    mut extract: impl FnMut(&T) -> SarifFields,
 ) {
     for item in items {
         let fields = extract(item);
-        let mut result = sarif_result(
+        let source_snippet = fields
+            .source_path
+            .as_deref()
+            .zip(fields.region)
+            .and_then(|(path, (line, _))| snippets.line(path, line));
+        let mut result = sarif_result_with_snippet(
             fields.rule_id,
             fields.level,
             &fields.message,
             &fields.uri,
             fields.region,
+            source_snippet.as_deref(),
         );
         if let Some(props) = fields.properties {
             result["properties"] = props;
@@ -122,6 +183,7 @@ fn sarif_export_fields(
         ),
         uri: relative_uri(&export.path, root),
         region: Some((export.line, export.col + 1)),
+        source_path: Some(export.path.clone()),
         properties: if export.is_re_export {
             Some(serde_json::json!({ "is_re_export": true }))
         } else {
@@ -144,6 +206,7 @@ fn sarif_private_type_leak_fields(
         ),
         uri: relative_uri(&leak.path, root),
         region: Some((leak.line, leak.col + 1)),
+        source_path: Some(leak.path.clone()),
         properties: None,
     }
 }
@@ -180,6 +243,7 @@ fn sarif_dep_fields(
         } else {
             None
         },
+        source_path: (dep.line > 0).then(|| dep.path.clone()),
         properties: None,
     }
 }
@@ -201,6 +265,7 @@ fn sarif_member_fields(
         ),
         uri: relative_uri(&member.path, root),
         region: Some((member.line, member.col + 1)),
+        source_path: Some(member.path.clone()),
         properties: None,
     }
 }
@@ -212,6 +277,7 @@ fn sarif_unused_file_fields(file: &UnusedFile, root: &Path, level: &'static str)
         message: "File is not reachable from any entry point".to_string(),
         uri: relative_uri(&file.path, root),
         region: None,
+        source_path: None,
         properties: None,
     }
 }
@@ -234,6 +300,7 @@ fn sarif_type_only_dep_fields(
         } else {
             None
         },
+        source_path: (dep.line > 0).then(|| dep.path.clone()),
         properties: None,
     }
 }
@@ -256,6 +323,7 @@ fn sarif_test_only_dep_fields(
         } else {
             None
         },
+        source_path: (dep.line > 0).then(|| dep.path.clone()),
         properties: None,
     }
 }
@@ -271,6 +339,7 @@ fn sarif_unresolved_import_fields(
         message: format!("Import '{}' could not be resolved", import.specifier),
         uri: relative_uri(&import.path, root),
         region: Some((import.line, import.col + 1)),
+        source_path: Some(import.path.clone()),
         properties: None,
     }
 }
@@ -286,6 +355,7 @@ fn sarif_circular_dep_fields(
         display_chain.push(first.clone());
     }
     let first_uri = chain.first().map_or_else(String::new, Clone::clone);
+    let first_path = cycle.files.first().cloned();
     SarifFields {
         rule_id: "fallow/circular-dependency",
         level,
@@ -304,6 +374,7 @@ fn sarif_circular_dep_fields(
         } else {
             None
         },
+        source_path: (cycle.line > 0).then_some(first_path).flatten(),
         properties: None,
     }
 }
@@ -328,6 +399,7 @@ fn sarif_boundary_violation_fields(
         } else {
             None
         },
+        source_path: (violation.line > 0).then(|| violation.from_path.clone()),
         properties: None,
     }
 }
@@ -343,6 +415,7 @@ fn sarif_stale_suppression_fields(
         message: suppression.description(),
         uri: relative_uri(&suppression.path, root),
         region: Some((suppression.line, suppression.col + 1)),
+        source_path: Some(suppression.path.clone()),
         properties: None,
     }
 }
@@ -354,18 +427,22 @@ fn push_sarif_unlisted_deps(
     deps: &[UnlistedDependency],
     root: &Path,
     level: &'static str,
+    snippets: &mut SourceSnippetCache,
 ) {
     for dep in deps {
         for site in &dep.imported_from {
-            sarif_results.push(sarif_result(
+            let uri = relative_uri(&site.path, root);
+            let source_snippet = snippets.line(&site.path, site.line);
+            sarif_results.push(sarif_result_with_snippet(
                 "fallow/unlisted-dependency",
                 level,
                 &format!(
                     "Package '{}' is imported but not listed in package.json",
                     dep.package_name
                 ),
-                &relative_uri(&site.path, root),
+                &uri,
                 Some((site.line, site.col + 1)),
+                source_snippet.as_deref(),
             ));
         }
     }
@@ -378,15 +455,19 @@ fn push_sarif_duplicate_exports(
     dups: &[DuplicateExport],
     root: &Path,
     level: &'static str,
+    snippets: &mut SourceSnippetCache,
 ) {
     for dup in dups {
         for loc in &dup.locations {
-            sarif_results.push(sarif_result(
+            let uri = relative_uri(&loc.path, root);
+            let source_snippet = snippets.line(&loc.path, loc.line);
+            sarif_results.push(sarif_result_with_snippet(
                 "fallow/duplicate-export",
                 level,
                 &format!("Export '{}' appears in multiple modules", dup.export_name),
-                &relative_uri(&loc.path, root),
+                &uri,
                 Some((loc.line, loc.col + 1)),
+                source_snippet.as_deref(),
             ));
         }
     }
@@ -394,225 +475,321 @@ fn push_sarif_duplicate_exports(
 
 /// Build the SARIF rules list from the current rules configuration.
 fn build_sarif_rules(rules: &RulesConfig) -> Vec<serde_json::Value> {
-    vec![
-        sarif_rule(
+    [
+        (
             "fallow/unused-file",
             "File is not reachable from any entry point",
-            severity_to_sarif_level(rules.unused_files),
+            rules.unused_files,
         ),
-        sarif_rule(
+        (
             "fallow/unused-export",
             "Export is never imported",
-            severity_to_sarif_level(rules.unused_exports),
+            rules.unused_exports,
         ),
-        sarif_rule(
+        (
             "fallow/unused-type",
             "Type export is never imported",
-            severity_to_sarif_level(rules.unused_types),
+            rules.unused_types,
         ),
-        sarif_rule(
+        (
             "fallow/private-type-leak",
             "Exported signature references a same-file private type",
-            severity_to_sarif_level(rules.private_type_leaks),
+            rules.private_type_leaks,
         ),
-        sarif_rule(
+        (
             "fallow/unused-dependency",
             "Dependency listed but never imported",
-            severity_to_sarif_level(rules.unused_dependencies),
+            rules.unused_dependencies,
         ),
-        sarif_rule(
+        (
             "fallow/unused-dev-dependency",
             "Dev dependency listed but never imported",
-            severity_to_sarif_level(rules.unused_dev_dependencies),
+            rules.unused_dev_dependencies,
         ),
-        sarif_rule(
+        (
             "fallow/unused-optional-dependency",
             "Optional dependency listed but never imported",
-            severity_to_sarif_level(rules.unused_optional_dependencies),
+            rules.unused_optional_dependencies,
         ),
-        sarif_rule(
+        (
             "fallow/type-only-dependency",
             "Production dependency only used via type-only imports",
-            severity_to_sarif_level(rules.type_only_dependencies),
+            rules.type_only_dependencies,
         ),
-        sarif_rule(
+        (
             "fallow/test-only-dependency",
             "Production dependency only imported by test files",
-            severity_to_sarif_level(rules.test_only_dependencies),
+            rules.test_only_dependencies,
         ),
-        sarif_rule(
+        (
             "fallow/unused-enum-member",
             "Enum member is never referenced",
-            severity_to_sarif_level(rules.unused_enum_members),
+            rules.unused_enum_members,
         ),
-        sarif_rule(
+        (
             "fallow/unused-class-member",
             "Class member is never referenced",
-            severity_to_sarif_level(rules.unused_class_members),
+            rules.unused_class_members,
         ),
-        sarif_rule(
+        (
             "fallow/unresolved-import",
             "Import could not be resolved",
-            severity_to_sarif_level(rules.unresolved_imports),
+            rules.unresolved_imports,
         ),
-        sarif_rule(
+        (
             "fallow/unlisted-dependency",
             "Dependency used but not in package.json",
-            severity_to_sarif_level(rules.unlisted_dependencies),
+            rules.unlisted_dependencies,
         ),
-        sarif_rule(
+        (
             "fallow/duplicate-export",
             "Export name appears in multiple modules",
-            severity_to_sarif_level(rules.duplicate_exports),
+            rules.duplicate_exports,
         ),
-        sarif_rule(
+        (
             "fallow/circular-dependency",
             "Circular dependency chain detected",
-            severity_to_sarif_level(rules.circular_dependencies),
+            rules.circular_dependencies,
         ),
-        sarif_rule(
+        (
             "fallow/boundary-violation",
             "Import crosses an architecture boundary",
-            severity_to_sarif_level(rules.boundary_violation),
+            rules.boundary_violation,
         ),
-        sarif_rule(
+        (
             "fallow/stale-suppression",
             "Suppression comment or tag no longer matches any issue",
-            severity_to_sarif_level(rules.stale_suppressions),
+            rules.stale_suppressions,
         ),
     ]
+    .into_iter()
+    .map(|(id, description, rule_severity)| {
+        sarif_rule(id, description, configured_sarif_level(rule_severity))
+    })
+    .collect()
 }
 
 #[must_use]
+#[expect(
+    clippy::too_many_lines,
+    reason = "SARIF builds one flat result list across every analysis family"
+)]
 pub fn build_sarif(
     results: &AnalysisResults,
     root: &Path,
     rules: &RulesConfig,
 ) -> serde_json::Value {
     let mut sarif_results = Vec::new();
-    let lvl_files = severity_to_sarif_level(rules.unused_files);
-    let lvl_exports = severity_to_sarif_level(rules.unused_exports);
-    let lvl_types = severity_to_sarif_level(rules.unused_types);
-    let lvl_private_type_leaks = severity_to_sarif_level(rules.private_type_leaks);
-    let lvl_deps = severity_to_sarif_level(rules.unused_dependencies);
-    let lvl_dev_deps = severity_to_sarif_level(rules.unused_dev_dependencies);
-    let lvl_opt_deps = severity_to_sarif_level(rules.unused_optional_dependencies);
-    let lvl_type_only = severity_to_sarif_level(rules.type_only_dependencies);
-    let lvl_test_only = severity_to_sarif_level(rules.test_only_dependencies);
-    let lvl_enum_members = severity_to_sarif_level(rules.unused_enum_members);
-    let lvl_class_members = severity_to_sarif_level(rules.unused_class_members);
-    let lvl_unresolved = severity_to_sarif_level(rules.unresolved_imports);
-    let lvl_unlisted = severity_to_sarif_level(rules.unlisted_dependencies);
-    let lvl_duplicate = severity_to_sarif_level(rules.duplicate_exports);
-    let lvl_circular = severity_to_sarif_level(rules.circular_dependencies);
-    let lvl_boundary = severity_to_sarif_level(rules.boundary_violation);
-    let lvl_stale = severity_to_sarif_level(rules.stale_suppressions);
+    let mut snippets = SourceSnippetCache::default();
 
-    push_sarif_results(&mut sarif_results, &results.unused_files, |f| {
-        sarif_unused_file_fields(f, root, lvl_files)
-    });
-    push_sarif_results(&mut sarif_results, &results.unused_exports, |e| {
-        sarif_export_fields(
-            e,
-            root,
-            "fallow/unused-export",
-            lvl_exports,
-            "Export",
-            "Re-export",
-        )
-    });
-    push_sarif_results(&mut sarif_results, &results.unused_types, |e| {
-        sarif_export_fields(
-            e,
-            root,
-            "fallow/unused-type",
-            lvl_types,
-            "Type export",
-            "Type re-export",
-        )
-    });
-    push_sarif_results(&mut sarif_results, &results.private_type_leaks, |e| {
-        sarif_private_type_leak_fields(e, root, lvl_private_type_leaks)
-    });
-    push_sarif_results(&mut sarif_results, &results.unused_dependencies, |d| {
-        sarif_dep_fields(
-            d,
-            root,
-            "fallow/unused-dependency",
-            lvl_deps,
-            "dependencies",
-        )
-    });
-    push_sarif_results(&mut sarif_results, &results.unused_dev_dependencies, |d| {
-        sarif_dep_fields(
-            d,
-            root,
-            "fallow/unused-dev-dependency",
-            lvl_dev_deps,
-            "devDependencies",
-        )
-    });
+    push_sarif_results(
+        &mut sarif_results,
+        &results.unused_files,
+        &mut snippets,
+        |f| sarif_unused_file_fields(f, root, severity_to_sarif_level(rules.unused_files)),
+    );
+    push_sarif_results(
+        &mut sarif_results,
+        &results.unused_exports,
+        &mut snippets,
+        |e| {
+            sarif_export_fields(
+                e,
+                root,
+                "fallow/unused-export",
+                severity_to_sarif_level(rules.unused_exports),
+                "Export",
+                "Re-export",
+            )
+        },
+    );
+    push_sarif_results(
+        &mut sarif_results,
+        &results.unused_types,
+        &mut snippets,
+        |e| {
+            sarif_export_fields(
+                e,
+                root,
+                "fallow/unused-type",
+                severity_to_sarif_level(rules.unused_types),
+                "Type export",
+                "Type re-export",
+            )
+        },
+    );
+    push_sarif_results(
+        &mut sarif_results,
+        &results.private_type_leaks,
+        &mut snippets,
+        |e| {
+            sarif_private_type_leak_fields(
+                e,
+                root,
+                severity_to_sarif_level(rules.private_type_leaks),
+            )
+        },
+    );
+    push_sarif_results(
+        &mut sarif_results,
+        &results.unused_dependencies,
+        &mut snippets,
+        |d| {
+            sarif_dep_fields(
+                d,
+                root,
+                "fallow/unused-dependency",
+                severity_to_sarif_level(rules.unused_dependencies),
+                "dependencies",
+            )
+        },
+    );
+    push_sarif_results(
+        &mut sarif_results,
+        &results.unused_dev_dependencies,
+        &mut snippets,
+        |d| {
+            sarif_dep_fields(
+                d,
+                root,
+                "fallow/unused-dev-dependency",
+                severity_to_sarif_level(rules.unused_dev_dependencies),
+                "devDependencies",
+            )
+        },
+    );
     push_sarif_results(
         &mut sarif_results,
         &results.unused_optional_dependencies,
+        &mut snippets,
         |d| {
             sarif_dep_fields(
                 d,
                 root,
                 "fallow/unused-optional-dependency",
-                lvl_opt_deps,
+                severity_to_sarif_level(rules.unused_optional_dependencies),
                 "optionalDependencies",
             )
         },
     );
-    push_sarif_results(&mut sarif_results, &results.type_only_dependencies, |d| {
-        sarif_type_only_dep_fields(d, root, lvl_type_only)
-    });
-    push_sarif_results(&mut sarif_results, &results.test_only_dependencies, |d| {
-        sarif_test_only_dep_fields(d, root, lvl_test_only)
-    });
-    push_sarif_results(&mut sarif_results, &results.unused_enum_members, |m| {
-        sarif_member_fields(
-            m,
-            root,
-            "fallow/unused-enum-member",
-            lvl_enum_members,
-            "Enum",
-        )
-    });
-    push_sarif_results(&mut sarif_results, &results.unused_class_members, |m| {
-        sarif_member_fields(
-            m,
-            root,
-            "fallow/unused-class-member",
-            lvl_class_members,
-            "Class",
-        )
-    });
-    push_sarif_results(&mut sarif_results, &results.unresolved_imports, |i| {
-        sarif_unresolved_import_fields(i, root, lvl_unresolved)
-    });
-    push_sarif_unlisted_deps(
+    push_sarif_results(
         &mut sarif_results,
-        &results.unlisted_dependencies,
-        root,
-        lvl_unlisted,
+        &results.type_only_dependencies,
+        &mut snippets,
+        |d| {
+            sarif_type_only_dep_fields(
+                d,
+                root,
+                severity_to_sarif_level(rules.type_only_dependencies),
+            )
+        },
     );
-    push_sarif_duplicate_exports(
+    push_sarif_results(
         &mut sarif_results,
-        &results.duplicate_exports,
-        root,
-        lvl_duplicate,
+        &results.test_only_dependencies,
+        &mut snippets,
+        |d| {
+            sarif_test_only_dep_fields(
+                d,
+                root,
+                severity_to_sarif_level(rules.test_only_dependencies),
+            )
+        },
     );
-    push_sarif_results(&mut sarif_results, &results.circular_dependencies, |c| {
-        sarif_circular_dep_fields(c, root, lvl_circular)
-    });
-    push_sarif_results(&mut sarif_results, &results.boundary_violations, |v| {
-        sarif_boundary_violation_fields(v, root, lvl_boundary)
-    });
-    push_sarif_results(&mut sarif_results, &results.stale_suppressions, |s| {
-        sarif_stale_suppression_fields(s, root, lvl_stale)
-    });
+    push_sarif_results(
+        &mut sarif_results,
+        &results.unused_enum_members,
+        &mut snippets,
+        |m| {
+            sarif_member_fields(
+                m,
+                root,
+                "fallow/unused-enum-member",
+                severity_to_sarif_level(rules.unused_enum_members),
+                "Enum",
+            )
+        },
+    );
+    push_sarif_results(
+        &mut sarif_results,
+        &results.unused_class_members,
+        &mut snippets,
+        |m| {
+            sarif_member_fields(
+                m,
+                root,
+                "fallow/unused-class-member",
+                severity_to_sarif_level(rules.unused_class_members),
+                "Class",
+            )
+        },
+    );
+    push_sarif_results(
+        &mut sarif_results,
+        &results.unresolved_imports,
+        &mut snippets,
+        |i| {
+            sarif_unresolved_import_fields(
+                i,
+                root,
+                severity_to_sarif_level(rules.unresolved_imports),
+            )
+        },
+    );
+    if !results.unlisted_dependencies.is_empty() {
+        push_sarif_unlisted_deps(
+            &mut sarif_results,
+            &results.unlisted_dependencies,
+            root,
+            severity_to_sarif_level(rules.unlisted_dependencies),
+            &mut snippets,
+        );
+    }
+    if !results.duplicate_exports.is_empty() {
+        push_sarif_duplicate_exports(
+            &mut sarif_results,
+            &results.duplicate_exports,
+            root,
+            severity_to_sarif_level(rules.duplicate_exports),
+            &mut snippets,
+        );
+    }
+    push_sarif_results(
+        &mut sarif_results,
+        &results.circular_dependencies,
+        &mut snippets,
+        |c| {
+            sarif_circular_dep_fields(
+                c,
+                root,
+                severity_to_sarif_level(rules.circular_dependencies),
+            )
+        },
+    );
+    push_sarif_results(
+        &mut sarif_results,
+        &results.boundary_violations,
+        &mut snippets,
+        |v| {
+            sarif_boundary_violation_fields(
+                v,
+                root,
+                severity_to_sarif_level(rules.boundary_violation),
+            )
+        },
+    );
+    push_sarif_results(
+        &mut sarif_results,
+        &results.stale_suppressions,
+        &mut snippets,
+        |s| {
+            sarif_stale_suppression_fields(
+                s,
+                root,
+                severity_to_sarif_level(rules.stale_suppressions),
+            )
+        },
+    );
 
     serde_json::json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
@@ -686,10 +863,13 @@ pub(super) fn print_grouped_sarif(
 )]
 pub(super) fn print_duplication_sarif(report: &DuplicationReport, root: &Path) -> ExitCode {
     let mut sarif_results = Vec::new();
+    let mut snippets = SourceSnippetCache::default();
 
     for (i, group) in report.clone_groups.iter().enumerate() {
         for instance in &group.instances {
-            sarif_results.push(sarif_result(
+            let uri = relative_uri(&instance.file, root);
+            let source_snippet = snippets.line(&instance.file, instance.start_line as u32);
+            sarif_results.push(sarif_result_with_snippet(
                 "fallow/code-duplication",
                 "warning",
                 &format!(
@@ -698,8 +878,9 @@ pub(super) fn print_duplication_sarif(report: &DuplicationReport, root: &Path) -
                     group.line_count,
                     group.instances.len()
                 ),
-                &relative_uri(&instance.file, root),
+                &uri,
                 Some((instance.start_line as u32, (instance.start_col + 1) as u32)),
+                source_snippet.as_deref(),
             ));
         }
     }
@@ -743,6 +924,7 @@ pub(super) fn print_grouped_duplication_sarif(
     resolver: &OwnershipResolver,
 ) -> ExitCode {
     let mut sarif_results = Vec::new();
+    let mut snippets = SourceSnippetCache::default();
 
     for (i, group) in report.clone_groups.iter().enumerate() {
         // Compute the group's primary owner once. Every result emitted for
@@ -750,7 +932,9 @@ pub(super) fn print_grouped_duplication_sarif(
         // owner, not the per-instance owner).
         let primary_owner = super::dupes_grouping::largest_owner(group, root, resolver);
         for instance in &group.instances {
-            let mut result = sarif_result(
+            let uri = relative_uri(&instance.file, root);
+            let source_snippet = snippets.line(&instance.file, instance.start_line as u32);
+            let mut result = sarif_result_with_snippet(
                 "fallow/code-duplication",
                 "warning",
                 &format!(
@@ -759,8 +943,9 @@ pub(super) fn print_grouped_duplication_sarif(
                     group.line_count,
                     group.instances.len()
                 ),
-                &relative_uri(&instance.file, root),
+                &uri,
                 Some((instance.start_line as u32, (instance.start_col + 1) as u32)),
+                source_snippet.as_deref(),
             );
             let props = result
                 .as_object_mut()
@@ -814,6 +999,7 @@ pub fn build_health_sarif(
     use crate::health_types::ExceededThreshold;
 
     let mut sarif_results = Vec::new();
+    let mut snippets = SourceSnippetCache::default();
 
     for finding in &report.findings {
         let uri = relative_uri(&finding.path, root);
@@ -874,17 +1060,19 @@ pub fn build_health_sarif(
             crate::health_types::FindingSeverity::High => "warning",
             crate::health_types::FindingSeverity::Moderate => "note",
         };
-        sarif_results.push(sarif_result(
+        let source_snippet = snippets.line(&finding.path, finding.line);
+        sarif_results.push(sarif_result_with_snippet(
             rule_id,
             level,
             &message,
             &uri,
             Some((finding.line, finding.col + 1)),
+            source_snippet.as_deref(),
         ));
     }
 
     if let Some(ref production) = report.runtime_coverage {
-        append_runtime_coverage_sarif_results(&mut sarif_results, production, root);
+        append_runtime_coverage_sarif_results(&mut sarif_results, production, root, &mut snippets);
     }
 
     // Refactoring targets as SARIF results (warning level — advisory recommendations)
@@ -935,12 +1123,14 @@ pub fn build_health_sarif(
                 "Export '{}' is runtime-reachable but never referenced by test-reachable modules",
                 item.export_name
             );
-            sarif_results.push(sarif_result(
+            let source_snippet = snippets.line(&item.path, item.line);
+            sarif_results.push(sarif_result_with_snippet(
                 "fallow/untested-export",
                 "warning",
                 &message,
                 &uri,
                 Some((item.line, item.col + 1)),
+                source_snippet.as_deref(),
             ));
         }
     }
@@ -1029,6 +1219,7 @@ fn append_runtime_coverage_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
     production: &crate::health_types::RuntimeCoverageReport,
     root: &Path,
+    snippets: &mut SourceSnippetCache,
 ) {
     for finding in &production.findings {
         let uri = relative_uri(&finding.path, root);
@@ -1061,12 +1252,14 @@ fn append_runtime_coverage_sarif_results(
             finding.verdict.human_label(),
             invocations_hint,
         );
-        sarif_results.push(sarif_result(
+        let source_snippet = snippets.line(&finding.path, finding.line);
+        sarif_results.push(sarif_result_with_snippet(
             rule_id,
             level,
             &message,
             &uri,
             Some((finding.line, 1)),
+            source_snippet.as_deref(),
         ));
     }
 }
@@ -1666,8 +1859,9 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "internal error: entered unreachable code")]
     fn severity_to_sarif_level_off() {
-        assert_eq!(severity_to_sarif_level(Severity::Off), "warning");
+        let _ = severity_to_sarif_level(Severity::Off);
     }
 
     // ── Re-export properties ──
@@ -2034,6 +2228,28 @@ mod tests {
         let region = &result["locations"][0]["physicalLocation"]["region"];
         assert_eq!(region["startLine"], 10);
         assert_eq!(region["startColumn"], 5);
+    }
+
+    #[test]
+    fn sarif_partial_fingerprint_ignores_rendered_message() {
+        let a = sarif_result(
+            "rule/test",
+            "error",
+            "first message",
+            "src/file.ts",
+            Some((10, 5)),
+        );
+        let b = sarif_result(
+            "rule/test",
+            "error",
+            "rewritten message",
+            "src/file.ts",
+            Some((10, 5)),
+        );
+        assert_eq!(
+            a["partialFingerprints"][fingerprint::FINGERPRINT_KEY],
+            b["partialFingerprints"][fingerprint::FINGERPRINT_KEY]
+        );
     }
 
     // ── Health SARIF refactoring targets ──

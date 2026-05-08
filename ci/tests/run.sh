@@ -581,215 +581,6 @@ OUT=$(echo '{"fixes":[],"dry_run":true}' | jq -r -f "$SHARED_JQ_DIR/summary-fix.
 assert_contains "$OUT" "No fixable issues" "empty fix: no fixable issues"
 
 # =========================================================================
-# GitLab review comments (dupes variant with GitLab URLs)
-# =========================================================================
-
-echo ""
-echo "=== GitLab Review comment scripts ==="
-
-export PREFIX="website/" MAX=50 FALLOW_ROOT="website" CI_PROJECT_URL="https://gitlab.com/test/repo" CI_COMMIT_SHA="abc123"
-
-echo "  review-comments-dupes.jq (GitLab):"
-OUT=$(jq -f "$CI_JQ_DIR/review-comments-dupes.jq" "$FIXTURES/dupes.json" 2>&1)
-assert_valid_json "$OUT" "produces valid JSON"
-assert_contains "$OUT" "duplication" "mentions duplication"
-assert_contains "$OUT" "gitlab.com" "has GitLab links (not GitHub)"
-assert_not_contains "$OUT" "github.com" "no GitHub links"
-assert_contains "$OUT" "View duplicated code" "includes code fragment"
-
-# Deep paths in "Also found in:" cross-refs: display rel_path-truncated, URL keeps full path
-DEEP_FIXTURE_GL=$(mktemp)
-cat > "$DEEP_FIXTURE_GL" <<'JSON'
-{"clone_families":[{"files":["apps/web/src/services/billing/calculator.ts","apps/api/src/services/billing/calculator.ts"],"total_duplicated_lines":10,"total_duplicated_tokens":50,"suggestions":[],"groups":[{"token_count":50,"line_count":10,"instances":[{"file":"apps/web/src/services/billing/calculator.ts","start_line":5,"end_line":15,"start_col":0,"end_col":0,"fragment":"stub"},{"file":"apps/api/src/services/billing/calculator.ts","start_line":8,"end_line":18,"start_col":0,"end_col":0,"fragment":"stub"}]}]}],"clone_groups":[],"stats":{"clone_groups":1,"clone_instances":2,"files_with_clones":2}}
-JSON
-OUT_DEEP_REVIEW_GL=$(PREFIX="" FALLOW_ROOT="" jq -f "$CI_JQ_DIR/review-comments-dupes.jq" "$DEEP_FIXTURE_GL" 2>&1)
-rm -f "$DEEP_FIXTURE_GL"
-# URL keeps full path; rel_path here is identity for relative paths so no display assertion is meaningful
-assert_contains "$OUT_DEEP_REVIEW_GL" "/-/blob/abc123/apps/web/src/services/billing/calculator.ts#L5-15" "review deep-path: URL keeps full path (web)"
-assert_contains "$OUT_DEEP_REVIEW_GL" "/-/blob/abc123/apps/api/src/services/billing/calculator.ts#L8-18" "review deep-path: URL keeps full path (api)"
-
-# =========================================================================
-# Shared review comment scripts (from action/jq/)
-# =========================================================================
-
-echo ""
-echo "=== Shared Review comment scripts (from action/jq/) ==="
-
-# Re-export env vars for shared jq scripts (they use GH_REPO etc. but we test with GitLab env)
-export GH_REPO="" PR_NUMBER="" PR_HEAD_SHA=""
-
-echo "  review-comments-check.jq:"
-OUT=$(jq -f "$SHARED_JQ_DIR/review-comments-check.jq" "$FIXTURES/check.json" 2>&1)
-assert_valid_json "$OUT" "produces valid JSON"
-assert_contains "$OUT" "Unused" "contains unused findings"
-assert_contains "$OUT" "@public" "mentions @public JSDoc tag"
-assert_contains "$OUT" "docs.fallow.tools" "has docs links"
-assert_contains "$OUT" "Configure or suppress" "has suppress link"
-assert_contains "$OUT" "imported in another workspace" "dependency comment includes workspace context"
-assert_contains "$OUT" "Move this dependency to the workspace that imports it" "dependency comment avoids unsafe remove hint"
-
-OUT_CLEAN=$(jq -f "$SHARED_JQ_DIR/review-comments-check.jq" "$FIXTURES/check-clean.json" 2>&1)
-assert_json_length "$OUT_CLEAN" "0" "clean: no comments"
-
-echo "  review-comments-health.jq:"
-OUT=$(jq -f "$SHARED_JQ_DIR/review-comments-health.jq" "$FIXTURES/health.json" 2>&1)
-assert_valid_json "$OUT" "produces valid JSON"
-
-OUT_PROD_REVIEW=$(jq '.runtime_coverage = {"verdict":"cold-code-detected","summary":{"functions_tracked":2,"functions_hit":1,"functions_unhit":1,"functions_untracked":0,"coverage_percent":50,"trace_count":1200,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/cold.ts","function":"coldPath","line":14,"verdict":"review_required","invocations":0,"confidence":"medium","evidence":{"static_status":"used","test_coverage":"not_covered","v8_tracking":"tracked"},"actions":[{"description":"Review before deleting."}]}]}' "$FIXTURES/health-clean.json" | jq -f "$SHARED_JQ_DIR/review-comments-health.jq" 2>&1)
-assert_valid_json "$OUT_PROD_REVIEW" "prod review comments: valid JSON"
-assert_contains "$OUT_PROD_REVIEW" "coldPath" "prod review comments: function present"
-
-echo "  review-body.jq:"
-OUT=$(jq -r -f "$SHARED_JQ_DIR/review-body.jq" "$FIXTURES/combined.json" 2>&1)
-assert_valid_markdown "$OUT" "produces output"
-assert_contains "$OUT" "Fallow Review" "has review title"
-assert_contains "$OUT" "fallow-review" "has marker comment"
-assert_contains "$OUT" "Maintainability" "shows metrics"
-
-OUT_REVIEW_PROD=$(jq '.health.runtime_coverage = {"verdict":"hot-path-changes-needed","summary":{"functions_tracked":4,"functions_hit":3,"functions_unhit":0,"functions_untracked":1,"coverage_percent":75,"trace_count":2400,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/lazy.ts","function":"lateBound","line":8,"verdict":"coverage_unavailable","confidence":"none"}],"hot_paths":[{"path":"src/hot.ts","function":"hotPath","line":3,"invocations":250,"percentile":99}]}' "$FIXTURES/combined-clean.json" | jq -r -f "$SHARED_JQ_DIR/review-body.jq" 2>&1)
-assert_contains "$OUT_REVIEW_PROD" "Runtime coverage:" "review body prod: summary line present"
-assert_contains "$OUT_REVIEW_PROD" "hot path" "review body prod: hot path mentioned"
-
-# =========================================================================
-# Suggestion block tests
-# =========================================================================
-
-echo ""
-echo "=== Suggestion blocks ==="
-
-echo "  unused-export type field:"
-OUT=$(jq -f "$SHARED_JQ_DIR/review-comments-check.jq" "$FIXTURES/check.json" 2>&1)
-TYPES=$(echo "$OUT" | jq -r '[.[].type] | unique | join(",")')
-assert_contains "$TYPES" "unused-export" "exports have type field for suggestion enrichment"
-
-echo "  single export keeps type:"
-SINGLE='{"total_issues":1,"unused_files":[],"unused_exports":[{"path":"x.ts","export_name":"foo","is_type_only":false,"line":5,"col":0,"span_start":0,"is_re_export":false}],"unused_types":[],"unused_dependencies":[],"unused_dev_dependencies":[],"unused_optional_dependencies":[],"unused_enum_members":[],"unused_class_members":[],"unresolved_imports":[],"unlisted_dependencies":[],"duplicate_exports":[],"circular_dependencies":[],"boundary_violations":[],"type_only_dependencies":[]}'
-OUT=$(echo "$SINGLE" | jq -f "$SHARED_JQ_DIR/review-comments-check.jq" 2>&1)
-assert_json_length "$OUT" "1" "single export produces 1 comment"
-SINGLE_TYPE=$(echo "$OUT" | jq -r '.[0].type')
-[ "$SINGLE_TYPE" = "unused-export" ] && pass "type is unused-export (not grouped)" || fail "type is unused-export" "got $SINGLE_TYPE"
-
-echo "  grouped exports get different type:"
-MULTI='{"total_issues":2,"unused_files":[],"unused_exports":[{"path":"x.ts","export_name":"foo","is_type_only":false,"line":5,"col":0,"span_start":0,"is_re_export":false},{"path":"x.ts","export_name":"bar","is_type_only":false,"line":10,"col":0,"span_start":0,"is_re_export":false}],"unused_types":[],"unused_dependencies":[],"unused_dev_dependencies":[],"unused_optional_dependencies":[],"unused_enum_members":[],"unused_class_members":[],"unresolved_imports":[],"unlisted_dependencies":[],"duplicate_exports":[],"circular_dependencies":[],"boundary_violations":[],"type_only_dependencies":[]}'
-OUT=$(echo "$MULTI" | jq -f "$SHARED_JQ_DIR/review-comments-check.jq" | jq --argjson max 50 -f "$SHARED_JQ_DIR/merge-comments.jq" 2>&1)
-assert_json_length "$OUT" "1" "2 exports from same file grouped into 1"
-GROUP_TYPE=$(echo "$OUT" | jq -r '.[0].type')
-[ "$GROUP_TYPE" = "unused-export-group" ] && pass "grouped type is unused-export-group" || fail "grouped type" "got $GROUP_TYPE"
-assert_contains "$OUT" "2 unused exports" "grouped comment mentions count"
-
-echo "  boundary violation produces review comment:"
-BV_INPUT='{"total_issues":1,"unused_files":[],"unused_exports":[],"unused_types":[],"unused_dependencies":[],"unused_dev_dependencies":[],"unused_optional_dependencies":[],"unused_enum_members":[],"unused_class_members":[],"unresolved_imports":[],"unlisted_dependencies":[],"duplicate_exports":[],"circular_dependencies":[],"boundary_violations":[{"from_path":"src/ui/App.ts","to_path":"src/db/query.ts","from_zone":"ui","to_zone":"db","import_specifier":"src/db/query.ts","line":5,"col":9}],"type_only_dependencies":[]}'
-OUT=$(echo "$BV_INPUT" | MAX=50 jq -f "$SHARED_JQ_DIR/review-comments-check.jq" 2>&1)
-assert_valid_json "$OUT" "boundary violation JSON valid"
-assert_json_length "$OUT" "1" "boundary violation produces 1 comment"
-assert_contains "$OUT" "Boundary violation" "comment mentions boundary violation"
-assert_contains "$OUT" "ui" "comment mentions from_zone"
-assert_contains "$OUT" "db" "comment mentions to_zone"
-assert_contains "$OUT" "src/ui/App.ts" "comment mentions from_path"
-assert_contains "$OUT" "src/db/query.ts" "comment mentions to_path"
-BV_PATH=$(echo "$OUT" | jq -r '.[0].path')
-[ "$BV_PATH" = "${PREFIX}src/ui/App.ts" ] && pass "path has prefix + from_path" || fail "path has prefix + from_path" "got $BV_PATH"
-BV_LINE=$(echo "$OUT" | jq -r '.[0].line')
-[ "$BV_LINE" = "5" ] && pass "line is 5" || fail "line is 5" "got $BV_LINE"
-
-echo "  boundary violation appears in summary:"
-SUMMARY=$(echo "$BV_INPUT" | jq -rf "$CI_JQ_DIR/summary-check.jq" 2>&1)
-assert_contains "$SUMMARY" "Boundary violations" "summary has boundary section"
-assert_contains "$SUMMARY" "src/ui/App.ts" "summary mentions file"
-assert_contains "$SUMMARY" "ui" "summary mentions zone"
-
-echo "  private type leak appears in summary:"
-PTL_INPUT='{"total_issues":1,"unused_files":[],"unused_exports":[],"unused_types":[],"private_type_leaks":[{"path":"src/Component.ts","export_name":"Component","type_name":"Props","line":17,"col":33,"span_start":207}],"unused_dependencies":[],"unused_dev_dependencies":[],"unused_optional_dependencies":[],"unused_enum_members":[],"unused_class_members":[],"unresolved_imports":[],"unlisted_dependencies":[],"duplicate_exports":[],"circular_dependencies":[],"boundary_violations":[],"type_only_dependencies":[]}'
-SUMMARY=$(echo "$PTL_INPUT" | jq -rf "$CI_JQ_DIR/summary-check.jq" 2>&1)
-assert_contains "$SUMMARY" "Private type leaks" "summary has private type leaks section"
-assert_contains "$SUMMARY" "src/Component.ts" "summary mentions file"
-assert_contains "$SUMMARY" "Component" "summary mentions export name"
-assert_contains "$SUMMARY" "Props" "summary mentions private type name"
-
-echo "  private type leak appears in review comments:"
-OUT=$(echo "$PTL_INPUT" | MAX=50 jq -f "$SHARED_JQ_DIR/review-comments-check.jq" 2>&1)
-assert_valid_json "$OUT" "private type leak JSON valid"
-assert_json_length "$OUT" "1" "private type leak produces 1 comment"
-assert_contains "$OUT" "Private type leak" "comment mentions Private type leak"
-assert_contains "$OUT" "Component" "comment mentions export name"
-assert_contains "$OUT" "Props" "comment mentions private type name"
-
-echo "  review-body clean state:"
-OUT_CLEAN=$(jq -r -f "$SHARED_JQ_DIR/review-body.jq" "$FIXTURES/combined-clean.json" 2>&1)
-assert_contains "$OUT_CLEAN" "No code issues" "clean: no code issues"
-assert_contains "$OUT_CLEAN" "No duplication" "clean: no duplication"
-assert_contains "$OUT_CLEAN" "fallow-review" "clean: has marker"
-
-# =========================================================================
-# Merge script tests (shared from action/jq/)
-# =========================================================================
-
-echo ""
-echo "=== Merge script ==="
-
-echo "  merge-comments.jq:"
-
-# Test grouping unused exports
-EXPORTS='[
-  {"type":"unused-export","export_name":"foo","path":"a.ts","line":1,"body":"unused foo"},
-  {"type":"unused-export","export_name":"bar","path":"a.ts","line":5,"body":"unused bar"},
-  {"type":"unused-export","export_name":"baz","path":"b.ts","line":1,"body":"unused baz"},
-  {"type":"other","path":"c.ts","line":1,"body":"something else"}
-]'
-OUT=$(echo "$EXPORTS" | jq --argjson max 50 -f "$SHARED_JQ_DIR/merge-comments.jq" 2>&1)
-assert_valid_json "$OUT" "valid JSON"
-assert_json_length "$OUT" "3" "groups 2 exports from a.ts into 1 (2 + 1 other = 3)"
-assert_contains "$OUT" "2 unused exports" "grouped comment mentions count"
-assert_contains "$OUT" "foo" "grouped comment lists export names"
-assert_contains "$OUT" "bar" "grouped comment lists export names"
-
-# Test dedup clones
-CLONES='[
-  {"type":"duplication","group_id":"g1","path":"a.ts","line":5,"body":"clone 1 instance 1"},
-  {"type":"duplication","group_id":"g1","path":"a.ts","line":20,"body":"clone 1 instance 2"},
-  {"type":"duplication","group_id":"g2","path":"b.ts","line":10,"body":"clone 2 instance 1"},
-  {"type":"duplication","group_id":"g2","path":"b.ts","line":30,"body":"clone 2 instance 2"}
-]'
-OUT=$(echo "$CLONES" | jq --argjson max 50 -f "$SHARED_JQ_DIR/merge-comments.jq" 2>&1)
-assert_valid_json "$OUT" "valid JSON"
-assert_json_length "$OUT" "2" "deduplicates to 1 per clone group (4 → 2)"
-
-# Test drop refactoring targets
-TARGETS='[
-  {"type":"other","path":"a.ts","line":1,"body":"finding"},
-  {"type":"refactoring-target","path":"a.ts","line":1,"body":"target"}
-]'
-OUT=$(echo "$TARGETS" | jq --argjson max 50 -f "$SHARED_JQ_DIR/merge-comments.jq" 2>&1)
-assert_json_length "$OUT" "1" "drops refactoring targets"
-assert_not_contains "$OUT" "target" "target body is removed"
-
-# Test merge same line
-SAME_LINE='[
-  {"type":"other","path":"a.ts","line":5,"body":"complexity warning"},
-  {"type":"other","path":"a.ts","line":5,"body":"unused export warning"}
-]'
-OUT=$(echo "$SAME_LINE" | jq --argjson max 50 -f "$SHARED_JQ_DIR/merge-comments.jq" 2>&1)
-assert_json_length "$OUT" "1" "merges same-line comments"
-assert_contains "$OUT" "complexity warning" "merged comment has first body"
-assert_contains "$OUT" "unused export warning" "merged comment has second body"
-assert_contains "$OUT" "\\n---\\n" "merged comment has separator"
-
-# Test empty input
-OUT=$(echo '[]' | jq --argjson max 50 -f "$SHARED_JQ_DIR/merge-comments.jq" 2>&1)
-assert_json_length "$OUT" "0" "empty input produces empty output"
-
-# Test max limit
-MANY='[
-  {"type":"other","path":"a.ts","line":1,"body":"1"},
-  {"type":"other","path":"a.ts","line":2,"body":"2"},
-  {"type":"other","path":"a.ts","line":3,"body":"3"},
-  {"type":"other","path":"a.ts","line":4,"body":"4"},
-  {"type":"other","path":"a.ts","line":5,"body":"5"}
-]'
-OUT=$(echo "$MANY" | jq --argjson max 3 -f "$SHARED_JQ_DIR/merge-comments.jq" 2>&1)
-assert_json_length "$OUT" "3" "respects max limit"
-
-# =========================================================================
 # GitLab-specific: no GitHub callouts in any output
 # =========================================================================
 
@@ -805,19 +596,6 @@ for jq_file in "$CI_JQ_DIR"/*.jq; do
     pass "$name has no GitHub callouts"
   fi
 done
-
-echo "  verify GitLab dupes links use CI_PROJECT_URL:"
-if /usr/bin/grep -q 'CI_PROJECT_URL' "$CI_JQ_DIR/review-comments-dupes.jq" 2>/dev/null; then
-  pass "review-comments-dupes.jq uses CI_PROJECT_URL"
-else
-  fail "review-comments-dupes.jq" "missing CI_PROJECT_URL reference"
-fi
-
-if /usr/bin/grep -q 'GH_REPO' "$CI_JQ_DIR/review-comments-dupes.jq" 2>/dev/null; then
-  fail "review-comments-dupes.jq" "still references GH_REPO"
-else
-  pass "review-comments-dupes.jq has no GH_REPO reference"
-fi
 
 # =========================================================================
 # GitLab CI YAML structure tests
@@ -862,16 +640,144 @@ assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "CI_JOB_TOKEN is read-only" "
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "fallow-results" "uses fallow-results marker"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "PUT" "can update existing comment"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "POST" "can create new comment"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "curl_retry" "wraps GitLab API calls with retry"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "rate limit response; retrying" "retries GitLab rate-limit responses"
 
 echo "  review.sh:"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "review-gitlab" "renders typed GitLab review envelope"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "fallow ci reconcile-review" "reconciles resolved discussions"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "--provider gitlab" "uses GitLab reconcile provider"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "discussions" "uses GitLab Discussions API"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "position" "posts with position for inline comments"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "suggestion" "adds suggestion blocks"
-assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "merge-comments" "runs merge pipeline"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "fallow-review" "uses fallow-review marker"
-assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "DELETE" "cleans up previous comments"
-assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "unused-export" "handles unused export suggestions"
-assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "FALLOW_SHARED_JQ_DIR" "can use shared jq scripts"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "fallow-fingerprint" "deduplicates by typed fingerprint"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "curl_retry" "wraps GitLab API calls with retry"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "rate limit response; retrying" "retries GitLab rate-limit responses"
+assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "merge-comments" "does not keep legacy jq merge fallback"
+assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "FALLOW_SHARED_JQ_DIR" "does not use shared jq fallback scripts"
+
+# =========================================================================
+# Typed GitLab script integration tests
+# =========================================================================
+
+echo ""
+echo "=== Typed GitLab script integration ==="
+
+CI_TYPED_WORK=$(mktemp -d)
+CI_TYPED_BIN="$CI_TYPED_WORK/bin"
+CI_TYPED_LOG="$CI_TYPED_WORK/mock.log"
+mkdir -p "$CI_TYPED_BIN"
+
+cat > "$CI_TYPED_BIN/fallow" <<'SH'
+#!/usr/bin/env bash
+printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
+if [ "${1:-}" = "ci" ]; then
+  printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
+  exit 0
+fi
+format=""
+previous=""
+for arg in "$@"; do
+  if [ "$previous" = "--format" ]; then
+    format="$arg"
+    break
+  fi
+  previous="$arg"
+done
+case "$format" in
+  pr-comment-gitlab)
+    printf '<!-- fallow-id: fallow-results -->\n### Fallow smoke\n\nGenerated by fallow.\n'
+    ;;
+  review-gitlab)
+    if [ "${MOCK_ZERO_REVIEW:-}" = "1" ]; then
+      cat <<'JSON'
+{"body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[],"meta":{"schema":"fallow-review-envelope/v1","provider":"gitlab"}}
+JSON
+      exit 0
+    fi
+    cat <<'JSON'
+{"body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[{"body":"**warn** `fallow/smoke`: smoke\n\n<!-- fallow-fingerprint: abc -->","position":{"base_sha":"base","start_sha":"start","head_sha":"head","position_type":"text","old_path":"src/a.ts","new_path":"src/a.ts","new_line":1},"fingerprint":"abc"}],"meta":{"schema":"fallow-review-envelope/v1","provider":"gitlab"}}
+JSON
+    ;;
+  *)
+    printf '{}\n'
+    ;;
+esac
+SH
+chmod +x "$CI_TYPED_BIN/fallow"
+
+cat > "$CI_TYPED_BIN/curl" <<'SH'
+#!/usr/bin/env bash
+printf 'curl %s\n' "$*" >> "$MOCK_LOG"
+last=""
+for arg in "$@"; do
+  last="$arg"
+done
+case "$last" in
+  *"/notes?per_page=100")
+    if [ "${MOCK_EXISTING_REVIEW:-}" = "1" ]; then
+      printf '[{"id":777,"body":"<!-- fallow-review -->"}]\n'
+    else
+      printf '[]\n'
+    fi
+    ;;
+  *"/discussions?per_page=100")
+    printf '[]\n'
+    ;;
+  *"/merge_requests/123")
+    printf '{"diff_refs":{"base_sha":"base","start_sha":"start","head_sha":"head"}}\n'
+    ;;
+  *)
+    printf '{}\n'
+    ;;
+esac
+SH
+chmod +x "$CI_TYPED_BIN/curl"
+
+printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_TYPED_WORK/fallow-analysis-args.sh"
+(
+  cd "$CI_TYPED_WORK"
+  PATH="$CI_TYPED_BIN:$PATH" \
+    MOCK_LOG="$CI_TYPED_LOG" \
+    GITLAB_TOKEN="test" \
+    CI_API_V4_URL="https://gitlab.example/api/v4" \
+    CI_PROJECT_ID="18" \
+    CI_MERGE_REQUEST_IID="123" \
+    FALLOW_COMMAND="check" \
+    bash "$SCRIPTS_DIR/comment.sh" > /dev/null
+  PATH="$CI_TYPED_BIN:$PATH" \
+    MOCK_LOG="$CI_TYPED_LOG" \
+    GITLAB_TOKEN="test" \
+    CI_API_V4_URL="https://gitlab.example/api/v4" \
+    CI_PROJECT_ID="18" \
+    CI_MERGE_REQUEST_IID="123" \
+    CI_COMMIT_SHA="abcdef1234567890" \
+    FALLOW_COMMAND="check" \
+    FALLOW_ROOT="." \
+    MAX_COMMENTS="5" \
+    bash "$SCRIPTS_DIR/review.sh" > /dev/null
+  PATH="$CI_TYPED_BIN:$PATH" \
+    MOCK_LOG="$CI_TYPED_LOG" \
+    MOCK_ZERO_REVIEW="1" \
+    MOCK_EXISTING_REVIEW="1" \
+    GITLAB_TOKEN="test" \
+    CI_API_V4_URL="https://gitlab.example/api/v4" \
+    CI_PROJECT_ID="18" \
+    CI_MERGE_REQUEST_IID="123" \
+    CI_COMMIT_SHA="abcdef1234567890" \
+    FALLOW_COMMAND="check" \
+    FALLOW_ROOT="." \
+    MAX_COMMENTS="5" \
+    bash "$SCRIPTS_DIR/review.sh" > /dev/null
+)
+CI_TYPED_OUT=$(cat "$CI_TYPED_LOG")
+assert_contains "$CI_TYPED_OUT" "--format pr-comment-gitlab" "comment.sh invokes typed MR comment format"
+assert_contains "$CI_TYPED_OUT" "--format review-gitlab" "review.sh invokes typed GitLab review format"
+assert_contains "$CI_TYPED_OUT" "fallow ci reconcile-review --provider gitlab" "review.sh invokes GitLab reconcile command"
+assert_contains "$CI_TYPED_OUT" "merge_requests/123/discussions" "review.sh posts discussion payload"
+assert_contains "$CI_TYPED_OUT" "merge_requests/123/notes/777" "review.sh updates existing body-only review note"
+rm -rf "$CI_TYPED_WORK"
 
 # --- Summary ---
 

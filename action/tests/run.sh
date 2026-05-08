@@ -529,219 +529,6 @@ OUT_PROD_ANN=$(jq '.runtime_coverage = {"verdict":"cold-code-detected","summary"
 assert_contains "$OUT_PROD_ANN" "Runtime coverage" "prod annotation: title present"
 assert_contains "$OUT_PROD_ANN" "coldPath" "prod annotation: function name present"
 
-# --- Review comment jq tests ---
-
-echo ""
-echo "=== Review comment scripts ==="
-
-export PREFIX="website/" MAX=50 FALLOW_ROOT="website" GH_REPO="test/repo" PR_NUMBER=1 PR_HEAD_SHA="abc123"
-
-echo "  review-comments-check.jq:"
-OUT=$(jq -f "$JQ_DIR/review-comments-check.jq" "$FIXTURES/check.json" 2>&1)
-assert_valid_json "$OUT" "produces valid JSON"
-assert_contains "$OUT" "Unused" "contains unused findings"
-assert_contains "$OUT" "@public" "mentions @public JSDoc tag"
-assert_contains "$OUT" "docs.fallow.tools" "has docs links"
-assert_contains "$OUT" "Configure or suppress" "has suppress link"
-assert_contains "$OUT" "imported in another workspace" "dependency comment includes workspace context"
-assert_contains "$OUT" "Move this dependency to the workspace that imports it" "dependency comment avoids unsafe remove hint"
-
-OUT_CLEAN=$(jq -f "$JQ_DIR/review-comments-check.jq" "$FIXTURES/check-clean.json" 2>&1)
-assert_json_length "$OUT_CLEAN" "0" "clean: no comments"
-
-echo "  review-comments-dupes.jq:"
-OUT=$(jq -f "$JQ_DIR/review-comments-dupes.jq" "$FIXTURES/dupes.json" 2>&1)
-assert_valid_json "$OUT" "produces valid JSON"
-assert_contains "$OUT" "duplication" "mentions duplication"
-assert_contains "$OUT" "github.com" "has GitHub links"
-assert_contains "$OUT" "View duplicated code" "includes code fragment"
-
-# Deep paths in "Also found in:" cross-refs: display rel_path-truncated, URL keeps full path
-DEEP_FIXTURE=$(mktemp)
-cat > "$DEEP_FIXTURE" <<'JSON'
-{"clone_families":[{"files":["apps/web/src/services/billing/calculator.ts","apps/api/src/services/billing/calculator.ts"],"total_duplicated_lines":10,"total_duplicated_tokens":50,"suggestions":[],"groups":[{"token_count":50,"line_count":10,"instances":[{"file":"apps/web/src/services/billing/calculator.ts","start_line":5,"end_line":15,"start_col":0,"end_col":0,"fragment":"stub"},{"file":"apps/api/src/services/billing/calculator.ts","start_line":8,"end_line":18,"start_col":0,"end_col":0,"fragment":"stub"}]}]}],"clone_groups":[],"stats":{"clone_groups":1,"clone_instances":2,"files_with_clones":2}}
-JSON
-OUT_DEEP_REVIEW=$(PREFIX="" FALLOW_ROOT="" GH_REPO="fallow-rs/fallow" PR_HEAD_SHA="deadbeef" MAX=10 jq -f "$JQ_DIR/review-comments-dupes.jq" "$DEEP_FIXTURE" 2>&1)
-rm -f "$DEEP_FIXTURE"
-# URL keeps full path including 'apps/web/' prefix; assertion fails if rel_path was applied to URL too.
-# The complex rel_path def in this file is identity for relative paths, so no display-truncation
-# assertion is meaningful here without an absolute-path fixture.
-assert_contains "$OUT_DEEP_REVIEW" "/blob/deadbeef/apps/web/src/services/billing/calculator.ts#L5-L15" "review deep-path: URL keeps full path (web)"
-assert_contains "$OUT_DEEP_REVIEW" "/blob/deadbeef/apps/api/src/services/billing/calculator.ts#L8-L18" "review deep-path: URL keeps full path (api)"
-
-echo "  review-comments-health.jq:"
-OUT=$(jq -f "$JQ_DIR/review-comments-health.jq" "$FIXTURES/health.json" 2>&1)
-assert_valid_json "$OUT" "produces valid JSON"
-assert_contains "$OUT" "critical" "includes severity in review comment"
-assert_contains "$OUT" "parseContentBlocks" "includes function name"
-
-OUT_PROD_REVIEW=$(jq '.runtime_coverage = {"verdict":"cold-code-detected","summary":{"functions_tracked":2,"functions_hit":1,"functions_unhit":1,"functions_untracked":0,"coverage_percent":50,"trace_count":1200,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/cold.ts","function":"coldPath","line":14,"verdict":"review_required","invocations":0,"confidence":"medium","evidence":{"static_status":"used","test_coverage":"not_covered","v8_tracking":"tracked"},"actions":[{"description":"Review before deleting."}]}]}' "$FIXTURES/health-clean.json" | jq -f "$JQ_DIR/review-comments-health.jq" 2>&1)
-assert_valid_json "$OUT_PROD_REVIEW" "prod review comments: valid JSON"
-assert_contains "$OUT_PROD_REVIEW" "coldPath" "prod review comments: function present"
-assert_contains "$OUT_PROD_REVIEW" "review_required" "prod review comments: verdict present"
-
-echo "  review-body.jq:"
-OUT=$(jq -r -f "$JQ_DIR/review-body.jq" "$FIXTURES/combined.json" 2>&1)
-assert_valid_markdown "$OUT" "produces output"
-assert_contains "$OUT" "Fallow Review" "has review title"
-assert_contains "$OUT" "fallow-review" "has marker comment"
-assert_contains "$OUT" "Maintainability" "shows metrics"
-
-OUT_REVIEW_PROD=$(jq '.health.runtime_coverage = {"verdict":"hot-path-changes-needed","summary":{"functions_tracked":4,"functions_hit":3,"functions_unhit":0,"functions_untracked":1,"coverage_percent":75,"trace_count":2400,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/lazy.ts","function":"lateBound","line":8,"verdict":"coverage_unavailable","confidence":"none"}],"hot_paths":[{"path":"src/hot.ts","function":"hotPath","line":3,"invocations":250,"percentile":99}]}' "$FIXTURES/combined-clean.json" | jq -r -f "$JQ_DIR/review-body.jq" 2>&1)
-assert_contains "$OUT_REVIEW_PROD" "Runtime coverage:" "review body prod: summary line present"
-assert_contains "$OUT_REVIEW_PROD" "hot path" "review body prod: hot path mentioned"
-
-# --- Suggestion block tests ---
-
-echo ""
-echo "=== Suggestion blocks ==="
-
-echo "  unused-export type field:"
-OUT=$(jq -f "$JQ_DIR/review-comments-check.jq" "$FIXTURES/check.json" 2>&1)
-TYPES=$(echo "$OUT" | jq -r '[.[].type] | unique | join(",")')
-assert_contains "$TYPES" "unused-export" "exports have type field for suggestion enrichment"
-
-echo "  single export keeps type:"
-SINGLE='{"total_issues":1,"unused_files":[],"unused_exports":[{"path":"x.ts","export_name":"foo","is_type_only":false,"line":5,"col":0,"span_start":0,"is_re_export":false}],"unused_types":[],"unused_dependencies":[],"unused_dev_dependencies":[],"unused_optional_dependencies":[],"unused_enum_members":[],"unused_class_members":[],"unresolved_imports":[],"unlisted_dependencies":[],"duplicate_exports":[],"circular_dependencies":[],"boundary_violations":[],"type_only_dependencies":[]}'
-OUT=$(echo "$SINGLE" | jq -f "$JQ_DIR/review-comments-check.jq" 2>&1)
-assert_json_length "$OUT" "1" "single export produces 1 comment"
-SINGLE_TYPE=$(echo "$OUT" | jq -r '.[0].type')
-[ "$SINGLE_TYPE" = "unused-export" ] && pass "type is unused-export (not grouped)" || fail "type is unused-export" "got $SINGLE_TYPE"
-
-echo "  grouped exports get different type:"
-MULTI='{"total_issues":2,"unused_files":[],"unused_exports":[{"path":"x.ts","export_name":"foo","is_type_only":false,"line":5,"col":0,"span_start":0,"is_re_export":false},{"path":"x.ts","export_name":"bar","is_type_only":false,"line":10,"col":0,"span_start":0,"is_re_export":false}],"unused_types":[],"unused_dependencies":[],"unused_dev_dependencies":[],"unused_optional_dependencies":[],"unused_enum_members":[],"unused_class_members":[],"unresolved_imports":[],"unlisted_dependencies":[],"duplicate_exports":[],"circular_dependencies":[],"boundary_violations":[],"type_only_dependencies":[]}'
-OUT=$(echo "$MULTI" | jq -f "$JQ_DIR/review-comments-check.jq" | jq --argjson max 50 -f "$JQ_DIR/merge-comments.jq" 2>&1)
-assert_json_length "$OUT" "1" "2 exports from same file grouped into 1"
-GROUP_TYPE=$(echo "$OUT" | jq -r '.[0].type')
-[ "$GROUP_TYPE" = "unused-export-group" ] && pass "grouped type is unused-export-group" || fail "grouped type" "got $GROUP_TYPE"
-assert_contains "$OUT" "2 unused exports" "grouped comment mentions count"
-
-echo "  boundary violation produces review comment:"
-BV_INPUT='{"total_issues":1,"unused_files":[],"unused_exports":[],"unused_types":[],"unused_dependencies":[],"unused_dev_dependencies":[],"unused_optional_dependencies":[],"unused_enum_members":[],"unused_class_members":[],"unresolved_imports":[],"unlisted_dependencies":[],"duplicate_exports":[],"circular_dependencies":[],"boundary_violations":[{"from_path":"src/ui/App.ts","to_path":"src/db/query.ts","from_zone":"ui","to_zone":"db","import_specifier":"src/db/query.ts","line":5,"col":9}],"type_only_dependencies":[]}'
-OUT=$(echo "$BV_INPUT" | MAX=50 jq -f "$JQ_DIR/review-comments-check.jq" 2>&1)
-assert_valid_json "$OUT" "boundary violation JSON valid"
-assert_json_length "$OUT" "1" "boundary violation produces 1 comment"
-assert_contains "$OUT" "Boundary violation" "comment mentions boundary violation"
-assert_contains "$OUT" "ui" "comment mentions from_zone"
-assert_contains "$OUT" "db" "comment mentions to_zone"
-assert_contains "$OUT" "src/ui/App.ts" "comment mentions from_path"
-assert_contains "$OUT" "src/db/query.ts" "comment mentions to_path"
-BV_PATH=$(echo "$OUT" | jq -r '.[0].path')
-[ "$BV_PATH" = "${PREFIX}src/ui/App.ts" ] && pass "path has prefix + from_path" || fail "path has prefix + from_path" "got $BV_PATH"
-BV_LINE=$(echo "$OUT" | jq -r '.[0].line')
-[ "$BV_LINE" = "5" ] && pass "line is 5" || fail "line is 5" "got $BV_LINE"
-
-echo "  boundary violation produces annotation:"
-ANN=$(echo "$BV_INPUT" | jq -rf "$JQ_DIR/annotations-check.jq" 2>&1)
-assert_contains "$ANN" "::warning" "annotation is warning level"
-assert_contains "$ANN" "file=src/ui/App.ts" "annotation has correct file"
-assert_contains "$ANN" "line=5" "annotation has correct line"
-assert_contains "$ANN" "Boundary violation" "annotation title"
-assert_contains "$ANN" "zone" "annotation mentions zone"
-
-echo "  boundary violation appears in summary:"
-SUMMARY=$(echo "$BV_INPUT" | jq -rf "$JQ_DIR/summary-check.jq" 2>&1)
-assert_contains "$SUMMARY" "Boundary violations" "summary has boundary section"
-assert_contains "$SUMMARY" "src/ui/App.ts" "summary mentions file"
-assert_contains "$SUMMARY" "ui" "summary mentions zone"
-
-echo "  private type leak appears in review comments:"
-PTL_INPUT='{"total_issues":1,"unused_files":[],"unused_exports":[],"unused_types":[],"private_type_leaks":[{"path":"src/Component.ts","export_name":"Component","type_name":"Props","line":17,"col":33,"span_start":207}],"unused_dependencies":[],"unused_dev_dependencies":[],"unused_optional_dependencies":[],"unused_enum_members":[],"unused_class_members":[],"unresolved_imports":[],"unlisted_dependencies":[],"duplicate_exports":[],"circular_dependencies":[],"boundary_violations":[],"type_only_dependencies":[]}'
-OUT=$(echo "$PTL_INPUT" | MAX=50 jq -f "$JQ_DIR/review-comments-check.jq" 2>&1)
-assert_valid_json "$OUT" "private type leak JSON valid"
-assert_json_length "$OUT" "1" "private type leak produces 1 comment"
-assert_contains "$OUT" "Private type leak" "comment mentions Private type leak"
-assert_contains "$OUT" "Component" "comment mentions export name"
-assert_contains "$OUT" "Props" "comment mentions private type name"
-
-echo "  private type leak appears in annotations:"
-ANN=$(echo "$PTL_INPUT" | jq -rf "$JQ_DIR/annotations-check.jq" 2>&1)
-assert_contains "$ANN" "::warning" "annotation is warning level"
-assert_contains "$ANN" "file=src/Component.ts" "annotation has correct file"
-assert_contains "$ANN" "title=Private type leak" "annotation title"
-assert_contains "$ANN" "Component" "annotation mentions export name"
-assert_contains "$ANN" "Props" "annotation mentions private type name"
-
-echo "  private type leak appears in summary:"
-SUMMARY=$(echo "$PTL_INPUT" | jq -rf "$JQ_DIR/summary-check.jq" 2>&1)
-assert_contains "$SUMMARY" "Private type leaks" "summary has private type leaks section"
-assert_contains "$SUMMARY" "src/Component.ts" "summary mentions file"
-assert_contains "$SUMMARY" "Component" "summary mentions export name"
-assert_contains "$SUMMARY" "Props" "summary mentions private type name"
-
-echo "  review-body clean state:"
-OUT_CLEAN=$(jq -r -f "$JQ_DIR/review-body.jq" "$FIXTURES/combined-clean.json" 2>&1)
-assert_contains "$OUT_CLEAN" "No code issues" "clean: no code issues"
-assert_contains "$OUT_CLEAN" "No duplication" "clean: no duplication"
-assert_contains "$OUT_CLEAN" "fallow-review" "clean: has marker"
-
-# --- Merge script tests ---
-
-echo ""
-echo "=== Merge script ==="
-
-echo "  merge-comments.jq:"
-
-# Test grouping unused exports
-EXPORTS='[
-  {"type":"unused-export","export_name":"foo","path":"a.ts","line":1,"body":"unused foo"},
-  {"type":"unused-export","export_name":"bar","path":"a.ts","line":5,"body":"unused bar"},
-  {"type":"unused-export","export_name":"baz","path":"b.ts","line":1,"body":"unused baz"},
-  {"type":"other","path":"c.ts","line":1,"body":"something else"}
-]'
-OUT=$(echo "$EXPORTS" | jq --argjson max 50 -f "$JQ_DIR/merge-comments.jq" 2>&1)
-assert_valid_json "$OUT" "valid JSON"
-assert_json_length "$OUT" "3" "groups 2 exports from a.ts into 1 (2 + 1 other = 3)"
-assert_contains "$OUT" "2 unused exports" "grouped comment mentions count"
-assert_contains "$OUT" "foo" "grouped comment lists export names"
-assert_contains "$OUT" "bar" "grouped comment lists export names"
-
-# Test dedup clones
-CLONES='[
-  {"type":"duplication","group_id":"g1","path":"a.ts","line":5,"body":"clone 1 instance 1"},
-  {"type":"duplication","group_id":"g1","path":"a.ts","line":20,"body":"clone 1 instance 2"},
-  {"type":"duplication","group_id":"g2","path":"b.ts","line":10,"body":"clone 2 instance 1"},
-  {"type":"duplication","group_id":"g2","path":"b.ts","line":30,"body":"clone 2 instance 2"}
-]'
-OUT=$(echo "$CLONES" | jq --argjson max 50 -f "$JQ_DIR/merge-comments.jq" 2>&1)
-assert_valid_json "$OUT" "valid JSON"
-assert_json_length "$OUT" "2" "deduplicates to 1 per clone group (4 → 2)"
-
-# Test drop refactoring targets
-TARGETS='[
-  {"type":"other","path":"a.ts","line":1,"body":"finding"},
-  {"type":"refactoring-target","path":"a.ts","line":1,"body":"target"}
-]'
-OUT=$(echo "$TARGETS" | jq --argjson max 50 -f "$JQ_DIR/merge-comments.jq" 2>&1)
-assert_json_length "$OUT" "1" "drops refactoring targets"
-assert_not_contains "$OUT" "target" "target body is removed"
-
-# Test merge same line
-SAME_LINE='[
-  {"type":"other","path":"a.ts","line":5,"body":"complexity warning"},
-  {"type":"other","path":"a.ts","line":5,"body":"unused export warning"}
-]'
-OUT=$(echo "$SAME_LINE" | jq --argjson max 50 -f "$JQ_DIR/merge-comments.jq" 2>&1)
-assert_json_length "$OUT" "1" "merges same-line comments"
-assert_contains "$OUT" "complexity warning" "merged comment has first body"
-assert_contains "$OUT" "unused export warning" "merged comment has second body"
-assert_contains "$OUT" "\\n---\\n" "merged comment has separator"
-
-# Test empty input
-OUT=$(echo '[]' | jq --argjson max 50 -f "$JQ_DIR/merge-comments.jq" 2>&1)
-assert_json_length "$OUT" "0" "empty input produces empty output"
-
-# Test max limit
-MANY='[
-  {"type":"other","path":"a.ts","line":1,"body":"1"},
-  {"type":"other","path":"a.ts","line":2,"body":"2"},
-  {"type":"other","path":"a.ts","line":3,"body":"3"},
-  {"type":"other","path":"a.ts","line":4,"body":"4"},
-  {"type":"other","path":"a.ts","line":5,"body":"5"}
-]'
-OUT=$(echo "$MANY" | jq --argjson max 3 -f "$JQ_DIR/merge-comments.jq" 2>&1)
-assert_json_length "$OUT" "3" "respects max limit"
-
 # --- Changed-file filter tests ---
 
 echo ""
@@ -801,6 +588,127 @@ OUT=$(echo "$CD_INPUT" | jq --argjson changed '["src/a.ts"]' -f "$JQ_DIR/filter-
 assert_json_value "$OUT" '.circular_dependencies | length' "1" "keeps cycle if any file changed"
 OUT=$(echo "$CD_INPUT" | jq --argjson changed '["src/c.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
 assert_json_value "$OUT" '.circular_dependencies | length' "0" "removes cycle if no file changed"
+
+# --- Typed Action script integration tests ---
+
+echo ""
+echo "=== Typed Action script integration ==="
+
+ACTION_TYPED_WORK=$(mktemp -d)
+ACTION_TYPED_BIN="$ACTION_TYPED_WORK/bin"
+ACTION_TYPED_LOG="$ACTION_TYPED_WORK/mock.log"
+SCRIPTS_DIR="$DIR/../scripts"
+mkdir -p "$ACTION_TYPED_BIN"
+
+cat > "$ACTION_TYPED_BIN/fallow" <<'SH'
+#!/usr/bin/env bash
+printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
+if [ "${1:-}" = "ci" ]; then
+  printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
+  exit 0
+fi
+format=""
+previous=""
+for arg in "$@"; do
+  if [ "$previous" = "--format" ]; then
+    format="$arg"
+    break
+  fi
+  previous="$arg"
+done
+case "$format" in
+  pr-comment-github)
+    printf '<!-- fallow-id: fallow-results -->\n### Fallow smoke\n\nGenerated by fallow.\n'
+    ;;
+  review-github)
+    if [ "${MOCK_ZERO_REVIEW:-}" = "1" ]; then
+      cat <<'JSON'
+{"event":"COMMENT","body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[],"meta":{"schema":"fallow-review-envelope/v1","provider":"github"}}
+JSON
+      exit 0
+    fi
+    cat <<'JSON'
+{"event":"COMMENT","body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[{"path":"src/a.ts","line":1,"side":"RIGHT","body":"**warn** `fallow/smoke`: smoke\n\n<!-- fallow-fingerprint: abc -->","fingerprint":"abc"}],"meta":{"schema":"fallow-review-envelope/v1","provider":"github"}}
+JSON
+    ;;
+  *)
+    printf '{}\n'
+    ;;
+esac
+SH
+chmod +x "$ACTION_TYPED_BIN/fallow"
+
+cat > "$ACTION_TYPED_BIN/gh" <<'SH'
+#!/usr/bin/env bash
+printf 'gh %s\n' "$*" >> "$MOCK_LOG"
+if [ "${1:-}" = "pr" ] && [ "${2:-}" = "diff" ]; then
+  printf 'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -0,0 +1 @@\n+export const a = 1;\n'
+  exit 0
+fi
+if [ "${1:-}" = "api" ]; then
+  if printf '%s\n' "$*" | grep -q -- '--input -'; then
+    cat > /dev/null
+  fi
+  if printf '%s\n' "$*" | grep -q -- '--jq'; then
+    if [ "${MOCK_EXISTING_REVIEW:-}" = "1" ] && printf '%s\n' "$*" | grep -q 'issues/123/comments'; then
+      printf '777\n'
+    fi
+    exit 0
+  fi
+  printf '{}\n'
+fi
+SH
+chmod +x "$ACTION_TYPED_BIN/gh"
+
+printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_WORK/fallow-analysis-args.sh"
+(
+  cd "$ACTION_TYPED_WORK"
+  PATH="$ACTION_TYPED_BIN:$PATH" \
+    MOCK_LOG="$ACTION_TYPED_LOG" \
+    GH_TOKEN="test" \
+    PR_NUMBER="123" \
+    GH_REPO="owner/repo" \
+    FALLOW_COMMAND="check" \
+    bash "$SCRIPTS_DIR/comment.sh" > /dev/null
+  PATH="$ACTION_TYPED_BIN:$PATH" \
+    MOCK_LOG="$ACTION_TYPED_LOG" \
+    GH_TOKEN="test" \
+    PR_NUMBER="123" \
+    GH_REPO="owner/repo" \
+    FALLOW_COMMAND="check" \
+    FALLOW_ROOT="." \
+    MAX_COMMENTS="5" \
+    bash "$SCRIPTS_DIR/review.sh" > /dev/null
+  PATH="$ACTION_TYPED_BIN:$PATH" \
+    MOCK_LOG="$ACTION_TYPED_LOG" \
+    MOCK_ZERO_REVIEW="1" \
+    MOCK_EXISTING_REVIEW="1" \
+    GH_TOKEN="test" \
+    PR_NUMBER="123" \
+    GH_REPO="owner/repo" \
+    FALLOW_COMMAND="check" \
+    FALLOW_ROOT="." \
+    MAX_COMMENTS="5" \
+    bash "$SCRIPTS_DIR/review.sh" > /dev/null
+)
+ACTION_TYPED_OUT=$(cat "$ACTION_TYPED_LOG")
+assert_contains "$ACTION_TYPED_OUT" "--format pr-comment-github" "comment.sh invokes typed PR comment format"
+assert_contains "$ACTION_TYPED_OUT" "--format review-github" "review.sh invokes typed GitHub review format"
+assert_contains "$ACTION_TYPED_OUT" "fallow ci reconcile-review --provider github" "review.sh invokes GitHub reconcile command"
+assert_contains "$ACTION_TYPED_OUT" "repos/owner/repo/pulls/123/reviews" "review.sh posts review envelope"
+assert_contains "$ACTION_TYPED_OUT" "repos/owner/repo/issues/comments/777 --method PATCH" "review.sh updates existing body-only review comment"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "gh_api_retry" "comment.sh wraps GitHub API calls with retry"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "gh_api_retry" "review.sh wraps GitHub API calls with retry"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "rate limit response; retrying" "comment.sh retries GitHub rate-limit responses"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "rate limit response; retrying" "review.sh retries GitHub rate-limit responses"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "fallow-review-payload.json" "review.sh stores retryable review payload"
+assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "--input -" "review.sh does not retry with consumed stdin"
+if sed -n '/name: Post review comments/,/run: bash/p' "$DIR/../../action.yml" | /usr/bin/grep -q "steps.analyze.outputs.issues != '0'"; then
+  fail "Post review comments action condition" "must run on zero-issue analyses so stale inline review threads can be resolved"
+else
+  pass "Post review comments action condition runs on zero-issue analyses"
+fi
+rm -rf "$ACTION_TYPED_WORK"
 
 # --- Pre-computed changed files (shallow clone fallback) tests ---
 
@@ -918,112 +826,6 @@ OUT=$(cd "$WORK_DIR" && \
 [ "$OUT" = "$EXPECTED_TOTAL" ] && pass "no CHANGED_SINCE skips filtering" || fail "no CHANGED_SINCE guard" "expected $EXPECTED_TOTAL, got $OUT"
 
 rm -rf "$WORK_DIR"
-
-# --- Diff-hunk filter tests ---
-
-echo ""
-echo "=== Diff-hunk filter (filter-diff-hunks.jq) ==="
-
-# Mock PR files API response with patch hunks
-PR_FILES='[
-  {"filename": "src/foo.ts", "patch": "@@ -10,3 +10,5 @@ function foo() {\n+  added line\n+  another added line\n context\n"},
-  {"filename": "src/bar.ts", "patch": "@@ -1,2 +1,3 @@ header\n+new\n@@ -20,3 +21,4 @@ other\n+more\n"},
-  {"filename": "src/binary.png", "patch": null},
-  {"filename": "src/big-file.ts"}
-]'
-
-# Comments: some inside hunks, some outside
-COMMENTS='[
-  {"type": "other", "path": "src/foo.ts", "line": 12, "body": "inside hunk"},
-  {"type": "other", "path": "src/foo.ts", "line": 50, "body": "outside hunk"},
-  {"type": "other", "path": "src/bar.ts", "line": 2, "body": "inside first hunk"},
-  {"type": "other", "path": "src/bar.ts", "line": 22, "body": "inside second hunk"},
-  {"type": "other", "path": "src/bar.ts", "line": 100, "body": "outside all hunks"},
-  {"type": "other", "path": "src/binary.png", "line": 5, "body": "null patch file"},
-  {"type": "other", "path": "src/big-file.ts", "line": 3, "body": "missing patch field"},
-  {"type": "other", "path": "src/unknown.ts", "line": 1, "body": "file not in PR"}
-]'
-
-echo "  filter-diff-hunks.jq:"
-OUT=$(echo "$COMMENTS" | jq --argjson pr_files "$PR_FILES" -f "$JQ_DIR/filter-diff-hunks.jq" 2>&1)
-assert_valid_json "$OUT" "produces valid JSON"
-
-echo "  keeps comments inside hunks:"
-assert_json_value "$OUT" '[.[] | select(.body == "inside hunk")] | length' "1" "foo.ts line 12 inside hunk kept"
-assert_json_value "$OUT" '[.[] | select(.body == "inside first hunk")] | length' "1" "bar.ts line 2 inside first hunk kept"
-assert_json_value "$OUT" '[.[] | select(.body == "inside second hunk")] | length' "1" "bar.ts line 22 inside second hunk kept"
-
-echo "  removes comments outside hunks:"
-assert_json_value "$OUT" '[.[] | select(.body == "outside hunk")] | length' "0" "foo.ts line 50 outside hunk removed"
-assert_json_value "$OUT" '[.[] | select(.body == "outside all hunks")] | length' "0" "bar.ts line 100 outside all hunks removed"
-
-echo "  fail-open for null/missing patch:"
-assert_json_value "$OUT" '[.[] | select(.body == "null patch file")] | length' "1" "null patch: comment kept (fail-open)"
-assert_json_value "$OUT" '[.[] | select(.body == "missing patch field")] | length' "1" "missing patch: comment kept (fail-open)"
-
-echo "  fail-open for files not in PR:"
-assert_json_value "$OUT" '[.[] | select(.body == "file not in PR")] | length' "1" "unknown file: comment kept (fail-open)"
-
-echo "  total filtered count:"
-assert_json_length "$OUT" "6" "keeps 6 of 8 comments (2 outside hunks removed)"
-
-echo "  single-line hunk (no count in @@):"
-SINGLE_LINE_PR='[{"filename": "src/x.ts", "patch": "@@ -5 +5 @@ ctx\n-old\n+new"}]'
-SINGLE_LINE_COMMENTS='[
-  {"type": "other", "path": "src/x.ts", "line": 5, "body": "on single-line hunk"},
-  {"type": "other", "path": "src/x.ts", "line": 6, "body": "outside single-line hunk"}
-]'
-OUT=$(echo "$SINGLE_LINE_COMMENTS" | jq --argjson pr_files "$SINGLE_LINE_PR" -f "$JQ_DIR/filter-diff-hunks.jq" 2>&1)
-assert_json_length "$OUT" "1" "single-line hunk: keeps line 5, removes line 6"
-assert_json_value "$OUT" '.[0].line' "5" "single-line hunk: kept line is 5"
-
-echo "  empty comments array:"
-OUT=$(echo '[]' | jq --argjson pr_files "$PR_FILES" -f "$JQ_DIR/filter-diff-hunks.jq" 2>&1)
-assert_json_length "$OUT" "0" "empty input produces empty output"
-
-echo "  empty PR files array:"
-OUT=$(echo "$COMMENTS" | jq --argjson pr_files '[]' -f "$JQ_DIR/filter-diff-hunks.jq" 2>&1)
-assert_json_length "$OUT" "8" "empty PR files: all comments kept (fail-open)"
-
-echo "  deleted file (count=0 hunk):"
-DELETED_PR='[{"filename": "src/gone.ts", "patch": "@@ -1,5 +0,0 @@ removed\n-line1\n-line2"}]'
-DELETED_COMMENTS='[{"type": "other", "path": "src/gone.ts", "line": 1, "body": "in deleted file"}]'
-OUT=$(echo "$DELETED_COMMENTS" | jq --argjson pr_files "$DELETED_PR" -f "$JQ_DIR/filter-diff-hunks.jq" 2>&1)
-assert_json_length "$OUT" "0" "deleted file (count=0): no new-side lines, comment removed"
-
-echo "  --slurpfile format (outer array wrapper):"
-SLURP_TMP=$(mktemp)
-echo "$PR_FILES" > "$SLURP_TMP"
-OUT=$(echo "$COMMENTS" | jq --slurpfile pr_files "$SLURP_TMP" -f "$JQ_DIR/filter-diff-hunks.jq" 2>&1)
-rm -f "$SLURP_TMP"
-assert_valid_json "$OUT" "slurpfile produces valid JSON"
-assert_json_length "$OUT" "6" "slurpfile: same result as argjson (6 of 8 kept)"
-
-# --- Review body with filtered counts ---
-
-echo ""
-echo "=== Review body with diff-hunk counts ==="
-
-echo "  review-body.jq with filtered findings:"
-OUT=$(INLINE_COUNT=5 FILTERED_COUNT=3 jq -r -f "$JQ_DIR/review-body.jq" "$FIXTURES/combined.json" 2>&1)
-assert_contains "$OUT" "inline comments" "shows inline count"
-assert_contains "$OUT" "findings in files not changed in this PR" "shows filtered count"
-assert_not_contains "$OUT" "See inline comments for details" "no generic message when filtered"
-
-echo "  review-body.jq with no filtered findings:"
-OUT=$(INLINE_COUNT=5 FILTERED_COUNT=0 jq -r -f "$JQ_DIR/review-body.jq" "$FIXTURES/combined.json" 2>&1)
-assert_contains "$OUT" "inline comments on your changes" "shows inline count when no filtered"
-assert_not_contains "$OUT" "additional findings" "no filtered mention when count is 0"
-
-echo "  review-body.jq with all findings filtered (body-only):"
-OUT=$(INLINE_COUNT=0 FILTERED_COUNT=8 jq -r -f "$JQ_DIR/review-body.jq" "$FIXTURES/combined.json" 2>&1)
-assert_not_contains "$OUT" "See inline comments" "no inline mention when all filtered"
-assert_contains "$OUT" "none are on lines changed" "body-only explains why no inline comments"
-assert_contains "$OUT" "fallow-review" "still has marker"
-
-echo "  review-body.jq without env vars (backwards compat):"
-OUT=$(jq -r -f "$JQ_DIR/review-body.jq" "$FIXTURES/combined.json" 2>&1)
-assert_contains "$OUT" "fallow-review" "marker present without env vars"
 
 # --- Summary ---
 

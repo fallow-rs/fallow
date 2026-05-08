@@ -1,6 +1,5 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 517
 expression: redact_sarif_version(&json_str)
 ---
 {
@@ -253,7 +252,10 @@ expression: redact_sarif_version(&json_str)
                 }
               }
             }
-          ]
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "5244a7d48544e258"
+          }
         },
         {
           "ruleId": "fallow/unused-export",
@@ -273,7 +275,10 @@ expression: redact_sarif_version(&json_str)
                 }
               }
             }
-          ]
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "8945df761bf48331"
+          }
         },
         {
           "ruleId": "fallow/unused-type",
@@ -293,7 +298,10 @@ expression: redact_sarif_version(&json_str)
                 }
               }
             }
-          ]
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "1d7e78a8d9fd8e4b"
+          }
         },
         {
           "ruleId": "fallow/unused-dependency",
@@ -313,7 +321,10 @@ expression: redact_sarif_version(&json_str)
                 }
               }
             }
-          ]
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "ac4b1a10c3c0e50b"
+          }
         },
         {
           "ruleId": "fallow/unused-dev-dependency",
@@ -333,7 +344,10 @@ expression: redact_sarif_version(&json_str)
                 }
               }
             }
-          ]
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "863889ab2e8befcd"
+          }
         },
         {
           "ruleId": "fallow/unused-optional-dependency",
@@ -353,7 +367,10 @@ expression: redact_sarif_version(&json_str)
                 }
               }
             }
-          ]
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "ff772e6d3e73d444"
+          }
         },
         {
           "ruleId": "fallow/type-only-dependency",
@@ -373,7 +390,10 @@ expression: redact_sarif_version(&json_str)
                 }
               }
             }
-          ]
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "6fb65b78864aed25"
+          }
         },
         {
           "ruleId": "fallow/test-only-dependency",
@@ -393,7 +413,10 @@ expression: redact_sarif_version(&json_str)
                 }
               }
             }
-          ]
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "7fd8b4c9c80a9e70"
+          }
         },
         {
           "ruleId": "fallow/unused-enum-member",
@@ -413,7 +436,10 @@ expression: redact_sarif_version(&json_str)
                 }
               }
             }
-          ]
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "befe71c215780d3d"
+          }
         },
         {
           "ruleId": "fallow/unused-class-member",
@@ -433,7 +459,10 @@ expression: redact_sarif_version(&json_str)
                 }
               }
             }
-          ]
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "1cfc889c87a95f2b"
+          }
         },
         {
           "ruleId": "fallow/unresolved-import",
@@ -453,7 +482,10 @@ expression: redact_sarif_version(&json_str)
                 }
               }
             }
-          ]
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "921a9ba09c5a381d"
+          }
         },
         {
           "ruleId": "fallow/unlisted-dependency",
@@ -473,7 +505,10 @@ expression: redact_sarif_version(&json_str)
                 }
               }
             }
-          ]
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "09489142d9d363ce"
+          }
         },
         {
           "ruleId": "fallow/duplicate-export",
@@ -493,7 +528,10 @@ expression: redact_sarif_version(&json_str)
                 }
               }
             }
-          ]
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "480efb653800ba4e"
+          }
         },
         {
           "ruleId": "fallow/duplicate-export",
@@ -513,7 +551,10 @@ expression: redact_sarif_version(&json_str)
                 }
               }
             }
-          ]
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "15773329e89e239a"
+          }
         },
         {
           "ruleId": "fallow/circular-dependency",
@@ -533,7 +574,10 @@ expression: redact_sarif_version(&json_str)
                 }
               }
             }
-          ]
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "464ecb8e77ea605f"
+          }
         }
       ]
     }

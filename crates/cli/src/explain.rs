@@ -391,13 +391,17 @@ pub fn run_explain(issue_type: &str, output: OutputFormat) -> ExitCode {
         OutputFormat::Human => print_explain_human(rule, &guide),
         OutputFormat::Compact => print_explain_compact(rule),
         OutputFormat::Markdown => print_explain_markdown(rule, &guide),
-        OutputFormat::Sarif | OutputFormat::CodeClimate | OutputFormat::Badge => {
-            crate::error::emit_error(
-                "explain supports human, compact, markdown, and json output",
-                2,
-                output,
-            )
-        }
+        OutputFormat::Sarif
+        | OutputFormat::CodeClimate
+        | OutputFormat::PrCommentGithub
+        | OutputFormat::PrCommentGitlab
+        | OutputFormat::ReviewGithub
+        | OutputFormat::ReviewGitlab
+        | OutputFormat::Badge => crate::error::emit_error(
+            "explain supports human, compact, markdown, and json output",
+            2,
+            output,
+        ),
     }
 }
 

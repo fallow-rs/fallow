@@ -13,6 +13,7 @@ mod api;
 mod audit;
 mod baseline;
 mod check;
+mod ci;
 mod ci_template;
 mod codeowners;
 mod combined;
@@ -388,6 +389,12 @@ enum Command {
         subcommand: HooksCli,
     },
 
+    /// CI helpers for PR/MR feedback envelopes.
+    Ci {
+        #[command(subcommand)]
+        subcommand: CiCli,
+    },
+
     /// Print the JSON Schema for fallow configuration files
     ConfigSchema,
 
@@ -726,7 +733,7 @@ enum Command {
     ///
     /// Use `fallow ci-template gitlab` to print the GitLab CI template, or
     /// `fallow ci-template gitlab --vendor` to write the template plus the
-    /// jq/bash helper files that enable MR comments without downloading from
+    /// bash helper files that enable MR comments without downloading from
     /// raw.githubusercontent.com at pipeline runtime.
     CiTemplate {
         #[command(subcommand)]
@@ -1188,7 +1195,59 @@ enum Format {
         alias = "gitlab-code-quality"
     )]
     CodeClimate,
+    #[value(name = "pr-comment-github")]
+    PrCommentGithub,
+    #[value(name = "pr-comment-gitlab")]
+    PrCommentGitlab,
+    #[value(name = "review-github")]
+    ReviewGithub,
+    #[value(name = "review-gitlab")]
+    ReviewGitlab,
     Badge,
+}
+
+#[derive(Subcommand)]
+enum CiCli {
+    /// Validate a rendered review envelope and compute a stable reconcile plan.
+    ReconcileReview {
+        /// Provider whose review envelope is being reconciled.
+        #[arg(long, value_enum)]
+        provider: CiProviderArg,
+
+        /// Pull request number (GitHub).
+        #[arg(long)]
+        pr: Option<String>,
+
+        /// Merge request IID (GitLab).
+        #[arg(long)]
+        mr: Option<String>,
+
+        /// Path to a review-github or review-gitlab JSON envelope.
+        #[arg(long)]
+        envelope: PathBuf,
+
+        /// GitHub repository in owner/name form. Defaults to GH_REPO or GITHUB_REPOSITORY.
+        #[arg(long)]
+        repo: Option<String>,
+
+        /// GitLab project id or path. Defaults to CI_PROJECT_ID.
+        #[arg(long = "project-id")]
+        project_id: Option<String>,
+
+        /// Provider API base URL. Defaults to github.com or CI_API_V4_URL/gitlab.com.
+        #[arg(long = "api-url")]
+        api_url: Option<String>,
+
+        /// Compute the reconcile plan without posting resolution notes or resolving threads.
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum CiProviderArg {
+    Github,
+    Gitlab,
 }
 
 impl From<Format> for fallow_config::OutputFormat {
@@ -1200,6 +1259,10 @@ impl From<Format> for fallow_config::OutputFormat {
             Format::Compact => Self::Compact,
             Format::Markdown => Self::Markdown,
             Format::CodeClimate => Self::CodeClimate,
+            Format::PrCommentGithub => Self::PrCommentGithub,
+            Format::PrCommentGitlab => Self::PrCommentGitlab,
+            Format::ReviewGithub => Self::ReviewGithub,
+            Format::ReviewGitlab => Self::ReviewGitlab,
             Format::Badge => Self::Badge,
         }
     }
@@ -1282,6 +1345,10 @@ fn format_from_env() -> Option<Format> {
         "compact" => Some(Format::Compact),
         "markdown" | "md" => Some(Format::Markdown),
         "codeclimate" | "gitlab-codequality" | "gitlab-code-quality" => Some(Format::CodeClimate),
+        "pr-comment-github" => Some(Format::PrCommentGithub),
+        "pr-comment-gitlab" => Some(Format::PrCommentGitlab),
+        "review-github" => Some(Format::ReviewGithub),
+        "review-gitlab" => Some(Format::ReviewGitlab),
         "badge" => Some(Format::Badge),
         _ => None,
     }
@@ -1711,6 +1778,7 @@ fn main() -> ExitCode {
                     | Command::Explain { .. }
                     | Command::CiTemplate { .. }
                     | Command::Config { .. }
+                    | Command::Ci { .. }
                     | Command::List { .. }
                     | Command::Flags { .. }
                     | Command::Migrate { .. }
@@ -1942,6 +2010,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             branch: branch.as_deref(),
         }),
         Command::Hooks { subcommand } => run_hooks_command(root, subcommand, output),
+        Command::Ci { subcommand } => ci::run(map_ci_subcommand(subcommand), output),
         Command::ConfigSchema => init::run_config_schema(),
         Command::PluginSchema => init::run_plugin_schema(),
         Command::CiTemplate { subcommand } => match subcommand {
@@ -2332,6 +2401,32 @@ fn map_license_subcommand(sub: LicenseCli) -> license::LicenseSubcommand {
         LicenseCli::Status => license::LicenseSubcommand::Status,
         LicenseCli::Refresh => license::LicenseSubcommand::Refresh,
         LicenseCli::Deactivate => license::LicenseSubcommand::Deactivate,
+    }
+}
+
+fn map_ci_subcommand(sub: CiCli) -> ci::CiCommand {
+    match sub {
+        CiCli::ReconcileReview {
+            provider,
+            pr,
+            mr,
+            envelope,
+            repo,
+            project_id,
+            api_url,
+            dry_run,
+        } => ci::CiCommand::ReconcileReview {
+            provider: match provider {
+                CiProviderArg::Github => ci::CiProvider::Github,
+                CiProviderArg::Gitlab => ci::CiProvider::Gitlab,
+            },
+            target: pr.or(mr),
+            envelope,
+            repo,
+            project_id,
+            api_url,
+            dry_run,
+        },
     }
 }
 
@@ -2801,6 +2896,10 @@ mod tests {
                 "codeclimate" | "gitlab-codequality" | "gitlab-code-quality" => {
                     Some(Format::CodeClimate)
                 }
+                "pr-comment-github" => Some(Format::PrCommentGithub),
+                "pr-comment-gitlab" => Some(Format::PrCommentGitlab),
+                "review-github" => Some(Format::ReviewGithub),
+                "review-gitlab" => Some(Format::ReviewGitlab),
                 "badge" => Some(Format::Badge),
                 _ => None,
             }
@@ -2821,6 +2920,16 @@ mod tests {
             parse("gitlab-code-quality"),
             Some(Format::CodeClimate)
         ));
+        assert!(matches!(
+            parse("pr-comment-github"),
+            Some(Format::PrCommentGithub)
+        ));
+        assert!(matches!(
+            parse("pr-comment-gitlab"),
+            Some(Format::PrCommentGitlab)
+        ));
+        assert!(matches!(parse("review-github"), Some(Format::ReviewGithub)));
+        assert!(matches!(parse("review-gitlab"), Some(Format::ReviewGitlab)));
         assert!(matches!(parse("badge"), Some(Format::Badge)));
         assert!(parse("xml").is_none());
         assert!(parse("").is_none());

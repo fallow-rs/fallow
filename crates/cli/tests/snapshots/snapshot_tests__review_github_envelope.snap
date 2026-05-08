@@ -1,0 +1,120 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: json_str
+---
+{
+  "event": "COMMENT",
+  "body": "### Fallow dead-code report\n\n15 inline findings selected for GitHub review.\n\n<!-- fallow-review -->",
+  "comments": [
+    {
+      "path": "package.json",
+      "line": 5,
+      "side": "RIGHT",
+      "body": "**error** `fallow/unused-dependency`: Package 'lodash' is in dependencies but never imported\n\n<!-- fallow-fingerprint: 1d04d08d81daf650 -->",
+      "fingerprint": "1d04d08d81daf650"
+    },
+    {
+      "path": "package.json",
+      "line": 5,
+      "side": "RIGHT",
+      "body": "**warn** `fallow/unused-dev-dependency`: Package 'jest' is in devDependencies but never imported\n\n<!-- fallow-fingerprint: 2a4393b133ea1523 -->",
+      "fingerprint": "2a4393b133ea1523"
+    },
+    {
+      "path": "package.json",
+      "line": 5,
+      "side": "RIGHT",
+      "body": "**warn** `fallow/unused-optional-dependency`: Package 'fsevents' is in optionalDependencies but never imported\n\n<!-- fallow-fingerprint: 66616a09b329d842 -->",
+      "fingerprint": "66616a09b329d842"
+    },
+    {
+      "path": "package.json",
+      "line": 8,
+      "side": "RIGHT",
+      "body": "**warn** `fallow/type-only-dependency`: Package 'zod' is only imported via type-only imports (consider moving to devDependencies)\n\n<!-- fallow-fingerprint: 34d2064787c07f45 -->",
+      "fingerprint": "34d2064787c07f45"
+    },
+    {
+      "path": "package.json",
+      "line": 12,
+      "side": "RIGHT",
+      "body": "**warn** `fallow/test-only-dependency`: Package 'msw' is only imported by test files (consider moving to devDependencies)\n\n<!-- fallow-fingerprint: ebc538b211ef05f5 -->",
+      "fingerprint": "ebc538b211ef05f5"
+    },
+    {
+      "path": "src/a.ts",
+      "line": 3,
+      "side": "RIGHT",
+      "body": "**error** `fallow/circular-dependency`: Circular dependency: src/a.ts → src/b.ts\n\n<!-- fallow-fingerprint: 405f0abed155920d -->",
+      "fingerprint": "405f0abed155920d"
+    },
+    {
+      "path": "src/app.ts",
+      "line": 3,
+      "side": "RIGHT",
+      "body": "**error** `fallow/unresolved-import`: Import './missing-module' could not be resolved\n\n<!-- fallow-fingerprint: 231a7ed9e16a19a6 -->",
+      "fingerprint": "231a7ed9e16a19a6"
+    },
+    {
+      "path": "src/cli.ts",
+      "line": 2,
+      "side": "RIGHT",
+      "body": "**error** `fallow/unlisted-dependency`: Package 'chalk' is imported but not listed in package.json\n\n<!-- fallow-fingerprint: 2ef210a41606f3aa -->",
+      "fingerprint": "2ef210a41606f3aa"
+    },
+    {
+      "path": "src/config.ts",
+      "line": 15,
+      "side": "RIGHT",
+      "body": "**error** `fallow/duplicate-export`: Export 'Config' appears in multiple modules\n\n<!-- fallow-fingerprint: da73cab5c65b029d -->",
+      "fingerprint": "da73cab5c65b029d"
+    },
+    {
+      "path": "src/dead.ts",
+      "line": 1,
+      "side": "RIGHT",
+      "body": "**error** `fallow/unused-file`: File is not reachable from any entry point\n\n<!-- fallow-fingerprint: e3912cb6bb9b0212 -->",
+      "fingerprint": "e3912cb6bb9b0212"
+    },
+    {
+      "path": "src/enums.ts",
+      "line": 8,
+      "side": "RIGHT",
+      "body": "**error** `fallow/unused-enum-member`: Enum member 'Status.Deprecated' is never referenced\n\n<!-- fallow-fingerprint: 090d4d65832bf868 -->",
+      "fingerprint": "090d4d65832bf868"
+    },
+    {
+      "path": "src/service.ts",
+      "line": 42,
+      "side": "RIGHT",
+      "body": "**error** `fallow/unused-class-member`: Class member 'UserService.legacyMethod' is never referenced\n\n<!-- fallow-fingerprint: 25579ea7b6940453 -->",
+      "fingerprint": "25579ea7b6940453"
+    },
+    {
+      "path": "src/types.ts",
+      "line": 5,
+      "side": "RIGHT",
+      "body": "**error** `fallow/unused-type`: Type export 'OldType' is never imported by other modules\n\n<!-- fallow-fingerprint: deb0e9de35cc06d9 -->",
+      "fingerprint": "deb0e9de35cc06d9"
+    },
+    {
+      "path": "src/types.ts",
+      "line": 30,
+      "side": "RIGHT",
+      "body": "**error** `fallow/duplicate-export`: Export 'Config' appears in multiple modules\n\n<!-- fallow-fingerprint: cc6a09c8dc227321 -->",
+      "fingerprint": "cc6a09c8dc227321"
+    },
+    {
+      "path": "src/utils.ts",
+      "line": 10,
+      "side": "RIGHT",
+      "body": "**error** `fallow/unused-export`: Export 'helperFn' is never imported by other modules\n\n<!-- fallow-fingerprint: ebe2360218821412 -->",
+      "fingerprint": "ebe2360218821412"
+    }
+  ],
+  "meta": {
+    "schema": "fallow-review-envelope/v1",
+    "provider": "github",
+    "check_conclusion": "failure"
+  }
+}
