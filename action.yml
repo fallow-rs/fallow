@@ -87,6 +87,30 @@ inputs:
     description: 'Maximum number of inline annotations to emit (default: 50)'
     required: false
     default: '50'
+  max-comments:
+    description: 'Maximum number of inline review comments + items in the sticky details table (default: 50). Mirrors max-annotations for the typed pr-comment / review formats.'
+    required: false
+    default: '50'
+  comment-id:
+    description: 'Sticky-comment marker id, embedded in the HTML comment that identifies fallow''s comment for upsert. Defaults to ''fallow-results'', auto-suffixed with the workspace name when running scoped to a single workspace package.'
+    required: false
+    default: ''
+  diff-filter:
+    description: 'Diff-aware finding filter: ''added'' (default, only findings on PR-added lines), ''diff_context'' (added lines plus surrounding context), ''file'' (any file touched by the PR), ''nofilter'' (every finding).'
+    required: false
+    default: 'added'
+  diff-file:
+    description: 'Path to a unified-diff file to drive diff-filter. When unset and the action runs in a PR context, the action fetches the diff via gh pr diff automatically.'
+    required: false
+    default: ''
+  api-retries:
+    description: 'Maximum HTTP retry attempts for fallow ci reconcile-review and the bash gh-api wrappers. Defaults to 3.'
+    required: false
+    default: '3'
+  api-retry-delay:
+    description: 'Floor delay in seconds between rate-limited retries. Server-supplied Retry-After overrides this when present. Defaults to 2.'
+    required: false
+    default: '2'
   # Dupes-specific inputs
   dupes-mode:
     description: 'Detection mode for dupes command (strict, mild, weak, semantic)'
@@ -424,6 +448,11 @@ runs:
         FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
         CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
         INPUT_ROOT: ${{ inputs.root }}
+        FALLOW_COMMENT_ID: ${{ inputs.comment-id }}
+        FALLOW_DIFF_FILTER: ${{ inputs.diff-filter }}
+        FALLOW_DIFF_FILE: ${{ inputs.diff-file }}
+        FALLOW_API_RETRIES: ${{ inputs.api-retries }}
+        FALLOW_API_RETRY_DELAY: ${{ inputs.api-retry-delay }}
       run: bash ${{ github.action_path }}/action/scripts/comment.sh
 
     - name: Post review comments
@@ -441,8 +470,13 @@ runs:
         GH_REPO: ${{ github.repository }}
         FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
         FALLOW_ROOT: ${{ inputs.root }}
-        MAX_COMMENTS: ${{ inputs.max-annotations }}
+        MAX_COMMENTS: ${{ inputs.max-comments || inputs.max-annotations }}
         CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
+        FALLOW_COMMENT_ID: ${{ inputs.comment-id }}
+        FALLOW_DIFF_FILTER: ${{ inputs.diff-filter }}
+        FALLOW_DIFF_FILE: ${{ inputs.diff-file }}
+        FALLOW_API_RETRIES: ${{ inputs.api-retries }}
+        FALLOW_API_RETRY_DELAY: ${{ inputs.api-retry-delay }}
       run: bash ${{ github.action_path }}/action/scripts/review.sh
 
     - name: Check threshold

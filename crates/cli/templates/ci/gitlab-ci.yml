@@ -86,7 +86,15 @@ variables:
   FALLOW_COMMENT: "false"       # Post results as MR summary comment
   FALLOW_REVIEW: "false"        # Post inline MR discussions with rich comments and suggestions
   FALLOW_CODEQUALITY: "true"    # Generate GitLab Code Quality report (inline MR annotations)
-  FALLOW_MAX_COMMENTS: "50"     # Maximum number of inline review comments
+  FALLOW_MAX_COMMENTS: "50"     # Maximum number of inline review comments + items in the sticky details table
+  FALLOW_COMMENT_ID: ""         # Sticky-comment marker id; auto-suffixed with the workspace name when scoped to one workspace and unset
+  FALLOW_DIFF_FILTER: "added"   # Diff-aware filter: 'added' | 'diff_context' | 'file' | 'nofilter'
+  FALLOW_DIFF_FILE: ""          # Path to a unified-diff file; when unset and CI_MERGE_REQUEST_DIFF_BASE_SHA is set, the comment / review scripts derive it via git diff
+  FALLOW_API_RETRIES: "3"       # Maximum HTTP retry attempts for the binary's reconcile-review and the curl/gh wrappers
+  FALLOW_API_RETRY_DELAY: "2"   # Floor delay in seconds between rate-limited retries; server-supplied Retry-After overrides
+  FALLOW_GITLAB_BASE_SHA: ""    # Override for the MR base SHA in the review-gitlab position object; falls back to CI_MERGE_REQUEST_DIFF_BASE_SHA
+  FALLOW_GITLAB_START_SHA: ""   # Override for the MR start SHA; falls back to base
+  FALLOW_GITLAB_HEAD_SHA: ""    # Override for the MR head SHA; falls back to CI_COMMIT_SHA
 
   # MR integration auth.
   # GITLAB_TOKEN (PAT/project access token with api scope) is required for
