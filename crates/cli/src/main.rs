@@ -1741,6 +1741,18 @@ fn resolve_production_modes(
 fn main() -> ExitCode {
     let mut cli = Cli::parse();
 
+    // Auto-suffix the sticky-comment marker with the workspace name when
+    // running scoped to a single workspace package and the user did not pin
+    // an explicit comment id. Parallel per-workspace jobs would otherwise
+    // edit the same `<!-- fallow-id: fallow-results -->` marker on the same
+    // PR/MR and race each other's bodies. Setting `FALLOW_WORKSPACE` here is
+    // read by `report::ci::pr_comment::sticky_marker_id` at render time.
+    if let Some(workspaces) = cli.workspace.as_ref()
+        && let [single] = workspaces.as_slice()
+    {
+        report::ci::pr_comment::set_workspace_marker(single);
+    }
+
     // Handle schema commands before tracing setup (no side effects)
     if matches!(cli.command, Some(Command::Schema)) {
         return schema::run_schema();

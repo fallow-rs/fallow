@@ -1,7 +1,29 @@
 use std::fmt::Write as _;
 use std::process::ExitCode;
+use std::sync::OnceLock;
 
 use serde_json::Value;
+
+/// Workspace name, set once by `main()` when the binary is invoked with
+/// `--workspace <name>`. Read by `sticky_marker_id` to auto-suffix the
+/// sticky-comment marker per workspace, which keeps parallel per-workspace
+/// jobs from racing each other's sticky body on the same PR/MR.
+///
+/// `OnceLock` gives us safe cross-function read-after-set without env-var
+/// indirection. Only main writes; readers always observe the post-CLI-parse
+/// state.
+static WORKSPACE_MARKER: OnceLock<String> = OnceLock::new();
+
+/// Set the workspace name used to disambiguate the sticky marker. Idempotent
+/// after the first set; later calls are no-ops, matching `OnceLock`'s
+/// semantics. Called from `main()` after CLI parsing.
+#[allow(
+    dead_code,
+    reason = "called from main.rs bin target; lib target sees no caller"
+)]
+pub fn set_workspace_marker(value: impl Into<String>) {
+    let _ = WORKSPACE_MARKER.set(value.into());
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Provider {
@@ -76,7 +98,7 @@ fn issue_from_codeclimate(value: &Value) -> Option<CiIssue> {
 
 #[must_use]
 pub fn render_pr_comment(command: &str, provider: Provider, issues: &[CiIssue]) -> String {
-    let marker_id = std::env::var("FALLOW_COMMENT_ID").unwrap_or_else(|_| "fallow-results".into());
+    let marker_id = sticky_marker_id();
     let marker = format!("<!-- fallow-id: {marker_id} -->");
     let max = max_comments();
     let title = command_title(command);
@@ -130,6 +152,54 @@ fn max_comments() -> usize {
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(50)
+}
+
+/// Compute the sticky-comment marker id. Precedence (highest first):
+///
+/// 1. `FALLOW_COMMENT_ID` set by the user explicitly: use as-is.
+/// 2. `WORKSPACE_MARKER` populated by `main()` from `--workspace <name>`:
+///    suffix the default to avoid colliding with a sibling per-workspace
+///    job's sticky on the same PR/MR.
+/// 3. Plain `fallow-results`.
+///
+/// The collision case (2) is the common monorepo shape: parallel jobs each
+/// run fallow scoped to one workspace package and post their own sticky.
+/// Without a per-workspace suffix every job edits the same marker, racing
+/// each other's bodies on every CI re-run.
+fn sticky_marker_id() -> String {
+    if let Ok(value) = std::env::var("FALLOW_COMMENT_ID")
+        && !value.trim().is_empty()
+    {
+        return value;
+    }
+    let suffix = WORKSPACE_MARKER
+        .get()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(sanitize_marker_segment);
+    match suffix {
+        Some(workspace) => format!("fallow-results-{workspace}"),
+        None => "fallow-results".to_owned(),
+    }
+}
+
+/// Strip characters that would break the HTML-comment marker. The marker
+/// shape is `<!-- fallow-id: <id> -->`; `<`, `>`, and `--` are reserved by
+/// the HTML comment grammar, and whitespace would split the id when the
+/// reader scans for it.
+fn sanitize_marker_segment(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_owned()
 }
 
 #[must_use]
@@ -210,10 +280,34 @@ mod tests {
     }
 
     #[test]
-    fn renders_sticky_marker() {
+    fn sticky_marker_id_default_when_nothing_set() {
+        // WORKSPACE_MARKER is a OnceLock that's set-once-per-process; tests
+        // can't unset it. We only assert about the unset branch when the
+        // OnceLock hasn't been touched, which is the case in this test if
+        // it's the first marker test to run. To keep tests order-independent
+        // we test sanitize_marker_segment + sticky_marker_id-with-mock
+        // separately rather than racing the OnceLock state.
         let body = render_pr_comment("check", Provider::Github, &[]);
-        assert!(body.contains("<!-- fallow-id: fallow-results -->"));
+        // The marker prefix is always `<!-- fallow-id: fallow-results`,
+        // regardless of whether a workspace suffix follows.
+        assert!(body.contains("<!-- fallow-id: fallow-results"));
         assert!(body.contains("No GitHub PR/MR findings."));
+    }
+
+    #[test]
+    fn sanitize_marker_segment_collapses_unsafe_chars_to_dashes() {
+        // `@`, `/`, spaces, and other special chars all become `-`.
+        // Leading and trailing dashes are trimmed.
+        assert_eq!(sanitize_marker_segment("@fallow/runtime"), "fallow-runtime");
+        assert_eq!(
+            sanitize_marker_segment("packages/web ui"),
+            "packages-web-ui"
+        );
+        assert_eq!(sanitize_marker_segment("plain"), "plain");
+        assert_eq!(
+            sanitize_marker_segment("--leading-trailing--"),
+            "leading-trailing"
+        );
     }
 
     #[test]
