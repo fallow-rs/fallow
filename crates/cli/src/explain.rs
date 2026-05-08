@@ -34,6 +34,13 @@ pub const COVERAGE_ANALYZE_DOCS: &str = "https://docs.fallow.tools/cli/coverage#
 /// Rule definition for SARIF `fullDescription` and JSON `_meta`.
 pub struct RuleDef {
     pub id: &'static str,
+    /// Coarse category label used by the sticky PR/MR comment renderer to
+    /// group findings into collapsible sections (Dead code, Dependencies,
+    /// Duplication, Health, Architecture, Suppressions). One source of
+    /// truth so the CodeClimate / SARIF / review-envelope path and the
+    /// renderer never drift; a unit test below asserts every RuleDef has
+    /// a non-empty category.
+    pub category: &'static str,
     pub name: &'static str,
     pub short: &'static str,
     pub full: &'static str,
@@ -43,6 +50,7 @@ pub struct RuleDef {
 pub const CHECK_RULES: &[RuleDef] = &[
     RuleDef {
         id: "fallow/unused-file",
+        category: "Dead code",
         name: "Unused Files",
         short: "File is not reachable from any entry point",
         full: "Source files that are not imported by any other module and are not entry points (scripts, tests, configs). These files can safely be deleted. Detection uses graph reachability from configured entry points.",
@@ -50,6 +58,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/unused-export",
+        category: "Dead code",
         name: "Unused Exports",
         short: "Export is never imported",
         full: "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file.",
@@ -57,6 +66,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/unused-type",
+        category: "Dead code",
         name: "Unused Type Exports",
         short: "Type export is never imported",
         full: "Type-only exports (interfaces, type aliases, enums used only as types) that are never imported. These do not generate runtime code but add maintenance burden.",
@@ -64,6 +74,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/private-type-leak",
+        category: "Dead code",
         name: "Private Type Leaks",
         short: "Exported signature references a private type",
         full: "Exported values or types whose public TypeScript signature references a same-file type declaration that is not exported. Consumers cannot name that private type directly, so the backing type should be exported or removed from the public signature.",
@@ -71,6 +82,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/unused-dependency",
+        category: "Dependencies",
         name: "Unused Dependencies",
         short: "Dependency listed but never imported",
         full: "Packages listed in dependencies that are never imported or required by any source file. Framework plugins and CLI tools may be false positives; use the ignore_dependencies config to suppress.",
@@ -78,6 +90,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/unused-dev-dependency",
+        category: "Dependencies",
         name: "Unused Dev Dependencies",
         short: "Dev dependency listed but never imported",
         full: "Packages listed in devDependencies that are never imported by test files, config files, or scripts. Build tools and jest presets that are referenced only in config may appear as false positives.",
@@ -85,6 +98,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/unused-optional-dependency",
+        category: "Dependencies",
         name: "Unused Optional Dependencies",
         short: "Optional dependency listed but never imported",
         full: "Packages listed in optionalDependencies that are never imported. Optional dependencies are typically platform-specific; verify they are not needed on any supported platform before removing.",
@@ -92,6 +106,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/type-only-dependency",
+        category: "Dependencies",
         name: "Type-only Dependencies",
         short: "Production dependency only used via type-only imports",
         full: "Production dependencies that are only imported via `import type` statements. These can be moved to devDependencies since they generate no runtime code and are stripped during compilation.",
@@ -99,6 +114,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/test-only-dependency",
+        category: "Dependencies",
         name: "Test-only Dependencies",
         short: "Production dependency only imported by test files",
         full: "Production dependencies that are only imported from test files. These can usually move to devDependencies because production entry points do not require them at runtime.",
@@ -106,6 +122,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/unused-enum-member",
+        category: "Dead code",
         name: "Unused Enum Members",
         short: "Enum member is never referenced",
         full: "Enum members that are never referenced in the codebase. Uses scope-aware binding analysis to track all references including computed access patterns.",
@@ -113,6 +130,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/unused-class-member",
+        category: "Dead code",
         name: "Unused Class Members",
         short: "Class member is never referenced",
         full: "Class methods and properties that are never referenced outside the class. Private members are checked within the class scope; public members are checked project-wide.",
@@ -120,6 +138,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/unresolved-import",
+        category: "Dead code",
         name: "Unresolved Imports",
         short: "Import could not be resolved",
         full: "Import specifiers that could not be resolved to a file on disk. Common causes: deleted files, typos in paths, missing path aliases in tsconfig, or uninstalled packages.",
@@ -127,6 +146,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/unlisted-dependency",
+        category: "Dependencies",
         name: "Unlisted Dependencies",
         short: "Dependency used but not in package.json",
         full: "Packages that are imported in source code but not listed in package.json. These work by accident (hoisted from another workspace package or transitive dep) and will break in strict package managers.",
@@ -134,6 +154,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/duplicate-export",
+        category: "Dead code",
         name: "Duplicate Exports",
         short: "Export name appears in multiple modules",
         full: "The same export name is defined in multiple modules. Consumers may import from the wrong module, leading to subtle bugs. Consider renaming or consolidating.",
@@ -141,6 +162,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/circular-dependency",
+        category: "Architecture",
         name: "Circular Dependencies",
         short: "Circular dependency chain detected",
         full: "A cycle in the module import graph. Circular dependencies cause undefined behavior with CommonJS (partial modules) and initialization ordering issues with ESM. Break cycles by extracting shared code.",
@@ -148,6 +170,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/boundary-violation",
+        category: "Architecture",
         name: "Boundary Violations",
         short: "Import crosses a configured architecture boundary",
         full: "A module imports from a zone that its configured boundary rules do not allow. Boundary checks help keep layered architecture, feature slices, and package ownership rules enforceable.",
@@ -155,6 +178,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/stale-suppression",
+        category: "Suppressions",
         name: "Stale Suppressions",
         short: "Suppression comment or tag no longer matches any issue",
         full: "A fallow-ignore-next-line, fallow-ignore-file, or @expected-unused suppression that no longer matches any active issue. The underlying problem was fixed but the suppression was left behind. Remove it to keep the codebase clean.",
@@ -457,6 +481,7 @@ fn print_explain_markdown(rule: &RuleDef, guide: &RuleGuide) -> ExitCode {
 pub const HEALTH_RULES: &[RuleDef] = &[
     RuleDef {
         id: "fallow/high-cyclomatic-complexity",
+        category: "Health",
         name: "High Cyclomatic Complexity",
         short: "Function has high cyclomatic complexity",
         full: "McCabe cyclomatic complexity exceeds the configured threshold. Cyclomatic complexity counts the number of independent paths through a function (1 + decision points: if/else, switch cases, loops, ternary, logical operators). High values indicate functions that are hard to test exhaustively.",
@@ -464,6 +489,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/high-cognitive-complexity",
+        category: "Health",
         name: "High Cognitive Complexity",
         short: "Function has high cognitive complexity",
         full: "SonarSource cognitive complexity exceeds the configured threshold. Unlike cyclomatic complexity, cognitive complexity penalizes nesting depth and non-linear control flow (breaks, continues, early returns). It measures how hard a function is to understand when reading sequentially.",
@@ -471,6 +497,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/high-complexity",
+        category: "Health",
         name: "High Complexity (Both)",
         short: "Function exceeds both complexity thresholds",
         full: "Function exceeds both cyclomatic and cognitive complexity thresholds. This is the strongest signal that a function needs refactoring, it has many paths AND is hard to understand.",
@@ -478,6 +505,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/high-crap-score",
+        category: "Health",
         name: "High CRAP Score",
         short: "Function has a high CRAP score (complexity combined with low coverage)",
         full: "The function's CRAP (Change Risk Anti-Patterns) score meets or exceeds the configured threshold. CRAP combines cyclomatic complexity with test coverage using the Savoia and Evans (2007) formula: `CC^2 * (1 - coverage/100)^3 + CC`. High CRAP indicates changes to this function carry high risk because it is complex AND poorly tested. Pair with `--coverage` for accurate per-function scoring; without it fallow estimates coverage from the module graph.",
@@ -485,6 +513,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/refactoring-target",
+        category: "Health",
         name: "Refactoring Target",
         short: "File identified as a high-priority refactoring candidate",
         full: "File identified as a refactoring candidate based on a weighted combination of complexity density, churn velocity, dead code ratio, fan-in (blast radius), and fan-out (coupling). Categories: urgent churn+complexity, break circular dependency, split high-impact file, remove dead code, extract complex functions, reduce coupling.",
@@ -492,6 +521,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/untested-file",
+        category: "Health",
         name: "Untested File",
         short: "Runtime-reachable file has no test dependency path",
         full: "A file is reachable from runtime entry points but not from any discovered test entry point. This indicates production code that no test imports, directly or transitively, according to the static module graph.",
@@ -499,6 +529,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/untested-export",
+        category: "Health",
         name: "Untested Export",
         short: "Runtime-reachable export has no test dependency path",
         full: "A value export is reachable from runtime entry points but no test-reachable module references it. This is a static test dependency gap rather than line coverage, and highlights exports exercised only through production entry paths.",
@@ -506,6 +537,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/runtime-safe-to-delete",
+        category: "Health",
         name: "Production Safe To Delete",
         short: "Statically unused AND never invoked in production with V8 tracking",
         full: "The function is both statically unreachable in the module graph and was never invoked during the observed runtime coverage window. This is the highest-confidence delete signal fallow emits.",
@@ -513,6 +545,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/runtime-review-required",
+        category: "Health",
         name: "Production Review Required",
         short: "Statically used but never invoked in production",
         full: "The function is reachable in the module graph (or exercised by tests / untracked call sites) but was not invoked during the observed runtime coverage window. Needs a human look: may be seasonal, error-path only, or legitimately unused.",
@@ -520,6 +553,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/runtime-low-traffic",
+        category: "Health",
         name: "Production Low Traffic",
         short: "Function was invoked below the low-traffic threshold",
         full: "The function was invoked in production but below the configured `--low-traffic-threshold` fraction of total trace count (spec default 0.1%). Effectively dead for the current period.",
@@ -527,6 +561,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/runtime-coverage-unavailable",
+        category: "Health",
         name: "Runtime Coverage Unavailable",
         short: "Runtime coverage could not be resolved for this function",
         full: "The function could not be matched to a V8-tracked coverage entry. Common causes: the function lives in a worker thread (separate V8 isolate), it is lazy-parsed and never reached the JIT tier, or its source map did not resolve to the expected source path. This is advisory, not a dead-code signal.",
@@ -534,6 +569,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "fallow/runtime-coverage",
+        category: "Health",
         name: "Runtime Coverage",
         short: "Runtime coverage finding",
         full: "Generic runtime-coverage finding for verdicts not covered by a more specific rule. Covers the forward-compat `unknown` sentinel; the CLI filters `active` entries out of `runtime_coverage.findings` so the surfaced list stays actionable.",
@@ -543,6 +579,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
 
 pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
     id: "fallow/code-duplication",
+    category: "Duplication",
     name: "Code Duplication",
     short: "Duplicated code block",
     full: "A block of code that appears in multiple locations with identical or near-identical token sequences. Clone detection uses normalized token comparison: identifier names and literals are abstracted away in non-strict modes.",
@@ -1393,5 +1430,36 @@ mod tests {
     #[test]
     fn dupes_rules_count() {
         assert_eq!(DUPES_RULES.len(), 1);
+    }
+
+    /// Every registered rule must declare a category. The PR/MR sticky
+    /// renderer reads this via `category_for_rule`; without an entry the
+    /// rule silently falls into the "Dead code" default and reviewers may
+    /// see it grouped under an unexpected section. Catching this here is
+    /// the same pattern as `check_rules_count` for the rule count itself.
+    #[test]
+    fn every_rule_declares_a_category() {
+        let allowed = [
+            "Dead code",
+            "Dependencies",
+            "Duplication",
+            "Health",
+            "Architecture",
+            "Suppressions",
+        ];
+        for rule in CHECK_RULES.iter().chain(HEALTH_RULES).chain(DUPES_RULES) {
+            assert!(
+                !rule.category.is_empty(),
+                "rule {} has empty category",
+                rule.id
+            );
+            assert!(
+                allowed.contains(&rule.category),
+                "rule {} has unrecognised category {:?}; add to allowlist or pick from {:?}",
+                rule.id,
+                rule.category,
+                allowed
+            );
+        }
     }
 }

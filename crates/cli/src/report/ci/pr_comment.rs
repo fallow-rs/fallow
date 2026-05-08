@@ -220,41 +220,14 @@ fn render_findings_table(out: &mut String, issues: &[CiIssue], max: usize, summa
 
 /// Map a fallow rule id to its category for sticky-comment grouping.
 ///
-/// Categories cluster related findings into reviewer-friendly sections.
-/// The mapping is intentionally coarse: it groups by the analysis tool that
-/// produced the finding (dead-code, duplication, health, dependencies,
-/// architecture), not by every individual rule id. Reviewers want to
-/// collapse "all dependency findings" with one click, not "all
-/// `unused-dev-dependency` findings".
+/// Single source of truth lives on `RuleDef::category` in `explain.rs`. This
+/// helper does the lookup so callers don't need to know about the registry;
+/// the look-up-then-fallback shape also keeps the renderer working for
+/// rules a downstream consumer added without registering (rare; produces
+/// the conservative "Dead code" default).
 #[must_use]
 pub fn category_for_rule(rule_id: &str) -> &'static str {
-    match rule_id.strip_prefix("fallow/").unwrap_or(rule_id) {
-        "code-duplication" => "Duplication",
-        "boundary-violation" | "circular-dependency" => "Architecture",
-        "high-complexity"
-        | "high-crap-score"
-        | "high-cyclomatic-complexity"
-        | "high-cognitive-complexity"
-        | "refactoring-target"
-        | "runtime-coverage"
-        | "runtime-coverage-unavailable"
-        | "runtime-low-traffic"
-        | "runtime-review-required"
-        | "runtime-safe-to-delete"
-        | "untested-export"
-        | "untested-file" => "Health",
-        "unused-dependency"
-        | "unused-dev-dependency"
-        | "unused-optional-dependency"
-        | "unlisted-dependency"
-        | "type-only-dependency"
-        | "test-only-dependency" => "Dependencies",
-        "stale-suppression" => "Suppressions",
-        // Everything else (unused-files / -exports / -types / -enum-members /
-        // -class-members / private-type-leak / duplicate-export /
-        // unresolved-import) is dead-code analysis output.
-        _ => "Dead code",
-    }
+    crate::explain::rule_by_id(rule_id).map_or("Dead code", |def| def.category)
 }
 
 /// Stable category ordering for the sticky comment. Reviewers see categories
