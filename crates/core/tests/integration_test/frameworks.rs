@@ -160,6 +160,82 @@ fn nextjs_config_referenced_dependencies_are_not_flagged_unused() {
     );
 }
 
+#[test]
+fn turborepo_generator_config_is_used_without_globbing_generator_directory() {
+    let tmp = tempfile::tempdir().expect("failed to create temp dir");
+    let root = tmp.path().to_path_buf();
+    std::fs::create_dir_all(root.join("turbo/generators")).unwrap();
+
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "turborepo-generator-fixture",
+            "devDependencies": {
+                "@turbo/gen": "*",
+                "turbo": "*"
+            }
+        }"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("turbo.json"), "{}").unwrap();
+    std::fs::write(
+        root.join("turbo/generators/config.ts"),
+        r#"
+            import type { PlopTypes } from "@turbo/gen";
+            import { registerGenerator } from "./helper";
+
+            export default function generator(plop: PlopTypes.NodePlopAPI): void {
+                registerGenerator(plop);
+            }
+        "#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("turbo/generators/helper.ts"),
+        "export function registerGenerator(_plop: unknown): void {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("turbo/generators/orphan.ts"),
+        "export const orphan = true;\n",
+    )
+    .unwrap();
+
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| {
+            file.path
+                .strip_prefix(&root)
+                .unwrap_or(&file.path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "turbo/generators/config.ts"),
+        "generator config should be treated as a Turborepo config file, unused files: {unused_files:?}"
+    );
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "turbo/generators/helper.ts"),
+        "helper should be reachable through the generator config import, unused files: {unused_files:?}"
+    );
+    assert!(
+        unused_files
+            .iter()
+            .any(|path| path == "turbo/generators/orphan.ts"),
+        "unimported generator files should not be kept alive by directory globbing, unused files: {unused_files:?}"
+    );
+}
+
 // ── Test runner entry points ──────────────────────────────────
 
 #[test]
