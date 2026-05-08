@@ -1,6 +1,11 @@
 /// Fingerprint key used in SARIF partialFingerprints and other CI formats.
 pub const FINGERPRINT_KEY: &str = "tools.fallow.fingerprint/v1";
 
+/// Conventional SARIF key consumed by GitHub Code Scanning's alert-correlation
+/// engine. Emitted in addition to `FINGERPRINT_KEY` so GHAS deduplicates fallow
+/// alerts across pushes.
+pub const GHAS_FINGERPRINT_KEY: &str = "primaryLocationLineHash/v1";
+
 #[must_use]
 pub fn normalize_snippet(snippet: &str) -> String {
     snippet

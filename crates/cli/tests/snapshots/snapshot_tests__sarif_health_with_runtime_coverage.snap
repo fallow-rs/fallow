@@ -193,7 +193,8 @@ expression: redact_health_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "c3976b43718b2197"
+            "tools.fallow.fingerprint/v1": "c3976b43718b2197",
+            "primaryLocationLineHash/v1": "c3976b43718b2197"
           }
         },
         {
@@ -216,7 +217,8 @@ expression: redact_health_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "50be8b87d2e2ba94"
+            "tools.fallow.fingerprint/v1": "50be8b87d2e2ba94",
+            "primaryLocationLineHash/v1": "50be8b87d2e2ba94"
           }
         },
         {
@@ -239,7 +241,8 @@ expression: redact_health_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "2d109423d5abfa94"
+            "tools.fallow.fingerprint/v1": "2d109423d5abfa94",
+            "primaryLocationLineHash/v1": "2d109423d5abfa94"
           }
         }
       ]

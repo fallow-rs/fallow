@@ -193,7 +193,8 @@ expression: redact_health_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "c3976b43718b2197"
+            "tools.fallow.fingerprint/v1": "c3976b43718b2197",
+            "primaryLocationLineHash/v1": "c3976b43718b2197"
           }
         }
       ]

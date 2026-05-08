@@ -101,13 +101,15 @@ fn sarif_result_with_snippet(
         || fingerprint::fingerprint_hash(&[rule_id, uri, &line, &col]),
         |snippet| fingerprint::finding_fingerprint(rule_id, uri, snippet),
     );
+    let partial_fingerprint_ghas = partial_fingerprint.clone();
     serde_json::json!({
         "ruleId": rule_id,
         "level": level,
         "message": { "text": message },
         "locations": [{ "physicalLocation": physical_location }],
         "partialFingerprints": {
-            fingerprint::FINGERPRINT_KEY: partial_fingerprint
+            fingerprint::FINGERPRINT_KEY: partial_fingerprint,
+            fingerprint::GHAS_FINGERPRINT_KEY: partial_fingerprint_ghas
         }
     })
 }

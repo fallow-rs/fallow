@@ -254,7 +254,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "5244a7d48544e258"
+            "tools.fallow.fingerprint/v1": "5244a7d48544e258",
+            "primaryLocationLineHash/v1": "5244a7d48544e258"
           }
         }
       ]

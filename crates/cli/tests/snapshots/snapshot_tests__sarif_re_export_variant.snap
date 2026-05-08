@@ -258,7 +258,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "91a2114ca2762404"
+            "tools.fallow.fingerprint/v1": "91a2114ca2762404",
+            "primaryLocationLineHash/v1": "91a2114ca2762404"
           },
           "properties": {
             "is_re_export": true

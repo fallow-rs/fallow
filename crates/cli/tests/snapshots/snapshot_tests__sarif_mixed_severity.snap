@@ -254,7 +254,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "5244a7d48544e258"
+            "tools.fallow.fingerprint/v1": "5244a7d48544e258",
+            "primaryLocationLineHash/v1": "5244a7d48544e258"
           }
         },
         {
@@ -277,7 +278,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "8945df761bf48331"
+            "tools.fallow.fingerprint/v1": "8945df761bf48331",
+            "primaryLocationLineHash/v1": "8945df761bf48331"
           }
         },
         {
@@ -300,7 +302,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "1d7e78a8d9fd8e4b"
+            "tools.fallow.fingerprint/v1": "1d7e78a8d9fd8e4b",
+            "primaryLocationLineHash/v1": "1d7e78a8d9fd8e4b"
           }
         },
         {
@@ -323,7 +326,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "ac4b1a10c3c0e50b"
+            "tools.fallow.fingerprint/v1": "ac4b1a10c3c0e50b",
+            "primaryLocationLineHash/v1": "ac4b1a10c3c0e50b"
           }
         },
         {
@@ -346,7 +350,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "863889ab2e8befcd"
+            "tools.fallow.fingerprint/v1": "863889ab2e8befcd",
+            "primaryLocationLineHash/v1": "863889ab2e8befcd"
           }
         },
         {
@@ -369,7 +374,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "ff772e6d3e73d444"
+            "tools.fallow.fingerprint/v1": "ff772e6d3e73d444",
+            "primaryLocationLineHash/v1": "ff772e6d3e73d444"
           }
         },
         {
@@ -392,7 +398,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "6fb65b78864aed25"
+            "tools.fallow.fingerprint/v1": "6fb65b78864aed25",
+            "primaryLocationLineHash/v1": "6fb65b78864aed25"
           }
         },
         {
@@ -415,7 +422,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "7fd8b4c9c80a9e70"
+            "tools.fallow.fingerprint/v1": "7fd8b4c9c80a9e70",
+            "primaryLocationLineHash/v1": "7fd8b4c9c80a9e70"
           }
         },
         {
@@ -438,7 +446,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "befe71c215780d3d"
+            "tools.fallow.fingerprint/v1": "befe71c215780d3d",
+            "primaryLocationLineHash/v1": "befe71c215780d3d"
           }
         },
         {
@@ -461,7 +470,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "1cfc889c87a95f2b"
+            "tools.fallow.fingerprint/v1": "1cfc889c87a95f2b",
+            "primaryLocationLineHash/v1": "1cfc889c87a95f2b"
           }
         },
         {
@@ -484,7 +494,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "921a9ba09c5a381d"
+            "tools.fallow.fingerprint/v1": "921a9ba09c5a381d",
+            "primaryLocationLineHash/v1": "921a9ba09c5a381d"
           }
         },
         {
@@ -507,7 +518,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "09489142d9d363ce"
+            "tools.fallow.fingerprint/v1": "09489142d9d363ce",
+            "primaryLocationLineHash/v1": "09489142d9d363ce"
           }
         },
         {
@@ -530,7 +542,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "480efb653800ba4e"
+            "tools.fallow.fingerprint/v1": "480efb653800ba4e",
+            "primaryLocationLineHash/v1": "480efb653800ba4e"
           }
         },
         {
@@ -553,7 +566,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "15773329e89e239a"
+            "tools.fallow.fingerprint/v1": "15773329e89e239a",
+            "primaryLocationLineHash/v1": "15773329e89e239a"
           }
         },
         {
@@ -576,7 +590,8 @@ expression: redact_sarif_version(&json_str)
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "464ecb8e77ea605f"
+            "tools.fallow.fingerprint/v1": "464ecb8e77ea605f",
+            "primaryLocationLineHash/v1": "464ecb8e77ea605f"
           }
         }
       ]
