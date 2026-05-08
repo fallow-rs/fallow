@@ -603,15 +603,15 @@ fn github_token() -> Result<String, String> {
 }
 
 fn github_get_json(agent: &ureq::Agent, url: &str, token: &str) -> Result<Value, String> {
-    let mut response = agent
-        .get(url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("User-Agent", "fallow-cli")
-        .call()
-        .map_err(|e| format!("GitHub request failed: {e}"))?;
-    read_json_response(&mut response, "GitHub")
+    with_rate_limit_retry("GitHub", || {
+        agent
+            .get(url)
+            .header("Authorization", &format!("Bearer {token}"))
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("User-Agent", "fallow-cli")
+            .call()
+    })
 }
 
 fn github_post_json(
@@ -620,25 +620,25 @@ fn github_post_json(
     token: &str,
     payload: &Value,
 ) -> Result<Value, String> {
-    let mut response = agent
-        .post(url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("User-Agent", "fallow-cli")
-        .send_json(payload)
-        .map_err(|e| format!("GitHub request failed: {e}"))?;
-    read_json_response(&mut response, "GitHub")
+    with_rate_limit_retry("GitHub", || {
+        agent
+            .post(url)
+            .header("Authorization", &format!("Bearer {token}"))
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("User-Agent", "fallow-cli")
+            .send_json(payload)
+    })
 }
 
 fn gitlab_get_json(agent: &ureq::Agent, url: &str, token: &str) -> Result<Value, String> {
-    let mut response = agent
-        .get(url)
-        .header("PRIVATE-TOKEN", token)
-        .header("User-Agent", "fallow-cli")
-        .call()
-        .map_err(|e| format!("GitLab request failed: {e}"))?;
-    read_json_response(&mut response, "GitLab")
+    with_rate_limit_retry("GitLab", || {
+        agent
+            .get(url)
+            .header("PRIVATE-TOKEN", token)
+            .header("User-Agent", "fallow-cli")
+            .call()
+    })
 }
 
 fn gitlab_post_json(
@@ -647,14 +647,14 @@ fn gitlab_post_json(
     token: &str,
     payload: &Value,
 ) -> Result<Value, String> {
-    let mut response = agent
-        .post(url)
-        .header("PRIVATE-TOKEN", token)
-        .header("Content-Type", "application/json")
-        .header("User-Agent", "fallow-cli")
-        .send_json(payload)
-        .map_err(|e| format!("GitLab request failed: {e}"))?;
-    read_json_response(&mut response, "GitLab")
+    with_rate_limit_retry("GitLab", || {
+        agent
+            .post(url)
+            .header("PRIVATE-TOKEN", token)
+            .header("Content-Type", "application/json")
+            .header("User-Agent", "fallow-cli")
+            .send_json(payload)
+    })
 }
 
 fn gitlab_put_json(
@@ -663,14 +663,79 @@ fn gitlab_put_json(
     token: &str,
     payload: &Value,
 ) -> Result<Value, String> {
-    let mut response = agent
-        .put(url)
-        .header("PRIVATE-TOKEN", token)
-        .header("Content-Type", "application/json")
-        .header("User-Agent", "fallow-cli")
-        .send_json(payload)
-        .map_err(|e| format!("GitLab request failed: {e}"))?;
-    read_json_response(&mut response, "GitLab")
+    with_rate_limit_retry("GitLab", || {
+        agent
+            .put(url)
+            .header("PRIVATE-TOKEN", token)
+            .header("Content-Type", "application/json")
+            .header("User-Agent", "fallow-cli")
+            .send_json(payload)
+    })
+}
+
+/// Wrap an HTTP request closure with rate-limit-aware retry.
+///
+/// Mirrors the bash `gh_api_retry` / `curl_retry` helpers in the action and
+/// CI scripts so the binary is no less robust than the bash glue around it
+/// when a workflow re-runs against a rate-limited GitHub Enterprise or a
+/// GitLab instance under load.
+///
+/// `FALLOW_API_RETRIES` (default 3) caps the total attempts; `FALLOW_API_RETRY_DELAY`
+/// (default 2s) is the floor between attempts. The actual sleep uses
+/// `Retry-After` from the server when present, falling back to the floor.
+fn with_rate_limit_retry<F>(provider: &str, mut op: F) -> Result<Value, String>
+where
+    F: FnMut() -> Result<http::Response<ureq::Body>, ureq::Error>,
+{
+    let max_attempts = retries_from_env();
+    let floor_delay = retry_delay_from_env();
+    let mut attempt: u32 = 0;
+    loop {
+        attempt += 1;
+        match op() {
+            Ok(mut response) => {
+                let status = response.status().as_u16();
+                if status == 429 && attempt < max_attempts {
+                    let wait = retry_after_seconds(&response).unwrap_or(floor_delay);
+                    eprintln!(
+                        "fallow: {provider} rate-limited; retrying in {wait}s ({attempt}/{max_attempts})"
+                    );
+                    std::thread::sleep(std::time::Duration::from_secs(wait));
+                    continue;
+                }
+                return read_json_response(&mut response, provider);
+            }
+            Err(e) => return Err(format!("{provider} request failed: {e}")),
+        }
+    }
+}
+
+fn retries_from_env() -> u32 {
+    std::env::var("FALLOW_API_RETRIES")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(3)
+}
+
+fn retry_delay_from_env() -> u64 {
+    std::env::var("FALLOW_API_RETRY_DELAY")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(2)
+}
+
+/// Parse `Retry-After`. Per RFC 9110 section 10.2.3 the value is either an
+/// integer count of seconds or an HTTP-date. We read seconds; HTTP-date
+/// callers fall back to the floor delay.
+fn retry_after_seconds(response: &http::Response<ureq::Body>) -> Option<u64> {
+    parse_retry_after(response.headers())
+}
+
+fn parse_retry_after(headers: &http::HeaderMap) -> Option<u64> {
+    let header = headers.get("Retry-After")?;
+    let raw = header.to_str().ok()?.trim();
+    raw.parse::<u64>().ok()
 }
 
 fn read_json_response(
@@ -765,6 +830,32 @@ mod tests {
     #[test]
     fn encodes_gitlab_project_path_as_one_segment() {
         assert_eq!(url_encode_path_segment("group/project"), "group%2Fproject");
+    }
+
+    fn headers_with_retry_after(value: &'static str) -> http::HeaderMap {
+        let mut map = http::HeaderMap::new();
+        map.insert("Retry-After", http::HeaderValue::from_static(value));
+        map
+    }
+
+    #[test]
+    fn parse_retry_after_reads_integer_seconds() {
+        assert_eq!(parse_retry_after(&headers_with_retry_after("12")), Some(12));
+    }
+
+    #[test]
+    fn parse_retry_after_returns_none_for_missing_header() {
+        assert_eq!(parse_retry_after(&http::HeaderMap::new()), None);
+    }
+
+    #[test]
+    fn parse_retry_after_returns_none_for_http_date() {
+        // Per RFC 9110 the header may carry an HTTP-date; we don't parse
+        // those, the caller falls back to the floor delay.
+        assert_eq!(
+            parse_retry_after(&headers_with_retry_after("Wed, 21 Oct 2026 07:28:00 GMT")),
+            None
+        );
     }
 
     #[test]
