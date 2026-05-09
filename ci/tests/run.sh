@@ -779,6 +779,101 @@ assert_contains "$CI_TYPED_OUT" "merge_requests/123/discussions" "review.sh post
 assert_contains "$CI_TYPED_OUT" "merge_requests/123/notes/777" "review.sh updates existing body-only review note"
 rm -rf "$CI_TYPED_WORK"
 
+# =========================================================================
+# curl_paginate Link-header walk: confirms multi-page concatenation
+# =========================================================================
+#
+# The single-page short-circuit is exercised indirectly by every typed-
+# integration test above (the mock returns a single-page body with no Link
+# header). This block exercises the multi-page path explicitly: page 1
+# returns content + `link: <URL>; rel="next"`, page 2 returns content
+# without a Link header. curl_paginate must visit both URLs and concatenate
+# the two arrays into one.
+echo ""
+echo "=== curl_paginate Link-header walk ==="
+
+# Extract curl_paginate at top level (outside any nested $()) so the awk
+# pattern parses cleanly, then define paginate_test_run as a regular
+# function and capture its output once. Disable pipefail just for the test
+# run because curl_paginate uses `url=$(grep | tr | sed | head -1)` and
+# `head -1` SIGPIPE-cancels the upstream pipeline on the no-Link-header
+# page, which under pipefail propagates as a non-zero exit.
+PAGINATE_FN_SRC=$(awk '/^curl_paginate\(\) \{/,/^\}$/' "$SCRIPTS_DIR/comment.sh")
+eval "$PAGINATE_FN_SRC"
+
+paginate_test_run() {
+  set +o pipefail
+  PAGINATE_HITS=0
+  curl_retry() {
+    local args=("$@")
+    local headers_file=""
+    local i
+    for ((i=0; i<${#args[@]}; i++)); do
+      if [ "${args[$i]}" = "-D" ] && [ $((i+1)) -lt ${#args[@]} ]; then
+        headers_file="${args[$((i+1))]}"
+      fi
+    done
+    local last_idx=$(( ${#args[@]} - 1 ))
+    local url="${args[$last_idx]}"
+    PAGINATE_HITS=$((PAGINATE_HITS + 1))
+    case "$url" in
+      *page=2*)
+        : > "$headers_file"
+        printf '[{"id":2,"body":"second"}]'
+        ;;
+      *)
+        printf 'link: <https://example.test/api/notes?page=2>; rel="next"\n' \
+          > "$headers_file"
+        printf '[{"id":1,"body":"first"}]'
+        ;;
+    esac
+  }
+
+  curl_paginate --header "PRIVATE-TOKEN: t" \
+    "https://example.test/api/notes?page=1&per_page=100"
+  printf '\nHITS=%d' "$PAGINATE_HITS"
+}
+
+PAGINATE_TEST_OUT=$(paginate_test_run)
+
+assert_contains "$PAGINATE_TEST_OUT" '"first"' "curl_paginate captures page 1 body"
+assert_contains "$PAGINATE_TEST_OUT" '"second"' "curl_paginate follows Link rel=next to page 2"
+assert_contains "$PAGINATE_TEST_OUT" "HITS=2" "curl_paginate stops after page 2 (no Link header)"
+
+# Strip the trailing "\nHITS=N" tail before piping the array body to jq.
+PAGINATE_BODY="${PAGINATE_TEST_OUT%$'\n'HITS=*}"
+PAGINATE_LEN=$(printf '%s' "$PAGINATE_BODY" | jq 'length' 2>/dev/null || echo 0)
+if [ "$PAGINATE_LEN" = "2" ]; then
+  pass "curl_paginate concatenates pages into a single array of length 2"
+else
+  fail "curl_paginate concatenates pages into a single array of length 2" \
+    "got length $PAGINATE_LEN"
+fi
+
+# Defensive non-array safety: a 401 / 403 envelope ({"message":"Unauthorized"})
+# returned mid-walk must NOT crash the helper. The defensive
+# `jq -s 'map(arrays) | add // []'` skips non-array pages.
+paginate_defensive_run() {
+  set +o pipefail
+  curl_retry() {
+    local args=("$@")
+    local headers_file=""
+    local i
+    for ((i=0; i<${#args[@]}; i++)); do
+      if [ "${args[$i]}" = "-D" ] && [ $((i+1)) -lt ${#args[@]} ]; then
+        headers_file="${args[$((i+1))]}"
+      fi
+    done
+    : > "$headers_file"
+    printf '{"message":"401 Unauthorized"}'
+  }
+  curl_paginate --header "PRIVATE-TOKEN: t" "https://example.test/api/notes"
+}
+
+PAGINATE_DEFENSIVE_OUT=$(paginate_defensive_run)
+assert_contains "$PAGINATE_DEFENSIVE_OUT" "[]" \
+  "curl_paginate returns empty array when API returns non-array error envelope"
+
 # --- Summary ---
 
 echo ""
