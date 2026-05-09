@@ -2258,6 +2258,8 @@ fn run_audit_health<'a>(
         performance: opts.performance,
         min_severity: None,
         runtime_coverage: None,
+        // Wired by --diff-file in slice 6 (audit runtime-coverage integration).
+        diff_file: None,
     };
     let health_run = if let Some(shared) = shared_parse {
         crate::health::execute_health_with_shared_parse(&health_opts, shared)

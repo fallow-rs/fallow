@@ -154,6 +154,9 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
         performance: false,
         min_severity: None,
         runtime_coverage: Some(runtime_coverage),
+        // `coverage analyze` is a focused runtime-only command; PR-scope
+        // line filtering belongs on `fallow audit` and `fallow health`.
+        diff_file: None,
     }) {
         Ok(result) => result,
         Err(code) => return code,

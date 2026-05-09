@@ -95,6 +95,16 @@ struct Cli {
     #[arg(long, visible_alias = "base", global = true)]
     changed_since: Option<String>,
 
+    /// Path to a unified diff (e.g. `git diff --unified=0 main...HEAD`) used
+    /// for line-level scoping of the `hot-path-touched` runtime-coverage
+    /// verdict. When supplied, a hot function is only flagged if a line in
+    /// `[start_line, end_line]` was modified, instead of the file-level
+    /// match `--changed-since` produces. Falls back to `FALLOW_DIFF_FILE`
+    /// when the flag is omitted, so CI scripts that already export the env
+    /// var keep working unchanged.
+    #[arg(long = "diff-file", value_name = "PATH", global = true)]
+    diff_file: Option<PathBuf>,
+
     /// Compare against a previously saved baseline file
     #[arg(long, global = true)]
     baseline: Option<PathBuf>,
@@ -1890,6 +1900,7 @@ fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
         fail_on_issues,
         sarif_file: cli.sarif_file.as_deref(),
         changed_since: cli.changed_since.as_deref(),
+        diff_file: cli.diff_file.as_deref(),
         baseline: cli.baseline.as_deref(),
         save_baseline: cli.save_baseline.as_deref(),
         production: cli.production,
@@ -2791,6 +2802,7 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         coverage_root,
         performance: cli.performance,
         runtime_coverage,
+        diff_file: cli.diff_file.as_deref(),
     })
 }
 

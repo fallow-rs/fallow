@@ -129,6 +129,13 @@ pub struct HealthOptions<'a> {
     pub min_severity: Option<FindingSeverity>,
     /// Paid runtime coverage sidecar input.
     pub runtime_coverage: Option<RuntimeCoverageOptions>,
+    /// Path to a unified diff for line-level scoping of `hot-path-touched`.
+    /// Resolved against `root` if relative. Falls back to the
+    /// `FALLOW_DIFF_FILE` env var inside `run_health` when this is `None`.
+    /// The PR/MR-comment scripts already export the env var; this flag
+    /// gives `--diff-file` parity with `--changed-since` for ad-hoc and
+    /// MCP callers that cannot easily set environment variables.
+    pub diff_file: Option<&'a std::path::Path>,
 }
 
 struct HealthPipelineTimings {
@@ -264,6 +271,7 @@ fn execute_health_inner(
     let changed_files = opts
         .changed_since
         .and_then(|git_ref| get_changed_files(opts.root, git_ref));
+    let diff_index = load_diff_index(opts.diff_file, opts.root, opts.quiet);
     let ws_roots = resolve_workspace_scope(
         opts.root,
         opts.workspace,
@@ -552,12 +560,11 @@ fn execute_health_inner(
     let targets_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     if let Some(report) = runtime_coverage.as_mut() {
-        // diff_index is wired to --diff-file / FALLOW_DIFF_FILE in the next slice;
-        // until then this stays a file-level filter on changed_files only.
         let ctx = RuntimeCoverageFilterContext::new(&config.root)
             .with_baseline(loaded_baseline.as_ref())
             .with_top(opts.top)
-            .with_changed_files(changed_files.as_ref());
+            .with_changed_files(changed_files.as_ref())
+            .with_diff_index(diff_index.as_ref());
         apply_runtime_coverage_filters(report, &ctx);
     }
 
@@ -773,16 +780,16 @@ fn execute_health_inner(
 /// threshold (7) as new filter axes land (e.g., per-package overrides,
 /// SARIF severity scoping). Builder-style construction is intentional so
 /// callers do not have to remember positional order across slices.
-pub(super) struct RuntimeCoverageFilterContext<'a> {
-    pub(super) baseline: Option<&'a HealthBaselineData>,
-    pub(super) root: &'a std::path::Path,
-    pub(super) top: Option<usize>,
-    pub(super) changed_files: Option<&'a FxHashSet<PathBuf>>,
-    pub(super) diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
+pub struct RuntimeCoverageFilterContext<'a> {
+    pub baseline: Option<&'a HealthBaselineData>,
+    pub root: &'a std::path::Path,
+    pub top: Option<usize>,
+    pub changed_files: Option<&'a FxHashSet<PathBuf>>,
+    pub diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
 }
 
 impl<'a> RuntimeCoverageFilterContext<'a> {
-    pub(super) fn new(root: &'a std::path::Path) -> Self {
+    pub fn new(root: &'a std::path::Path) -> Self {
         Self {
             baseline: None,
             root,
@@ -792,29 +799,22 @@ impl<'a> RuntimeCoverageFilterContext<'a> {
         }
     }
 
-    pub(super) fn with_baseline(mut self, baseline: Option<&'a HealthBaselineData>) -> Self {
+    pub fn with_baseline(mut self, baseline: Option<&'a HealthBaselineData>) -> Self {
         self.baseline = baseline;
         self
     }
 
-    pub(super) fn with_top(mut self, top: Option<usize>) -> Self {
+    pub fn with_top(mut self, top: Option<usize>) -> Self {
         self.top = top;
         self
     }
 
-    pub(super) fn with_changed_files(
-        mut self,
-        changed_files: Option<&'a FxHashSet<PathBuf>>,
-    ) -> Self {
+    pub fn with_changed_files(mut self, changed_files: Option<&'a FxHashSet<PathBuf>>) -> Self {
         self.changed_files = changed_files;
         self
     }
 
-    #[allow(
-        dead_code,
-        reason = "Production call path is wired in the next slice (--diff-file / FALLOW_DIFF_FILE); tests exercise this builder today, the binary picks it up later"
-    )]
-    pub(super) fn with_diff_index(
+    pub fn with_diff_index(
         mut self,
         diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
     ) -> Self {
@@ -878,18 +878,17 @@ fn retain_hot_paths_in_change_scope(
     }
 
     report.hot_paths.retain(|hot_path| {
-        if let Some(diff_index) = ctx.diff_index {
-            if let Some(rel) = relative_to_root(&hot_path.path, ctx.root) {
-                if let Some(added) = diff_index.added_lines_in(&rel) {
-                    let start = u64::from(hot_path.line);
-                    let end = if hot_path.end_line == 0 {
-                        start
-                    } else {
-                        u64::from(hot_path.end_line)
-                    };
-                    return added.iter().any(|&line| line >= start && line <= end);
-                }
-            }
+        if let Some(diff_index) = ctx.diff_index
+            && let Some(rel) = relative_to_root(&hot_path.path, ctx.root)
+            && let Some(added) = diff_index.added_lines_in(&rel)
+        {
+            let start = u64::from(hot_path.line);
+            let end = if hot_path.end_line == 0 {
+                start
+            } else {
+                u64::from(hot_path.end_line)
+            };
+            return added.iter().any(|&line| line >= start && line <= end);
         }
 
         if let Some(changed_files) = ctx.changed_files {
@@ -905,6 +904,59 @@ fn retain_hot_paths_in_change_scope(
     });
 
     true
+}
+
+/// Resolve `--diff-file <path>` (or `$FALLOW_DIFF_FILE` when the flag is
+/// omitted) into a parsed `DiffIndex`. Returns `None` when neither source
+/// is set. Failure modes (file missing, unreadable, oversized) emit a
+/// `fallow: warning [diff-file]` line on stderr and produce `None`, so
+/// the runtime-coverage filter degrades to file-level matching rather
+/// than failing the whole `fallow health` run for a CI-script issue.
+/// `quiet` suppresses the warning so JSON-mode CI does not get a
+/// non-empty stderr stream.
+///
+/// Path resolution: relative paths join against `root` so callers do not
+/// have to absolutize before passing the flag. Mirrors the
+/// `health::scoring::resolve_relative_to_root` pattern used by
+/// `--coverage` and `--coverage-root`.
+fn load_diff_index(
+    diff_file: Option<&std::path::Path>,
+    root: &std::path::Path,
+    quiet: bool,
+) -> Option<crate::report::ci::diff_filter::DiffIndex> {
+    let resolved_path: PathBuf = if let Some(path) = diff_file {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            root.join(path)
+        }
+    } else {
+        let env = std::env::var_os("FALLOW_DIFF_FILE")?;
+        let raw = PathBuf::from(env);
+        if raw.is_absolute() {
+            raw
+        } else {
+            root.join(raw)
+        }
+    };
+
+    match std::fs::read_to_string(&resolved_path) {
+        Ok(text) => Some(crate::report::ci::diff_filter::DiffIndex::from_unified_diff(
+            &text,
+        )),
+        Err(error) => {
+            if !quiet {
+                eprintln!(
+                    "fallow: warning [diff-file]: could not read {}: {} \
+                     (line-level hot-path matching disabled; falling back to \
+                     file-level if --changed-since is set)",
+                    resolved_path.display(),
+                    error
+                );
+            }
+            None
+        }
+    }
 }
 
 /// Reduce `path` to a forward-slashed, project-root-relative string for
@@ -953,11 +1005,8 @@ fn refresh_runtime_coverage_verdict(
         Some(crate::health_types::RuntimeCoverageWatermark::LicenseExpiredGrace)
     );
 
-    report.signals = build_runtime_coverage_signals(
-        has_license_grace,
-        has_cold_signal,
-        has_changed_hot_path,
-    );
+    report.signals =
+        build_runtime_coverage_signals(has_license_grace, has_cold_signal, has_changed_hot_path);
 
     report.verdict = pick_primary_verdict(
         has_license_grace,
@@ -2886,7 +2935,12 @@ mod tests {
             warnings: vec![],
         };
 
-        apply_runtime_coverage_filters(&mut report, &RuntimeCoverageFilterContext::new(root).with_baseline(Some(&baseline)).with_top(Some(1)));
+        apply_runtime_coverage_filters(
+            &mut report,
+            &RuntimeCoverageFilterContext::new(root)
+                .with_baseline(Some(&baseline))
+                .with_top(Some(1)),
+        );
 
         assert_eq!(report.findings.len(), 1);
         assert_eq!(report.findings[0].function, "gamma");
@@ -2934,7 +2988,10 @@ mod tests {
             warnings: vec![],
         };
 
-        apply_runtime_coverage_filters(&mut report, &RuntimeCoverageFilterContext::new(root).with_baseline(Some(&baseline)));
+        apply_runtime_coverage_filters(
+            &mut report,
+            &RuntimeCoverageFilterContext::new(root).with_baseline(Some(&baseline)),
+        );
 
         assert!(report.findings.is_empty());
         assert_eq!(
@@ -2974,7 +3031,10 @@ mod tests {
             warnings: vec![],
         };
 
-        apply_runtime_coverage_filters(&mut report, &RuntimeCoverageFilterContext::new(root).with_changed_files(Some(&changed_files)));
+        apply_runtime_coverage_filters(
+            &mut report,
+            &RuntimeCoverageFilterContext::new(root).with_changed_files(Some(&changed_files)),
+        );
 
         assert_eq!(
             report.verdict,
@@ -3008,7 +3068,10 @@ mod tests {
             warnings: vec![],
         };
 
-        apply_runtime_coverage_filters(&mut report, &RuntimeCoverageFilterContext::new(root).with_changed_files(Some(&changed_files)));
+        apply_runtime_coverage_filters(
+            &mut report,
+            &RuntimeCoverageFilterContext::new(root).with_changed_files(Some(&changed_files)),
+        );
 
         assert!(report.hot_paths.is_empty());
         assert_eq!(
@@ -3068,7 +3131,10 @@ mod tests {
             24,
         )]);
 
-        apply_runtime_coverage_filters(&mut report, &RuntimeCoverageFilterContext::new(root).with_diff_index(Some(&diff_index)));
+        apply_runtime_coverage_filters(
+            &mut report,
+            &RuntimeCoverageFilterContext::new(root).with_diff_index(Some(&diff_index)),
+        );
 
         assert_eq!(report.hot_paths.len(), 1);
         assert_eq!(
@@ -3094,7 +3160,10 @@ mod tests {
             24,
         )]);
 
-        apply_runtime_coverage_filters(&mut report, &RuntimeCoverageFilterContext::new(root).with_diff_index(Some(&diff_index)));
+        apply_runtime_coverage_filters(
+            &mut report,
+            &RuntimeCoverageFilterContext::new(root).with_diff_index(Some(&diff_index)),
+        );
 
         assert!(report.hot_paths.is_empty());
         assert_eq!(
@@ -3124,7 +3193,10 @@ mod tests {
             0,
         )]);
 
-        apply_runtime_coverage_filters(&mut report, &RuntimeCoverageFilterContext::new(root).with_diff_index(Some(&diff_index)));
+        apply_runtime_coverage_filters(
+            &mut report,
+            &RuntimeCoverageFilterContext::new(root).with_diff_index(Some(&diff_index)),
+        );
 
         assert_eq!(report.hot_paths.len(), 1);
         assert_eq!(
@@ -3150,7 +3222,10 @@ mod tests {
             24,
         )]);
 
-        apply_runtime_coverage_filters(&mut report, &RuntimeCoverageFilterContext::new(root).with_diff_index(Some(&diff_index)));
+        apply_runtime_coverage_filters(
+            &mut report,
+            &RuntimeCoverageFilterContext::new(root).with_diff_index(Some(&diff_index)),
+        );
 
         assert_eq!(report.hot_paths.len(), 1);
     }
@@ -3363,6 +3438,31 @@ mod tests {
     }
 
     #[test]
+    fn load_diff_index_resolves_relative_path_against_root_and_parses() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        let diff_path = root.join("pr.diff");
+        let diff = "diff --git a/src/hot.ts b/src/hot.ts\n\
+                    --- a/src/hot.ts\n\
+                    +++ b/src/hot.ts\n\
+                    @@ -10,1 +10,2 @@\n\
+                    +  // touched\n";
+        std::fs::write(&diff_path, diff).expect("write diff");
+
+        let index = load_diff_index(Some(Path::new("pr.diff")), root, true)
+            .expect("relative diff path should resolve and parse");
+        assert!(index.added_lines_in("src/hot.ts").is_some());
+    }
+
+    #[test]
+    fn load_diff_index_returns_none_for_missing_file() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        let result = load_diff_index(Some(Path::new("nonexistent.diff")), root, true);
+        assert!(result.is_none());
+    }
+
+    #[test]
     fn runtime_coverage_changed_files_matches_relative_hot_path_against_absolute_set() {
         // Hot paths arrive from the protocol with project-root-relative paths
         // ('src/hot.ts'); changed_files entries are absolute
@@ -3378,7 +3478,10 @@ mod tests {
             24,
         )]);
 
-        apply_runtime_coverage_filters(&mut report, &RuntimeCoverageFilterContext::new(root).with_changed_files(Some(&changed_files)));
+        apply_runtime_coverage_filters(
+            &mut report,
+            &RuntimeCoverageFilterContext::new(root).with_changed_files(Some(&changed_files)),
+        );
 
         assert_eq!(report.hot_paths.len(), 1);
     }
