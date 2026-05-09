@@ -109,6 +109,19 @@ pub struct AuditOptions<'a> {
     pub gate: AuditGate,
     /// Report unused exports in entry files (forwarded to the dead-code sub-pass).
     pub include_entry_exports: bool,
+    /// Paid runtime-coverage sidecar input (V8 directory, V8 JSON, or
+    /// Istanbul coverage map). Forwarded into the embedded health pass so
+    /// audit surfaces the `hot-path-touched` verdict alongside dead-code
+    /// and complexity findings without requiring a second `fallow health`
+    /// invocation in CI.
+    pub runtime_coverage: Option<&'a std::path::Path>,
+    /// Threshold for hot-path classification, forwarded to the sidecar.
+    pub min_invocations_hot: u64,
+    /// Path to a unified diff for line-level scoping of `hot-path-touched`.
+    /// Resolves against `root` if relative; falls back to `FALLOW_DIFF_FILE`.
+    /// Mirrors `fallow health --diff-file` so the two surfaces stay
+    /// behaviorally identical.
+    pub diff_file: Option<&'a std::path::Path>,
 }
 
 // ── Auto-detect base branch ──────────────────────────────────────
@@ -684,6 +697,15 @@ fn compute_base_snapshot(
         coverage_root: opts.coverage_root,
         gate: AuditGate::All,
         include_entry_exports: opts.include_entry_exports,
+        // Base-snapshot pass intentionally does NOT spawn the sidecar
+        // again or apply hot-path filtering: hot-path-touched is a
+        // PR-vs-HEAD signal, and the recursive base run is HEAD's
+        // baseline, so it has nothing to compare against. Suppressing
+        // here also avoids a duplicate license check + sidecar download
+        // cost on every audit run.
+        runtime_coverage: None,
+        min_invocations_hot: opts.min_invocations_hot,
+        diff_file: None,
     };
 
     let base_changed_files = remap_focus_files(changed_files, opts.root, &base_root);
@@ -2213,6 +2235,24 @@ fn run_audit_health<'a>(
     changed_since: Option<&'a str>,
     shared_parse: Option<crate::health::SharedParseData>,
 ) -> Result<Option<HealthResult>, ExitCode> {
+    // Build runtime-coverage sidecar options when --runtime-coverage was
+    // supplied. License JWT loading + 7/30/hard-fail grace evaluation
+    // happen inside prepare_options; an exit here means the user is past
+    // the hard-fail line and audit cannot proceed.
+    let runtime_coverage = match opts.runtime_coverage {
+        Some(path) => match crate::health::coverage::prepare_options(
+            path,
+            opts.min_invocations_hot,
+            None,
+            None,
+            opts.output,
+        ) {
+            Ok(options) => Some(options),
+            Err(code) => return Err(code),
+        },
+        None => None,
+    };
+
     let health_opts = HealthOptions {
         root: opts.root,
         config_path: opts.config_path,
@@ -2257,9 +2297,8 @@ fn run_audit_health<'a>(
         coverage_root: opts.coverage_root,
         performance: opts.performance,
         min_severity: None,
-        runtime_coverage: None,
-        // Wired by --diff-file in slice 6 (audit runtime-coverage integration).
-        diff_file: None,
+        runtime_coverage,
+        diff_file: opts.diff_file,
     };
     let health_run = if let Some(shared) = shared_parse {
         crate::health::execute_health_with_shared_parse(&health_opts, shared)
@@ -2757,8 +2796,20 @@ pub fn run_audit(opts: &AuditOptions<'_>) -> ExitCode {
     let coverage_resolved = opts
         .coverage
         .map(|p| crate::health::scoring::resolve_relative_to_root(p, Some(opts.root)));
+    // Absolutize runtime_coverage and diff_file at the public entry for the
+    // same reason coverage is absolutized: `compute_base_snapshot` swaps
+    // `opts.root` to a temp worktree directory, and any relative path
+    // would re-resolve against that worktree on the recursive base pass.
+    let runtime_coverage_resolved = opts
+        .runtime_coverage
+        .map(|p| crate::health::scoring::resolve_relative_to_root(p, Some(opts.root)));
+    let diff_file_resolved = opts
+        .diff_file
+        .map(|p| crate::health::scoring::resolve_relative_to_root(p, Some(opts.root)));
     let resolved_opts = AuditOptions {
         coverage: coverage_resolved.as_deref(),
+        runtime_coverage: runtime_coverage_resolved.as_deref(),
+        diff_file: diff_file_resolved.as_deref(),
         ..*opts
     };
     match execute_audit(&resolved_opts) {
@@ -3030,6 +3081,9 @@ mod tests {
             coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
+            runtime_coverage: None,
+            min_invocations_hot: 100,
+            diff_file: None,
         };
 
         let first = config_file_fingerprint(&opts).expect("fingerprint should be computed");
@@ -3098,6 +3152,9 @@ mod tests {
             coverage_root: None,
             gate: AuditGate::All,
             include_entry_exports: false,
+            runtime_coverage: None,
+            min_invocations_hot: 100,
+            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -3171,6 +3228,9 @@ mod tests {
             coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
+            runtime_coverage: None,
+            min_invocations_hot: 100,
+            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -3260,6 +3320,9 @@ mod tests {
             coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
+            runtime_coverage: None,
+            min_invocations_hot: 100,
+            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -3339,6 +3402,9 @@ mod tests {
             coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
+            runtime_coverage: None,
+            min_invocations_hot: 100,
+            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -3502,6 +3568,9 @@ mod tests {
             coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
+            runtime_coverage: None,
+            min_invocations_hot: 100,
+            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -3628,6 +3697,9 @@ export function App() {
             coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
+            runtime_coverage: None,
+            min_invocations_hot: 100,
+            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -3761,6 +3833,9 @@ export function App() {
             coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
+            runtime_coverage: None,
+            min_invocations_hot: 100,
+            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -3839,6 +3914,9 @@ export function App() {
             coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
+            runtime_coverage: None,
+            min_invocations_hot: 100,
+            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute with a new explicit config");
@@ -3911,6 +3989,9 @@ export function App() {
             coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
+            runtime_coverage: None,
+            min_invocations_hot: 100,
+            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -3989,6 +4070,9 @@ export function App() {
             coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
+            runtime_coverage: None,
+            min_invocations_hot: 100,
+            diff_file: None,
         };
 
         let first = execute_audit(&opts).expect("first audit should execute");
@@ -4090,6 +4174,9 @@ export function App() {
             coverage_root: None,
             gate: AuditGate::All,
             include_entry_exports: false,
+            runtime_coverage: None,
+            min_invocations_hot: 100,
+            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");

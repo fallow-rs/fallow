@@ -941,9 +941,7 @@ fn load_diff_index(
     };
 
     match std::fs::read_to_string(&resolved_path) {
-        Ok(text) => Some(crate::report::ci::diff_filter::DiffIndex::from_unified_diff(
-            &text,
-        )),
+        Ok(text) => Some(crate::report::ci::diff_filter::DiffIndex::from_unified_diff(&text)),
         Err(error) => {
             if !quiet {
                 eprintln!(

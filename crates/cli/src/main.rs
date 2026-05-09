@@ -734,6 +734,22 @@ enum Command {
         /// base-snapshot attribution.
         #[arg(long, value_enum)]
         gate: Option<AuditGateArg>,
+
+        /// Paid runtime-coverage sidecar input. Accepts a V8 directory, a
+        /// single V8 JSON file, or an Istanbul coverage map JSON. Spawns
+        /// the `fallow-cov` sidecar as part of the audit pipeline so the
+        /// `hot-path-touched` verdict surfaces alongside dead-code and
+        /// complexity findings without requiring a second `fallow health`
+        /// invocation in CI. License-gated; the verdict is informational
+        /// (no exit code change) until a future `--gate hot-path-touched`
+        /// knob lands.
+        #[arg(long, value_name = "PATH")]
+        runtime_coverage: Option<PathBuf>,
+
+        /// Threshold for hot-path classification, forwarded to the sidecar
+        /// when `--runtime-coverage` is set.
+        #[arg(long, default_value_t = 100)]
+        min_invocations_hot: u64,
     },
 
     /// Dump the CLI interface as machine-readable JSON for agent introspection
@@ -2198,6 +2214,8 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             coverage,
             coverage_root,
             gate,
+            runtime_coverage,
+            min_invocations_hot,
         } => {
             if cli.baseline.is_some() || cli.save_baseline.is_some() {
                 return emit_error(
@@ -2272,6 +2290,9 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 coverage_root: coverage_root.as_deref(),
                 gate: gate.map_or(audit_cfg.gate, Into::into),
                 include_entry_exports: cli.include_entry_exports,
+                runtime_coverage: runtime_coverage.as_deref(),
+                min_invocations_hot,
+                diff_file: cli.diff_file.as_deref(),
             })
         }
         Command::Schema => unreachable!("handled above"),
