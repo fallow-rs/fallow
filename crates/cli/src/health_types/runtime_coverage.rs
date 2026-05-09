@@ -241,6 +241,12 @@ pub struct RuntimeCoverageHotPath {
     pub path: PathBuf,
     pub function: String,
     pub line: u32,
+    /// 1-indexed line the function ends on (inclusive). Mirrors
+    /// `fallow_cov_protocol::HotPath::end_line` (added in protocol 0.5).
+    /// Older 0.4-shape sidecars omit the field on the wire; serde defaults
+    /// to `0`, which the line-overlap filter MUST treat as a single-line
+    /// range (`line..=line`) rather than a span.
+    pub end_line: u32,
     pub invocations: u64,
     /// Percentile rank over this response's hot-path distribution. `100`
     /// means the busiest, `0` means the quietest function that qualified.

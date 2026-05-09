@@ -1951,6 +1951,7 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
             path: root.join("src/hot.ts"),
             function: "hotPath".to_string(),
             line: 3,
+            end_line: 9,
             invocations: 250,
             percentile: 99,
             actions: vec![],

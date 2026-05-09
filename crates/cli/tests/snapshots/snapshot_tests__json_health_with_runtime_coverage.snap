@@ -1,5 +1,6 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
+assertion_line: 2137
 expression: redact_version(&json_str)
 ---
 {
@@ -115,6 +116,7 @@ expression: redact_version(&json_str)
         "path": "src/hot.ts",
         "function": "hotPath",
         "line": 3,
+        "end_line": 9,
         "invocations": 250,
         "percentile": 99
       }

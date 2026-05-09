@@ -480,6 +480,7 @@ mod tests {
                     path: root.join("src/hot.ts"),
                     function: "hotPath".to_owned(),
                     line: 3,
+                    end_line: 9,
                     invocations: 250,
                     percentile: 99,
                     actions: vec![],

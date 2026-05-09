@@ -219,3 +219,10 @@ opt-level = "z"
 opt-level = "z"
 [profile.release.package.tracing-subscriber]
 opt-level = "z"
+
+# Local development override: consume fallow-cov-protocol 0.5.0 from the
+# sibling working tree so the line-overlap matching work can iterate before
+# the new protocol is published to crates.io. Remove this stanza in the
+# release commit that publishes 0.5.0.
+[patch.crates-io]
+fallow-cov-protocol = { path = "../fallow-cov-protocol" }

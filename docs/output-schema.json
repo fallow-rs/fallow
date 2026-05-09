@@ -943,7 +943,7 @@
 
     "RuntimeCoverageHotPath": {
       "type": "object",
-      "required": ["id", "path", "function", "line", "invocations", "percentile"],
+      "required": ["id", "path", "function", "line", "end_line", "invocations", "percentile"],
       "properties": {
         "id": {
           "type": "string",
@@ -962,6 +962,11 @@
           "type": "integer",
           "minimum": 1,
           "description": "1-indexed line number the function starts on."
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "1-indexed line the function ends on (inclusive). `0` indicates the value was unavailable (older protocol-0.4 sidecars), in which case consumers MUST treat the range as a single line at `line`."
         },
         "invocations": {
           "type": "integer",

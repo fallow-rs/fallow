@@ -34,7 +34,7 @@ fallow-core = { workspace = true }
 fallow-config = { workspace = true }
 fallow-types = { workspace = true }
 fallow-v8-coverage = { version = "2.69.0", path = "../v8-coverage" }
-fallow-cov-protocol = "0.4"
+fallow-cov-protocol = "0.5"
 fallow-license = { version = "2.69.0", path = "../license" }
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 clap = { workspace = true }
@@ -73,7 +73,7 @@ oxc_span = { workspace = true }
 proptest = { workspace = true }
 base64 = "0.22"
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
-fallow-cov-protocol = "0.4"
+fallow-cov-protocol = "0.5"
 
 [package.metadata.cargo-shear]
 ignored = ["miette"] # feature-only dep: activates fancy rendering for fallow-config's miette::Report

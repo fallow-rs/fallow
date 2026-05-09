@@ -1726,11 +1726,16 @@ fn convert_response(
             path: PathBuf::from(entry.file),
             function: entry.function,
             line: entry.line,
+            // 0.4-shape sidecars omit end_line; protocol's serde default is
+            // 0. The line-overlap filter folds 0 into a single-line range,
+            // so we forward the value as-is rather than synthesizing
+            // `entry.line` here (preserves the "we don't know" signal).
+            end_line: entry.end_line,
             invocations: entry.invocations,
             percentile: entry.percentile,
             // Actions on hot paths are reserved for future protocol versions
             // (e.g., a "review-on-change" suggestion). The sidecar protocol
-            // at 0.2 does not emit per-hot-path actions, so leave empty.
+            // at 0.5 does not emit per-hot-path actions, so leave empty.
             actions: Vec::new(),
         })
         .collect::<Vec<_>>();
@@ -1901,7 +1906,7 @@ fn map_evidence(evidence: Evidence) -> RuntimeCoverageEvidence {
 fn map_report_verdict(verdict: &ReportVerdict) -> RuntimeCoverageReportVerdict {
     match verdict {
         ReportVerdict::Clean => RuntimeCoverageReportVerdict::Clean,
-        ReportVerdict::HotPathChangesNeeded => RuntimeCoverageReportVerdict::HotPathTouched,
+        ReportVerdict::HotPathTouched => RuntimeCoverageReportVerdict::HotPathTouched,
         ReportVerdict::ColdCodeDetected => RuntimeCoverageReportVerdict::ColdCodeDetected,
         ReportVerdict::LicenseExpiredGrace => RuntimeCoverageReportVerdict::LicenseExpiredGrace,
         ReportVerdict::Unknown => RuntimeCoverageReportVerdict::Unknown,
@@ -2501,6 +2506,7 @@ mod tests {
                     file: "src/app.ts".to_owned(),
                     function: "alpha".to_owned(),
                     line: 8,
+                    end_line: 12,
                     invocations: 20,
                     percentile: 50,
                 }],
