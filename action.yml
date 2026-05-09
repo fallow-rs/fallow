@@ -100,7 +100,7 @@ inputs:
     required: false
     default: 'added'
   diff-file:
-    description: 'Path to a unified-diff file to drive diff-filter. When unset and the action runs in a PR context, the action fetches the diff via gh pr diff automatically.'
+    description: 'Path to a unified-diff file used for diff-filter (issue line-pinning) AND for line-level scoping of the runtime-coverage `hot-path-touched` verdict. When unset and the action runs in a PR context with `changed-since` set, the analyze step derives it via `git diff --unified=0` (with a `gh pr diff` fallback for shallow clones) and propagates the path via $GITHUB_ENV so the comment / review steps reuse the same file.'
     required: false
     default: ''
   api-retries:
@@ -373,6 +373,13 @@ runs:
         INPUT_THREADS: ${{ inputs.threads }}
         INPUT_ONLY: ${{ inputs.only }}
         INPUT_SKIP: ${{ inputs.skip }}
+        # User-supplied diff overrides the analyze step's auto-generation
+        # below; analyze.sh leaves it untouched when the user already
+        # supplied a path. When the user did not, analyze.sh writes
+        # fallow-pr.diff and exports it via $GITHUB_ENV so subsequent
+        # steps (comment.sh, review.sh) skip their own `gh pr diff`
+        # fetch and reuse the same file.
+        FALLOW_DIFF_FILE: ${{ inputs.diff-file }}
       run: bash ${{ github.action_path }}/action/scripts/analyze.sh
 
     - name: Job summary

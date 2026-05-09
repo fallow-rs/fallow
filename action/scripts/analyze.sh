@@ -254,6 +254,63 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
   fi
 fi
 
+# --- Pre-compute unified diff for line-level hot-path scoping ---
+# `fallow audit` and `fallow health` consume a unified diff to do
+# line-overlap matching against runtime hot paths so the
+# `hot-path-touched` verdict only fires when an added line falls inside
+# a hot function's body, not merely when the file was touched. Mirrors
+# the changed-files cascade above (three-dot diff, shallow-clone fetch
+# fallback, GitHub API last resort) so behavior is consistent across
+# checkout depths.
+#
+# Skip when the user already supplied `inputs.diff-file` (FALLOW_DIFF_FILE
+# is non-empty in that case): respect their choice. Skip when there is no
+# changed-since, since there is nothing to scope against.
+#
+# Export via $GITHUB_ENV so the comment / review render steps later in
+# the composite action reuse the same diff file we wrote here, instead
+# of re-running `gh pr diff` and double-paying the API quota.
+
+if [ -n "${INPUT_CHANGED_SINCE:-}" ] && [ -z "${FALLOW_DIFF_FILE:-}" ]; then
+  _ROOT="${INPUT_ROOT:-.}"
+  _DIFF_PATH="$PWD/fallow-pr.diff"
+
+  # Three-dot diff (precise: changes since merge-base, needs full history).
+  if (cd "$_ROOT" && git diff --unified=0 --relative "${INPUT_CHANGED_SINCE}...HEAD" -- .) > "$_DIFF_PATH" 2>/dev/null; then
+    :
+  fi
+
+  # Shallow-clone fallback: fetch the base commit, retry two-dot diff.
+  if [ ! -s "$_DIFF_PATH" ]; then
+    if ! git cat-file -e "${INPUT_CHANGED_SINCE}^{commit}" 2>/dev/null; then
+      git fetch --depth=1 origin "$INPUT_CHANGED_SINCE" 2>/dev/null || true
+    fi
+    (cd "$_ROOT" && git diff --unified=0 --relative "${INPUT_CHANGED_SINCE}" HEAD -- .) > "$_DIFF_PATH" 2>/dev/null || true
+  fi
+
+  # Last resort: GitHub API. `gh pr diff` returns the same unified-diff
+  # format git produces, so the downstream DiffIndex parser is identical.
+  if [ ! -s "$_DIFF_PATH" ] && [ -n "${GH_TOKEN:-}" ] && [ -n "${PR_NUMBER:-}" ] && [ -n "${GH_REPO:-}" ]; then
+    gh pr diff "$PR_NUMBER" --repo "$GH_REPO" > "$_DIFF_PATH" 2>/dev/null || true
+  fi
+
+  if [ -s "$_DIFF_PATH" ]; then
+    export FALLOW_DIFF_FILE="$_DIFF_PATH"
+    # Propagate to the comment / review render steps (separate composite
+    # steps see only $GITHUB_ENV, not exported shell variables).
+    if [ -n "${GITHUB_ENV:-}" ]; then
+      echo "FALLOW_DIFF_FILE=${_DIFF_PATH}" >> "$GITHUB_ENV"
+    fi
+  else
+    rm -f "$_DIFF_PATH"
+    # Soft-degrade: line-level filtering disabled, the runtime-coverage
+    # filter falls back to file-level via `--changed-since`. Emit a
+    # machine-greppable warning so dashboards can alert on it without
+    # parsing free-form text.
+    echo "::warning::fallow: warning [shallow-clone]: could not produce unified diff for line-level hot-path scoping. Use fetch-depth: 0 in actions/checkout for line-precision."
+  fi
+fi
+
 # --- Build and run main analysis ---
 
 ARGS=()
