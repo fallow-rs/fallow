@@ -822,7 +822,7 @@ fn refresh_runtime_coverage_verdict(
     } else if has_cold_signal {
         crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected
     } else if has_changed_hot_path {
-        crate::health_types::RuntimeCoverageReportVerdict::HotPathChangesNeeded
+        crate::health_types::RuntimeCoverageReportVerdict::HotPathTouched
     } else {
         crate::health_types::RuntimeCoverageReportVerdict::Clean
     };
@@ -2788,7 +2788,7 @@ mod tests {
 
         assert_eq!(
             report.verdict,
-            crate::health_types::RuntimeCoverageReportVerdict::HotPathChangesNeeded
+            crate::health_types::RuntimeCoverageReportVerdict::HotPathTouched
         );
     }
 

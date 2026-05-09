@@ -803,7 +803,7 @@
 
     "RuntimeCoverageReportVerdict": {
       "type": "string",
-      "enum": ["clean", "hot-path-changes-needed", "cold-code-detected", "license-expired-grace", "unknown"],
+      "enum": ["clean", "hot-path-touched", "cold-code-detected", "license-expired-grace", "unknown"],
       "description": "Overall report verdict. Independent of the per-finding verdict."
     },
 

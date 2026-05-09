@@ -12,7 +12,7 @@ Concrete work scoped to the next one or two minor releases.
 
 ### Hot-path change review
 
-Runtime coverage ships the data; the review workflow on top of it does not yet exist. `HotPathChangesNeeded` will correlate a PR's changed lines against the hot functions captured by the sidecar and flag diffs that touch runtime-critical code. Paid, runtime-backed.
+Runtime coverage ships the data; the review workflow on top of it does not yet exist. The `hot-path-touched` verdict will correlate a PR's changed lines against the hot functions captured by the sidecar and flag diffs that touch runtime-critical code. Paid, runtime-backed.
 
 ### Richer MCP responses
 

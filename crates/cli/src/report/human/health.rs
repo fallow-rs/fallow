@@ -143,9 +143,7 @@ fn render_runtime_coverage(
 
     let verdict = match production.verdict {
         crate::health_types::RuntimeCoverageReportVerdict::Clean => "clean",
-        crate::health_types::RuntimeCoverageReportVerdict::HotPathChangesNeeded => {
-            "hot path changes needed"
-        }
+        crate::health_types::RuntimeCoverageReportVerdict::HotPathTouched => "hot path touched",
         crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected => "cold code detected",
         crate::health_types::RuntimeCoverageReportVerdict::LicenseExpiredGrace => {
             "license expired grace"

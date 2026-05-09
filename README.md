@@ -300,7 +300,7 @@ Setup details:
 - `fallow health --coverage <path>` accepts a single Istanbul coverage map JSON file or a directory containing `coverage-final.json`
 - `--coverage-root <path>` must be an absolute prefix from the Istanbul file paths. Use it when coverage was generated in CI or Docker with a different checkout root, for example `fallow health --coverage artifacts/coverage-final.json --coverage-root /home/runner/work/myapp`
 - V8 dumps that include Node's `source-map-cache` are remapped through supported source-map paths before analysis, including file paths, relative paths, `webpack://...`, and `vite://...`; unsupported virtual schemes safely fall back to raw V8 handling
-- `fallow health --changed-since <ref> --runtime-coverage <path>` promotes touched hot paths to a `hot-path-changes-needed` verdict during change review
+- `fallow health --changed-since <ref> --runtime-coverage <path>` promotes touched hot paths to a `hot-path-touched` verdict during change review
 
 Runtime coverage is merged into the same human, JSON, SARIF, compact, markdown, and CodeClimate outputs as the rest of the health report.
 

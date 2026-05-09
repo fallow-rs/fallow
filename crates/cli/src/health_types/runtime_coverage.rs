@@ -7,7 +7,7 @@ use std::path::PathBuf;
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeCoverageReportVerdict {
     Clean,
-    HotPathChangesNeeded,
+    HotPathTouched,
     ColdCodeDetected,
     LicenseExpiredGrace,
     #[default]
@@ -19,7 +19,7 @@ impl RuntimeCoverageReportVerdict {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Clean => "clean",
-            Self::HotPathChangesNeeded => "hot-path-changes-needed",
+            Self::HotPathTouched => "hot-path-touched",
             Self::ColdCodeDetected => "cold-code-detected",
             Self::LicenseExpiredGrace => "license-expired-grace",
             Self::Unknown => "unknown",
@@ -326,8 +326,8 @@ mod tests {
     fn report_verdict_display_matches_kebab_case_serde() {
         assert_eq!(RuntimeCoverageReportVerdict::Clean.to_string(), "clean");
         assert_eq!(
-            RuntimeCoverageReportVerdict::HotPathChangesNeeded.to_string(),
-            "hot-path-changes-needed",
+            RuntimeCoverageReportVerdict::HotPathTouched.to_string(),
+            "hot-path-touched",
         );
         assert_eq!(
             RuntimeCoverageReportVerdict::ColdCodeDetected.to_string(),

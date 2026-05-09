@@ -1901,7 +1901,7 @@ fn map_evidence(evidence: Evidence) -> RuntimeCoverageEvidence {
 fn map_report_verdict(verdict: &ReportVerdict) -> RuntimeCoverageReportVerdict {
     match verdict {
         ReportVerdict::Clean => RuntimeCoverageReportVerdict::Clean,
-        ReportVerdict::HotPathChangesNeeded => RuntimeCoverageReportVerdict::HotPathChangesNeeded,
+        ReportVerdict::HotPathChangesNeeded => RuntimeCoverageReportVerdict::HotPathTouched,
         ReportVerdict::ColdCodeDetected => RuntimeCoverageReportVerdict::ColdCodeDetected,
         ReportVerdict::LicenseExpiredGrace => RuntimeCoverageReportVerdict::LicenseExpiredGrace,
         ReportVerdict::Unknown => RuntimeCoverageReportVerdict::Unknown,

@@ -768,9 +768,9 @@ pub fn health_meta() -> Value {
             },
             "runtime_coverage_verdict": {
                 "name": "Runtime Coverage Verdict",
-                "description": "Overall verdict across all runtime-coverage findings. `clean` = nothing cold; `cold-code-detected` = one or more tracked functions had zero invocations; `hot-path-changes-needed` = a function modified in the current change set is on the hot path; `license-expired-grace` = analysis ran but the license is in its post-expiry grace window; `unknown` = verdict could not be computed (degenerate input).",
-                "values": ["clean", "hot-path-changes-needed", "cold-code-detected", "license-expired-grace", "unknown"],
-                "interpretation": "`cold-code-detected` is the primary actionable signal; `hot-path-changes-needed` elevates code-review attention for touched hot paths"
+                "description": "Overall verdict across all runtime-coverage findings. `clean` = nothing cold; `cold-code-detected` = one or more tracked functions had zero invocations; `hot-path-touched` = a function modified in the current change set is on the hot path; `license-expired-grace` = analysis ran but the license is in its post-expiry grace window; `unknown` = verdict could not be computed (degenerate input).",
+                "values": ["clean", "hot-path-touched", "cold-code-detected", "license-expired-grace", "unknown"],
+                "interpretation": "`cold-code-detected` is the primary actionable signal; `hot-path-touched` elevates code-review attention for touched hot paths"
             },
             "runtime_coverage_state": {
                 "name": "Runtime Coverage State",
@@ -903,7 +903,7 @@ pub fn coverage_analyze_meta() -> Value {
         },
         "enums": {
             "data_source": ["local", "cloud"],
-            "report_verdict": ["clean", "hot-path-changes-needed", "cold-code-detected", "license-expired-grace", "unknown"],
+            "report_verdict": ["clean", "hot-path-touched", "cold-code-detected", "license-expired-grace", "unknown"],
             "finding_verdict": ["safe_to_delete", "review_required", "coverage_unavailable", "low_traffic", "active", "unknown"],
             "static_status": ["used", "unused"],
             "test_coverage": ["covered", "not_covered"],
