@@ -1887,6 +1887,7 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
     let mut report = sample_health_report(root);
     report.runtime_coverage = Some(RuntimeCoverageReport {
         verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
+        signals: Vec::new(),
         summary: RuntimeCoverageSummary {
             data_source: RuntimeCoverageDataSource::Local,
             last_received_at: None,

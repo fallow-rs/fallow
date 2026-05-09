@@ -646,7 +646,12 @@
         },
         "verdict": {
           "$ref": "#/definitions/RuntimeCoverageReportVerdict",
-          "description": "Overall runtime coverage verdict after baseline filtering and changed-review adjustments."
+          "description": "Single most actionable runtime-coverage signal under the current context. In PR-review context (CLI saw `--diff-file` or `--changed-since`) the verdict is `hot-path-touched` whenever a hot function was touched, regardless of cold-code findings; in standalone analysis `cold-code-detected` remains primary. For the full set of findings the report carries, see `signals`."
+        },
+        "signals": {
+          "type": "array",
+          "description": "Every runtime-coverage signal the report carries, severity-descending. Independent of `verdict`. Empty when `verdict` is `clean` and there is no license grace. Used by JSON / SARIF / MCP consumers that want the complete set rather than the headline.",
+          "items": { "$ref": "#/definitions/RuntimeCoverageSignal" }
         },
         "summary": {
           "$ref": "#/definitions/RuntimeCoverageSummary",
@@ -811,6 +816,12 @@
       "type": "string",
       "enum": ["safe_to_delete", "review_required", "coverage_unavailable", "low_traffic", "active", "unknown"],
       "description": "Protocol-level per-function runtime coverage verdict derived from the decision table in fallow-cov-protocol. The CLI's `runtime_coverage.findings` array omits `active` entries even though the underlying enum still includes it."
+    },
+
+    "RuntimeCoverageSignal": {
+      "type": "string",
+      "enum": ["license-expired-grace", "cold-code-detected", "hot-path-touched"],
+      "description": "Discrete signal captured during runtime-coverage post-processing. Multiple signals can apply to a single report; `verdict` collapses to the most actionable one for the current context."
     },
 
     "RuntimeCoverageConfidence": {

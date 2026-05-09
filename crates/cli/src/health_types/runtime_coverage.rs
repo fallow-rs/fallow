@@ -2,7 +2,14 @@ use std::fmt;
 use std::path::PathBuf;
 
 /// Top-level verdict for the whole runtime-coverage report. Mirrors
-/// `fallow_cov_protocol::ReportVerdict`.
+/// `fallow_cov_protocol::ReportVerdict`. The verdict is the SINGLE most
+/// actionable finding; for the full set of findings see [`signals`] on
+/// [`RuntimeCoverageReport`]. The verdict promotes `hot-path-touched`
+/// above `cold-code-detected` in PR-review context (when the CLI was
+/// given a change-scope: `--diff-file` or `--changed-since`) because the
+/// touched-hot-path is event-tied to the current diff and reviewers need
+/// it to be the top-line signal. In standalone analysis (no change
+/// scope), `cold-code-detected` remains primary.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeCoverageReportVerdict {
@@ -12,6 +19,37 @@ pub enum RuntimeCoverageReportVerdict {
     LicenseExpiredGrace,
     #[default]
     Unknown,
+}
+
+/// Discrete signal captured during runtime-coverage post-processing.
+/// `verdict` collapses to one summary value; `signals` enumerates ALL
+/// findings the report carries so JSON consumers, CI dashboards, and
+/// agents can reason about them independently of the headline. Order is
+/// stable: severity-descending so the first entry mirrors a sensible
+/// non-PR-context verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RuntimeCoverageSignal {
+    LicenseExpiredGrace,
+    ColdCodeDetected,
+    HotPathTouched,
+}
+
+impl RuntimeCoverageSignal {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LicenseExpiredGrace => "license-expired-grace",
+            Self::ColdCodeDetected => "cold-code-detected",
+            Self::HotPathTouched => "hot-path-touched",
+        }
+    }
+}
+
+impl fmt::Display for RuntimeCoverageSignal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 impl RuntimeCoverageReportVerdict {
@@ -311,6 +349,12 @@ pub struct RuntimeCoverageImportanceEntry {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct RuntimeCoverageReport {
     pub verdict: RuntimeCoverageReportVerdict,
+    /// All signals captured by post-processing. Independent of `verdict`,
+    /// which is the single most actionable signal under the current
+    /// context. Empty when the report is `Clean` and not under license
+    /// grace. Order is stable severity-descending.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub signals: Vec<RuntimeCoverageSignal>,
     pub summary: RuntimeCoverageSummary,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub findings: Vec<RuntimeCoverageFinding>,

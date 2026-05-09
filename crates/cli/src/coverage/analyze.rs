@@ -493,6 +493,7 @@ fn merge_cloud_snapshot(
         } else {
             RuntimeCoverageReportVerdict::ColdCodeDetected
         },
+        signals: Vec::new(),
         summary: RuntimeCoverageSummary {
             data_source: RuntimeCoverageDataSource::Cloud,
             last_received_at: snapshot.summary.last_received_at.clone(),
@@ -1247,6 +1248,7 @@ mod tests {
     fn top_limit_truncates_all_runtime_arrays() {
         let mut report = RuntimeCoverageReport {
             verdict: RuntimeCoverageReportVerdict::Clean,
+            signals: Vec::new(),
             summary: RuntimeCoverageSummary::default(),
             findings: vec![
                 runtime_finding("fallow:prod:00000001"),

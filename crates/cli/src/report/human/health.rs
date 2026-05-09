@@ -1939,6 +1939,7 @@ mod tests {
         let mut report = empty_report();
         report.runtime_coverage = Some(crate::health_types::RuntimeCoverageReport {
             verdict: crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected,
+            signals: Vec::new(),
             summary: crate::health_types::RuntimeCoverageSummary {
                 data_source: crate::health_types::RuntimeCoverageDataSource::Local,
                 last_received_at: None,
@@ -2002,6 +2003,7 @@ mod tests {
     ) -> crate::health_types::RuntimeCoverageReport {
         crate::health_types::RuntimeCoverageReport {
             verdict: crate::health_types::RuntimeCoverageReportVerdict::Clean,
+            signals: Vec::new(),
             summary: crate::health_types::RuntimeCoverageSummary {
                 data_source: crate::health_types::RuntimeCoverageDataSource::Local,
                 last_received_at: None,

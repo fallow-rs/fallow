@@ -444,6 +444,7 @@ mod tests {
         let report = crate::health_types::HealthReport {
             runtime_coverage: Some(RuntimeCoverageReport {
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
+                signals: Vec::new(),
                 summary: RuntimeCoverageSummary {
                     data_source: RuntimeCoverageDataSource::Local,
                     last_received_at: None,

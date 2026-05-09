@@ -1811,6 +1811,7 @@ fn convert_response(
 
     RuntimeCoverageReport {
         verdict: map_report_verdict(&response.verdict),
+        signals: Vec::new(),
         summary: RuntimeCoverageSummary {
             data_source: RuntimeCoverageDataSource::Local,
             last_received_at: None,
