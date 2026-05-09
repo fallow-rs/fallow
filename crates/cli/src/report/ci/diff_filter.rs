@@ -118,6 +118,17 @@ impl DiffIndex {
                 .is_some_and(|lines| lines.contains(&issue.line)),
         }
     }
+
+    /// Added-line numbers for `path` (repo-root-relative, forward-slashed),
+    /// or `None` when the file does not appear in the diff. Used by the
+    /// runtime-coverage filter to do line-overlap matching against hot-path
+    /// `[start_line, end_line]` ranges, so a PR touching the body of a hot
+    /// function flips the verdict to `hot-path-touched` while edits to
+    /// other functions in the same file do not.
+    #[must_use]
+    pub fn added_lines_in(&self, path: &str) -> Option<&FxHashSet<u64>> {
+        self.added_lines.get(path)
+    }
 }
 
 fn context_radius_from_env() -> u64 {

@@ -558,6 +558,8 @@ fn execute_health_inner(
             &config.root,
             opts.top,
             changed_files.as_ref(),
+            // Wired to --diff-file / FALLOW_DIFF_FILE in the next slice.
+            None,
         );
     }
 
@@ -774,6 +776,7 @@ fn apply_runtime_coverage_filters(
     root: &std::path::Path,
     top: Option<usize>,
     changed_files: Option<&FxHashSet<PathBuf>>,
+    diff_index: Option<&crate::report::ci::diff_filter::DiffIndex>,
 ) {
     if let Some(baseline) = baseline {
         report.findings = filter_new_runtime_coverage_findings(
@@ -783,18 +786,85 @@ fn apply_runtime_coverage_filters(
         );
     }
 
-    if let Some(changed_files) = changed_files {
-        report
-            .hot_paths
-            .retain(|hot_path| changed_files.contains(&hot_path.path));
-    }
+    let changed_review =
+        retain_hot_paths_in_change_scope(report, root, changed_files, diff_index);
 
-    refresh_runtime_coverage_verdict(report, changed_files.is_some());
+    refresh_runtime_coverage_verdict(report, changed_review);
 
     if let Some(top) = top {
         report.findings.truncate(top);
         report.hot_paths.truncate(top);
     }
+}
+
+/// Filter `report.hot_paths` to functions in the current PR's change set.
+/// Returns `true` if either signal (line-level diff or file-level changed-set)
+/// was supplied; the caller uses that to flip the verdict.
+///
+/// Resolution order (best signal wins):
+///   1. `diff_index` (line-level): retain when an added line falls in
+///      `[start_line, end_line]`. When the sidecar is at protocol 0.4 (or
+///      otherwise omits `end_line`, surfaced as `0`), the range collapses to
+///      `line..=line` to avoid claiming false coverage of the rest of the
+///      function body.
+///   2. `changed_files` (file-level): retain when the hot path's file is in
+///      the changed set. Hot paths arrive from the protocol with project-
+///      root-relative paths; `changed_files` carries absolute paths from
+///      `git rev-parse --show-toplevel`. Compare both forms so the filter
+///      works whether the path was absolutized upstream or not.
+fn retain_hot_paths_in_change_scope(
+    report: &mut crate::health_types::RuntimeCoverageReport,
+    root: &std::path::Path,
+    changed_files: Option<&FxHashSet<PathBuf>>,
+    diff_index: Option<&crate::report::ci::diff_filter::DiffIndex>,
+) -> bool {
+    if let Some(diff_index) = diff_index {
+        report.hot_paths.retain(|hot_path| {
+            let Some(rel) = relative_to_root(&hot_path.path, root) else {
+                return false;
+            };
+            let Some(added) = diff_index.added_lines_in(&rel) else {
+                return false;
+            };
+            let start = u64::from(hot_path.line);
+            let end = if hot_path.end_line == 0 {
+                start
+            } else {
+                u64::from(hot_path.end_line)
+            };
+            added.iter().any(|&line| line >= start && line <= end)
+        });
+        return true;
+    }
+
+    if let Some(changed_files) = changed_files {
+        report.hot_paths.retain(|hot_path| {
+            let absolute = if hot_path.path.is_absolute() {
+                hot_path.path.clone()
+            } else {
+                root.join(&hot_path.path)
+            };
+            changed_files.contains(&absolute) || changed_files.contains(&hot_path.path)
+        });
+        return true;
+    }
+
+    false
+}
+
+/// Reduce `path` to a forward-slashed, project-root-relative string for
+/// matching against a unified diff's `+++ b/<path>` keys. Returns `None`
+/// when the path cannot be expressed relative to `root` (different drive,
+/// path traversal escape, etc.). Backslashes in the result are normalized
+/// to forward slashes so Windows checkouts compare against the same diff
+/// keys that `git diff` emits.
+fn relative_to_root(path: &std::path::Path, root: &std::path::Path) -> Option<String> {
+    let relative = if path.is_absolute() {
+        path.strip_prefix(root).ok()?
+    } else {
+        path
+    };
+    Some(relative.to_string_lossy().replace('\\', "/"))
 }
 
 fn refresh_runtime_coverage_verdict(
@@ -2701,7 +2771,7 @@ mod tests {
             warnings: vec![],
         };
 
-        apply_runtime_coverage_filters(&mut report, Some(&baseline), root, Some(1), None);
+        apply_runtime_coverage_filters(&mut report, Some(&baseline), root, Some(1), None, None);
 
         assert_eq!(report.findings.len(), 1);
         assert_eq!(report.findings[0].function, "gamma");
@@ -2748,7 +2818,7 @@ mod tests {
             warnings: vec![],
         };
 
-        apply_runtime_coverage_filters(&mut report, Some(&baseline), root, None, None);
+        apply_runtime_coverage_filters(&mut report, Some(&baseline), root, None, None, None);
 
         assert!(report.findings.is_empty());
         assert_eq!(
@@ -2787,7 +2857,7 @@ mod tests {
             warnings: vec![],
         };
 
-        apply_runtime_coverage_filters(&mut report, None, root, None, Some(&changed_files));
+        apply_runtime_coverage_filters(&mut report, None, root, None, Some(&changed_files), None);
 
         assert_eq!(
             report.verdict,
@@ -2820,13 +2890,209 @@ mod tests {
             warnings: vec![],
         };
 
-        apply_runtime_coverage_filters(&mut report, None, root, None, Some(&changed_files));
+        apply_runtime_coverage_filters(&mut report, None, root, None, Some(&changed_files), None);
 
         assert!(report.hot_paths.is_empty());
         assert_eq!(
             report.verdict,
             crate::health_types::RuntimeCoverageReportVerdict::Clean
         );
+    }
+
+    fn fx_runtime_coverage_report_with_hot_paths(
+        hot_paths: Vec<crate::health_types::RuntimeCoverageHotPath>,
+    ) -> crate::health_types::RuntimeCoverageReport {
+        crate::health_types::RuntimeCoverageReport {
+            verdict: crate::health_types::RuntimeCoverageReportVerdict::Clean,
+            summary: fx_summary(2, 2, 0, 0),
+            findings: vec![],
+            hot_paths,
+            blast_radius: vec![],
+            importance: vec![],
+            watermark: None,
+            warnings: vec![],
+        }
+    }
+
+    fn fx_hot_path(
+        id: &str,
+        path: &str,
+        line: u32,
+        end_line: u32,
+    ) -> crate::health_types::RuntimeCoverageHotPath {
+        crate::health_types::RuntimeCoverageHotPath {
+            id: id.to_owned(),
+            path: PathBuf::from(path),
+            function: "renderHotPath".to_owned(),
+            line,
+            end_line,
+            invocations: 9_500,
+            percentile: 99,
+            actions: vec![],
+        }
+    }
+
+    #[test]
+    fn runtime_coverage_diff_index_keeps_hot_paths_with_added_line_in_range() {
+        let root = Path::new("/project");
+        let diff = "diff --git a/src/hot.ts b/src/hot.ts\n\
+                    --- a/src/hot.ts\n\
+                    +++ b/src/hot.ts\n\
+                    @@ -10,1 +10,2 @@\n\
+                    +  // touch the body\n\
+                    line 11\n";
+        let diff_index = crate::report::ci::diff_filter::DiffIndex::from_unified_diff(diff);
+        let mut report = fx_runtime_coverage_report_with_hot_paths(vec![fx_hot_path(
+            "fallow:hot:01010101",
+            "src/hot.ts",
+            7,
+            24,
+        )]);
+
+        apply_runtime_coverage_filters(&mut report, None, root, None, None, Some(&diff_index));
+
+        assert_eq!(report.hot_paths.len(), 1);
+        assert_eq!(
+            report.verdict,
+            crate::health_types::RuntimeCoverageReportVerdict::HotPathTouched
+        );
+    }
+
+    #[test]
+    fn runtime_coverage_diff_index_drops_hot_paths_when_added_line_outside_range() {
+        let root = Path::new("/project");
+        let diff = "diff --git a/src/hot.ts b/src/hot.ts\n\
+                    --- a/src/hot.ts\n\
+                    +++ b/src/hot.ts\n\
+                    @@ -50,1 +50,2 @@\n\
+                    +  // unrelated change far below the hot function\n\
+                    line 51\n";
+        let diff_index = crate::report::ci::diff_filter::DiffIndex::from_unified_diff(diff);
+        let mut report = fx_runtime_coverage_report_with_hot_paths(vec![fx_hot_path(
+            "fallow:hot:02020202",
+            "src/hot.ts",
+            7,
+            24,
+        )]);
+
+        apply_runtime_coverage_filters(&mut report, None, root, None, None, Some(&diff_index));
+
+        assert!(report.hot_paths.is_empty());
+        assert_eq!(
+            report.verdict,
+            crate::health_types::RuntimeCoverageReportVerdict::Clean
+        );
+    }
+
+    #[test]
+    fn runtime_coverage_diff_index_falls_back_to_single_line_when_end_line_zero() {
+        // Older 0.4-shape sidecars omit end_line; serde defaults to 0. The
+        // filter MUST treat 0 as a single-line range at `line` to avoid
+        // claiming overlap with the rest of the function body it never knew
+        // about.
+        let root = Path::new("/project");
+        let diff = "diff --git a/src/hot.ts b/src/hot.ts\n\
+                    --- a/src/hot.ts\n\
+                    +++ b/src/hot.ts\n\
+                    @@ -7,1 +7,2 @@\n\
+                    +  // exactly the function's start line\n\
+                    line 8\n";
+        let diff_index = crate::report::ci::diff_filter::DiffIndex::from_unified_diff(diff);
+        let mut report = fx_runtime_coverage_report_with_hot_paths(vec![fx_hot_path(
+            "fallow:hot:03030303",
+            "src/hot.ts",
+            7,
+            0,
+        )]);
+
+        apply_runtime_coverage_filters(&mut report, None, root, None, None, Some(&diff_index));
+
+        assert_eq!(report.hot_paths.len(), 1);
+        assert_eq!(
+            report.verdict,
+            crate::health_types::RuntimeCoverageReportVerdict::HotPathTouched
+        );
+    }
+
+    #[test]
+    fn runtime_coverage_diff_index_resolves_absolute_hot_path_against_root() {
+        let root = Path::new("/project");
+        let diff = "diff --git a/src/hot.ts b/src/hot.ts\n\
+                    --- a/src/hot.ts\n\
+                    +++ b/src/hot.ts\n\
+                    @@ -10,1 +10,2 @@\n\
+                    +  // touched\n\
+                    line 11\n";
+        let diff_index = crate::report::ci::diff_filter::DiffIndex::from_unified_diff(diff);
+        let mut report = fx_runtime_coverage_report_with_hot_paths(vec![fx_hot_path(
+            "fallow:hot:04040404",
+            "/project/src/hot.ts",
+            7,
+            24,
+        )]);
+
+        apply_runtime_coverage_filters(&mut report, None, root, None, None, Some(&diff_index));
+
+        assert_eq!(report.hot_paths.len(), 1);
+    }
+
+    #[test]
+    fn runtime_coverage_diff_index_takes_priority_over_changed_files() {
+        // Both signals supplied: line-overlap from the diff is the better
+        // signal, so changed_files is ignored. Verifies the filter does not
+        // double-up retain logic when both are present.
+        let root = Path::new("/project");
+        let diff = "diff --git a/src/hot.ts b/src/hot.ts\n\
+                    --- a/src/hot.ts\n\
+                    +++ b/src/hot.ts\n\
+                    @@ -50,1 +50,2 @@\n\
+                    +  // outside the hot function\n\
+                    line 51\n";
+        let diff_index = crate::report::ci::diff_filter::DiffIndex::from_unified_diff(diff);
+        let mut changed_files = FxHashSet::default();
+        changed_files.insert(PathBuf::from("/project/src/hot.ts"));
+        let mut report = fx_runtime_coverage_report_with_hot_paths(vec![fx_hot_path(
+            "fallow:hot:05050505",
+            "src/hot.ts",
+            7,
+            24,
+        )]);
+
+        apply_runtime_coverage_filters(
+            &mut report,
+            None,
+            root,
+            None,
+            Some(&changed_files),
+            Some(&diff_index),
+        );
+
+        assert!(report.hot_paths.is_empty());
+        assert_eq!(
+            report.verdict,
+            crate::health_types::RuntimeCoverageReportVerdict::Clean
+        );
+    }
+
+    #[test]
+    fn runtime_coverage_changed_files_matches_relative_hot_path_against_absolute_set() {
+        // Hot paths arrive from the protocol with project-root-relative paths
+        // ('src/hot.ts'); changed_files entries are absolute
+        // ('/project/src/hot.ts') because git reports paths relative to its
+        // toplevel and the caller absolutizes. Filter must match.
+        let root = Path::new("/project");
+        let mut changed_files = FxHashSet::default();
+        changed_files.insert(PathBuf::from("/project/src/hot.ts"));
+        let mut report = fx_runtime_coverage_report_with_hot_paths(vec![fx_hot_path(
+            "fallow:hot:06060606",
+            "src/hot.ts",
+            7,
+            24,
+        )]);
+
+        apply_runtime_coverage_filters(&mut report, None, root, None, Some(&changed_files), None);
+
+        assert_eq!(report.hot_paths.len(), 1);
     }
 
     #[test]
