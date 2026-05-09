@@ -39,6 +39,15 @@ def prod_advisory_findings:
   (.health.runtime_coverage.findings // [])
   | map(select(.verdict != "safe_to_delete" and .verdict != "review_required" and .verdict != "low_traffic"));
 def prod_hot_paths: (.health.runtime_coverage.hot_paths // []);
+# When runtime-coverage post-processing flipped the verdict to
+# `hot-path-touched`, the hot_paths array is the PR-scoped subset
+# (line-overlap match against the supplied --diff-file). Render the
+# header text so reviewers see "touched" framing rather than the
+# project-wide "top hot paths" framing.
+def prod_hot_paths_touched: (.health.runtime_coverage.verdict // "") == "hot-path-touched";
+def prod_hot_path_label($n):
+  ($n | tostring) as $count |
+  (if prod_hot_paths_touched then "hot path\(if $n == 1 then "" else "s" end) touched" else "hot path\(if $n == 1 then "" else "s" end)" end);
 
 (count(.check; "total_issues")) as $check |
 (count(.dupes.stats; "clone_groups")) as $dupes |
@@ -79,7 +88,7 @@ if $total == 0 then
     "> [!NOTE]\n> **No blocking issues found**\n\n" +
     ":white_check_mark: No code issues \u00b7 :white_check_mark: No duplication \u00b7 :white_check_mark: No blocking health findings" +
     (if $prod_advisory > 0 then " \u00b7 :information_source: **\($prod_advisory)** runtime coverage advisory finding\(if $prod_advisory == 1 then "" else "s" end)" else "" end) +
-    (if $hot_paths > 0 then " \u00b7 :eyes: **\($hot_paths)** hot path\(if $hot_paths == 1 then "" else "s" end)" else "" end)
+    (if $hot_paths > 0 then " \u00b7 :eyes: **\($hot_paths)** \(prod_hot_path_label($hot_paths))" else "" end)
   else
     "> [!NOTE]\n> **No issues found**\n\n" +
     ":white_check_mark: No code issues \u00b7 :white_check_mark: No duplication \u00b7 :white_check_mark: No complex functions"
@@ -98,7 +107,7 @@ else
   " \u00b7 " +
   (if $health > 0 then ":warning: **\($health)** health \(if $health == 1 then "finding" else "findings" end)" else ":white_check_mark: No blocking health findings" end) +
   (if $prod_advisory > 0 then " \u00b7 :information_source: **\($prod_advisory)** coverage advisory finding\(if $prod_advisory == 1 then "" else "s" end)" else "" end) +
-  (if $hot_paths > 0 then " \u00b7 :eyes: **\($hot_paths)** hot path\(if $hot_paths == 1 then "" else "s" end)" else "" end) +
+  (if $hot_paths > 0 then " \u00b7 :eyes: **\($hot_paths)** \(prod_hot_path_label($hot_paths))" else "" end) +
   "\n\n" +
 
   # Pointer to inline comments
@@ -162,7 +171,7 @@ else
   else "" end) +
 
   (if $prod_failing > 0 or $prod_advisory > 0 or $hot_paths > 0 then
-    "<details>\n<summary><strong><a href=\"\(health_docs)#runtime-coverage\">Runtime coverage</a> (\($prod_failing + $prod_advisory) finding\(if ($prod_failing + $prod_advisory) == 1 then "" else "s" end)\(if $hot_paths > 0 then ", \($hot_paths) hot path\(if $hot_paths == 1 then "" else "s" end)" else "" end))</strong></summary>\n\n" +
+    "<details>\n<summary><strong><a href=\"\(health_docs)#runtime-coverage\">Runtime coverage</a> (\($prod_failing + $prod_advisory) finding\(if ($prod_failing + $prod_advisory) == 1 then "" else "s" end)\(if $hot_paths > 0 then ", \($hot_paths) \(prod_hot_path_label($hot_paths))" else "" end))</strong></summary>\n\n" +
     (if $prod_failing + $prod_advisory > 0 then
       "| File | Function | Verdict | Invocations | Confidence |\n|:-----|:---------|:--------|------------:|:-----------|\n" +
       ([(.health.runtime_coverage.findings // [])[:5][] |

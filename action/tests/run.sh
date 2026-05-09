@@ -495,6 +495,20 @@ echo "  summary-combined.jq (runtime coverage details):"
 OUT_COMBINED_PROD=$(jq '.health.runtime_coverage = {"verdict":"hot-path-touched","summary":{"functions_tracked":4,"functions_hit":3,"functions_unhit":0,"functions_untracked":1,"coverage_percent":75,"trace_count":2400,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/cold.ts","function":"coldPath","line":14,"verdict":"review_required","invocations":0,"confidence":"medium"}],"hot_paths":[{"path":"src/hot.ts","function":"hotPath","line":3,"invocations":250,"percentile":99}]}' "$FIXTURES/combined-clean.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
 assert_contains "$OUT_COMBINED_PROD" "Runtime coverage" "combined prod: has runtime coverage details"
 assert_contains "$OUT_COMBINED_PROD" "hotPath" "combined prod: shows hot path"
+# Verdict hot-path-touched: header should say "hot path[s] touched", not the
+# project-wide "hot path[s]" framing. Single-path counts use the singular form.
+assert_contains "$OUT_COMBINED_PROD" "hot path touched" "combined prod (verdict hot-path-touched): header uses 'touched' framing"
+
+echo "  summary-combined.jq (no diff/changed-since: standalone framing):"
+OUT_COMBINED_STANDALONE=$(jq '.health.runtime_coverage = {"verdict":"clean","summary":{"functions_tracked":4,"functions_hit":4,"functions_unhit":0,"functions_untracked":0,"coverage_percent":100,"trace_count":2400,"period_days":7,"deployments_seen":2},"findings":[],"hot_paths":[{"path":"src/hot.ts","function":"hotPath","line":3,"invocations":250,"percentile":99}]}' "$FIXTURES/combined-clean.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
+# Verdict NOT hot-path-touched (running outside PR context): keep the
+# project-wide "hot path" framing so the line does not falsely imply the
+# hot path is on this change.
+assert_contains "$OUT_COMBINED_STANDALONE" "hot path" "combined prod (verdict clean): header uses 'hot path' framing"
+if echo "$OUT_COMBINED_STANDALONE" | grep -q "hot path touched"; then
+  echo "  FAIL: standalone (verdict=clean) must not say 'hot path touched'"
+  exit 1
+fi
 
 # --- Annotation jq tests ---
 
