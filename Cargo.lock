@@ -916,7 +916,8 @@ dependencies = [
 [[package]]
 name = "fallow-cov-protocol"
 version = "0.5.0"
-source = "git+https://github.com/fallow-rs/fallow-cov-protocol.git?tag=v0.5.0#60432cee21694e4c1507cd3ad9310913dd21ceed"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83b18585b9e079a7d1e99b6fbc505860bb8e6b73198ebca08f15951ac83334e6"
 dependencies = [
  "serde",
  "serde_json",
