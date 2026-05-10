@@ -740,6 +740,13 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> serde_jso
         ));
     }
 
+    // Note: `production.hot_paths` and `production.signals` are
+    // intentionally omitted from CodeClimate output. CodeClimate / GitLab
+    // Code Quality issues are actionable findings; the
+    // `hot-path-touched` signal is a PR-review heads-up and the
+    // `signals[]` array is a programmatic decomposition of the verdict.
+    // JSON consumers that need the full surface read those fields
+    // directly from the JSON output.
     if let Some(ref production) = report.runtime_coverage {
         for finding in &production.findings {
             let path = cc_path(&finding.path, root);

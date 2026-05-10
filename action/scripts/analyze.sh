@@ -271,6 +271,15 @@ fi
 # the composite action reuse the same diff file we wrote here, instead
 # of re-running `gh pr diff` and double-paying the API quota.
 
+# When the user supplied --diff-file via the action input, the env block
+# already set FALLOW_DIFF_FILE on this step. Propagate it to subsequent
+# composite steps via $GITHUB_ENV so the comment / review steps don't
+# need to declare their own FALLOW_DIFF_FILE env (which would override
+# the analyze-step propagation otherwise). User-supplied path wins.
+if [ -n "${FALLOW_DIFF_FILE:-}" ] && [ -n "${GITHUB_ENV:-}" ]; then
+  echo "FALLOW_DIFF_FILE=${FALLOW_DIFF_FILE}" >> "$GITHUB_ENV"
+fi
+
 if [ -n "${INPUT_CHANGED_SINCE:-}" ] && [ -z "${FALLOW_DIFF_FILE:-}" ]; then
   _ROOT="${INPUT_ROOT:-.}"
   _DIFF_PATH="$PWD/fallow-pr.diff"

@@ -940,12 +940,33 @@ fn load_diff_index(
         }
     };
 
+    // Reject diffs above the size cap before reading them into memory. A
+    // pathological vendored dump or accidentally-checked-in binary blob
+    // would otherwise allocate proportional to file size in
+    // `read_to_string` before the line-cap inside `from_unified_diff`
+    // can fire. Mirrors the early-return pattern in
+    // `report::ci::diff_filter::filter_issues_from_path`.
+    if let Ok(meta) = std::fs::metadata(&resolved_path)
+        && meta.len() > crate::report::ci::diff_filter::MAX_DIFF_BYTES
+    {
+        if !quiet {
+            eprintln!(
+                "warning [diff-file]: {} exceeds {} bytes; line-level \
+                 hot-path matching disabled, falling back to file-level \
+                 if --changed-since is set",
+                resolved_path.display(),
+                crate::report::ci::diff_filter::MAX_DIFF_BYTES
+            );
+        }
+        return None;
+    }
+
     match std::fs::read_to_string(&resolved_path) {
         Ok(text) => Some(crate::report::ci::diff_filter::DiffIndex::from_unified_diff(&text)),
         Err(error) => {
             if !quiet {
                 eprintln!(
-                    "fallow: warning [diff-file]: could not read {}: {} \
+                    "warning [diff-file]: could not read {}: {} \
                      (line-level hot-path matching disabled; falling back to \
                      file-level if --changed-since is set)",
                     resolved_path.display(),

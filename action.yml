@@ -457,7 +457,11 @@ runs:
         INPUT_ROOT: ${{ inputs.root }}
         FALLOW_COMMENT_ID: ${{ inputs.comment-id }}
         FALLOW_DIFF_FILTER: ${{ inputs.diff-filter }}
-        FALLOW_DIFF_FILE: ${{ inputs.diff-file }}
+        # FALLOW_DIFF_FILE is propagated from the analyze step via
+        # $GITHUB_ENV. Declaring it here would override the propagation
+        # whenever inputs.diff-file is empty (the default), forcing
+        # comment.sh to re-fetch the diff via `gh pr diff` and
+        # double-paying the API quota.
         FALLOW_API_RETRIES: ${{ inputs.api-retries }}
         FALLOW_API_RETRY_DELAY: ${{ inputs.api-retry-delay }}
       run: bash ${{ github.action_path }}/action/scripts/comment.sh
@@ -481,7 +485,8 @@ runs:
         CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
         FALLOW_COMMENT_ID: ${{ inputs.comment-id }}
         FALLOW_DIFF_FILTER: ${{ inputs.diff-filter }}
-        FALLOW_DIFF_FILE: ${{ inputs.diff-file }}
+        # FALLOW_DIFF_FILE is propagated from the analyze step via
+        # $GITHUB_ENV (see comment on the comment step env block).
         FALLOW_API_RETRIES: ${{ inputs.api-retries }}
         FALLOW_API_RETRY_DELAY: ${{ inputs.api-retry-delay }}
       run: bash ${{ github.action_path }}/action/scripts/review.sh

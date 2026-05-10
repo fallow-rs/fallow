@@ -46,7 +46,6 @@ def prod_hot_paths: (.health.runtime_coverage.hot_paths // []);
 # project-wide "top hot paths" framing.
 def prod_hot_paths_touched: (.health.runtime_coverage.verdict // "") == "hot-path-touched";
 def prod_hot_path_label($n):
-  ($n | tostring) as $count |
   (if prod_hot_paths_touched then "hot path\(if $n == 1 then "" else "s" end) touched" else "hot path\(if $n == 1 then "" else "s" end)" end);
 
 (count(.check; "total_issues")) as $check |

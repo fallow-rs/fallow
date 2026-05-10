@@ -1621,6 +1621,8 @@ fn audit_args_with_all_options() {
         coverage: Some("coverage/coverage-final.json".to_string()),
         coverage_root: Some("/ci/build".to_string()),
         include_entry_exports: None,
+        runtime_coverage: Some(".fallow/runtime.json".to_string()),
+        min_invocations_hot: Some(250),
     })
     .expect("all options are valid");
     assert!(args.contains(&"--root".to_string()));
@@ -1645,6 +1647,14 @@ fn audit_args_with_all_options() {
     assert!(
         args.windows(2)
             .any(|w| w == ["--coverage-root", "/ci/build"])
+    );
+    assert!(
+        args.windows(2)
+            .any(|w| w == ["--runtime-coverage", ".fallow/runtime.json"])
+    );
+    assert!(
+        args.windows(2)
+            .any(|w| w == ["--min-invocations-hot", "250"])
     );
 }
 

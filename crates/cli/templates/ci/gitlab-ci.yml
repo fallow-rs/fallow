@@ -396,6 +396,26 @@ variables:
         fi
       fi
 
+      # ── Pre-compute unified diff for line-level hot-path scoping ───
+      # When the user did not supply $FALLOW_DIFF_FILE, write a
+      # fallow-mr.diff alongside the analysis output so the runtime-
+      # coverage filter can do line-overlap matching against hot paths.
+      # GitLab CI runs each script line in the same shell, so an exported
+      # variable is visible to the analysis below; for the comment /
+      # review jobs (separate jobs in the pipeline) we rely on the
+      # `dotenv` artifact written by the shared helper that lives in
+      # ci/scripts/. Today comment.sh / review.sh re-derive the diff
+      # themselves when FALLOW_DIFF_FILE is unset, so this block only
+      # affects the analysis job and is purely an upgrade.
+      if [ -n "$FALLOW_CHANGED_SINCE" ] && [ -z "$FALLOW_DIFF_FILE" ]; then
+        if git diff --unified=0 "${FALLOW_CHANGED_SINCE}..HEAD" > fallow-mr.diff 2>/dev/null && [ -s fallow-mr.diff ]; then
+          export FALLOW_DIFF_FILE="$PWD/fallow-mr.diff"
+        else
+          rm -f fallow-mr.diff
+          echo "fallow: warning [shallow-clone]: could not produce unified diff for line-level hot-path scoping. Set GIT_DEPTH: \"0\" in the pipeline to enable line-precision."
+        fi
+      fi
+
       # ── Build CLI arguments ──────────────────────────────────────────
       # Primary run uses --format json; CodeClimate report is generated via
       # a second run with --format codeclimate when FALLOW_CODEQUALITY=true.

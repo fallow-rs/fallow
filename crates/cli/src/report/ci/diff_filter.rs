@@ -8,7 +8,7 @@ use super::pr_comment::CiIssue;
 /// SARIF upload limit (10 MiB) and is also far above what any sane PR
 /// produces. A pathologically large diff (binary blob, vendored dump) would
 /// otherwise eat memory proportional to its size before we can inspect it.
-const MAX_DIFF_BYTES: u64 = 10 * 1024 * 1024;
+pub const MAX_DIFF_BYTES: u64 = 10 * 1024 * 1024;
 
 /// Stop indexing added lines past this count. A 1M-line "diff" is a sign of
 /// a regenerated lockfile or vendored bundle and is not useful for filtering;

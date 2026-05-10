@@ -768,9 +768,9 @@ pub fn health_meta() -> Value {
             },
             "runtime_coverage_verdict": {
                 "name": "Runtime Coverage Verdict",
-                "description": "Overall verdict across all runtime-coverage findings. `clean` = nothing cold; `cold-code-detected` = one or more tracked functions had zero invocations; `hot-path-touched` = a function modified in the current change set is on the hot path; `license-expired-grace` = analysis ran but the license is in its post-expiry grace window; `unknown` = verdict could not be computed (degenerate input).",
+                "description": "Overall verdict across all runtime-coverage findings. `clean` = nothing cold; `cold-code-detected` = one or more tracked functions had zero invocations; `hot-path-touched` = a function modified in the current change set is on the hot path (requires `--diff-file` or `--changed-since` to fire; without a change scope the verdict cannot promote); `license-expired-grace` = analysis ran but the license is in its post-expiry grace window; `unknown` = verdict could not be computed (degenerate input).",
                 "values": ["clean", "hot-path-touched", "cold-code-detected", "license-expired-grace", "unknown"],
-                "interpretation": "`cold-code-detected` is the primary actionable signal; `hot-path-touched` elevates code-review attention for touched hot paths"
+                "interpretation": "`cold-code-detected` is the primary actionable signal in standalone analysis; `hot-path-touched` is promoted to primary in PR context (when a change scope is supplied) so reviewers see the diff-tied signal first. `signals[]` carries the full unprioritized set."
             },
             "runtime_coverage_state": {
                 "name": "Runtime Coverage State",

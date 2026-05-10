@@ -1217,6 +1217,15 @@ pub fn build_health_sarif(
     })
 }
 
+// Note: `production.hot_paths`, `production.signals`, and per-hot-path
+// `end_line` are intentionally omitted from SARIF output. SARIF is
+// designed for diagnostic results (issues a reviewer should act on),
+// not for state observations. `hot-path-touched` is informational
+// (PR-context heads-up that a touched function is on the hot path),
+// not a finding to fix; surfacing it as a SARIF result would clutter
+// Code Scanning's UI with non-actionable entries. JSON consumers that
+// want the full picture read `runtime_coverage.signals[]` and
+// `runtime_coverage.hot_paths[]` directly.
 fn append_runtime_coverage_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
     production: &crate::health_types::RuntimeCoverageReport,

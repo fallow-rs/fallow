@@ -70,6 +70,17 @@ pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {
     if params.include_entry_exports == Some(true) {
         args.push("--include-entry-exports".to_string());
     }
+    push_str_flag(
+        &mut args,
+        "--runtime-coverage",
+        params.runtime_coverage.as_deref(),
+    );
+    if let Some(min_invocations_hot) = params.min_invocations_hot {
+        args.extend([
+            "--min-invocations-hot".to_string(),
+            format!("{min_invocations_hot}"),
+        ]);
+    }
 
     Ok(args)
 }
