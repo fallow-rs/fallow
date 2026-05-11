@@ -6,9 +6,9 @@ expression: redact_version(&json_str)
   "schema_version": 6,
   "version": "[VERSION]",
   "elapsed_ms": 42,
-  "total_issues": 14,
+  "total_issues": 16,
   "summary": {
-    "total_issues": 14,
+    "total_issues": 16,
     "unused_files": 1,
     "unused_exports": 1,
     "unused_types": 1,
@@ -23,7 +23,8 @@ expression: redact_version(&json_str)
     "test_only_dependencies": 1,
     "circular_dependencies": 1,
     "boundary_violations": 0,
-    "stale_suppressions": 0
+    "stale_suppressions": 0,
+    "unused_catalog_entries": 2
   },
   "unused_files": [
     {
@@ -385,5 +386,50 @@ expression: redact_version(&json_str)
     }
   ],
   "boundary_violations": [],
-  "stale_suppressions": []
+  "stale_suppressions": [],
+  "unused_catalog_entries": [
+    {
+      "entry_name": "is-even",
+      "catalog_name": "default",
+      "path": "pnpm-workspace.yaml",
+      "line": 6,
+      "actions": [
+        {
+          "type": "remove-catalog-entry",
+          "auto_fixable": false,
+          "description": "Remove the entry from pnpm-workspace.yaml",
+          "note": "If any consumer declares the same package with a hardcoded version, switch the consumer to `catalog:` before removing"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with a YAML comment above the line",
+          "comment": "# fallow-ignore-next-line unused-catalog-entry"
+        }
+      ]
+    },
+    {
+      "entry_name": "old-thing",
+      "catalog_name": "legacy",
+      "path": "pnpm-workspace.yaml",
+      "line": 12,
+      "hardcoded_consumers": [
+        "apps/web/package.json"
+      ],
+      "actions": [
+        {
+          "type": "remove-catalog-entry",
+          "auto_fixable": false,
+          "description": "Remove the entry from pnpm-workspace.yaml",
+          "note": "If any consumer declares the same package with a hardcoded version, switch the consumer to `catalog:` before removing"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with a YAML comment above the line",
+          "comment": "# fallow-ignore-next-line unused-catalog-entry"
+        }
+      ]
+    }
+  ]
 }

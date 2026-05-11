@@ -1,0 +1,9 @@
+{
+  "name": "app",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "react": "catalog:",
+    "hardcoded-pkg": "^2.5.0"
+  }
+}

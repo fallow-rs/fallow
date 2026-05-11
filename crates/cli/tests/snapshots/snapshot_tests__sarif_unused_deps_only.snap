@@ -233,6 +233,19 @@ expression: redact_sarif_version(&json_str)
               "defaultConfiguration": {
                 "level": "warning"
               }
+            },
+            {
+              "id": "fallow/unused-catalog-entry",
+              "shortDescription": {
+                "text": "Catalog entry in pnpm-workspace.yaml not referenced by any workspace package"
+              },
+              "fullDescription": {
+                "text": "An entry in the `catalog:` or `catalogs:` section of pnpm-workspace.yaml that no workspace package.json references via the `catalog:` protocol. Catalog entries are leftover dependency metadata once a package is removed from every consumer; delete the entry to keep the catalog truthful."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-catalog-entries",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
             }
           ]
         }

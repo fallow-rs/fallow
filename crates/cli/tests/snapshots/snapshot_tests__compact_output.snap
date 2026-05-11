@@ -16,3 +16,5 @@ duplicate-export:Config
 type-only-dep:zod
 test-only-dep:msw
 circular-dependency:src/a.ts:3:src/a.ts → src/b.ts → src/a.ts
+unused-catalog-entry:pnpm-workspace.yaml:6:default:is-even
+unused-catalog-entry:pnpm-workspace.yaml:12:legacy:old-thing

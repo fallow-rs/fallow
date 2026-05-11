@@ -242,5 +242,37 @@ expression: json_str
         "begin": 3
       }
     }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/unused-catalog-entry",
+    "description": "Catalog entry 'is-even' is not referenced by any workspace package",
+    "categories": [
+      "Clarity"
+    ],
+    "severity": "minor",
+    "fingerprint": "01c68b8e65ee42b9",
+    "location": {
+      "path": "pnpm-workspace.yaml",
+      "lines": {
+        "begin": 6
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/unused-catalog-entry",
+    "description": "Catalog entry 'old-thing' (catalog 'legacy') is not referenced by any workspace package",
+    "categories": [
+      "Clarity"
+    ],
+    "severity": "minor",
+    "fingerprint": "2d5072d3451b44dd",
+    "location": {
+      "path": "pnpm-workspace.yaml",
+      "lines": {
+        "begin": 12
+      }
+    }
   }
 ]

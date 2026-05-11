@@ -4,7 +4,7 @@ expression: json_str
 ---
 {
   "event": "COMMENT",
-  "body": "### Fallow dead-code report\n\n15 inline findings selected for GitHub review.\n\n<!-- fallow-review -->",
+  "body": "### Fallow dead-code report\n\n17 inline findings selected for GitHub review.\n\n<!-- fallow-review -->",
   "comments": [
     {
       "path": "package.json",
@@ -40,6 +40,20 @@ expression: json_str
       "side": "RIGHT",
       "body": "**warn** `fallow/test-only-dependency`: Package 'msw' is only imported by test files \\(consider moving to devDependencies\\)\n\n<!-- fallow-fingerprint: ebc538b211ef05f5 -->",
       "fingerprint": "ebc538b211ef05f5"
+    },
+    {
+      "path": "pnpm-workspace.yaml",
+      "line": 6,
+      "side": "RIGHT",
+      "body": "**warn** `fallow/unused-catalog-entry`: Catalog entry 'is-even' is not referenced by any workspace package\n\n<!-- fallow-fingerprint: 01c68b8e65ee42b9 -->",
+      "fingerprint": "01c68b8e65ee42b9"
+    },
+    {
+      "path": "pnpm-workspace.yaml",
+      "line": 12,
+      "side": "RIGHT",
+      "body": "**warn** `fallow/unused-catalog-entry`: Catalog entry 'old-thing' \\(catalog 'legacy'\\) is not referenced by any workspace package\n\n<!-- fallow-fingerprint: 2d5072d3451b44dd -->",
+      "fingerprint": "2d5072d3451b44dd"
     },
     {
       "path": "src/a.ts",

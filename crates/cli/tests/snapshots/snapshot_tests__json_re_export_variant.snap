@@ -23,7 +23,8 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     "test_only_dependencies": 0,
     "circular_dependencies": 0,
     "boundary_violations": 0,
-    "stale_suppressions": 0
+    "stale_suppressions": 0,
+    "unused_catalog_entries": 0
   },
   "unused_files": [],
   "unused_exports": [
@@ -65,5 +66,6 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   "test_only_dependencies": [],
   "circular_dependencies": [],
   "boundary_violations": [],
-  "stale_suppressions": []
+  "stale_suppressions": [],
+  "unused_catalog_entries": []
 }

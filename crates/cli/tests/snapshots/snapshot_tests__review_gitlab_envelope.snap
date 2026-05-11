@@ -3,7 +3,7 @@ source: crates/cli/tests/snapshot_tests.rs
 expression: json_str
 ---
 {
-  "body": "### Fallow dead-code report\n\n15 inline findings selected for GitLab review.\n\n<!-- fallow-review -->",
+  "body": "### Fallow dead-code report\n\n17 inline findings selected for GitLab review.\n\n<!-- fallow-review -->",
   "comments": [
     {
       "body": "**error** `fallow/unused-dependency`: Package 'lodash' is in dependencies but never imported\n\n<!-- fallow-fingerprint: 1d04d08d81daf650 -->",
@@ -54,6 +54,26 @@ expression: json_str
         "new_line": 12
       },
       "fingerprint": "ebc538b211ef05f5"
+    },
+    {
+      "body": "**warn** `fallow/unused-catalog-entry`: Catalog entry 'is-even' is not referenced by any workspace package\n\n<!-- fallow-fingerprint: 01c68b8e65ee42b9 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "pnpm-workspace.yaml",
+        "new_path": "pnpm-workspace.yaml",
+        "new_line": 6
+      },
+      "fingerprint": "01c68b8e65ee42b9"
+    },
+    {
+      "body": "**warn** `fallow/unused-catalog-entry`: Catalog entry 'old-thing' \\(catalog 'legacy'\\) is not referenced by any workspace package\n\n<!-- fallow-fingerprint: 2d5072d3451b44dd -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "pnpm-workspace.yaml",
+        "new_path": "pnpm-workspace.yaml",
+        "new_line": 12
+      },
+      "fingerprint": "2d5072d3451b44dd"
     },
     {
       "body": "**error** `fallow/circular-dependency`: Circular dependency: src/a.ts → src/b.ts\n\n<!-- fallow-fingerprint: 405f0abed155920d -->",

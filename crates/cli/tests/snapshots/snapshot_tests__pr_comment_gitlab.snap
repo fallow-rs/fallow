@@ -5,7 +5,7 @@ expression: output
 <!-- fallow-id: fallow-results -->
 ### Fallow dead-code report
 
-Found **15** findings.
+Found **17** findings.
 
 <details>
 <summary>Dead code (8)</summary>
@@ -24,7 +24,7 @@ Found **15** findings.
 </details>
 
 <details>
-<summary>Dependencies (6)</summary>
+<summary>Dependencies (8)</summary>
 
 | Severity | Rule | Location | Description |
 | --- | --- | --- | --- |
@@ -33,6 +33,8 @@ Found **15** findings.
 | minor | `fallow/unused-optional-dependency` | `package.json`:5 | Package 'fsevents' is in optionalDependencies but never imported |
 | minor | `fallow/type-only-dependency` | `package.json`:8 | Package 'zod' is only imported via type-only imports \(consider moving to devDependencies\) |
 | minor | `fallow/test-only-dependency` | `package.json`:12 | Package 'msw' is only imported by test files \(consider moving to devDependencies\) |
+| minor | `fallow/unused-catalog-entry` | `pnpm-workspace.yaml`:6 | Catalog entry 'is-even' is not referenced by any workspace package |
+| minor | `fallow/unused-catalog-entry` | `pnpm-workspace.yaml`:12 | Catalog entry 'old-thing' \(catalog 'legacy'\) is not referenced by any workspace package |
 | major | `fallow/unlisted-dependency` | `src/cli.ts`:2 | Package 'chalk' is imported but not listed in package.json |
 
 </details>

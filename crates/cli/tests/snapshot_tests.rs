@@ -126,6 +126,22 @@ fn sample_results(root: &Path) -> AnalysisResults {
         col: 0,
         is_cross_package: false,
     });
+    r.unused_catalog_entries
+        .push(fallow_core::results::UnusedCatalogEntry {
+            entry_name: "is-even".to_string(),
+            catalog_name: "default".to_string(),
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line: 6,
+            hardcoded_consumers: vec![],
+        });
+    r.unused_catalog_entries
+        .push(fallow_core::results::UnusedCatalogEntry {
+            entry_name: "old-thing".to_string(),
+            catalog_name: "legacy".to_string(),
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line: 12,
+            hardcoded_consumers: vec![PathBuf::from("apps/web/package.json")],
+        });
 
     r
 }

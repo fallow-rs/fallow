@@ -233,6 +233,19 @@ expression: redact_sarif_version(&json_str)
               "defaultConfiguration": {
                 "level": "warning"
               }
+            },
+            {
+              "id": "fallow/unused-catalog-entry",
+              "shortDescription": {
+                "text": "Catalog entry in pnpm-workspace.yaml not referenced by any workspace package"
+              },
+              "fullDescription": {
+                "text": "An entry in the `catalog:` or `catalogs:` section of pnpm-workspace.yaml that no workspace package.json references via the `catalog:` protocol. Catalog entries are leftover dependency metadata once a package is removed from every consumer; delete the entry to keep the catalog truthful."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-catalog-entries",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
             }
           ]
         }
@@ -592,6 +605,54 @@ expression: redact_sarif_version(&json_str)
           "partialFingerprints": {
             "tools.fallow.fingerprint/v1": "464ecb8e77ea605f",
             "primaryLocationLineHash/v1": "464ecb8e77ea605f"
+          }
+        },
+        {
+          "ruleId": "fallow/unused-catalog-entry",
+          "level": "warning",
+          "message": {
+            "text": "Catalog entry 'is-even' is not referenced by any workspace package"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "pnpm-workspace.yaml"
+                },
+                "region": {
+                  "startLine": 6,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "8c0988bcf35d8b87",
+            "primaryLocationLineHash/v1": "8c0988bcf35d8b87"
+          }
+        },
+        {
+          "ruleId": "fallow/unused-catalog-entry",
+          "level": "warning",
+          "message": {
+            "text": "Catalog entry 'old-thing' (catalog 'legacy') is not referenced by any workspace package"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "pnpm-workspace.yaml"
+                },
+                "region": {
+                  "startLine": 12,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "998648e8e4881340",
+            "primaryLocationLineHash/v1": "998648e8e4881340"
           }
         }
       ]
