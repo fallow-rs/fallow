@@ -414,6 +414,7 @@ pub fn find_dead_code_full(
                                     if config.rules.duplicate_exports != Severity::Off {
                                         find_duplicate_exports(
                                             graph,
+                                            config,
                                             &suppressions,
                                             &line_offsets_by_file,
                                             resolved_modules,

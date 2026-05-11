@@ -1,0 +1,4 @@
+{
+  "name": "issue-317-namespace-barrel-ignore-exports",
+  "main": "src/page.ts"
+}

@@ -186,6 +186,27 @@ impl FallowConfig {
             .overrides
             .into_iter()
             .filter_map(|o| {
+                // Inter-file rules group findings across multiple files (a
+                // single duplicate-exports finding spans N files; a single
+                // circular-dependency finding spans M files in a cycle), so a
+                // per-file `overrides.rules` setting cannot meaningfully turn
+                // them off: the override only fires when the path being looked
+                // up matches, but the finding belongs to a group of paths, not
+                // to one. Warn at load time and point users at the working
+                // escape hatch (`ignoreExports` for duplicates, file-level
+                // `// fallow-ignore-file circular-dependency` for cycles).
+                if o.rules.duplicate_exports.is_some() {
+                    let files = o.files.join(", ");
+                    tracing::warn!(
+                        "overrides.rules.duplicate-exports has no effect for files matching [{files}]: duplicate-exports is an inter-file rule. Use top-level `ignoreExports` to exclude these files from duplicate-export grouping."
+                    );
+                }
+                if o.rules.circular_dependencies.is_some() {
+                    let files = o.files.join(", ");
+                    tracing::warn!(
+                        "overrides.rules.circular-dependency has no effect for files matching [{files}]: circular-dependency is an inter-file rule. Use a file-level `// fallow-ignore-file circular-dependency` comment in one participating file instead."
+                    );
+                }
                 let matchers: Vec<globset::GlobMatcher> = o
                     .files
                     .iter()
@@ -447,6 +468,64 @@ mod tests {
         // Non-test .ts file only matches first override
         let rules2 = resolved.resolve_rules_for_path(Path::new("/project/foo.ts"));
         assert_eq!(rules2.unused_files, Severity::Warn);
+    }
+
+    #[test]
+    fn resolve_keeps_inter_file_rule_override_after_warning() {
+        // Setting `overrides.rules.duplicate-exports` for a file glob is a no-op
+        // at finding-time (duplicate-exports groups span multiple files), but the
+        // override must still resolve cleanly so other co-located rule settings
+        // on the same override are honored. The resolver emits a tracing warning;
+        // here we assert the override is still installed for non-inter-file rules.
+        let config = FallowConfig {
+            schema: None,
+            extends: vec![],
+            entry: vec![],
+            ignore_patterns: vec![],
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_exports: vec![],
+            ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
+            used_class_members: vec![],
+            duplicates: DuplicatesConfig::default(),
+            health: HealthConfig::default(),
+            rules: RulesConfig::default(),
+            boundaries: BoundaryConfig::default(),
+            production: false.into(),
+            plugins: vec![],
+            dynamically_loaded: vec![],
+            overrides: vec![ConfigOverride {
+                files: vec!["**/ui/**".to_string()],
+                rules: PartialRulesConfig {
+                    duplicate_exports: Some(Severity::Off),
+                    unused_files: Some(Severity::Warn),
+                    ..Default::default()
+                },
+            }],
+            regression: None,
+            audit: crate::config::AuditConfig::default(),
+            codeowners: None,
+            public_packages: vec![],
+            flags: FlagsConfig::default(),
+            resolve: ResolveConfig::default(),
+            sealed: false,
+            include_entry_exports: false,
+        };
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert_eq!(
+            resolved.overrides.len(),
+            1,
+            "inter-file rule warning must not drop the override; co-located non-inter-file rules still apply"
+        );
+        let rules = resolved.resolve_rules_for_path(Path::new("/project/ui/dialog.ts"));
+        assert_eq!(rules.unused_files, Severity::Warn);
     }
 
     /// Helper to build a FallowConfig with minimal boilerplate.

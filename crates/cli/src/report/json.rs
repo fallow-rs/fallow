@@ -113,7 +113,7 @@ pub(super) fn print_grouped_json(
 /// Bump this when the structure of the JSON output changes in a
 /// backwards-incompatible way (removing/renaming fields, changing types).
 /// Adding new fields is always backwards-compatible and does not require a bump.
-const SCHEMA_VERSION: u32 = 5;
+const SCHEMA_VERSION: u32 = 6;
 const RUNTIME_COVERAGE_SCHEMA_VERSION: &str = "1";
 
 /// Build a JSON envelope with standard metadata fields at the top.
@@ -421,7 +421,9 @@ fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
             fix_type: "remove-duplicate",
             auto_fixable: false,
             description: "Keep one canonical export location and remove the others",
-            note: Some("Review all locations to determine which should be the canonical export"),
+            note: Some(
+                "If every location is the sole `index.*` of its directory, this is likely an intentional namespace-barrel API. Prefer the `add-to-config` ignoreExports action over removing exports.",
+            ),
             suppress: SuppressKind::InlineComment,
             issue_kind: "duplicate-export",
         }),
@@ -481,6 +483,24 @@ fn build_actions(
             .get("used_in_workspaces")
             .and_then(serde_json::Value::as_array)
             .is_some_and(|workspaces| !workspaces.is_empty());
+
+    // duplicate-exports: emit the safe `add-to-config` (ignoreExports) action
+    // FIRST so position-0 (the documented primary slot, see HealthFindingAction
+    // schema description) recommends the non-destructive path for the common
+    // shadcn / Radix / bits-ui namespace-barrel case. The fix action below
+    // (remove-duplicate) stays as the secondary, for findings where the
+    // duplication is genuinely accidental.
+    if issue_key == "duplicate_exports"
+        && let Some(value) = build_duplicate_exports_config_value(item)
+    {
+        actions.push(serde_json::json!({
+            "type": "add-to-config",
+            "auto_fixable": false,
+            "description": "Add an ignoreExports rule so these files are excluded from duplicate-export grouping (use when this duplication is an intentional namespace-barrel API).",
+            "config_key": "ignoreExports",
+            "value": value,
+        }));
+    }
 
     // Primary fix action
     let mut fix_action = if cross_workspace_dependency {
@@ -553,6 +573,31 @@ fn build_actions(
     }
 
     serde_json::Value::Array(actions)
+}
+
+/// Build a paste-ready `ignoreExports` config snippet from a duplicate-exports
+/// finding's `locations` array. Returns one `{ file, exports: ["*"] }` entry per
+/// distinct file in the finding, in stable order.
+fn build_duplicate_exports_config_value(item: &serde_json::Value) -> Option<serde_json::Value> {
+    let locations = item.get("locations")?.as_array()?;
+    let mut entries: Vec<serde_json::Value> = Vec::with_capacity(locations.len());
+    let mut seen: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
+    for loc in locations {
+        let Some(path) = loc.get("path").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if !seen.insert(path) {
+            continue;
+        }
+        entries.push(serde_json::json!({
+            "file": path,
+            "exports": ["*"],
+        }));
+    }
+    if entries.is_empty() {
+        return None;
+    }
+    Some(serde_json::Value::Array(entries))
 }
 
 fn is_dependency_issue(issue_key: &str) -> bool {
@@ -1587,7 +1632,7 @@ mod tests {
         let elapsed = Duration::from_millis(123);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
-        assert_eq!(output["schema_version"], 5);
+        assert_eq!(output["schema_version"], 6);
         assert!(output["version"].is_string());
         assert_eq!(output["elapsed_ms"], 123);
         assert_eq!(output["total_issues"], 0);
@@ -2244,14 +2289,14 @@ mod tests {
     // ── Schema version stability ────────────────────────────────────
 
     #[test]
-    fn json_schema_version_is_5() {
+    fn json_schema_version_is_pinned() {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["schema_version"], SCHEMA_VERSION);
-        assert_eq!(output["schema_version"], 5);
+        assert_eq!(output["schema_version"], 6);
     }
 
     // ── Version string ──────────────────────────────────────────────
@@ -2457,7 +2502,7 @@ mod tests {
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
         // Metadata should reflect our explicit values, not anything from AnalysisResults.
-        assert_eq!(output["schema_version"], 5);
+        assert_eq!(output["schema_version"], 6);
         assert_eq!(output["elapsed_ms"], 99);
     }
 
@@ -2529,7 +2574,7 @@ mod tests {
         let elapsed = Duration::from_millis(42);
         let output = build_json_envelope(report, elapsed);
 
-        assert_eq!(output["schema_version"], 5);
+        assert_eq!(output["schema_version"], 6);
         assert!(output["version"].is_string());
         assert_eq!(output["elapsed_ms"], 42);
         assert!(output["findings"].is_array());

@@ -3,7 +3,7 @@ source: crates/cli/tests/snapshot_tests.rs
 expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"CARGO_PKG_VERSION\")),\n\"\\\"version\\\": \\\"[VERSION]\\\"\",)"
 ---
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "version": "[VERSION]",
   "elapsed_ms": 42,
   "total_issues": 14,
@@ -273,10 +273,30 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
       ],
       "actions": [
         {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Add an ignoreExports rule so these files are excluded from duplicate-export grouping (use when this duplication is an intentional namespace-barrel API).",
+          "config_key": "ignoreExports",
+          "value": [
+            {
+              "file": "src/config.ts",
+              "exports": [
+                "*"
+              ]
+            },
+            {
+              "file": "src/types.ts",
+              "exports": [
+                "*"
+              ]
+            }
+          ]
+        },
+        {
           "type": "remove-duplicate",
           "auto_fixable": false,
           "description": "Keep one canonical export location and remove the others",
-          "note": "Review all locations to determine which should be the canonical export"
+          "note": "If every location is the sole `index.*` of its directory, this is likely an intentional namespace-barrel API. Prefer the `add-to-config` ignoreExports action over removing exports."
         },
         {
           "type": "suppress-line",

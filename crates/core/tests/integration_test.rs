@@ -108,6 +108,8 @@ mod bin_script_deps;
 mod entry_export_validation;
 #[path = "integration_test/issue_195_non_source_entry_points.rs"]
 mod issue_195_non_source_entry_points;
+#[path = "integration_test/issue_317_namespace_barrel_ignore_exports.rs"]
+mod issue_317_namespace_barrel_ignore_exports;
 #[path = "integration_test/script_multiplexers.rs"]
 mod script_multiplexers;
 #[path = "integration_test/visibility_tags.rs"]

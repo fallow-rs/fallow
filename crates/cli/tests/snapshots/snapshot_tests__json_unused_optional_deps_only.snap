@@ -3,7 +3,7 @@ source: crates/cli/tests/snapshot_tests.rs
 expression: redact_version(&json_str)
 ---
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "version": "[VERSION]",
   "elapsed_ms": 0,
   "total_issues": 1,

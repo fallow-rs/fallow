@@ -3,7 +3,7 @@ source: crates/cli/tests/snapshot_tests.rs
 expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"CARGO_PKG_VERSION\")),\n\"\\\"version\\\": \\\"[VERSION]\\\"\",)"
 ---
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "version": "[VERSION]",
   "elapsed_ms": 0,
   "total_issues": 0,
