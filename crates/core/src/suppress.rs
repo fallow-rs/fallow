@@ -207,6 +207,7 @@ impl<'a> SuppressionContext<'a> {
                         IssueKind::FeatureFlag => "feature-flag",
                         IssueKind::Complexity => "complexity",
                         IssueKind::StaleSuppression => "stale-suppression",
+                        IssueKind::PnpmCatalogEntry => "unused-catalog-entry",
                     }
                     .to_string()
                 });
@@ -323,6 +324,7 @@ mod tests {
             IssueKind::FeatureFlag,
             IssueKind::Complexity,
             IssueKind::StaleSuppression,
+            IssueKind::PnpmCatalogEntry,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -330,7 +332,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(21), None);
+        assert_eq!(IssueKind::from_discriminant(22), None);
     }
 
     #[test]

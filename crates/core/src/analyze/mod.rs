@@ -2,6 +2,7 @@ mod boundary;
 pub mod feature_flags;
 mod package_json_utils;
 mod predicates;
+mod unused_catalog;
 mod unused_deps;
 mod unused_exports;
 mod unused_files;
@@ -18,6 +19,7 @@ use crate::resolve::ResolvedModule;
 use crate::results::{AnalysisResults, CircularDependency};
 use crate::suppress::IssueKind;
 
+use unused_catalog::find_unused_catalog_entries;
 use unused_deps::{
     find_test_only_dependencies, find_type_only_dependencies, find_unlisted_dependencies,
     find_unresolved_imports, find_unused_dependencies,
@@ -523,6 +525,11 @@ pub fn find_dead_code_full(
     }
     results.suppression_count = suppressions.used_count();
 
+    // Detect unused pnpm catalog entries (purely off package.json + pnpm-workspace.yaml).
+    if config.rules.unused_catalog_entries != Severity::Off {
+        results.unused_catalog_entries = find_unused_catalog_entries(config, workspaces);
+    }
+
     // Sort all result arrays for deterministic output ordering.
     // Parallel collection and FxHashMap iteration don't guarantee order,
     // so without sorting the same project can produce different orderings.
@@ -717,6 +724,7 @@ mod tests {
                 coverage_gaps: Severity::Off,
                 feature_flags: Severity::Off,
                 stale_suppressions: Severity::Off,
+                unused_catalog_entries: Severity::Off,
             };
             let config = make_config_with_rules(rules);
             let results = find_dead_code(&graph, &config);

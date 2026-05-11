@@ -1,5 +1,6 @@
 mod package_json;
 mod parsers;
+mod pnpm_catalog;
 
 use std::path::{Path, PathBuf};
 
@@ -9,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub use package_json::PackageJson;
 pub use parsers::parse_tsconfig_root_dir;
 use parsers::{expand_workspace_glob, parse_pnpm_workspace_yaml, parse_tsconfig_references};
+pub use pnpm_catalog::{PnpmCatalog, PnpmCatalogData, PnpmCatalogEntry, parse_pnpm_catalog_data};
 
 /// Workspace configuration for monorepo support.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

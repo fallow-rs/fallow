@@ -59,6 +59,8 @@ pub enum IssueKind {
     Complexity,
     /// A suppression comment or JSDoc tag that no longer matches any issue.
     StaleSuppression,
+    /// A pnpm catalog entry in pnpm-workspace.yaml not referenced by any workspace package.
+    PnpmCatalogEntry,
 }
 
 impl IssueKind {
@@ -86,6 +88,7 @@ impl IssueKind {
             "feature-flag" => Some(Self::FeatureFlag),
             "complexity" => Some(Self::Complexity),
             "stale-suppression" => Some(Self::StaleSuppression),
+            "unused-catalog-entry" | "unused-catalog-entries" => Some(Self::PnpmCatalogEntry),
             _ => None,
         }
     }
@@ -114,6 +117,7 @@ impl IssueKind {
             Self::FeatureFlag => 18,
             Self::Complexity => 19,
             Self::StaleSuppression => 20,
+            Self::PnpmCatalogEntry => 21,
         }
     }
 
@@ -141,6 +145,7 @@ impl IssueKind {
             18 => Some(Self::FeatureFlag),
             19 => Some(Self::Complexity),
             20 => Some(Self::StaleSuppression),
+            21 => Some(Self::PnpmCatalogEntry),
             _ => None,
         }
     }
@@ -263,6 +268,14 @@ mod tests {
             IssueKind::parse("stale-suppression"),
             Some(IssueKind::StaleSuppression)
         );
+        assert_eq!(
+            IssueKind::parse("unused-catalog-entry"),
+            Some(IssueKind::PnpmCatalogEntry)
+        );
+        assert_eq!(
+            IssueKind::parse("unused-catalog-entries"),
+            Some(IssueKind::PnpmCatalogEntry)
+        );
     }
 
     #[test]
@@ -284,7 +297,7 @@ mod tests {
     #[test]
     fn discriminant_out_of_range() {
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(21), None);
+        assert_eq!(IssueKind::from_discriminant(22), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -311,6 +324,7 @@ mod tests {
             IssueKind::FeatureFlag,
             IssueKind::Complexity,
             IssueKind::StaleSuppression,
+            IssueKind::PnpmCatalogEntry,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -318,7 +332,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(21), None);
+        assert_eq!(IssueKind::from_discriminant(22), None);
     }
 
     // ── Discriminant uniqueness ─────────────────────────────────
@@ -346,6 +360,7 @@ mod tests {
             IssueKind::FeatureFlag,
             IssueKind::Complexity,
             IssueKind::StaleSuppression,
+            IssueKind::PnpmCatalogEntry,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();

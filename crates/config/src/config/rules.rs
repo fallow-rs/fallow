@@ -104,6 +104,8 @@ pub struct RulesConfig {
     pub feature_flags: Severity,
     #[serde(default = "Severity::default_warn", alias = "stale-suppression")]
     pub stale_suppressions: Severity,
+    #[serde(default = "Severity::default_warn", alias = "unused-catalog-entry")]
+    pub unused_catalog_entries: Severity,
 }
 
 impl Default for RulesConfig {
@@ -128,6 +130,7 @@ impl Default for RulesConfig {
             coverage_gaps: Severity::Off,
             feature_flags: Severity::Off,
             stale_suppressions: Severity::Warn,
+            unused_catalog_entries: Severity::Warn,
         }
     }
 }
@@ -191,6 +194,9 @@ impl RulesConfig {
         }
         if let Some(s) = partial.stale_suppressions {
             self.stale_suppressions = s;
+        }
+        if let Some(s) = partial.unused_catalog_entries {
+            self.unused_catalog_entries = s;
         }
     }
 }
@@ -313,6 +319,12 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub stale_suppressions: Option<Severity>,
+    #[serde(
+        default,
+        alias = "unused-catalog-entry",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_catalog_entries: Option<Severity>,
 }
 
 #[cfg(test)]
@@ -341,6 +353,7 @@ mod tests {
         assert_eq!(rules.coverage_gaps, Severity::Off);
         assert_eq!(rules.feature_flags, Severity::Off);
         assert_eq!(rules.stale_suppressions, Severity::Warn);
+        assert_eq!(rules.unused_catalog_entries, Severity::Warn);
     }
 
     #[test]
@@ -401,7 +414,8 @@ mod tests {
             "test-only-dependency": "off",
             "coverage-gap": "warn",
             "feature-flag": "warn",
-            "stale-suppression": "off"
+            "stale-suppression": "off",
+            "unused-catalog-entry": "error"
         }"#;
 
         let rules: RulesConfig = serde_json::from_str(json_str).unwrap();
@@ -422,6 +436,7 @@ mod tests {
         assert_eq!(rules.coverage_gaps, Severity::Warn);
         assert_eq!(rules.feature_flags, Severity::Warn);
         assert_eq!(rules.stale_suppressions, Severity::Off);
+        assert_eq!(rules.unused_catalog_entries, Severity::Error);
 
         let partial: PartialRulesConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(partial.unused_files, Some(Severity::Off));
@@ -441,6 +456,7 @@ mod tests {
         assert_eq!(partial.coverage_gaps, Some(Severity::Warn));
         assert_eq!(partial.feature_flags, Some(Severity::Warn));
         assert_eq!(partial.stale_suppressions, Some(Severity::Off));
+        assert_eq!(partial.unused_catalog_entries, Some(Severity::Error));
     }
 
     #[test]
@@ -513,6 +529,7 @@ mod tests {
             coverage_gaps: Some(Severity::Off),
             feature_flags: Some(Severity::Off),
             stale_suppressions: Some(Severity::Off),
+            unused_catalog_entries: Some(Severity::Off),
         };
         rules.apply_partial(&partial);
         assert_eq!(rules.unused_files, Severity::Off);

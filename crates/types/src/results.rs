@@ -79,6 +79,9 @@ pub struct AnalysisResults {
     /// Suppression comments or JSDoc tags that no longer match any issue.
     #[serde(default)]
     pub stale_suppressions: Vec<StaleSuppression>,
+    /// Entries in pnpm-workspace.yaml catalogs that no workspace package references.
+    #[serde(default)]
+    pub unused_catalog_entries: Vec<UnusedCatalogEntry>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -143,6 +146,7 @@ impl AnalysisResults {
             + self.circular_dependencies.len()
             + self.boundary_violations.len()
             + self.stale_suppressions.len()
+            + self.unused_catalog_entries.len()
     }
 
     /// Whether any issues were found.
@@ -273,6 +277,19 @@ impl AnalysisResults {
                 .then(a.col.cmp(&b.col))
         });
 
+        self.unused_catalog_entries.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then_with(|| {
+                    catalog_sort_key(&a.catalog_name).cmp(&catalog_sort_key(&b.catalog_name))
+                })
+                .then(a.catalog_name.cmp(&b.catalog_name))
+                .then(a.entry_name.cmp(&b.entry_name))
+        });
+        for entry in &mut self.unused_catalog_entries {
+            entry.hardcoded_consumers.sort();
+        }
+
         self.feature_flags.sort_by(|a, b| {
             a.path
                 .cmp(&b.path)
@@ -294,6 +311,15 @@ impl AnalysisResults {
                 .then(a.line.cmp(&b.line))
                 .then(a.export_name.cmp(&b.export_name))
         });
+    }
+}
+
+/// Sort key for catalog names: the default catalog ("default") sorts before any named catalog.
+fn catalog_sort_key(name: &str) -> (u8, &str) {
+    if name == "default" {
+        (0, name)
+    } else {
+        (1, name)
     }
 }
 
@@ -480,6 +506,35 @@ pub struct TypeOnlyDependency {
     pub path: PathBuf,
     /// 1-based line number of the dependency entry in package.json.
     pub line: u32,
+}
+
+/// A pnpm catalog entry declared in pnpm-workspace.yaml that no workspace package
+/// references via the `catalog:` protocol.
+///
+/// The default catalog (top-level `catalog:` key) uses `catalog_name: "default"`.
+/// Named catalogs (under `catalogs.<name>:`) use their declared name.
+#[derive(Debug, Clone, Serialize)]
+pub struct UnusedCatalogEntry {
+    /// Package name declared in the catalog (e.g. `"react"`, `"@scope/lib"`).
+    pub entry_name: String,
+    /// Catalog group: `"default"` for the top-level `catalog:` map, or the
+    /// named catalog key for entries declared under `catalogs.<name>:`.
+    pub catalog_name: String,
+    /// Path to `pnpm-workspace.yaml`, relative to the analyzed root.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number of the catalog entry within `pnpm-workspace.yaml`.
+    pub line: u32,
+    /// Workspace `package.json` files that declare the same package with a
+    /// hardcoded version range instead of `catalog:`. Empty when no consumer
+    /// uses a hardcoded version. Sorted lexicographically for deterministic
+    /// output.
+    #[serde(
+        default,
+        serialize_with = "serde_path::serialize_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub hardcoded_consumers: Vec<PathBuf>,
 }
 
 /// A production dependency that is only imported by test files.
