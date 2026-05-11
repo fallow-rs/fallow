@@ -90,6 +90,9 @@ pub struct BaselineData {
     /// Stale suppressions, keyed by `file:line`.
     #[serde(default)]
     pub stale_suppressions: Vec<String>,
+    /// Unused pnpm catalog entries, keyed by `catalog_name:entry_name`.
+    #[serde(default)]
+    pub unused_catalog_entries: Vec<String>,
 }
 
 impl BaselineData {
@@ -201,6 +204,11 @@ impl BaselineData {
                 .iter()
                 .map(|s| format!("{}:{}", relative_path(&s.path, root), s.line))
                 .collect(),
+            unused_catalog_entries: results
+                .unused_catalog_entries
+                .iter()
+                .map(|e| format!("{}:{}", e.catalog_name, e.entry_name))
+                .collect(),
         }
     }
 
@@ -223,6 +231,7 @@ impl BaselineData {
             + self.test_only_dependencies.len()
             + self.boundary_violations.len()
             + self.stale_suppressions.len()
+            + self.unused_catalog_entries.len()
     }
 }
 
@@ -276,6 +285,10 @@ fn filter_private_type_leaks(
 }
 
 /// Filter results to only include issues not present in the baseline.
+#[expect(
+    clippy::too_many_lines,
+    reason = "flat list of per-issue-type retain calls; one block per category keeps each filter local and easy to audit"
+)]
 pub fn filter_new_issues(
     mut results: fallow_core::results::AnalysisResults,
     baseline: &BaselineData,
@@ -440,6 +453,16 @@ pub fn filter_new_issues(
     results.stale_suppressions.retain(|s| {
         let key = format!("{}:{}", relative_path(&s.path, root), s.line);
         !baseline_stale.contains(key.as_str())
+    });
+
+    let baseline_catalog: FxHashSet<&str> = baseline
+        .unused_catalog_entries
+        .iter()
+        .map(String::as_str)
+        .collect();
+    results.unused_catalog_entries.retain(|e| {
+        let key = format!("{}:{}", e.catalog_name, e.entry_name);
+        !baseline_catalog.contains(key.as_str())
     });
 
     results
@@ -1182,6 +1205,7 @@ mod tests {
             test_only_dependencies: vec![],
             boundary_violations: vec![],
             stale_suppressions: vec![],
+            unused_catalog_entries: vec![],
         };
         let results = AnalysisResults {
             unused_files: vec![
@@ -1222,6 +1246,7 @@ mod tests {
             test_only_dependencies: vec![],
             boundary_violations: vec![],
             stale_suppressions: vec![],
+            unused_catalog_entries: vec![],
         };
         let results = make_results();
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
@@ -1249,6 +1274,7 @@ mod tests {
             test_only_dependencies: vec![],
             boundary_violations: vec![],
             stale_suppressions: vec![],
+            unused_catalog_entries: vec![],
         };
         let results = AnalysisResults {
             unused_exports: vec![

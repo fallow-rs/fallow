@@ -3,7 +3,8 @@ pub use fallow_types::results::{
     AnalysisResults, BoundaryViolation, CircularDependency, DependencyLocation, DuplicateExport,
     DuplicateLocation, EntryPointSummary, ExportUsage, ImportSite, PrivateTypeLeak,
     ReferenceLocation, StaleSuppression, SuppressionOrigin, TestOnlyDependency, TypeOnlyDependency,
-    UnlistedDependency, UnresolvedImport, UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
+    UnlistedDependency, UnresolvedImport, UnusedCatalogEntry, UnusedDependency, UnusedExport,
+    UnusedFile, UnusedMember,
 };
 
 #[cfg(test)]

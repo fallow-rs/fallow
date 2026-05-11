@@ -168,6 +168,11 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         code: "stale-suppression",
         label: "Stale Suppressions",
     },
+    DiagnosticIssueType {
+        config_key: Some("unused-catalog-entries"),
+        code: "unused-catalog-entry",
+        label: "Unused Catalog Entries",
+    },
 ];
 
 fn diagnostic_issue_types() -> Vec<IssueTypeInfo> {

@@ -503,6 +503,49 @@ fn push_stale_suppression_issues(
     }
 }
 
+fn push_unused_catalog_entry_issues(
+    issues: &mut Vec<serde_json::Value>,
+    entries: &[fallow_core::results::UnusedCatalogEntry],
+    root: &Path,
+    severity: Severity,
+) {
+    if entries.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in entries {
+        let path = cc_path(&entry.path, root);
+        let line_str = entry.line.to_string();
+        let fp = fingerprint_hash(&[
+            "fallow/unused-catalog-entry",
+            &path,
+            &line_str,
+            &entry.catalog_name,
+            &entry.entry_name,
+        ]);
+        let description = if entry.catalog_name == "default" {
+            format!(
+                "Catalog entry '{}' is not referenced by any workspace package",
+                entry.entry_name
+            )
+        } else {
+            format!(
+                "Catalog entry '{}' (catalog '{}') is not referenced by any workspace package",
+                entry.entry_name, entry.catalog_name
+            )
+        };
+        issues.push(cc_issue(
+            "fallow/unused-catalog-entry",
+            &description,
+            level,
+            "Clarity",
+            &path,
+            Some(entry.line),
+            &fp,
+        ));
+    }
+}
+
 /// Build CodeClimate JSON array from dead-code analysis results.
 #[must_use]
 pub fn build_codeclimate(
@@ -624,6 +667,12 @@ pub fn build_codeclimate(
         &results.stale_suppressions,
         root,
         rules.stale_suppressions,
+    );
+    push_unused_catalog_entry_issues(
+        &mut issues,
+        &results.unused_catalog_entries,
+        root,
+        rules.unused_catalog_entries,
     );
 
     serde_json::Value::Array(issues)

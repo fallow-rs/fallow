@@ -250,6 +250,39 @@ pub fn push_dep_diagnostics(
             });
         }
     }
+
+    // Unused pnpm catalog entries in pnpm-workspace.yaml.
+    for entry in &results.unused_catalog_entries {
+        if let Ok(entry_uri) = Url::from_file_path(&entry.path) {
+            let line = entry.line.saturating_sub(1);
+            let message = if entry.catalog_name == "default" {
+                format!(
+                    "Unused catalog entry: '{}' is not referenced by any workspace package",
+                    entry.entry_name
+                )
+            } else {
+                format!(
+                    "Unused catalog entry: '{}' in catalog '{}' is not referenced by any workspace package",
+                    entry.entry_name, entry.catalog_name
+                )
+            };
+            map.entry(entry_uri).or_default().push(Diagnostic {
+                range: Range {
+                    start: Position { line, character: 0 },
+                    end: Position {
+                        line,
+                        character: u32::MAX,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::WARNING),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("unused-catalog-entry".to_string())),
+                code_description: doc_link("unused-catalog-entries"),
+                message,
+                ..Default::default()
+            });
+        }
+    }
 }
 
 #[expect(

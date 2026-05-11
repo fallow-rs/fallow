@@ -229,6 +229,31 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
             )]
         },
     );
+    markdown_section(
+        &mut out,
+        &results.unused_catalog_entries,
+        "Unused catalog entries",
+        |entry| {
+            let mut row = format!(
+                "- `{}` ({}) `{}`:{}",
+                escape_backticks(&entry.entry_name),
+                escape_backticks(&entry.catalog_name),
+                rel(&entry.path),
+                entry.line,
+            );
+            if !entry.hardcoded_consumers.is_empty() {
+                use std::fmt::Write as _;
+                let consumers = entry
+                    .hardcoded_consumers
+                    .iter()
+                    .map(|p| format!("`{}`", rel(p)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let _ = write!(row, " (hardcoded in {consumers})");
+            }
+            vec![row]
+        },
+    );
 
     out
 }

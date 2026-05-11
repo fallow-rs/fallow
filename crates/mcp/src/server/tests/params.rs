@@ -3,7 +3,7 @@ use crate::tools::ISSUE_TYPE_FLAGS;
 
 #[test]
 fn issue_type_flags_are_complete() {
-    assert_eq!(ISSUE_TYPE_FLAGS.len(), 13);
+    assert_eq!(ISSUE_TYPE_FLAGS.len(), 14);
     for &(name, flag) in ISSUE_TYPE_FLAGS {
         assert!(
             flag.starts_with("--"),

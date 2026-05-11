@@ -184,6 +184,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         full: "A fallow-ignore-next-line, fallow-ignore-file, or @expected-unused suppression that no longer matches any active issue. The underlying problem was fixed but the suppression was left behind. Remove it to keep the codebase clean.",
         docs_path: "explanations/dead-code#stale-suppressions",
     },
+    RuleDef {
+        id: "fallow/unused-catalog-entry",
+        category: "Dependencies",
+        name: "Unused pnpm catalog entry",
+        short: "Catalog entry in pnpm-workspace.yaml not referenced by any workspace package",
+        full: "An entry in the `catalog:` or `catalogs:` section of pnpm-workspace.yaml that no workspace package.json references via the `catalog:` protocol. Catalog entries are leftover dependency metadata once a package is removed from every consumer; delete the entry to keep the catalog truthful.",
+        docs_path: "explanations/dead-code#unused-catalog-entries",
+    },
 ];
 
 /// Look up a rule definition by its SARIF rule ID across all rule sets.
@@ -249,6 +257,9 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         "circular-deps" | "circular-dependencies" => Some("fallow/circular-dependency"),
         "boundary-violations" => Some("fallow/boundary-violation"),
         "stale-suppressions" => Some("fallow/stale-suppression"),
+        "unused-catalog-entries" | "unused-catalog-entry" | "catalog" => {
+            Some("fallow/unused-catalog-entry")
+        }
         "complexity" | "high-complexity" => Some("fallow/high-complexity"),
         "cyclomatic" | "high-cyclomatic" | "high-cyclomatic-complexity" => {
             Some("fallow/high-cyclomatic-complexity")
@@ -348,6 +359,10 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
         "fallow/stale-suppression" => RuleGuide {
             example: "// fallow-ignore-next-line unused-export remains above an export that is now used.",
             how_to_fix: "Remove the suppression. If a different issue is still intentional, replace it with a current, specific suppression.",
+        },
+        "fallow/unused-catalog-entry" => RuleGuide {
+            example: "pnpm-workspace.yaml declares `catalog: { is-even: ^1.0.0 }`, but no workspace package.json declares `\"is-even\": \"catalog:\"`.",
+            how_to_fix: "Delete the entry from pnpm-workspace.yaml. If any consumer uses a hardcoded version (surfaced in `hardcoded_consumers`), switch that consumer to `catalog:` first to keep versions aligned.",
         },
         "fallow/high-cyclomatic-complexity"
         | "fallow/high-cognitive-complexity"
@@ -1419,7 +1434,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 17);
+        assert_eq!(CHECK_RULES.len(), 18);
     }
 
     #[test]

@@ -96,6 +96,7 @@ pub struct DeadCodeFilters {
     pub circular_deps: bool,
     pub boundary_violations: bool,
     pub stale_suppressions: bool,
+    pub unused_catalog_entries: bool,
 }
 
 /// Options for dead-code-oriented analyses.
@@ -374,6 +375,7 @@ fn to_issue_filters(filters: &DeadCodeFilters) -> IssueFilters {
         circular_deps: filters.circular_deps,
         boundary_violations: filters.boundary_violations,
         stale_suppressions: filters.stale_suppressions,
+        unused_catalog_entries: filters.unused_catalog_entries,
     }
 }
 

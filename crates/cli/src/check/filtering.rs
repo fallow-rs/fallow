@@ -73,6 +73,11 @@ pub fn filter_to_workspaces(
 
     // Stale suppressions: keep if the file is in a matched workspace
     results.stale_suppressions.retain(|s| any_under(&s.path));
+
+    // Catalog entries live in the project-root pnpm-workspace.yaml, not per-workspace.
+    // Workspace scoping is asking "show me findings for this subset of packages";
+    // catalog hygiene is a whole-project concern, so drop it when --workspace narrows.
+    results.unused_catalog_entries.clear();
 }
 
 /// Resolve `--workspace <patterns...>` to a set of workspace roots, or exit with

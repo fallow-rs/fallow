@@ -137,6 +137,15 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
             s.description(),
         ));
     }
+    for entry in &results.unused_catalog_entries {
+        lines.push(format!(
+            "unused-catalog-entry:{}:{}:{}:{}",
+            rel(&entry.path),
+            entry.line,
+            entry.catalog_name,
+            entry.entry_name,
+        ));
+    }
 
     lines
 }

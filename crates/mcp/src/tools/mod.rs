@@ -117,6 +117,7 @@ pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
     ("circular-deps", "--circular-deps"),
     ("boundary-violations", "--boundary-violations"),
     ("stale-suppressions", "--stale-suppressions"),
+    ("unused-catalog-entries", "--unused-catalog-entries"),
 ];
 
 /// Valid detection modes for the `find_dupes` tool.

@@ -265,6 +265,7 @@ pub fn build_json(
         "circular_dependencies": results.circular_dependencies.len(),
         "boundary_violations": results.boundary_violations.len(),
         "stale_suppressions": results.stale_suppressions.len(),
+        "unused_catalog_entries": results.unused_catalog_entries.len(),
     });
     map.insert("summary".to_string(), summary);
 
@@ -322,6 +323,8 @@ pub fn strip_root_prefix(value: &mut serde_json::Value, prefix: &str) {
 enum SuppressKind {
     /// `// fallow-ignore-next-line <type>` on the line before.
     InlineComment,
+    /// `# fallow-ignore-next-line <type>` on the line before (YAML / shell).
+    YamlComment,
     /// `// fallow-ignore-file <type>` at the top of the file.
     FileComment,
     /// Add to `ignoreDependencies` in fallow config.
@@ -339,6 +342,10 @@ struct ActionSpec {
 }
 
 /// Map an issue array key to its action specification.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one match arm per issue type keeps the action spec table flat and grep-friendly"
+)]
 fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
     match key {
         "unused_files" => Some(ActionSpec {
@@ -480,6 +487,16 @@ fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
             suppress: SuppressKind::InlineComment,
             issue_kind: "boundary-violation",
         }),
+        "unused_catalog_entries" => Some(ActionSpec {
+            fix_type: "remove-catalog-entry",
+            auto_fixable: false,
+            description: "Remove the entry from pnpm-workspace.yaml",
+            note: Some(
+                "If any consumer declares the same package with a hardcoded version, switch the consumer to `catalog:` before removing",
+            ),
+            suppress: SuppressKind::YamlComment,
+            issue_kind: "unused-catalog-entry",
+        }),
         _ => None,
     }
 }
@@ -561,6 +578,14 @@ fn build_actions(
                 suppress["scope"] = serde_json::json!("per-location");
             }
             actions.push(suppress);
+        }
+        SuppressKind::YamlComment => {
+            actions.push(serde_json::json!({
+                "type": "suppress-line",
+                "auto_fixable": false,
+                "description": "Suppress with a YAML comment above the line",
+                "comment": format!("# fallow-ignore-next-line {}", spec.issue_kind),
+            }));
         }
         SuppressKind::FileComment => {
             actions.push(serde_json::json!({

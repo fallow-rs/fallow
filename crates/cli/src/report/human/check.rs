@@ -576,7 +576,8 @@ fn build_dependencies_section(
         || !results.unresolved_imports.is_empty()
         || !results.unlisted_dependencies.is_empty()
         || !results.type_only_dependencies.is_empty()
-        || !results.test_only_dependencies.is_empty();
+        || !results.test_only_dependencies.is_empty()
+        || !results.unused_catalog_entries.is_empty();
     if !has_dependencies {
         return;
     }
@@ -645,6 +646,68 @@ fn build_dependencies_section(
         max_items,
         total_issues,
         root,
+    );
+    push_unused_catalog_entries_section(
+        lines,
+        &results.unused_catalog_entries,
+        rules.unused_catalog_entries,
+        max_items,
+        total_issues,
+        root,
+    );
+}
+
+/// Render unused pnpm catalog entries in a flat column layout (matches knip's
+/// shape): `entry_name  catalog_name  path:line`. Skipped when the list is
+/// empty or the rule is `Off` (which already removed entries upstream).
+fn push_unused_catalog_entries_section(
+    lines: &mut Vec<String>,
+    entries: &[fallow_core::results::UnusedCatalogEntry],
+    severity: fallow_config::Severity,
+    max_items: usize,
+    total_issues: usize,
+    root: &Path,
+) {
+    if entries.is_empty() {
+        return;
+    }
+    let level = severity_to_level(severity);
+    build_human_section_ex(
+        lines,
+        entries,
+        "Unused catalog entries",
+        level,
+        max_items,
+        total_issues,
+        |entry| {
+            let path_display = root.join(&entry.path);
+            let mut row = format!(
+                "  {entry_name}  {catalog}  {loc}",
+                entry_name = entry.entry_name.bold(),
+                catalog = entry.catalog_name.dimmed(),
+                loc = format!(
+                    "{}:{}",
+                    path_display
+                        .strip_prefix(root)
+                        .unwrap_or(&path_display)
+                        .display(),
+                    entry.line
+                )
+                .dimmed(),
+            );
+            let mut out = vec![row];
+            if !entry.hardcoded_consumers.is_empty() {
+                let consumers = entry
+                    .hardcoded_consumers
+                    .iter()
+                    .map(|p| p.strip_prefix(root).unwrap_or(p).display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                row = format!("    {}: {consumers}", "hardcoded in".dimmed());
+                out.push(row);
+            }
+            out
+        },
     );
 }
 
