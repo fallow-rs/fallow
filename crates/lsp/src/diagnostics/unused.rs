@@ -348,8 +348,8 @@ mod tests {
     use fallow_core::extract::MemberKind;
     use fallow_core::results::{
         AnalysisResults, DependencyLocation, ImportSite, TestOnlyDependency, TypeOnlyDependency,
-        UnlistedDependency, UnresolvedImport, UnusedDependency, UnusedExport, UnusedFile,
-        UnusedMember,
+        UnlistedDependency, UnresolvedImport, UnusedCatalogEntry, UnusedDependency, UnusedExport,
+        UnusedFile, UnusedMember,
     };
     use tower_lsp::lsp_types::{DiagnosticSeverity, DiagnosticTag, NumberOrString, Url};
 
@@ -771,5 +771,67 @@ mod tests {
         let uri = Url::from_file_path(root.join("src/edge.ts")).unwrap();
         let d = &diags[&uri][0];
         assert_eq!(d.range.start.line, 0);
+    }
+
+    #[test]
+    fn unused_catalog_entry_produces_warning_diagnostic() {
+        // Catalog entries store project-root-relative paths. The diagnostic
+        // must build its URI by joining against the analyzer root, otherwise
+        // Url::from_file_path silently fails on the relative path and no
+        // squiggle ever lands on pnpm-workspace.yaml.
+        let root = test_root();
+        let mut results = AnalysisResults::default();
+        results.unused_catalog_entries.push(UnusedCatalogEntry {
+            entry_name: "is-even".to_string(),
+            catalog_name: "default".to_string(),
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line: 6,
+            hardcoded_consumers: vec![],
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
+        let file_diags = diags
+            .get(&uri)
+            .expect("catalog diagnostic should be keyed by the absolute YAML URI");
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("unused-catalog-entry".to_string()))
+        );
+        assert_eq!(d.source, Some("fallow".to_string()));
+        assert!(d.message.contains("is-even"));
+        // Line is 1-based in results, 0-based in LSP
+        assert_eq!(d.range.start.line, 5);
+    }
+
+    #[test]
+    fn unused_catalog_entry_message_mentions_named_catalog() {
+        let root = test_root();
+        let mut results = AnalysisResults::default();
+        results.unused_catalog_entries.push(UnusedCatalogEntry {
+            entry_name: "react-dom".to_string(),
+            catalog_name: "react17".to_string(),
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line: 12,
+            hardcoded_consumers: vec![],
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
+        let d = &diags[&uri][0];
+        assert!(d.message.contains("react-dom"));
+        assert!(
+            d.message.contains("react17"),
+            "named-catalog diagnostic must surface the catalog name, got: {}",
+            d.message
+        );
     }
 }
