@@ -288,6 +288,7 @@ impl AnalysisResults {
         });
         for entry in &mut self.unused_catalog_entries {
             entry.hardcoded_consumers.sort();
+            entry.hardcoded_consumers.dedup();
         }
 
         self.feature_flags.sort_by(|a, b| {

@@ -156,7 +156,7 @@ fn collect_catalog_consumers(pkg_paths: &[PathBuf], root: &Path) -> CatalogConsu
                         package_name: name.clone(),
                         catalog_name: catalog.to_string(),
                     });
-                } else {
+                } else if is_hardcoded_version(version) {
                     consumers
                         .hardcoded
                         .push((name.clone(), relative_path.clone()));
@@ -177,6 +177,21 @@ fn parse_catalog_reference(value: &str) -> Option<&str> {
     } else {
         Some(rest)
     }
+}
+
+/// Identify version strings that represent a hardcoded version range, as
+/// opposed to a workspace cross-reference (`workspace:*`, `workspace:^`),
+/// a filesystem path (`file:..`), or a symlinked dependency (`link:..`).
+/// Catalog references are handled by the caller and never reach this
+/// function. Surfacing only true hardcoded ranges keeps
+/// `hardcoded_consumers` actionable: the user can decide whether to switch
+/// the consumer to `catalog:` rather than chase an internal workspace
+/// reference.
+fn is_hardcoded_version(value: &str) -> bool {
+    !(value.starts_with("workspace:")
+        || value.starts_with("file:")
+        || value.starts_with("link:")
+        || value.starts_with("portal:"))
 }
 
 #[cfg(test)]
@@ -200,5 +215,30 @@ mod tests {
         assert_eq!(parse_catalog_reference("workspace:*"), None);
         assert_eq!(parse_catalog_reference("npm:other-pkg@^1.0.0"), None);
         assert_eq!(parse_catalog_reference(""), None);
+    }
+
+    #[test]
+    fn workspace_and_link_protocols_are_not_hardcoded() {
+        // `workspace:*`, `file:..`, `link:..`, and `portal:..` are internal
+        // workspace references, not hardcoded version ranges. They must not
+        // appear in `hardcoded_consumers` because the user can't "switch
+        // them to catalog:" - they're a different kind of relationship.
+        assert!(!is_hardcoded_version("workspace:*"));
+        assert!(!is_hardcoded_version("workspace:^"));
+        assert!(!is_hardcoded_version("workspace:~"));
+        assert!(!is_hardcoded_version("file:../other-pkg"));
+        assert!(!is_hardcoded_version("link:../symlinked"));
+        assert!(!is_hardcoded_version("portal:../portal"));
+    }
+
+    #[test]
+    fn semver_ranges_and_npm_specs_are_hardcoded() {
+        assert!(is_hardcoded_version("^1.0.0"));
+        assert!(is_hardcoded_version("~2.5.0"));
+        assert!(is_hardcoded_version("1.2.3"));
+        assert!(is_hardcoded_version(">=1.0.0 <2.0.0"));
+        assert!(is_hardcoded_version("npm:other-pkg@^1.0.0"));
+        assert!(is_hardcoded_version("github:user/repo#commit"));
+        assert!(is_hardcoded_version("https://example.com/pkg.tgz"));
     }
 }
