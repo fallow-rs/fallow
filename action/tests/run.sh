@@ -554,7 +554,7 @@ assert_valid_json "$OUT" "valid JSON"
 assert_json_value "$OUT" '.unused_exports | length' "3" "keeps only exports in changed files"
 assert_json_value "$OUT" '.unused_files | length' "0" "no unused files match changed path"
 assert_json_value "$OUT" '.unused_dependencies | length' "3" "preserves dependency issues (not file-scoped)"
-assert_json_value "$OUT" '.total_issues' "6" "recalculates total_issues"
+assert_json_value "$OUT" '.total_issues' "7" "recalculates total_issues"
 
 echo "  check with no matching files:"
 OUT=$(jq --argjson changed '["nonexistent.ts"]' -f "$JQ_DIR/filter-changed.jq" "$FIXTURES/check.json" 2>&1)
@@ -759,7 +759,7 @@ OUT=$(cd "$WORK_DIR" && \
     fi
     jq -r ".total_issues" "$RESULTS_FILE"
   ' 2>&1)
-[ "$OUT" = "6" ] && pass "filters to 6 issues (pre-computed)" || fail "pre-computed filter" "expected 6, got $OUT"
+[ "$OUT" = "7" ] && pass "filters to 7 issues (pre-computed)" || fail "pre-computed filter" "expected 7, got $OUT"
 
 echo "  fallback to unfiltered when no pre-computed file:"
 rm -f "$WORK_DIR/fallow-changed-files.json"

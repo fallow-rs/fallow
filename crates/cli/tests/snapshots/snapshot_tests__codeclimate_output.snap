@@ -248,7 +248,7 @@ expression: json_str
     "check_name": "fallow/unused-catalog-entry",
     "description": "Catalog entry 'is-even' is not referenced by any workspace package",
     "categories": [
-      "Clarity"
+      "Bug Risk"
     ],
     "severity": "minor",
     "fingerprint": "01c68b8e65ee42b9",
@@ -264,7 +264,7 @@ expression: json_str
     "check_name": "fallow/unused-catalog-entry",
     "description": "Catalog entry 'old-thing' (catalog 'legacy') is not referenced by any workspace package",
     "categories": [
-      "Clarity"
+      "Bug Risk"
     ],
     "severity": "minor",
     "fingerprint": "2d5072d3451b44dd",

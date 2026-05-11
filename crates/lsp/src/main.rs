@@ -56,6 +56,7 @@ struct AnalysisCompleteParams {
     circular_dependencies: usize,
     boundary_violations: usize,
     stale_suppressions: usize,
+    unused_catalog_entries: usize,
     duplication_percentage: f64,
     clone_groups: usize,
 }
@@ -835,6 +836,7 @@ impl FallowLspServer {
                         circular_dependencies: results.circular_dependencies.len(),
                         boundary_violations: results.boundary_violations.len(),
                         stale_suppressions: results.stale_suppressions.len(),
+                        unused_catalog_entries: results.unused_catalog_entries.len(),
                         duplication_percentage: duplication.stats.duplication_percentage,
                         clone_groups: duplication.stats.clone_groups,
                     })
@@ -1126,6 +1128,9 @@ fn dedup_results(target: &mut AnalysisResults) {
     dedup_by_key_preserving_order(&mut target.stale_suppressions, |s| {
         (s.path.clone(), s.line, s.col)
     });
+    dedup_by_key_preserving_order(&mut target.unused_catalog_entries, |e| {
+        (e.path.clone(), e.catalog_name.clone(), e.entry_name.clone())
+    });
 
     // UnlistedDependency: real merge, not plain dedup. The same package can
     // be reported by two roots with different `imported_from` site lists
@@ -1197,6 +1202,9 @@ fn merge_results(target: &mut AnalysisResults, source: AnalysisResults) {
         .extend(source.boundary_violations);
     target.export_usages.extend(source.export_usages);
     target.stale_suppressions.extend(source.stale_suppressions);
+    target
+        .unused_catalog_entries
+        .extend(source.unused_catalog_entries);
 }
 
 /// Merge duplication reports from a sub-project into the accumulated report.

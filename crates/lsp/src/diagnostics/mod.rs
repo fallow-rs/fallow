@@ -43,7 +43,7 @@ pub fn build_diagnostics(
     unused::push_export_diagnostics(&mut map, results);
     unused::push_file_diagnostics(&mut map, results);
     unused::push_import_diagnostics(&mut map, results);
-    unused::push_dep_diagnostics(&mut map, results, package_json_uri.as_ref());
+    unused::push_dep_diagnostics(&mut map, results, package_json_uri.as_ref(), root);
     unused::push_member_diagnostics(&mut map, results);
     quality::push_duplicate_export_diagnostics(&mut map, results);
     quality::push_duplication_diagnostics(&mut map, duplication);

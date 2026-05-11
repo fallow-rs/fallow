@@ -67,5 +67,5 @@ expression: output
 
 ### Unused catalog entries (2)
 
-- `is-even` (default) `pnpm-workspace.yaml`:6
-- `old-thing` (legacy) `pnpm-workspace.yaml`:12 (hardcoded in `apps/web/package.json`)
+- `is-even` (`default`) `pnpm-workspace.yaml`:6
+- `old-thing` (`legacy`) `pnpm-workspace.yaml`:12 (hardcoded in `apps/web/package.json`)

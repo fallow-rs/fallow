@@ -50,7 +50,7 @@ pub struct AnalyzeParams {
     /// Valid values: unused-files, unused-exports, unused-types,
     /// private-type-leaks, unused-deps, unused-enum-members, unused-class-members, unresolved-imports,
     /// unlisted-deps, duplicate-exports, circular-deps, boundary-violations,
-    /// stale-suppressions.
+    /// stale-suppressions, unused-catalog-entries.
     pub issue_types: Option<Vec<String>>,
 
     #[schemars(

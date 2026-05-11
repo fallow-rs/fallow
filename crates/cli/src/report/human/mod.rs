@@ -124,6 +124,10 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "Suppression comments or JSDoc tags that no longer match any issue",
             "https://docs.fallow.tools/explanations/dead-code#stale-suppressions",
         )),
+        "Unused catalog entries" => Some((
+            "pnpm-workspace.yaml catalog entries not referenced by any workspace package via the `catalog:` protocol",
+            "https://docs.fallow.tools/explanations/dead-code#unused-catalog-entries",
+        )),
         t if t.starts_with("Type-only") => Some((
             "Dependencies only used for type imports \u{2014} consider moving to devDependencies",
             "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
@@ -149,6 +153,7 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
         "Duplicate exports" => Some("duplicate-exports"),
         "Circular dependencies" => Some("circular-dependencies"),
         "Boundary violations" => Some("boundary-violation"),
+        "Unused catalog entries" => Some("unused-catalog-entry"),
         _ => None,
     }
 }
@@ -156,6 +161,12 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
 /// Rules that only support file-level suppression (not next-line).
 fn is_file_level_only(rule: &str) -> bool {
     matches!(rule, "circular-dependencies" | "boundary-violation")
+}
+
+/// Rules whose findings live in YAML files (so the suppression comment must
+/// use `#` rather than `//`).
+fn is_yaml_comment_only(rule: &str) -> bool {
+    matches!(rule, "unused-catalog-entry")
 }
 
 /// Categories that support `fallow fix --dry-run` auto-fix.
@@ -202,6 +213,8 @@ fn push_section_footer_impl(lines: &mut Vec<String>, title: &str, item_count: us
                 "To suppress a directory: add to ignorePatterns in .fallowrc.json".to_string()
             } else if is_file_level_only(rule) {
                 format!("To suppress: // fallow-ignore-file {rule}")
+            } else if is_yaml_comment_only(rule) {
+                format!("To suppress: # fallow-ignore-next-line {rule}")
             } else {
                 format!("To suppress: // fallow-ignore-next-line {rule}")
             };

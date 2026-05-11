@@ -235,7 +235,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         "Unused catalog entries",
         |entry| {
             let mut row = format!(
-                "- `{}` ({}) `{}`:{}",
+                "- `{}` (`{}`) `{}`:{}",
                 escape_backticks(&entry.entry_name),
                 escape_backticks(&entry.catalog_name),
                 rel(&entry.path),

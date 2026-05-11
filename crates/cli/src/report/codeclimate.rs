@@ -538,7 +538,7 @@ fn push_unused_catalog_entry_issues(
             "fallow/unused-catalog-entry",
             &description,
             level,
-            "Clarity",
+            "Bug Risk",
             &path,
             Some(entry.line),
             &fp,

@@ -139,6 +139,7 @@ pub fn push_dep_diagnostics(
     map: &mut FxHashMap<Url, Vec<Diagnostic>>,
     results: &AnalysisResults,
     package_json_uri: Option<&Url>,
+    root: &std::path::Path,
 ) {
     // Unused deps: dependencies, devDependencies, optionalDependencies
     for (deps, code, anchor, msg_prefix) in [
@@ -252,8 +253,10 @@ pub fn push_dep_diagnostics(
     }
 
     // Unused pnpm catalog entries in pnpm-workspace.yaml.
+    // entry.path is project-root-relative; Url::from_file_path requires an
+    // absolute path, so join against the analyzer root before constructing.
     for entry in &results.unused_catalog_entries {
-        if let Ok(entry_uri) = Url::from_file_path(&entry.path) {
+        if let Ok(entry_uri) = Url::from_file_path(root.join(&entry.path)) {
             let line = entry.line.saturating_sub(1);
             let message = if entry.catalog_name == "default" {
                 format!(

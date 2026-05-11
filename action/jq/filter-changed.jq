@@ -51,7 +51,8 @@ def filter_check:
       (.circular_dependencies // [] | length) +
       (.boundary_violations // [] | length) +
       (.type_only_dependencies // [] | length) +
-      (.stale_suppressions // [] | length)
+      (.stale_suppressions // [] | length) +
+      (.unused_catalog_entries // [] | length)
     )
   else . end);
 
