@@ -89,10 +89,24 @@ pub fn parse_source_to_module(
     extractor.visit_program(&parser_return.program);
     extractor.resolve_pending_local_export_specifiers();
 
+    // For `.gts` / `.gjs` files, scan `<template>` blocks against the captured
+    // imports and fold the result into the extractor BEFORE `oxc_semantic`
+    // runs: member accesses are pushed onto `extractor.member_accesses` (same
+    // path Angular uses for inline templates in `visit_class`), and
+    // template-credited binding names flow into `compute_import_binding_usage`
+    // as a skip-set so they never enter the `unused` vector in the first
+    // place. The `apply_*` post-construction mutation that used to live here
+    // is gone — all state now flows through the extractor.
+    let mut template_used_imports =
+        collect_glimmer_template_into_extractor(&mut extractor, path, source);
+
     // Track unused imports plus whether each binding is referenced as a type,
     // a runtime value, or both.
-    let mut import_binding_usage =
-        compute_import_binding_usage(&parser_return.program, &extractor.imports);
+    let mut import_binding_usage = compute_import_binding_usage(
+        &parser_return.program,
+        &extractor.imports,
+        &template_used_imports,
+    );
 
     // Line offsets are always needed (error location reporting in analysis).
     let line_offsets = fallow_types::extract::compute_line_offsets(source);
@@ -142,8 +156,18 @@ pub fn parse_source_to_module(
             + retry_extractor.imports.len()
             + retry_extractor.re_exports.len();
         if retry_total > total_extracted {
-            import_binding_usage =
-                compute_import_binding_usage(&retry_return.program, &retry_extractor.imports);
+            // The JSX retry replaced the import list, so re-fold the Glimmer
+            // template scan against the retry extractor's imports before
+            // recomputing binding usage. Templates themselves are
+            // parser-agnostic, but `template_used_imports` is keyed by the
+            // import names visible to the current extractor.
+            template_used_imports =
+                collect_glimmer_template_into_extractor(&mut retry_extractor, path, source);
+            import_binding_usage = compute_import_binding_usage(
+                &retry_return.program,
+                &retry_extractor.imports,
+                &template_used_imports,
+            );
             // Recompute complexity from the successful retry parse (only if requested)
             if need_complexity {
                 complexity =
@@ -200,6 +224,63 @@ pub fn parse_source_to_module(
     info.flag_uses = flag_uses;
 
     info
+}
+
+/// Scan Glimmer `<template>...</template>` blocks in a `.gts` / `.gjs` file
+/// and fold the result directly into `extractor`. Returns the set of import
+/// local names that the template body credits, so
+/// `compute_import_binding_usage` can skip them when building the unused list.
+///
+/// Mirrors the Angular inline-template path in
+/// `visitor/visit_impl.rs::visit_class`, which pushes
+/// `collect_angular_template_refs(...)` results straight onto
+/// `self.member_accesses`. The Glimmer scan can't run inside the JS visitor
+/// because template bodies are blanked by `strip_glimmer_templates` before
+/// the JS parse — the un-stripped source is only available here in
+/// `parse.rs`, so this is the earliest point we can fold the result in.
+///
+/// `extractor.member_accesses` receives every emitted `MemberAccess`
+/// (including `this.<member>` chain hops that survive even when there are
+/// zero imports — class-member tracking still needs them). Bindings the
+/// template credits are returned, not pushed; the caller threads them into
+/// `compute_import_binding_usage`'s skip-set so the `unused` vector never
+/// names them in the first place. This replaces the previous
+/// `apply_glimmer_template_usage` post-construction `info` mutation and
+/// the `retain` it performed against `unused_import_bindings`.
+fn collect_glimmer_template_into_extractor(
+    extractor: &mut ModuleInfoExtractor,
+    path: &Path,
+    source: &str,
+) -> rustc_hash::FxHashSet<String> {
+    use rustc_hash::FxHashSet;
+
+    if !is_glimmer_file(path) {
+        return FxHashSet::default();
+    }
+    let template_ranges = crate::glimmer::find_template_ranges(source);
+    if template_ranges.is_empty() {
+        return FxHashSet::default();
+    }
+
+    // Collect import-binding names even if the set ends up empty: the scanner
+    // also emits `this.<member>` accesses that don't depend on imports, so a
+    // class component with no module-scope imports whose template wires
+    // arrow-function fields into a child (`<Child @on={{this.handle}} />`)
+    // still needs its member accesses recorded.
+    let imported_bindings: FxHashSet<String> = extractor
+        .imports
+        .iter()
+        .filter(|import| !import.local_name.is_empty())
+        .map(|import| import.local_name.clone())
+        .collect();
+
+    let usage = crate::sfc_template::glimmer::collect_glimmer_template_usage(
+        source,
+        &template_ranges,
+        &imported_bindings,
+    );
+    extractor.member_accesses.extend(usage.member_accesses);
+    usage.used_bindings
 }
 
 /// Synthesise `<template>` complexity findings for inline `@Component({ template: \`...\` })`
@@ -531,6 +612,12 @@ pub struct ImportBindingUsage {
 /// anywhere in the file should not count as a reference to the `foo` export.
 /// This improves unused-export detection precision.
 ///
+/// `template_used` lets framework template scanners (Glimmer `<template>`
+/// blocks today; Vue/Svelte SFCs will follow) credit imports referenced only
+/// in markup that `oxc_semantic` cannot see. Names in the set are filtered
+/// out of the `unused` result before it is built. Pass `&FxHashSet::default()`
+/// when no template scan applies.
+///
 /// Note: `get_resolved_references` counts both value-context and type-context
 /// references. A value import used only as a type annotation (`const x: Foo`)
 /// will have a type-position reference and will NOT appear in the unused list.
@@ -538,6 +625,7 @@ pub struct ImportBindingUsage {
 pub fn compute_import_binding_usage(
     program: &Program<'_>,
     imports: &[ImportInfo],
+    template_used: &rustc_hash::FxHashSet<String>,
 ) -> ImportBindingUsage {
     use oxc_semantic::SemanticBuilder;
     use rustc_hash::FxHashSet;
@@ -574,7 +662,11 @@ pub fn compute_import_binding_usage(
             }
 
             if !has_references {
-                unused.push(import.local_name.clone());
+                // Templates may credit a binding the JS semantic pass can't
+                // see — skip it instead of flagging it unused.
+                if !template_used.contains(&import.local_name) {
+                    unused.push(import.local_name.clone());
+                }
                 continue;
             }
 

@@ -44,7 +44,14 @@ use crate::MemberKind;
 /// Bumped to 94 for issue #586: Playwright helper fixture extraction recognizes
 /// helpers with local setup before the final `return base.extend<T>(...)`, so
 /// pre-fix entries can miss fixture definition sentinels.
-pub(super) const CACHE_VERSION: u32 = 94;
+///
+/// Bumped to 95 for the Glimmer `<template>` scanner: imported-binding usage
+/// and `MemberAccess { object: "this", member }` records for `{{this.foo}}`
+/// template references are now folded into the extractor before
+/// `into_module_info`. Pre-fix entries for `.gts` / `.gjs` files omit both,
+/// so template-only imports surface as `unused-import` and template-only
+/// class members as `unused-class-member` until the cache is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 95;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -236,3 +236,397 @@ fn bom_stripped_before_line_offsets_so_line_numbers_align() {
         "the first export sits on line 1 in both views",
     );
 }
+
+#[test]
+fn glimmer_template_only_pascal_tag_credits_import() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("app.gts"),
+        "import HelloWorld from './hello-world';\nimport { greeting } from './lib';\n\
+         <template><HelloWorld @msg={{greeting}} /></template>\n",
+        0,
+        false,
+    );
+
+    assert!(
+        info.unused_import_bindings.is_empty(),
+        "expected HelloWorld and greeting to be credited via the <template> block, \
+         but unused_import_bindings = {:?}",
+        info.unused_import_bindings,
+    );
+}
+
+#[test]
+fn glimmer_dotted_template_reference_emits_member_access() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("app.gts"),
+        "import * as utils from './utils';\n<template>{{utils.formatDate value}}</template>\n",
+        0,
+        false,
+    );
+
+    assert!(info.unused_import_bindings.is_empty());
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "utils" && access.member == "formatDate")
+    );
+}
+
+#[test]
+fn glimmer_import_used_only_inside_template_is_not_flagged() {
+    // Regression for the original symptom: an import that is referenced ONLY
+    // inside the template block was previously surfaced as `unused-import`
+    // because the template body is blanked before the JS parse.
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("counter.gts"),
+        "import { capitalize } from './helpers';\n\
+         <template>{{capitalize name}}</template>\n",
+        0,
+        false,
+    );
+
+    assert!(info.unused_import_bindings.is_empty());
+}
+
+// ── negative cases: confirm the scanner does NOT over-credit ───────────
+//
+// The trio above only proves the credit path works. These tests fail the
+// suite if the scanner regresses into crediting bindings it shouldn't (or
+// if `info.unused_import_bindings` ever gets stubbed back to an empty set
+// by mistake): each one declares an import that is genuinely unreachable
+// and asserts it surfaces in `unused_import_bindings`.
+
+fn assert_unused(info: &ModuleInfo, expected: &[&str]) {
+    let mut actual: Vec<&str> = info
+        .unused_import_bindings
+        .iter()
+        .map(String::as_str)
+        .collect();
+    actual.sort_unstable();
+    let mut expected = expected.to_vec();
+    expected.sort_unstable();
+    assert_eq!(
+        actual, expected,
+        "unused_import_bindings did not match expected set"
+    );
+}
+
+#[test]
+fn glimmer_import_referenced_nowhere_is_flagged_unused() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("app.gts"),
+        "import { unused } from './lib';\n\
+         <template>hello world</template>\n",
+        0,
+        false,
+    );
+    assert_unused(&info, &["unused"]);
+}
+
+#[test]
+fn glimmer_import_referenced_only_via_this_dot_in_template_is_flagged() {
+    // `this.greeting` reads a class property — even when `greeting` happens
+    // to also be an imported binding name, the template scanner must not
+    // credit the import.
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("app.gts"),
+        "import { greeting } from './lib';\n\
+         <template>{{this.greeting}}</template>\n",
+        0,
+        false,
+    );
+    assert_unused(&info, &["greeting"]);
+}
+
+#[test]
+fn glimmer_import_referenced_only_via_arg_in_template_is_flagged() {
+    // `@name` is a template argument, not a module-scope binding. An import
+    // named `name` is genuinely unused here.
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("app.gts"),
+        "import { name } from './lib';\n\
+         <template>{{@name}}</template>\n",
+        0,
+        false,
+    );
+    assert_unused(&info, &["name"]);
+}
+
+#[test]
+fn glimmer_import_shadowing_builtin_helper_is_flagged() {
+    // `each` is a Glimmer built-in helper keyword; the scanner must NEVER
+    // resolve it to an import binding, even if the user did `import { each }`.
+    // (Built-ins like `if` / `let` are reserved words and can't be import
+    // identifiers, so `each` is the realistic regression to lock in.)
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("app.gts"),
+        "import { each } from './lib';\n\
+         <template>{{#each items as |x|}}{{x}}{{/each}}</template>\n",
+        0,
+        false,
+    );
+    assert_unused(&info, &["each"]);
+}
+
+#[test]
+fn glimmer_import_shadowed_by_block_param_is_flagged() {
+    // `as |item|` introduces a template-scope local. References to `item`
+    // inside the block resolve to the local, NOT to the same-named import,
+    // so the import must surface as unused.
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("app.gts"),
+        "import { item } from './lib';\n\
+         <template>{{#each items as |item|}}{{item}}{{/each}}</template>\n",
+        0,
+        false,
+    );
+    assert_unused(&info, &["item"]);
+}
+
+#[test]
+fn glimmer_mix_of_used_and_unused_imports_flags_only_the_unused() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("app.gts"),
+        "import HelloWorld from './hello-world';\n\
+         import { greeting } from './lib';\n\
+         import { stale } from './lib';\n\
+         <template><HelloWorld @msg={{greeting}} /></template>\n",
+        0,
+        false,
+    );
+    assert_unused(&info, &["stale"]);
+}
+
+#[test]
+fn glimmer_strict_mode_helper_imports_from_ember_helper_are_credited() {
+    // Strict-mode `.gts` requires `hash`, `array`, `concat`, `fn`, `mut`,
+    // `get` to be imported from `@ember/helper`; using them in `<template>`
+    // must keep the import credited. Regression for the case where these
+    // names were misclassified as ambient built-ins and never credited.
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("form.gts"),
+        "import { hash, array, concat, fn, get } from '@ember/helper';\n\
+         <template>\n  \
+           {{#let (hash a=(array 1 2) label=(concat \"x\" \"y\")) as |opts|}}\n    \
+             <button {{on \"click\" (fn this.save opts)}}>{{get opts \"label\"}}</button>\n  \
+           {{/let}}\n\
+         </template>\n",
+        0,
+        false,
+    );
+    assert_unused(&info, &[]);
+}
+
+#[test]
+fn glimmer_template_this_dot_member_emits_member_access() {
+    // Common pattern: a component class declares arrow-function fields
+    // whose ONLY call-site is `<Child @prop={{this.field}} />` in the
+    // surrounding `<template>` block. Without member-access emission for
+    // `this.field`, `unused-class-members` flags those fields as unused
+    // even though the template wires them into a child component.
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("toolbar.gts"),
+        "import Component from '@glimmer/component';\n\
+         export class Toolbar extends Component {\n  \
+           handleSelect = (x) => { void x; };\n  \
+           changeTab = (t) => { void t; };\n  \
+           <template>\n    \
+             <Child @onSelect={{this.handleSelect}} \
+                    @changeTab={{this.changeTab}} />\n  \
+           </template>\n\
+         }\n",
+        0,
+        false,
+    );
+    let access_keys: Vec<(&str, &str)> = info
+        .member_accesses
+        .iter()
+        .map(|a| (a.object.as_str(), a.member.as_str()))
+        .collect();
+    assert!(
+        access_keys.contains(&("this", "handleSelect")),
+        "expected this.handleSelect member-access from <template>; \
+         got {access_keys:?}"
+    );
+    assert!(
+        access_keys.contains(&("this", "changeTab")),
+        "expected this.changeTab member-access from <template>; got {access_keys:?}"
+    );
+}
+
+#[test]
+fn glimmer_template_this_dot_member_records_access_with_zero_imports() {
+    // Edge case the previous post-construction `apply_glimmer_template_usage`
+    // got wrong: a `.gts` file with NO module-scope imports but a
+    // `{{this.foo}}` template reference must still record the member access
+    // so unused-class-members tracking sees template-only `this.*` uses.
+    // The Angular-shaped fold-into-extractor path runs the scan even when
+    // imports are empty (only the binding-credit branch is a no-op).
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("no-imports.gts"),
+        "export class Widget {\n  \
+           handleClick = () => {};\n  \
+           <template>\n    \
+             <button {{on \"click\" this.handleClick}}>x</button>\n  \
+           </template>\n\
+         }\n",
+        0,
+        false,
+    );
+    let access_keys: Vec<(&str, &str)> = info
+        .member_accesses
+        .iter()
+        .map(|a| (a.object.as_str(), a.member.as_str()))
+        .collect();
+    assert!(
+        access_keys.contains(&("this", "handleClick")),
+        "this.handleClick must still be recorded as a member access when \
+         the file has zero module-scope imports; got {access_keys:?}",
+    );
+}
+
+#[test]
+fn glimmer_file_with_two_class_components_credits_all_template_imports() {
+    // Glimmer allows multiple class components in one `.gts` file, each
+    // with its own class-body `<template>` block. Imports used by EITHER
+    // template must be credited, and `this.<member>` accesses from one
+    // class's template must still be recorded so unused-class-members can
+    // see them. The scanner doesn't know which class a `<template>` block
+    // belongs to (templates are accumulated file-wide), so the union of
+    // credited bindings is what we assert on.
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("layout.gts"),
+        "import Component from '@glimmer/component';\n\
+         import { on } from '@ember/modifier';\n\
+         import HelloWorld from './hello-world';\n\
+         \n\
+         export class Header extends Component {\n  \
+           greet = (e) => { void e; };\n  \
+           <template>\n    \
+             <h1>Header</h1>\n    \
+             <button {{on \"click\" this.greet}}>greet</button>\n  \
+           </template>\n\
+         }\n\
+         \n\
+         export class Footer extends Component {\n  \
+           <template>\n    \
+             <HelloWorld @msg=\"bye\" />\n  \
+           </template>\n\
+         }\n",
+        0,
+        false,
+    );
+    assert_unused(&info, &[]);
+    let access_keys: Vec<(&str, &str)> = info
+        .member_accesses
+        .iter()
+        .map(|a| (a.object.as_str(), a.member.as_str()))
+        .collect();
+    assert!(
+        access_keys.contains(&("this", "greet")),
+        "Header.greet referenced via `{{{{on \"click\" this.greet}}}}` must \
+         emit a `this.greet` member access; got {access_keys:?}",
+    );
+}
+
+#[test]
+fn glimmer_file_with_two_template_only_components_credits_all_imports() {
+    // Top-level template-only components are a first-class Glimmer pattern:
+    // `const Foo = <template>...</template>;` defines a component without a
+    // backing class. A `.gts` file may export several such components and
+    // each can pull from distinct module-scope imports — they must all be
+    // credited (the JS parser sees the template bodies as blank padding, so
+    // without the template scanner each import would surface as unused).
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("greetings.gts"),
+        "import HelloWorld from './hello-world';\n\
+         import { formatDate } from './utils';\n\
+         \n\
+         export const Greeting = <template>\n  \
+           <HelloWorld @msg=\"hi\" />\n\
+         </template>;\n\
+         \n\
+         export const Stamp = <template>\n  \
+           {{formatDate this}}\n\
+         </template>;\n",
+        0,
+        false,
+    );
+    assert_unused(&info, &[]);
+}
+
+#[test]
+fn glimmer_file_mixing_class_and_template_only_components_credits_all_imports() {
+    // Mixed shape: one class component and one top-level template-only
+    // component in the same file. Imports used by either should be
+    // credited regardless of which template-host shape consumes them.
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("mixed.gts"),
+        "import Component from '@glimmer/component';\n\
+         import { capitalize } from './utils';\n\
+         \n\
+         export class Heading extends Component {\n  \
+           <template><h1>{{capitalize \"hello\"}}</h1></template>\n\
+         }\n\
+         \n\
+         export const Spacer = <template><hr /></template>;\n",
+        0,
+        false,
+    );
+    assert_unused(&info, &[]);
+}
+
+#[test]
+fn glimmer_file_with_two_components_flags_only_genuinely_unused_imports() {
+    // Sanity guard against the multi-component path accidentally over-
+    // crediting: a third import that no template references must STILL
+    // surface as unused. Locks in that the union-of-templates scan does
+    // not silently credit every module-scope binding name.
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("layout.gts"),
+        "import Component from '@glimmer/component';\n\
+         import HelloWorld from './hello-world';\n\
+         import { stale } from './lib';\n\
+         \n\
+         export class Header extends Component {\n  \
+           <template><h1>Header</h1></template>\n\
+         }\n\
+         \n\
+         export class Footer extends Component {\n  \
+           <template><HelloWorld @msg=\"bye\" /></template>\n\
+         }\n",
+        0,
+        false,
+    );
+    assert_unused(&info, &["stale"]);
+}
+
+#[test]
+fn glimmer_file_without_template_still_flags_unused_imports() {
+    // Sanity: the scanner only ever ADDS credit; on a `.gts` file with no
+    // `<template>` block at all, an unused import must still surface.
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("plain.gts"),
+        "import { unused } from './lib';\nexport const x = 1;\n",
+        0,
+        false,
+    );
+    assert_unused(&info, &["unused"]);
+}
