@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 /// Top-level verdict for the whole runtime-coverage report. Mirrors
 /// `fallow_cov_protocol::ReportVerdict`. The verdict is the SINGLE most
-/// actionable finding; for the full set of findings see [`signals`] on
-/// [`RuntimeCoverageReport`]. The verdict promotes `hot-path-touched`
+/// actionable finding; for the full set of findings see
+/// [`RuntimeCoverageReport::signals`]. The verdict promotes `hot-path-touched`
 /// above `cold-code-detected` in PR-review context (when the CLI was
 /// given a change-scope: `--diff-file` or `--changed-since`) because the
 /// touched-hot-path is event-tied to the current diff and reviewers need
