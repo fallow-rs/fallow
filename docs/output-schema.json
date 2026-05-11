@@ -263,7 +263,7 @@
     "CheckOutput": {
       "title": "fallow dead-code --format json",
       "type": "object",
-      "required": ["schema_version", "version", "elapsed_ms", "total_issues", "unused_files", "unused_exports", "unused_types", "private_type_leaks", "unused_dependencies", "unused_dev_dependencies", "unused_optional_dependencies", "unused_enum_members", "unused_class_members", "unresolved_imports", "unlisted_dependencies", "duplicate_exports", "type_only_dependencies", "test_only_dependencies", "circular_dependencies", "boundary_violations", "stale_suppressions"],
+      "required": ["schema_version", "version", "elapsed_ms", "total_issues", "unused_files", "unused_exports", "unused_types", "private_type_leaks", "unused_dependencies", "unused_dev_dependencies", "unused_optional_dependencies", "unused_enum_members", "unused_class_members", "unresolved_imports", "unlisted_dependencies", "duplicate_exports", "type_only_dependencies", "test_only_dependencies", "circular_dependencies", "boundary_violations", "stale_suppressions", "unused_catalog_entries"],
       "properties": {
         "schema_version": { "$ref": "#/definitions/SchemaVersion" },
         "version": { "$ref": "#/definitions/ToolVersion" },
@@ -339,6 +339,11 @@
         "stale_suppressions": {
           "type": "array",
           "items": { "$ref": "#/definitions/StaleSuppression" }
+        },
+        "unused_catalog_entries": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UnusedCatalogEntry" },
+          "description": "Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not referenced by any workspace package via the catalog: protocol."
         },
         "entry_points": {
           "$ref": "#/definitions/EntryPoints",
@@ -2561,6 +2566,42 @@
       }
     },
 
+    "UnusedCatalogEntry": {
+      "type": "object",
+      "required": ["entry_name", "catalog_name", "path", "line"],
+      "description": "A package declared in a pnpm-workspace.yaml catalog that is not referenced by any workspace package via the catalog: protocol.",
+      "properties": {
+        "entry_name": {
+          "type": "string",
+          "description": "Package name declared in the catalog (e.g. 'react')."
+        },
+        "catalog_name": {
+          "type": "string",
+          "description": "Catalog group name. 'default' for the top-level catalog: map, or the named catalog key for entries under catalogs.<name>:."
+        },
+        "path": {
+          "type": "string",
+          "description": "Relative path to pnpm-workspace.yaml."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the catalog entry."
+        },
+        "hardcoded_consumers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Workspace package.json paths that declare the same package with a hardcoded version range instead of catalog:. Omitted when empty."
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Action" }
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
+        }
+      }
+    },
+
     "CloneGroup": {
       "type": "object",
       "required": ["instances", "token_count", "line_count"],
@@ -2767,7 +2808,8 @@
         "duplicate_exports": { "type": "integer" },
         "circular_dependencies": { "type": "integer" },
         "boundary_violations": { "type": "integer" },
-        "stale_suppressions": { "type": "integer" }
+        "stale_suppressions": { "type": "integer" },
+        "unused_catalog_entries": { "type": "integer" }
       }
     },
 

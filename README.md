@@ -96,7 +96,7 @@ fallow fix --dry-run        # Preview automatic cleanup
 
 ## What it finds
 
-- **Dead code**: unused files, exports, dependencies, types, cycles, boundaries, stale suppressions, GraphQL documents linked by `#import`, plus opt-in API hygiene checks such as private type leaks
+- **Dead code**: unused files, exports, dependencies, types, cycles, boundaries, stale suppressions, unused pnpm `catalog:` entries, GraphQL documents linked by `#import`, plus opt-in API hygiene checks such as private type leaks
 - **Duplication**: repeated blocks from exact to semantic clones
 - **Complexity**: high-risk functions, file scores, hotspots, and refactor targets
 - **Architecture drift**: boundary violations across layers and modules

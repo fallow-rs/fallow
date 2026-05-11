@@ -148,7 +148,8 @@
         "boundary-violation": "error",
         "coverage-gaps": "off",
         "feature-flags": "off",
-        "stale-suppressions": "warn"
+        "stale-suppressions": "warn",
+        "unused-catalog-entries": "warn"
       }
     },
     "boundaries": {
@@ -873,6 +874,10 @@
         "stale-suppressions": {
           "$ref": "#/$defs/Severity",
           "default": "warn"
+        },
+        "unused-catalog-entries": {
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
         }
       }
     },
@@ -1309,6 +1314,16 @@
           ]
         },
         "stale-suppressions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-catalog-entries": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

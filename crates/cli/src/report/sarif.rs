@@ -1417,7 +1417,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 17);
+        assert_eq!(rules.len(), 18);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -1436,6 +1436,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/duplicate-export"));
         assert!(rule_ids.contains(&"fallow/circular-dependency"));
         assert!(rule_ids.contains(&"fallow/boundary-violation"));
+        assert!(rule_ids.contains(&"fallow/unused-catalog-entry"));
     }
 
     #[test]
