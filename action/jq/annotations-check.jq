@@ -51,5 +51,7 @@ def dependency_action(pkg):
       "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Stale @expected-unused::The @expected-unused tag on '\(.origin.export_name | san)' is stale because the export is now used.\(nl)\(nl)Remove the @expected-unused tag."
     else
       "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Stale suppression::This '\(if .origin.is_file_level then "fallow-ignore-file" else "fallow-ignore-next-line" end)' comment\(if .origin.issue_kind then " for '\(.origin.issue_kind | san)'" else "" end) no longer matches any active issue.\(nl)\(nl)Remove the suppression comment to keep the codebase clean."
-    end)
+    end),
+  (.unused_catalog_entries[]? |
+    "::warning file=\(.path | san),line=\(.line),title=Unused catalog entry::Catalog entry '\(.entry_name | san)' (catalog '\(.catalog_name | san)') is not referenced by any workspace package via the catalog: protocol.\(nl)\(nl)\(if ((.hardcoded_consumers // []) | length) > 0 then "Hardcoded consumers: " + (.hardcoded_consumers | map(san) | join(", ")) + ".\(nl)Switch them to catalog: before removing." else "Remove the entry from pnpm-workspace.yaml." end)")
 ] | .[]

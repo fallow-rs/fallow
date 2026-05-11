@@ -45,7 +45,8 @@ else
     table_row("Boundary violations"; "boundary_violations"; "boundary-violations"),
     table_row("Type-only dependencies"; "type_only_dependencies"; "type-only-dependencies"),
     table_row("Test-only dependencies"; "test_only_dependencies"; "test-only-dependencies"),
-    table_row("Stale suppressions"; "stale_suppressions"; "stale-suppressions")
+    table_row("Stale suppressions"; "stale_suppressions"; "stale-suppressions"),
+    table_row("Unused catalog entries"; "unused_catalog_entries"; "unused-catalog-entries")
   ] | join("\n")) +
   "\n\n---\n" +
   section("Unused files"; "unused_files";
@@ -99,6 +100,9 @@ else
   section("Stale suppressions"; "stale_suppressions";
     "Suppression comments or JSDoc tags that no longer match any active issue.\n\n| File | Line | Description |\n|------|-----:|-------------|\n";
     "| `\(.path)` | \(.line) | \(if .origin.type == "jsdoc_tag" then "`@expected-unused` on `\(.origin.export_name)`" elif .origin.issue_kind then "`\(.origin.issue_kind)`" else "blanket" end) |") +
+  section("Unused catalog entries"; "unused_catalog_entries";
+    "pnpm catalog entries not referenced by any workspace package.\n\n| Entry | Catalog | Location | Hardcoded consumers |\n|-------|---------|----------|---------------------|\n";
+    "| `\(.entry_name)` | `\(.catalog_name)` | `\(.path):\(.line)` | \(if ((.hardcoded_consumers // []) | length) > 0 then (.hardcoded_consumers | map("`\(.)`") | join(", ")) else "" end) |") +
   "\n\n> [!TIP]\n" +
   (if ((.unused_exports // []) + (.unused_dependencies // []) + (.unused_enum_members // [])) | length > 0 then
     "> Run `fallow fix --dry-run` to preview safe auto-fixes.\n"

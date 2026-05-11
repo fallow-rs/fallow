@@ -102,5 +102,14 @@
   "type_only_dependencies": [],
   "circular_dependencies": [],
   "boundary_violations": [],
-  "stale_suppressions": []
+  "stale_suppressions": [],
+  "unused_catalog_entries": [
+    {
+      "entry_name": "is-even",
+      "catalog_name": "default",
+      "path": "pnpm-workspace.yaml",
+      "line": 6,
+      "hardcoded_consumers": []
+    }
+  ]
 }
