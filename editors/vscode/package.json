@@ -162,7 +162,8 @@
             "test-only-dependencies": true,
             "circular-dependencies": true,
             "boundary-violation": true,
-            "stale-suppressions": true
+            "stale-suppressions": true,
+            "unused-catalog-entries": true
           },
           "description": "Toggle individual issue types on or off. Uses kebab-case names matching fallow's rules config.",
           "properties": {
@@ -215,6 +216,9 @@
               "type": "boolean"
             },
             "stale-suppressions": {
+              "type": "boolean"
+            },
+            "unused-catalog-entries": {
               "type": "boolean"
             }
           }

@@ -46,6 +46,7 @@ export const getIssueTypes = (): IssueTypeConfig =>
     "circular-dependencies": true,
     "boundary-violation": true,
     "stale-suppressions": true,
+    "unused-catalog-entries": true,
   });
 
 export const getDuplicationThreshold = (): number =>

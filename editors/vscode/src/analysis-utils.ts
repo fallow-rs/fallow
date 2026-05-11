@@ -22,6 +22,7 @@ export const countCheckIssues = (result: FallowCheckResult | null): number => {
     (result.test_only_dependencies?.length ?? 0) +
     (result.circular_dependencies?.length ?? 0) +
     (result.boundary_violations?.length ?? 0) +
-    (result.stale_suppressions?.length ?? 0)
+    (result.stale_suppressions?.length ?? 0) +
+    (result.unused_catalog_entries?.length ?? 0)
   );
 };

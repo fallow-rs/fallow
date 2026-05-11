@@ -16,6 +16,7 @@ export interface IssueTypeConfig {
   readonly "circular-dependencies": boolean;
   readonly "boundary-violation": boolean;
   readonly "stale-suppressions": boolean;
+  readonly "unused-catalog-entries": boolean;
 }
 
 export type DuplicationMode = "strict" | "mild" | "weak" | "semantic";
@@ -44,6 +45,7 @@ export interface FallowCheckResult {
   readonly circular_dependencies?: ReadonlyArray<CircularDependency>;
   readonly boundary_violations?: ReadonlyArray<BoundaryViolation>;
   readonly stale_suppressions?: ReadonlyArray<StaleSuppression>;
+  readonly unused_catalog_entries?: ReadonlyArray<UnusedCatalogEntry>;
   readonly entry_points?: EntryPoints;
   readonly summary?: CheckSummary;
 }
@@ -184,6 +186,16 @@ interface StaleSuppression {
   readonly introduced?: boolean;
 }
 
+interface UnusedCatalogEntry {
+  readonly entry_name: string;
+  readonly catalog_name: string;
+  readonly path: string;
+  readonly line: number;
+  readonly hardcoded_consumers?: ReadonlyArray<string>;
+  readonly actions: ReadonlyArray<FindingAction>;
+  readonly introduced?: boolean;
+}
+
 type SuppressionOrigin =
   | {
       readonly type: "comment";
@@ -218,6 +230,7 @@ interface CheckSummary {
   readonly circular_dependencies?: number;
   readonly boundary_violations?: number;
   readonly stale_suppressions?: number;
+  readonly unused_catalog_entries?: number;
 }
 
 type FindingAction =
@@ -381,7 +394,8 @@ export type IssueCategory =
   | "test-only-dependencies"
   | "circular-dependencies"
   | "boundary-violation"
-  | "stale-suppressions";
+  | "stale-suppressions"
+  | "unused-catalog-entries";
 
 export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "unused-files": "Unused Files",
@@ -401,4 +415,5 @@ export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "circular-dependencies": "Circular Dependencies",
   "boundary-violation": "Boundary Violations",
   "stale-suppressions": "Stale Suppressions",
+  "unused-catalog-entries": "Unused Catalog Entries",
 };

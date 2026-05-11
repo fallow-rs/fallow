@@ -36,6 +36,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "circular-dependencies": "sync",
   "boundary-violation": "symbol-namespace",
   "stale-suppressions": "trash",
+  "unused-catalog-entries": "package",
 };
 
 /** Icons for individual issue items. */
@@ -57,6 +58,7 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
   "circular-dependencies": "sync",
   "boundary-violation": "symbol-namespace",
   "stale-suppressions": "trash",
+  "unused-catalog-entries": "package",
 };
 
 const staleSuppressionLabel = (
@@ -347,6 +349,24 @@ export class DeadCodeTreeProvider
               s.line,
               s.col,
               "stale-suppressions"
+            )
+        )
+      );
+    }
+
+    if (this.result.unused_catalog_entries) {
+      addCategory(
+        "unused-catalog-entries",
+        this.result.unused_catalog_entries.map(
+          (entry) =>
+            new IssueItem(
+              entry.catalog_name === "default"
+                ? entry.entry_name
+                : `${entry.entry_name} (${entry.catalog_name})`,
+              entry.path,
+              entry.line,
+              0,
+              "unused-catalog-entries"
             )
         )
       );

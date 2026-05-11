@@ -20,6 +20,7 @@ export interface AnalysisCompleteParams {
   circularDependencies: number;
   boundaryViolations: number;
   staleSuppressions: number;
+  unusedCatalogEntries: number;
   duplicationPercentage: number;
   cloneGroups: number;
 }
@@ -51,6 +52,7 @@ export const buildParamsFromCli = (
   circularDependencies: check?.circular_dependencies?.length ?? 0,
   boundaryViolations: check?.boundary_violations?.length ?? 0,
   staleSuppressions: check?.stale_suppressions?.length ?? 0,
+  unusedCatalogEntries: check?.unused_catalog_entries?.length ?? 0,
   duplicationPercentage: dupes?.stats.duplication_percentage ?? 0,
   cloneGroups: dupes?.stats.clone_groups ?? 0,
 });
@@ -138,6 +140,11 @@ const BREAKDOWN_LINES: ReadonlyArray<BreakdownLine> = [
     count: "staleSuppressions",
     icon: "$(info)",
     label: "stale suppressions",
+  },
+  {
+    count: "unusedCatalogEntries",
+    icon: "$(warning)",
+    label: "unused catalog entries",
   },
 ];
 
