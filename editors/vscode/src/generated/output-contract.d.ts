@@ -143,7 +143,7 @@ export interface FixAction {
 /**
  * Kebab-case identifier for the fix action.
  */
-type: ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-boundary" | "export-type")
+type: ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference")
 /**
  * Whether `fallow fix` can apply this fix automatically.
  */
@@ -156,6 +156,10 @@ description: string
  * Optional context note. Present on non-auto-fixable actions, and on auto-fixable re-export findings to warn about public API surface.
  */
 note?: string
+/**
+ * Only present on `update-catalog-reference` actions: catalogs in the same workspace that DO declare the package, sorted lexicographically. Lets agents pick the catalog to switch to without re-reading the source.
+ */
+available_in_catalogs?: string[]
 }
 export interface SuppressLineAction {
 /**
