@@ -70,7 +70,7 @@
     "detect-libc": "2.1.2"
   },
   "devDependencies": {
-    "@tanstack/intent": "0.0.36"
+    "@tanstack/intent": "0.0.40"
   },
   "optionalDependencies": {
     "@fallow-cli/darwin-arm64": "2.71.1",
