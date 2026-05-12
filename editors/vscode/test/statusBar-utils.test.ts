@@ -188,6 +188,10 @@ describe("renderStatusBarText", () => {
 
 describe("buildParamsFromCli", () => {
   const emptyCheck = (): FallowCheckResult => ({
+    schema_version: 6,
+    version: "0.0.0-test",
+    elapsed_ms: 0,
+    total_issues: 0,
     unused_files: [],
     unused_exports: [],
     unused_types: [],
@@ -312,6 +316,9 @@ describe("buildParamsFromCli", () => {
 
   it("propagates duplication stats from the dupes result so the tooltip matches the status bar text", () => {
     const dupes: FallowDupesResult = {
+      schema_version: 6,
+      version: "0.0.0-test",
+      elapsed_ms: 0,
       clone_groups: [],
       clone_families: [],
       stats: {

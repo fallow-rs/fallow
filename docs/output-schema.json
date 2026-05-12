@@ -1824,7 +1824,7 @@
       }
     },
 
-    "Action": {
+    "IssueAction": {
       "description": "A suggested action for resolving an issue. Each issue includes an array of possible actions: a fix action (auto-fixable or manual), suppress-line, suppress-file, and/or add-to-config.",
       "oneOf": [
         { "$ref": "#/definitions/FixAction" },
@@ -2116,7 +2116,7 @@
         },
         "actions": {
           "type": "array",
-          "items": { "$ref": "#/definitions/Action" },
+          "items": { "$ref": "#/definitions/IssueAction" },
           "description": "Suggested actions to resolve this issue."
         },
         "introduced": {
@@ -2158,7 +2158,7 @@
         },
         "actions": {
           "type": "array",
-          "items": { "$ref": "#/definitions/Action" },
+          "items": { "$ref": "#/definitions/IssueAction" },
           "description": "Suggested actions to resolve this issue."
         },
         "introduced": {
@@ -2196,7 +2196,7 @@
         },
         "actions": {
           "type": "array",
-          "items": { "$ref": "#/definitions/Action" },
+          "items": { "$ref": "#/definitions/IssueAction" },
           "description": "Suggested actions to resolve this issue."
         },
         "introduced": {
@@ -2232,7 +2232,7 @@
         },
         "actions": {
           "type": "array",
-          "items": { "$ref": "#/definitions/Action" },
+          "items": { "$ref": "#/definitions/IssueAction" },
           "description": "Suggested actions to resolve this issue."
         },
         "introduced": {
@@ -2270,7 +2270,7 @@
         },
         "actions": {
           "type": "array",
-          "items": { "$ref": "#/definitions/Action" },
+          "items": { "$ref": "#/definitions/IssueAction" },
           "description": "Suggested actions to resolve this issue."
         },
         "introduced": {
@@ -2300,7 +2300,7 @@
         },
         "actions": {
           "type": "array",
-          "items": { "$ref": "#/definitions/Action" },
+          "items": { "$ref": "#/definitions/IssueAction" },
           "description": "Suggested actions to resolve this issue."
         },
         "introduced": {
@@ -2323,7 +2323,7 @@
         },
         "actions": {
           "type": "array",
-          "items": { "$ref": "#/definitions/Action" },
+          "items": { "$ref": "#/definitions/IssueAction" },
           "description": "Suggested actions to resolve this issue."
         },
         "introduced": {
@@ -2364,7 +2364,7 @@
         },
         "actions": {
           "type": "array",
-          "items": { "$ref": "#/definitions/Action" },
+          "items": { "$ref": "#/definitions/IssueAction" },
           "description": "Suggested actions to resolve this issue."
         },
         "introduced": {
@@ -2408,7 +2408,7 @@
         },
         "actions": {
           "type": "array",
-          "items": { "$ref": "#/definitions/Action" },
+          "items": { "$ref": "#/definitions/IssueAction" },
           "description": "Suggested actions to resolve this issue."
         },
         "introduced": {
@@ -2434,7 +2434,7 @@
         },
         "actions": {
           "type": "array",
-          "items": { "$ref": "#/definitions/Action" },
+          "items": { "$ref": "#/definitions/IssueAction" },
           "description": "Suggested actions to resolve this issue."
         },
         "introduced": {
@@ -2469,7 +2469,7 @@
         },
         "actions": {
           "type": "array",
-          "items": { "$ref": "#/definitions/Action" },
+          "items": { "$ref": "#/definitions/IssueAction" },
           "description": "Suggested actions to resolve this issue."
         },
         "introduced": {
@@ -2512,7 +2512,7 @@
         },
         "actions": {
           "type": "array",
-          "items": { "$ref": "#/definitions/Action" },
+          "items": { "$ref": "#/definitions/IssueAction" },
           "description": "Suggested actions to resolve this issue."
         },
         "introduced": {
@@ -2594,7 +2594,7 @@
         },
         "actions": {
           "type": "array",
-          "items": { "$ref": "#/definitions/Action" }
+          "items": { "$ref": "#/definitions/IssueAction" }
         },
         "introduced": {
           "$ref": "#/definitions/AuditIntroduced"

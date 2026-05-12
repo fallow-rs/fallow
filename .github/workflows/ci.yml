@@ -206,6 +206,8 @@ jobs:
           cache-dependency-path: editors/vscode/pnpm-lock.yaml
       - run: cd editors/vscode && pnpm install --frozen-lockfile
       - run: cd editors/vscode && pnpm audit --prod
+      - name: Verify generated TypeScript matches docs/output-schema.json
+        run: cd editors/vscode && pnpm run check:codegen
       - run: cd editors/vscode && pnpm lint
       - run: cd editors/vscode && pnpm build
       - run: cd editors/vscode && pnpm test:unit

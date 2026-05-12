@@ -385,13 +385,16 @@
     ]
   },
   "scripts": {
+    "codegen:types": "node ./scripts/codegen-types.mjs",
+    "check:codegen": "node ./scripts/codegen-types.mjs --check",
+    "prebuild": "pnpm run codegen:types",
     "build": "rolldown -c",
     "watch": "rolldown -c --watch",
     "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "test": "pnpm run test:unit && pnpm run test:integration",
     "test:unit": "vitest run",
     "test:integration": "pnpm run build && tsc -p tsconfig.test.json && node ./.test-dist/test/integration/runTest.js",
-    "prepackage": "cp ../../LICENSE ./LICENSE",
+    "prepackage": "pnpm run codegen:types && cp ../../LICENSE ./LICENSE",
     "package": "vsce package --no-dependencies",
     "publish": "vsce publish --no-dependencies",
     "publish:ovsx": "ovsx publish --no-dependencies"
@@ -406,6 +409,7 @@
     "@types/mocha": "10.0.10",
     "@vscode/test-electron": "2.5.2",
     "@vscode/vsce": "3.9.1",
+    "json-schema-to-typescript": "15.0.4",
     "mocha": "11.7.5",
     "rolldown": "1.0.0-rc.17",
     "ovsx": "0.10.11",

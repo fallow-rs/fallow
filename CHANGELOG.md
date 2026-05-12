@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **VS Code extension TypeScript types for fallow's JSON output are now generated from `docs/output-schema.json` instead of hand-maintained.** The hand-written `editors/vscode/src/types.ts` shapes have repeatedly drifted from the Rust source of truth: issue [#323](https://github.com/fallow-rs/fallow/issues/323) crashed the Unused Code tree because `UnlistedDependency` had been restructured Rust-side but the TS interface still read the removed `path` field, and an audit at the time surfaced two more latent drifts on `UnusedDependency` and `TypeOnlyDependency`. The contract is now derived: `editors/vscode/scripts/codegen-types.mjs` runs `json-schema-to-typescript` against `docs/output-schema.json` and writes `editors/vscode/src/generated/output-contract.d.ts` (committed). `prebuild` and `prepackage` regenerate before the bundle is built or packaged, so the marketplace artifact never ships against stale types. CI runs `pnpm run check:codegen` as a dedicated step so a forgotten regen fails the build with an actionable message. Existing `FallowCheckResult` / `FallowDupesResult` / `FallowCombinedResult` aliases stay re-exported from `types.ts` so consumer code keeps compiling; new code should prefer the schema-derived names (`CheckOutput`, `DupesOutput`, `CombinedOutput`). The settings shapes that are NOT in the output contract (`IssueTypeConfig`, `DuplicationMode`, `TraceLevel`), UI label maps (`IssueCategory`, `ISSUE_CATEGORY_LABELS`), and the still-unschematized `fallow fix --format json` shape (`FixAction`, `FallowFixResult`) split out into `src/settings.ts`, `src/labels.ts`, and `src/fix-types.ts` and stay hand-written. Renamed the `Action` definition in `docs/output-schema.json` to `IssueAction` so the generated TS does not collide with the consumer-facing `FixAction` (fallow-fix output entry); no `schema_version` bump because the rename is to an internal definition name and does not change the JSON payload. (Closes [#326](https://github.com/fallow-rs/fallow/issues/326))
+
 ## [2.70.0] - 2026-05-12
 
 ### Added

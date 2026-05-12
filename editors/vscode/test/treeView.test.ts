@@ -76,6 +76,10 @@ interface TestRange {
 }
 
 const emptyCheck = (): FallowCheckResult => ({
+  schema_version: 6,
+  version: "0.0.0-test",
+  elapsed_ms: 0,
+  total_issues: 0,
   unused_files: [],
   unused_exports: [],
   unused_types: [],
