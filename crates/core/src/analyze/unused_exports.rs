@@ -243,15 +243,6 @@ pub fn find_unused_exports(
             None
         };
 
-    // Precompute reachable FileIds so we can distinguish meaningful references
-    // (from reachable modules) from unreachable-to-unreachable references.
-    let reachable_files: FxHashSet<u32> = graph
-        .modules
-        .iter()
-        .filter(|m| m.is_reachable())
-        .map(|m| m.file_id.0)
-        .collect();
-
     let module_results: Vec<(Vec<UnusedExport>, Vec<UnusedExport>, Vec<StaleSuppression>)> = graph
         .modules
         .par_iter()
@@ -311,10 +302,12 @@ pub fn find_unused_exports(
                 let has_cross_file_ref = if module.is_reachable() {
                     !export.references.is_empty()
                 } else {
-                    export
-                        .references
-                        .iter()
-                        .any(|r| reachable_files.contains(&r.from_file.0))
+                    export.references.iter().any(|r| {
+                        graph
+                            .modules
+                            .get(r.from_file.0 as usize)
+                            .is_some_and(ModuleNode::is_reachable)
+                    })
                 };
                 // Treat side-effect-registered exports (Lit @customElement,
                 // customElements.define) as referenced even when no other file
@@ -595,12 +588,6 @@ pub fn find_private_type_leaks(
     suppressions: &SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<PrivateTypeLeak> {
-    let module_by_id: FxHashMap<FileId, &ModuleNode> = graph
-        .modules
-        .iter()
-        .map(|module| (module.file_id, module))
-        .collect();
-
     let mut leaks = Vec::new();
     for module_info in modules {
         if module_info.public_signature_type_references.is_empty()
@@ -608,7 +595,7 @@ pub fn find_private_type_leaks(
         {
             continue;
         }
-        let Some(module) = module_by_id.get(&module_info.file_id) else {
+        let Some(module) = graph.modules.get(module_info.file_id.0 as usize) else {
             continue;
         };
         if is_storybook_file(&module.path) || is_route_convention_file(&module.path, &config.root) {
@@ -665,17 +652,17 @@ pub fn find_private_type_leaks(
 fn collect_dynamic_reexport_sources(
     resolved_modules: &[crate::resolve::ResolvedModule],
     graph: &ModuleGraph,
-    module_idx_by_file_id: &FxHashMap<FileId, usize>,
     re_export_sources: &mut FxHashMap<usize, FxHashSet<usize>>,
 ) {
     use crate::extract::ExportName;
     use fallow_types::extract::ImportedName;
 
     for resolved in resolved_modules {
-        let Some(&wrapper_idx) = module_idx_by_file_id.get(&resolved.file_id) else {
+        let wrapper_idx = resolved.file_id.0 as usize;
+        let Some(wrapper) = graph.modules.get(wrapper_idx) else {
             continue;
         };
-        let wrapper_exports = &graph.modules[wrapper_idx].exports;
+        let wrapper_exports = &wrapper.exports;
 
         for dynamic_import in &resolved.resolved_dynamic_imports {
             let crate::resolve::ResolveResult::InternalModule(source_file_id) =
@@ -698,9 +685,10 @@ fn collect_dynamic_reexport_sources(
                 continue;
             }
 
-            let Some(&source_idx) = module_idx_by_file_id.get(source_file_id) else {
+            let source_idx = source_file_id.0 as usize;
+            if source_idx >= graph.modules.len() {
                 continue;
-            };
+            }
             re_export_sources
                 .entry(wrapper_idx)
                 .or_default()
@@ -726,15 +714,9 @@ pub fn find_duplicate_exports(
     resolved_modules: &[crate::resolve::ResolvedModule],
 ) -> Vec<DuplicateExport> {
     let ignore_matchers = config.compiled_ignore_exports.as_slice();
-    // Build a map from FileId to module index for dynamic re-export source lookup.
-    let module_idx_by_file_id: FxHashMap<FileId, usize> = graph
-        .modules
-        .iter()
-        .enumerate()
-        .map(|(idx, m)| (m.file_id, idx))
-        .collect();
 
-    // Build a set of re-export relationships: (re-exporting module idx) -> set of (source module idx)
+    // Build a set of re-export relationships: (re-exporting module idx) -> set of (source module idx).
+    // FileIds are sequential (discover/walk.rs:264) so module_idx == file_id.0 as usize.
     let mut re_export_sources: FxHashMap<usize, FxHashSet<usize>> = FxHashMap::default();
     for (idx, module) in graph.modules.iter().enumerate() {
         for re in &module.re_exports {
@@ -753,12 +735,7 @@ pub fn find_duplicate_exports(
     // import targeting `InternalModule(S)` AND A also exports the name being
     // imported. The export-side check guards against false negatives where a
     // module dynamically imports something but does not actually re-export it.
-    collect_dynamic_reexport_sources(
-        resolved_modules,
-        graph,
-        &module_idx_by_file_id,
-        &mut re_export_sources,
-    );
+    collect_dynamic_reexport_sources(resolved_modules, graph, &mut re_export_sources);
 
     struct ExportEntry {
         module_idx: usize,
@@ -769,11 +746,6 @@ pub fn find_duplicate_exports(
     }
 
     let mut export_locations: FxHashMap<String, Vec<ExportEntry>> = FxHashMap::default();
-    let file_id_by_path: FxHashMap<&std::path::Path, FileId> = graph
-        .modules
-        .iter()
-        .map(|module| (module.path.as_path(), module.file_id))
-        .collect();
 
     for (idx, module) in graph.modules.iter().enumerate() {
         if !module.is_reachable() || module.is_entry_point() {
@@ -857,24 +829,28 @@ pub fn find_duplicate_exports(
             // For each pair (A, B), if A re-exports from B or B re-exports from A,
             // they are part of the same export chain, not true duplicates.
             let module_indices: FxHashSet<usize> = locations.iter().map(|e| e.module_idx).collect();
-            let independent: Vec<DuplicateLocation> = locations
-                .into_iter()
-                .filter(|e| {
-                    let sources = re_export_sources.get(&e.module_idx);
-                    let has_source_in_set =
-                        sources.is_some_and(|s| s.iter().any(|src| module_indices.contains(src)));
-                    !has_source_in_set
-                })
-                .map(|e| {
-                    let (line, col) =
-                        byte_offset_to_line_col(line_offsets_by_file, e.file_id, e.span_start);
-                    DuplicateLocation {
-                        path: e.path,
-                        line,
-                        col,
-                    }
-                })
-                .collect();
+            let (independent_file_ids, independent): (Vec<FileId>, Vec<DuplicateLocation>) =
+                locations
+                    .into_iter()
+                    .filter(|e| {
+                        let sources = re_export_sources.get(&e.module_idx);
+                        let has_source_in_set = sources
+                            .is_some_and(|s| s.iter().any(|src| module_indices.contains(src)));
+                        !has_source_in_set
+                    })
+                    .map(|e| {
+                        let (line, col) =
+                            byte_offset_to_line_col(line_offsets_by_file, e.file_id, e.span_start);
+                        (
+                            e.file_id,
+                            DuplicateLocation {
+                                path: e.path,
+                                line,
+                                col,
+                            },
+                        )
+                    })
+                    .unzip();
 
             if independent.len() <= 1 {
                 return None;
@@ -885,7 +861,7 @@ pub fn find_duplicate_exports(
             // modules in different directories) that happen to export the same name
             // are not actionable duplicates since they can never be confused at an
             // import site.
-            let has_shared_importer = has_common_importer(&independent, graph, &file_id_by_path);
+            let has_shared_importer = has_common_importer(&independent_file_ids, graph);
             if has_shared_importer {
                 Some(DuplicateExport {
                     export_name: name,
@@ -904,21 +880,7 @@ pub fn find_duplicate_exports(
 /// from both. This filters out false positives from unrelated leaf modules (e.g.,
 /// SvelteKit route files in different directories) that coincidentally export the
 /// same name but are never imported together.
-fn has_common_importer(
-    locations: &[DuplicateLocation],
-    graph: &ModuleGraph,
-    file_id_by_path: &FxHashMap<&std::path::Path, FileId>,
-) -> bool {
-    if locations.len() <= 1 {
-        return false;
-    }
-
-    // Collect FileIds for the duplicate locations through a pre-built path index.
-    let file_ids: Vec<FileId> = locations
-        .iter()
-        .filter_map(|loc| file_id_by_path.get(loc.path.as_path()).copied())
-        .collect();
-
+fn has_common_importer(file_ids: &[FileId], graph: &ModuleGraph) -> bool {
     if file_ids.len() <= 1 {
         return false;
     }
@@ -926,7 +888,7 @@ fn has_common_importer(
     let duplicate_files: FxHashSet<FileId> = file_ids.iter().copied().collect();
     let mut importer_owner: FxHashMap<FileId, FileId> = FxHashMap::default();
 
-    for file_id in file_ids {
+    for &file_id in file_ids {
         let idx = file_id.0 as usize;
         if idx >= graph.reverse_deps.len() {
             continue;
