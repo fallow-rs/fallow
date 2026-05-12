@@ -82,6 +82,9 @@ pub struct AnalysisResults {
     /// Entries in pnpm-workspace.yaml catalogs that no workspace package references.
     #[serde(default)]
     pub unused_catalog_entries: Vec<UnusedCatalogEntry>,
+    /// Workspace package.json references to pnpm catalogs that don't declare the package.
+    #[serde(default)]
+    pub unresolved_catalog_references: Vec<UnresolvedCatalogReference>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -147,6 +150,7 @@ impl AnalysisResults {
             + self.boundary_violations.len()
             + self.stale_suppressions.len()
             + self.unused_catalog_entries.len()
+            + self.unresolved_catalog_references.len()
     }
 
     /// Whether any issues were found.
@@ -289,6 +293,21 @@ impl AnalysisResults {
         for entry in &mut self.unused_catalog_entries {
             entry.hardcoded_consumers.sort();
             entry.hardcoded_consumers.dedup();
+        }
+
+        self.unresolved_catalog_references.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then(a.line.cmp(&b.line))
+                .then_with(|| {
+                    catalog_sort_key(&a.catalog_name).cmp(&catalog_sort_key(&b.catalog_name))
+                })
+                .then(a.catalog_name.cmp(&b.catalog_name))
+                .then(a.entry_name.cmp(&b.entry_name))
+        });
+        for finding in &mut self.unresolved_catalog_references {
+            finding.available_in_catalogs.sort();
+            finding.available_in_catalogs.dedup();
         }
 
         self.feature_flags.sort_by(|a, b| {
@@ -536,6 +555,36 @@ pub struct UnusedCatalogEntry {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub hardcoded_consumers: Vec<PathBuf>,
+}
+
+/// A workspace package.json reference (`catalog:` or `catalog:<name>`) that points
+/// at a catalog which does not declare the consumed package.
+///
+/// `pnpm install` errors at install time with `ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL`
+/// when this happens. fallow surfaces it statically so the failure is caught at
+/// `fallow check` time, before any install.
+///
+/// The default catalog (bare `catalog:` references the top-level `catalog:` map)
+/// uses `catalog_name: "default"`. Named catalogs (`catalog:react17`) use the
+/// declared catalog name.
+#[derive(Debug, Clone, Serialize)]
+pub struct UnresolvedCatalogReference {
+    /// Package name being referenced via the catalog protocol (e.g. `"react"`).
+    pub entry_name: String,
+    /// Catalog group the reference points at: `"default"` for bare `catalog:` references,
+    /// or the named catalog key for `catalog:<name>` references.
+    pub catalog_name: String,
+    /// Path to the consumer `package.json`, relative to the analyzed root.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number of the dependency entry in the consumer `package.json`.
+    pub line: u32,
+    /// Other catalogs (in the same `pnpm-workspace.yaml`) that DO declare this
+    /// package. Empty when no catalog has the package. Sorted lexicographically.
+    /// Lets agents and humans decide whether to switch the reference to a
+    /// different catalog or to add the entry to the named catalog.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub available_in_catalogs: Vec<String>,
 }
 
 /// A production dependency that is only imported by test files.
@@ -997,6 +1046,8 @@ mod tests {
         assert!(r.test_only_dependencies.is_empty());
         assert!(r.circular_dependencies.is_empty());
         assert!(r.boundary_violations.is_empty());
+        assert!(r.unused_catalog_entries.is_empty());
+        assert!(r.unresolved_catalog_references.is_empty());
         assert!(r.export_usages.is_empty());
     }
 

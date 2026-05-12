@@ -93,6 +93,64 @@ pub struct CompiledIgnoreExportRule {
     pub exports: Vec<String>,
 }
 
+/// Rule for suppressing an `unresolved-catalog-reference` finding.
+///
+/// A finding is suppressed when ALL provided fields match the finding:
+/// - `package` matches the consumed package name exactly (case-sensitive).
+/// - `catalog`, if set, matches the referenced catalog name (`"default"` for
+///   bare `catalog:` references; named catalogs use their declared key). When
+///   omitted, any catalog matches.
+/// - `consumer`, if set, is a glob matched against the consumer `package.json`
+///   path relative to the project root. When omitted, any consumer matches.
+///
+/// Typical use cases:
+/// - Staged migrations: catalog entry is being added in a separate PR
+/// - Library-internal placeholder packages whose target catalog isn't ready yet
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct IgnoreCatalogReferenceRule {
+    /// Package name being referenced via the catalog protocol (exact match).
+    pub package: String,
+    /// Catalog name to scope the suppression to. `None` matches any catalog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog: Option<String>,
+    /// Glob (root-relative) for the consumer `package.json`. `None` matches any consumer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consumer: Option<String>,
+}
+
+/// `IgnoreCatalogReferenceRule` with the optional consumer glob pre-compiled.
+#[derive(Debug)]
+pub struct CompiledIgnoreCatalogReferenceRule {
+    pub package: String,
+    pub catalog: Option<String>,
+    /// `None` means "match any consumer path"; `Some` matches only paths the glob accepts.
+    pub consumer_matcher: Option<globset::GlobMatcher>,
+}
+
+impl CompiledIgnoreCatalogReferenceRule {
+    /// Whether this rule suppresses an `unresolved-catalog-reference` finding
+    /// for the given (package, catalog, consumer-path) triple. The consumer
+    /// path must be project-root-relative.
+    #[must_use]
+    pub fn matches(&self, package: &str, catalog: &str, consumer_path: &str) -> bool {
+        if self.package != package {
+            return false;
+        }
+        if let Some(catalog_filter) = &self.catalog
+            && catalog_filter != catalog
+        {
+            return false;
+        }
+        if let Some(matcher) = &self.consumer_matcher
+            && !matcher.is_match(consumer_path)
+        {
+            return false;
+        }
+        true
+    }
+}
+
 /// Per-file override entry.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -129,6 +187,8 @@ pub struct ResolvedConfig {
     /// "does this file match a configured `ignoreExports` glob?" can read the
     /// compiled matchers without re-running `globset::Glob::new` per call.
     pub compiled_ignore_exports: Vec<CompiledIgnoreExportRule>,
+    /// Pre-compiled rules for suppressing `unresolved-catalog-reference` findings.
+    pub compiled_ignore_catalog_references: Vec<CompiledIgnoreCatalogReferenceRule>,
     /// Whether same-file references should suppress unused-export findings.
     pub ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig,
     /// Class member names that should never be flagged as unused-class-members.
@@ -325,6 +385,30 @@ impl FallowConfig {
             })
             .collect();
 
+        let compiled_ignore_catalog_references: Vec<CompiledIgnoreCatalogReferenceRule> = self
+            .ignore_catalog_references
+            .iter()
+            .filter_map(|rule| {
+                let consumer_matcher = match &rule.consumer {
+                    Some(pattern) => match Glob::new(pattern) {
+                        Ok(g) => Some(g.compile_matcher()),
+                        Err(e) => {
+                            tracing::warn!(
+                                "invalid ignoreCatalogReferences consumer glob '{pattern}': {e}"
+                            );
+                            return None;
+                        }
+                    },
+                    None => None,
+                };
+                Some(CompiledIgnoreCatalogReferenceRule {
+                    package: rule.package.clone(),
+                    catalog: rule.catalog.clone(),
+                    consumer_matcher,
+                })
+            })
+            .collect();
+
         ResolvedConfig {
             root,
             entry_patterns: self.entry,
@@ -336,6 +420,7 @@ impl FallowConfig {
             ignore_dependencies: self.ignore_dependencies,
             ignore_export_rules: self.ignore_exports,
             compiled_ignore_exports,
+            compiled_ignore_catalog_references,
             ignore_exports_used_in_file: self.ignore_exports_used_in_file,
             used_class_members: self.used_class_members,
             duplicates: self.duplicates,
@@ -421,6 +506,7 @@ mod tests {
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
+            ignore_catalog_references: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: DuplicatesConfig::default(),
@@ -462,6 +548,7 @@ mod tests {
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
+            ignore_catalog_references: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: DuplicatesConfig::default(),
@@ -516,6 +603,7 @@ mod tests {
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
+            ignore_catalog_references: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: DuplicatesConfig::default(),
@@ -583,6 +671,7 @@ mod tests {
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
+            ignore_catalog_references: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: DuplicatesConfig::default(),
@@ -686,6 +775,7 @@ mod tests {
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
+            ignore_catalog_references: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: DuplicatesConfig::default(),
@@ -740,6 +830,7 @@ mod tests {
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
+            ignore_catalog_references: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: DuplicatesConfig::default(),

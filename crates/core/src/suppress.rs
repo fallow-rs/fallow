@@ -208,6 +208,7 @@ impl<'a> SuppressionContext<'a> {
                         IssueKind::Complexity => "complexity",
                         IssueKind::StaleSuppression => "stale-suppression",
                         IssueKind::PnpmCatalogEntry => "unused-catalog-entry",
+                        IssueKind::UnresolvedCatalogReference => "unresolved-catalog-reference",
                     }
                     .to_string()
                 });
@@ -325,6 +326,7 @@ mod tests {
             IssueKind::Complexity,
             IssueKind::StaleSuppression,
             IssueKind::PnpmCatalogEntry,
+            IssueKind::UnresolvedCatalogReference,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -332,7 +334,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(22), None);
+        assert_eq!(IssueKind::from_discriminant(23), None);
     }
 
     #[test]

@@ -358,6 +358,7 @@ mod tests {
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
+            ignore_catalog_references: vec![],
             ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: fallow_config::DuplicatesConfig::default(),
@@ -447,6 +448,7 @@ mod tests {
             feature_flags: Severity::Off,
             stale_suppressions: Severity::Off,
             unused_catalog_entries: Severity::Off,
+            unresolved_catalog_references: Severity::Off,
         };
         let config = config_with_rules(rules);
         apply_rules(&mut results, &config);
@@ -556,6 +558,7 @@ mod tests {
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
             unused_catalog_entries: Severity::Warn,
+            unresolved_catalog_references: Severity::Error,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
     }
@@ -587,6 +590,7 @@ mod tests {
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
             unused_catalog_entries: Severity::Warn,
+            unresolved_catalog_references: Severity::Error,
         };
         // Only unused_files present, but set to Warn — should not trigger
         assert!(!has_error_severity_issues(&results, &rules, None));
@@ -627,6 +631,7 @@ mod tests {
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
+            ignore_catalog_references: vec![],
             ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: fallow_config::DuplicatesConfig::default(),
@@ -671,6 +676,7 @@ mod tests {
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
+            ignore_catalog_references: vec![],
             ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: fallow_config::DuplicatesConfig::default(),
@@ -894,6 +900,7 @@ mod tests {
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
             unused_catalog_entries: Severity::Warn,
+            unresolved_catalog_references: Severity::Error,
         };
         promote_warns_to_errors(&mut rules);
 
@@ -939,6 +946,7 @@ mod tests {
             feature_flags: Severity::Off,
             stale_suppressions: Severity::Off,
             unused_catalog_entries: Severity::Off,
+            unresolved_catalog_references: Severity::Off,
         };
         promote_warns_to_errors(&mut rules);
 

@@ -19,7 +19,9 @@ use crate::resolve::ResolvedModule;
 use crate::results::{AnalysisResults, CircularDependency};
 use crate::suppress::IssueKind;
 
-use unused_catalog::find_unused_catalog_entries;
+use unused_catalog::{
+    find_unresolved_catalog_references, find_unused_catalog_entries, gather_pnpm_catalog_state,
+};
 use unused_deps::{
     find_test_only_dependencies, find_type_only_dependencies, find_unlisted_dependencies,
     find_unresolved_imports, find_unused_dependencies,
@@ -525,9 +527,24 @@ pub fn find_dead_code_full(
     }
     results.suppression_count = suppressions.used_count();
 
-    // Detect unused pnpm catalog entries (purely off package.json + pnpm-workspace.yaml).
-    if config.rules.unused_catalog_entries != Severity::Off {
-        results.unused_catalog_entries = find_unused_catalog_entries(config, workspaces);
+    // Detect pnpm catalog issues (purely off package.json + pnpm-workspace.yaml).
+    // Both unused-catalog-entries and unresolved-catalog-references share the
+    // YAML parse and consumer walk; gather state once and run each detector
+    // gated on its own rule severity.
+    let need_unused_catalogs = config.rules.unused_catalog_entries != Severity::Off;
+    let need_unresolved_refs = config.rules.unresolved_catalog_references != Severity::Off;
+    if (need_unused_catalogs || need_unresolved_refs)
+        && let Some(state) = gather_pnpm_catalog_state(config, workspaces)
+    {
+        if need_unused_catalogs {
+            results.unused_catalog_entries = find_unused_catalog_entries(&state);
+        }
+        if need_unresolved_refs {
+            results.unresolved_catalog_references = find_unresolved_catalog_references(
+                &state,
+                &config.compiled_ignore_catalog_references,
+            );
+        }
     }
 
     // Sort all result arrays for deterministic output ordering.
@@ -725,6 +742,7 @@ mod tests {
                 feature_flags: Severity::Off,
                 stale_suppressions: Severity::Off,
                 unused_catalog_entries: Severity::Off,
+                unresolved_catalog_references: Severity::Off,
             };
             let config = make_config_with_rules(rules);
             let results = find_dead_code(&graph, &config);

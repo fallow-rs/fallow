@@ -397,6 +397,7 @@ mod tests {
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
+            ignore_catalog_references: vec![],
             ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: fallow_config::DuplicatesConfig::default(),

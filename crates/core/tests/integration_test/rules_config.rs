@@ -74,6 +74,7 @@ fn rules_off_disables_duplicate_exports() {
 fn ignore_exports_wildcard() {
     let root = fixture_path("ignore-exports");
     let config = FallowConfig {
+        ignore_catalog_references: vec![],
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -128,6 +129,7 @@ fn ignore_exports_wildcard() {
 fn ignore_exports_specific() {
     let root = fixture_path("ignore-exports");
     let config = FallowConfig {
+        ignore_catalog_references: vec![],
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -306,6 +308,7 @@ fn ignore_exports_used_in_file_does_not_suppress_export_specifier_self_reference
 fn ignore_dependencies_config() {
     let root = fixture_path("basic-project");
     let config = FallowConfig {
+        ignore_catalog_references: vec![],
         schema: None,
         extends: vec![],
         entry: vec![],
