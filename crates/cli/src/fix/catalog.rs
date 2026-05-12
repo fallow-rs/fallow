@@ -765,8 +765,7 @@ mod tests {
         // issue-329 fixture's `react17` group after removing both its
         // entries.
         let dir = tempfile::tempdir().unwrap();
-        let content =
-            "catalogs:\n  react17:\n    react: ^17.0.2\n    react-dom: ^17.0.2\n  legacy:\n    is-odd: ^3.0.0\n";
+        let content = "catalogs:\n  react17:\n    react: ^17.0.2\n    react-dom: ^17.0.2\n  legacy:\n    is-odd: ^3.0.0\n";
         seed_workspace_file(dir.path(), content);
 
         let entries = vec![
@@ -804,7 +803,10 @@ mod tests {
         apply_catalog_entry_fixes(dir.path(), &entries, OutputFormat::Json, false, &mut fixes);
 
         let result = std::fs::read_to_string(dir.path().join("pnpm-workspace.yaml")).unwrap();
-        assert_eq!(result, "catalogs:\n  react17: {}\n  vue3:\n    vue: ^3.4.0\n");
+        assert_eq!(
+            result,
+            "catalogs:\n  react17: {}\n  vue3:\n    vue: ^3.4.0\n"
+        );
     }
 
     #[test]

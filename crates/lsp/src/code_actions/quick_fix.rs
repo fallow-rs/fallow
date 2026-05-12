@@ -392,11 +392,7 @@ fn build_parent_rewrite_edit(
 /// line index. For default-catalog entries the parent is the line
 /// starting with `catalog:`; for named-catalog entries the parent is
 /// the indented `<name>:` line under `catalogs:`.
-fn find_parent_header_idx(
-    lines: &[&str],
-    entry_idx: usize,
-    catalog_name: &str,
-) -> Option<usize> {
+fn find_parent_header_idx(lines: &[&str], entry_idx: usize, catalog_name: &str) -> Option<usize> {
     if entry_idx >= lines.len() {
         return None;
     }
@@ -434,10 +430,7 @@ fn parent_has_other_children(
     del_start: usize,
     del_end: usize,
 ) -> bool {
-    let parent_indent = lines[parent_idx]
-        .bytes()
-        .take_while(|&b| b == b' ')
-        .count();
+    let parent_indent = lines[parent_idx].bytes().take_while(|&b| b == b' ').count();
     for (idx, line) in lines.iter().enumerate().skip(parent_idx + 1) {
         let stripped = line.trim_end();
         let content = stripped.trim_start();
@@ -1481,7 +1474,11 @@ mod tests {
         let ca = unwrap_code_action(&actions[0]);
         let changes = ca.edit.as_ref().unwrap().changes.as_ref().unwrap();
         let edits = changes.get(&uri).unwrap();
-        assert_eq!(edits.len(), 1, "react-dom remains so parent stays populated");
+        assert_eq!(
+            edits.len(),
+            1,
+            "react-dom remains so parent stays populated"
+        );
     }
 
     #[test]
