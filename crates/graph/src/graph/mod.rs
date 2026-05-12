@@ -28,6 +28,14 @@ pub use types::{ExportSymbol, ModuleNode, ReExportEdge, ReferenceKind, SymbolRef
 #[derive(Debug)]
 pub struct ModuleGraph {
     /// All modules indexed by `FileId`.
+    ///
+    /// Invariant: `modules[file_id.0 as usize].file_id == file_id` for every
+    /// `FileId` in the graph. Holds because `discover/walk.rs` assigns FileIds
+    /// sequentially via `.enumerate()` after path-sorting, and
+    /// `build::populate_edges` pushes one `ModuleNode` per file in iteration
+    /// order. Detectors rely on this for O(1) FileId-to-module lookup
+    /// (`graph.modules.get(file_id.0 as usize)`) instead of building a
+    /// per-call `FxHashMap<FileId, &ModuleNode>`.
     pub modules: Vec<ModuleNode>,
     /// Flat edge storage for cache-friendly iteration.
     edges: Vec<Edge>,

@@ -303,10 +303,13 @@ pub fn find_unused_exports(
                     !export.references.is_empty()
                 } else {
                     export.references.iter().any(|r| {
-                        graph
-                            .modules
-                            .get(r.from_file.0 as usize)
-                            .is_some_and(ModuleNode::is_reachable)
+                        graph.modules.get(r.from_file.0 as usize).is_some_and(|m| {
+                            debug_assert_eq!(
+                                m.file_id, r.from_file,
+                                "ModuleGraph::modules FileId-as-index invariant broken"
+                            );
+                            m.is_reachable()
+                        })
                     })
                 };
                 // Treat side-effect-registered exports (Lit @customElement,
@@ -598,6 +601,10 @@ pub fn find_private_type_leaks(
         let Some(module) = graph.modules.get(module_info.file_id.0 as usize) else {
             continue;
         };
+        debug_assert_eq!(
+            module.file_id, module_info.file_id,
+            "ModuleGraph::modules FileId-as-index invariant broken"
+        );
         if is_storybook_file(&module.path) || is_route_convention_file(&module.path, &config.root) {
             continue;
         }
@@ -662,6 +669,10 @@ fn collect_dynamic_reexport_sources(
         let Some(wrapper) = graph.modules.get(wrapper_idx) else {
             continue;
         };
+        debug_assert_eq!(
+            wrapper.file_id, resolved.file_id,
+            "ModuleGraph::modules FileId-as-index invariant broken"
+        );
         let wrapper_exports = &wrapper.exports;
 
         for dynamic_import in &resolved.resolved_dynamic_imports {
@@ -716,9 +727,14 @@ pub fn find_duplicate_exports(
     let ignore_matchers = config.compiled_ignore_exports.as_slice();
 
     // Build a set of re-export relationships: (re-exporting module idx) -> set of (source module idx).
-    // FileIds are sequential (discover/walk.rs:264) so module_idx == file_id.0 as usize.
+    // Module idx and `file_id.0 as usize` are interchangeable; see the
+    // invariant doc on `ModuleGraph::modules`.
     let mut re_export_sources: FxHashMap<usize, FxHashSet<usize>> = FxHashMap::default();
     for (idx, module) in graph.modules.iter().enumerate() {
+        debug_assert_eq!(
+            module.file_id.0 as usize, idx,
+            "ModuleGraph::modules FileId-as-index invariant broken"
+        );
         for re in &module.re_exports {
             re_export_sources
                 .entry(idx)
