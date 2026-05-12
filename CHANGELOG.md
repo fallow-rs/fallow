@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`fallow fix` now auto-removes unused pnpm catalog entries from `pnpm-workspace.yaml`.** The `unused-catalog-entries` detector shipped in v2.70.0, but until now the only available action was `# fallow-ignore-next-line unused-catalog-entry`; users had to hand-edit the YAML to drop the entry. The fix is line-aware (preserves comments and stylistic choices in the file) and detects object-form entries such as `react:\n  specifier: ^18.2.0\n  publishConfig: {}` by consuming subsequent lines whose indent is strictly greater than the entry's own. Entries whose `hardcoded_consumers` is non-empty are skipped: removing the catalog entry while a workspace package still pins a hardcoded version of the same package would break the user's next `pnpm install`. The skip is surfaced in the human stderr summary and in the JSON output (`{"type": "remove_catalog_entry", "applied": false, "skipped": true, "skip_reason": "hardcoded_consumers", "consumers": [...], "description": "..."}`), and the per-instance `auto_fixable` bool on the check-command action correctly flips to `false` for findings with hardcoded consumers so agents that filter on the bool skip those automatically. After a successful run the CLI emits a one-line `Run \`pnpm install\` to refresh pnpm-lock.yaml` reminder so the workspace stays internally consistent. The fix output's top-level envelope adds a `"skipped"` count alongside the existing `"total_fixed"` so consumers can gate on partial-fix runs. The LSP `unused-catalog-entry` diagnostic now exposes a matching `Remove unused catalog entry` quick-fix code action with the same hardcoded-consumer guard and an anchored key-prefix sanity check so sibling entries with shared prefixes (`react` vs `react-native`, `lodash` vs `lodash-es`) cannot be deleted by mistake. (Closes [#335](https://github.com/fallow-rs/fallow/issues/335).)
+
 ## [2.72.0] - 2026-05-12
 
 ### Added

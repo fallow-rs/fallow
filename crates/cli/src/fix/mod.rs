@@ -157,42 +157,55 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
             }
         }
     } else if !opts.quiet {
-        if opts.dry_run {
-            eprintln!("Dry run complete. No files were modified.");
-        } else {
-            let fixed_count = fixes
-                .iter()
-                .filter(|f| {
-                    f.get("applied")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false)
-                })
-                .count();
-            eprintln!("Fixed {fixed_count} issue(s).");
-        }
-        // Most actionable next step first: the user just succeeded;
-        // tell them how to keep their workspace consistent before
-        // showing any residual work that needs human attention.
-        if !opts.dry_run && catalog_applied > 0 {
-            eprintln!(
-                "Catalog entries were removed from pnpm-workspace.yaml. Run `pnpm install` to refresh pnpm-lock.yaml.",
-            );
-        }
-        if catalog_skipped > 0 {
-            let entries_word = if catalog_skipped == 1 {
-                "entry"
-            } else {
-                "entries"
-            };
-            eprintln!(
-                "Skipped {catalog_skipped} catalog {entries_word} with hardcoded consumers or other guards (run with --format json for details).",
-            );
-        }
+        emit_human_summary(opts.dry_run, &fixes, catalog_applied, catalog_skipped);
     }
 
     if had_write_error {
         ExitCode::from(2)
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+/// Print the human stderr summary block at the end of a fix run.
+///
+/// Ordering rationale: the most actionable next step (`pnpm install`)
+/// follows the success line so users see what to do next before any
+/// residual-work warnings. Skipped-entry counts come last because they
+/// describe work the user opted out of rather than work they need to
+/// do right now.
+fn emit_human_summary(
+    dry_run: bool,
+    fixes: &[serde_json::Value],
+    catalog_applied: usize,
+    catalog_skipped: usize,
+) {
+    if dry_run {
+        eprintln!("Dry run complete. No files were modified.");
+    } else {
+        let fixed_count = fixes
+            .iter()
+            .filter(|f| {
+                f.get("applied")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+            })
+            .count();
+        eprintln!("Fixed {fixed_count} issue(s).");
+    }
+    if !dry_run && catalog_applied > 0 {
+        eprintln!(
+            "Catalog entries were removed from pnpm-workspace.yaml. Run `pnpm install` to refresh pnpm-lock.yaml.",
+        );
+    }
+    if catalog_skipped > 0 {
+        let entries_word = if catalog_skipped == 1 {
+            "entry"
+        } else {
+            "entries"
+        };
+        eprintln!(
+            "Skipped {catalog_skipped} catalog {entries_word} with hardcoded consumers or other guards (run with --format json for details).",
+        );
     }
 }
