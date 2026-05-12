@@ -415,7 +415,7 @@
     "@vscode/vsce": "3.9.1",
     "json-schema-to-typescript": "15.0.4",
     "mocha": "11.7.5",
-    "rolldown": "1.0.0-rc.17",
+    "rolldown": "1.0.0-rc.18",
     "ovsx": "0.10.11",
     "typescript": "6.0.3",
     "vitest": "4.1.5"
