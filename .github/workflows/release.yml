@@ -541,10 +541,14 @@ jobs:
           pack() {
             local dest="$1"
             local src="$2"
-            local name version filename
-            name=$(node -p "require('$GITHUB_WORKSPACE/$src/package.json').name")
-            version=$(node -p "require('$GITHUB_WORKSPACE/$src/package.json').version")
+            local name version filename pkg_path="$GITHUB_WORKSPACE/$src/package.json"
+            name=$(PKG_PATH="$pkg_path" node -p 'require(process.env.PKG_PATH).name')
+            version=$(PKG_PATH="$pkg_path" node -p 'require(process.env.PKG_PATH).version')
             filename=$(cd "$dest" && npm pack --ignore-scripts "$GITHUB_WORKSPACE/$src" | tail -n1)
+            if [ -z "$filename" ] || [ ! -f "$dest/$filename" ]; then
+              echo "::error::npm pack produced no tarball for $src (filename='$filename')"
+              return 1
+            fi
             # Use tabs as separators; tarball paths and package names never
             # contain tabs.
             printf '%s\t%s\t%s\n' "$dest/$filename" "$name" "$version" >> tarballs/manifest.tsv
@@ -632,8 +636,18 @@ jobs:
 
       - name: Publish all tarballs
         run: |
-          if [ ! -f tarballs/manifest.tsv ]; then
-            echo "::error::tarballs/manifest.tsv missing; npm-prep did not produce a manifest"
+          if [ ! -s tarballs/manifest.tsv ]; then
+            echo "::error::tarballs/manifest.tsv missing or empty; npm-prep did not produce any tarballs"
+            exit 1
+          fi
+          # Fixed expected count: 8 cli platform + 1 cli root + 8 napi platform
+          # + 1 napi root = 18 entries. If this number changes, update the
+          # numbered-stage matrix in npm-prep AND this constant together.
+          EXPECTED=18
+          ACTUAL=$(wc -l < tarballs/manifest.tsv | tr -d ' ')
+          if [ "$ACTUAL" -ne "$EXPECTED" ]; then
+            echo "::error::Expected $EXPECTED tarballs in manifest, got $ACTUAL"
+            cat tarballs/manifest.tsv
             exit 1
           fi
           FAILED=0
