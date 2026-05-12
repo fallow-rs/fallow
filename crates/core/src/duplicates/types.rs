@@ -190,8 +190,22 @@ pub struct DuplicationStats {
     pub clone_groups: usize,
     /// Total clone instances across all groups.
     pub clone_instances: usize,
-    /// Percentage of duplicated lines (0.0 - 100.0).
+    /// Percentage of duplicated lines (0.0 - 100.0). Computed BEFORE the
+    /// `minOccurrences` filter so trend lines and threshold gates stay
+    /// stable when the filter changes.
     pub duplication_percentage: f64,
+    /// Number of clone groups hidden by the `minOccurrences` filter.
+    /// Always 0 when the filter is at its default of 2.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub clone_groups_below_min_occurrences: usize,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if requires &T signature"
+)]
+const fn is_zero_usize(value: &usize) -> bool {
+    *value == 0
 }
 
 #[cfg(test)]

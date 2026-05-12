@@ -1392,6 +1392,7 @@ mod tests {
                 clone_groups: 1,
                 clone_instances: 2,
                 duplication_percentage: 4.0,
+                clone_groups_below_min_occurrences: 0,
             },
         };
         let md = build_duplication_markdown(&report, &root);

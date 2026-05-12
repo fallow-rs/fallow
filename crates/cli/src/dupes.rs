@@ -42,6 +42,10 @@ pub struct DupesOptions<'a> {
     pub min_tokens: Option<usize>,
     /// CLI override for minimum line count. `None` falls back to config.
     pub min_lines: Option<usize>,
+    /// CLI override for minimum occurrence count (clone groups with fewer
+    /// instances are hidden). `None` falls back to config (default 2).
+    /// CLI parsing rejects `< 2` so callers never need to clamp here.
+    pub min_occurrences: Option<usize>,
     /// CLI override for failure threshold percentage. `None` falls back to
     /// config (where `0.0` disables the gate).
     pub threshold: Option<f64>,
@@ -110,6 +114,7 @@ fn build_dupes_config(
         mode,
         min_tokens: opts.min_tokens.unwrap_or(toml_dupes.min_tokens),
         min_lines: opts.min_lines.unwrap_or(toml_dupes.min_lines),
+        min_occurrences: opts.min_occurrences.unwrap_or(toml_dupes.min_occurrences),
         threshold: opts.threshold.unwrap_or(toml_dupes.threshold),
         ignore: toml_dupes.ignore.clone(),
         ignore_defaults: toml_dupes.ignore_defaults,
@@ -169,6 +174,10 @@ pub struct DupesResult {
     pub config: ResolvedConfig,
     pub elapsed: Duration,
     pub threshold: f64,
+    /// Effective `minOccurrences` (CLI override merged with config). Used by
+    /// the human-format note to display the value that was actually applied;
+    /// `config.duplicates.min_occurrences` only carries the toml value.
+    pub min_occurrences: usize,
     pub explain_skipped: bool,
 }
 
@@ -344,16 +353,7 @@ fn execute_dupes_inner(
     if let Some(n) = opts.top
         && opts.group_by.is_none()
     {
-        report.clone_groups.truncate(n);
-        report.clone_families = fallow_core::duplicates::families::group_into_families(
-            &report.clone_groups,
-            &config.root,
-        );
-        report.mirrored_directories =
-            fallow_core::duplicates::families::detect_mirrored_directories(
-                &report.clone_families,
-                &config.root,
-            );
+        apply_top(&mut report, n, &config.root);
     }
 
     let elapsed = start.elapsed();
@@ -366,6 +366,7 @@ fn execute_dupes_inner(
         // Use the merged threshold so the failure gate honors `.fallowrc.jsonc`
         // when `--threshold` is omitted on the CLI.
         threshold: dupes_config.threshold,
+        min_occurrences: dupes_config.min_occurrences,
         explain_skipped: opts.explain_skipped,
     })
 }
@@ -385,6 +386,47 @@ fn resolve_changed_since(
     }
     let git_ref = opts.changed_since?;
     get_changed_files(opts.root, git_ref)
+}
+
+/// Keep only the `n` clone groups with the highest instance count.
+///
+/// Sort by instance count desc (most-duplicated first), then by line count
+/// desc (largest blocks first), then by deterministic path/line order so
+/// ties don't shift between runs. Without this, the raw vector is
+/// path-sorted alphabetically, so `--top 20` returned 20 arbitrary clone
+/// groups instead of the 20 most-duplicated. Re-applies `DuplicationReport::sort()`
+/// after truncation so user-facing render order stays deterministic.
+fn apply_top(report: &mut DuplicationReport, n: usize, root: &std::path::Path) {
+    report.clone_groups.sort_by(|a, b| {
+        b.instances
+            .len()
+            .cmp(&a.instances.len())
+            .then(b.line_count.cmp(&a.line_count))
+            .then_with(|| match (a.instances.first(), b.instances.first()) {
+                (Some(ai), Some(bi)) => ai
+                    .file
+                    .cmp(&bi.file)
+                    .then(ai.start_line.cmp(&bi.start_line)),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            })
+    });
+    report.clone_groups.truncate(n);
+    report.clone_families =
+        fallow_core::duplicates::families::group_into_families(&report.clone_groups, root);
+    report.mirrored_directories = fallow_core::duplicates::families::detect_mirrored_directories(
+        &report.clone_families,
+        root,
+    );
+    // Match `stats.clone_groups` and `stats.clone_instances` to the truncated
+    // array length so consumers iterating `clone_groups[]` see the same count
+    // as the stats block. `duplication_percentage`, `duplicated_lines`, and
+    // `duplicated_tokens` stay corpus-wide for trend-line stability (mirrors
+    // the minOccurrences split documented in `docs/output-schema.json`).
+    report.stats.clone_groups = report.clone_groups.len();
+    report.stats.clone_instances = report.clone_groups.iter().map(|g| g.instances.len()).sum();
+    report.sort();
 }
 
 fn run_duplication_analysis(
@@ -449,6 +491,7 @@ pub fn print_dupes_result(
         health_action_opts: report::HealthActionOptions::default(),
     };
     print_default_ignore_note(result, quiet);
+    print_min_occurrences_note(result, quiet);
     let report_code = report::print_duplication_report(&result.report, &ctx, result.config.output);
     if report_code != ExitCode::SUCCESS {
         return report_code;
@@ -570,6 +613,7 @@ fn print_dupes_result_with_grouping(
         health_action_opts: report::HealthActionOptions::default(),
     };
     print_default_ignore_note(result, quiet);
+    print_min_occurrences_note(result, quiet);
     report::print_duplication_report(&result.report, &ctx, result.config.output)
 }
 
@@ -608,6 +652,37 @@ pub fn print_default_ignore_note(result: &DupesResult, quiet: bool) {
             skips.total
         );
     }
+}
+
+/// Emit a stderr note when `minOccurrences` hid clone groups. Human-format
+/// only, so machine readers (JSON, SARIF, CodeClimate) never see decorative
+/// stderr noise; consumers read `stats.cloneGroupsBelowMinOccurrences`
+/// directly from the JSON envelope instead.
+pub fn print_min_occurrences_note(result: &DupesResult, quiet: bool) {
+    if quiet
+        || !matches!(
+            result.config.output,
+            OutputFormat::Human
+                | OutputFormat::Markdown
+                | OutputFormat::PrCommentGithub
+                | OutputFormat::PrCommentGitlab
+                | OutputFormat::ReviewGithub
+                | OutputFormat::ReviewGitlab
+        )
+    {
+        return;
+    }
+
+    let hidden = result.report.stats.clone_groups_below_min_occurrences;
+    if hidden == 0 {
+        return;
+    }
+
+    let min = result.min_occurrences;
+    let noun = if hidden == 1 { "group" } else { "groups" };
+    eprintln!(
+        "note: hid {hidden} clone {noun} below minOccurrences={min} (lower --min-occurrences to see them)"
+    );
 }
 
 #[cfg(test)]
@@ -659,6 +734,7 @@ mod tests {
                 clone_groups: 0,
                 clone_instances,
                 duplication_percentage: 0.0,
+                clone_groups_below_min_occurrences: 0,
             },
         }
     }
@@ -680,6 +756,7 @@ mod tests {
             mode: Some(mode),
             min_tokens: Some(50),
             min_lines: Some(5),
+            min_occurrences: Some(2),
             threshold: Some(0.0),
             skip_local: false,
             cross_language: false,
@@ -809,6 +886,102 @@ mod tests {
     #[test]
     fn threshold_zero_duplication_with_positive_threshold() {
         assert!(!exceeds_threshold(5.0, 0.0));
+    }
+
+    // ── apply_top ────────────────────────────────────────────────────
+
+    #[test]
+    fn apply_top_keeps_the_most_duplicated_groups() {
+        // Build 5 groups with decreasing instance counts. The path-sorted
+        // order (before --top) would have placed `a.ts` first; the
+        // instance-count-desc order should pick the 33-instance group
+        // first regardless of file name.
+        let groups = vec![
+            make_group(vec![instance("z-most.ts", 1, 10); 33], 50, 10),
+            make_group(vec![instance("y-mid.ts", 1, 10); 8], 50, 10),
+            make_group(vec![instance("a-pair.ts", 1, 10); 2], 50, 10),
+            make_group(vec![instance("m-triple.ts", 1, 10); 3], 50, 10),
+            make_group(vec![instance("b-pair.ts", 1, 10); 2], 50, 10),
+        ];
+        let mut report = make_report(groups, 5, 100);
+        report.sort(); // Path-sort first, mirroring the call site.
+
+        apply_top(&mut report, 3, Path::new("/project"));
+
+        let kept_sizes: Vec<usize> = report
+            .clone_groups
+            .iter()
+            .map(|g| g.instances.len())
+            .collect();
+        assert_eq!(
+            kept_sizes.iter().sum::<usize>(),
+            33 + 8 + 3,
+            "top 3 should keep the 33/8/3-instance groups, not the 2-instance pairs"
+        );
+        assert!(
+            kept_sizes.contains(&33),
+            "33-instance group must be kept (was alphabetically last under path-sort)"
+        );
+        assert!(
+            !kept_sizes.contains(&2),
+            "2-instance pairs must be dropped by top-3"
+        );
+    }
+
+    #[test]
+    fn apply_top_tiebreaks_by_line_count_desc() {
+        // Same instance count, different line counts; larger lines wins.
+        let groups = vec![
+            make_group(vec![instance("a.ts", 1, 10); 3], 50, 10),
+            make_group(vec![instance("b.ts", 1, 60); 3], 200, 60),
+            make_group(vec![instance("c.ts", 1, 30); 3], 100, 30),
+        ];
+        let mut report = make_report(groups, 3, 100);
+        report.sort();
+
+        apply_top(&mut report, 2, Path::new("/project"));
+
+        let kept_lines: Vec<usize> = report.clone_groups.iter().map(|g| g.line_count).collect();
+        assert_eq!(
+            kept_lines.iter().sum::<usize>(),
+            60 + 30,
+            "with equal instance count, top 2 must keep the 60-line and 30-line groups"
+        );
+    }
+
+    #[test]
+    fn apply_top_recomputes_clone_groups_and_clone_instances_stats() {
+        // Build 4 groups; --top 1 must keep one and update the stats block so
+        // `stats.clone_groups == clone_groups.len()` and
+        // `stats.clone_instances == sum of surviving instances`. Without the
+        // recompute the JSON contract documented in docs/output-schema.json
+        // breaks: array length 1 but stats.clone_groups still reports 4.
+        let groups = vec![
+            make_group(vec![instance("a.ts", 1, 10); 5], 50, 10),
+            make_group(vec![instance("b.ts", 1, 10); 3], 50, 10),
+            make_group(vec![instance("c.ts", 1, 10); 2], 50, 10),
+            make_group(vec![instance("d.ts", 1, 10); 2], 50, 10),
+        ];
+        let mut report = make_report(groups, 4, 100);
+        report.sort();
+
+        apply_top(&mut report, 1, Path::new("/project"));
+
+        assert_eq!(report.clone_groups.len(), 1, "kept exactly one group");
+        assert_eq!(
+            report.clone_groups[0].instances.len(),
+            5,
+            "kept group is the 5-instance group"
+        );
+        assert_eq!(
+            report.stats.clone_groups,
+            report.clone_groups.len(),
+            "stats.clone_groups must match the truncated array length"
+        );
+        assert_eq!(
+            report.stats.clone_instances, 5,
+            "stats.clone_instances must reflect the surviving instances"
+        );
     }
 
     // ── build_dupes_config ───────────────────────────────────────────

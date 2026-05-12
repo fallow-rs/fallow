@@ -178,6 +178,12 @@ pub struct FindDupesParams {
     /// Minimum line count for a clone to be reported. Default: 5.
     pub min_lines: Option<u32>,
 
+    /// Minimum number of occurrences before a clone group is reported.
+    /// Increase to focus on widespread copy-paste worth refactoring and skip
+    /// 2-instance noise. Must be at least 2. Default: 2.
+    #[schemars(range(min = 2))]
+    pub min_occurrences: Option<u32>,
+
     /// Fail if duplication percentage exceeds this value. 0 = no limit.
     pub threshold: Option<f64>,
 
@@ -381,6 +387,12 @@ pub struct TraceCloneParams {
 
     /// Minimum line count for a clone to be reported. Default: 5.
     pub min_lines: Option<u32>,
+
+    /// Minimum number of occurrences before a clone group is reported.
+    /// Increase to focus on widespread copy-paste worth refactoring and skip
+    /// 2-instance noise. Must be at least 2. Default: 2.
+    #[schemars(range(min = 2))]
+    pub min_occurrences: Option<u32>,
 
     /// Fail if duplication percentage exceeds this value. 0 = no limit.
     pub threshold: Option<f64>,

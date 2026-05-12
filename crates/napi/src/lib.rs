@@ -49,6 +49,9 @@ pub struct DuplicationOptions {
     pub mode: Option<String>,
     pub min_tokens: Option<u32>,
     pub min_lines: Option<u32>,
+    /// Minimum occurrences before a clone group is reported. Must be >= 2.
+    /// Defaults to 2 (current behavior).
+    pub min_occurrences: Option<u32>,
     pub threshold: Option<f64>,
     pub skip_local: Option<bool>,
     pub cross_language: Option<bool>,
@@ -279,6 +282,15 @@ impl TryFrom<DuplicationOptions> for programmatic::DuplicationOptions {
             mode: parse_duplication_mode(value.mode)?,
             min_tokens: value.min_tokens.map_or(defaults.min_tokens, |n| n as usize),
             min_lines: value.min_lines.map_or(defaults.min_lines, |n| n as usize),
+            min_occurrences: match value.min_occurrences {
+                Some(n) if n < 2 => {
+                    return Err(napi::Error::from_reason(format!(
+                        "min_occurrences must be at least 2 (got {n})"
+                    )));
+                }
+                Some(n) => n as usize,
+                None => defaults.min_occurrences,
+            },
             threshold: value.threshold.unwrap_or(defaults.threshold),
             skip_local: value.skip_local.unwrap_or(defaults.skip_local),
             cross_language: value.cross_language.unwrap_or(defaults.cross_language),

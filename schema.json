@@ -100,6 +100,7 @@
         "mode": "mild",
         "minTokens": 50,
         "minLines": 5,
+        "minOccurrences": 2,
         "threshold": 0.0,
         "ignore": [],
         "ignoreDefaults": true,
@@ -621,6 +622,13 @@
           "format": "uint",
           "minimum": 0,
           "default": 5
+        },
+        "minOccurrences": {
+          "description": "Minimum number of occurrences (instances of the same clone) before a\ngroup is reported. Defaults to 2 (every duplicated pair is reported).\nRaise this to focus on widespread copy-paste worth refactoring and skip\ncontext-sensitive pairs.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 2,
+          "default": 2
         },
         "threshold": {
           "description": "Maximum allowed duplication percentage (0 = no limit).",

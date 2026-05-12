@@ -757,6 +757,7 @@ fn run_combined_dupes(
         ),
         min_tokens: Some(dupes_cfg.min_tokens),
         min_lines: Some(dupes_cfg.min_lines),
+        min_occurrences: Some(dupes_cfg.min_occurrences),
         threshold: Some(opts.dupes_threshold.unwrap_or(dupes_cfg.threshold)),
         skip_local: dupes_cfg.skip_local,
         cross_language: dupes_cfg.cross_language,

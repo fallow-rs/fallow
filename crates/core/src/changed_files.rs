@@ -395,6 +395,7 @@ fn recompute_duplication_stats(report: &DuplicationReport) -> DuplicationStats {
         } else {
             0.0
         },
+        clone_groups_below_min_occurrences: report.stats.clone_groups_below_min_occurrences,
     }
 }
 
@@ -678,6 +679,7 @@ mod tests {
                 clone_groups: 1,
                 clone_instances: 2,
                 duplication_percentage: 10.0,
+                clone_groups_below_min_occurrences: 0,
             },
         };
 
@@ -906,6 +908,7 @@ mod tests {
                 clone_groups: 1,
                 clone_instances: 1,
                 duplication_percentage: 5.0,
+                clone_groups_below_min_occurrences: 0,
             },
         };
 

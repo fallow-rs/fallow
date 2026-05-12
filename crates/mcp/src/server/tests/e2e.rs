@@ -242,6 +242,7 @@ async fn e2e_trace_clone_returns_json() {
         ignore_imports: None,
         no_cache: None,
         threads: None,
+        min_occurrences: None,
     })
     .unwrap();
     let result = run_fallow(&bin, &args).await.unwrap();

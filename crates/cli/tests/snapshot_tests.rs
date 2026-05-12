@@ -2357,6 +2357,7 @@ fn sample_duplication_report(root: &Path) -> DuplicationReport {
             clone_groups: 1,
             clone_instances: 2,
             duplication_percentage: 0.22,
+            clone_groups_below_min_occurrences: 0,
         },
     }
 }
@@ -2468,6 +2469,7 @@ fn sample_grouped_duplication_report(root: &Path) -> DuplicationReport {
             clone_groups: 2,
             clone_instances: 5,
             duplication_percentage: 0.7,
+            clone_groups_below_min_occurrences: 0,
         },
     }
 }

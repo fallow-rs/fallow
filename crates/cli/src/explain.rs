@@ -859,6 +859,12 @@ pub fn dupes_meta() -> Value {
                 "description": "A set of code fragments with identical or near-identical normalized token sequences. Each group has 2+ instances across different locations.",
                 "interpretation": "each group is a single refactoring opportunity"
             },
+            "clone_groups_below_min_occurrences": {
+                "name": "Clone Groups Below minOccurrences",
+                "description": "Number of clone groups detected but hidden by the `duplicates.minOccurrences` filter. Always 0 (or absent) when the filter is at its default of 2. Pre-filter group count = `clone_groups + clone_groups_below_min_occurrences`.",
+                "range": "[0, \u{221e})",
+                "interpretation": "high values suggest noisy pair-only duplication; lower `minOccurrences` to inspect"
+            },
             "clone_families": {
                 "name": "Clone Families",
                 "description": "Groups of clone groups that share the same set of files. Indicates systematic duplication patterns (e.g., mirrored directory structures).",

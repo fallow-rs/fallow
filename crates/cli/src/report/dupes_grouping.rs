@@ -172,6 +172,9 @@ pub fn build_duplication_grouping(
                     clone_groups: 0,
                     clone_instances: 0,
                     duplication_percentage: 0.0,
+                    clone_groups_below_min_occurrences: report
+                        .stats
+                        .clone_groups_below_min_occurrences,
                 },
             };
             subset.stats = recompute_stats(&subset);

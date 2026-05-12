@@ -370,10 +370,16 @@ fn find_duplicates_inner(
         detector.detect(detector_data)
     };
 
-    // Step 5: Apply line-level suppressions
+    // Step 5: Apply line-level suppressions FIRST, so the post-suppression
+    // instance count is what the min-occurrences filter evaluates. Otherwise
+    // a 3-instance clone group whose third instance is line-suppressed would
+    // survive `--min-occurrences 3` and show up as a 2-instance group.
     if !suppressions_by_file.is_empty() {
         apply_line_suppressions(&mut report, &suppressions_by_file);
     }
+
+    // Step 5b: Apply the min-occurrences filter on the post-suppression set.
+    apply_min_occurrences_filter(&mut report, config.min_occurrences);
 
     let default_ignore_skips =
         build_default_ignore_skips(extra_ignores.as_ref(), &default_skip_counts);
@@ -393,6 +399,37 @@ fn find_duplicates_inner(
         report,
         default_ignore_skips,
     }
+}
+
+/// Drop clone groups with fewer than `min` instances and record the count on
+/// the stats block. The detector already guarantees `>= 2`, so this is a
+/// no-op when `min <= 2`.
+///
+/// Stats split: `clone_groups` and `clone_instances` are recomputed
+/// post-filter so they match the serialized array length (a CI consumer
+/// reading `stats.clone_groups` and iterating `clone_groups[]` sees the same
+/// count). `duplication_percentage`, `duplicated_lines`, `duplicated_tokens`,
+/// and `files_with_clones` stay pre-filter so the percentage math (lines /
+/// total) stays consistent and `threshold` gates / trend lines don't shift
+/// when the filter changes. The hidden count is disclosed in
+/// `clone_groups_below_min_occurrences`. The surviving groups feed every
+/// downstream step (families, mirrored dirs, --top, baseline, changed-since,
+/// workspace scoping) so there's a single source of truth.
+fn apply_min_occurrences_filter(report: &mut DuplicationReport, min: usize) {
+    if min <= 2 {
+        return;
+    }
+    let before = report.clone_groups.len();
+    report
+        .clone_groups
+        .retain(|group| group.instances.len() >= min);
+    let hidden = before - report.clone_groups.len();
+    if hidden == 0 {
+        return;
+    }
+    report.stats.clone_groups_below_min_occurrences = hidden;
+    report.stats.clone_groups = report.clone_groups.len();
+    report.stats.clone_instances = report.clone_groups.iter().map(|g| g.instances.len()).sum();
 }
 
 /// Filter out clone instances that are suppressed by line-level comments.
@@ -802,6 +839,214 @@ export function processData(input: string): string {
         assert!(
             report.clone_groups.is_empty(),
             "File-wide suppression should exclude file from duplication analysis"
+        );
+    }
+
+    #[test]
+    fn min_occurrences_hides_pairs_and_records_count() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).expect("create src dir");
+
+        // Block A: only appears in 2 files (a pair).
+        // Block B: appears in 3 files (a triple).
+        let block_a = r#"
+export function blockA(input: string): string {
+    const trimmed = input.trim();
+    if (trimmed.length === 0) {
+        return "";
+    }
+    const parts = trimmed.split(",");
+    const filtered = parts.filter(p => p.length > 0);
+    const mapped = filtered.map(p => p.toUpperCase());
+    return mapped.join(", ");
+}
+"#;
+        let block_b = r"
+export function blockB(value: number): number {
+    if (value <= 0) {
+        return 0;
+    }
+    let total = 0;
+    for (let i = 1; i <= value; i += 1) {
+        total += i * 2;
+        total -= 1;
+    }
+    return total + 7;
+}
+";
+
+        let pair_a1 = src_dir.join("pair-a1.ts");
+        let pair_a2 = src_dir.join("pair-a2.ts");
+        let triple_b1 = src_dir.join("triple-b1.ts");
+        let triple_b2 = src_dir.join("triple-b2.ts");
+        let triple_b3 = src_dir.join("triple-b3.ts");
+        std::fs::write(&pair_a1, block_a).expect("write");
+        std::fs::write(&pair_a2, block_a).expect("write");
+        std::fs::write(&triple_b1, block_b).expect("write");
+        std::fs::write(&triple_b2, block_b).expect("write");
+        std::fs::write(&triple_b3, block_b).expect("write");
+
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: pair_a1,
+                size_bytes: block_a.len() as u64,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: pair_a2,
+                size_bytes: block_a.len() as u64,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: triple_b1,
+                size_bytes: block_b.len() as u64,
+            },
+            DiscoveredFile {
+                id: FileId(3),
+                path: triple_b2,
+                size_bytes: block_b.len() as u64,
+            },
+            DiscoveredFile {
+                id: FileId(4),
+                path: triple_b3,
+                size_bytes: block_b.len() as u64,
+            },
+        ];
+
+        // Baseline: minOccurrences = 2 (default). Both groups reported.
+        let default_config = DuplicatesConfig {
+            min_tokens: 10,
+            min_lines: 2,
+            ..DuplicatesConfig::default()
+        };
+        let baseline = find_duplicates(dir.path(), &files, &default_config);
+        assert_eq!(
+            baseline.clone_groups.len(),
+            2,
+            "default minOccurrences should report both the pair and the triple"
+        );
+        assert_eq!(
+            baseline.stats.clone_groups_below_min_occurrences, 0,
+            "default minOccurrences hides nothing"
+        );
+        let baseline_pct = baseline.stats.duplication_percentage;
+
+        // Raised: minOccurrences = 3. Only the triple survives.
+        let raised_config = DuplicatesConfig {
+            min_tokens: 10,
+            min_lines: 2,
+            min_occurrences: 3,
+            ..DuplicatesConfig::default()
+        };
+        let report = find_duplicates(dir.path(), &files, &raised_config);
+        assert_eq!(
+            report.clone_groups.len(),
+            1,
+            "minOccurrences=3 should hide the 2-instance group"
+        );
+        assert_eq!(
+            report.clone_groups[0].instances.len(),
+            3,
+            "surviving group must be the 3-instance group"
+        );
+        assert_eq!(
+            report.stats.clone_groups_below_min_occurrences, 1,
+            "the hidden 2-instance group must be counted"
+        );
+        // `clone_groups` and `clone_instances` reflect the post-filter set so
+        // consumers iterating `clone_groups[]` see a matching count.
+        assert_eq!(
+            report.stats.clone_groups, 1,
+            "stats.clone_groups must match the post-filter array length"
+        );
+        assert_eq!(
+            report.stats.clone_instances, 3,
+            "stats.clone_instances must match the surviving instance total"
+        );
+        // `duplication_percentage` stays pre-filter so threshold gates and
+        // trend lines don't shift when minOccurrences changes.
+        assert!(
+            (report.stats.duplication_percentage - baseline_pct).abs() < f64::EPSILON,
+            "duplication_percentage should not shift when minOccurrences changes"
+        );
+    }
+
+    #[test]
+    fn min_occurrences_evaluates_after_line_suppressions() {
+        // Three files share a clone. The third file suppresses the clone with
+        // an inline comment. After suppression the group has 2 instances.
+        // With minOccurrences=3 the group must be hidden, NOT reported as a
+        // 2-instance clone. The filter evaluates the post-suppression count,
+        // not the pre-suppression detector output.
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).expect("create src dir");
+
+        let block = r#"
+export function shared(input: string): string {
+    const trimmed = input.trim();
+    if (trimmed.length === 0) {
+        return "";
+    }
+    const parts = trimmed.split(",");
+    const filtered = parts.filter(p => p.length > 0);
+    const mapped = filtered.map(p => p.toUpperCase());
+    return mapped.join(", ");
+}
+"#;
+        let suppressed = format!("// fallow-ignore-file code-duplication\n{block}");
+
+        let a = src_dir.join("a.ts");
+        let b = src_dir.join("b.ts");
+        let c = src_dir.join("c.ts");
+        std::fs::write(&a, block).expect("write a");
+        std::fs::write(&b, block).expect("write b");
+        std::fs::write(&c, &suppressed).expect("write c");
+
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: a,
+                size_bytes: block.len() as u64,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: b,
+                size_bytes: block.len() as u64,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: c,
+                size_bytes: suppressed.len() as u64,
+            },
+        ];
+
+        let config = DuplicatesConfig {
+            min_tokens: 10,
+            min_lines: 2,
+            min_occurrences: 3,
+            ..DuplicatesConfig::default()
+        };
+        let report = find_duplicates(dir.path(), &files, &config);
+        assert!(
+            report.clone_groups.is_empty(),
+            "post-suppression 2-instance group must be hidden by minOccurrences=3, \
+             got groups: {:?}",
+            report
+                .clone_groups
+                .iter()
+                .map(|g| g.instances.len())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            report.stats.clone_groups, 0,
+            "stats.clone_groups must match the empty post-filter array"
+        );
+        assert_eq!(
+            report.stats.clone_instances, 0,
+            "stats.clone_instances must match the empty post-filter array"
         );
     }
 }

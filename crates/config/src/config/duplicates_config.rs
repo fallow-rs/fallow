@@ -1,5 +1,5 @@
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 const fn default_true() -> bool {
     true
@@ -11,6 +11,26 @@ const fn default_min_tokens() -> usize {
 
 const fn default_min_lines() -> usize {
     5
+}
+
+const fn default_min_occurrences() -> usize {
+    2
+}
+
+/// Reject `< 2` at deserialize time. A single occurrence isn't a duplicate;
+/// silently clamping would poison reproducibility across config / env / CLI
+/// override sources.
+fn deserialize_min_occurrences<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = usize::deserialize(deserializer)?;
+    if value < 2 {
+        return Err(serde::de::Error::custom(format!(
+            "minOccurrences must be at least 2 (got {value}); a single occurrence isn't a duplicate"
+        )));
+    }
+    Ok(value)
 }
 
 const fn default_min_corpus_size_for_shingle_filter() -> usize {
@@ -40,6 +60,17 @@ pub struct DuplicatesConfig {
     /// Minimum number of lines for a clone.
     #[serde(default = "default_min_lines")]
     pub min_lines: usize,
+
+    /// Minimum number of occurrences (instances of the same clone) before a
+    /// group is reported. Defaults to 2 (every duplicated pair is reported).
+    /// Raise this to focus on widespread copy-paste worth refactoring and skip
+    /// context-sensitive pairs.
+    #[serde(
+        default = "default_min_occurrences",
+        deserialize_with = "deserialize_min_occurrences"
+    )]
+    #[schemars(range(min = 2))]
+    pub min_occurrences: usize,
 
     /// Maximum allowed duplication percentage (0 = no limit).
     #[serde(default)]
@@ -101,6 +132,7 @@ impl Default for DuplicatesConfig {
             mode: DetectionMode::default(),
             min_tokens: default_min_tokens(),
             min_lines: default_min_lines(),
+            min_occurrences: default_min_occurrences(),
             threshold: 0.0,
             ignore: vec![],
             ignore_defaults: true,
@@ -223,6 +255,7 @@ mod tests {
         assert_eq!(config.mode, DetectionMode::Mild);
         assert_eq!(config.min_tokens, 50);
         assert_eq!(config.min_lines, 5);
+        assert_eq!(config.min_occurrences, 2);
         assert!((config.threshold - 0.0).abs() < f64::EPSILON);
         assert!(config.ignore.is_empty());
         assert!(config.ignore_defaults);
@@ -378,6 +411,7 @@ mod tests {
             "mode": "semantic",
             "minTokens": 100,
             "minLines": 10,
+            "minOccurrences": 3,
             "threshold": 5.0,
             "ignore": ["**/vendor/**"],
             "ignoreDefaults": false,
@@ -390,6 +424,7 @@ mod tests {
         assert_eq!(config.mode, DetectionMode::Semantic);
         assert_eq!(config.min_tokens, 100);
         assert_eq!(config.min_lines, 10);
+        assert_eq!(config.min_occurrences, 3);
         assert!((config.threshold - 5.0).abs() < f64::EPSILON);
         assert_eq!(config.ignore, vec!["**/vendor/**"]);
         assert!(!config.ignore_defaults);
@@ -438,6 +473,7 @@ enabled = false
 mode = "weak"
 minTokens = 75
 minLines = 8
+minOccurrences = 3
 threshold = 3.0
 ignore = ["vendor/**"]
 skipLocal = true
@@ -454,6 +490,7 @@ ignoreNumericValues = false
         assert_eq!(config.mode, DetectionMode::Weak);
         assert_eq!(config.min_tokens, 75);
         assert_eq!(config.min_lines, 8);
+        assert_eq!(config.min_occurrences, 3);
         assert!((config.threshold - 3.0).abs() < f64::EPSILON);
         assert_eq!(config.ignore, vec!["vendor/**"]);
         assert!(config.skip_local);
@@ -555,6 +592,7 @@ ignoreNumericValues = false
             mode: DetectionMode::Semantic,
             min_tokens: 100,
             min_lines: 10,
+            min_occurrences: 4,
             threshold: 5.5,
             ignore: vec!["test/**".to_string()],
             ignore_defaults: false,
@@ -575,6 +613,7 @@ ignoreNumericValues = false
         assert_eq!(restored.mode, DetectionMode::Semantic);
         assert_eq!(restored.min_tokens, 100);
         assert_eq!(restored.min_lines, 10);
+        assert_eq!(restored.min_occurrences, 4);
         assert!((restored.threshold - 5.5).abs() < f64::EPSILON);
         assert!(!restored.ignore_defaults);
         assert!(restored.skip_local);
@@ -618,5 +657,39 @@ ignoreNumericValues = false
         assert!(json.contains("ignoreIdentifiers"));
         assert!(!json.contains("ignoreStringValues"));
         assert!(json.contains("ignoreNumericValues"));
+    }
+
+    // ── minOccurrences validation ───────────────────────────────────
+
+    #[test]
+    fn min_occurrences_accepts_two_or_more() {
+        let json = r#"{"minOccurrences": 2}"#;
+        let config: DuplicatesConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.min_occurrences, 2);
+
+        let json = r#"{"minOccurrences": 5}"#;
+        let config: DuplicatesConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.min_occurrences, 5);
+    }
+
+    #[test]
+    fn min_occurrences_rejects_one() {
+        let json = r#"{"minOccurrences": 1}"#;
+        let err = serde_json::from_str::<DuplicatesConfig>(json).unwrap_err();
+        assert!(err.to_string().contains("at least 2"));
+    }
+
+    #[test]
+    fn min_occurrences_rejects_zero() {
+        let json = r#"{"minOccurrences": 0}"#;
+        let err = serde_json::from_str::<DuplicatesConfig>(json).unwrap_err();
+        assert!(err.to_string().contains("at least 2"));
+    }
+
+    #[test]
+    fn min_occurrences_rejects_one_in_toml() {
+        let toml_str = "minOccurrences = 1";
+        let err = toml::from_str::<DuplicatesConfig>(toml_str).unwrap_err();
+        assert!(err.to_string().contains("at least 2"));
     }
 }

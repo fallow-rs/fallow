@@ -468,6 +468,13 @@ enum Command {
         #[arg(long)]
         min_lines: Option<usize>,
 
+        /// Minimum number of occurrences before a clone group is reported.
+        /// Raise to focus on widespread copy-paste worth refactoring and skip
+        /// pair-only clones.
+        /// (defaults to the value in `.fallowrc.jsonc`, or `2` if unset).
+        #[arg(long, value_parser = parse_min_occurrences)]
+        min_occurrences: Option<usize>,
+
         /// Fail if duplication exceeds this percentage (0 = no limit)
         /// (defaults to the value in `.fallowrc.jsonc`, or `0` if unset).
         #[arg(long)]
@@ -485,7 +492,8 @@ enum Command {
         #[arg(long)]
         ignore_imports: bool,
 
-        /// Show only the N largest clone groups
+        /// Show only the N most-duplicated clone groups (sorted by instance
+        /// count descending, then line count descending)
         #[arg(long)]
         top: Option<usize>,
 
@@ -1369,6 +1377,21 @@ impl From<AuditGateArg> for fallow_config::AuditGate {
 
 // ── Environment variable helpers ─────────────────────────────────
 
+/// Parse `--min-occurrences` and reject values below 2. A single occurrence
+/// is not a duplicate; silently clamping would diverge from the config-file
+/// validator, which also rejects `< 2`.
+fn parse_min_occurrences(s: &str) -> Result<usize, String> {
+    let value: usize = s
+        .parse()
+        .map_err(|_| format!("`{s}` is not a non-negative integer"))?;
+    if value < 2 {
+        return Err(format!(
+            "must be at least 2 (got {value}); a single occurrence isn't a duplicate"
+        ));
+    }
+    Ok(value)
+}
+
 /// Read `FALLOW_FORMAT` env var and parse it into a Format value.
 fn format_from_env() -> Option<Format> {
     let val = std::env::var("FALLOW_FORMAT").ok()?;
@@ -2107,6 +2130,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             mode,
             min_tokens,
             min_lines,
+            min_occurrences,
             threshold,
             skip_local,
             cross_language,
@@ -2119,6 +2143,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 mode,
                 min_tokens,
                 min_lines,
+                min_occurrences,
                 threshold,
                 skip_local,
                 cross_language,
@@ -2641,6 +2666,7 @@ struct DupesDispatchArgs {
     mode: Option<DupesMode>,
     min_tokens: Option<usize>,
     min_lines: Option<usize>,
+    min_occurrences: Option<usize>,
     threshold: Option<f64>,
     skip_local: bool,
     cross_language: bool,
@@ -2666,6 +2692,7 @@ fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> E
         mode: args.mode,
         min_tokens: args.min_tokens,
         min_lines: args.min_lines,
+        min_occurrences: args.min_occurrences,
         threshold: args.threshold,
         skip_local: args.skip_local,
         cross_language: args.cross_language,

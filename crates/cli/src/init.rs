@@ -186,9 +186,12 @@ fn add_json_rules_config(config: &mut serde_json::Value, info: &ProjectInfo) {
 }
 
 fn insert_json_duplicates_template(output: &mut String) {
+    // `minOccurrences` has no trailing comma so the file remains valid JSON
+    // even after the JSONC comment lines are stripped (only one non-commented
+    // field exists today, so a trailing comma would dangle before `}`).
     *output = output.replacen(
         "  \"rules\":",
-        "  \"duplicates\": {\n    // Common additions (uncomment to enable):\n    // \"ignore\": [\n    //   \"**/lib/**\",          // for repos that publish transpiled output to lib/\n    //   \"**/legacy/**\",       // for repos with legacy-build artifacts\n    //   \"**/__generated__/**\", // Relay, GraphQL Code Generator\n    //   \"**/generated/**\"     // OpenAPI, Protobuf codegen\n    // ]\n  },\n  \"rules\":",
+        "  \"duplicates\": {\n    // Hide pair-only clones; focus on widespread copy-paste\n    // worth refactoring. Lower to 2 to report every duplicate pair.\n    \"minOccurrences\": 3\n    // Common additions (uncomment to enable):\n    // \"ignore\": [\n    //   \"**/lib/**\",          // for repos that publish transpiled output to lib/\n    //   \"**/legacy/**\",       // for repos with legacy-build artifacts\n    //   \"**/__generated__/**\", // Relay, GraphQL Code Generator\n    //   \"**/generated/**\"     // OpenAPI, Protobuf codegen\n    // ]\n  },\n  \"rules\":",
         1,
     );
 }
@@ -232,6 +235,11 @@ fn build_toml_config(info: &ProjectInfo) -> String {
 
     // Duplicates
     lines.push("[duplicates]".to_string());
+    lines.push(
+        "# Hide pair-only clones; focus on widespread copy-paste worth refactoring.".to_string(),
+    );
+    lines.push("# Lower to 2 to report every duplicate pair.".to_string());
+    lines.push("minOccurrences = 3".to_string());
     lines.push("# Common additions (uncomment to enable):".to_string());
     lines.push("# ignore = [".to_string());
     lines.push(
@@ -833,6 +841,31 @@ mod tests {
         assert!(parsed.is_object());
         assert!(parsed["$schema"].is_string());
         assert!(content.contains("// Common additions (uncomment to enable):"));
+    }
+
+    #[test]
+    fn init_json_template_writes_min_occurrences_three() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        run_init(&config_opts(root, false));
+        let content = std::fs::read_to_string(root.join(".fallowrc.json")).unwrap();
+        let parsed = parse_jsonc_config(&content);
+        assert_eq!(
+            parsed["duplicates"]["minOccurrences"], 3,
+            "fresh installs default minOccurrences to 3 to hide pair-only noise"
+        );
+    }
+
+    #[test]
+    fn init_toml_template_writes_min_occurrences_three() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        run_init(&config_opts(root, true));
+        let content = std::fs::read_to_string(root.join("fallow.toml")).unwrap();
+        assert!(
+            content.contains("minOccurrences = 3"),
+            "fresh installs default minOccurrences to 3 to hide pair-only noise"
+        );
     }
 
     #[test]

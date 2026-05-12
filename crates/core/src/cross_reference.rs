@@ -199,6 +199,7 @@ mod tests {
                 clone_groups: 0,
                 clone_instances: 0,
                 duplication_percentage: 0.0,
+                clone_groups_below_min_occurrences: 0,
             },
         };
         let dead_code = AnalysisResults::default();
@@ -227,6 +228,7 @@ mod tests {
                 clone_groups: 1,
                 clone_instances: 2,
                 duplication_percentage: 50.0,
+                clone_groups_below_min_occurrences: 0,
             },
         };
         let mut dead_code = AnalysisResults::default();
@@ -262,6 +264,7 @@ mod tests {
                 clone_groups: 1,
                 clone_instances: 2,
                 duplication_percentage: 50.0,
+                clone_groups_below_min_occurrences: 0,
             },
         };
         let mut dead_code = AnalysisResults::default();
@@ -303,6 +306,7 @@ mod tests {
                 clone_groups: 1,
                 clone_instances: 2,
                 duplication_percentage: 50.0,
+                clone_groups_below_min_occurrences: 0,
             },
         };
         let mut dead_code = AnalysisResults::default();
@@ -346,6 +350,7 @@ mod tests {
                 clone_groups: 2,
                 clone_instances: 4,
                 duplication_percentage: 50.0,
+                clone_groups_below_min_occurrences: 0,
             },
         };
         let mut dead_code = AnalysisResults::default();
@@ -380,6 +385,7 @@ mod tests {
                 clone_groups: 1,
                 clone_instances: 2,
                 duplication_percentage: 50.0,
+                clone_groups_below_min_occurrences: 0,
             },
         };
         let mut dead_code = AnalysisResults::default();
@@ -426,6 +432,7 @@ mod tests {
                 clone_groups: 1,
                 clone_instances: 2,
                 duplication_percentage: 50.0,
+                clone_groups_below_min_occurrences: 0,
             },
         };
         let mut dead_code = AnalysisResults::default();
@@ -488,6 +495,7 @@ mod tests {
                 clone_groups: 3,
                 clone_instances: 6,
                 duplication_percentage: 50.0,
+                clone_groups_below_min_occurrences: 0,
             },
         };
         let mut dead_code = AnalysisResults::default();

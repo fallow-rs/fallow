@@ -2230,6 +2230,7 @@ fn run_audit_dupes<'a>(
         mode: Some(DupesMode::from(dupes_cfg.mode)),
         min_tokens: Some(dupes_cfg.min_tokens),
         min_lines: Some(dupes_cfg.min_lines),
+        min_occurrences: Some(dupes_cfg.min_occurrences),
         threshold: Some(dupes_cfg.threshold),
         skip_local: dupes_cfg.skip_local,
         cross_language: dupes_cfg.cross_language,
@@ -2478,6 +2479,7 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
 
     if !has_dupe_groups && let Some(ref dupes) = result.dupes {
         crate::dupes::print_default_ignore_note(dupes, quiet);
+        crate::dupes::print_min_occurrences_note(dupes, quiet);
     }
 
     // Status line (stderr) — always last

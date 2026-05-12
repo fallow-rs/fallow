@@ -369,6 +369,7 @@ fn find_dupes_args_with_all_options() {
         threads: Some(8),
         changed_since: Some("main".to_string()),
         group_by: None,
+        min_occurrences: None,
     };
     let args = build_find_dupes_args(&params).unwrap();
     assert_eq!(
@@ -474,6 +475,31 @@ fn find_dupes_args_group_by_section() {
         args.windows(2).any(|w| w == ["--group-by", "section"]),
         "expected --group-by section, got {args:?}"
     );
+}
+
+#[test]
+fn find_dupes_args_min_occurrences_forwards_flag() {
+    let params = FindDupesParams {
+        min_occurrences: Some(3),
+        ..Default::default()
+    };
+    let args = build_find_dupes_args(&params).unwrap();
+    assert!(
+        args.windows(2).any(|w| w == ["--min-occurrences", "3"]),
+        "expected --min-occurrences 3, got {args:?}"
+    );
+}
+
+#[test]
+fn find_dupes_args_min_occurrences_rejects_one() {
+    let params = FindDupesParams {
+        min_occurrences: Some(1),
+        ..Default::default()
+    };
+    let err = build_find_dupes_args(&params).unwrap_err();
+    let msg = parse_validation_message(&err);
+    assert!(msg.contains("min_occurrences must be at least 2"), "{msg}");
+    assert!(msg.contains("(got 1)"), "{msg}");
 }
 
 // ── Argument building: fix_preview vs fix_apply ───────────────────
@@ -708,6 +734,7 @@ fn trace_clone_args_with_all_options() {
         ignore_imports: Some(true),
         no_cache: Some(true),
         threads: Some(6),
+        min_occurrences: None,
     })
     .unwrap();
     assert_eq!(
@@ -760,6 +787,7 @@ fn trace_clone_args_invalid_mode_returns_error() {
         ignore_imports: None,
         no_cache: None,
         threads: None,
+        min_occurrences: None,
     })
     .unwrap_err();
     assert!(parse_validation_message(&err).contains("Invalid mode 'bogus'"));
@@ -847,12 +875,63 @@ fn trace_clone_args_reject_zero_line() {
         ignore_imports: None,
         no_cache: None,
         threads: None,
+        min_occurrences: None,
     })
     .unwrap_err();
     assert_eq!(
         parse_validation_message(&err),
         "line must be greater than 0"
     );
+}
+
+#[test]
+fn trace_clone_args_min_occurrences_forwards_flag() {
+    let args = build_trace_clone_args(&TraceCloneParams {
+        file: "src/original.ts".to_string(),
+        line: 42,
+        root: None,
+        config: None,
+        workspace: None,
+        mode: None,
+        min_tokens: None,
+        min_lines: None,
+        threshold: None,
+        skip_local: None,
+        cross_language: None,
+        ignore_imports: None,
+        no_cache: None,
+        threads: None,
+        min_occurrences: Some(3),
+    })
+    .unwrap();
+    assert!(
+        args.windows(2).any(|w| w == ["--min-occurrences", "3"]),
+        "expected --min-occurrences 3, got {args:?}"
+    );
+}
+
+#[test]
+fn trace_clone_args_min_occurrences_rejects_one() {
+    let err = build_trace_clone_args(&TraceCloneParams {
+        file: "src/original.ts".to_string(),
+        line: 42,
+        root: None,
+        config: None,
+        workspace: None,
+        mode: None,
+        min_tokens: None,
+        min_lines: None,
+        threshold: None,
+        skip_local: None,
+        cross_language: None,
+        ignore_imports: None,
+        no_cache: None,
+        threads: None,
+        min_occurrences: Some(1),
+    })
+    .unwrap_err();
+    let msg = parse_validation_message(&err);
+    assert!(msg.contains("min_occurrences must be at least 2"), "{msg}");
 }
 
 // ── Validation error body shape ──────────────────────────────────
@@ -878,6 +957,7 @@ fn validation_errors_use_structured_json_body() {
             ignore_imports: None,
             no_cache: None,
             threads: None,
+            min_occurrences: None,
         })
         .unwrap_err(),
         build_trace_export_args(&TraceExportParams {
@@ -1161,6 +1241,7 @@ fn all_arg_builders_include_format_json_and_quiet() {
         ignore_imports: None,
         no_cache: None,
         threads: None,
+        min_occurrences: None,
     })
     .unwrap();
     let health = build_health_args(&HealthParams::default());
@@ -1283,6 +1364,7 @@ fn each_tool_uses_correct_subcommand() {
             ignore_imports: None,
             no_cache: None,
             threads: None,
+            min_occurrences: None,
         })
         .unwrap()[0],
         "dupes"
@@ -1483,6 +1565,7 @@ fn trace_tools_do_not_include_explain() {
         ignore_imports: None,
         no_cache: None,
         threads: None,
+        min_occurrences: None,
     })
     .unwrap();
 

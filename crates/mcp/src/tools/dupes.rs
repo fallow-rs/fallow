@@ -37,6 +37,14 @@ pub fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, St
     if let Some(min_lines) = params.min_lines {
         args.extend(["--min-lines".to_string(), min_lines.to_string()]);
     }
+    if let Some(min_occurrences) = params.min_occurrences {
+        if min_occurrences < 2 {
+            return Err(validation_error_body(format!(
+                "min_occurrences must be at least 2 (got {min_occurrences})"
+            )));
+        }
+        args.extend(["--min-occurrences".to_string(), min_occurrences.to_string()]);
+    }
     if let Some(threshold) = params.threshold {
         args.extend(["--threshold".to_string(), threshold.to_string()]);
     }

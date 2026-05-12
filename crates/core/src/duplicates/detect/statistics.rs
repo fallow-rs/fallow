@@ -56,5 +56,6 @@ pub(super) fn compute_stats(
         clone_groups: clone_groups.len(),
         clone_instances,
         duplication_percentage,
+        clone_groups_below_min_occurrences: 0,
     }
 }

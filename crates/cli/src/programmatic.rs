@@ -137,6 +137,13 @@ pub struct DuplicationOptions {
     pub mode: DuplicationMode,
     pub min_tokens: usize,
     pub min_lines: usize,
+    /// Minimum number of occurrences (instances) before a clone group is
+    /// reported. Values below 2 are silently treated as 2 (a single
+    /// occurrence isn't a duplicate, so the engine no-ops). The CLI and
+    /// MCP surfaces hard-reject `< 2` at parse time; the programmatic
+    /// path is permissive because callers may construct this from
+    /// untyped configuration.
+    pub min_occurrences: usize,
     pub threshold: f64,
     pub skip_local: bool,
     pub cross_language: bool,
@@ -151,6 +158,7 @@ impl Default for DuplicationOptions {
             mode: DuplicationMode::Mild,
             min_tokens: 50,
             min_lines: 5,
+            min_occurrences: 2,
             threshold: 0.0,
             skip_local: false,
             cross_language: false,
@@ -567,6 +575,7 @@ pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<se
         mode: Some(options.mode.to_cli()),
         min_tokens: Some(options.min_tokens),
         min_lines: Some(options.min_lines),
+        min_occurrences: Some(options.min_occurrences),
         threshold: Some(options.threshold),
         skip_local: options.skip_local,
         cross_language: options.cross_language,

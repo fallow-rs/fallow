@@ -608,6 +608,7 @@ pub fn recompute_stats(report: &DuplicationReport) -> fallow_core::duplicates::D
         } else {
             0.0
         },
+        clone_groups_below_min_occurrences: report.stats.clone_groups_below_min_occurrences,
     }
 }
 
@@ -1375,6 +1376,7 @@ mod tests {
                 clone_groups: 1,
                 clone_instances: 2,
                 duplication_percentage: 10.0,
+                clone_groups_below_min_occurrences: 0,
             },
         }
     }
@@ -1500,6 +1502,7 @@ mod tests {
                 clone_groups: 0,
                 clone_instances: 0,
                 duplication_percentage: 0.0,
+                clone_groups_below_min_occurrences: 0,
             },
         };
         let stats = super::recompute_stats(&report);

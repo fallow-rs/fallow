@@ -814,6 +814,7 @@ mod tests {
                 clone_groups: 1,
                 clone_instances: 2,
                 duplication_percentage: 22.0,
+                clone_groups_below_min_occurrences: 0,
             },
         };
         let trace = trace_clone(&report, Path::new("/project"), "src/a.ts", 15);
@@ -850,6 +851,7 @@ mod tests {
                 clone_groups: 1,
                 clone_instances: 1,
                 duplication_percentage: 22.0,
+                clone_groups_below_min_occurrences: 0,
             },
         };
         let trace = trace_clone(&report, Path::new("/project"), "src/a.ts", 25);
@@ -895,6 +897,7 @@ mod tests {
                 clone_groups: 1,
                 clone_instances: 2,
                 duplication_percentage: 22.0,
+                clone_groups_below_min_occurrences: 0,
             },
         };
         let root = Path::new("/project");
@@ -953,6 +956,7 @@ mod tests {
                 clone_groups: 1,
                 clone_instances: 2,
                 duplication_percentage: 40.0,
+                clone_groups_below_min_occurrences: 0,
             },
         };
         let trace = trace_clone(&report, Path::new("/project"), "src/a.ts", 5);
