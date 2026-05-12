@@ -19,11 +19,25 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-rust
+        with:
+          # Dedicated cache scope; do not share with main / PR builds. A poisoned
+          # workspace cache from another job could otherwise be restored here and
+          # influence the bundle that `cargo package` produces.
+          cache-key: release-publish-crates
+
+      # --no-verify skips the post-package verify-build. Verifying again here
+      # would compile every transitive dependency's build.rs with
+      # CARGO_REGISTRY_TOKEN available in the environment; a single compromised
+      # build script could exfiltrate the token. The same code already built
+      # cleanly in CI on the commit that produced this tag, so the verify build
+      # is a redundant safety net we can drop on the privileged path.
 
       - name: Publish fallow-types
-        run: cargo publish -p fallow-types || echo "Already published, skipping"
+        run: cargo publish -p fallow-types --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -31,7 +45,7 @@ jobs:
         run: sleep 30
 
       - name: Publish fallow-config
-        run: cargo publish -p fallow-config || echo "Already published, skipping"
+        run: cargo publish -p fallow-config --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -39,7 +53,7 @@ jobs:
         run: sleep 30
 
       - name: Publish fallow-extract
-        run: cargo publish -p fallow-extract || echo "Already published, skipping"
+        run: cargo publish -p fallow-extract --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -47,7 +61,7 @@ jobs:
         run: sleep 30
 
       - name: Publish fallow-graph
-        run: cargo publish -p fallow-graph || echo "Already published, skipping"
+        run: cargo publish -p fallow-graph --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -55,7 +69,7 @@ jobs:
         run: sleep 30
 
       - name: Publish fallow-core
-        run: cargo publish -p fallow-core || echo "Already published, skipping"
+        run: cargo publish -p fallow-core --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -63,7 +77,7 @@ jobs:
         run: sleep 30
 
       - name: Publish fallow-license
-        run: cargo publish -p fallow-license || echo "Already published, skipping"
+        run: cargo publish -p fallow-license --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -71,7 +85,7 @@ jobs:
         run: sleep 30
 
       - name: Publish fallow-v8-coverage
-        run: cargo publish -p fallow-v8-coverage || echo "Already published, skipping"
+        run: cargo publish -p fallow-v8-coverage --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -79,7 +93,7 @@ jobs:
         run: sleep 30
 
       - name: Publish fallow-cli
-        run: cargo publish -p fallow-cli || echo "Already published, skipping"
+        run: cargo publish -p fallow-cli --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -87,7 +101,7 @@ jobs:
         run: sleep 30
 
       - name: Publish fallow-mcp
-        run: cargo publish -p fallow-mcp || echo "Already published, skipping"
+        run: cargo publish -p fallow-mcp --no-verify || echo "Already published, skipping"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -154,6 +168,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-rust
         with:
@@ -349,9 +365,14 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
+      # Required to create GitHub Releases and to push the rolling v1 action
+      # tag below. The push uses an explicit token URL, not git/config-persisted
+      # credentials, so checkout runs with persist-credentials: false.
       contents: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - name: Download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -370,36 +391,35 @@ jobs:
 
       - name: Update stable action tags
         env:
-          TAG_REF: ${{ github.ref }}
+          # GH_TOKEN is interpolated only into the git push URL below, never
+          # into shell metacharacters, and the checkout step does not persist
+          # credentials, so this token's lifetime is scoped to this step.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git tag -f v1 "${GITHUB_SHA}"
-          git push origin refs/tags/v1 --force
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" refs/tags/v1 --force
 
-  npm-publish:
-    name: Publish to npm
-    needs: [build, release]
+  # Build the npm publish tree (versioned package.json files, binaries, NAPI
+  # addons, schema) into immutable tarballs. This job runs no publish
+  # credentials. The split exists to keep `npm ci`, dependency install
+  # scripts, and any other untrusted-code execution off the privileged
+  # publish job. See the npm-publish job below for the matching pattern.
+  npm-prep:
+    name: Pack npm tarballs
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
-    env:
-      TAG_REF: ${{ github.ref }}
-      # Bootstrap fallback. When NPM_TOKEN is present in repo secrets,
-      # setup-node writes it to .npmrc and `npm publish` authenticates
-      # with it. When the secret is absent (steady state, once every
-      # package has a trusted publisher registered), this stays empty
-      # and OIDC / trusted publishing handles auth exactly like today.
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Ensure latest npm (for trusted publishing)
-        run: npm install -g npm@10.9.8 && npm install -g npm@latest
+          # Intentionally no registry-url: this job must not write
+          # NODE_AUTH_TOKEN to .npmrc. Auth lives in the publish job.
 
       - name: Download all npm binaries
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -428,44 +448,58 @@ jobs:
           done
 
       - name: Update versions
+        env:
+          # The ref is read via process.env in the embedded node script, not
+          # interpolated into a heredoc, so a malformed ref cannot break out
+          # of the script body.
+          PKG_VERSION_REF: ${{ github.ref }}
         run: |
-          VERSION="${TAG_REF#refs/tags/v}"
+          VERSION="${PKG_VERSION_REF#refs/tags/v}"
+          export PKG_VERSION="$VERSION"
           for pkg in npm/*/package.json; do
-            node -e "
-              const fs = require('fs');
-              const pkg = JSON.parse(fs.readFileSync('$pkg', 'utf8'));
-              pkg.version = '$VERSION';
+            PKG_PATH="$pkg" node -e '
+              const fs = require("fs");
+              const path = process.env.PKG_PATH;
+              const version = process.env.PKG_VERSION;
+              const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
+              pkg.version = version;
               if (pkg.optionalDependencies) {
                 for (const key of Object.keys(pkg.optionalDependencies)) {
-                  if (key.startsWith('@fallow-cli/')) {
-                    pkg.optionalDependencies[key] = '$VERSION';
+                  if (key.startsWith("@fallow-cli/")) {
+                    pkg.optionalDependencies[key] = version;
                   }
                 }
               }
-              fs.writeFileSync('$pkg', JSON.stringify(pkg, null, 2) + '\n');
-            "
+              fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n");
+            '
           done
 
       - name: Install NAPI package dependencies
+        # Only safe here because this job has no publish tokens. The dev
+        # dependency tree of @napi-rs/cli runs install scripts; keeping that
+        # off the npm-publish job is the whole point of the split.
         run: cd crates/napi && npm ci --omit=optional
 
       - name: Update NAPI package version
+        env:
+          PKG_VERSION_REF: ${{ github.ref }}
         run: |
-          VERSION="${TAG_REF#refs/tags/v}"
-          node -e "
-            const fs = require('fs');
-            const pkgPath = 'crates/napi/package.json';
-            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-            pkg.version = '$VERSION';
+          VERSION="${PKG_VERSION_REF#refs/tags/v}"
+          PKG_VERSION="$VERSION" node -e '
+            const fs = require("fs");
+            const path = "crates/napi/package.json";
+            const version = process.env.PKG_VERSION;
+            const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
+            pkg.version = version;
             if (pkg.optionalDependencies) {
               for (const key of Object.keys(pkg.optionalDependencies)) {
-                if (key.startsWith('@fallow-cli/fallow-node')) {
-                  pkg.optionalDependencies[key] = '$VERSION';
+                if (key.startsWith("@fallow-cli/fallow-node")) {
+                  pkg.optionalDependencies[key] = version;
                 }
               }
             }
-            fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
-          "
+            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n");
+          '
 
       - name: Prepare NAPI root package for publish
         run: cd crates/napi && npm run publish:prepare
@@ -481,94 +515,169 @@ jobs:
             cp "$dir"/* "$target"/
           done
 
-      - name: Publish platform packages
-        run: |
-          VERSION="${TAG_REF#refs/tags/v}"
-          FAILED=0
-          for dir in ./npm/darwin-arm64 ./npm/darwin-x64 ./npm/linux-x64-gnu ./npm/linux-arm64-gnu ./npm/linux-x64-musl ./npm/linux-arm64-musl ./npm/win32-x64-msvc ./npm/win32-arm64-msvc; do
-            PKG_NAME=$(node -e "console.log(require('$dir/package.json').name)")
-            echo "Publishing $PKG_NAME@$VERSION..."
-            if npm view "$PKG_NAME@$VERSION" version >/dev/null 2>&1; then
-              echo "  Already published, skipping"
-              continue
-            fi
-            if ! npm publish "$dir" --access public --provenance; then
-              echo "  Provenance publish failed, retrying without provenance..."
-              if ! npm publish "$dir" --access public; then
-                echo "::error::Failed to publish $PKG_NAME@$VERSION"
-                FAILED=1
-              fi
-            fi
-          done
-          if [ "$FAILED" -eq 1 ]; then
-            exit 1
-          fi
-
       # Bundle the JSON schema into the fallow npm package so consumers
       # can reference it from `node_modules/fallow/schema.json`. Without
       # this, users either pin to a remote URL that drifts from the
       # installed CLI version, or have to run `fallow config-schema`
       # themselves and refresh on every upgrade. See
       # https://github.com/fallow-rs/fallow/issues/275.
-      #
-      # `--ignore-scripts` is set on the publish below, so we copy at
-      # workflow level rather than relying on a prepublishOnly hook.
       - name: Bundle schema.json into fallow package
         run: cp schema.json npm/fallow/schema.json
 
-      - name: Publish fallow
+      - name: Pack tarballs
         run: |
-          VERSION="${TAG_REF#refs/tags/v}"
-          if npm view "fallow@$VERSION" version >/dev/null 2>&1; then
-            echo "fallow@$VERSION already published, skipping"
-          else
-            npm publish ./npm/fallow --access public --provenance --ignore-scripts || \
-              npm publish ./npm/fallow --access public --ignore-scripts
-          fi
+          # Publish order matters: platform packages before their meta package,
+          # NAPI platform packages before the @fallow-cli/fallow-node root.
+          # Numbered subdirectories make the order explicit and survive the
+          # download/upload artifact round-trip; the publish job iterates them
+          # in sequence and publishes whatever .tgz it finds inside.
+          rm -rf tarballs
+          mkdir -p tarballs/10-cli-platform tarballs/20-cli-root tarballs/30-napi-platform tarballs/40-napi-root
 
-      - name: Publish NAPI platform packages
+          # Emit a manifest alongside the tarballs so the publish job can look
+          # up name/version without executing any code from inside a tarball.
+          : > tarballs/manifest.tsv
+
+          pack() {
+            local dest="$1"
+            local src="$2"
+            local name version filename
+            name=$(node -p "require('$GITHUB_WORKSPACE/$src/package.json').name")
+            version=$(node -p "require('$GITHUB_WORKSPACE/$src/package.json').version")
+            filename=$(cd "$dest" && npm pack --ignore-scripts "$GITHUB_WORKSPACE/$src" | tail -n1)
+            # Use tabs as separators; tarball paths and package names never
+            # contain tabs.
+            printf '%s\t%s\t%s\n' "$dest/$filename" "$name" "$version" >> tarballs/manifest.tsv
+          }
+
+          for dir in \
+            ./npm/darwin-arm64 \
+            ./npm/darwin-x64 \
+            ./npm/linux-x64-gnu \
+            ./npm/linux-arm64-gnu \
+            ./npm/linux-x64-musl \
+            ./npm/linux-arm64-musl \
+            ./npm/win32-x64-msvc \
+            ./npm/win32-arm64-msvc
+          do
+            pack tarballs/10-cli-platform "$dir"
+          done
+
+          pack tarballs/20-cli-root ./npm/fallow
+
+          for dir in \
+            ./crates/napi/npm/darwin-arm64 \
+            ./crates/napi/npm/darwin-x64 \
+            ./crates/napi/npm/linux-x64-gnu \
+            ./crates/napi/npm/linux-arm64-gnu \
+            ./crates/napi/npm/linux-x64-musl \
+            ./crates/napi/npm/linux-arm64-musl \
+            ./crates/napi/npm/win32-x64-msvc \
+            ./crates/napi/npm/win32-arm64-msvc
+          do
+            pack tarballs/30-napi-platform "$dir"
+          done
+
+          pack tarballs/40-napi-root ./crates/napi
+
+          echo "--- manifest ---"
+          cat tarballs/manifest.tsv
+
+      - name: Upload npm tarballs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: npm-tarballs
+          path: tarballs/
+          retention-days: 7
+          include-hidden-files: false
+
+  npm-publish:
+    name: Publish to npm
+    # Privileged job. Keep the surface tiny:
+    # - downloads pre-packed tarballs (no fresh checkout, no installs)
+    # - the only network calls are `npm publish` and the `npm view` precheck
+    # - --ignore-scripts on every publish blocks lifecycle scripts inside the
+    #   tarballs from executing here.
+    # Anything that needs `npm ci` or runs dependency code belongs in npm-prep.
+    needs: [npm-prep, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # Bootstrap fallback. When NPM_TOKEN is present in repo secrets,
+      # setup-node writes it to .npmrc and `npm publish` authenticates
+      # with it. When the secret is absent (steady state, once every
+      # package has a trusted publisher registered), this stays empty
+      # and OIDC / trusted publishing handles auth exactly like today.
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Pin the global npm to a known-good version. `npm@latest` would pull
+      # whatever tag is current at publish time; we keep this explicit so a
+      # compromised `latest` tag cannot land in the privileged job without a
+      # commit to this file.
+      - name: Install pinned npm (required for trusted publishing)
+        run: npm install -g --ignore-scripts npm@11.14.1
+
+      - name: Download npm tarballs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: npm-tarballs
+          path: tarballs
+
+      - name: Publish all tarballs
         run: |
-          VERSION="${TAG_REF#refs/tags/v}"
+          if [ ! -f tarballs/manifest.tsv ]; then
+            echo "::error::tarballs/manifest.tsv missing; npm-prep did not produce a manifest"
+            exit 1
+          fi
           FAILED=0
-          for dir in ./crates/napi/npm/darwin-arm64 ./crates/napi/npm/darwin-x64 ./crates/napi/npm/linux-x64-gnu ./crates/napi/npm/linux-arm64-gnu ./crates/napi/npm/linux-x64-musl ./crates/napi/npm/linux-arm64-musl ./crates/napi/npm/win32-x64-msvc ./crates/napi/npm/win32-arm64-msvc; do
-            PKG_NAME=$(node -e "console.log(require('$dir/package.json').name)")
-            echo "Publishing $PKG_NAME@$VERSION..."
-            if npm view "$PKG_NAME@$VERSION" version >/dev/null 2>&1; then
+          # Manifest format (TSV): <tarball-path>\t<name>\t<version>. Rows are
+          # emitted in publish order by npm-prep, so we just walk top to bottom.
+          while IFS=$'\t' read -r file name version; do
+            [ -n "$file" ] || continue
+            if [ ! -f "$file" ]; then
+              echo "::error::Tarball missing: $file"
+              FAILED=1
+              continue
+            fi
+            echo "Publishing $name@$version from $file"
+            if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "  Already published, skipping"
               continue
             fi
-            if ! npm publish "$dir" --access public --provenance; then
+            if ! npm publish "$file" --access public --provenance --ignore-scripts; then
               echo "  Provenance publish failed, retrying without provenance..."
-              if ! npm publish "$dir" --access public; then
-                echo "::error::Failed to publish $PKG_NAME@$VERSION"
+              if ! npm publish "$file" --access public --ignore-scripts; then
+                echo "::error::Failed to publish $name@$version"
                 FAILED=1
               fi
             fi
-          done
+          done < tarballs/manifest.tsv
           if [ "$FAILED" -eq 1 ]; then
             exit 1
           fi
 
-      - name: Publish fallow-node
-        run: |
-          VERSION="${TAG_REF#refs/tags/v}"
-          if npm view "@fallow-cli/fallow-node@$VERSION" version >/dev/null 2>&1; then
-            echo "@fallow-cli/fallow-node@$VERSION already published, skipping"
-          else
-            npm publish ./crates/napi --access public --provenance --ignore-scripts || \
-              npm publish ./crates/napi --access public --ignore-scripts
-          fi
-
-  vscode-publish:
-    name: Publish VS Code Extension
+  # Build the .vsix in a job with no marketplace tokens. The matching
+  # vscode-publish job below downloads the .vsix as an artifact and runs
+  # only `vsce publish --packagePath` / `ovsx publish <file>` so VSCE_PAT
+  # and OVSX_PAT are never co-resident with `pnpm install` / extension
+  # build steps that execute dependency code.
+  vscode-prep:
+    name: Build VS Code .vsix
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      TAG_REF: ${{ github.ref }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@903f9c1a6ebcba6cf41d87230be49611ac97822e # v6
         with:
@@ -584,14 +693,17 @@ jobs:
         run: cd editors/vscode && pnpm install --frozen-lockfile
 
       - name: Update extension version
+        env:
+          PKG_VERSION_REF: ${{ github.ref }}
         run: |
-          VERSION="${TAG_REF#refs/tags/v}"
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('editors/vscode/package.json', 'utf8'));
-            pkg.version = '$VERSION';
-            fs.writeFileSync('editors/vscode/package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
+          VERSION="${PKG_VERSION_REF#refs/tags/v}"
+          PKG_VERSION="$VERSION" node -e '
+            const fs = require("fs");
+            const path = "editors/vscode/package.json";
+            const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
+            pkg.version = process.env.PKG_VERSION;
+            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n");
+          '
 
       - name: Copy LICENSE into extension directory
         run: cp LICENSE editors/vscode/LICENSE
@@ -602,14 +714,55 @@ jobs:
           pnpm build
           pnpm package
 
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fallow-vscode
+          path: editors/vscode/*.vsix
+
+  vscode-publish:
+    name: Publish VS Code Extension
+    needs: [vscode-prep, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '22'
+
+      - name: Download VSIX
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: fallow-vscode
+          path: vsix
+
+      - name: Locate VSIX
+        id: vsix
+        run: |
+          file=$(find vsix -maxdepth 1 -name '*.vsix' -type f | head -n1)
+          if [ -z "$file" ]; then
+            echo "::error::No .vsix file found in artifact"
+            exit 1
+          fi
+          echo "path=$file" >> "$GITHUB_OUTPUT"
+
+      # Install the publisher CLIs with --ignore-scripts so any compromised
+      # install/postinstall script of @vscode/vsce or ovsx (or a transitive
+      # dependency) cannot execute with VSCE_PAT / OVSX_PAT in the
+      # environment. Versions are pinned to match the editor's pnpm-lock.
+      - name: Install publisher CLIs
+        run: npm install -g --ignore-scripts @vscode/vsce@3.9.1 ovsx@0.10.11
+
       - name: Publish to VS Code Marketplace
         # continue-on-error so a transient failure here does not skip Open VSX
         # publish below. On a `gh run rerun --failed`, vsce will exit non-zero
         # with version-exists, but the next step still runs.
         continue-on-error: true
-        run: cd editors/vscode && pnpm exec vsce publish --no-dependencies
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          VSIX_PATH: ${{ steps.vsix.outputs.path }}
+        run: vsce publish --packagePath "$VSIX_PATH" --no-dependencies
 
       - name: Publish to Open VSX (Cursor, VSCodium)
         # continue-on-error so a transient 502 from openvsx.org does not block
@@ -617,12 +770,7 @@ jobs:
         # --failed` re-runs the entire job, vsce publish then fails with
         # version-exists, and Open VSX never gets retried.
         continue-on-error: true
-        run: cd editors/vscode && pnpm exec ovsx publish --no-dependencies
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
-
-      - name: Upload VSIX artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: fallow-vscode
-          path: editors/vscode/*.vsix
+          VSIX_PATH: ${{ steps.vsix.outputs.path }}
+        run: ovsx publish "$VSIX_PATH" --no-dependencies
