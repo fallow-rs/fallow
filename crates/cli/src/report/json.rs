@@ -624,7 +624,19 @@ fn build_actions(
         }));
     }
 
-    // Primary fix action
+    // Primary fix action. `auto_fixable` is per-instance for issue types
+    // whose `fallow fix` applier has per-finding guards (e.g.
+    // `unused_catalog_entries` skips entries with non-empty
+    // `hardcoded_consumers`); for those types the ActionSpec carries the
+    // pessimistic default `false` and the per-instance override flips it
+    // to `true` here when the applier would actually run.
+    let auto_fixable = if issue_key == "unused_catalog_entries" {
+        item.get("hardcoded_consumers")
+            .and_then(serde_json::Value::as_array)
+            .is_none_or(Vec::is_empty)
+    } else {
+        spec.auto_fixable
+    };
     let mut fix_action = if cross_workspace_dependency {
         serde_json::json!({
             "type": "move-dependency",
@@ -635,7 +647,7 @@ fn build_actions(
     } else {
         serde_json::json!({
             "type": spec.fix_type,
-            "auto_fixable": spec.auto_fixable,
+            "auto_fixable": auto_fixable,
             "description": spec.description,
         })
     };

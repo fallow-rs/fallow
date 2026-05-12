@@ -5,6 +5,7 @@ use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
 
+mod catalog;
 mod deps;
 mod enum_helpers;
 mod enum_members;
@@ -114,6 +115,17 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
         );
     }
 
+    let catalog_summary = catalog::apply_catalog_entry_fixes(
+        opts.root,
+        &results.unused_catalog_entries,
+        opts.output,
+        opts.dry_run,
+        &mut fixes,
+    );
+    had_write_error |= catalog_summary.write_error;
+    let catalog_applied = catalog_summary.applied;
+    let catalog_skipped = catalog_summary.skipped;
+
     if matches!(opts.output, OutputFormat::Json) {
         let applied_count = fixes
             .iter()
@@ -123,10 +135,19 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
                     .unwrap_or(false)
             })
             .count();
+        let skipped_count = fixes
+            .iter()
+            .filter(|f| {
+                f.get("skipped")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+            })
+            .count();
         match serde_json::to_string_pretty(&serde_json::json!({
             "dry_run": opts.dry_run,
             "fixes": fixes,
-            "total_fixed": applied_count
+            "total_fixed": applied_count,
+            "skipped": skipped_count,
         })) {
             Ok(json) => println!("{json}"),
             Err(e) => {
@@ -135,11 +156,28 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
             }
         }
     } else if !opts.quiet {
-        let fixed_count = fixes.len();
         if opts.dry_run {
             eprintln!("Dry run complete. No files were modified.");
         } else {
+            let fixed_count = fixes
+                .iter()
+                .filter(|f| {
+                    f.get("applied")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                })
+                .count();
             eprintln!("Fixed {fixed_count} issue(s).");
+        }
+        if catalog_skipped > 0 {
+            eprintln!(
+                "Skipped {catalog_skipped} catalog entry(ies) with hardcoded consumers or other guards (run with --format json for details).",
+            );
+        }
+        if !opts.dry_run && catalog_applied > 0 {
+            eprintln!(
+                "Catalog entries were removed from pnpm-workspace.yaml. Run `pnpm install` to refresh pnpm-lock.yaml.",
+            );
         }
     }
 

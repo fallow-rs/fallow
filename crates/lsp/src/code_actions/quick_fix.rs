@@ -119,6 +119,167 @@ pub fn build_remove_export_actions(
     actions
 }
 
+/// Build quick-fix code actions for unused pnpm catalog entries
+/// (delete the line range from `pnpm-workspace.yaml`).
+///
+/// Only emits an action when the finding's `hardcoded_consumers` list is
+/// empty. Workspace packages that still pin a hardcoded version would
+/// break on the next `pnpm install` if the catalog entry were removed,
+/// so the user must migrate consumers to the `catalog:` protocol first.
+///
+/// The LSP diagnostic carries only the entry's start line, not the end.
+/// The deletion range is computed from the YAML source on disk by
+/// scanning forward for lines whose indent is strictly greater than the
+/// entry line's indent (covers object-form entries such as
+/// `react:\n    specifier: ^18.2.0`).
+///
+/// The `root` parameter is required because `UnusedCatalogEntry.path` is
+/// stored project-root-relative; `Url::from_file_path` would silently
+/// reject the relative path and the action would never appear.
+#[expect(
+    clippy::disallowed_types,
+    reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by tower-lsp"
+)]
+pub fn build_remove_catalog_entry_actions(
+    results: &AnalysisResults,
+    root: &Path,
+    uri: &Url,
+    cursor_range: &Range,
+) -> Vec<CodeActionOrCommand> {
+    let mut actions = Vec::new();
+
+    for entry in &results.unused_catalog_entries {
+        // Skip entries with hardcoded consumers: the consumer-side
+        // migration must happen first.
+        if !entry.hardcoded_consumers.is_empty() {
+            continue;
+        }
+
+        let Ok(entry_uri) = Url::from_file_path(root.join(&entry.path)) else {
+            continue;
+        };
+        if entry_uri != *uri {
+            continue;
+        }
+
+        let entry_line = entry.line.saturating_sub(1);
+        if entry_line < cursor_range.start.line || entry_line > cursor_range.end.line {
+            continue;
+        }
+
+        // Read the YAML from disk so we can compute the deletion range.
+        // The LSP diagnostic carries only the start line; the end line
+        // depends on the entry's indent versus subsequent lines.
+        let absolute = root.join(&entry.path);
+        let Ok(content) = std::fs::read_to_string(&absolute) else {
+            continue;
+        };
+        let lines: Vec<&str> = content.lines().collect();
+        let start_idx = entry_line as usize;
+        if start_idx >= lines.len() {
+            continue;
+        }
+        let end_idx = compute_catalog_deletion_end(&lines, start_idx);
+        // Sanity-check the line really matches the reported entry name:
+        // if the file has been edited since `fallow check` ran, the line
+        // might no longer hold the catalog entry. Bail in that case so
+        // we don't delete something unrelated. The check is intentionally
+        // loose (substring match) to handle quoted (`"@scope/foo":`) and
+        // unquoted (`react:`) key forms uniformly.
+        let line_content = lines[start_idx];
+        if !line_content.contains(&entry.entry_name) || !line_content.contains(':') {
+            continue;
+        }
+
+        let title = if entry.catalog_name == "default" {
+            format!("Remove unused catalog entry `{}`", entry.entry_name)
+        } else {
+            format!(
+                "Remove unused catalog entry `{}` from `{}`",
+                entry.entry_name, entry.catalog_name
+            )
+        };
+
+        let mut changes = HashMap::new();
+        // Single TextEdit removing the line range [start_idx, end_idx).
+        // The replacement text is empty. Using start of start_idx to
+        // start of end_idx absorbs the newline at the boundary so we
+        // don't leave a blank line behind.
+        let edit = TextEdit {
+            range: Range {
+                start: Position {
+                    line: start_idx as u32,
+                    character: 0,
+                },
+                end: Position {
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "line index is bounded by source size"
+                    )]
+                    line: end_idx as u32,
+                    character: 0,
+                },
+            },
+            new_text: String::new(),
+        };
+        changes.insert(uri.clone(), vec![edit]);
+
+        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+            title,
+            kind: Some(CodeActionKind::QUICKFIX),
+            edit: Some(WorkspaceEdit {
+                changes: Some(changes),
+                ..Default::default()
+            }),
+            diagnostics: Some(vec![Diagnostic {
+                range: Range {
+                    start: Position {
+                        line: entry_line,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: entry_line,
+                        character: u32::MAX,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::WARNING),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("unused-catalog-entry".to_string())),
+                message: format!(
+                    "Unused catalog entry: '{}' is not referenced by any workspace package",
+                    entry.entry_name
+                ),
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        }));
+    }
+
+    actions
+}
+
+/// Compute the end line index (exclusive) for a catalog entry whose key
+/// sits on `start_idx`. Mirrors the algorithm in
+/// `crates/cli/src/fix/catalog.rs::compute_deletion_range` so the LSP
+/// preview matches what `fallow fix` would write.
+fn compute_catalog_deletion_end(lines: &[&str], start_idx: usize) -> usize {
+    let entry_indent = lines[start_idx].bytes().take_while(|&b| b == b' ').count();
+    let mut end_idx = start_idx + 1;
+    while end_idx < lines.len() {
+        let line = lines[end_idx];
+        if line.trim().is_empty() {
+            break;
+        }
+        let indent = line.bytes().take_while(|&b| b == b' ').count();
+        if indent <= entry_indent {
+            break;
+        }
+        end_idx += 1;
+    }
+    end_idx
+}
+
 /// Build quick-fix code actions for unused files (delete the file).
 pub fn build_delete_file_actions(
     results: &AnalysisResults,
@@ -776,5 +937,176 @@ mod tests {
         let delete_ca = unwrap_code_action(&delete_actions[0]);
         assert!(export_ca.title.contains("Remove unused export"));
         assert!(delete_ca.title.contains("Delete"));
+    }
+
+    // -----------------------------------------------------------------------
+    // build_remove_catalog_entry_actions
+    // -----------------------------------------------------------------------
+
+    use fallow_core::results::UnusedCatalogEntry;
+
+    fn make_catalog_entry(
+        name: &str,
+        catalog: &str,
+        line: u32,
+        consumers: Vec<PathBuf>,
+    ) -> UnusedCatalogEntry {
+        UnusedCatalogEntry {
+            entry_name: name.to_string(),
+            catalog_name: catalog.to_string(),
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line,
+            hardcoded_consumers: consumers,
+        }
+    }
+
+    #[test]
+    fn no_catalog_action_when_no_findings() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path().join("pnpm-workspace.yaml");
+        std::fs::write(&workspace, "catalog:\n  is-even: ^1.0.0\n").unwrap();
+        let uri = Url::from_file_path(&workspace).unwrap();
+        let results = AnalysisResults::default();
+
+        let actions =
+            build_remove_catalog_entry_actions(&results, dir.path(), &uri, &make_range(0, 100));
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn catalog_action_uses_root_join_for_relative_path() {
+        // Regression test for issue #329: when the LSP emitter forgets
+        // to `root.join(&entry.path)`, `Url::from_file_path` rejects the
+        // relative path and the action silently never appears.
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path().join("pnpm-workspace.yaml");
+        std::fs::write(&workspace, "catalog:\n  is-even: ^1.0.0\n").unwrap();
+        let uri = Url::from_file_path(&workspace).unwrap();
+
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(make_catalog_entry("is-even", "default", 2, vec![]));
+
+        let actions =
+            build_remove_catalog_entry_actions(&results, dir.path(), &uri, &make_range(1, 1));
+
+        assert_eq!(actions.len(), 1);
+        let ca = unwrap_code_action(&actions[0]);
+        assert!(ca.title.contains("is-even"));
+        assert_eq!(ca.kind, Some(CodeActionKind::QUICKFIX));
+    }
+
+    #[test]
+    fn catalog_action_skipped_when_hardcoded_consumers_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path().join("pnpm-workspace.yaml");
+        std::fs::write(&workspace, "catalog:\n  react: ^18.2.0\n").unwrap();
+        let uri = Url::from_file_path(&workspace).unwrap();
+
+        let mut results = AnalysisResults::default();
+        results.unused_catalog_entries.push(make_catalog_entry(
+            "react",
+            "default",
+            2,
+            vec![PathBuf::from("apps/web/package.json")],
+        ));
+
+        let actions =
+            build_remove_catalog_entry_actions(&results, dir.path(), &uri, &make_range(1, 1));
+        // The action must NOT appear: removing the catalog entry while a
+        // consumer still pins a hardcoded version would break install.
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn catalog_action_deletes_object_form_range() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path().join("pnpm-workspace.yaml");
+        std::fs::write(
+            &workspace,
+            "catalog:\n  react:\n    specifier: ^18.2.0\n    publishConfig: {}\n  is-even: ^1.0.0\n",
+        )
+        .unwrap();
+        let uri = Url::from_file_path(&workspace).unwrap();
+
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(make_catalog_entry("react", "default", 2, vec![]));
+
+        let actions =
+            build_remove_catalog_entry_actions(&results, dir.path(), &uri, &make_range(1, 1));
+
+        assert_eq!(actions.len(), 1);
+        let ca = unwrap_code_action(&actions[0]);
+        let changes = ca.edit.as_ref().unwrap().changes.as_ref().unwrap();
+        let edits = changes.get(&uri).unwrap();
+        assert_eq!(edits.len(), 1);
+        // start line 1 (`react:`), end line 4 (`is-even:` line). Range
+        // covers the 3-line object block: react: + 2 nested.
+        assert_eq!(edits[0].range.start.line, 1);
+        assert_eq!(edits[0].range.end.line, 4);
+        assert_eq!(edits[0].new_text, "");
+    }
+
+    #[test]
+    fn catalog_action_bails_when_line_does_not_match_entry_name() {
+        // File has been edited since `fallow check` ran; the reported
+        // line no longer holds the catalog entry. Don't blindly delete
+        // unrelated content.
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path().join("pnpm-workspace.yaml");
+        std::fs::write(&workspace, "catalog:\n  different-entry: ^2.0.0\n").unwrap();
+        let uri = Url::from_file_path(&workspace).unwrap();
+
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(make_catalog_entry("is-even", "default", 2, vec![]));
+
+        let actions =
+            build_remove_catalog_entry_actions(&results, dir.path(), &uri, &make_range(1, 1));
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn catalog_action_outside_cursor_range_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path().join("pnpm-workspace.yaml");
+        std::fs::write(
+            &workspace,
+            "catalog:\n  is-odd: ^1.0.0\n  is-even: ^1.0.0\n",
+        )
+        .unwrap();
+        let uri = Url::from_file_path(&workspace).unwrap();
+
+        let mut results = AnalysisResults::default();
+        // is-even sits on 1-based line 3 (0-based line 2)
+        results
+            .unused_catalog_entries
+            .push(make_catalog_entry("is-even", "default", 3, vec![]));
+
+        // Cursor on lines 0-1; action's diagnostic is on line 2.
+        let actions =
+            build_remove_catalog_entry_actions(&results, dir.path(), &uri, &make_range(0, 1));
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn compute_catalog_deletion_end_scalar() {
+        let lines: Vec<&str> = "catalog:\n  is-even: ^1.0.0\n  is-odd: ^1.0.0\n"
+            .split('\n')
+            .collect();
+        // start at index 1 (`  is-even: ^1.0.0`)
+        assert_eq!(compute_catalog_deletion_end(&lines, 1), 2);
+    }
+
+    #[test]
+    fn compute_catalog_deletion_end_object_form() {
+        let content = "catalog:\n  react:\n    specifier: ^18.2.0\n    publishConfig: {}\n  is-even: ^1.0.0\n";
+        let lines: Vec<&str> = content.split('\n').collect();
+        // start at index 1 (`  react:`); should consume 3 more lines.
+        assert_eq!(compute_catalog_deletion_end(&lines, 1), 4);
     }
 }

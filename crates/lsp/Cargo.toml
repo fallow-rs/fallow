@@ -22,6 +22,7 @@ tracing-subscriber = { workspace = true }
 rustc-hash = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 tower = { version = "0.5", default-features = false, features = ["util"] }
 
 [lints]

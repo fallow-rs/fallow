@@ -397,7 +397,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
       "actions": [
         {
           "type": "remove-catalog-entry",
-          "auto_fixable": false,
+          "auto_fixable": true,
           "description": "Remove the entry from pnpm-workspace.yaml",
           "note": "If any consumer declares the same package with a hardcoded version, switch the consumer to `catalog:` before removing"
         },

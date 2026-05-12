@@ -544,6 +544,19 @@ impl LanguageServer for FallowLspServer {
             &params.range,
         ));
 
+        // Generate "Remove unused catalog entry" code actions for
+        // pnpm-workspace.yaml findings. `entry.path` is stored relative
+        // to the analyzer root, so we pass the cached root through.
+        let root = self.root.read().await.clone();
+        if let Some(root) = root {
+            actions.extend(code_actions::build_remove_catalog_entry_actions(
+                results,
+                &root,
+                uri,
+                &params.range,
+            ));
+        }
+
         if actions.is_empty() {
             Ok(None)
         } else {
