@@ -172,12 +172,23 @@ pub(super) fn apply_catalog_entry_fixes(
             continue;
         }
 
-        // Apply: drain ranges from a fresh Vec<String>, validate by reparse,
-        // then atomic-write.
+        // Track the parent header line for each deletion so we can detect
+        // when an entire catalog group becomes empty (e.g. removing the
+        // last entry from `catalogs.react17` leaves `react17:` with a
+        // null value, which pnpm rejects with "Cannot convert undefined
+        // or null to object" at install time).
+        let parent_header_indices: Vec<usize> = deduped
+            .iter()
+            .filter_map(|(_, entry)| find_parent_header_line(&lines, entry))
+            .collect();
+
+        // Apply: drain ranges from a fresh Vec<String>, rewrite emptied
+        // parent headers to `key: {}`, validate by reparse, then atomic-write.
         let mut new_lines: Vec<String> = lines.iter().map(ToString::to_string).collect();
         for (range, _) in &deduped {
             new_lines.drain(range.clone());
         }
+        rewrite_empty_catalog_parents(&mut new_lines, &parent_header_indices, &deduped);
 
         let mut new_content = new_lines.join(line_ending);
         if content.ends_with(line_ending) && !new_content.ends_with(line_ending) {
@@ -254,6 +265,128 @@ fn is_multi_document_yaml(content: &str) -> bool {
     content
         .lines()
         .any(|line| line.trim_end() == "---" || line.trim_end().starts_with("--- "))
+}
+
+/// Locate the line index of a catalog entry's parent header in the
+/// PRE-deletion `lines` Vec. Returns:
+/// - `Some(idx)` of the line containing `catalog:` for default-catalog entries
+/// - `Some(idx)` of the line containing `<name>:` (indented under `catalogs:`)
+///   for named-catalog entries
+/// - `None` if no matching parent is found (the file shape diverges from
+///   what the detector reported; the caller skips the rewrite step)
+fn find_parent_header_line(lines: &[&str], entry: &UnusedCatalogEntry) -> Option<usize> {
+    let entry_line_idx = entry.line.saturating_sub(1) as usize;
+    if entry_line_idx >= lines.len() {
+        return None;
+    }
+    let entry_indent = leading_spaces(lines[entry_line_idx]);
+
+    // Walk backwards from the entry line to find the first line at
+    // strictly lower indent. For default-catalog entries the parent
+    // must start with `catalog:`; for named-catalog entries the parent
+    // is the `<name>:` line at an intermediate indent under `catalogs:`.
+    for idx in (0..entry_line_idx).rev() {
+        let line = lines[idx];
+        let stripped = line.trim_end();
+        let content = stripped.trim_start();
+        if content.is_empty() || content.starts_with('#') {
+            continue;
+        }
+        let indent = leading_spaces(stripped);
+        if indent >= entry_indent {
+            continue;
+        }
+        if entry.catalog_name == "default" {
+            return content.starts_with("catalog:").then_some(idx);
+        }
+        // Strip leading quotes for quoted-key catalog names.
+        let key = content
+            .trim_start_matches(['"', '\''])
+            .split([':', '"', '\''])
+            .next()
+            .unwrap_or("");
+        return (key == entry.catalog_name).then_some(idx);
+    }
+    None
+}
+
+/// Rewrite parent catalog headers whose only children were just deleted.
+///
+/// pnpm rejects null-valued catalogs (`catalogs:\n  react17:\n` parses
+/// as `{'catalogs': {'react17': None}}`) with
+/// `Cannot convert undefined or null to object` at install time. When
+/// we empty a catalog group via `apply_catalog_entry_fixes`, rewrite
+/// the header from `react17:` to `react17: {}` so the file stays
+/// installable. Verified against pnpm 10.33.4.
+///
+/// `parent_indices` are line indices into the PRE-deletion `lines` Vec.
+/// `deleted_ranges` are the ranges that were drained from that Vec.
+/// Both are translated into POST-deletion `new_lines` coordinates by
+/// subtracting the number of deleted lines preceding each anchor.
+fn rewrite_empty_catalog_parents(
+    new_lines: &mut [String],
+    parent_indices: &[usize],
+    deleted_ranges: &[(std::ops::Range<usize>, &UnusedCatalogEntry)],
+) {
+    // Dedup parents and map their pre-deletion indices into post-deletion
+    // indices. A parent header line itself is NEVER inside a deletion
+    // range (deletions cover entry lines plus their multi-line children,
+    // which all sit BELOW the parent), so the mapping is simply
+    // `new_idx = pre_idx - (lines deleted strictly before pre_idx)`.
+    let mut unique_parents: Vec<usize> = parent_indices.to_vec();
+    unique_parents.sort_unstable();
+    unique_parents.dedup();
+
+    for parent_pre_idx in unique_parents {
+        let deleted_before: usize = deleted_ranges
+            .iter()
+            .map(|(range, _)| {
+                if range.end <= parent_pre_idx {
+                    range.end - range.start
+                } else if range.start <= parent_pre_idx {
+                    // Parent inside a deletion range is impossible by
+                    // construction (deletions start at entry lines, which
+                    // are strictly below the parent). Skip defensively.
+                    0
+                } else {
+                    0
+                }
+            })
+            .sum();
+        let new_idx = parent_pre_idx.saturating_sub(deleted_before);
+        if new_idx >= new_lines.len() {
+            continue;
+        }
+        if has_remaining_children(new_lines, new_idx) {
+            continue;
+        }
+        // Append ` {}` to the header line, preserving any trailing
+        // whitespace / line ending semantics. `new_lines` was produced
+        // by `content.split(line_ending)`, so trailing whitespace is
+        // already trimmed and the line ending is added back on join.
+        let original = new_lines[new_idx].clone();
+        let trimmed_end = original.trim_end();
+        let trailing = &original[trimmed_end.len()..];
+        new_lines[new_idx] = format!("{trimmed_end} {{}}{trailing}");
+    }
+}
+
+/// Return true if `parent_idx` in `lines` is followed by at least one
+/// child line (indent strictly greater than the parent's). Comments and
+/// blank lines are skipped; a sibling-or-shallower non-blank line means
+/// the parent has no children.
+fn has_remaining_children(lines: &[String], parent_idx: usize) -> bool {
+    let parent_indent = leading_spaces(&lines[parent_idx]);
+    for line in lines.iter().skip(parent_idx + 1) {
+        let stripped = line.trim_end();
+        let content = stripped.trim_start();
+        if content.is_empty() || content.starts_with('#') {
+            continue;
+        }
+        let indent = leading_spaces(stripped);
+        return indent > parent_indent;
+    }
+    false
 }
 
 fn skip_record(
@@ -601,7 +734,11 @@ mod tests {
     }
 
     #[test]
-    fn leaves_empty_catalog_header_in_place() {
+    fn rewrites_emptied_default_catalog_to_empty_map() {
+        // Regression: pnpm rejects `catalog:\n` (null value) with
+        // "Cannot convert undefined or null to object". When the fix
+        // empties the default catalog, the header must be rewritten to
+        // `catalog: {}` so the file stays installable.
         let dir = tempfile::tempdir().unwrap();
         let content = "catalog:\n  is-even: ^1.0.0\n";
         seed_workspace_file(dir.path(), content);
@@ -611,8 +748,79 @@ mod tests {
         apply_catalog_entry_fixes(dir.path(), &entries, OutputFormat::Json, false, &mut fixes);
 
         let result = std::fs::read_to_string(dir.path().join("pnpm-workspace.yaml")).unwrap();
-        // The `catalog:` header stays; we don't guess at structural edits.
-        assert_eq!(result, "catalog:\n");
+        assert_eq!(result, "catalog: {}\n");
+        let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&result).unwrap();
+        assert!(
+            parsed
+                .get("catalog")
+                .and_then(serde_yaml_ng::Value::as_mapping)
+                .is_some_and(serde_yaml_ng::Mapping::is_empty),
+            "catalog must be `{{}}`, not null"
+        );
+    }
+
+    #[test]
+    fn rewrites_emptied_named_catalog_to_empty_map() {
+        // Regression: same as above for named catalogs. Reproduces the
+        // issue-329 fixture's `react17` group after removing both its
+        // entries.
+        let dir = tempfile::tempdir().unwrap();
+        let content =
+            "catalogs:\n  react17:\n    react: ^17.0.2\n    react-dom: ^17.0.2\n  legacy:\n    is-odd: ^3.0.0\n";
+        seed_workspace_file(dir.path(), content);
+
+        let entries = vec![
+            make_entry("react", "react17", 3),
+            make_entry("react-dom", "react17", 4),
+        ];
+        let mut fixes = Vec::new();
+        apply_catalog_entry_fixes(dir.path(), &entries, OutputFormat::Json, false, &mut fixes);
+
+        let result = std::fs::read_to_string(dir.path().join("pnpm-workspace.yaml")).unwrap();
+        assert_eq!(
+            result,
+            "catalogs:\n  react17: {}\n  legacy:\n    is-odd: ^3.0.0\n",
+        );
+        let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&result).unwrap();
+        let react17 = parsed.get("catalogs").and_then(|c| c.get("react17"));
+        assert!(
+            react17
+                .and_then(serde_yaml_ng::Value::as_mapping)
+                .is_some_and(serde_yaml_ng::Mapping::is_empty),
+            "react17 must be `{{}}`, not null. Got: {react17:?}"
+        );
+    }
+
+    #[test]
+    fn preserves_non_empty_sibling_named_catalogs() {
+        // When one named catalog is emptied but a sibling stays populated,
+        // only the emptied one gets the `{}` rewrite.
+        let dir = tempfile::tempdir().unwrap();
+        let content = "catalogs:\n  react17:\n    react: ^17.0.2\n  vue3:\n    vue: ^3.4.0\n";
+        seed_workspace_file(dir.path(), content);
+
+        let entries = vec![make_entry("react", "react17", 3)];
+        let mut fixes = Vec::new();
+        apply_catalog_entry_fixes(dir.path(), &entries, OutputFormat::Json, false, &mut fixes);
+
+        let result = std::fs::read_to_string(dir.path().join("pnpm-workspace.yaml")).unwrap();
+        assert_eq!(result, "catalogs:\n  react17: {}\n  vue3:\n    vue: ^3.4.0\n");
+    }
+
+    #[test]
+    fn leaves_partially_populated_catalog_alone() {
+        // When only some entries of a catalog are removed and siblings
+        // remain, no `{}` rewrite is needed.
+        let dir = tempfile::tempdir().unwrap();
+        let content = "catalog:\n  is-odd: ^1.0.0\n  is-even: ^1.0.0\n";
+        seed_workspace_file(dir.path(), content);
+
+        let entries = vec![make_entry("is-even", "default", 3)];
+        let mut fixes = Vec::new();
+        apply_catalog_entry_fixes(dir.path(), &entries, OutputFormat::Json, false, &mut fixes);
+
+        let result = std::fs::read_to_string(dir.path().join("pnpm-workspace.yaml")).unwrap();
+        assert_eq!(result, "catalog:\n  is-odd: ^1.0.0\n");
     }
 
     // -- compute_deletion_range unit tests ----------------------------------

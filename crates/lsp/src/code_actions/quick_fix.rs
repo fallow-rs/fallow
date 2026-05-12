@@ -212,7 +212,7 @@ pub fn build_remove_catalog_entry_actions(
         // The replacement text is empty. Using start of start_idx to
         // start of end_idx absorbs the newline at the boundary so we
         // don't leave a blank line behind.
-        let edit = TextEdit {
+        let mut edits = vec![TextEdit {
             range: Range {
                 start: Position {
                     line: start_idx as u32,
@@ -228,8 +228,20 @@ pub fn build_remove_catalog_entry_actions(
                 },
             },
             new_text: String::new(),
-        };
-        changes.insert(uri.clone(), vec![edit]);
+        }];
+
+        // If removing this entry empties its parent catalog
+        // (`catalog:` or `catalogs.<name>:`), append a second TextEdit
+        // that rewrites the parent header to `key: {}`. Bare `key:` in
+        // YAML parses as null which pnpm rejects with
+        // "Cannot convert undefined or null to object" at install time.
+        // Verified against pnpm 10.33.4.
+        if let Some(parent_edit) =
+            build_parent_rewrite_edit(file_lines, start_idx, end_idx, &entry.catalog_name)
+        {
+            edits.push(parent_edit);
+        }
+        changes.insert(uri.clone(), edits);
 
         // Reconstruct the published diagnostic so VS Code's
         // "Fix all in file" source action can tie this edit back to the
@@ -330,6 +342,118 @@ fn compute_catalog_deletion_end(lines: &[&str], start_idx: usize) -> usize {
         end_idx += 1;
     }
     end_idx
+}
+
+/// Build a TextEdit that rewrites the parent catalog header to `key: {}`
+/// when removing the line range `[start_idx, end_idx)` would leave it
+/// with no children. Returns `None` if siblings remain or no parent is
+/// found. Mirrors the CLI fix module's `rewrite_empty_catalog_parents`.
+fn build_parent_rewrite_edit(
+    lines: &[&str],
+    start_idx: usize,
+    end_idx: usize,
+    catalog_name: &str,
+) -> Option<TextEdit> {
+    let parent_idx = find_parent_header_idx(lines, start_idx, catalog_name)?;
+    if parent_has_other_children(lines, parent_idx, start_idx, end_idx) {
+        return None;
+    }
+    let header = lines[parent_idx];
+    let trimmed_end = header.trim_end();
+    let new_text = format!("{trimmed_end} {{}}");
+    Some(TextEdit {
+        range: Range {
+            start: Position {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "line index is bounded by source size"
+                )]
+                line: parent_idx as u32,
+                character: 0,
+            },
+            end: Position {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "line index is bounded by source size"
+                )]
+                line: parent_idx as u32,
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "header length is bounded by source size"
+                )]
+                character: header.len() as u32,
+            },
+        },
+        new_text,
+    })
+}
+
+/// Walk backwards from a catalog entry line to find its parent header
+/// line index. For default-catalog entries the parent is the line
+/// starting with `catalog:`; for named-catalog entries the parent is
+/// the indented `<name>:` line under `catalogs:`.
+fn find_parent_header_idx(
+    lines: &[&str],
+    entry_idx: usize,
+    catalog_name: &str,
+) -> Option<usize> {
+    if entry_idx >= lines.len() {
+        return None;
+    }
+    let entry_indent = lines[entry_idx].bytes().take_while(|&b| b == b' ').count();
+    for idx in (0..entry_idx).rev() {
+        let line = lines[idx];
+        let stripped = line.trim_end();
+        let content = stripped.trim_start();
+        if content.is_empty() || content.starts_with('#') {
+            continue;
+        }
+        let indent = stripped.bytes().take_while(|&b| b == b' ').count();
+        if indent >= entry_indent {
+            continue;
+        }
+        if catalog_name == "default" {
+            return content.starts_with("catalog:").then_some(idx);
+        }
+        let key = content
+            .trim_start_matches(['"', '\''])
+            .split([':', '"', '\''])
+            .next()
+            .unwrap_or("");
+        return (key == catalog_name).then_some(idx);
+    }
+    None
+}
+
+/// Return true if the parent at `parent_idx` has at least one child
+/// line that is NOT inside the deletion range `[del_start, del_end)`.
+/// Comments and blank lines are not counted as children.
+fn parent_has_other_children(
+    lines: &[&str],
+    parent_idx: usize,
+    del_start: usize,
+    del_end: usize,
+) -> bool {
+    let parent_indent = lines[parent_idx]
+        .bytes()
+        .take_while(|&b| b == b' ')
+        .count();
+    for (idx, line) in lines.iter().enumerate().skip(parent_idx + 1) {
+        let stripped = line.trim_end();
+        let content = stripped.trim_start();
+        if content.is_empty() || content.starts_with('#') {
+            continue;
+        }
+        let indent = stripped.bytes().take_while(|&b| b == b' ').count();
+        if indent <= parent_indent {
+            return false;
+        }
+        // This is a child of the parent. Is it inside the deletion range?
+        if idx < del_start || idx >= del_end {
+            return true;
+        }
+    }
+    false
 }
 
 /// Build quick-fix code actions for unused files (delete the file).
@@ -1284,6 +1408,114 @@ mod tests {
             diag_msg.contains("in catalog 'react17'"),
             "named-catalog diagnostic must say `in catalog 'react17'`, got: {diag_msg}"
         );
+    }
+
+    #[test]
+    fn catalog_action_emits_parent_rewrite_when_emptying_named_catalog() {
+        // Regression: pnpm rejects bare `react17:` (null value). When the
+        // last entry of a named catalog is removed, the action must emit
+        // a second TextEdit rewriting the parent to `react17: {}`.
+        // Reproduces the issue-329 fixture scenario Codex caught.
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(make_catalog_entry("react", "react17", 3, vec![]));
+
+        let lines = vec!["catalogs:", "  react17:", "    react: ^17.0.2"];
+        let actions = build_remove_catalog_entry_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(2, 2),
+            &lines,
+        );
+
+        assert_eq!(actions.len(), 1);
+        let ca = unwrap_code_action(&actions[0]);
+        let changes = ca.edit.as_ref().unwrap().changes.as_ref().unwrap();
+        let edits = changes.get(&uri).unwrap();
+        assert_eq!(
+            edits.len(),
+            2,
+            "must emit deletion + parent rewrite, got {} edits",
+            edits.len()
+        );
+        // First edit removes the entry line.
+        assert_eq!(edits[0].range.start.line, 2);
+        assert_eq!(edits[0].new_text, "");
+        // Second edit rewrites the parent header.
+        assert_eq!(edits[1].range.start.line, 1);
+        assert_eq!(edits[1].new_text, "  react17: {}");
+    }
+
+    #[test]
+    fn catalog_action_no_parent_rewrite_when_siblings_remain() {
+        // When other entries stay in the catalog, the parent rewrite
+        // must NOT fire.
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(make_catalog_entry("react", "react17", 3, vec![]));
+
+        let lines = vec![
+            "catalogs:",
+            "  react17:",
+            "    react: ^17.0.2",
+            "    react-dom: ^17.0.2",
+        ];
+        let actions = build_remove_catalog_entry_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(2, 2),
+            &lines,
+        );
+
+        assert_eq!(actions.len(), 1);
+        let ca = unwrap_code_action(&actions[0]);
+        let changes = ca.edit.as_ref().unwrap().changes.as_ref().unwrap();
+        let edits = changes.get(&uri).unwrap();
+        assert_eq!(edits.len(), 1, "react-dom remains so parent stays populated");
+    }
+
+    #[test]
+    fn catalog_action_emits_parent_rewrite_for_default_catalog() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(make_catalog_entry("is-even", "default", 2, vec![]));
+
+        let lines = vec!["catalog:", "  is-even: ^1.0.0"];
+        let actions = build_remove_catalog_entry_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(1, 1),
+            &lines,
+        );
+
+        assert_eq!(actions.len(), 1);
+        let ca = unwrap_code_action(&actions[0]);
+        let edits = ca
+            .edit
+            .as_ref()
+            .unwrap()
+            .changes
+            .as_ref()
+            .unwrap()
+            .get(&uri)
+            .unwrap();
+        assert_eq!(edits.len(), 2);
+        assert_eq!(edits[1].new_text, "catalog: {}");
     }
 
     #[test]
