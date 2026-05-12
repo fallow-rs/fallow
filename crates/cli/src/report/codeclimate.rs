@@ -572,7 +572,7 @@ fn push_unresolved_catalog_reference_issues(
             format!("catalog '{}'", finding.catalog_name)
         };
         let mut description = format!(
-            "Package '{}' is referenced via `catalog:{}` but {} does not declare it",
+            "Package '{}' is referenced via `catalog:{}` but {} does not declare it; `pnpm install` will fail",
             finding.entry_name,
             if finding.catalog_name == "default" {
                 ""

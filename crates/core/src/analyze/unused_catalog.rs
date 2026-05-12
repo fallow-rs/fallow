@@ -130,7 +130,9 @@ pub fn find_unresolved_catalog_references(
             continue;
         }
 
-        let consumer_path_str = reference.consumer_path.to_string_lossy();
+        // Normalize backslashes to forward slashes so user-written consumer
+        // globs (which are always written with `/`) match correctly on Windows.
+        let consumer_path_str = reference.consumer_path.to_string_lossy().replace('\\', "/");
         if ignore_rules.iter().any(|rule| {
             rule.matches(
                 &reference.package_name,
@@ -282,11 +284,16 @@ fn collect_catalog_consumers(pkg_paths: &[PathBuf], root: &Path) -> CatalogConsu
                         package_name: name.clone(),
                         catalog_name: catalog.to_string(),
                     });
+                    // Fall back to line 1 (file top) on the rare minified
+                    // form where `"dependencies": {"react": "..."}` shares a
+                    // line so the LSP diagnostic still lands inside the file
+                    // instead of off-screen at line 0.
+                    let line = line_map.line_for(section, name).unwrap_or(1);
                     consumers.referenced_with_locations.push(ConsumerReference {
                         package_name: name.clone(),
                         catalog_name: catalog.to_string(),
                         consumer_path: relative_path.clone(),
-                        line: line_map.line_for(section, name).unwrap_or(0),
+                        line,
                     });
                 } else if is_hardcoded_version(version) {
                     consumers
