@@ -203,6 +203,10 @@ pub fn has_error_severity_issues(
         || (rules.boundary_violation == Severity::Error && !results.boundary_violations.is_empty())
         || (rules.unused_catalog_entries == Severity::Error
             && !results.unused_catalog_entries.is_empty())
+        || (rules.unused_dependency_overrides == Severity::Error
+            && !results.unused_dependency_overrides.is_empty())
+        || (rules.misconfigured_dependency_overrides == Severity::Error
+            && !results.misconfigured_dependency_overrides.is_empty())
 }
 
 /// Promote all `Warn` severities to `Error` for a single run.
@@ -266,6 +270,12 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     }
     if rules.unresolved_catalog_references == Severity::Warn {
         rules.unresolved_catalog_references = Severity::Error;
+    }
+    if rules.unused_dependency_overrides == Severity::Warn {
+        rules.unused_dependency_overrides = Severity::Error;
+    }
+    if rules.misconfigured_dependency_overrides == Severity::Warn {
+        rules.misconfigured_dependency_overrides = Severity::Error;
     }
 }
 

@@ -276,6 +276,8 @@ pub fn build_json(
         "stale_suppressions": results.stale_suppressions.len(),
         "unused_catalog_entries": results.unused_catalog_entries.len(),
         "unresolved_catalog_references": results.unresolved_catalog_references.len(),
+        "unused_dependency_overrides": results.unused_dependency_overrides.len(),
+        "misconfigured_dependency_overrides": results.misconfigured_dependency_overrides.len(),
     });
     map.insert("summary".to_string(), summary);
 
@@ -342,6 +344,9 @@ enum SuppressKind {
     /// Add to `ignoreCatalogReferences` in fallow config (with optional
     /// catalog + consumer scope).
     AddToConfigIgnoreCatalogReferences,
+    /// Add to `ignoreDependencyOverrides` in fallow config (with optional
+    /// source scope).
+    AddToConfigIgnoreDependencyOverrides,
 }
 
 /// Specification for actions to inject per issue type.
@@ -522,6 +527,26 @@ fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
             ),
             suppress: SuppressKind::AddToConfigIgnoreCatalogReferences,
             issue_kind: "unresolved-catalog-reference",
+        }),
+        "unused_dependency_overrides" => Some(ActionSpec {
+            fix_type: "remove-dependency-override",
+            auto_fixable: false,
+            description: "Remove the override entry from pnpm-workspace.yaml or pnpm.overrides",
+            note: Some(
+                "Conservative static check; verify against `pnpm install --frozen-lockfile` before removing in case the override targets a transitive dependency (CVE-fix pattern)",
+            ),
+            suppress: SuppressKind::AddToConfigIgnoreDependencyOverrides,
+            issue_kind: "unused-dependency-override",
+        }),
+        "misconfigured_dependency_overrides" => Some(ActionSpec {
+            fix_type: "fix-dependency-override",
+            auto_fixable: false,
+            description: "Fix the override key or value: pnpm refuses to honor entries with an unparsable key or empty value",
+            note: Some(
+                "Common shapes: bare `pkg`, scoped `@scope/pkg`, version-selector `pkg@<2`, parent-chain `parent>child`. Valid values include semver ranges, `-` (removal), `$ref` (self-ref), and `npm:alias@^1`.",
+            ),
+            suppress: SuppressKind::AddToConfigIgnoreDependencyOverrides,
+            issue_kind: "misconfigured-dependency-override",
         }),
         _ => None,
     }
@@ -738,6 +763,28 @@ fn build_actions(
                 "config_key": "ignoreCatalogReferences",
                 "value": value,
                 "value_schema": IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA,
+            }));
+        }
+        SuppressKind::AddToConfigIgnoreDependencyOverrides => {
+            let package_name = item
+                .get("target_package")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| item.get("raw_key").and_then(serde_json::Value::as_str))
+                .unwrap_or("package");
+            let source = item
+                .get("source")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("pnpm-workspace.yaml");
+            let value = serde_json::json!({
+                "package": package_name,
+                "source": source,
+            });
+            actions.push(serde_json::json!({
+                "type": "add-to-config",
+                "auto_fixable": false,
+                "description": "Suppress this override finding via ignoreDependencyOverrides in fallow config (use for CVE-fix overrides that target a purely-transitive package).",
+                "config_key": "ignoreDependencyOverrides",
+                "value": value,
             }));
         }
     }

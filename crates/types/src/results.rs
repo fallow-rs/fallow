@@ -663,8 +663,10 @@ pub struct UnusedDependencyOverride {
     /// 1-based line number of the entry within the source file.
     pub line: u32,
     /// Soft hint for cases the conservative algorithm cannot disambiguate.
-    /// Currently emitted only when the parent-chain shape might target a
-    /// transitive dependency (CVE-fix pattern).
+    /// Emitted on every unused-override finding (both bare-target and
+    /// parent-chain shapes) so consumers know the result may be a false
+    /// positive against a transitive dependency (CVE-fix / canary-aliasing
+    /// pattern).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }

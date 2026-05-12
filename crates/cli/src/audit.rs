@@ -1422,6 +1422,22 @@ fn dead_code_keys(
             item.entry_name
         ));
     }
+    for item in &results.unused_dependency_overrides {
+        keys.insert(format!(
+            "unused-dependency-override:{}:{}:{}",
+            relative_key_path(&item.path, root),
+            item.line,
+            item.raw_key
+        ));
+    }
+    for item in &results.misconfigured_dependency_overrides {
+        keys.insert(format!(
+            "misconfigured-dependency-override:{}:{}:{}",
+            relative_key_path(&item.path, root),
+            item.line,
+            item.raw_key
+        ));
+    }
     keys
 }
 
@@ -1552,6 +1568,22 @@ fn retain_introduced_dead_code(
             item.line,
             item.catalog_name,
             item.entry_name
+        ))
+    });
+    results.unused_dependency_overrides.retain(|item| {
+        keep(format!(
+            "unused-dependency-override:{}:{}:{}",
+            relative_key_path(&item.path, root),
+            item.line,
+            item.raw_key
+        ))
+    });
+    results.misconfigured_dependency_overrides.retain(|item| {
+        keep(format!(
+            "misconfigured-dependency-override:{}:{}:{}",
+            relative_key_path(&item.path, root),
+            item.line,
+            item.raw_key
         ))
     });
 }
@@ -1803,6 +1835,39 @@ fn annotate_dead_code_json(
                 base,
             )
         }),
+    );
+    annotate_issue_array(
+        json,
+        "unused_dependency_overrides",
+        results.unused_dependency_overrides.iter().map(|item| {
+            issue_was_introduced(
+                &format!(
+                    "unused-dependency-override:{}:{}:{}",
+                    relative_key_path(&item.path, root),
+                    item.line,
+                    item.raw_key
+                ),
+                base,
+            )
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "misconfigured_dependency_overrides",
+        results
+            .misconfigured_dependency_overrides
+            .iter()
+            .map(|item| {
+                issue_was_introduced(
+                    &format!(
+                        "misconfigured-dependency-override:{}:{}:{}",
+                        relative_key_path(&item.path, root),
+                        item.line,
+                        item.raw_key
+                    ),
+                    base,
+                )
+            }),
     );
 }
 

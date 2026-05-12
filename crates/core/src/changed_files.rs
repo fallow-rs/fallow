@@ -350,6 +350,16 @@ pub fn filter_results_by_changed_files(
     results
         .unresolved_catalog_references
         .retain(|r| changed_files.contains(&r.path));
+
+    // Unused / misconfigured dependency overrides: anchored at the declaring
+    // source file (pnpm-workspace.yaml or root package.json). Keep only
+    // findings whose source file is in the changed set.
+    results
+        .unused_dependency_overrides
+        .retain(|o| changed_files.contains(&o.path));
+    results
+        .misconfigured_dependency_overrides
+        .retain(|o| changed_files.contains(&o.path));
 }
 
 /// Recompute duplication statistics after filtering.

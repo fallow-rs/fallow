@@ -25,7 +25,9 @@ expression: redact_version(&json_str)
     "boundary_violations": 0,
     "stale_suppressions": 0,
     "unused_catalog_entries": 0,
-    "unresolved_catalog_references": 0
+    "unresolved_catalog_references": 0,
+    "unused_dependency_overrides": 0,
+    "misconfigured_dependency_overrides": 0
   },
   "unused_files": [
     {

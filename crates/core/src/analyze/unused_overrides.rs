@@ -11,9 +11,10 @@
 //! 1. **`unused-dependency-overrides`**: an override whose target package is
 //!    not declared in any workspace `package.json` dep section. Conservative
 //!    static algorithm: the v1 detector does not read `pnpm-lock.yaml`, so
-//!    overrides targeting purely-transitive packages (a common CVE-fix
-//!    pattern) can produce false positives. The finding's `hint` field
-//!    flags the parent-chain shape so consumers can de-prioritize.
+//!    overrides targeting purely-transitive packages (a common CVE-fix /
+//!    canary-aliasing pattern) can produce false positives. Every unused
+//!    finding (bare-target AND parent-chain) carries a `hint` flagging the
+//!    transitive-dependency possibility so consumers can de-prioritize.
 //!
 //! 2. **`misconfigured-dependency-overrides`**: an override whose key cannot
 //!    be parsed or whose value is empty. `pnpm install` refuses to honor
