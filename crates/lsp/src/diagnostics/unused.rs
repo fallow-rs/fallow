@@ -287,20 +287,20 @@ pub fn push_dep_diagnostics(
         }
     }
 
-    push_unresolved_catalog_reference_diagnostics(map, results, root);
+    push_unresolved_catalog_reference_diagnostics(map, results);
 }
 
 /// Emit one `ERROR`-severity diagnostic per unresolved-catalog-reference
-/// finding, anchored on the consumer `package.json` line via `root.join` so
-/// the URI built from the project-relative path is absolute.
+/// finding. The finding's `path` is stored as an absolute filesystem path
+/// (matching the existing convention for path-anchored findings), so
+/// `Url::from_file_path` can be called directly.
 fn push_unresolved_catalog_reference_diagnostics(
     map: &mut FxHashMap<Url, Vec<Diagnostic>>,
     results: &AnalysisResults,
-    root: &std::path::Path,
 ) {
     use std::fmt::Write as _;
     for finding in &results.unresolved_catalog_references {
-        let Ok(uri) = Url::from_file_path(root.join(&finding.path)) else {
+        let Ok(uri) = Url::from_file_path(&finding.path) else {
             continue;
         };
         let line = finding.line.saturating_sub(1);
@@ -889,19 +889,19 @@ mod tests {
 
     #[test]
     fn unresolved_catalog_reference_produces_error_diagnostic_with_absolute_uri() {
-        // Mirrors the unused-catalog-entry test: the finding's path is
-        // project-root-relative (`packages/app/package.json`); Url::from_file_path
-        // requires an absolute path, so the diagnostic must build the URI via
-        // root.join. Without that, no squiggle ever reaches the editor even
-        // though the rust-side test suite passes.
+        // `UnresolvedCatalogReference.path` is stored as an absolute filesystem
+        // path (matching the convention used by every other path-anchored
+        // finding type), so the LSP can pass it directly into
+        // `Url::from_file_path` without joining against any root.
         let root = test_root();
+        let abs_path = root.join("packages/app/package.json");
         let mut results = AnalysisResults::default();
         results
             .unresolved_catalog_references
             .push(UnresolvedCatalogReference {
                 entry_name: "old-react".to_string(),
                 catalog_name: "react17".to_string(),
-                path: PathBuf::from("packages/app/package.json"),
+                path: abs_path.clone(),
                 line: 14,
                 available_in_catalogs: vec!["react18".to_string()],
             });
@@ -909,7 +909,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("packages/app/package.json")).unwrap();
+        let uri = Url::from_file_path(&abs_path).unwrap();
         let file_diags = diags
             .get(&uri)
             .expect("unresolved-catalog-reference diagnostic must be keyed by absolute URI");
@@ -932,13 +932,14 @@ mod tests {
     #[test]
     fn unresolved_catalog_reference_default_catalog_uses_default_phrasing() {
         let root = test_root();
+        let abs_path = root.join("package.json");
         let mut results = AnalysisResults::default();
         results
             .unresolved_catalog_references
             .push(UnresolvedCatalogReference {
                 entry_name: "foo".to_string(),
                 catalog_name: "default".to_string(),
-                path: PathBuf::from("package.json"),
+                path: abs_path.clone(),
                 line: 5,
                 available_in_catalogs: vec![],
             });
@@ -946,7 +947,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let uri = Url::from_file_path(&abs_path).unwrap();
         let d = &diags[&uri][0];
         assert!(
             d.message.contains("the default catalog"),

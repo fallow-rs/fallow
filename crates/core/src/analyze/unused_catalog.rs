@@ -117,6 +117,7 @@ pub fn find_unused_catalog_entries(state: &PnpmCatalogState) -> Vec<UnusedCatalo
 pub fn find_unresolved_catalog_references(
     state: &PnpmCatalogState,
     ignore_rules: &[CompiledIgnoreCatalogReferenceRule],
+    root: &Path,
 ) -> Vec<UnresolvedCatalogReference> {
     let mut findings = Vec::new();
 
@@ -130,9 +131,16 @@ pub fn find_unresolved_catalog_references(
             continue;
         }
 
-        // Normalize backslashes to forward slashes so user-written consumer
-        // globs (which are always written with `/`) match correctly on Windows.
-        let consumer_path_str = reference.consumer_path.to_string_lossy().replace('\\', "/");
+        // User-written consumer globs are project-root-relative with forward
+        // slashes, but `consumer_path` is stored as an absolute filesystem
+        // path. Strip the root before matching so `packages/**/package.json`
+        // matches the consumer path correctly on every platform.
+        let consumer_path_str = reference
+            .consumer_path
+            .strip_prefix(root)
+            .unwrap_or(&reference.consumer_path)
+            .to_string_lossy()
+            .replace('\\', "/");
         if ignore_rules.iter().any(|rule| {
             rule.matches(
                 &reference.package_name,
@@ -260,9 +268,18 @@ fn collect_catalog_consumers(pkg_paths: &[PathBuf], root: &Path) -> CatalogConsu
         let Ok(pkg) = serde_json::from_str::<PackageJson>(&raw_source) else {
             continue;
         };
+        // For `hardcoded_consumers` keep the relative-path storage that
+        // shipped with #329 (the JSON consumer contract uses relative paths
+        // and the #329 integration test asserts that shape).
         let relative_path = pkg_path
             .strip_prefix(root)
             .map_or_else(|_| pkg_path.clone(), Path::to_path_buf);
+        // For `ConsumerReference.consumer_path` keep the absolute path so the
+        // path-anchored filters that other finding types use
+        // (`filter_results_by_changed_files`, `filter_to_workspaces`'s
+        // `starts_with` check) work without a separate root-join pass. JSON
+        // output strips the root via `serde_path::serialize`.
+        let absolute_path = pkg_path.clone();
 
         let line_map = scan_dep_lines(&raw_source);
 
@@ -292,7 +309,7 @@ fn collect_catalog_consumers(pkg_paths: &[PathBuf], root: &Path) -> CatalogConsu
                     consumers.referenced_with_locations.push(ConsumerReference {
                         package_name: name.clone(),
                         catalog_name: catalog.to_string(),
-                        consumer_path: relative_path.clone(),
+                        consumer_path: absolute_path.clone(),
                         line,
                     });
                 } else if is_hardcoded_version(version) {

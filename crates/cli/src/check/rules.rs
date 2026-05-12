@@ -38,6 +38,12 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
         results
             .stale_suppressions
             .retain(|s| config.resolve_rules_for_path(&s.path).stale_suppressions != Severity::Off);
+        results.unresolved_catalog_references.retain(|r| {
+            config
+                .resolve_rules_for_path(&r.path)
+                .unresolved_catalog_references
+                != Severity::Off
+        });
         results.circular_dependencies.retain(|c| {
             c.files.iter().any(|path| {
                 config.resolve_rules_for_path(path).circular_dependencies != Severity::Off
@@ -148,6 +154,12 @@ pub fn has_error_severity_issues(
             || results.stale_suppressions.iter().any(|s| {
                 config.resolve_rules_for_path(&s.path).stale_suppressions == Severity::Error
             })
+            || results.unresolved_catalog_references.iter().any(|r| {
+                config
+                    .resolve_rules_for_path(&r.path)
+                    .unresolved_catalog_references
+                    == Severity::Error
+            })
             || results.circular_dependencies.iter().any(|c| {
                 c.files.iter().any(|path| {
                     config.resolve_rules_for_path(path).circular_dependencies == Severity::Error
@@ -167,6 +179,8 @@ pub fn has_error_severity_issues(
                 && !results.unresolved_imports.is_empty())
             || (rules.stale_suppressions == Severity::Error
                 && !results.stale_suppressions.is_empty())
+            || (rules.unresolved_catalog_references == Severity::Error
+                && !results.unresolved_catalog_references.is_empty())
     };
 
     // Non-file-scoped issue types: always use base rules
@@ -189,8 +203,6 @@ pub fn has_error_severity_issues(
         || (rules.boundary_violation == Severity::Error && !results.boundary_violations.is_empty())
         || (rules.unused_catalog_entries == Severity::Error
             && !results.unused_catalog_entries.is_empty())
-        || (rules.unresolved_catalog_references == Severity::Error
-            && !results.unresolved_catalog_references.is_empty())
 }
 
 /// Promote all `Warn` severities to `Error` for a single run.

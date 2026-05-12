@@ -543,6 +543,7 @@ pub fn find_dead_code_full(
             results.unresolved_catalog_references = find_unresolved_catalog_references(
                 &state,
                 &config.compiled_ignore_catalog_references,
+                &config.root,
             );
         }
     }

@@ -344,6 +344,12 @@ pub fn filter_results_by_changed_files(
     results
         .stale_suppressions
         .retain(|s| changed_files.contains(&s.path));
+
+    // Unresolved catalog references: anchored at the consumer package.json,
+    // so keep only findings whose path is in the changed set.
+    results
+        .unresolved_catalog_references
+        .retain(|r| changed_files.contains(&r.path));
 }
 
 /// Recompute duplication statistics after filtering.

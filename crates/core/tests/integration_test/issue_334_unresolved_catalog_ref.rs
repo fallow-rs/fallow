@@ -39,6 +39,16 @@ fn detects_unresolved_named_and_default_catalog_references() {
     let config = config_for_fixture(root, vec![]);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
+    // Strip the project root so the test asserts on the project-root-relative
+    // form regardless of where the fixture lives on disk. The path is stored
+    // as absolute internally (matching the convention for path-anchored
+    // findings); serde_path::serialize strips the root for JSON output.
+    let strip = |p: &std::path::Path| -> String {
+        p.strip_prefix(&config.root)
+            .unwrap_or(p)
+            .to_string_lossy()
+            .replace('\\', "/")
+    };
     let actual: FxHashSet<(&str, &str, String)> = results
         .unresolved_catalog_references
         .iter()
@@ -46,7 +56,7 @@ fn detects_unresolved_named_and_default_catalog_references() {
             (
                 r.catalog_name.as_str(),
                 r.entry_name.as_str(),
-                r.path.to_string_lossy().replace('\\', "/"),
+                strip(&r.path),
             )
         })
         .collect();

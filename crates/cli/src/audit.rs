@@ -1413,6 +1413,15 @@ fn dead_code_keys(
             item.description()
         ));
     }
+    for item in &results.unresolved_catalog_references {
+        keys.insert(format!(
+            "unresolved-catalog-reference:{}:{}:{}:{}",
+            relative_key_path(&item.path, root),
+            item.line,
+            item.catalog_name,
+            item.entry_name
+        ));
+    }
     keys
 }
 
@@ -1534,6 +1543,15 @@ fn retain_introduced_dead_code(
             "stale-suppression:{}:{}",
             relative_key_path(&item.path, root),
             item.description()
+        ))
+    });
+    results.unresolved_catalog_references.retain(|item| {
+        keep(format!(
+            "unresolved-catalog-reference:{}:{}:{}:{}",
+            relative_key_path(&item.path, root),
+            item.line,
+            item.catalog_name,
+            item.entry_name
         ))
     });
 }
@@ -1765,6 +1783,22 @@ fn annotate_dead_code_json(
                     "stale-suppression:{}:{}",
                     relative_key_path(&item.path, root),
                     item.description()
+                ),
+                base,
+            )
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "unresolved_catalog_references",
+        results.unresolved_catalog_references.iter().map(|item| {
+            issue_was_introduced(
+                &format!(
+                    "unresolved-catalog-reference:{}:{}:{}:{}",
+                    relative_key_path(&item.path, root),
+                    item.line,
+                    item.catalog_name,
+                    item.entry_name
                 ),
                 base,
             )
