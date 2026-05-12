@@ -30,8 +30,6 @@
 //! This matches the common CVE-fix pattern where the parent is declared and
 //! the override forces a transitive version inside that parent's subtree.
 
-use std::path::PathBuf;
-
 use fallow_config::{
     CompiledIgnoreDependencyOverrideRule, PackageJson, PnpmOverrideData, ResolvedConfig,
     WorkspaceInfo, override_misconfig_reason as parser_misconfig_reason,
@@ -147,8 +145,8 @@ pub fn find_unused_dependency_overrides(
     config: &ResolvedConfig,
 ) -> Vec<UnusedDependencyOverride> {
     let mut findings = Vec::new();
-    let yaml_path = PathBuf::from(PNPM_WORKSPACE_FILE);
-    let json_path = PathBuf::from(ROOT_PACKAGE_JSON);
+    let yaml_path = config.root.join(PNPM_WORKSPACE_FILE);
+    let json_path = config.root.join(ROOT_PACKAGE_JSON);
     collect_unused_from_source(
         &state.workspace_yaml_data,
         DependencyOverrideSource::PnpmWorkspaceYaml,
@@ -237,8 +235,8 @@ pub fn find_misconfigured_dependency_overrides(
     config: &ResolvedConfig,
 ) -> Vec<MisconfiguredDependencyOverride> {
     let mut findings = Vec::new();
-    let yaml_path = PathBuf::from(PNPM_WORKSPACE_FILE);
-    let json_path = PathBuf::from(ROOT_PACKAGE_JSON);
+    let yaml_path = config.root.join(PNPM_WORKSPACE_FILE);
+    let json_path = config.root.join(ROOT_PACKAGE_JSON);
     collect_misconfigured_from_source(
         &state.workspace_yaml_data,
         DependencyOverrideSource::PnpmWorkspaceYaml,
@@ -281,8 +279,18 @@ fn collect_misconfigured_from_source(
             continue;
         }
 
+        // `target_package` is the parsed package name when the key parses
+        // (always for `EmptyValue` findings, never for `UnparsableKey`).
+        // Surfacing it lets JSON `add-to-config` actions emit a paste-ready
+        // suppression value that matches the actual suppression matcher (which
+        // also keys on `target_package`); without it, a raw_key like
+        // `"react@<18"` would suggest `{ package: "react@<18" }` that does not
+        // suppress the finding (suppressor uses just `"react"`).
+        let target_package = entry.parsed_key.as_ref().map(|p| p.target_package.clone());
+
         findings.push(MisconfiguredDependencyOverride {
             raw_key: entry.raw_key.clone(),
+            target_package,
             raw_value: entry.raw_value.clone().unwrap_or_default(),
             reason: map_misconfig_reason(reason),
             source,

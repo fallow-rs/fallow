@@ -162,7 +162,7 @@ fn sample_results(root: &Path) -> AnalysisResults {
             version_constraint: None,
             version_range: "^1.6.0".to_string(),
             source: fallow_core::results::DependencyOverrideSource::PnpmWorkspaceYaml,
-            path: PathBuf::from("pnpm-workspace.yaml"),
+            path: root.join("pnpm-workspace.yaml"),
             line: 9,
             hint: Some(
                 "May be an intentional pin for a transitive CVE that no workspace package depends on directly"
@@ -173,10 +173,11 @@ fn sample_results(root: &Path) -> AnalysisResults {
     r.misconfigured_dependency_overrides.push(
         fallow_core::results::MisconfiguredDependencyOverride {
             raw_key: "@types/react@<<18".to_string(),
+            target_package: None,
             raw_value: "18.0.0".to_string(),
             reason: fallow_core::results::DependencyOverrideMisconfigReason::UnparsableKey,
             source: fallow_core::results::DependencyOverrideSource::PnpmPackageJson,
-            path: PathBuf::from("package.json"),
+            path: root.join("package.json"),
             line: 3,
         },
     );

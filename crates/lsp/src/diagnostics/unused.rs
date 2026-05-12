@@ -288,7 +288,7 @@ pub fn push_dep_diagnostics(
     }
 
     push_unresolved_catalog_reference_diagnostics(map, results);
-    push_dependency_override_diagnostics(map, results, root);
+    push_dependency_override_diagnostics(map, results);
 }
 
 /// Emit one `ERROR`-severity diagnostic per unresolved-catalog-reference
@@ -342,18 +342,18 @@ fn push_unresolved_catalog_reference_diagnostics(
 }
 
 /// Emit diagnostics for unused and misconfigured pnpm dependency-override
-/// findings. Both finding types carry a project-root-relative `path` (same
-/// convention as `UnusedCatalogEntry`), so the URI must be built from
-/// `root.join(&finding.path)`. Severity matches the default rule severity:
-/// unused = `WARNING`, misconfigured = `ERROR` (pnpm refuses to install).
+/// findings. Both finding types carry an absolute `path` (matching the
+/// `UnresolvedCatalogReference` convention so `--changed-since` and per-file
+/// overrides.rules can compare directly). `Url::from_file_path` accepts the
+/// path as-is. Severity matches the default rule severity: unused =
+/// `WARNING`, misconfigured = `ERROR` (pnpm refuses to install).
 fn push_dependency_override_diagnostics(
     map: &mut FxHashMap<Url, Vec<Diagnostic>>,
     results: &AnalysisResults,
-    root: &std::path::Path,
 ) {
     use std::fmt::Write as _;
     for finding in &results.unused_dependency_overrides {
-        let Ok(uri) = Url::from_file_path(root.join(&finding.path)) else {
+        let Ok(uri) = Url::from_file_path(&finding.path) else {
             continue;
         };
         let line = finding.line.saturating_sub(1);
@@ -383,7 +383,7 @@ fn push_dependency_override_diagnostics(
         });
     }
     for finding in &results.misconfigured_dependency_overrides {
-        let Ok(uri) = Url::from_file_path(root.join(&finding.path)) else {
+        let Ok(uri) = Url::from_file_path(&finding.path) else {
             continue;
         };
         let line = finding.line.saturating_sub(1);
@@ -1044,6 +1044,7 @@ mod tests {
 
         let root = test_root();
         let mut results = AnalysisResults::default();
+        let yaml_path = root.join("pnpm-workspace.yaml");
         results
             .unused_dependency_overrides
             .push(UnusedDependencyOverride {
@@ -1053,7 +1054,7 @@ mod tests {
                 version_constraint: None,
                 version_range: "^1.6.0".to_string(),
                 source: DependencyOverrideSource::PnpmWorkspaceYaml,
-                path: PathBuf::from("pnpm-workspace.yaml"),
+                path: yaml_path.clone(),
                 line: 9,
                 hint: Some("may be intentional transitive pin".to_string()),
             });
@@ -1061,7 +1062,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
+        let uri = Url::from_file_path(&yaml_path).unwrap();
         let file_diags = diags
             .get(&uri)
             .expect("unused-dependency-override diagnostic must key by absolute URI");
@@ -1092,22 +1093,24 @@ mod tests {
         };
 
         let root = test_root();
+        let json_path = root.join("package.json");
         let mut results = AnalysisResults::default();
         results
             .misconfigured_dependency_overrides
             .push(MisconfiguredDependencyOverride {
                 raw_key: "@types/react@<<18".to_string(),
+                target_package: None,
                 raw_value: "18.0.0".to_string(),
                 reason: DependencyOverrideMisconfigReason::UnparsableKey,
                 source: DependencyOverrideSource::PnpmPackageJson,
-                path: PathBuf::from("package.json"),
+                path: json_path.clone(),
                 line: 3,
             });
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let uri = Url::from_file_path(&json_path).unwrap();
         let d = &diags[&uri][0];
         assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
         assert_eq!(

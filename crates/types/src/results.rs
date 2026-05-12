@@ -675,7 +675,11 @@ pub struct UnusedDependencyOverride {
     /// Where the override entry was declared.
     pub source: DependencyOverrideSource,
     /// Path to the source file. `pnpm-workspace.yaml` or a `package.json`,
-    /// stored as project-root-relative for consistency with `UnusedCatalogEntry`.
+    /// stored as an absolute filesystem path so `--changed-since` and
+    /// per-file `overrides.rules` can compare directly against the analyzer's
+    /// changed-set / per-path rule lookups. JSON serialization strips the
+    /// project root via `serde_path::serialize`, matching the
+    /// `UnresolvedCatalogReference` convention.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
     /// 1-based line number of the entry within the source file.
@@ -720,6 +724,15 @@ impl DependencyOverrideMisconfigReason {
 pub struct MisconfiguredDependencyOverride {
     /// The full original override key as written in the source.
     pub raw_key: String,
+    /// Parsed target package name when the key was syntactically valid (the
+    /// `EmptyValue` reason path). `None` for `UnparsableKey` findings whose
+    /// key could not be parsed at all. Used by JSON `add-to-config` actions to
+    /// emit a paste-ready `ignoreDependencyOverrides` value that matches the
+    /// suppression matcher (which also keys on `target_package`); avoids the
+    /// pitfall where `raw_key` like `"react@<18"` would not match the rule
+    /// that targets package `"react"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_package: Option<String>,
     /// The right-hand side of the entry, exactly as written. Empty when the
     /// value was missing.
     pub raw_value: String,
@@ -727,7 +740,9 @@ pub struct MisconfiguredDependencyOverride {
     pub reason: DependencyOverrideMisconfigReason,
     /// Where the override entry was declared.
     pub source: DependencyOverrideSource,
-    /// Path to the source file (project-root-relative).
+    /// Path to the source file. Stored as an absolute filesystem path so
+    /// `--changed-since` and per-file `overrides.rules` can compare directly.
+    /// JSON serialization strips the project root via `serde_path::serialize`.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
     /// 1-based line number of the entry within the source file.

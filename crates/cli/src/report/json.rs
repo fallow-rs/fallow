@@ -617,6 +617,10 @@ fn build_unresolved_catalog_reference_primary_action(
 }
 
 /// Build the `actions` array for a single issue item.
+#[expect(
+    clippy::too_many_lines,
+    reason = "One match arm per SuppressKind; the line count grows with new issue types and the structure is clearer than extracting per-arm helpers."
+)]
 fn build_actions(
     item: &serde_json::Value,
     issue_key: &str,

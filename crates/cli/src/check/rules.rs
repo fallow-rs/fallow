@@ -44,6 +44,18 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
                 .unresolved_catalog_references
                 != Severity::Off
         });
+        results.unused_dependency_overrides.retain(|o| {
+            config
+                .resolve_rules_for_path(&o.path)
+                .unused_dependency_overrides
+                != Severity::Off
+        });
+        results.misconfigured_dependency_overrides.retain(|o| {
+            config
+                .resolve_rules_for_path(&o.path)
+                .misconfigured_dependency_overrides
+                != Severity::Off
+        });
         results.circular_dependencies.retain(|c| {
             c.files.iter().any(|path| {
                 config.resolve_rules_for_path(path).circular_dependencies != Severity::Off
