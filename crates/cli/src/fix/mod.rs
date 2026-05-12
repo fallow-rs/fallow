@@ -58,7 +58,8 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
             match serde_json::to_string_pretty(&serde_json::json!({
                 "dry_run": opts.dry_run,
                 "fixes": [],
-                "total_fixed": 0
+                "total_fixed": 0,
+                "skipped": 0,
             })) {
                 Ok(json) => println!("{json}"),
                 Err(e) => {
@@ -169,14 +170,22 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
                 .count();
             eprintln!("Fixed {fixed_count} issue(s).");
         }
-        if catalog_skipped > 0 {
-            eprintln!(
-                "Skipped {catalog_skipped} catalog entry(ies) with hardcoded consumers or other guards (run with --format json for details).",
-            );
-        }
+        // Most actionable next step first: the user just succeeded;
+        // tell them how to keep their workspace consistent before
+        // showing any residual work that needs human attention.
         if !opts.dry_run && catalog_applied > 0 {
             eprintln!(
                 "Catalog entries were removed from pnpm-workspace.yaml. Run `pnpm install` to refresh pnpm-lock.yaml.",
+            );
+        }
+        if catalog_skipped > 0 {
+            let entries_word = if catalog_skipped == 1 {
+                "entry"
+            } else {
+                "entries"
+            };
+            eprintln!(
+                "Skipped {catalog_skipped} catalog {entries_word} with hardcoded consumers or other guards (run with --format json for details).",
             );
         }
     }

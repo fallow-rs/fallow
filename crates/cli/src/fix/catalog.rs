@@ -277,7 +277,14 @@ fn skip_record(
                 entry
                     .hardcoded_consumers
                     .iter()
-                    .map(|p| serde_json::Value::String(p.display().to_string()))
+                    .map(|p| {
+                        // Normalize separators to match the check-side
+                        // `hardcoded_consumers` shape (which uses
+                        // `serde_path::serialize_vec` doing `.replace('\\', "/")`)
+                        // so agents correlating check + fix output see the
+                        // same path strings on Windows.
+                        serde_json::Value::String(p.to_string_lossy().replace('\\', "/"))
+                    })
                     .collect(),
             ))
         } else {
@@ -287,7 +294,7 @@ fn skip_record(
         "type": "remove_catalog_entry",
         "entry_name": entry.entry_name,
         "catalog_name": entry.catalog_name,
-        "file": relative_path.display().to_string(),
+        "file": relative_path.to_string_lossy().replace('\\', "/"),
         "line": entry.line,
         "applied": false,
         "skipped": true,
@@ -313,7 +320,7 @@ fn remove_record(
         "type": "remove_catalog_entry",
         "entry_name": entry.entry_name,
         "catalog_name": entry.catalog_name,
-        "file": relative_path.display().to_string(),
+        "file": relative_path.to_string_lossy().replace('\\', "/"),
         "line": range.start + 1,
         "removed_lines": removed_lines,
     });

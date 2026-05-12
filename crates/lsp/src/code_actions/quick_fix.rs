@@ -136,6 +136,13 @@ pub fn build_remove_export_actions(
 /// The `root` parameter is required because `UnusedCatalogEntry.path` is
 /// stored project-root-relative; `Url::from_file_path` would silently
 /// reject the relative path and the action would never appear.
+///
+/// `file_lines` is the caller-supplied content of `pnpm-workspace.yaml`
+/// (in-memory document text when available, otherwise on-disk content).
+/// Passing the buffer in mirrors `build_remove_export_actions` and keeps
+/// the deletion range consistent with what the user actually sees in
+/// their editor, even when there are unsaved edits to the YAML file.
+/// Empty `file_lines` short-circuits the function with no actions.
 #[expect(
     clippy::disallowed_types,
     reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by tower-lsp"
@@ -145,8 +152,13 @@ pub fn build_remove_catalog_entry_actions(
     root: &Path,
     uri: &Url,
     cursor_range: &Range,
+    file_lines: &[&str],
 ) -> Vec<CodeActionOrCommand> {
     let mut actions = Vec::new();
+
+    if file_lines.is_empty() {
+        return actions;
+    }
 
     for entry in &results.unused_catalog_entries {
         // Skip entries with hardcoded consumers: the consumer-side
@@ -167,27 +179,22 @@ pub fn build_remove_catalog_entry_actions(
             continue;
         }
 
-        // Read the YAML from disk so we can compute the deletion range.
-        // The LSP diagnostic carries only the start line; the end line
-        // depends on the entry's indent versus subsequent lines.
-        let absolute = root.join(&entry.path);
-        let Ok(content) = std::fs::read_to_string(&absolute) else {
-            continue;
-        };
-        let lines: Vec<&str> = content.lines().collect();
         let start_idx = entry_line as usize;
-        if start_idx >= lines.len() {
+        if start_idx >= file_lines.len() {
             continue;
         }
-        let end_idx = compute_catalog_deletion_end(&lines, start_idx);
-        // Sanity-check the line really matches the reported entry name:
-        // if the file has been edited since `fallow check` ran, the line
-        // might no longer hold the catalog entry. Bail in that case so
-        // we don't delete something unrelated. The check is intentionally
-        // loose (substring match) to handle quoted (`"@scope/foo":`) and
-        // unquoted (`react:`) key forms uniformly.
-        let line_content = lines[start_idx];
-        if !line_content.contains(&entry.entry_name) || !line_content.contains(':') {
+        let end_idx = compute_catalog_deletion_end(file_lines, start_idx);
+        // Sanity-check the line really matches the reported entry name
+        // BEFORE producing a destructive edit. The file may have been
+        // edited since `fallow check` ran, and pnpm catalogs commonly
+        // contain sibling entries whose names overlap by substring
+        // (`react` and `react-native`, `lodash` and `lodash-es`,
+        // `core-js` and `core-js-bundle`). A loose `contains` check
+        // would happily delete the wrong line in those cases. Anchor
+        // the match to the start of the trimmed line in either the
+        // unquoted (`react:`), double-quoted (`"@scope/foo":`), or
+        // single-quoted (`'react':`) key form.
+        if !line_matches_catalog_key(file_lines[start_idx], &entry.entry_name) {
             continue;
         }
 
@@ -224,6 +231,23 @@ pub fn build_remove_catalog_entry_actions(
         };
         changes.insert(uri.clone(), vec![edit]);
 
+        // Reconstruct the published diagnostic so VS Code's
+        // "Fix all in file" source action can tie this edit back to the
+        // existing diagnostic. The message wording matches
+        // `crates/lsp/src/diagnostics/unused.rs:261-271` (default vs
+        // named-catalog variants).
+        let diagnostic_message = if entry.catalog_name == "default" {
+            format!(
+                "Unused catalog entry: '{}' is not referenced by any workspace package",
+                entry.entry_name
+            )
+        } else {
+            format!(
+                "Unused catalog entry: '{}' in catalog '{}' is not referenced by any workspace package",
+                entry.entry_name, entry.catalog_name
+            )
+        };
+
         actions.push(CodeActionOrCommand::CodeAction(CodeAction {
             title,
             kind: Some(CodeActionKind::QUICKFIX),
@@ -245,10 +269,7 @@ pub fn build_remove_catalog_entry_actions(
                 severity: Some(DiagnosticSeverity::WARNING),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-catalog-entry".to_string())),
-                message: format!(
-                    "Unused catalog entry: '{}' is not referenced by any workspace package",
-                    entry.entry_name
-                ),
+                message: diagnostic_message,
                 tags: Some(vec![DiagnosticTag::UNNECESSARY]),
                 ..Default::default()
             }]),
@@ -257,6 +278,37 @@ pub fn build_remove_catalog_entry_actions(
     }
 
     actions
+}
+
+/// Anchored match for a catalog key on its declared line. Handles
+/// unquoted (`react:`), double-quoted (`"@scope/foo":`), and single-quoted
+/// (`'react':`) key forms; rejects substring matches in values or in
+/// sibling entries whose names share a prefix (`react` vs `react-native`).
+fn line_matches_catalog_key(line: &str, entry_name: &str) -> bool {
+    let trimmed = line.trim_start();
+    // Unquoted: `react:` or `react: ^18.2.0` or `react :` (rare).
+    if let Some(rest) = trimmed.strip_prefix(entry_name)
+        && rest.trim_start().starts_with(':')
+    {
+        return true;
+    }
+    // Double-quoted: `"@scope/foo": ...`
+    if let Some(rest) = trimmed
+        .strip_prefix('"')
+        .and_then(|s| s.strip_prefix(entry_name))
+        && (rest.starts_with("\":") || rest.starts_with("\" :"))
+    {
+        return true;
+    }
+    // Single-quoted: `'react': ...`
+    if let Some(rest) = trimmed
+        .strip_prefix('\'')
+        .and_then(|s| s.strip_prefix(entry_name))
+        && (rest.starts_with("':") || rest.starts_with("' :"))
+    {
+        return true;
+    }
+    false
 }
 
 /// Compute the end line index (exclusive) for a catalog entry whose key
@@ -960,16 +1012,27 @@ mod tests {
         }
     }
 
+    fn workspace_yaml_uri(dir: &tempfile::TempDir) -> Url {
+        // We need a URI that matches `Url::from_file_path(root.join("pnpm-workspace.yaml"))`
+        // exactly. The file does NOT need to exist on disk because the LSP
+        // handler now reads from `file_lines` passed in by the caller.
+        Url::from_file_path(dir.path().join("pnpm-workspace.yaml")).unwrap()
+    }
+
     #[test]
     fn no_catalog_action_when_no_findings() {
         let dir = tempfile::tempdir().unwrap();
-        let workspace = dir.path().join("pnpm-workspace.yaml");
-        std::fs::write(&workspace, "catalog:\n  is-even: ^1.0.0\n").unwrap();
-        let uri = Url::from_file_path(&workspace).unwrap();
+        let uri = workspace_yaml_uri(&dir);
         let results = AnalysisResults::default();
+        let lines = vec!["catalog:", "  is-even: ^1.0.0"];
 
-        let actions =
-            build_remove_catalog_entry_actions(&results, dir.path(), &uri, &make_range(0, 100));
+        let actions = build_remove_catalog_entry_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(0, 100),
+            &lines,
+        );
         assert!(actions.is_empty());
     }
 
@@ -979,17 +1042,21 @@ mod tests {
         // to `root.join(&entry.path)`, `Url::from_file_path` rejects the
         // relative path and the action silently never appears.
         let dir = tempfile::tempdir().unwrap();
-        let workspace = dir.path().join("pnpm-workspace.yaml");
-        std::fs::write(&workspace, "catalog:\n  is-even: ^1.0.0\n").unwrap();
-        let uri = Url::from_file_path(&workspace).unwrap();
+        let uri = workspace_yaml_uri(&dir);
 
         let mut results = AnalysisResults::default();
         results
             .unused_catalog_entries
             .push(make_catalog_entry("is-even", "default", 2, vec![]));
 
-        let actions =
-            build_remove_catalog_entry_actions(&results, dir.path(), &uri, &make_range(1, 1));
+        let lines = vec!["catalog:", "  is-even: ^1.0.0"];
+        let actions = build_remove_catalog_entry_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(1, 1),
+            &lines,
+        );
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -1000,9 +1067,7 @@ mod tests {
     #[test]
     fn catalog_action_skipped_when_hardcoded_consumers_present() {
         let dir = tempfile::tempdir().unwrap();
-        let workspace = dir.path().join("pnpm-workspace.yaml");
-        std::fs::write(&workspace, "catalog:\n  react: ^18.2.0\n").unwrap();
-        let uri = Url::from_file_path(&workspace).unwrap();
+        let uri = workspace_yaml_uri(&dir);
 
         let mut results = AnalysisResults::default();
         results.unused_catalog_entries.push(make_catalog_entry(
@@ -1012,8 +1077,14 @@ mod tests {
             vec![PathBuf::from("apps/web/package.json")],
         ));
 
-        let actions =
-            build_remove_catalog_entry_actions(&results, dir.path(), &uri, &make_range(1, 1));
+        let lines = vec!["catalog:", "  react: ^18.2.0"];
+        let actions = build_remove_catalog_entry_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(1, 1),
+            &lines,
+        );
         // The action must NOT appear: removing the catalog entry while a
         // consumer still pins a hardcoded version would break install.
         assert!(actions.is_empty());
@@ -1022,21 +1093,27 @@ mod tests {
     #[test]
     fn catalog_action_deletes_object_form_range() {
         let dir = tempfile::tempdir().unwrap();
-        let workspace = dir.path().join("pnpm-workspace.yaml");
-        std::fs::write(
-            &workspace,
-            "catalog:\n  react:\n    specifier: ^18.2.0\n    publishConfig: {}\n  is-even: ^1.0.0\n",
-        )
-        .unwrap();
-        let uri = Url::from_file_path(&workspace).unwrap();
+        let uri = workspace_yaml_uri(&dir);
 
         let mut results = AnalysisResults::default();
         results
             .unused_catalog_entries
             .push(make_catalog_entry("react", "default", 2, vec![]));
 
-        let actions =
-            build_remove_catalog_entry_actions(&results, dir.path(), &uri, &make_range(1, 1));
+        let lines = vec![
+            "catalog:",
+            "  react:",
+            "    specifier: ^18.2.0",
+            "    publishConfig: {}",
+            "  is-even: ^1.0.0",
+        ];
+        let actions = build_remove_catalog_entry_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(1, 1),
+            &lines,
+        );
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -1056,30 +1133,109 @@ mod tests {
         // line no longer holds the catalog entry. Don't blindly delete
         // unrelated content.
         let dir = tempfile::tempdir().unwrap();
-        let workspace = dir.path().join("pnpm-workspace.yaml");
-        std::fs::write(&workspace, "catalog:\n  different-entry: ^2.0.0\n").unwrap();
-        let uri = Url::from_file_path(&workspace).unwrap();
+        let uri = workspace_yaml_uri(&dir);
 
         let mut results = AnalysisResults::default();
         results
             .unused_catalog_entries
             .push(make_catalog_entry("is-even", "default", 2, vec![]));
 
-        let actions =
-            build_remove_catalog_entry_actions(&results, dir.path(), &uri, &make_range(1, 1));
+        let lines = vec!["catalog:", "  different-entry: ^2.0.0"];
+        let actions = build_remove_catalog_entry_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(1, 1),
+            &lines,
+        );
         assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn catalog_action_bails_when_entry_name_is_substring_of_sibling() {
+        // Regression test for the rust-reviewer's BLOCK on the initial
+        // implementation: pnpm catalogs commonly hold sibling entries
+        // whose names share a prefix (`react` and `react-native`,
+        // `lodash` and `lodash-es`, `core-js` and `core-js-bundle`). If
+        // the file has been edited since `fallow check` ran and the
+        // reported line now holds a DIFFERENT entry whose name starts
+        // with the same prefix, the action must NOT fire.
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+
+        let mut results = AnalysisResults::default();
+        // Reported finding: `react` on line 2.
+        results
+            .unused_catalog_entries
+            .push(make_catalog_entry("react", "default", 2, vec![]));
+
+        // But the actual file now has `react-native` on line 2.
+        let lines = vec!["catalog:", "  react-native: ^0.73.0"];
+        let actions = build_remove_catalog_entry_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(1, 1),
+            &lines,
+        );
+        assert!(
+            actions.is_empty(),
+            "must NOT delete `react-native` when the finding reports `react`"
+        );
+    }
+
+    #[test]
+    fn catalog_action_bails_when_entry_name_appears_only_in_value() {
+        // Defensive: an entry whose value happens to contain the entry
+        // name as a substring shouldn't accidentally match. Vanishingly
+        // rare in real YAML but cheap to defend against.
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(make_catalog_entry("react", "default", 2, vec![]));
+
+        // The actual line is a different key whose VALUE mentions react.
+        let lines = vec!["catalog:", "  description: react fork"];
+        let actions = build_remove_catalog_entry_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(1, 1),
+            &lines,
+        );
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn catalog_action_handles_quoted_key_forms() {
+        // Scoped packages and other quoted keys are valid YAML. The
+        // sanity check accepts both quote styles.
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(make_catalog_entry("@scope/foo", "default", 2, vec![]));
+
+        let lines = vec!["catalog:", "  \"@scope/foo\": ^1.0.0"];
+        let actions = build_remove_catalog_entry_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(1, 1),
+            &lines,
+        );
+        assert_eq!(actions.len(), 1);
     }
 
     #[test]
     fn catalog_action_outside_cursor_range_is_skipped() {
         let dir = tempfile::tempdir().unwrap();
-        let workspace = dir.path().join("pnpm-workspace.yaml");
-        std::fs::write(
-            &workspace,
-            "catalog:\n  is-odd: ^1.0.0\n  is-even: ^1.0.0\n",
-        )
-        .unwrap();
-        let uri = Url::from_file_path(&workspace).unwrap();
+        let uri = workspace_yaml_uri(&dir);
 
         let mut results = AnalysisResults::default();
         // is-even sits on 1-based line 3 (0-based line 2)
@@ -1087,10 +1243,47 @@ mod tests {
             .unused_catalog_entries
             .push(make_catalog_entry("is-even", "default", 3, vec![]));
 
+        let lines = vec!["catalog:", "  is-odd: ^1.0.0", "  is-even: ^1.0.0"];
         // Cursor on lines 0-1; action's diagnostic is on line 2.
-        let actions =
-            build_remove_catalog_entry_actions(&results, dir.path(), &uri, &make_range(0, 1));
+        let actions = build_remove_catalog_entry_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(0, 1),
+            &lines,
+        );
         assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn catalog_action_named_catalog_uses_matching_diagnostic_message() {
+        // Regression test for the LSP-reviewer C3 concern: the action's
+        // reconstructed diagnostic message must mirror the published
+        // diagnostic's named-catalog phrasing so "Fix all in file"
+        // grouping does not get confused.
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+
+        let mut results = AnalysisResults::default();
+        results
+            .unused_catalog_entries
+            .push(make_catalog_entry("react", "react17", 3, vec![]));
+
+        let lines = vec!["catalogs:", "  react17:", "    react: ^17.0.2"];
+        let actions = build_remove_catalog_entry_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(2, 2),
+            &lines,
+        );
+        assert_eq!(actions.len(), 1);
+        let ca = unwrap_code_action(&actions[0]);
+        let diag_msg = &ca.diagnostics.as_ref().unwrap()[0].message;
+        assert!(
+            diag_msg.contains("in catalog 'react17'"),
+            "named-catalog diagnostic must say `in catalog 'react17'`, got: {diag_msg}"
+        );
     }
 
     #[test]
