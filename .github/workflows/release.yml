@@ -635,11 +635,15 @@ jobs:
           path: tarballs
 
       - name: Publish all tarballs
+        shell: bash
+        env:
+          PKG_VERSION_REF: ${{ github.ref }}
         run: |
           if [ ! -s tarballs/manifest.tsv ]; then
             echo "::error::tarballs/manifest.tsv missing or empty; npm-prep did not produce any tarballs"
             exit 1
           fi
+          VERSION="${PKG_VERSION_REF#refs/tags/v}"
           # Fixed expected count: 8 cli platform + 1 cli root + 8 napi platform
           # + 1 napi root = 18 entries. If this number changes, update the
           # numbered-stage matrix in npm-prep AND this constant together.
@@ -650,19 +654,63 @@ jobs:
             cat tarballs/manifest.tsv
             exit 1
           fi
+          expected_names=(
+            "@fallow-cli/darwin-arm64"
+            "@fallow-cli/darwin-x64"
+            "@fallow-cli/linux-x64-gnu"
+            "@fallow-cli/linux-arm64-gnu"
+            "@fallow-cli/linux-x64-musl"
+            "@fallow-cli/linux-arm64-musl"
+            "@fallow-cli/win32-x64-msvc"
+            "@fallow-cli/win32-arm64-msvc"
+            "fallow"
+            "@fallow-cli/fallow-node-darwin-arm64"
+            "@fallow-cli/fallow-node-darwin-x64"
+            "@fallow-cli/fallow-node-linux-x64-gnu"
+            "@fallow-cli/fallow-node-linux-arm64-gnu"
+            "@fallow-cli/fallow-node-linux-x64-musl"
+            "@fallow-cli/fallow-node-linux-arm64-musl"
+            "@fallow-cli/fallow-node-win32-x64-msvc"
+            "@fallow-cli/fallow-node-win32-arm64-msvc"
+            "@fallow-cli/fallow-node"
+          )
           FAILED=0
+          index=0
           # Manifest format (TSV): <tarball-path>\t<name>\t<version>. Rows are
           # emitted in publish order by npm-prep, so we just walk top to bottom.
           while IFS=$'\t' read -r file name version; do
             [ -n "$file" ] || continue
+            expected_name="${expected_names[$index]}"
+            if [ "$name" != "$expected_name" ]; then
+              echo "::error::Manifest row $((index + 1)) expected $expected_name, got $name"
+              FAILED=1
+              index=$((index + 1))
+              continue
+            fi
+            if [ "$version" != "$VERSION" ]; then
+              echo "::error::Manifest row $((index + 1)) for $name has version $version, expected tag version $VERSION"
+              FAILED=1
+              index=$((index + 1))
+              continue
+            fi
             if [ ! -f "$file" ]; then
               echo "::error::Tarball missing: $file"
               FAILED=1
+              index=$((index + 1))
+              continue
+            fi
+            actual_name=$(tar -xOf "$file" package/package.json | node -e 'const fs=require("fs"); console.log(JSON.parse(fs.readFileSync(0, "utf8")).name)')
+            actual_version=$(tar -xOf "$file" package/package.json | node -e 'const fs=require("fs"); console.log(JSON.parse(fs.readFileSync(0, "utf8")).version)')
+            if [ "$actual_name" != "$name" ] || [ "$actual_version" != "$version" ]; then
+              echo "::error::Tarball package.json mismatch for $file: manifest=$name@$version tarball=$actual_name@$actual_version"
+              FAILED=1
+              index=$((index + 1))
               continue
             fi
             echo "Publishing $name@$version from $file"
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "  Already published, skipping"
+              index=$((index + 1))
               continue
             fi
             if ! npm publish "$file" --access public --provenance --ignore-scripts; then
@@ -672,7 +720,12 @@ jobs:
                 FAILED=1
               fi
             fi
+            index=$((index + 1))
           done < tarballs/manifest.tsv
+          if [ "$index" -ne "$EXPECTED" ]; then
+            echo "::error::Validated $index tarballs, expected $EXPECTED"
+            exit 1
+          fi
           if [ "$FAILED" -eq 1 ]; then
             exit 1
           fi
@@ -754,11 +807,13 @@ jobs:
       - name: Locate VSIX
         id: vsix
         run: |
-          file=$(find vsix -maxdepth 1 -name '*.vsix' -type f | head -n1)
-          if [ -z "$file" ]; then
-            echo "::error::No .vsix file found in artifact"
+          file_count=$(find vsix -maxdepth 1 -name '*.vsix' -type f | wc -l | tr -d ' ')
+          if [ "$file_count" -ne 1 ]; then
+            echo "::error::Expected exactly one .vsix file in artifact, found $file_count"
+            find vsix -maxdepth 1 -name '*.vsix' -type f | sort
             exit 1
           fi
+          file=$(find vsix -maxdepth 1 -name '*.vsix' -type f | sort | head -n1)
           echo "path=$file" >> "$GITHUB_OUTPUT"
 
       # Install the publisher CLIs with --ignore-scripts so any compromised
