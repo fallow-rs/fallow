@@ -17,7 +17,7 @@ name = "fallow-mcp"
 path = "src/main.rs"
 
 [dependencies]
-rmcp = { version = "1.5", features = ["transport-io"] }
+rmcp = { version = "1.6", features = ["transport-io"] }
 tokio.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
