@@ -69,15 +69,20 @@ const OPTIONS = {
 };
 
 /**
- * Strip `title` from every definition before generation. jstt prefers `title`
- * over the definition key when naming generated types, which turns documentary
- * titles like "fallow dead-code --format json" into the mangled name
- * `FallowDeadCodeFormatJson` AND produces a duplicate `CheckOutput`. Removing
- * the title forces jstt to use the definition key.
+ * Strip `title` from the schema root AND every definition before generation.
+ * jstt prefers `title` over the definition key (or the explicit name argument
+ * passed to `compile`) when naming generated types: documentary titles like
+ * "fallow dead-code --format json" otherwise become mangled names like
+ * `FallowDeadCodeFormatJson` (plus a duplicate `CheckOutput`), and the root
+ * title "Fallow JSON Output Schemas" otherwise becomes `FallowJSONOutputSchemas`
+ * regardless of the second argument to `compile`.
  *
  * We keep `description` (used as JSDoc) and only drop `title` (TS naming).
  */
-function stripDefinitionTitles(schema) {
+function stripTitles(schema) {
+  if ("title" in schema) {
+    delete schema.title;
+  }
   if (schema.definitions) {
     for (const def of Object.values(schema.definitions)) {
       if (def && typeof def === "object" && "title" in def) {
@@ -115,11 +120,10 @@ function flattenRefSiblings(node) {
 async function generate() {
   const raw = await readFile(SCHEMA_PATH, "utf8");
   const parsed = JSON.parse(raw);
-  stripDefinitionTitles(parsed);
+  stripTitles(parsed);
   flattenRefSiblings(parsed);
-  // jstt uses the second arg as the name of the top-level type. The schema's
-  // outer `title` ("Fallow JSON Output Schemas") would otherwise produce
-  // `FallowJSONOutputSchemas`. Use a clearer root name.
+  // With the root title stripped, jstt uses the second arg as the name of the
+  // top-level union type.
   return compile(parsed, "FallowJsonOutput", OPTIONS);
 }
 
