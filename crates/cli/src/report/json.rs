@@ -27,6 +27,11 @@ const IGNORE_DEPENDENCIES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.co
 /// consumer? }` entry to append.
 const IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreCatalogReferences/items";
 
+/// JSON Pointer fragment URL describing the shape of the `value` field on an
+/// `ignoreDependencyOverrides` `add-to-config` action: one `{ package, source? }`
+/// entry to append.
+const IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencyOverrides/items";
+
 pub(super) fn print_json(
     results: &AnalysisResults,
     root: &Path,
@@ -766,26 +771,40 @@ fn build_actions(
             }));
         }
         SuppressKind::AddToConfigIgnoreDependencyOverrides => {
+            // `target_package` is set on unused overrides (the key parsed
+            // successfully) but absent on misconfigured ones whose `raw_key`
+            // could not be parsed. Falling back to `raw_key` is unsafe in the
+            // misconfigured case: it may be empty or malformed. Skip the
+            // suppress action entirely when neither field yields a non-empty
+            // name; an `ignoreDependencyOverrides` entry with `package: ""`
+            // would be silently ignored by the config parser.
             let package_name = item
                 .get("target_package")
                 .and_then(serde_json::Value::as_str)
-                .or_else(|| item.get("raw_key").and_then(serde_json::Value::as_str))
-                .unwrap_or("package");
-            let source = item
-                .get("source")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("pnpm-workspace.yaml");
-            let value = serde_json::json!({
-                "package": package_name,
-                "source": source,
-            });
-            actions.push(serde_json::json!({
-                "type": "add-to-config",
-                "auto_fixable": false,
-                "description": "Suppress this override finding via ignoreDependencyOverrides in fallow config (use for CVE-fix overrides that target a purely-transitive package).",
-                "config_key": "ignoreDependencyOverrides",
-                "value": value,
-            }));
+                .filter(|s| !s.is_empty())
+                .or_else(|| {
+                    item.get("raw_key")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|s| !s.is_empty())
+                });
+            if let Some(package_name) = package_name {
+                let source = item
+                    .get("source")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("pnpm-workspace.yaml");
+                let value = serde_json::json!({
+                    "package": package_name,
+                    "source": source,
+                });
+                actions.push(serde_json::json!({
+                    "type": "add-to-config",
+                    "auto_fixable": false,
+                    "description": "Suppress this override finding via ignoreDependencyOverrides in fallow config (use for CVE-fix overrides that target a purely-transitive package).",
+                    "config_key": "ignoreDependencyOverrides",
+                    "value": value,
+                    "value_schema": IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA,
+                }));
+            }
         }
     }
 

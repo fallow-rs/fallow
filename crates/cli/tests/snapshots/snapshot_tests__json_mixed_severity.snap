@@ -499,7 +499,8 @@ expression: redact_version(&json_str)
           "value": {
             "package": "axios",
             "source": "pnpm-workspace.yaml"
-          }
+          },
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencyOverrides/items"
         }
       ]
     }
@@ -527,7 +528,8 @@ expression: redact_version(&json_str)
           "value": {
             "package": "@types/react@<<18",
             "source": "package.json"
-          }
+          },
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencyOverrides/items"
         }
       ]
     }

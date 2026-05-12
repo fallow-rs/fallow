@@ -114,7 +114,7 @@ else
     "| `\(.raw_key)` | `\(.target_package)` -> `\(.version_range)` | `\(.source)` | `\(.path):\(.line)` | \(.hint // "") |") +
   section("Misconfigured dependency overrides"; "misconfigured_dependency_overrides";
     "`pnpm.overrides` entries with an unparsable key or empty value. `pnpm install` will reject these.\n\n| Override | Value | Source | Location | Reason |\n|----------|-------|--------|----------|--------|\n";
-    "| `\(.raw_key)` | `\(.raw_value)` | `\(.source)` | `\(.path):\(.line)` | \(.reason) |") +
+    "| `\(.raw_key // "")` | `\(.raw_value // "")` | `\(.source)` | `\(.path):\(.line)` | \(.reason // "unparsable") |") +
   "\n\n> [!TIP]\n" +
   (if ((.unused_exports // []) + (.unused_dependencies // []) + (.unused_enum_members // [])) | length > 0 then
     "> Run `fallow fix --dry-run` to preview safe auto-fixes.\n"

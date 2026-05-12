@@ -98,7 +98,7 @@ fallow fix --dry-run        # Preview automatic cleanup
 
 ## What it finds
 
-- **Dead code**: unused files, exports, dependencies, types, cycles, boundaries, stale suppressions, unused pnpm `catalog:` entries, unresolved pnpm `catalog:` references (a `package.json` references a catalog that does not declare the package, so `pnpm install` would fail), GraphQL documents linked by `#import`, plus opt-in API hygiene checks such as private type leaks
+- **Dead code**: unused files, exports, dependencies, types, cycles, boundaries, stale suppressions, unused pnpm `catalog:` entries, unresolved pnpm `catalog:` references (a `package.json` references a catalog that does not declare the package, so `pnpm install` would fail), unused or misconfigured pnpm `overrides:` entries (an override forces a version no workspace package depends on, or an override key/value is malformed), GraphQL documents linked by `#import`, plus opt-in API hygiene checks such as private type leaks
 - **Duplication**: repeated blocks from exact to semantic clones
 - **Complexity**: high-risk functions, file scores, hotspots, and refactor targets
 - **Architecture drift**: boundary violations across layers and modules
