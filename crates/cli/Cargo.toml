@@ -75,6 +75,7 @@ proptest = { workspace = true }
 base64 = "0.22"
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 fallow-cov-protocol = "0.5"
+serde_yaml_ng = { workspace = true }
 
 [package.metadata.cargo-shear]
 ignored = ["miette"] # feature-only dep: activates fancy rendering for fallow-config's miette::Report
