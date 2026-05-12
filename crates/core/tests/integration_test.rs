@@ -112,6 +112,8 @@ mod issue_195_non_source_entry_points;
 mod issue_317_namespace_barrel_ignore_exports;
 #[path = "integration_test/issue_329_pnpm_catalog.rs"]
 mod issue_329_pnpm_catalog;
+#[path = "integration_test/issue_334_unresolved_catalog_ref.rs"]
+mod issue_334_unresolved_catalog_ref;
 #[path = "integration_test/script_multiplexers.rs"]
 mod script_multiplexers;
 #[path = "integration_test/visibility_tags.rs"]

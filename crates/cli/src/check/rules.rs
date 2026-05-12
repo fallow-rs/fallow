@@ -101,6 +101,9 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
     if rules.unused_catalog_entries == Severity::Off {
         results.unused_catalog_entries.clear();
     }
+    if rules.unresolved_catalog_references == Severity::Off {
+        results.unresolved_catalog_references.clear();
+    }
 }
 
 /// Check whether any issue type with `Severity::Error` has remaining issues.
@@ -186,6 +189,8 @@ pub fn has_error_severity_issues(
         || (rules.boundary_violation == Severity::Error && !results.boundary_violations.is_empty())
         || (rules.unused_catalog_entries == Severity::Error
             && !results.unused_catalog_entries.is_empty())
+        || (rules.unresolved_catalog_references == Severity::Error
+            && !results.unresolved_catalog_references.is_empty())
 }
 
 /// Promote all `Warn` severities to `Error` for a single run.
@@ -246,6 +251,9 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     }
     if rules.unused_catalog_entries == Severity::Warn {
         rules.unused_catalog_entries = Severity::Error;
+    }
+    if rules.unresolved_catalog_references == Severity::Warn {
+        rules.unresolved_catalog_references = Severity::Error;
     }
 }
 

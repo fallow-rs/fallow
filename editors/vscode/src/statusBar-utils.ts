@@ -21,6 +21,7 @@ export interface AnalysisCompleteParams {
   boundaryViolations: number;
   staleSuppressions: number;
   unusedCatalogEntries: number;
+  unresolvedCatalogReferences: number;
   duplicationPercentage: number;
   cloneGroups: number;
 }
@@ -53,6 +54,8 @@ export const buildParamsFromCli = (
   boundaryViolations: check?.boundary_violations?.length ?? 0,
   staleSuppressions: check?.stale_suppressions?.length ?? 0,
   unusedCatalogEntries: check?.unused_catalog_entries?.length ?? 0,
+  unresolvedCatalogReferences:
+    check?.unresolved_catalog_references?.length ?? 0,
   duplicationPercentage: dupes?.stats.duplication_percentage ?? 0,
   cloneGroups: dupes?.stats.clone_groups ?? 0,
 });
@@ -145,6 +148,11 @@ const BREAKDOWN_LINES: ReadonlyArray<BreakdownLine> = [
     count: "unusedCatalogEntries",
     icon: "$(warning)",
     label: "unused catalog entries",
+  },
+  {
+    count: "unresolvedCatalogReferences",
+    icon: "$(error)",
+    label: "unresolved catalog references",
   },
 ];
 

@@ -577,7 +577,8 @@ fn build_dependencies_section(
         || !results.unlisted_dependencies.is_empty()
         || !results.type_only_dependencies.is_empty()
         || !results.test_only_dependencies.is_empty()
-        || !results.unused_catalog_entries.is_empty();
+        || !results.unused_catalog_entries.is_empty()
+        || !results.unresolved_catalog_references.is_empty();
     if !has_dependencies {
         return;
     }
@@ -655,6 +656,14 @@ fn build_dependencies_section(
         total_issues,
         root,
     );
+    push_unresolved_catalog_references_section(
+        lines,
+        &results.unresolved_catalog_references,
+        rules.unresolved_catalog_references,
+        max_items,
+        total_issues,
+        root,
+    );
 }
 
 /// Render unused pnpm catalog entries in a flat column layout (matches knip's
@@ -706,6 +715,73 @@ fn push_unused_catalog_entries_section(
                 row = format!("    {}: {consumers}", "hardcoded in".dimmed());
                 out.push(row);
             }
+            out
+        },
+    );
+}
+
+/// Render unresolved pnpm catalog references using the same two-tier shape as
+/// `unused-catalog-entries`: a headline `entry_name  catalog_name  path:line`
+/// row, then an indented "not in catalog ...; available in: ..." second line.
+/// The default catalog gets a special case: the indented text reads "not in the
+/// default catalog" instead of "not in catalog 'default'" because users who
+/// write bare `catalog:` think of it as "the catalog", not as a named one.
+fn push_unresolved_catalog_references_section(
+    lines: &mut Vec<String>,
+    findings: &[fallow_core::results::UnresolvedCatalogReference],
+    severity: fallow_config::Severity,
+    max_items: usize,
+    total_issues: usize,
+    root: &Path,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_level(severity);
+    build_human_section_ex(
+        lines,
+        findings,
+        "Unresolved catalog references",
+        level,
+        max_items,
+        total_issues,
+        |finding| {
+            let path_display = root.join(&finding.path);
+            let catalog_label = if finding.catalog_name == "default" {
+                "default".to_string()
+            } else {
+                finding.catalog_name.clone()
+            };
+            let row = format!(
+                "  {entry_name}  {catalog}  {loc}",
+                entry_name = finding.entry_name.bold(),
+                catalog = catalog_label.dimmed(),
+                loc = format!(
+                    "{}:{}",
+                    path_display
+                        .strip_prefix(root)
+                        .unwrap_or(&path_display)
+                        .display(),
+                    finding.line
+                )
+                .dimmed(),
+            );
+            let mut out = vec![row];
+            let detail = if finding.catalog_name == "default" {
+                "not in the default catalog".to_string()
+            } else {
+                format!("not in catalog '{}'", finding.catalog_name)
+            };
+            let detail_line = if finding.available_in_catalogs.is_empty() {
+                format!("    {}", detail.dimmed())
+            } else {
+                format!(
+                    "    {}; available in: {}",
+                    detail.dimmed(),
+                    finding.available_in_catalogs.join(", ").bold(),
+                )
+            };
+            out.push(detail_line);
             out
         },
     );

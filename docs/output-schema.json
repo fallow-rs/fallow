@@ -345,6 +345,11 @@
           "items": { "$ref": "#/definitions/UnusedCatalogEntry" },
           "description": "Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not referenced by any workspace package via the catalog: protocol."
         },
+        "unresolved_catalog_references": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UnresolvedCatalogReference" },
+          "description": "Workspace package.json references to catalogs (catalog: or catalog:<name>) that do not declare the consumed package. pnpm install will error until the named catalog grows to include the package or the reference is switched / removed."
+        },
         "entry_points": {
           "$ref": "#/definitions/EntryPoints",
           "description": "Entry point detection summary. Always present in check output."
@@ -2602,6 +2607,42 @@
       }
     },
 
+    "UnresolvedCatalogReference": {
+      "type": "object",
+      "required": ["entry_name", "catalog_name", "path", "line"],
+      "description": "A workspace package.json reference (catalog: or catalog:<name>) pointing at a catalog that does not declare the consumed package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL.",
+      "properties": {
+        "entry_name": {
+          "type": "string",
+          "description": "Package name being referenced via the catalog protocol (e.g. 'old-react')."
+        },
+        "catalog_name": {
+          "type": "string",
+          "description": "Catalog group the reference points at. 'default' for bare catalog: references, or the named catalog key for catalog:<name> references."
+        },
+        "path": {
+          "type": "string",
+          "description": "Relative path to the consumer package.json."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the dependency entry in the consumer package.json."
+        },
+        "available_in_catalogs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Other catalogs in the same workspace that DO declare this package, sorted lexicographically. When non-empty, the suggested fix is to flip the reference to one of those catalogs; when empty, the fix is to add the missing entry to the named catalog or to remove the reference. Omitted when empty."
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/IssueAction" }
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
+        }
+      }
+    },
+
     "CloneGroup": {
       "type": "object",
       "required": ["instances", "token_count", "line_count"],
@@ -2809,7 +2850,8 @@
         "circular_dependencies": { "type": "integer" },
         "boundary_violations": { "type": "integer" },
         "stale_suppressions": { "type": "integer" },
-        "unused_catalog_entries": { "type": "integer" }
+        "unused_catalog_entries": { "type": "integer" },
+        "unresolved_catalog_references": { "type": "integer" }
       }
     },
 

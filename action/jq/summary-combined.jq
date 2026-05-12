@@ -136,7 +136,8 @@ else
       (if (.check.type_only_dependencies | length) > 0 then "| [Type-only dependencies](\(docs("type-only-dependencies"))) | \(.check.type_only_dependencies | length) |" else null end),
       (if (.check.test_only_dependencies | length) > 0 then "| [Test-only dependencies](\(docs("test-only-dependencies"))) | \(.check.test_only_dependencies | length) |" else null end),
       (if (.check.stale_suppressions | length) > 0 then "| [Stale suppressions](\(docs("stale-suppressions"))) | \(.check.stale_suppressions | length) |" else null end),
-      (if ((.check.unused_catalog_entries // []) | length) > 0 then "| [Unused catalog entries](\(docs("unused-catalog-entries"))) | \(.check.unused_catalog_entries | length) |" else null end)
+      (if ((.check.unused_catalog_entries // []) | length) > 0 then "| [Unused catalog entries](\(docs("unused-catalog-entries"))) | \(.check.unused_catalog_entries | length) |" else null end),
+      (if ((.check.unresolved_catalog_references // []) | length) > 0 then "| [Unresolved catalog references](\(docs("unresolved-catalog-references"))) | \(.check.unresolved_catalog_references | length) |" else null end)
     ] | map(select(. != null)) | join("\n")) +
     "\n\n</details>\n\n"
   else "" end) +

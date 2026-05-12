@@ -97,6 +97,7 @@ pub struct DeadCodeFilters {
     pub boundary_violations: bool,
     pub stale_suppressions: bool,
     pub unused_catalog_entries: bool,
+    pub unresolved_catalog_references: bool,
 }
 
 /// Options for dead-code-oriented analyses.
@@ -376,6 +377,7 @@ fn to_issue_filters(filters: &DeadCodeFilters) -> IssueFilters {
         boundary_violations: filters.boundary_violations,
         stale_suppressions: filters.stale_suppressions,
         unused_catalog_entries: filters.unused_catalog_entries,
+        unresolved_catalog_references: filters.unresolved_catalog_references,
     }
 }
 

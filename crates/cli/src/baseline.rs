@@ -93,6 +93,9 @@ pub struct BaselineData {
     /// Unused pnpm catalog entries, keyed by `catalog_name:entry_name`.
     #[serde(default)]
     pub unused_catalog_entries: Vec<String>,
+    /// Unresolved catalog references, keyed by `path:line:catalog_name:entry_name`.
+    #[serde(default)]
+    pub unresolved_catalog_references: Vec<String>,
 }
 
 impl BaselineData {
@@ -209,6 +212,19 @@ impl BaselineData {
                 .iter()
                 .map(|e| format!("{}:{}", e.catalog_name, e.entry_name))
                 .collect(),
+            unresolved_catalog_references: results
+                .unresolved_catalog_references
+                .iter()
+                .map(|r| {
+                    format!(
+                        "{}:{}:{}:{}",
+                        relative_path(&r.path, root),
+                        r.line,
+                        r.catalog_name,
+                        r.entry_name,
+                    )
+                })
+                .collect(),
         }
     }
 
@@ -232,6 +248,7 @@ impl BaselineData {
             + self.boundary_violations.len()
             + self.stale_suppressions.len()
             + self.unused_catalog_entries.len()
+            + self.unresolved_catalog_references.len()
     }
 }
 
@@ -463,6 +480,22 @@ pub fn filter_new_issues(
     results.unused_catalog_entries.retain(|e| {
         let key = format!("{}:{}", e.catalog_name, e.entry_name);
         !baseline_catalog.contains(key.as_str())
+    });
+
+    let baseline_unresolved: FxHashSet<&str> = baseline
+        .unresolved_catalog_references
+        .iter()
+        .map(String::as_str)
+        .collect();
+    results.unresolved_catalog_references.retain(|r| {
+        let key = format!(
+            "{}:{}:{}:{}",
+            relative_path(&r.path, root),
+            r.line,
+            r.catalog_name,
+            r.entry_name,
+        );
+        !baseline_unresolved.contains(key.as_str())
     });
 
     results
@@ -1206,6 +1239,7 @@ mod tests {
             boundary_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
+            unresolved_catalog_references: vec![],
         };
         let results = AnalysisResults {
             unused_files: vec![
@@ -1247,6 +1281,7 @@ mod tests {
             boundary_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
+            unresolved_catalog_references: vec![],
         };
         let results = make_results();
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
@@ -1275,6 +1310,7 @@ mod tests {
             boundary_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
+            unresolved_catalog_references: vec![],
         };
         let results = AnalysisResults {
             unused_exports: vec![

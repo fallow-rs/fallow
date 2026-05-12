@@ -163,7 +163,8 @@
             "circular-dependencies": true,
             "boundary-violation": true,
             "stale-suppressions": true,
-            "unused-catalog-entries": true
+            "unused-catalog-entries": true,
+            "unresolved-catalog-references": true
           },
           "description": "Toggle individual issue types on or off. Uses kebab-case names matching fallow's rules config.",
           "properties": {
@@ -219,6 +220,9 @@
               "type": "boolean"
             },
             "unused-catalog-entries": {
+              "type": "boolean"
+            },
+            "unresolved-catalog-references": {
               "type": "boolean"
             }
           }

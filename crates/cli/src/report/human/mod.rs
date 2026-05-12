@@ -128,6 +128,10 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "pnpm-workspace.yaml catalog entries not referenced by any workspace package via the `catalog:` protocol",
             "https://docs.fallow.tools/explanations/dead-code#unused-catalog-entries",
         )),
+        "Unresolved catalog references" => Some((
+            "package.json `catalog:` / `catalog:<name>` references whose catalog does not declare the package (pnpm install will error)",
+            "https://docs.fallow.tools/explanations/dead-code#unresolved-catalog-references",
+        )),
         t if t.starts_with("Type-only") => Some((
             "Dependencies only used for type imports \u{2014} consider moving to devDependencies",
             "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
@@ -154,6 +158,7 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
         "Circular dependencies" => Some("circular-dependencies"),
         "Boundary violations" => Some("boundary-violation"),
         "Unused catalog entries" => Some("unused-catalog-entry"),
+        "Unresolved catalog references" => Some("unresolved-catalog-reference"),
         _ => None,
     }
 }
@@ -167,6 +172,24 @@ fn is_file_level_only(rule: &str) -> bool {
 /// use `#` rather than `//`).
 fn is_yaml_comment_only(rule: &str) -> bool {
     matches!(rule, "unused-catalog-entry")
+}
+
+/// Rules whose findings live in a file format that does not support comments
+/// at all (e.g., `unresolved-catalog-reference` lives in `package.json`).
+/// Suppression for these MUST go through a fallow config entry.
+fn is_config_only_suppression(rule: &str) -> bool {
+    matches!(rule, "unresolved-catalog-reference")
+}
+
+/// Render the config-only suppression hint for a rule that has no inline
+/// suppression path.
+fn config_only_suppression_hint(rule: &str) -> &'static str {
+    match rule {
+        "unresolved-catalog-reference" => {
+            "To suppress: add an entry to ignoreCatalogReferences in your fallow config"
+        }
+        _ => "To suppress: add an override in your fallow config",
+    }
 }
 
 /// Categories that support `fallow fix --dry-run` auto-fix.
@@ -215,6 +238,8 @@ fn push_section_footer_impl(lines: &mut Vec<String>, title: &str, item_count: us
                 format!("To suppress: // fallow-ignore-file {rule}")
             } else if is_yaml_comment_only(rule) {
                 format!("To suppress: # fallow-ignore-next-line {rule}")
+            } else if is_config_only_suppression(rule) {
+                config_only_suppression_hint(rule).to_string()
             } else {
                 format!("To suppress: // fallow-ignore-next-line {rule}")
             };

@@ -146,6 +146,15 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
             entry.entry_name,
         ));
     }
+    for finding in &results.unresolved_catalog_references {
+        lines.push(format!(
+            "unresolved-catalog-reference:{}:{}:{}:{}",
+            rel(&finding.path),
+            finding.line,
+            finding.catalog_name,
+            finding.entry_name,
+        ));
+    }
 
     lines
 }

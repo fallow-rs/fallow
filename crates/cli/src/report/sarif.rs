@@ -449,6 +449,45 @@ fn sarif_unused_catalog_entry_fields(
     }
 }
 
+fn sarif_unresolved_catalog_reference_fields(
+    finding: &fallow_core::results::UnresolvedCatalogReference,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    let catalog_phrase = if finding.catalog_name == "default" {
+        "the default catalog".to_string()
+    } else {
+        format!("catalog '{}'", finding.catalog_name)
+    };
+    let mut message = format!(
+        "Package '{}' is referenced via `catalog:{}` but {} does not declare it",
+        finding.entry_name,
+        if finding.catalog_name == "default" {
+            ""
+        } else {
+            finding.catalog_name.as_str()
+        },
+        catalog_phrase,
+    );
+    if !finding.available_in_catalogs.is_empty() {
+        use std::fmt::Write as _;
+        let _ = write!(
+            message,
+            " (available in: {})",
+            finding.available_in_catalogs.join(", ")
+        );
+    }
+    SarifFields {
+        rule_id: "fallow/unresolved-catalog-reference",
+        level,
+        message,
+        uri: relative_uri(&finding.path, root),
+        region: Some((finding.line, 1)),
+        source_path: Some(finding.path.clone()),
+        properties: None,
+    }
+}
+
 /// Unlisted deps fan out to one SARIF result per import site, so they do not
 /// fit `push_sarif_results`. Keep the nested-loop shape in its own helper.
 fn push_sarif_unlisted_deps(
@@ -594,6 +633,11 @@ fn build_sarif_rules(rules: &RulesConfig) -> Vec<serde_json::Value> {
             "fallow/unused-catalog-entry",
             "pnpm catalog entry not referenced by any workspace package",
             rules.unused_catalog_entries,
+        ),
+        (
+            "fallow/unresolved-catalog-reference",
+            "package.json catalog reference points at a catalog that does not declare the package",
+            rules.unresolved_catalog_references,
         ),
     ]
     .into_iter()
@@ -833,6 +877,18 @@ pub fn build_sarif(
                 e,
                 root,
                 severity_to_sarif_level(rules.unused_catalog_entries),
+            )
+        },
+    );
+    push_sarif_results(
+        &mut sarif_results,
+        &results.unresolved_catalog_references,
+        &mut snippets,
+        |f| {
+            sarif_unresolved_catalog_reference_fields(
+                f,
+                root,
+                severity_to_sarif_level(rules.unresolved_catalog_references),
             )
         },
     );
@@ -1417,7 +1473,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 18);
+        assert_eq!(rules.len(), 19);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -1437,6 +1493,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/circular-dependency"));
         assert!(rule_ids.contains(&"fallow/boundary-violation"));
         assert!(rule_ids.contains(&"fallow/unused-catalog-entry"));
+        assert!(rule_ids.contains(&"fallow/unresolved-catalog-reference"));
     }
 
     #[test]

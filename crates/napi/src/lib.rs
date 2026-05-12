@@ -29,6 +29,7 @@ pub struct DeadCodeOptions {
     pub boundary_violations: Option<bool>,
     pub stale_suppressions: Option<bool>,
     pub unused_catalog_entries: Option<bool>,
+    pub unresolved_catalog_references: Option<bool>,
     pub files: Option<Vec<String>>,
     pub include_entry_exports: Option<bool>,
 }
@@ -245,6 +246,7 @@ impl TryFrom<DeadCodeOptions> for programmatic::DeadCodeOptions {
                 boundary_violations: value.boundary_violations.unwrap_or(false),
                 stale_suppressions: value.stale_suppressions.unwrap_or(false),
                 unused_catalog_entries: value.unused_catalog_entries.unwrap_or(false),
+                unresolved_catalog_references: value.unresolved_catalog_references.unwrap_or(false),
             },
             files: value
                 .files

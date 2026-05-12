@@ -240,11 +240,24 @@ expression: redact_sarif_version(&json_str)
                 "text": "Catalog entry in pnpm-workspace.yaml not referenced by any workspace package"
               },
               "fullDescription": {
-                "text": "An entry in the `catalog:` or `catalogs:` section of pnpm-workspace.yaml that no workspace package.json references via the `catalog:` protocol. Catalog entries are leftover dependency metadata once a package is removed from every consumer; delete the entry to keep the catalog truthful."
+                "text": "An entry in the `catalog:` or `catalogs:` section of pnpm-workspace.yaml that no workspace package.json references via the `catalog:` protocol. Catalog entries are leftover dependency metadata once a package is removed from every consumer; delete the entry to keep the catalog truthful. See also: fallow/unresolved-catalog-reference (the inverse: consumer references a catalog that does not declare the package)."
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-catalog-entries",
               "defaultConfiguration": {
                 "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/unresolved-catalog-reference",
+              "shortDescription": {
+                "text": "package.json references a catalog that does not declare the package"
+              },
+              "fullDescription": {
+                "text": "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. See also: fallow/unused-catalog-entry (the inverse: catalog entries no consumer references)."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unresolved-catalog-references",
+              "defaultConfiguration": {
+                "level": "error"
               }
             }
           ]

@@ -24,6 +24,7 @@ export interface IssueTypeConfig {
   readonly "boundary-violation": boolean;
   readonly "stale-suppressions": boolean;
   readonly "unused-catalog-entries": boolean;
+  readonly "unresolved-catalog-references": boolean;
 }
 
 export type DuplicationMode = "strict" | "mild" | "weak" | "semantic";

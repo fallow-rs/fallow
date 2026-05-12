@@ -189,8 +189,16 @@ pub const CHECK_RULES: &[RuleDef] = &[
         category: "Dependencies",
         name: "Unused pnpm catalog entry",
         short: "Catalog entry in pnpm-workspace.yaml not referenced by any workspace package",
-        full: "An entry in the `catalog:` or `catalogs:` section of pnpm-workspace.yaml that no workspace package.json references via the `catalog:` protocol. Catalog entries are leftover dependency metadata once a package is removed from every consumer; delete the entry to keep the catalog truthful.",
+        full: "An entry in the `catalog:` or `catalogs:` section of pnpm-workspace.yaml that no workspace package.json references via the `catalog:` protocol. Catalog entries are leftover dependency metadata once a package is removed from every consumer; delete the entry to keep the catalog truthful. See also: fallow/unresolved-catalog-reference (the inverse: consumer references a catalog that does not declare the package).",
         docs_path: "explanations/dead-code#unused-catalog-entries",
+    },
+    RuleDef {
+        id: "fallow/unresolved-catalog-reference",
+        category: "Dependencies",
+        name: "Unresolved pnpm catalog reference",
+        short: "package.json references a catalog that does not declare the package",
+        full: "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. See also: fallow/unused-catalog-entry (the inverse: catalog entries no consumer references).",
+        docs_path: "explanations/dead-code#unresolved-catalog-references",
     },
 ];
 
@@ -259,6 +267,9 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         "stale-suppressions" => Some("fallow/stale-suppression"),
         "unused-catalog-entries" | "unused-catalog-entry" | "catalog" => {
             Some("fallow/unused-catalog-entry")
+        }
+        "unresolved-catalog-references" | "unresolved-catalog-reference" | "unresolved-catalog" => {
+            Some("fallow/unresolved-catalog-reference")
         }
         "complexity" | "high-complexity" => Some("fallow/high-complexity"),
         "cyclomatic" | "high-cyclomatic" | "high-cyclomatic-complexity" => {
@@ -363,6 +374,10 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
         "fallow/unused-catalog-entry" => RuleGuide {
             example: "pnpm-workspace.yaml declares `catalog: { is-even: ^1.0.0 }`, but no workspace package.json declares `\"is-even\": \"catalog:\"`.",
             how_to_fix: "Delete the entry from pnpm-workspace.yaml. If any consumer uses a hardcoded version (surfaced in `hardcoded_consumers`), switch that consumer to `catalog:` first to keep versions aligned.",
+        },
+        "fallow/unresolved-catalog-reference" => RuleGuide {
+            example: "packages/app/package.json declares `\"old-react\": \"catalog:react17\"`, but `catalogs.react17` in pnpm-workspace.yaml does not declare `old-react`. `pnpm install` will fail.",
+            how_to_fix: "If `available_in_catalogs` is non-empty, change the reference to one of those catalogs (e.g. `catalog:react18`). Otherwise add the package to the named catalog in pnpm-workspace.yaml, or remove the catalog reference and pin a hardcoded version. For staged migrations where the catalog edit lands separately, add the (package, catalog, consumer) triple to `ignoreCatalogReferences` in your fallow config.",
         },
         "fallow/high-cyclomatic-complexity"
         | "fallow/high-cognitive-complexity"
@@ -1434,7 +1449,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 18);
+        assert_eq!(CHECK_RULES.len(), 19);
     }
 
     #[test]

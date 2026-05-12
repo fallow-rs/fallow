@@ -46,7 +46,8 @@ else
     table_row("Type-only dependencies"; "type_only_dependencies"; "type-only-dependencies"),
     table_row("Test-only dependencies"; "test_only_dependencies"; "test-only-dependencies"),
     table_row("Stale suppressions"; "stale_suppressions"; "stale-suppressions"),
-    table_row("Unused catalog entries"; "unused_catalog_entries"; "unused-catalog-entries")
+    table_row("Unused catalog entries"; "unused_catalog_entries"; "unused-catalog-entries"),
+    table_row("Unresolved catalog references"; "unresolved_catalog_references"; "unresolved-catalog-references")
   ] | join("\n")) +
   "\n\n---\n" +
   section("Unused files"; "unused_files";
@@ -103,6 +104,9 @@ else
   section("Unused catalog entries"; "unused_catalog_entries";
     "pnpm catalog entries not referenced by any workspace package.\n\n| Entry | Catalog | Location | Hardcoded consumers |\n|-------|---------|----------|---------------------|\n";
     "| `\(.entry_name)` | `\(.catalog_name)` | `\(.path):\(.line)` | \(if ((.hardcoded_consumers // []) | length) > 0 then (.hardcoded_consumers | map("`\(.)`") | join(", ")) else "" end) |") +
+  section("Unresolved catalog references"; "unresolved_catalog_references";
+    "Workspace `package.json` references to catalogs that do not declare the package. `pnpm install` will fail until each entry is added to its named catalog or the reference is switched.\n\n| Entry | Catalog | Location | Available in |\n|-------|---------|----------|--------------|\n";
+    "| `\(.entry_name)` | `\(.catalog_name)` | `\(.path):\(.line)` | \(if ((.available_in_catalogs // []) | length) > 0 then (.available_in_catalogs | map("`\(.)`") | join(", ")) else "" end) |") +
   "\n\n> [!TIP]\n" +
   (if ((.unused_exports // []) + (.unused_dependencies // []) + (.unused_enum_members // [])) | length > 0 then
     "> Run `fallow fix --dry-run` to preview safe auto-fixes.\n"

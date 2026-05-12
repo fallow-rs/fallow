@@ -37,6 +37,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "boundary-violation": "symbol-namespace",
   "stale-suppressions": "trash",
   "unused-catalog-entries": "package",
+  "unresolved-catalog-references": "error",
 };
 
 /** Icons for individual issue items. */
@@ -59,6 +60,7 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
   "boundary-violation": "symbol-namespace",
   "stale-suppressions": "trash",
   "unused-catalog-entries": "package",
+  "unresolved-catalog-references": "error",
 };
 
 const staleSuppressionLabel = (
@@ -367,6 +369,24 @@ export class DeadCodeTreeProvider
               entry.line,
               0,
               "unused-catalog-entries"
+            )
+        )
+      );
+    }
+
+    if (this.result.unresolved_catalog_references) {
+      addCategory(
+        "unresolved-catalog-references",
+        this.result.unresolved_catalog_references.map(
+          (finding) =>
+            new IssueItem(
+              finding.catalog_name === "default"
+                ? finding.entry_name
+                : `${finding.entry_name} (${finding.catalog_name})`,
+              finding.path,
+              finding.line,
+              0,
+              "unresolved-catalog-references"
             )
         )
       );

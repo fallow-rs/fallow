@@ -22,7 +22,8 @@ export type IssueCategory =
   | "circular-dependencies"
   | "boundary-violation"
   | "stale-suppressions"
-  | "unused-catalog-entries";
+  | "unused-catalog-entries"
+  | "unresolved-catalog-references";
 
 export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "unused-files": "Unused Files",
@@ -43,4 +44,5 @@ export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "boundary-violation": "Boundary Violations",
   "stale-suppressions": "Stale Suppressions",
   "unused-catalog-entries": "Unused Catalog Entries",
+  "unresolved-catalog-references": "Unresolved Catalog References",
 };

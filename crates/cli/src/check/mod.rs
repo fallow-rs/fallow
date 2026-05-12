@@ -36,6 +36,7 @@ pub struct IssueFilters {
     pub boundary_violations: bool,
     pub stale_suppressions: bool,
     pub unused_catalog_entries: bool,
+    pub unresolved_catalog_references: bool,
 }
 
 impl IssueFilters {
@@ -54,6 +55,7 @@ impl IssueFilters {
             || self.boundary_violations
             || self.stale_suppressions
             || self.unused_catalog_entries
+            || self.unresolved_catalog_references
     }
 
     /// Enable off-by-default issue types when explicitly requested as filters.
@@ -112,6 +114,9 @@ impl IssueFilters {
         }
         if !self.unused_catalog_entries {
             results.unused_catalog_entries.clear();
+        }
+        if !self.unresolved_catalog_references {
+            results.unresolved_catalog_references.clear();
         }
     }
 }
@@ -675,6 +680,7 @@ mod tests {
             boundary_violations: false,
             stale_suppressions: false,
             unused_catalog_entries: false,
+            unresolved_catalog_references: false,
         }
     }
 
@@ -1024,6 +1030,7 @@ mod tests {
             boundary_violations: true,
             stale_suppressions: true,
             unused_catalog_entries: true,
+            unresolved_catalog_references: true,
         };
         let total_before = results.total_issues();
         f.apply(&mut results);

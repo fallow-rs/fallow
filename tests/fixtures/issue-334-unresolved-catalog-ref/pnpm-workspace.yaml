@@ -1,0 +1,14 @@
+packages:
+  - 'packages/*'
+
+catalog:
+  is-even: ^1.0.0
+
+catalogs:
+  react17:
+    react: ^17.0.2
+    react-dom: ^17.0.2
+  react18:
+    react: ^18.2.0
+    react-dom: ^18.2.0
+    old-react: ^18.0.0

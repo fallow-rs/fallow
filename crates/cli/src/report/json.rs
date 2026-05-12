@@ -22,6 +22,11 @@ const IGNORE_EXPORTS_VALUE_SCHEMA: &str =
 /// (a single string) since the action's `value` is one entry to append.
 const IGNORE_DEPENDENCIES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items";
 
+/// JSON Pointer fragment URL describing the shape of the `value` field on an
+/// `ignoreCatalogReferences` `add-to-config` action: one `{ package, catalog?,
+/// consumer? }` entry to append.
+const IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreCatalogReferences/items";
+
 pub(super) fn print_json(
     results: &AnalysisResults,
     root: &Path,
@@ -266,6 +271,7 @@ pub fn build_json(
         "boundary_violations": results.boundary_violations.len(),
         "stale_suppressions": results.stale_suppressions.len(),
         "unused_catalog_entries": results.unused_catalog_entries.len(),
+        "unresolved_catalog_references": results.unresolved_catalog_references.len(),
     });
     map.insert("summary".to_string(), summary);
 
@@ -329,6 +335,9 @@ enum SuppressKind {
     FileComment,
     /// Add to `ignoreDependencies` in fallow config.
     ConfigIgnoreDep,
+    /// Add to `ignoreCatalogReferences` in fallow config (with optional
+    /// catalog + consumer scope).
+    AddToConfigIgnoreCatalogReferences,
 }
 
 /// Specification for actions to inject per issue type.
@@ -497,7 +506,67 @@ fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
             suppress: SuppressKind::YamlComment,
             issue_kind: "unused-catalog-entry",
         }),
+        // The primary fix for unresolved-catalog-references is computed in
+        // build_actions because it discriminates on `available_in_catalogs`.
+        // This entry serves as the fallback / suppression spec only.
+        "unresolved_catalog_references" => Some(ActionSpec {
+            fix_type: "remove-catalog-reference",
+            auto_fixable: false,
+            description: "Remove the catalog reference and pin a hardcoded version in package.json",
+            note: Some(
+                "Use only when neither another catalog declares the package nor the named catalog should grow to include it",
+            ),
+            suppress: SuppressKind::AddToConfigIgnoreCatalogReferences,
+            issue_kind: "unresolved-catalog-reference",
+        }),
         _ => None,
+    }
+}
+
+/// Build the discriminated primary action for an `unresolved_catalog_references`
+/// finding. Reads `available_in_catalogs` to decide between the two high-confidence
+/// machine-actionable fixes; the result is appended ahead of the generic
+/// `remove-catalog-reference` fallback in `build_actions`.
+fn build_unresolved_catalog_reference_primary_action(
+    item: &serde_json::Value,
+) -> serde_json::Value {
+    let available: Vec<String> = item
+        .get("available_in_catalogs")
+        .and_then(serde_json::Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let package_name = item
+        .get("entry_name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("package");
+    let current_catalog = item
+        .get("catalog_name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("default");
+    if available.is_empty() {
+        serde_json::json!({
+            "type": "add-catalog-entry",
+            "auto_fixable": false,
+            "description": format!(
+                "Add `{package_name}` to the `{current_catalog}` catalog in pnpm-workspace.yaml",
+            ),
+            "note": "Pin a version that satisfies the consumer's import; no other catalog declares this package today",
+        })
+    } else {
+        serde_json::json!({
+            "type": "update-catalog-reference",
+            "auto_fixable": false,
+            "description": format!(
+                "Switch the reference from `catalog:{current_catalog}` to a catalog that declares `{package_name}`",
+            ),
+            "available_in_catalogs": available,
+        })
     }
 }
 
@@ -513,6 +582,12 @@ fn build_actions(
             .get("used_in_workspaces")
             .and_then(serde_json::Value::as_array)
             .is_some_and(|workspaces| !workspaces.is_empty());
+
+    // unresolved-catalog-references emits a discriminated primary action
+    // before the generic remove-catalog-reference fallback below.
+    if issue_key == "unresolved_catalog_references" {
+        actions.push(build_unresolved_catalog_reference_primary_action(item));
+    }
 
     // duplicate-exports: emit the safe `add-to-config` (ignoreExports) action
     // FIRST so position-0 (the documented primary slot, see HealthFindingAction
@@ -608,6 +683,33 @@ fn build_actions(
                 "config_key": "ignoreDependencies",
                 "value": pkg,
                 "value_schema": IGNORE_DEPENDENCIES_VALUE_SCHEMA,
+            }));
+        }
+        SuppressKind::AddToConfigIgnoreCatalogReferences => {
+            let package_name = item
+                .get("entry_name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("package");
+            let catalog_name = item
+                .get("catalog_name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("default");
+            let consumer_path = item
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            let value = serde_json::json!({
+                "package": package_name,
+                "catalog": catalog_name,
+                "consumer": consumer_path,
+            });
+            actions.push(serde_json::json!({
+                "type": "add-to-config",
+                "auto_fixable": false,
+                "description": "Suppress this reference via ignoreCatalogReferences in fallow config (use when the catalog edit is intentionally landing in a separate PR or the package is a placeholder).",
+                "config_key": "ignoreCatalogReferences",
+                "value": value,
+                "value_schema": IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA,
             }));
         }
     }

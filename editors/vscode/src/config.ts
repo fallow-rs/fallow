@@ -47,6 +47,7 @@ export const getIssueTypes = (): IssueTypeConfig =>
     "boundary-violation": true,
     "stale-suppressions": true,
     "unused-catalog-entries": true,
+    "unresolved-catalog-references": true,
   });
 
 export const getDuplicationThreshold = (): number =>

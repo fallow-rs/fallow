@@ -33,6 +33,9 @@ def filter_check:
   (if .stale_suppressions then
     .stale_suppressions |= map(select(.path | in_changed))
   else . end) |
+  (if .unresolved_catalog_references then
+    .unresolved_catalog_references |= map(select(.path | in_changed))
+  else . end) |
   # Recalculate total_issues from filtered arrays
   (if .total_issues != null then
     .total_issues = (
@@ -52,7 +55,8 @@ def filter_check:
       (.boundary_violations // [] | length) +
       (.type_only_dependencies // [] | length) +
       (.stale_suppressions // [] | length) +
-      (.unused_catalog_entries // [] | length)
+      (.unused_catalog_entries // [] | length) +
+      (.unresolved_catalog_references // [] | length)
     )
   else . end);
 

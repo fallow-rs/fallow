@@ -29,7 +29,8 @@ def dead_code_rows:
    [ (.dead_code.type_only_dependencies // [])[] | {kind:"Type-only dependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.test_only_dependencies // [])[] | {kind:"Test-only dependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.stale_suppressions // [])[] | {kind:"Stale suppression", location:path_line, item:(.description // "suppression"), introduced:.introduced} ] +
-   [ (.dead_code.unused_catalog_entries // [])[] | {kind:"Unused catalog entry", location:path_line, item:("`\(.entry_name)` (`\(.catalog_name)`)"), introduced:.introduced} ]);
+   [ (.dead_code.unused_catalog_entries // [])[] | {kind:"Unused catalog entry", location:path_line, item:("`\(.entry_name)` (`\(.catalog_name)`)"), introduced:.introduced} ] +
+   [ (.dead_code.unresolved_catalog_references // [])[] | {kind:"Unresolved catalog reference", location:path_line, item:("`\(.entry_name)` -> `\(.catalog_name)`"), introduced:.introduced} ]);
 def duplication_rows:
   [(.duplication.clone_groups // [])[] |
     (.instances // []) as $instances |

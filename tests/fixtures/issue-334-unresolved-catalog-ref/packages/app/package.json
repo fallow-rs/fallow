@@ -1,0 +1,11 @@
+{
+  "name": "app",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "react": "catalog:react17",
+    "old-react": "catalog:react17",
+    "is-even": "catalog:",
+    "missing-pkg": "catalog:"
+  }
+}

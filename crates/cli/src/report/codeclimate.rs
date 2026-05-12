@@ -546,6 +546,61 @@ fn push_unused_catalog_entry_issues(
     }
 }
 
+fn push_unresolved_catalog_reference_issues(
+    issues: &mut Vec<serde_json::Value>,
+    findings: &[fallow_core::results::UnresolvedCatalogReference],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for finding in findings {
+        let path = cc_path(&finding.path, root);
+        let line_str = finding.line.to_string();
+        let fp = fingerprint_hash(&[
+            "fallow/unresolved-catalog-reference",
+            &path,
+            &line_str,
+            &finding.catalog_name,
+            &finding.entry_name,
+        ]);
+        let catalog_phrase = if finding.catalog_name == "default" {
+            "the default catalog".to_string()
+        } else {
+            format!("catalog '{}'", finding.catalog_name)
+        };
+        let mut description = format!(
+            "Package '{}' is referenced via `catalog:{}` but {} does not declare it",
+            finding.entry_name,
+            if finding.catalog_name == "default" {
+                ""
+            } else {
+                finding.catalog_name.as_str()
+            },
+            catalog_phrase,
+        );
+        if !finding.available_in_catalogs.is_empty() {
+            use std::fmt::Write as _;
+            let _ = write!(
+                description,
+                " (available in: {})",
+                finding.available_in_catalogs.join(", ")
+            );
+        }
+        issues.push(cc_issue(
+            "fallow/unresolved-catalog-reference",
+            &description,
+            level,
+            "Bug Risk",
+            &path,
+            Some(finding.line),
+            &fp,
+        ));
+    }
+}
+
 /// Build CodeClimate JSON array from dead-code analysis results.
 #[must_use]
 pub fn build_codeclimate(
@@ -673,6 +728,12 @@ pub fn build_codeclimate(
         &results.unused_catalog_entries,
         root,
         rules.unused_catalog_entries,
+    );
+    push_unresolved_catalog_reference_issues(
+        &mut issues,
+        &results.unresolved_catalog_references,
+        root,
+        rules.unresolved_catalog_references,
     );
 
     serde_json::Value::Array(issues)

@@ -24,7 +24,8 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     "circular_dependencies": 1,
     "boundary_violations": 0,
     "stale_suppressions": 0,
-    "unused_catalog_entries": 2
+    "unused_catalog_entries": 2,
+    "unresolved_catalog_references": 0
   },
   "unused_files": [
     {
@@ -431,5 +432,6 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         }
       ]
     }
-  ]
+  ],
+  "unresolved_catalog_references": []
 }

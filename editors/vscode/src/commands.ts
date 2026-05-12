@@ -135,6 +135,9 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     unused_catalog_entries: types["unused-catalog-entries"]
       ? result.unused_catalog_entries
       : [],
+    unresolved_catalog_references: types["unresolved-catalog-references"]
+      ? result.unresolved_catalog_references
+      : [],
   };
   const totalIssues = countCheckIssues(filtered);
   const summary = {
@@ -158,6 +161,8 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     boundary_violations: filtered.boundary_violations?.length ?? 0,
     stale_suppressions: filtered.stale_suppressions?.length ?? 0,
     unused_catalog_entries: filtered.unused_catalog_entries?.length ?? 0,
+    unresolved_catalog_references:
+      filtered.unresolved_catalog_references?.length ?? 0,
   };
   return {
     ...filtered,

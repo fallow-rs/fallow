@@ -20,7 +20,8 @@
     "boundary_violations": [],
     "type_only_dependencies": [],
     "stale_suppressions": [],
-    "unused_catalog_entries": []
+    "unused_catalog_entries": [],
+    "unresolved_catalog_references": []
   },
   "dupes": {
     "clone_groups": [],

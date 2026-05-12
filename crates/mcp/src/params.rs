@@ -50,7 +50,10 @@ pub struct AnalyzeParams {
     /// Valid values: unused-files, unused-exports, unused-types,
     /// private-type-leaks, unused-deps, unused-enum-members, unused-class-members, unresolved-imports,
     /// unlisted-deps, duplicate-exports, circular-deps, boundary-violations,
-    /// stale-suppressions, unused-catalog-entries.
+    /// stale-suppressions, unused-catalog-entries (catalog declares packages no
+    /// consumer references; dead config), unresolved-catalog-references
+    /// (consumer references catalogs that do not declare the package; broken
+    /// config that pnpm install will reject).
     pub issue_types: Option<Vec<String>>,
 
     #[schemars(

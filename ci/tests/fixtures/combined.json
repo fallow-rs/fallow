@@ -106,7 +106,8 @@
     "circular_dependencies": [],
     "boundary_violations": [],
     "stale_suppressions": [],
-    "unused_catalog_entries": []
+    "unused_catalog_entries": [],
+    "unresolved_catalog_references": []
   },
   "dupes": {
     "clone_groups": [

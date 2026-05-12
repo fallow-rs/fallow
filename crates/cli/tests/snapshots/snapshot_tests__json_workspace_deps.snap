@@ -24,7 +24,8 @@ expression: redact_version(&json_str)
     "circular_dependencies": 0,
     "boundary_violations": 0,
     "stale_suppressions": 0,
-    "unused_catalog_entries": 0
+    "unused_catalog_entries": 0,
+    "unresolved_catalog_references": 0
   },
   "unused_files": [],
   "unused_exports": [],
@@ -87,5 +88,6 @@ expression: redact_version(&json_str)
   "circular_dependencies": [],
   "boundary_violations": [],
   "stale_suppressions": [],
-  "unused_catalog_entries": []
+  "unused_catalog_entries": [],
+  "unresolved_catalog_references": []
 }

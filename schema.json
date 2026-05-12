@@ -72,6 +72,13 @@
       },
       "default": []
     },
+    "ignoreCatalogReferences": {
+      "description": "Rules for suppressing `unresolved-catalog-reference` findings.\n\nEach rule matches by package name, optionally scoped to a specific\ncatalog and/or consumer `package.json` glob. Useful for staged catalog\nmigrations where the catalog edit lands separately from the consumer\nedit, and for library-internal placeholder packages whose target\ncatalog isn't ready yet.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/IgnoreCatalogReferenceRule"
+      }
+    },
     "ignoreExportsUsedInFile": {
       "description": "Suppress unused-export findings when the exported symbol is referenced\ninside the file that declares it. This mirrors Knip's\n`ignoreExportsUsedInFile` option while still reporting exports that have\nno references at all.",
       "$ref": "#/$defs/IgnoreExportsUsedInFileConfig",
@@ -149,7 +156,8 @@
         "coverage-gaps": "off",
         "feature-flags": "off",
         "stale-suppressions": "warn",
-        "unused-catalog-entries": "warn"
+        "unused-catalog-entries": "warn",
+        "unresolved-catalog-references": "error"
       }
     },
     "boundaries": {
@@ -529,6 +537,34 @@
         "exports"
       ]
     },
+    "IgnoreCatalogReferenceRule": {
+      "description": "Rule for suppressing an `unresolved-catalog-reference` finding.\n\nA finding is suppressed when ALL provided fields match the finding:\n- `package` matches the consumed package name exactly (case-sensitive).\n- `catalog`, if set, matches the referenced catalog name (`\"default\"` for\n  bare `catalog:` references; named catalogs use their declared key). When\n  omitted, any catalog matches.\n- `consumer`, if set, is a glob matched against the consumer `package.json`\n  path relative to the project root. When omitted, any consumer matches.\n\nTypical use cases:\n- Staged migrations: catalog entry is being added in a separate PR\n- Library-internal placeholder packages whose target catalog isn't ready yet",
+      "type": "object",
+      "properties": {
+        "package": {
+          "description": "Package name being referenced via the catalog protocol (exact match).",
+          "type": "string"
+        },
+        "catalog": {
+          "description": "Catalog name to scope the suppression to. `None` matches any catalog.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "consumer": {
+          "description": "Glob (root-relative) for the consumer `package.json`. `None` matches any consumer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "package"
+      ]
+    },
     "IgnoreExportsUsedInFileConfig": {
       "description": "Controls whether exports referenced only inside their defining file are\nreported as unused exports.",
       "anyOf": [
@@ -878,6 +914,10 @@
         "unused-catalog-entries": {
           "$ref": "#/$defs/Severity",
           "default": "warn"
+        },
+        "unresolved-catalog-references": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
         }
       }
     },
@@ -1324,6 +1364,16 @@
           ]
         },
         "unused-catalog-entries": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unresolved-catalog-references": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

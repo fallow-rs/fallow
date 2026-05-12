@@ -111,5 +111,14 @@
       "line": 6,
       "hardcoded_consumers": []
     }
+  ],
+  "unresolved_catalog_references": [
+    {
+      "entry_name": "old-react",
+      "catalog_name": "react17",
+      "path": "packages/app/package.json",
+      "line": 14,
+      "available_in_catalogs": ["react18"]
+    }
   ]
 }

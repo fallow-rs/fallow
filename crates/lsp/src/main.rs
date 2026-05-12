@@ -57,6 +57,7 @@ struct AnalysisCompleteParams {
     boundary_violations: usize,
     stale_suppressions: usize,
     unused_catalog_entries: usize,
+    unresolved_catalog_references: usize,
     duplication_percentage: f64,
     clone_groups: usize,
 }
@@ -173,6 +174,11 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         config_key: Some("unused-catalog-entries"),
         code: "unused-catalog-entry",
         label: "Unused Catalog Entries",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unresolved-catalog-references"),
+        code: "unresolved-catalog-reference",
+        label: "Unresolved Catalog References",
     },
 ];
 
@@ -837,6 +843,7 @@ impl FallowLspServer {
                         boundary_violations: results.boundary_violations.len(),
                         stale_suppressions: results.stale_suppressions.len(),
                         unused_catalog_entries: results.unused_catalog_entries.len(),
+                        unresolved_catalog_references: results.unresolved_catalog_references.len(),
                         duplication_percentage: duplication.stats.duplication_percentage,
                         clone_groups: duplication.stats.clone_groups,
                     })
@@ -1131,6 +1138,14 @@ fn dedup_results(target: &mut AnalysisResults) {
     dedup_by_key_preserving_order(&mut target.unused_catalog_entries, |e| {
         (e.path.clone(), e.catalog_name.clone(), e.entry_name.clone())
     });
+    dedup_by_key_preserving_order(&mut target.unresolved_catalog_references, |f| {
+        (
+            f.path.clone(),
+            f.line,
+            f.catalog_name.clone(),
+            f.entry_name.clone(),
+        )
+    });
 
     // UnlistedDependency: real merge, not plain dedup. The same package can
     // be reported by two roots with different `imported_from` site lists
@@ -1205,6 +1220,9 @@ fn merge_results(target: &mut AnalysisResults, source: AnalysisResults) {
     target
         .unused_catalog_entries
         .extend(source.unused_catalog_entries);
+    target
+        .unresolved_catalog_references
+        .extend(source.unresolved_catalog_references);
 }
 
 /// Merge duplication reports from a sub-project into the accumulated report.

@@ -33,6 +33,7 @@ const baseParams = (
   boundaryViolations: 0,
   staleSuppressions: 0,
   unusedCatalogEntries: 0,
+  unresolvedCatalogReferences: 0,
   duplicationPercentage: 0,
   cloneGroups: 0,
 }, overrides);

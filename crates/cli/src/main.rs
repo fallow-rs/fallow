@@ -323,6 +323,10 @@ enum Command {
         #[arg(long)]
         unused_catalog_entries: bool,
 
+        /// Only report unresolved pnpm catalog references
+        #[arg(long)]
+        unresolved_catalog_references: bool,
+
         /// Also run duplication analysis and cross-reference with dead code
         #[arg(long)]
         include_dupes: bool,
@@ -1977,6 +1981,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             boundary_violations,
             stale_suppressions,
             unused_catalog_entries,
+            unresolved_catalog_references,
             include_dupes,
             trace,
             trace_file,
@@ -2001,6 +2006,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     boundary_violations,
                     stale_suppressions,
                     unused_catalog_entries,
+                    unresolved_catalog_references,
                 },
                 trace_opts: TraceOptions {
                     trace_export: trace,

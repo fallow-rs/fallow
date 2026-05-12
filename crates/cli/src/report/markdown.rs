@@ -254,6 +254,31 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
             vec![row]
         },
     );
+    markdown_section(
+        &mut out,
+        &results.unresolved_catalog_references,
+        "Unresolved catalog references",
+        |finding| {
+            let mut row = format!(
+                "- `{}` (`{}`) `{}`:{}",
+                escape_backticks(&finding.entry_name),
+                escape_backticks(&finding.catalog_name),
+                rel(&finding.path),
+                finding.line,
+            );
+            if !finding.available_in_catalogs.is_empty() {
+                use std::fmt::Write as _;
+                let alts = finding
+                    .available_in_catalogs
+                    .iter()
+                    .map(|c| format!("`{}`", escape_backticks(c)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let _ = write!(row, " (available in: {alts})");
+            }
+            vec![row]
+        },
+    );
 
     out
 }

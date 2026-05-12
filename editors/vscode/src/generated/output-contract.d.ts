@@ -117,6 +117,10 @@ stale_suppressions: StaleSuppression[]
  * Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not referenced by any workspace package via the catalog: protocol.
  */
 unused_catalog_entries?: UnusedCatalogEntry[]
+/**
+ * Workspace package.json references to catalogs (catalog: or catalog:<name>) that do not declare the consumed package. pnpm install will error until the named catalog grows to include the package or the reference is switched / removed.
+ */
+unresolved_catalog_references?: UnresolvedCatalogReference[]
 entry_points?: EntryPoints
 summary?: CheckSummary
 baseline_deltas?: BaselineDeltas
@@ -587,6 +591,33 @@ actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
+ * A workspace package.json reference (catalog: or catalog:<name>) pointing at a catalog that does not declare the consumed package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL.
+ */
+export interface UnresolvedCatalogReference {
+/**
+ * Package name being referenced via the catalog protocol (e.g. 'old-react').
+ */
+entry_name: string
+/**
+ * Catalog group the reference points at. 'default' for bare catalog: references, or the named catalog key for catalog:<name> references.
+ */
+catalog_name: string
+/**
+ * Relative path to the consumer package.json.
+ */
+path: string
+/**
+ * 1-based line number of the dependency entry in the consumer package.json.
+ */
+line: number
+/**
+ * Other catalogs in the same workspace that DO declare this package, sorted lexicographically. When non-empty, the suggested fix is to flip the reference to one of those catalogs; when empty, the fix is to add the missing entry to the named catalog or to remove the reference. Omitted when empty.
+ */
+available_in_catalogs?: string[]
+actions?: IssueAction[]
+introduced?: AuditIntroduced
+}
+/**
  * Entry point detection summary showing total detected entry points and their sources.
  */
 export interface EntryPoints {
@@ -620,6 +651,7 @@ circular_dependencies?: number
 boundary_violations?: number
 stale_suppressions?: number
 unused_catalog_entries?: number
+unresolved_catalog_references?: number
 }
 /**
  * Per-category delta comparison against a saved baseline. Shows current count, baseline count, and delta for each category.
