@@ -601,6 +601,84 @@ fn push_unresolved_catalog_reference_issues(
     }
 }
 
+fn push_unused_dependency_override_issues(
+    issues: &mut Vec<serde_json::Value>,
+    findings: &[fallow_core::results::UnusedDependencyOverride],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for finding in findings {
+        let path = cc_path(&finding.path, root);
+        let line_str = finding.line.to_string();
+        let fp = fingerprint_hash(&[
+            "fallow/unused-dependency-override",
+            &path,
+            &line_str,
+            finding.source.as_label(),
+            &finding.raw_key,
+        ]);
+        let mut description = format!(
+            "Override `{}` forces version `{}` but no workspace package depends on `{}`",
+            finding.raw_key, finding.version_range, finding.target_package,
+        );
+        if let Some(hint) = &finding.hint {
+            use std::fmt::Write as _;
+            let _ = write!(description, " ({hint})");
+        }
+        issues.push(cc_issue(
+            "fallow/unused-dependency-override",
+            &description,
+            level,
+            "Bug Risk",
+            &path,
+            Some(finding.line),
+            &fp,
+        ));
+    }
+}
+
+fn push_misconfigured_dependency_override_issues(
+    issues: &mut Vec<serde_json::Value>,
+    findings: &[fallow_core::results::MisconfiguredDependencyOverride],
+    root: &Path,
+    severity: Severity,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for finding in findings {
+        let path = cc_path(&finding.path, root);
+        let line_str = finding.line.to_string();
+        let fp = fingerprint_hash(&[
+            "fallow/misconfigured-dependency-override",
+            &path,
+            &line_str,
+            finding.source.as_label(),
+            &finding.raw_key,
+        ]);
+        let description = format!(
+            "Override `{}` -> `{}` is malformed: {}",
+            finding.raw_key,
+            finding.raw_value,
+            finding.reason.describe(),
+        );
+        issues.push(cc_issue(
+            "fallow/misconfigured-dependency-override",
+            &description,
+            level,
+            "Bug Risk",
+            &path,
+            Some(finding.line),
+            &fp,
+        ));
+    }
+}
+
 /// Build CodeClimate JSON array from dead-code analysis results.
 #[must_use]
 pub fn build_codeclimate(
@@ -734,6 +812,18 @@ pub fn build_codeclimate(
         &results.unresolved_catalog_references,
         root,
         rules.unresolved_catalog_references,
+    );
+    push_unused_dependency_override_issues(
+        &mut issues,
+        &results.unused_dependency_overrides,
+        root,
+        rules.unused_dependency_overrides,
+    );
+    push_misconfigured_dependency_override_issues(
+        &mut issues,
+        &results.misconfigured_dependency_overrides,
+        root,
+        rules.misconfigured_dependency_overrides,
     );
 
     serde_json::Value::Array(issues)

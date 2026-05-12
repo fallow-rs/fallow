@@ -25,6 +25,8 @@ export interface IssueTypeConfig {
   readonly "stale-suppressions": boolean;
   readonly "unused-catalog-entries": boolean;
   readonly "unresolved-catalog-references": boolean;
+  readonly "unused-dependency-overrides": boolean;
+  readonly "misconfigured-dependency-overrides": boolean;
 }
 
 export type DuplicationMode = "strict" | "mild" | "weak" | "semantic";

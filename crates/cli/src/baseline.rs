@@ -96,6 +96,12 @@ pub struct BaselineData {
     /// Unresolved catalog references, keyed by `path:line:catalog_name:entry_name`.
     #[serde(default)]
     pub unresolved_catalog_references: Vec<String>,
+    /// Unused pnpm dependency overrides, keyed by `source:raw_key`.
+    #[serde(default)]
+    pub unused_dependency_overrides: Vec<String>,
+    /// Misconfigured pnpm dependency overrides, keyed by `source:raw_key`.
+    #[serde(default)]
+    pub misconfigured_dependency_overrides: Vec<String>,
 }
 
 impl BaselineData {
@@ -225,6 +231,16 @@ impl BaselineData {
                     )
                 })
                 .collect(),
+            unused_dependency_overrides: results
+                .unused_dependency_overrides
+                .iter()
+                .map(|o| format!("{}:{}", o.source, o.raw_key))
+                .collect(),
+            misconfigured_dependency_overrides: results
+                .misconfigured_dependency_overrides
+                .iter()
+                .map(|o| format!("{}:{}", o.source, o.raw_key))
+                .collect(),
         }
     }
 
@@ -249,6 +265,8 @@ impl BaselineData {
             + self.stale_suppressions.len()
             + self.unused_catalog_entries.len()
             + self.unresolved_catalog_references.len()
+            + self.unused_dependency_overrides.len()
+            + self.misconfigured_dependency_overrides.len()
     }
 }
 
@@ -496,6 +514,26 @@ pub fn filter_new_issues(
             r.entry_name,
         );
         !baseline_unresolved.contains(key.as_str())
+    });
+
+    let baseline_unused_overrides: FxHashSet<&str> = baseline
+        .unused_dependency_overrides
+        .iter()
+        .map(String::as_str)
+        .collect();
+    results.unused_dependency_overrides.retain(|o| {
+        let key = format!("{}:{}", o.source, o.raw_key);
+        !baseline_unused_overrides.contains(key.as_str())
+    });
+
+    let baseline_misconfigured_overrides: FxHashSet<&str> = baseline
+        .misconfigured_dependency_overrides
+        .iter()
+        .map(String::as_str)
+        .collect();
+    results.misconfigured_dependency_overrides.retain(|o| {
+        let key = format!("{}:{}", o.source, o.raw_key);
+        !baseline_misconfigured_overrides.contains(key.as_str())
     });
 
     results
@@ -1241,6 +1279,8 @@ mod tests {
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
             unresolved_catalog_references: vec![],
+            unused_dependency_overrides: vec![],
+            misconfigured_dependency_overrides: vec![],
         };
         let results = AnalysisResults {
             unused_files: vec![
@@ -1283,6 +1323,8 @@ mod tests {
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
             unresolved_catalog_references: vec![],
+            unused_dependency_overrides: vec![],
+            misconfigured_dependency_overrides: vec![],
         };
         let results = make_results();
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
@@ -1312,6 +1354,8 @@ mod tests {
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
             unresolved_catalog_references: vec![],
+            unused_dependency_overrides: vec![],
+            misconfigured_dependency_overrides: vec![],
         };
         let results = AnalysisResults {
             unused_exports: vec![

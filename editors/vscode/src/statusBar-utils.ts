@@ -22,6 +22,8 @@ export interface AnalysisCompleteParams {
   staleSuppressions: number;
   unusedCatalogEntries: number;
   unresolvedCatalogReferences: number;
+  unusedDependencyOverrides: number;
+  misconfiguredDependencyOverrides: number;
   duplicationPercentage: number;
   cloneGroups: number;
 }
@@ -56,6 +58,10 @@ export const buildParamsFromCli = (
   unusedCatalogEntries: check?.unused_catalog_entries?.length ?? 0,
   unresolvedCatalogReferences:
     check?.unresolved_catalog_references?.length ?? 0,
+  unusedDependencyOverrides:
+    check?.unused_dependency_overrides?.length ?? 0,
+  misconfiguredDependencyOverrides:
+    check?.misconfigured_dependency_overrides?.length ?? 0,
   duplicationPercentage: dupes?.stats.duplication_percentage ?? 0,
   cloneGroups: dupes?.stats.clone_groups ?? 0,
 });
@@ -153,6 +159,16 @@ const BREAKDOWN_LINES: ReadonlyArray<BreakdownLine> = [
     count: "unresolvedCatalogReferences",
     icon: "$(error)",
     label: "unresolved catalog references",
+  },
+  {
+    count: "unusedDependencyOverrides",
+    icon: "$(warning)",
+    label: "unused dependency overrides",
+  },
+  {
+    count: "misconfiguredDependencyOverrides",
+    icon: "$(error)",
+    label: "misconfigured dependency overrides",
   },
 ];
 

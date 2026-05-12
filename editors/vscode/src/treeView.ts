@@ -38,6 +38,8 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "stale-suppressions": "trash",
   "unused-catalog-entries": "package",
   "unresolved-catalog-references": "error",
+  "unused-dependency-overrides": "package",
+  "misconfigured-dependency-overrides": "error",
 };
 
 /** Icons for individual issue items. */
@@ -61,6 +63,8 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
   "stale-suppressions": "trash",
   "unused-catalog-entries": "package",
   "unresolved-catalog-references": "error",
+  "unused-dependency-overrides": "package",
+  "misconfigured-dependency-overrides": "error",
 };
 
 const staleSuppressionLabel = (
@@ -387,6 +391,38 @@ export class DeadCodeTreeProvider
               finding.line,
               0,
               "unresolved-catalog-references"
+            )
+        )
+      );
+    }
+
+    if (this.result.unused_dependency_overrides) {
+      addCategory(
+        "unused-dependency-overrides",
+        this.result.unused_dependency_overrides.map(
+          (finding) =>
+            new IssueItem(
+              `${finding.raw_key} (${finding.source})`,
+              finding.path,
+              finding.line,
+              0,
+              "unused-dependency-overrides"
+            )
+        )
+      );
+    }
+
+    if (this.result.misconfigured_dependency_overrides) {
+      addCategory(
+        "misconfigured-dependency-overrides",
+        this.result.misconfigured_dependency_overrides.map(
+          (finding) =>
+            new IssueItem(
+              `${finding.raw_key} (${finding.source})`,
+              finding.path,
+              finding.line,
+              0,
+              "misconfigured-dependency-overrides"
             )
         )
       );

@@ -4,8 +4,15 @@ expression: json_str
 ---
 {
   "event": "COMMENT",
-  "body": "### Fallow dead-code report\n\n17 inline findings selected for GitHub review.\n\n<!-- fallow-review -->",
+  "body": "### Fallow dead-code report\n\n20 inline findings selected for GitHub review.\n\n<!-- fallow-review -->",
   "comments": [
+    {
+      "path": "package.json",
+      "line": 3,
+      "side": "RIGHT",
+      "body": "**error** `fallow/misconfigured-dependency-override`: Override \\`@types/react@\\<\\<18\\` -\\> \\`18.0.0\\` is malformed: override key cannot be parsed\n\n<!-- fallow-fingerprint: 21be520b86ce0207 -->",
+      "fingerprint": "21be520b86ce0207"
+    },
     {
       "path": "package.json",
       "line": 5,
@@ -42,11 +49,25 @@ expression: json_str
       "fingerprint": "ebc538b211ef05f5"
     },
     {
+      "path": "packages/app/package.json",
+      "line": 14,
+      "side": "RIGHT",
+      "body": "**error** `fallow/unresolved-catalog-reference`: Package 'old-react' is referenced via \\`catalog:react17\\` but catalog 'react17' does not declare it; \\`pnpm install\\` will fail \\(available in: react18\\)\n\n<!-- fallow-fingerprint: 3b583c29be84724a -->",
+      "fingerprint": "3b583c29be84724a"
+    },
+    {
       "path": "pnpm-workspace.yaml",
       "line": 6,
       "side": "RIGHT",
       "body": "**warn** `fallow/unused-catalog-entry`: Catalog entry 'is-even' is not referenced by any workspace package\n\n<!-- fallow-fingerprint: 01c68b8e65ee42b9 -->",
       "fingerprint": "01c68b8e65ee42b9"
+    },
+    {
+      "path": "pnpm-workspace.yaml",
+      "line": 9,
+      "side": "RIGHT",
+      "body": "**warn** `fallow/unused-dependency-override`: Override \\`axios\\` forces version \\`^1.6.0\\` but no workspace package depends on \\`axios\\` \\(May be an intentional pin for a transitive CVE that no workspace package depends on directly\\)\n\n<!-- fallow-fingerprint: 9e455c649fd184fe -->",
+      "fingerprint": "9e455c649fd184fe"
     },
     {
       "path": "pnpm-workspace.yaml",

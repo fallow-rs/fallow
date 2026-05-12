@@ -132,6 +132,14 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "package.json `catalog:` / `catalog:<name>` references whose catalog does not declare the package (pnpm install will error)",
             "https://docs.fallow.tools/explanations/dead-code#unresolved-catalog-references",
         )),
+        "Unused dependency overrides" => Some((
+            "pnpm `overrides:` entries forcing a version no workspace package depends on (may be intentional pin for a transitive CVE)",
+            "https://docs.fallow.tools/explanations/dead-code#unused-dependency-overrides",
+        )),
+        "Misconfigured dependency overrides" => Some((
+            "pnpm `overrides:` entries with an unparsable key or empty value (pnpm install will error)",
+            "https://docs.fallow.tools/explanations/dead-code#misconfigured-dependency-overrides",
+        )),
         t if t.starts_with("Type-only") => Some((
             "Dependencies only used for type imports \u{2014} consider moving to devDependencies",
             "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
@@ -159,6 +167,8 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
         "Boundary violations" => Some("boundary-violation"),
         "Unused catalog entries" => Some("unused-catalog-entry"),
         "Unresolved catalog references" => Some("unresolved-catalog-reference"),
+        "Unused dependency overrides" => Some("unused-dependency-override"),
+        "Misconfigured dependency overrides" => Some("misconfigured-dependency-override"),
         _ => None,
     }
 }
@@ -175,10 +185,17 @@ fn is_yaml_comment_only(rule: &str) -> bool {
 }
 
 /// Rules whose findings live in a file format that does not support comments
-/// at all (e.g., `unresolved-catalog-reference` lives in `package.json`).
-/// Suppression for these MUST go through a fallow config entry.
+/// at all (e.g., `unresolved-catalog-reference` lives in `package.json`), or
+/// whose findings can live in either YAML or JSON (`*-dependency-override`),
+/// so an inline suppression mechanism would be format-dependent. Suppression
+/// for these MUST go through a fallow config entry.
 fn is_config_only_suppression(rule: &str) -> bool {
-    matches!(rule, "unresolved-catalog-reference")
+    matches!(
+        rule,
+        "unresolved-catalog-reference"
+            | "unused-dependency-override"
+            | "misconfigured-dependency-override"
+    )
 }
 
 /// Render the config-only suppression hint for a rule that has no inline
@@ -187,6 +204,9 @@ fn config_only_suppression_hint(rule: &str) -> &'static str {
     match rule {
         "unresolved-catalog-reference" => {
             "To suppress: add an entry to ignoreCatalogReferences in your fallow config"
+        }
+        "unused-dependency-override" | "misconfigured-dependency-override" => {
+            "To suppress: add an entry to ignoreDependencyOverrides in your fallow config"
         }
         _ => "To suppress: add an override in your fallow config",
     }

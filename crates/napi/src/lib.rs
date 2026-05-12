@@ -30,6 +30,8 @@ pub struct DeadCodeOptions {
     pub stale_suppressions: Option<bool>,
     pub unused_catalog_entries: Option<bool>,
     pub unresolved_catalog_references: Option<bool>,
+    pub unused_dependency_overrides: Option<bool>,
+    pub misconfigured_dependency_overrides: Option<bool>,
     pub files: Option<Vec<String>>,
     pub include_entry_exports: Option<bool>,
 }
@@ -250,6 +252,10 @@ impl TryFrom<DeadCodeOptions> for programmatic::DeadCodeOptions {
                 stale_suppressions: value.stale_suppressions.unwrap_or(false),
                 unused_catalog_entries: value.unused_catalog_entries.unwrap_or(false),
                 unresolved_catalog_references: value.unresolved_catalog_references.unwrap_or(false),
+                unused_dependency_overrides: value.unused_dependency_overrides.unwrap_or(false),
+                misconfigured_dependency_overrides: value
+                    .misconfigured_dependency_overrides
+                    .unwrap_or(false),
             },
             files: value
                 .files

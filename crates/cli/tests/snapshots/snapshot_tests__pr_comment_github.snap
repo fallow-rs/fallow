@@ -5,7 +5,7 @@ expression: output
 <!-- fallow-id: fallow-results -->
 ### Fallow dead-code report
 
-Found **17** findings.
+Found **20** findings.
 
 <details>
 <summary>Dead code (8)</summary>
@@ -24,16 +24,19 @@ Found **17** findings.
 </details>
 
 <details>
-<summary>Dependencies (8)</summary>
+<summary>Dependencies (11)</summary>
 
 | Severity | Rule | Location | Description |
 | --- | --- | --- | --- |
+| major | `fallow/misconfigured-dependency-override` | `package.json`:3 | Override \`@types/react@\<\<18\` -\> \`18.0.0\` is malformed: override key cannot be parsed |
 | major | `fallow/unused-dependency` | `package.json`:5 | Package 'lodash' is in dependencies but never imported |
 | minor | `fallow/unused-dev-dependency` | `package.json`:5 | Package 'jest' is in devDependencies but never imported |
 | minor | `fallow/unused-optional-dependency` | `package.json`:5 | Package 'fsevents' is in optionalDependencies but never imported |
 | minor | `fallow/type-only-dependency` | `package.json`:8 | Package 'zod' is only imported via type-only imports \(consider moving to devDependencies\) |
 | minor | `fallow/test-only-dependency` | `package.json`:12 | Package 'msw' is only imported by test files \(consider moving to devDependencies\) |
+| major | `fallow/unresolved-catalog-reference` | `packages/app/package.json`:14 | Package 'old-react' is referenced via \`catalog:react17\` but catalog 'react17' does not declare it; \`pnpm install\` will fail \(available in: react18\) |
 | minor | `fallow/unused-catalog-entry` | `pnpm-workspace.yaml`:6 | Catalog entry 'is-even' is not referenced by any workspace package |
+| minor | `fallow/unused-dependency-override` | `pnpm-workspace.yaml`:9 | Override \`axios\` forces version \`^1.6.0\` but no workspace package depends on \`axios\` \(May be an intentional pin for a transitive CVE that no workspace package depends on directly\) |
 | minor | `fallow/unused-catalog-entry` | `pnpm-workspace.yaml`:12 | Catalog entry 'old-thing' \(catalog 'legacy'\) is not referenced by any workspace package |
 | major | `fallow/unlisted-dependency` | `src/cli.ts`:2 | Package 'chalk' is imported but not listed in package.json |
 

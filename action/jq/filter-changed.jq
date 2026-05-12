@@ -36,6 +36,12 @@ def filter_check:
   (if .unresolved_catalog_references then
     .unresolved_catalog_references |= map(select(.path | in_changed))
   else . end) |
+  (if .unused_dependency_overrides then
+    .unused_dependency_overrides |= map(select(.path | in_changed))
+  else . end) |
+  (if .misconfigured_dependency_overrides then
+    .misconfigured_dependency_overrides |= map(select(.path | in_changed))
+  else . end) |
   # Recalculate total_issues from filtered arrays
   (if .total_issues != null then
     .total_issues = (
@@ -56,7 +62,9 @@ def filter_check:
       (.type_only_dependencies // [] | length) +
       (.stale_suppressions // [] | length) +
       (.unused_catalog_entries // [] | length) +
-      (.unresolved_catalog_references // [] | length)
+      (.unresolved_catalog_references // [] | length) +
+      (.unused_dependency_overrides // [] | length) +
+      (.misconfigured_dependency_overrides // [] | length)
     )
   else . end);
 

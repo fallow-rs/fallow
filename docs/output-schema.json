@@ -350,6 +350,16 @@
           "items": { "$ref": "#/definitions/UnresolvedCatalogReference" },
           "description": "Workspace package.json references to catalogs (catalog: or catalog:<name>) that do not declare the consumed package. pnpm install will error until the named catalog grows to include the package or the reference is switched / removed."
         },
+        "unused_dependency_overrides": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UnusedDependencyOverride" },
+          "description": "Entries in pnpm-workspace.yaml's overrides: section, or package.json's pnpm.overrides block, whose target package no workspace package depends on. Default severity is warn because some entries are intentional pins for transitive CVEs; the hint field flags the cases the conservative algorithm cannot disambiguate."
+        },
+        "misconfigured_dependency_overrides": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/MisconfiguredDependencyOverride" },
+          "description": "pnpm.overrides entries whose key or value does not parse as a valid override spec (empty key, empty value, malformed selector, unbalanced parent matcher). pnpm install will reject these. Default severity is error."
+        },
         "entry_points": {
           "$ref": "#/definitions/EntryPoints",
           "description": "Entry point detection summary. Always present in check output."
@@ -1844,7 +1854,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["remove-export", "delete-file", "remove-dependency", "move-dependency", "remove-enum-member", "remove-class-member", "resolve-import", "install-dependency", "remove-duplicate", "move-to-dev", "refactor-cycle", "refactor-boundary", "export-type", "remove-catalog-entry", "update-catalog-reference", "add-catalog-entry", "remove-catalog-reference"],
+          "enum": ["remove-export", "delete-file", "remove-dependency", "move-dependency", "remove-enum-member", "remove-class-member", "resolve-import", "install-dependency", "remove-duplicate", "move-to-dev", "refactor-cycle", "refactor-boundary", "export-type", "remove-catalog-entry", "update-catalog-reference", "add-catalog-entry", "remove-catalog-reference", "remove-dependency-override", "fix-dependency-override"],
           "description": "Kebab-case identifier for the fix action."
         },
         "auto_fixable": {
@@ -1954,9 +1964,13 @@
                   "exports": { "type": "array", "items": { "type": "string" } }
                 }
               }
+            },
+            {
+              "type": "object",
+              "description": "Object value used by `ignoreCatalogReferences` and `ignoreDependencyOverrides` add-to-config actions. For `ignoreDependencyOverrides`: `{ package: string, source: \"pnpm-workspace.yaml\" | \"package.json\" }`. For `ignoreCatalogReferences`: `{ package: string, catalog?: string, consumer?: string }`."
             }
           ],
-          "description": "Value to add to the config key. Shape depends on `config_key`. For scalar config keys (`ignoreDependencies`, others) this is a string such as `\"lodash\"`. For `ignoreExports` this is an array of `{ file, exports }` rule objects so the snippet can be merged into the user's config verbatim."
+          "description": "Value to add to the config key. Shape depends on `config_key`. For scalar config keys (`ignoreDependencies`, others) this is a string such as `\"lodash\"`. For `ignoreExports` this is an array of `{ file, exports }` rule objects so the snippet can be merged into the user's config verbatim. For `ignoreCatalogReferences` and `ignoreDependencyOverrides` this is an object whose shape matches the rule entry users add to their fallow config."
         },
         "value_schema": {
           "type": "string",
@@ -2648,6 +2662,99 @@
       }
     },
 
+    "UnusedDependencyOverride": {
+      "type": "object",
+      "required": ["raw_key", "target_package", "version_range", "source", "path", "line"],
+      "description": "A pnpm.overrides entry whose target package is not declared in any workspace package.json (directly or as a declared parent in a parent>child override). May still be intentional for a transitive CVE pin; see `hint`.",
+      "properties": {
+        "raw_key": {
+          "type": "string",
+          "description": "Full original override key as written (e.g. 'react>react-dom', '@types/react@<18')."
+        },
+        "target_package": {
+          "type": "string",
+          "description": "Target package the override rewrites (rightmost segment for parent>child keys)."
+        },
+        "parent_package": {
+          "type": "string",
+          "description": "Optional parent package (left side of `>`). Omitted for bare-target keys."
+        },
+        "version_constraint": {
+          "type": "string",
+          "description": "Optional version selector on the target (e.g. '<18' for '@types/react@<18'). Omitted when absent."
+        },
+        "version_range": {
+          "type": "string",
+          "description": "Right-hand side of the entry: the version pnpm should force."
+        },
+        "source": {
+          "type": "string",
+          "enum": ["pnpm-workspace.yaml", "package.json"],
+          "description": "File the override was declared in. Matches the value users write in `ignoreDependencyOverrides[].source`."
+        },
+        "path": {
+          "type": "string",
+          "description": "Relative path to the source file."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the entry."
+        },
+        "hint": {
+          "type": "string",
+          "description": "Soft hint for cases the conservative algorithm cannot disambiguate (e.g. a transitive CVE pin not visible to static analysis). Omitted when absent."
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/IssueAction" }
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
+        }
+      }
+    },
+
+    "MisconfiguredDependencyOverride": {
+      "type": "object",
+      "required": ["raw_key", "raw_value", "reason", "source", "path", "line"],
+      "description": "A pnpm.overrides entry whose key or value does not parse as a valid pnpm override spec. `pnpm install` will reject these.",
+      "properties": {
+        "raw_key": {
+          "type": "string",
+          "description": "Full original override key as written."
+        },
+        "raw_value": {
+          "type": "string",
+          "description": "Right-hand side of the entry, exactly as written. Empty when the value was missing."
+        },
+        "reason": {
+          "type": "string",
+          "enum": ["unparsable-key", "empty-value"],
+          "description": "Classifier for the misconfiguration. 'unparsable-key' = the key is not a valid pnpm shape; 'empty-value' = the value is missing, empty, or contains line breaks."
+        },
+        "source": {
+          "type": "string",
+          "enum": ["pnpm-workspace.yaml", "package.json"],
+          "description": "File the override was declared in."
+        },
+        "path": {
+          "type": "string",
+          "description": "Relative path to the source file."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the entry."
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/IssueAction" }
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
+        }
+      }
+    },
+
     "CloneGroup": {
       "type": "object",
       "required": ["instances", "token_count", "line_count"],
@@ -2860,7 +2967,9 @@
         "boundary_violations": { "type": "integer" },
         "stale_suppressions": { "type": "integer" },
         "unused_catalog_entries": { "type": "integer" },
-        "unresolved_catalog_references": { "type": "integer" }
+        "unresolved_catalog_references": { "type": "integer" },
+        "unused_dependency_overrides": { "type": "integer" },
+        "misconfigured_dependency_overrides": { "type": "integer" }
       }
     },
 

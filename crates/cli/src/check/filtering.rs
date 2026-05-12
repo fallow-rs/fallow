@@ -83,6 +83,11 @@ pub fn filter_to_workspaces(
     results
         .unresolved_catalog_references
         .retain(|r| any_under(&r.path));
+    // Dependency overrides live in the project-root pnpm-workspace.yaml or
+    // root package.json's pnpm.overrides, not per-workspace. Same reasoning as
+    // unused-catalog-entries: drop when --workspace narrows.
+    results.unused_dependency_overrides.clear();
+    results.misconfigured_dependency_overrides.clear();
 }
 
 /// Resolve `--workspace <patterns...>` to a set of workspace roots, or exit with

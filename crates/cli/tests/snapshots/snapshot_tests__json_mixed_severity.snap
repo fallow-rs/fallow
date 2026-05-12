@@ -6,9 +6,9 @@ expression: redact_version(&json_str)
   "schema_version": 6,
   "version": "[VERSION]",
   "elapsed_ms": 42,
-  "total_issues": 16,
+  "total_issues": 19,
   "summary": {
-    "total_issues": 16,
+    "total_issues": 19,
     "unused_files": 1,
     "unused_exports": 1,
     "unused_types": 1,
@@ -25,9 +25,9 @@ expression: redact_version(&json_str)
     "boundary_violations": 0,
     "stale_suppressions": 0,
     "unused_catalog_entries": 2,
-    "unresolved_catalog_references": 0,
-    "unused_dependency_overrides": 0,
-    "misconfigured_dependency_overrides": 0
+    "unresolved_catalog_references": 1,
+    "unused_dependency_overrides": 1,
+    "misconfigured_dependency_overrides": 1
   },
   "unused_files": [
     {
@@ -435,7 +435,101 @@ expression: redact_version(&json_str)
       ]
     }
   ],
-  "unresolved_catalog_references": [],
-  "unused_dependency_overrides": [],
-  "misconfigured_dependency_overrides": []
+  "unresolved_catalog_references": [
+    {
+      "entry_name": "old-react",
+      "catalog_name": "react17",
+      "path": "packages/app/package.json",
+      "line": 14,
+      "available_in_catalogs": [
+        "react18"
+      ],
+      "actions": [
+        {
+          "type": "update-catalog-reference",
+          "auto_fixable": false,
+          "description": "Switch the reference from `catalog:react17` to a catalog that declares `old-react`",
+          "available_in_catalogs": [
+            "react18"
+          ],
+          "suggested_target": "react18"
+        },
+        {
+          "type": "remove-catalog-reference",
+          "auto_fixable": false,
+          "description": "Remove the catalog reference and pin a hardcoded version in package.json",
+          "note": "Use only when neither another catalog declares the package nor the named catalog should grow to include it"
+        },
+        {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Suppress this reference via ignoreCatalogReferences in fallow config (use when the catalog edit is intentionally landing in a separate PR or the package is a placeholder).",
+          "config_key": "ignoreCatalogReferences",
+          "value": {
+            "package": "old-react",
+            "catalog": "react17",
+            "consumer": "packages/app/package.json"
+          },
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreCatalogReferences/items"
+        }
+      ]
+    }
+  ],
+  "unused_dependency_overrides": [
+    {
+      "raw_key": "axios",
+      "target_package": "axios",
+      "version_range": "^1.6.0",
+      "source": "pnpm-workspace.yaml",
+      "path": "pnpm-workspace.yaml",
+      "line": 9,
+      "hint": "May be an intentional pin for a transitive CVE that no workspace package depends on directly",
+      "actions": [
+        {
+          "type": "remove-dependency-override",
+          "auto_fixable": false,
+          "description": "Remove the override entry from pnpm-workspace.yaml or pnpm.overrides",
+          "note": "Conservative static check; verify against `pnpm install --frozen-lockfile` before removing in case the override targets a transitive dependency (CVE-fix pattern)"
+        },
+        {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Suppress this override finding via ignoreDependencyOverrides in fallow config (use for CVE-fix overrides that target a purely-transitive package).",
+          "config_key": "ignoreDependencyOverrides",
+          "value": {
+            "package": "axios",
+            "source": "pnpm-workspace.yaml"
+          }
+        }
+      ]
+    }
+  ],
+  "misconfigured_dependency_overrides": [
+    {
+      "raw_key": "@types/react@<<18",
+      "raw_value": "18.0.0",
+      "reason": "unparsable-key",
+      "source": "package.json",
+      "path": "package.json",
+      "line": 3,
+      "actions": [
+        {
+          "type": "fix-dependency-override",
+          "auto_fixable": false,
+          "description": "Fix the override key or value: pnpm refuses to honor entries with an unparsable key or empty value",
+          "note": "Common shapes: bare `pkg`, scoped `@scope/pkg`, version-selector `pkg@<2`, parent-chain `parent>child`. Valid values include semver ranges, `-` (removal), `$ref` (self-ref), and `npm:alias@^1`."
+        },
+        {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Suppress this override finding via ignoreDependencyOverrides in fallow config (use for CVE-fix overrides that target a purely-transitive package).",
+          "config_key": "ignoreDependencyOverrides",
+          "value": {
+            "package": "@types/react@<<18",
+            "source": "package.json"
+          }
+        }
+      ]
+    }
+  ]
 }

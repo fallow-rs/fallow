@@ -53,7 +53,10 @@ pub struct AnalyzeParams {
     /// stale-suppressions, unused-catalog-entries (catalog declares packages no
     /// consumer references; dead config), unresolved-catalog-references
     /// (consumer references catalogs that do not declare the package; broken
-    /// config that pnpm install will reject).
+    /// config that pnpm install will reject), unused-dependency-overrides
+    /// (pnpm.overrides forces a version no workspace package depends on; may be
+    /// an intentional transitive CVE pin), misconfigured-dependency-overrides
+    /// (pnpm.overrides key/value is unparsable; pnpm install will reject).
     pub issue_types: Option<Vec<String>>,
 
     #[schemars(

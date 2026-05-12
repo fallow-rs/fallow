@@ -121,6 +121,14 @@ unused_catalog_entries?: UnusedCatalogEntry[]
  * Workspace package.json references to catalogs (catalog: or catalog:<name>) that do not declare the consumed package. pnpm install will error until the named catalog grows to include the package or the reference is switched / removed.
  */
 unresolved_catalog_references?: UnresolvedCatalogReference[]
+/**
+ * Entries in pnpm-workspace.yaml's overrides: section, or package.json's pnpm.overrides block, whose target package no workspace package depends on. Default severity is warn because some entries are intentional pins for transitive CVEs; the hint field flags the cases the conservative algorithm cannot disambiguate.
+ */
+unused_dependency_overrides?: UnusedDependencyOverride[]
+/**
+ * pnpm.overrides entries whose key or value does not parse as a valid override spec (empty key, empty value, malformed selector, unbalanced parent matcher). pnpm install will reject these. Default severity is error.
+ */
+misconfigured_dependency_overrides?: MisconfiguredDependencyOverride[]
 entry_points?: EntryPoints
 summary?: CheckSummary
 baseline_deltas?: BaselineDeltas
@@ -143,7 +151,7 @@ export interface FixAction {
 /**
  * Kebab-case identifier for the fix action.
  */
-type: ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference")
+type: ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override")
 /**
  * Whether `fallow fix` can apply this fix automatically.
  */
@@ -219,12 +227,14 @@ description: string
  */
 config_key: string
 /**
- * Value to add to the config key. Shape depends on `config_key`. For scalar config keys (`ignoreDependencies`, others) this is a string such as `"lodash"`. For `ignoreExports` this is an array of `{ file, exports }` rule objects so the snippet can be merged into the user's config verbatim.
+ * Value to add to the config key. Shape depends on `config_key`. For scalar config keys (`ignoreDependencies`, others) this is a string such as `"lodash"`. For `ignoreExports` this is an array of `{ file, exports }` rule objects so the snippet can be merged into the user's config verbatim. For `ignoreCatalogReferences` and `ignoreDependencyOverrides` this is an object whose shape matches the rule entry users add to their fallow config.
  */
 value: (string | {
 file: string
 exports: string[]
-}[])
+}[] | {
+
+})
 /**
  * Optional URL pointing at a stable JSON Schema fragment that describes the shape of `value`. Agents that intend to validate `value` before writing it into a user's config can fetch the linked schema and run it against `value`. The URL is a JSON Pointer fragment into fallow's main config schema (e.g. `schema.json#/properties/ignoreExports` for the ignoreExports action, or `schema.json#/properties/ignoreDependencies/items` for the per-package ignoreDependencies action). Strictly additive: consumers that ignore the field keep working unchanged.
  */
@@ -622,6 +632,80 @@ actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
+ * A pnpm.overrides entry whose target package is not declared in any workspace package.json (directly or as a declared parent in a parent>child override). May still be intentional for a transitive CVE pin; see `hint`.
+ */
+export interface UnusedDependencyOverride {
+/**
+ * Full original override key as written (e.g. 'react>react-dom', '@types/react@<18').
+ */
+raw_key: string
+/**
+ * Target package the override rewrites (rightmost segment for parent>child keys).
+ */
+target_package: string
+/**
+ * Optional parent package (left side of `>`). Omitted for bare-target keys.
+ */
+parent_package?: string
+/**
+ * Optional version selector on the target (e.g. '<18' for '@types/react@<18'). Omitted when absent.
+ */
+version_constraint?: string
+/**
+ * Right-hand side of the entry: the version pnpm should force.
+ */
+version_range: string
+/**
+ * File the override was declared in. Matches the value users write in `ignoreDependencyOverrides[].source`.
+ */
+source: ("pnpm-workspace.yaml" | "package.json")
+/**
+ * Relative path to the source file.
+ */
+path: string
+/**
+ * 1-based line number of the entry.
+ */
+line: number
+/**
+ * Soft hint for cases the conservative algorithm cannot disambiguate (e.g. a transitive CVE pin not visible to static analysis). Omitted when absent.
+ */
+hint?: string
+actions?: IssueAction[]
+introduced?: AuditIntroduced
+}
+/**
+ * A pnpm.overrides entry whose key or value does not parse as a valid pnpm override spec. `pnpm install` will reject these.
+ */
+export interface MisconfiguredDependencyOverride {
+/**
+ * Full original override key as written.
+ */
+raw_key: string
+/**
+ * Right-hand side of the entry, exactly as written. Empty when the value was missing.
+ */
+raw_value: string
+/**
+ * Classifier for the misconfiguration. 'unparsable-key' = the key is not a valid pnpm shape; 'empty-value' = the value is missing, empty, or contains line breaks.
+ */
+reason: ("unparsable-key" | "empty-value")
+/**
+ * File the override was declared in.
+ */
+source: ("pnpm-workspace.yaml" | "package.json")
+/**
+ * Relative path to the source file.
+ */
+path: string
+/**
+ * 1-based line number of the entry.
+ */
+line: number
+actions?: IssueAction[]
+introduced?: AuditIntroduced
+}
+/**
  * Entry point detection summary showing total detected entry points and their sources.
  */
 export interface EntryPoints {
@@ -656,6 +740,8 @@ boundary_violations?: number
 stale_suppressions?: number
 unused_catalog_entries?: number
 unresolved_catalog_references?: number
+unused_dependency_overrides?: number
+misconfigured_dependency_overrides?: number
 }
 /**
  * Per-category delta comparison against a saved baseline. Shows current count, baseline count, and delta for each category.

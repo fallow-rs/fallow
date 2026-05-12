@@ -164,7 +164,9 @@
             "boundary-violation": true,
             "stale-suppressions": true,
             "unused-catalog-entries": true,
-            "unresolved-catalog-references": true
+            "unresolved-catalog-references": true,
+            "unused-dependency-overrides": true,
+            "misconfigured-dependency-overrides": true
           },
           "description": "Toggle individual issue types on or off. Uses kebab-case names matching fallow's rules config.",
           "properties": {
@@ -223,6 +225,12 @@
               "type": "boolean"
             },
             "unresolved-catalog-references": {
+              "type": "boolean"
+            },
+            "unused-dependency-overrides": {
+              "type": "boolean"
+            },
+            "misconfigured-dependency-overrides": {
               "type": "boolean"
             }
           }

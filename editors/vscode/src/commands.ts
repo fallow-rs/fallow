@@ -138,6 +138,14 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     unresolved_catalog_references: types["unresolved-catalog-references"]
       ? result.unresolved_catalog_references
       : [],
+    unused_dependency_overrides: types["unused-dependency-overrides"]
+      ? result.unused_dependency_overrides
+      : [],
+    misconfigured_dependency_overrides: types[
+      "misconfigured-dependency-overrides"
+    ]
+      ? result.misconfigured_dependency_overrides
+      : [],
   };
   const totalIssues = countCheckIssues(filtered);
   const summary = {

@@ -46,6 +46,8 @@ export type {
   UnresolvedImport,
   UnusedCatalogEntry,
   UnusedDependency,
+  UnusedDependencyOverride,
+  MisconfiguredDependencyOverride,
   UnusedExport,
   UnusedFile,
   UnusedMember,

@@ -288,6 +288,7 @@ pub fn push_dep_diagnostics(
     }
 
     push_unresolved_catalog_reference_diagnostics(map, results);
+    push_dependency_override_diagnostics(map, results, root);
 }
 
 /// Emit one `ERROR`-severity diagnostic per unresolved-catalog-reference
@@ -334,6 +335,78 @@ fn push_unresolved_catalog_reference_diagnostics(
                 "unresolved-catalog-reference".to_string(),
             )),
             code_description: doc_link("unresolved-catalog-references"),
+            message,
+            ..Default::default()
+        });
+    }
+}
+
+/// Emit diagnostics for unused and misconfigured pnpm dependency-override
+/// findings. Both finding types carry a project-root-relative `path` (same
+/// convention as `UnusedCatalogEntry`), so the URI must be built from
+/// `root.join(&finding.path)`. Severity matches the default rule severity:
+/// unused = `WARNING`, misconfigured = `ERROR` (pnpm refuses to install).
+fn push_dependency_override_diagnostics(
+    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+    root: &std::path::Path,
+) {
+    use std::fmt::Write as _;
+    for finding in &results.unused_dependency_overrides {
+        let Ok(uri) = Url::from_file_path(root.join(&finding.path)) else {
+            continue;
+        };
+        let line = finding.line.saturating_sub(1);
+        let mut message = format!(
+            "Unused dependency override: `{}` forces `{}` to `{}` but no workspace package depends on it",
+            finding.raw_key, finding.target_package, finding.version_range,
+        );
+        if let Some(hint) = &finding.hint {
+            let _ = write!(message, " ({hint})");
+        }
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position { line, character: 0 },
+                end: Position {
+                    line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String(
+                "unused-dependency-override".to_string(),
+            )),
+            code_description: doc_link("unused-dependency-overrides"),
+            message,
+            ..Default::default()
+        });
+    }
+    for finding in &results.misconfigured_dependency_overrides {
+        let Ok(uri) = Url::from_file_path(root.join(&finding.path)) else {
+            continue;
+        };
+        let line = finding.line.saturating_sub(1);
+        let message = format!(
+            "Misconfigured dependency override: `{}` -> `{}` ({})",
+            finding.raw_key,
+            finding.raw_value,
+            finding.reason.describe(),
+        );
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position { line, character: 0 },
+                end: Position {
+                    line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::ERROR),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String(
+                "misconfigured-dependency-override".to_string(),
+            )),
+            code_description: doc_link("misconfigured-dependency-overrides"),
             message,
             ..Default::default()
         });
@@ -959,5 +1032,92 @@ mod tests {
             !d.message.contains("available in"),
             "empty available_in_catalogs should not produce an 'available in' suffix",
         );
+    }
+
+    #[test]
+    fn unused_dependency_override_produces_warning_diagnostic_with_absolute_uri() {
+        // Override findings store project-root-relative paths (same convention
+        // as UnusedCatalogEntry), so the diagnostic emitter must root.join
+        // before calling Url::from_file_path. Asserting the key exists in the
+        // map under the absolute URI proves the join happened.
+        use fallow_core::results::{DependencyOverrideSource, UnusedDependencyOverride};
+
+        let root = test_root();
+        let mut results = AnalysisResults::default();
+        results
+            .unused_dependency_overrides
+            .push(UnusedDependencyOverride {
+                raw_key: "axios".to_string(),
+                target_package: "axios".to_string(),
+                parent_package: None,
+                version_constraint: None,
+                version_range: "^1.6.0".to_string(),
+                source: DependencyOverrideSource::PnpmWorkspaceYaml,
+                path: PathBuf::from("pnpm-workspace.yaml"),
+                line: 9,
+                hint: Some("may be intentional transitive pin".to_string()),
+            });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
+        let file_diags = diags
+            .get(&uri)
+            .expect("unused-dependency-override diagnostic must key by absolute URI");
+        assert_eq!(file_diags.len(), 1);
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String(
+                "unused-dependency-override".to_string()
+            ))
+        );
+        assert!(d.message.contains("axios"));
+        assert!(d.message.contains("^1.6.0"));
+        assert!(
+            d.message.contains("transitive pin"),
+            "hint must surface in the diagnostic message, got: {}",
+            d.message
+        );
+        assert_eq!(d.range.start.line, 8);
+    }
+
+    #[test]
+    fn misconfigured_dependency_override_produces_error_diagnostic() {
+        use fallow_core::results::{
+            DependencyOverrideMisconfigReason, DependencyOverrideSource,
+            MisconfiguredDependencyOverride,
+        };
+
+        let root = test_root();
+        let mut results = AnalysisResults::default();
+        results
+            .misconfigured_dependency_overrides
+            .push(MisconfiguredDependencyOverride {
+                raw_key: "@types/react@<<18".to_string(),
+                raw_value: "18.0.0".to_string(),
+                reason: DependencyOverrideMisconfigReason::UnparsableKey,
+                source: DependencyOverrideSource::PnpmPackageJson,
+                path: PathBuf::from("package.json"),
+                line: 3,
+            });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let d = &diags[&uri][0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String(
+                "misconfigured-dependency-override".to_string()
+            ))
+        );
+        assert!(d.message.contains("@types/react@<<18"));
+        assert!(d.message.contains("override key cannot be parsed"));
+        assert_eq!(d.range.start.line, 2);
     }
 }

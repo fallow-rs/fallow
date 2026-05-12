@@ -110,6 +110,12 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
     if rules.unresolved_catalog_references == Severity::Off {
         results.unresolved_catalog_references.clear();
     }
+    if rules.unused_dependency_overrides == Severity::Off {
+        results.unused_dependency_overrides.clear();
+    }
+    if rules.misconfigured_dependency_overrides == Severity::Off {
+        results.misconfigured_dependency_overrides.clear();
+    }
 }
 
 /// Check whether any issue type with `Severity::Error` has remaining issues.

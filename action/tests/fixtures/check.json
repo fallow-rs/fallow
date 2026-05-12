@@ -2,7 +2,7 @@
   "schema_version": 3,
   "version": "2.2.2",
   "elapsed_ms": 4,
-  "total_issues": 11,
+  "total_issues": 14,
   "unused_files": [],
   "unused_exports": [
     {
@@ -119,6 +119,27 @@
       "path": "packages/app/package.json",
       "line": 14,
       "available_in_catalogs": ["react18"]
+    }
+  ],
+  "unused_dependency_overrides": [
+    {
+      "raw_key": "axios",
+      "target_package": "axios",
+      "version_range": "^1.6.0",
+      "source": "pnpm-workspace.yaml",
+      "path": "pnpm-workspace.yaml",
+      "line": 9,
+      "hint": "May be an intentional pin for a transitive CVE that no workspace package depends on directly"
+    }
+  ],
+  "misconfigured_dependency_overrides": [
+    {
+      "raw_key": "@types/react@<<18",
+      "raw_value": "18.0.0",
+      "reason": "unparsable-key",
+      "source": "package.json",
+      "path": "package.json",
+      "line": 3
     }
   ]
 }

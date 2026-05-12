@@ -449,6 +449,52 @@ fn sarif_unused_catalog_entry_fields(
     }
 }
 
+fn sarif_unused_dependency_override_fields(
+    finding: &fallow_core::results::UnusedDependencyOverride,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    let mut message = format!(
+        "Override `{}` forces version `{}` but no workspace package depends on `{}`",
+        finding.raw_key, finding.version_range, finding.target_package,
+    );
+    if let Some(hint) = &finding.hint {
+        use std::fmt::Write as _;
+        let _ = write!(message, " ({hint})");
+    }
+    SarifFields {
+        rule_id: "fallow/unused-dependency-override",
+        level,
+        message,
+        uri: relative_uri(&finding.path, root),
+        region: Some((finding.line, 1)),
+        source_path: Some(finding.path.clone()),
+        properties: None,
+    }
+}
+
+fn sarif_misconfigured_dependency_override_fields(
+    finding: &fallow_core::results::MisconfiguredDependencyOverride,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    let message = format!(
+        "Override `{}` -> `{}` is malformed: {}",
+        finding.raw_key,
+        finding.raw_value,
+        finding.reason.describe(),
+    );
+    SarifFields {
+        rule_id: "fallow/misconfigured-dependency-override",
+        level,
+        message,
+        uri: relative_uri(&finding.path, root),
+        region: Some((finding.line, 1)),
+        source_path: Some(finding.path.clone()),
+        properties: None,
+    }
+}
+
 fn sarif_unresolved_catalog_reference_fields(
     finding: &fallow_core::results::UnresolvedCatalogReference,
     root: &Path,
@@ -638,6 +684,16 @@ fn build_sarif_rules(rules: &RulesConfig) -> Vec<serde_json::Value> {
             "fallow/unresolved-catalog-reference",
             "package.json catalog reference points at a catalog that does not declare the package",
             rules.unresolved_catalog_references,
+        ),
+        (
+            "fallow/unused-dependency-override",
+            "pnpm dependency override forces a version no workspace package depends on",
+            rules.unused_dependency_overrides,
+        ),
+        (
+            "fallow/misconfigured-dependency-override",
+            "pnpm dependency override key or value is malformed",
+            rules.misconfigured_dependency_overrides,
         ),
     ]
     .into_iter()
@@ -889,6 +945,30 @@ pub fn build_sarif(
                 f,
                 root,
                 severity_to_sarif_level(rules.unresolved_catalog_references),
+            )
+        },
+    );
+    push_sarif_results(
+        &mut sarif_results,
+        &results.unused_dependency_overrides,
+        &mut snippets,
+        |f| {
+            sarif_unused_dependency_override_fields(
+                f,
+                root,
+                severity_to_sarif_level(rules.unused_dependency_overrides),
+            )
+        },
+    );
+    push_sarif_results(
+        &mut sarif_results,
+        &results.misconfigured_dependency_overrides,
+        &mut snippets,
+        |f| {
+            sarif_misconfigured_dependency_override_fields(
+                f,
+                root,
+                severity_to_sarif_level(rules.misconfigured_dependency_overrides),
             )
         },
     );
@@ -1473,7 +1553,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 19);
+        assert_eq!(rules.len(), 21);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -1494,6 +1574,8 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/boundary-violation"));
         assert!(rule_ids.contains(&"fallow/unused-catalog-entry"));
         assert!(rule_ids.contains(&"fallow/unresolved-catalog-reference"));
+        assert!(rule_ids.contains(&"fallow/unused-dependency-override"));
+        assert!(rule_ids.contains(&"fallow/misconfigured-dependency-override"));
     }
 
     #[test]

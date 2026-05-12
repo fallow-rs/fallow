@@ -2,7 +2,7 @@
 source: crates/cli/tests/snapshot_tests.rs
 expression: output
 ---
-## Fallow: 16 issues found
+## Fallow: 19 issues found
 
 ### Unused files (1)
 
@@ -69,3 +69,15 @@ expression: output
 
 - `is-even` (`default`) `pnpm-workspace.yaml`:6
 - `old-thing` (`legacy`) `pnpm-workspace.yaml`:12 (hardcoded in `apps/web/package.json`)
+
+### Unresolved catalog references (1)
+
+- `old-react` (`react17`) `packages/app/package.json`:14 (available in: `react18`)
+
+### Unused dependency overrides (1)
+
+- `axios` -> `^1.6.0` (`pnpm-workspace.yaml`) `pnpm-workspace.yaml`:9 (hint: May be an intentional pin for a transitive CVE that no workspace package depends on directly)
+
+### Misconfigured dependency overrides (1)
+
+- `@types/react@<<18` -> `18.0.0` (`package.json`) `package.json`:3 (override key cannot be parsed)

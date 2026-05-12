@@ -14,6 +14,10 @@ pub(super) fn print_compact(results: &AnalysisResults, root: &Path) {
 
 /// Build compact output lines for analysis results.
 /// Each issue is represented as a single `prefix:details` line.
+#[expect(
+    clippy::too_many_lines,
+    reason = "One uniform loop per issue type; the line count grows linearly with new issue types and the structure is clearer than extracting per-loop helpers."
+)]
 pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String> {
     let rel = |p: &Path| normalize_uri(&relative_path(p, root).display().to_string());
 
@@ -153,6 +157,24 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
             finding.line,
             finding.catalog_name,
             finding.entry_name,
+        ));
+    }
+    for finding in &results.unused_dependency_overrides {
+        lines.push(format!(
+            "unused-dependency-override:{}:{}:{}:{}",
+            rel(&finding.path),
+            finding.line,
+            finding.source.as_label(),
+            finding.raw_key,
+        ));
+    }
+    for finding in &results.misconfigured_dependency_overrides {
+        lines.push(format!(
+            "misconfigured-dependency-override:{}:{}:{}:{}",
+            rel(&finding.path),
+            finding.line,
+            finding.source.as_label(),
+            finding.raw_key,
         ));
     }
 

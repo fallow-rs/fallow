@@ -23,7 +23,9 @@ export type IssueCategory =
   | "boundary-violation"
   | "stale-suppressions"
   | "unused-catalog-entries"
-  | "unresolved-catalog-references";
+  | "unresolved-catalog-references"
+  | "unused-dependency-overrides"
+  | "misconfigured-dependency-overrides";
 
 export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "unused-files": "Unused Files",
@@ -45,4 +47,6 @@ export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "stale-suppressions": "Stale Suppressions",
   "unused-catalog-entries": "Unused Catalog Entries",
   "unresolved-catalog-references": "Unresolved Catalog References",
+  "unused-dependency-overrides": "Unused Dependency Overrides",
+  "misconfigured-dependency-overrides": "Misconfigured Dependency Overrides",
 };

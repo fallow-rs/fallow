@@ -79,6 +79,13 @@
         "$ref": "#/$defs/IgnoreCatalogReferenceRule"
       }
     },
+    "ignoreDependencyOverrides": {
+      "description": "Rules for suppressing `unused-dependency-override` and\n`misconfigured-dependency-override` findings.\n\nEach rule matches by override target package, optionally scoped to the\ndeclaring source file (`pnpm-workspace.yaml` or `package.json`). Useful\nfor overrides targeting purely-transitive packages (CVE-fix pattern)\nwhere the conservative static algorithm would otherwise cry wolf.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/IgnoreDependencyOverrideRule"
+      }
+    },
     "ignoreExportsUsedInFile": {
       "description": "Suppress unused-export findings when the exported symbol is referenced\ninside the file that declares it. This mirrors Knip's\n`ignoreExportsUsedInFile` option while still reporting exports that have\nno references at all.",
       "$ref": "#/$defs/IgnoreExportsUsedInFileConfig",
@@ -158,7 +165,9 @@
         "feature-flags": "off",
         "stale-suppressions": "warn",
         "unused-catalog-entries": "warn",
-        "unresolved-catalog-references": "error"
+        "unresolved-catalog-references": "error",
+        "unused-dependency-overrides": "warn",
+        "misconfigured-dependency-overrides": "error"
       }
     },
     "boundaries": {
@@ -566,6 +575,27 @@
         "package"
       ]
     },
+    "IgnoreDependencyOverrideRule": {
+      "description": "Rule for suppressing an `unused-dependency-override` or\n`misconfigured-dependency-override` finding.\n\nA finding is suppressed when ALL provided fields match the finding:\n- `package` matches the override's target package name exactly\n  (case-sensitive). For parent-chain overrides (`react>react-dom`), the\n  target is the rightmost segment (`react-dom`).\n- `source`, if set, scopes the suppression to overrides declared in that\n  source file. Accepts `\"pnpm-workspace.yaml\"` or `\"package.json\"`.\n  When omitted, both sources match.\n\nTypical use cases:\n- Library-internal CI tooling overrides we cannot drop yet\n- Overrides targeting purely-transitive packages (CVE-fix pattern)",
+      "type": "object",
+      "properties": {
+        "package": {
+          "description": "Override target package name (exact match; case-sensitive).",
+          "type": "string"
+        },
+        "source": {
+          "description": "Source file scope: `\"pnpm-workspace.yaml\"` or `\"package.json\"`.\n`None` matches both sources.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "package"
+      ]
+    },
     "IgnoreExportsUsedInFileConfig": {
       "description": "Controls whether exports referenced only inside their defining file are\nreported as unused exports.",
       "anyOf": [
@@ -924,6 +954,14 @@
           "default": "warn"
         },
         "unresolved-catalog-references": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
+        "unused-dependency-overrides": {
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "misconfigured-dependency-overrides": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         }
@@ -1382,6 +1420,26 @@
           ]
         },
         "unresolved-catalog-references": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-dependency-overrides": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "misconfigured-dependency-overrides": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

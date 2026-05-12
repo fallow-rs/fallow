@@ -279,6 +279,42 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
             vec![row]
         },
     );
+    markdown_section(
+        &mut out,
+        &results.unused_dependency_overrides,
+        "Unused dependency overrides",
+        |finding| {
+            use std::fmt::Write as _;
+            let mut row = format!(
+                "- `{}` -> `{}` (`{}`) `{}`:{}",
+                escape_backticks(&finding.raw_key),
+                escape_backticks(&finding.version_range),
+                finding.source.as_label(),
+                rel(&finding.path),
+                finding.line,
+            );
+            if let Some(hint) = &finding.hint {
+                let _ = write!(row, " (hint: {})", escape_backticks(hint));
+            }
+            vec![row]
+        },
+    );
+    markdown_section(
+        &mut out,
+        &results.misconfigured_dependency_overrides,
+        "Misconfigured dependency overrides",
+        |finding| {
+            vec![format!(
+                "- `{}` -> `{}` (`{}`) `{}`:{} ({})",
+                escape_backticks(&finding.raw_key),
+                escape_backticks(&finding.raw_value),
+                finding.source.as_label(),
+                rel(&finding.path),
+                finding.line,
+                finding.reason.describe(),
+            )]
+        },
+    );
 
     out
 }

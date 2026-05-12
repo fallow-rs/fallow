@@ -253,9 +253,35 @@ expression: redact_sarif_version(&json_str)
                 "text": "package.json references a catalog that does not declare the package"
               },
               "fullDescription": {
-                "text": "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. Scope: the detector scans `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` in every workspace `package.json`. `pnpm.overrides` is currently out of scope. See also: fallow/unused-catalog-entry (the inverse: catalog entries no consumer references)."
+                "text": "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. Scope: the detector scans `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` in every workspace `package.json`. See also: fallow/unused-catalog-entry (the inverse: catalog entries no consumer references)."
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#unresolved-catalog-references",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "fallow/unused-dependency-override",
+              "shortDescription": {
+                "text": "pnpm.overrides entry forces a version no workspace package depends on"
+              },
+              "fullDescription": {
+                "text": "An entry in `pnpm-workspace.yaml`'s `overrides:` section, or the root `package.json`'s `pnpm.overrides` block, that no workspace package depends on (either directly or as the parent in a parent>child override). Override entries linger after their target package is removed from the dependency tree. Bare-target overrides (`axios: ^1.6.0` without a parent matcher) may still be intentional pins for transitive CVEs not visible to static analysis; the `cve_hint` field flags those for review. To fix: delete the entry, or scope it under a real parent if it pins a transitive. See also: fallow/misconfigured-dependency-override."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-dependency-overrides",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/misconfigured-dependency-override",
+              "shortDescription": {
+                "text": "pnpm.overrides entry has an unparsable key or value"
+              },
+              "fullDescription": {
+                "text": "An entry in `pnpm-workspace.yaml`'s `overrides:` or `package.json`'s `pnpm.overrides` whose key or value does not parse as a valid pnpm override spec. Common shapes: empty key, empty value, malformed version selector on the target (`@types/react@<<18`), unbalanced parent matcher (`react>`), or unsupported `npm:alias@` syntax in the version (only the `-`, `$ref`, and `npm:alias` pnpm idioms are allowed). pnpm rejects the workspace at install time with a parser error. To fix: correct the key/value shape, or remove the entry. See also: fallow/unused-dependency-override."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#misconfigured-dependency-overrides",
               "defaultConfiguration": {
                 "level": "error"
               }

@@ -631,6 +631,24 @@ pub enum DependencyOverrideSource {
     PnpmPackageJson,
 }
 
+impl DependencyOverrideSource {
+    /// Stable string label matching the serde rename. Used in baseline keys,
+    /// audit keys, jq comparisons, and `ignoreDependencyOverrides[].source`.
+    #[must_use]
+    pub const fn as_label(&self) -> &'static str {
+        match self {
+            Self::PnpmWorkspaceYaml => "pnpm-workspace.yaml",
+            Self::PnpmPackageJson => "package.json",
+        }
+    }
+}
+
+impl std::fmt::Display for DependencyOverrideSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_label())
+    }
+}
+
 /// An entry in pnpm's `overrides:` map (or the legacy `pnpm.overrides` in
 /// `package.json`) whose target package is not declared in any workspace
 /// `package.json`. Conservative static algorithm: no lockfile read, so this

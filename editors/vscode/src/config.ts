@@ -48,6 +48,8 @@ export const getIssueTypes = (): IssueTypeConfig =>
     "stale-suppressions": true,
     "unused-catalog-entries": true,
     "unresolved-catalog-references": true,
+    "unused-dependency-overrides": true,
+    "misconfigured-dependency-overrides": true,
   });
 
 export const getDuplicationThreshold = (): number =>

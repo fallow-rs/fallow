@@ -107,7 +107,9 @@
     "boundary_violations": [],
     "stale_suppressions": [],
     "unused_catalog_entries": [],
-    "unresolved_catalog_references": []
+    "unresolved_catalog_references": [],
+    "unused_dependency_overrides": [],
+    "misconfigured_dependency_overrides": []
   },
   "dupes": {
     "clone_groups": [

@@ -55,6 +55,14 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
     code: "unresolved-catalog-reference",
     label: "Unresolved Catalog References",
   },
+  {
+    code: "unused-dependency-override",
+    label: "Unused Dependency Overrides",
+  },
+  {
+    code: "misconfigured-dependency-override",
+    label: "Misconfigured Dependency Overrides",
+  },
 ];
 
 let activeDiagnosticCategories: ReadonlyArray<DiagnosticCategory> =

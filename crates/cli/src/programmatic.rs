@@ -98,6 +98,8 @@ pub struct DeadCodeFilters {
     pub stale_suppressions: bool,
     pub unused_catalog_entries: bool,
     pub unresolved_catalog_references: bool,
+    pub unused_dependency_overrides: bool,
+    pub misconfigured_dependency_overrides: bool,
 }
 
 /// Options for dead-code-oriented analyses.
@@ -386,6 +388,8 @@ fn to_issue_filters(filters: &DeadCodeFilters) -> IssueFilters {
         stale_suppressions: filters.stale_suppressions,
         unused_catalog_entries: filters.unused_catalog_entries,
         unresolved_catalog_references: filters.unresolved_catalog_references,
+        unused_dependency_overrides: filters.unused_dependency_overrides,
+        misconfigured_dependency_overrides: filters.misconfigured_dependency_overrides,
     }
 }
 

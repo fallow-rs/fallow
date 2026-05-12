@@ -197,8 +197,24 @@ pub const CHECK_RULES: &[RuleDef] = &[
         category: "Dependencies",
         name: "Unresolved pnpm catalog reference",
         short: "package.json references a catalog that does not declare the package",
-        full: "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. Scope: the detector scans `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` in every workspace `package.json`. `pnpm.overrides` is currently out of scope. See also: fallow/unused-catalog-entry (the inverse: catalog entries no consumer references).",
+        full: "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. Scope: the detector scans `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` in every workspace `package.json`. See also: fallow/unused-catalog-entry (the inverse: catalog entries no consumer references).",
         docs_path: "explanations/dead-code#unresolved-catalog-references",
+    },
+    RuleDef {
+        id: "fallow/unused-dependency-override",
+        category: "Dependencies",
+        name: "Unused pnpm dependency override",
+        short: "pnpm.overrides entry forces a version no workspace package depends on",
+        full: "An entry in `pnpm-workspace.yaml`'s `overrides:` section, or the root `package.json`'s `pnpm.overrides` block, that no workspace package depends on (either directly or as the parent in a parent>child override). Override entries linger after their target package is removed from the dependency tree. Bare-target overrides (`axios: ^1.6.0` without a parent matcher) may still be intentional pins for transitive CVEs not visible to static analysis; the `cve_hint` field flags those for review. To fix: delete the entry, or scope it under a real parent if it pins a transitive. See also: fallow/misconfigured-dependency-override.",
+        docs_path: "explanations/dead-code#unused-dependency-overrides",
+    },
+    RuleDef {
+        id: "fallow/misconfigured-dependency-override",
+        category: "Dependencies",
+        name: "Misconfigured pnpm dependency override",
+        short: "pnpm.overrides entry has an unparsable key or value",
+        full: "An entry in `pnpm-workspace.yaml`'s `overrides:` or `package.json`'s `pnpm.overrides` whose key or value does not parse as a valid pnpm override spec. Common shapes: empty key, empty value, malformed version selector on the target (`@types/react@<<18`), unbalanced parent matcher (`react>`), or unsupported `npm:alias@` syntax in the version (only the `-`, `$ref`, and `npm:alias` pnpm idioms are allowed). pnpm rejects the workspace at install time with a parser error. To fix: correct the key/value shape, or remove the entry. See also: fallow/unused-dependency-override.",
+        docs_path: "explanations/dead-code#misconfigured-dependency-overrides",
     },
 ];
 
@@ -271,6 +287,14 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         "unresolved-catalog-references" | "unresolved-catalog-reference" | "unresolved-catalog" => {
             Some("fallow/unresolved-catalog-reference")
         }
+        "unused-dependency-overrides"
+        | "unused-dependency-override"
+        | "unused-override"
+        | "unused-overrides" => Some("fallow/unused-dependency-override"),
+        "misconfigured-dependency-overrides"
+        | "misconfigured-dependency-override"
+        | "misconfigured-override"
+        | "misconfigured-overrides" => Some("fallow/misconfigured-dependency-override"),
         "complexity" | "high-complexity" => Some("fallow/high-complexity"),
         "cyclomatic" | "high-cyclomatic" | "high-cyclomatic-complexity" => {
             Some("fallow/high-cyclomatic-complexity")
@@ -378,6 +402,14 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
         "fallow/unresolved-catalog-reference" => RuleGuide {
             example: "packages/app/package.json declares `\"old-react\": \"catalog:react17\"`, but `catalogs.react17` in pnpm-workspace.yaml does not declare `old-react`. `pnpm install` will fail.",
             how_to_fix: "If `available_in_catalogs` is non-empty, change the reference to one of those catalogs (e.g. `catalog:react18`). Otherwise add the package to the named catalog in pnpm-workspace.yaml, or remove the catalog reference and pin a hardcoded version. For staged migrations where the catalog edit lands separately, add the (package, catalog, consumer) triple to `ignoreCatalogReferences` in your fallow config.",
+        },
+        "fallow/unused-dependency-override" => RuleGuide {
+            example: "pnpm-workspace.yaml declares `overrides: { axios: ^1.6.0 }`, but no workspace package.json depends on `axios` (directly or transitively as a declared parent in `react>axios: ...`).",
+            how_to_fix: "Delete the entry from `pnpm-workspace.yaml` or `package.json#pnpm.overrides`. If the entry exists to pin a transitive dependency for a CVE fix, scope it under a real parent (`real-pkg>axios: ^1.6.0`) so the parent-chain rule recognises it, or add the entry to `ignoreDependencyOverrides` in your fallow config to silence the finding while keeping the override.",
+        },
+        "fallow/misconfigured-dependency-override" => RuleGuide {
+            example: "pnpm-workspace.yaml declares `overrides: { \"@types/react@<<18\": \"18.0.0\" }`. The doubled `<<` is not a valid pnpm version selector and pnpm will reject the workspace at install time.",
+            how_to_fix: "Fix the key/value to match pnpm's override grammar: bare names (`axios`), scoped names (`@types/react`), targets with version selectors (`@types/react@<18`), parent matchers (`react>react-dom`), and parent chains with selectors on either side. Allowed value idioms: bare version range, `-` (delete), `$ref`, and `npm:alias`. If the entry was experimental, remove it.",
         },
         "fallow/high-cyclomatic-complexity"
         | "fallow/high-cognitive-complexity"
@@ -1455,7 +1487,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 19);
+        assert_eq!(CHECK_RULES.len(), 21);
     }
 
     #[test]

@@ -274,5 +274,53 @@ expression: json_str
         "begin": 12
       }
     }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/unresolved-catalog-reference",
+    "description": "Package 'old-react' is referenced via `catalog:react17` but catalog 'react17' does not declare it; `pnpm install` will fail (available in: react18)",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "major",
+    "fingerprint": "3b583c29be84724a",
+    "location": {
+      "path": "packages/app/package.json",
+      "lines": {
+        "begin": 14
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/unused-dependency-override",
+    "description": "Override `axios` forces version `^1.6.0` but no workspace package depends on `axios` (May be an intentional pin for a transitive CVE that no workspace package depends on directly)",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "minor",
+    "fingerprint": "9e455c649fd184fe",
+    "location": {
+      "path": "pnpm-workspace.yaml",
+      "lines": {
+        "begin": 9
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/misconfigured-dependency-override",
+    "description": "Override `@types/react@<<18` -> `18.0.0` is malformed: override key cannot be parsed",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "major",
+    "fingerprint": "21be520b86ce0207",
+    "location": {
+      "path": "package.json",
+      "lines": {
+        "begin": 3
+      }
+    }
   }
 ]

@@ -58,6 +58,8 @@ struct AnalysisCompleteParams {
     stale_suppressions: usize,
     unused_catalog_entries: usize,
     unresolved_catalog_references: usize,
+    unused_dependency_overrides: usize,
+    misconfigured_dependency_overrides: usize,
     duplication_percentage: f64,
     clone_groups: usize,
 }
@@ -179,6 +181,16 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         config_key: Some("unresolved-catalog-references"),
         code: "unresolved-catalog-reference",
         label: "Unresolved Catalog References",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-dependency-overrides"),
+        code: "unused-dependency-override",
+        label: "Unused Dependency Overrides",
+    },
+    DiagnosticIssueType {
+        config_key: Some("misconfigured-dependency-overrides"),
+        code: "misconfigured-dependency-override",
+        label: "Misconfigured Dependency Overrides",
     },
 ];
 
@@ -862,6 +874,10 @@ impl FallowLspServer {
                         stale_suppressions: results.stale_suppressions.len(),
                         unused_catalog_entries: results.unused_catalog_entries.len(),
                         unresolved_catalog_references: results.unresolved_catalog_references.len(),
+                        unused_dependency_overrides: results.unused_dependency_overrides.len(),
+                        misconfigured_dependency_overrides: results
+                            .misconfigured_dependency_overrides
+                            .len(),
                         duplication_percentage: duplication.stats.duplication_percentage,
                         clone_groups: duplication.stats.clone_groups,
                     })
@@ -1164,6 +1180,12 @@ fn dedup_results(target: &mut AnalysisResults) {
             f.entry_name.clone(),
         )
     });
+    dedup_by_key_preserving_order(&mut target.unused_dependency_overrides, |o| {
+        (o.path.clone(), o.source, o.raw_key.clone())
+    });
+    dedup_by_key_preserving_order(&mut target.misconfigured_dependency_overrides, |o| {
+        (o.path.clone(), o.source, o.raw_key.clone())
+    });
 
     // UnlistedDependency: real merge, not plain dedup. The same package can
     // be reported by two roots with different `imported_from` site lists
@@ -1241,6 +1263,12 @@ fn merge_results(target: &mut AnalysisResults, source: AnalysisResults) {
     target
         .unresolved_catalog_references
         .extend(source.unresolved_catalog_references);
+    target
+        .unused_dependency_overrides
+        .extend(source.unused_dependency_overrides);
+    target
+        .misconfigured_dependency_overrides
+        .extend(source.misconfigured_dependency_overrides);
 }
 
 /// Merge duplication reports from a sub-project into the accumulated report.

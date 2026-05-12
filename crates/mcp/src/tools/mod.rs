@@ -122,6 +122,14 @@ pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
         "unresolved-catalog-references",
         "--unresolved-catalog-references",
     ),
+    (
+        "unused-dependency-overrides",
+        "--unused-dependency-overrides",
+    ),
+    (
+        "misconfigured-dependency-overrides",
+        "--misconfigured-dependency-overrides",
+    ),
 ];
 
 /// Valid detection modes for the `find_dupes` tool.

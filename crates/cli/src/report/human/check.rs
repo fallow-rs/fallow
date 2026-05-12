@@ -578,7 +578,9 @@ fn build_dependencies_section(
         || !results.type_only_dependencies.is_empty()
         || !results.test_only_dependencies.is_empty()
         || !results.unused_catalog_entries.is_empty()
-        || !results.unresolved_catalog_references.is_empty();
+        || !results.unresolved_catalog_references.is_empty()
+        || !results.unused_dependency_overrides.is_empty()
+        || !results.misconfigured_dependency_overrides.is_empty();
     if !has_dependencies {
         return;
     }
@@ -660,6 +662,22 @@ fn build_dependencies_section(
         lines,
         &results.unresolved_catalog_references,
         rules.unresolved_catalog_references,
+        max_items,
+        total_issues,
+        root,
+    );
+    push_unused_dependency_overrides_section(
+        lines,
+        &results.unused_dependency_overrides,
+        rules.unused_dependency_overrides,
+        max_items,
+        total_issues,
+        root,
+    );
+    push_misconfigured_dependency_overrides_section(
+        lines,
+        &results.misconfigured_dependency_overrides,
+        rules.misconfigured_dependency_overrides,
         max_items,
         total_issues,
         root,
@@ -793,6 +811,103 @@ fn push_unresolved_catalog_references_section(
                 ));
             }
             out
+        },
+    );
+}
+
+/// Render unused pnpm dependency overrides as a two-tier block: a headline row
+/// shows `raw_key  source  path:line`, then an indented detail row shows the
+/// forced version, target package, and optional CVE hint that the
+/// conservative-static algorithm flags.
+fn push_unused_dependency_overrides_section(
+    lines: &mut Vec<String>,
+    findings: &[fallow_core::results::UnusedDependencyOverride],
+    severity: fallow_config::Severity,
+    max_items: usize,
+    total_issues: usize,
+    root: &Path,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_level(severity);
+    build_human_section_ex(
+        lines,
+        findings,
+        "Unused dependency overrides",
+        level,
+        max_items,
+        total_issues,
+        |finding| {
+            let path_display = root.join(&finding.path);
+            let row = format!(
+                "  {key}  {source}  {loc}",
+                key = finding.raw_key.bold(),
+                source = finding.source.as_label().dimmed(),
+                loc = format!(
+                    "{}:{}",
+                    path_display
+                        .strip_prefix(root)
+                        .unwrap_or(&path_display)
+                        .display(),
+                    finding.line
+                )
+                .dimmed(),
+            );
+            let mut out = vec![row];
+            let detail = format!(
+                "forces {} to {}",
+                finding.target_package, finding.version_range
+            );
+            out.push(format!("    {}", detail.dimmed()));
+            if let Some(hint) = &finding.hint {
+                out.push(format!("    {}", hint.as_str().dimmed()));
+            }
+            out
+        },
+    );
+}
+
+/// Render misconfigured pnpm dependency overrides as a two-tier block: a
+/// headline row shows `raw_key  source  path:line`, then an indented detail
+/// row shows the parsed reason. pnpm refuses to install on these shapes so the
+/// rule defaults to error.
+fn push_misconfigured_dependency_overrides_section(
+    lines: &mut Vec<String>,
+    findings: &[fallow_core::results::MisconfiguredDependencyOverride],
+    severity: fallow_config::Severity,
+    max_items: usize,
+    total_issues: usize,
+    root: &Path,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    let level = severity_to_level(severity);
+    build_human_section_ex(
+        lines,
+        findings,
+        "Misconfigured dependency overrides",
+        level,
+        max_items,
+        total_issues,
+        |finding| {
+            let path_display = root.join(&finding.path);
+            let row = format!(
+                "  {key}  {source}  {loc}",
+                key = finding.raw_key.bold(),
+                source = finding.source.as_label().dimmed(),
+                loc = format!(
+                    "{}:{}",
+                    path_display
+                        .strip_prefix(root)
+                        .unwrap_or(&path_display)
+                        .display(),
+                    finding.line
+                )
+                .dimmed(),
+            );
+            vec![row, format!("    {}", finding.reason.describe().dimmed())]
         },
     );
 }

@@ -34,6 +34,8 @@ const baseParams = (
   staleSuppressions: 0,
   unusedCatalogEntries: 0,
   unresolvedCatalogReferences: 0,
+  unusedDependencyOverrides: 0,
+  misconfiguredDependencyOverrides: 0,
   duplicationPercentage: 0,
   cloneGroups: 0,
 }, overrides);

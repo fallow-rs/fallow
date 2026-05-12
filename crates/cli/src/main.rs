@@ -327,6 +327,14 @@ enum Command {
         #[arg(long)]
         unresolved_catalog_references: bool,
 
+        /// Only report unused pnpm dependency overrides
+        #[arg(long)]
+        unused_dependency_overrides: bool,
+
+        /// Only report misconfigured pnpm dependency overrides
+        #[arg(long)]
+        misconfigured_dependency_overrides: bool,
+
         /// Also run duplication analysis and cross-reference with dead code
         #[arg(long)]
         include_dupes: bool,
@@ -2005,6 +2013,8 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             stale_suppressions,
             unused_catalog_entries,
             unresolved_catalog_references,
+            unused_dependency_overrides,
+            misconfigured_dependency_overrides,
             include_dupes,
             trace,
             trace_file,
@@ -2030,6 +2040,8 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     stale_suppressions,
                     unused_catalog_entries,
                     unresolved_catalog_references,
+                    unused_dependency_overrides,
+                    misconfigured_dependency_overrides,
                 },
                 trace_opts: TraceOptions {
                     trace_export: trace,
