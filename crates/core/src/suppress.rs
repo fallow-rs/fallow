@@ -209,6 +209,10 @@ impl<'a> SuppressionContext<'a> {
                         IssueKind::StaleSuppression => "stale-suppression",
                         IssueKind::PnpmCatalogEntry => "unused-catalog-entry",
                         IssueKind::UnresolvedCatalogReference => "unresolved-catalog-reference",
+                        IssueKind::UnusedDependencyOverride => "unused-dependency-override",
+                        IssueKind::MisconfiguredDependencyOverride => {
+                            "misconfigured-dependency-override"
+                        }
                     }
                     .to_string()
                 });
@@ -327,6 +331,8 @@ mod tests {
             IssueKind::StaleSuppression,
             IssueKind::PnpmCatalogEntry,
             IssueKind::UnresolvedCatalogReference,
+            IssueKind::UnusedDependencyOverride,
+            IssueKind::MisconfiguredDependencyOverride,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -334,7 +340,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(23), None);
+        assert_eq!(IssueKind::from_discriminant(25), None);
     }
 
     #[test]

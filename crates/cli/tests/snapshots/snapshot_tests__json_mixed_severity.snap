@@ -433,5 +433,7 @@ expression: redact_version(&json_str)
       ]
     }
   ],
-  "unresolved_catalog_references": []
+  "unresolved_catalog_references": [],
+  "unused_dependency_overrides": [],
+  "misconfigured_dependency_overrides": []
 }

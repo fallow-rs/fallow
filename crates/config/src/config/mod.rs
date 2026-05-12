@@ -20,8 +20,9 @@ pub use flags::{FlagsConfig, SdkPattern};
 pub use format::OutputFormat;
 pub use health::{EmailMode, HealthConfig, OwnershipConfig};
 pub use resolution::{
-    CompiledIgnoreCatalogReferenceRule, CompiledIgnoreExportRule, ConfigOverride,
-    IgnoreCatalogReferenceRule, IgnoreExportRule, ResolvedConfig, ResolvedOverride,
+    CompiledIgnoreCatalogReferenceRule, CompiledIgnoreDependencyOverrideRule,
+    CompiledIgnoreExportRule, ConfigOverride, IgnoreCatalogReferenceRule,
+    IgnoreDependencyOverrideRule, IgnoreExportRule, ResolvedConfig, ResolvedOverride,
 };
 pub use resolve::ResolveConfig;
 pub use rules::{PartialRulesConfig, RulesConfig, Severity};
@@ -185,6 +186,16 @@ pub struct FallowConfig {
     /// catalog isn't ready yet.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ignore_catalog_references: Vec<IgnoreCatalogReferenceRule>,
+
+    /// Rules for suppressing `unused-dependency-override` and
+    /// `misconfigured-dependency-override` findings.
+    ///
+    /// Each rule matches by override target package, optionally scoped to the
+    /// declaring source file (`pnpm-workspace.yaml` or `package.json`). Useful
+    /// for overrides targeting purely-transitive packages (CVE-fix pattern)
+    /// where the conservative static algorithm would otherwise cry wolf.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore_dependency_overrides: Vec<IgnoreDependencyOverrideRule>,
 
     /// Suppress unused-export findings when the exported symbol is referenced
     /// inside the file that declares it. This mirrors Knip's

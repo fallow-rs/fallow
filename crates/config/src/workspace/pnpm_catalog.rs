@@ -225,7 +225,7 @@ enum Section {
 /// Strip an unquoted trailing `# ...` comment from a single line. Preserves
 /// `#` characters inside quoted strings so `"# in quotes": "value"` is left
 /// alone.
-fn strip_inline_comment(line: &str) -> &str {
+pub(super) fn strip_inline_comment(line: &str) -> &str {
     let bytes = line.as_bytes();
     let mut in_single = false;
     let mut in_double = false;
@@ -246,7 +246,7 @@ fn strip_inline_comment(line: &str) -> &str {
 /// Parse a key declaration of the form `key:` or `key: value`, returning just
 /// the (unquoted) key. Returns `None` when the line is not a key declaration
 /// (e.g., a list item `- foo`, a block scalar marker, or malformed).
-fn parse_key(line: &str) -> Option<String> {
+pub(super) fn parse_key(line: &str) -> Option<String> {
     let bytes = line.as_bytes();
     if bytes.is_empty() {
         return None;

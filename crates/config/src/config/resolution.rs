@@ -151,6 +151,57 @@ impl CompiledIgnoreCatalogReferenceRule {
     }
 }
 
+/// Rule for suppressing an `unused-dependency-override` or
+/// `misconfigured-dependency-override` finding.
+///
+/// A finding is suppressed when ALL provided fields match the finding:
+/// - `package` matches the override's target package name exactly
+///   (case-sensitive). For parent-chain overrides (`react>react-dom`), the
+///   target is the rightmost segment (`react-dom`).
+/// - `source`, if set, scopes the suppression to overrides declared in that
+///   source file. Accepts `"pnpm-workspace.yaml"` or `"package.json"`.
+///   When omitted, both sources match.
+///
+/// Typical use cases:
+/// - Library-internal CI tooling overrides we cannot drop yet
+/// - Overrides targeting purely-transitive packages (CVE-fix pattern)
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct IgnoreDependencyOverrideRule {
+    /// Override target package name (exact match; case-sensitive).
+    pub package: String,
+    /// Source file scope: `"pnpm-workspace.yaml"` or `"package.json"`.
+    /// `None` matches both sources.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
+/// `IgnoreDependencyOverrideRule` ready for matching.
+#[derive(Debug)]
+pub struct CompiledIgnoreDependencyOverrideRule {
+    pub package: String,
+    /// `None` matches any source; `Some` matches only the named source.
+    pub source: Option<String>,
+}
+
+impl CompiledIgnoreDependencyOverrideRule {
+    /// Whether this rule suppresses a dependency-override finding for the
+    /// given (target_package, source_label) pair. `source_label` should be
+    /// `"pnpm-workspace.yaml"` or `"package.json"`.
+    #[must_use]
+    pub fn matches(&self, package: &str, source_label: &str) -> bool {
+        if self.package != package {
+            return false;
+        }
+        if let Some(source_filter) = &self.source
+            && source_filter != source_label
+        {
+            return false;
+        }
+        true
+    }
+}
+
 /// Per-file override entry.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -189,6 +240,9 @@ pub struct ResolvedConfig {
     pub compiled_ignore_exports: Vec<CompiledIgnoreExportRule>,
     /// Pre-compiled rules for suppressing `unresolved-catalog-reference` findings.
     pub compiled_ignore_catalog_references: Vec<CompiledIgnoreCatalogReferenceRule>,
+    /// Pre-compiled rules for suppressing dependency-override findings (both
+    /// `unused-dependency-override` and `misconfigured-dependency-override`).
+    pub compiled_ignore_dependency_overrides: Vec<CompiledIgnoreDependencyOverrideRule>,
     /// Whether same-file references should suppress unused-export findings.
     pub ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig,
     /// Class member names that should never be flagged as unused-class-members.
@@ -409,6 +463,15 @@ impl FallowConfig {
             })
             .collect();
 
+        let compiled_ignore_dependency_overrides: Vec<CompiledIgnoreDependencyOverrideRule> = self
+            .ignore_dependency_overrides
+            .iter()
+            .map(|rule| CompiledIgnoreDependencyOverrideRule {
+                package: rule.package.clone(),
+                source: rule.source.clone(),
+            })
+            .collect();
+
         ResolvedConfig {
             root,
             entry_patterns: self.entry,
@@ -421,6 +484,7 @@ impl FallowConfig {
             ignore_export_rules: self.ignore_exports,
             compiled_ignore_exports,
             compiled_ignore_catalog_references,
+            compiled_ignore_dependency_overrides,
             ignore_exports_used_in_file: self.ignore_exports_used_in_file,
             used_class_members: self.used_class_members,
             duplicates: self.duplicates,
@@ -507,6 +571,7 @@ mod tests {
             ignore_dependencies: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
+            ignore_dependency_overrides: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: DuplicatesConfig::default(),
@@ -549,6 +614,7 @@ mod tests {
             ignore_dependencies: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
+            ignore_dependency_overrides: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: DuplicatesConfig::default(),
@@ -604,6 +670,7 @@ mod tests {
             ignore_dependencies: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
+            ignore_dependency_overrides: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: DuplicatesConfig::default(),
@@ -672,6 +739,7 @@ mod tests {
             ignore_dependencies: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
+            ignore_dependency_overrides: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: DuplicatesConfig::default(),
@@ -776,6 +844,7 @@ mod tests {
             ignore_dependencies: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
+            ignore_dependency_overrides: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: DuplicatesConfig::default(),
@@ -831,6 +900,7 @@ mod tests {
             ignore_dependencies: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
+            ignore_dependency_overrides: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: DuplicatesConfig::default(),

@@ -28,6 +28,7 @@ fn config_for_fixture(
 ) -> fallow_config::ResolvedConfig {
     FallowConfig {
         ignore_catalog_references: ignore,
+        ignore_dependency_overrides: vec![],
         ..Default::default()
     }
     .resolve(root, OutputFormat::Human, 4, true, true)

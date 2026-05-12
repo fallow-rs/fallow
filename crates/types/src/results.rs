@@ -85,6 +85,12 @@ pub struct AnalysisResults {
     /// Workspace package.json references to pnpm catalogs that don't declare the package.
     #[serde(default)]
     pub unresolved_catalog_references: Vec<UnresolvedCatalogReference>,
+    /// Entries in pnpm `overrides:` / `pnpm.overrides` that no workspace package depends on.
+    #[serde(default)]
+    pub unused_dependency_overrides: Vec<UnusedDependencyOverride>,
+    /// Entries in pnpm `overrides:` / `pnpm.overrides` whose key or value cannot be parsed.
+    #[serde(default)]
+    pub misconfigured_dependency_overrides: Vec<MisconfiguredDependencyOverride>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -151,6 +157,8 @@ impl AnalysisResults {
             + self.stale_suppressions.len()
             + self.unused_catalog_entries.len()
             + self.unresolved_catalog_references.len()
+            + self.unused_dependency_overrides.len()
+            + self.misconfigured_dependency_overrides.len()
     }
 
     /// Whether any issues were found.
@@ -165,6 +173,10 @@ impl AnalysisResults {
     /// insertion order, so the same project can produce different orderings
     /// across runs. This method canonicalises every result list by sorting on
     /// (path, line, col, name) so that JSON/SARIF/human output is stable.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one short sort_by per result array; splitting would add indirection without clarity"
+    )]
     pub fn sort(&mut self) {
         self.unused_files.sort_by(|a, b| a.path.cmp(&b.path));
 
@@ -309,6 +321,20 @@ impl AnalysisResults {
             finding.available_in_catalogs.sort();
             finding.available_in_catalogs.dedup();
         }
+
+        self.unused_dependency_overrides.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then(a.line.cmp(&b.line))
+                .then(a.raw_key.cmp(&b.raw_key))
+        });
+
+        self.misconfigured_dependency_overrides.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then(a.line.cmp(&b.line))
+                .then(a.raw_key.cmp(&b.raw_key))
+        });
 
         self.feature_flags.sort_by(|a, b| {
             a.path
@@ -590,6 +616,99 @@ pub struct UnresolvedCatalogReference {
     /// different catalog or to add the entry to the named catalog.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub available_in_catalogs: Vec<String>,
+}
+
+/// Where an override entry was declared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DependencyOverrideSource {
+    /// Top-level `overrides:` key in `pnpm-workspace.yaml`.
+    PnpmWorkspaceYaml,
+    /// `pnpm.overrides` in a root `package.json`.
+    PnpmPackageJson,
+}
+
+/// An entry in pnpm's `overrides:` map (or the legacy `pnpm.overrides` in
+/// `package.json`) whose target package is not declared in any workspace
+/// `package.json`. Conservative static algorithm: no lockfile read, so this
+/// can produce false negatives for overrides targeting purely-transitive
+/// packages (e.g. CVE-fix overrides). The `hint` field flags that case.
+#[derive(Debug, Clone, Serialize)]
+pub struct UnusedDependencyOverride {
+    /// The full original override key as written in the source (e.g.
+    /// `"react>react-dom"`, `"@types/react@<18"`). Preserved for round-trip
+    /// reporting so agents see the unmodified spelling.
+    pub raw_key: String,
+    /// The target package the override rewrites (e.g. `"react-dom"` for
+    /// `"react>react-dom"`, `"@types/react"` for `"@types/react@<18"`).
+    pub target_package: String,
+    /// Optional parent package (left side of `>`). `None` for bare-target keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_package: Option<String>,
+    /// Optional version selector on the target (e.g. `Some("<18")` for
+    /// `"@types/react@<18"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_constraint: Option<String>,
+    /// The right-hand side of the entry: the version pnpm should force.
+    pub version_range: String,
+    /// Where the override entry was declared.
+    pub source: DependencyOverrideSource,
+    /// Path to the source file. `pnpm-workspace.yaml` or a `package.json`,
+    /// stored as project-root-relative for consistency with `UnusedCatalogEntry`.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number of the entry within the source file.
+    pub line: u32,
+    /// Soft hint for cases the conservative algorithm cannot disambiguate.
+    /// Currently emitted only when the parent-chain shape might target a
+    /// transitive dependency (CVE-fix pattern).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
+/// Why a dependency-override entry is misconfigured. `pnpm install` would
+/// either fail at install time or silently no-op on these entries; surfacing
+/// them statically catches the issue before pnpm does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DependencyOverrideMisconfigReason {
+    /// The override key could not be parsed into a recognised pnpm shape
+    /// (e.g. dangling `>`, missing target, garbage characters).
+    UnparsableKey,
+    /// The override value is missing, empty, or contains line breaks.
+    EmptyValue,
+}
+
+impl DependencyOverrideMisconfigReason {
+    /// Human-readable summary of the reason.
+    #[must_use]
+    pub const fn describe(self) -> &'static str {
+        match self {
+            Self::UnparsableKey => "override key cannot be parsed",
+            Self::EmptyValue => "override value is missing or empty",
+        }
+    }
+}
+
+/// An override entry whose key or value is malformed. Default severity is
+/// `error` because pnpm refuses to install (or silently produces a no-op
+/// override) when it encounters these shapes.
+#[derive(Debug, Clone, Serialize)]
+pub struct MisconfiguredDependencyOverride {
+    /// The full original override key as written in the source.
+    pub raw_key: String,
+    /// The right-hand side of the entry, exactly as written. Empty when the
+    /// value was missing.
+    pub raw_value: String,
+    /// Classifier for the misconfiguration.
+    pub reason: DependencyOverrideMisconfigReason,
+    /// Where the override entry was declared.
+    pub source: DependencyOverrideSource,
+    /// Path to the source file (project-root-relative).
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number of the entry within the source file.
+    pub line: u32,
 }
 
 /// A production dependency that is only imported by test files.

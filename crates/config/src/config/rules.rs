@@ -108,6 +108,13 @@ pub struct RulesConfig {
     pub unused_catalog_entries: Severity,
     #[serde(default, alias = "unresolved-catalog-reference")]
     pub unresolved_catalog_references: Severity,
+    #[serde(
+        default = "Severity::default_warn",
+        alias = "unused-dependency-override"
+    )]
+    pub unused_dependency_overrides: Severity,
+    #[serde(default, alias = "misconfigured-dependency-override")]
+    pub misconfigured_dependency_overrides: Severity,
 }
 
 impl Default for RulesConfig {
@@ -134,6 +141,8 @@ impl Default for RulesConfig {
             stale_suppressions: Severity::Warn,
             unused_catalog_entries: Severity::Warn,
             unresolved_catalog_references: Severity::Error,
+            unused_dependency_overrides: Severity::Warn,
+            misconfigured_dependency_overrides: Severity::Error,
         }
     }
 }
@@ -203,6 +212,12 @@ impl RulesConfig {
         }
         if let Some(s) = partial.unresolved_catalog_references {
             self.unresolved_catalog_references = s;
+        }
+        if let Some(s) = partial.unused_dependency_overrides {
+            self.unused_dependency_overrides = s;
+        }
+        if let Some(s) = partial.misconfigured_dependency_overrides {
+            self.misconfigured_dependency_overrides = s;
         }
     }
 }
@@ -337,6 +352,18 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub unresolved_catalog_references: Option<Severity>,
+    #[serde(
+        default,
+        alias = "unused-dependency-override",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_dependency_overrides: Option<Severity>,
+    #[serde(
+        default,
+        alias = "misconfigured-dependency-override",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub misconfigured_dependency_overrides: Option<Severity>,
 }
 
 #[cfg(test)]
@@ -547,6 +574,8 @@ mod tests {
             stale_suppressions: Some(Severity::Off),
             unused_catalog_entries: Some(Severity::Off),
             unresolved_catalog_references: Some(Severity::Off),
+            unused_dependency_overrides: Some(Severity::Off),
+            misconfigured_dependency_overrides: Some(Severity::Off),
         };
         rules.apply_partial(&partial);
         assert_eq!(rules.unused_files, Severity::Off);

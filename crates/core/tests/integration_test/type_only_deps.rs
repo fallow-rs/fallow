@@ -12,6 +12,7 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
         ignore_dependencies: vec![],
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
+        ignore_dependency_overrides: vec![],
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         duplicates: fallow_config::DuplicatesConfig::default(),

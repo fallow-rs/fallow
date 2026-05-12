@@ -64,6 +64,12 @@ pub enum IssueKind {
     /// A workspace package.json reference (`catalog:` / `catalog:<name>`) pointing at
     /// a catalog that does not declare the consumed package.
     UnresolvedCatalogReference,
+    /// An entry in pnpm's `overrides:` / `pnpm.overrides` whose target package
+    /// is not declared in any workspace `package.json`.
+    UnusedDependencyOverride,
+    /// An entry in pnpm's `overrides:` / `pnpm.overrides` whose key or value
+    /// cannot be parsed into a valid pnpm shape.
+    MisconfiguredDependencyOverride,
 }
 
 impl IssueKind {
@@ -95,6 +101,12 @@ impl IssueKind {
             "unresolved-catalog-reference" | "unresolved-catalog-references" => {
                 Some(Self::UnresolvedCatalogReference)
             }
+            "unused-dependency-override" | "unused-dependency-overrides" => {
+                Some(Self::UnusedDependencyOverride)
+            }
+            "misconfigured-dependency-override" | "misconfigured-dependency-overrides" => {
+                Some(Self::MisconfiguredDependencyOverride)
+            }
             _ => None,
         }
     }
@@ -125,6 +137,8 @@ impl IssueKind {
             Self::StaleSuppression => 20,
             Self::PnpmCatalogEntry => 21,
             Self::UnresolvedCatalogReference => 22,
+            Self::UnusedDependencyOverride => 23,
+            Self::MisconfiguredDependencyOverride => 24,
         }
     }
 
@@ -154,6 +168,8 @@ impl IssueKind {
             20 => Some(Self::StaleSuppression),
             21 => Some(Self::PnpmCatalogEntry),
             22 => Some(Self::UnresolvedCatalogReference),
+            23 => Some(Self::UnusedDependencyOverride),
+            24 => Some(Self::MisconfiguredDependencyOverride),
             _ => None,
         }
     }
@@ -292,6 +308,22 @@ mod tests {
             IssueKind::parse("unresolved-catalog-references"),
             Some(IssueKind::UnresolvedCatalogReference)
         );
+        assert_eq!(
+            IssueKind::parse("unused-dependency-override"),
+            Some(IssueKind::UnusedDependencyOverride)
+        );
+        assert_eq!(
+            IssueKind::parse("unused-dependency-overrides"),
+            Some(IssueKind::UnusedDependencyOverride)
+        );
+        assert_eq!(
+            IssueKind::parse("misconfigured-dependency-override"),
+            Some(IssueKind::MisconfiguredDependencyOverride)
+        );
+        assert_eq!(
+            IssueKind::parse("misconfigured-dependency-overrides"),
+            Some(IssueKind::MisconfiguredDependencyOverride)
+        );
     }
 
     #[test]
@@ -313,7 +345,7 @@ mod tests {
     #[test]
     fn discriminant_out_of_range() {
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(23), None);
+        assert_eq!(IssueKind::from_discriminant(25), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -342,6 +374,8 @@ mod tests {
             IssueKind::StaleSuppression,
             IssueKind::PnpmCatalogEntry,
             IssueKind::UnresolvedCatalogReference,
+            IssueKind::UnusedDependencyOverride,
+            IssueKind::MisconfiguredDependencyOverride,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -349,7 +383,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(23), None);
+        assert_eq!(IssueKind::from_discriminant(25), None);
     }
 
     // ── Discriminant uniqueness ─────────────────────────────────
@@ -379,6 +413,8 @@ mod tests {
             IssueKind::StaleSuppression,
             IssueKind::PnpmCatalogEntry,
             IssueKind::UnresolvedCatalogReference,
+            IssueKind::UnusedDependencyOverride,
+            IssueKind::MisconfiguredDependencyOverride,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();

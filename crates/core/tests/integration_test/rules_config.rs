@@ -75,6 +75,7 @@ fn ignore_exports_wildcard() {
     let root = fixture_path("ignore-exports");
     let config = FallowConfig {
         ignore_catalog_references: vec![],
+        ignore_dependency_overrides: vec![],
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -130,6 +131,7 @@ fn ignore_exports_specific() {
     let root = fixture_path("ignore-exports");
     let config = FallowConfig {
         ignore_catalog_references: vec![],
+        ignore_dependency_overrides: vec![],
         schema: None,
         extends: vec![],
         entry: vec![],
@@ -309,6 +311,7 @@ fn ignore_dependencies_config() {
     let root = fixture_path("basic-project");
     let config = FallowConfig {
         ignore_catalog_references: vec![],
+        ignore_dependency_overrides: vec![],
         schema: None,
         extends: vec![],
         entry: vec![],

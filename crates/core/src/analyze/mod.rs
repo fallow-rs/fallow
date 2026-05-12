@@ -7,6 +7,7 @@ mod unused_deps;
 mod unused_exports;
 mod unused_files;
 mod unused_members;
+mod unused_overrides;
 
 use rustc_hash::FxHashMap;
 
@@ -32,6 +33,10 @@ use unused_exports::{
 };
 use unused_files::find_unused_files;
 use unused_members::find_unused_members;
+use unused_overrides::{
+    find_misconfigured_dependency_overrides, find_unused_dependency_overrides,
+    gather_pnpm_override_state,
+};
 
 /// Pre-computed line offset tables indexed by `FileId`, built during parse and
 /// carried through the cache. Eliminates redundant file reads during analysis.
@@ -548,6 +553,26 @@ pub fn find_dead_code_full(
         }
     }
 
+    // Detect pnpm dependency-override issues (off pnpm-workspace.yaml +
+    // root package.json's pnpm.overrides). Mirrors the catalog detector: one
+    // parse + workspace walk feeds both unused-dependency-overrides and
+    // misconfigured-dependency-overrides; each detector gated on its own
+    // rule severity.
+    let need_unused_overrides = config.rules.unused_dependency_overrides != Severity::Off;
+    let need_misconfigured_overrides =
+        config.rules.misconfigured_dependency_overrides != Severity::Off;
+    if (need_unused_overrides || need_misconfigured_overrides)
+        && let Some(state) = gather_pnpm_override_state(config, workspaces)
+    {
+        if need_unused_overrides {
+            results.unused_dependency_overrides = find_unused_dependency_overrides(&state, config);
+        }
+        if need_misconfigured_overrides {
+            results.misconfigured_dependency_overrides =
+                find_misconfigured_dependency_overrides(&state, config);
+        }
+    }
+
     // Sort all result arrays for deterministic output ordering.
     // Parallel collection and FxHashMap iteration don't guarantee order,
     // so without sorting the same project can produce different orderings.
@@ -744,6 +769,8 @@ mod tests {
                 stale_suppressions: Severity::Off,
                 unused_catalog_entries: Severity::Off,
                 unresolved_catalog_references: Severity::Off,
+                unused_dependency_overrides: Severity::Off,
+                misconfigured_dependency_overrides: Severity::Off,
             };
             let config = make_config_with_rules(rules);
             let results = find_dead_code(&graph, &config);

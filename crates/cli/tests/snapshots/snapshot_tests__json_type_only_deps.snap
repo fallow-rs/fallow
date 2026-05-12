@@ -88,5 +88,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   "boundary_violations": [],
   "stale_suppressions": [],
   "unused_catalog_entries": [],
-  "unresolved_catalog_references": []
+  "unresolved_catalog_references": [],
+  "unused_dependency_overrides": [],
+  "misconfigured_dependency_overrides": []
 }

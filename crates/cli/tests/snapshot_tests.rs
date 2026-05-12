@@ -533,6 +533,8 @@ fn sarif_mixed_severity_snapshot() {
         stale_suppressions: fallow_config::Severity::Warn,
         unused_catalog_entries: fallow_config::Severity::Warn,
         unresolved_catalog_references: fallow_config::Severity::Error,
+        unused_dependency_overrides: fallow_config::Severity::Warn,
+        misconfigured_dependency_overrides: fallow_config::Severity::Error,
     };
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -1272,6 +1274,8 @@ fn codeclimate_mixed_severity_snapshot() {
         stale_suppressions: fallow_config::Severity::Warn,
         unused_catalog_entries: fallow_config::Severity::Warn,
         unresolved_catalog_references: fallow_config::Severity::Error,
+        unused_dependency_overrides: fallow_config::Severity::Warn,
+        misconfigured_dependency_overrides: fallow_config::Severity::Error,
     };
     let cc = build_codeclimate(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");

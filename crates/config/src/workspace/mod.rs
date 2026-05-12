@@ -1,6 +1,7 @@
 mod package_json;
 mod parsers;
 mod pnpm_catalog;
+mod pnpm_overrides;
 
 use std::path::{Path, PathBuf};
 
@@ -11,6 +12,11 @@ pub use package_json::PackageJson;
 pub use parsers::parse_tsconfig_root_dir;
 use parsers::{expand_workspace_glob, parse_pnpm_workspace_yaml, parse_tsconfig_references};
 pub use pnpm_catalog::{PnpmCatalog, PnpmCatalogData, PnpmCatalogEntry, parse_pnpm_catalog_data};
+pub use pnpm_overrides::{
+    MisconfigReason, OverrideSource, ParsedOverrideKey, PnpmOverrideData, PnpmOverrideEntry,
+    is_valid_override_value, override_misconfig_reason, override_source_label, parse_override_key,
+    parse_pnpm_package_json_overrides, parse_pnpm_workspace_overrides,
+};
 
 /// Workspace configuration for monorepo support.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
