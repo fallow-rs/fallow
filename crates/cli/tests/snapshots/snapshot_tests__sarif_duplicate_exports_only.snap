@@ -253,7 +253,7 @@ expression: redact_sarif_version(&json_str)
                 "text": "package.json references a catalog that does not declare the package"
               },
               "fullDescription": {
-                "text": "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. See also: fallow/unused-catalog-entry (the inverse: catalog entries no consumer references)."
+                "text": "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. Scope: the detector scans `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` in every workspace `package.json`. `pnpm.overrides` is currently out of scope. See also: fallow/unused-catalog-entry (the inverse: catalog entries no consumer references)."
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#unresolved-catalog-references",
               "defaultConfiguration": {

@@ -782,6 +782,16 @@ fn push_unresolved_catalog_references_section(
                 )
             };
             out.push(detail_line);
+            // When exactly one alternative catalog declares the package, the
+            // fix is unambiguous; surface the concrete switch as a third line
+            // so a human reading CI output can apply it without thinking.
+            if finding.available_in_catalogs.len() == 1 {
+                let target = &finding.available_in_catalogs[0];
+                out.push(format!(
+                    "    {}",
+                    format!("Suggested: switch to `catalog:{target}`").dimmed(),
+                ));
+            }
             out
         },
     );

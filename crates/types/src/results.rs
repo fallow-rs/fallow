@@ -574,7 +574,12 @@ pub struct UnresolvedCatalogReference {
     /// Catalog group the reference points at: `"default"` for bare `catalog:` references,
     /// or the named catalog key for `catalog:<name>` references.
     pub catalog_name: String,
-    /// Path to the consumer `package.json`, relative to the analyzed root.
+    /// Absolute path to the consumer `package.json`. Matches the storage
+    /// convention used by every path-anchored finding type (`UnusedFile`,
+    /// `UnresolvedImport`, `UnusedExport`, etc.) so the shared filtering
+    /// pipelines (`filter_results_by_changed_files`, per-file overrides,
+    /// audit attribution) work without a separate root-join pass. JSON
+    /// output strips the project-root prefix via `serde_path::serialize`.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
     /// 1-based line number of the dependency entry in the consumer `package.json`.

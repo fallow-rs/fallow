@@ -559,14 +559,26 @@ fn build_unresolved_catalog_reference_primary_action(
             "note": "Pin a version that satisfies the consumer's import; no other catalog declares this package today",
         })
     } else {
-        serde_json::json!({
+        // When exactly one alternative catalog declares this package, the fix
+        // is unambiguous: name it as `suggested_target` so deterministic agents
+        // (rule-based, not LLM-driven) can land the edit without picking from
+        // a list. LLM agents that read `available_in_catalogs[0]` arrive at
+        // the same answer; this field just makes the choice machine-explicit.
+        let suggested_target = (available.len() == 1).then(|| available[0].clone());
+        let mut action = serde_json::json!({
             "type": "update-catalog-reference",
             "auto_fixable": false,
             "description": format!(
                 "Switch the reference from `catalog:{current_catalog}` to a catalog that declares `{package_name}`",
             ),
             "available_in_catalogs": available,
-        })
+        });
+        if let Some(target) = suggested_target
+            && let serde_json::Value::Object(map) = &mut action
+        {
+            map.insert("suggested_target".to_string(), serde_json::json!(target));
+        }
+        action
     }
 }
 
