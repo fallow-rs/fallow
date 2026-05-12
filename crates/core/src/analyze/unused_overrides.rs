@@ -46,7 +46,7 @@ const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
 const ROOT_PACKAGE_JSON: &str = "package.json";
 const SOURCE_LABEL_YAML: &str = "pnpm-workspace.yaml";
 const SOURCE_LABEL_JSON: &str = "package.json";
-const HINT_PARENT_CHAIN_TRANSITIVE: &str =
+const HINT_MAY_BE_TRANSITIVE: &str =
     "may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth";
 
 /// Combined override state across both sources, plus the set of packages
@@ -207,11 +207,12 @@ fn collect_unused_from_source(
             continue;
         }
 
-        let hint = if parsed.parent_package.is_some() {
-            Some(HINT_PARENT_CHAIN_TRANSITIVE.to_string())
-        } else {
-            None
-        };
+        // Every unused override (bare-target AND parent-chain) is a potential
+        // transitive-dependency override, the CVE-fix / canary-aliasing pattern
+        // the conservative static algorithm cannot disambiguate without a
+        // lockfile. Emit the hint on every finding so agents can de-prioritize
+        // and human readers know to verify against `pnpm install`.
+        let hint = Some(HINT_MAY_BE_TRANSITIVE.to_string());
 
         findings.push(UnusedDependencyOverride {
             raw_key: entry.raw_key.clone(),

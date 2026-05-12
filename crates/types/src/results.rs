@@ -618,13 +618,16 @@ pub struct UnresolvedCatalogReference {
     pub available_in_catalogs: Vec<String>,
 }
 
-/// Where an override entry was declared.
+/// Where an override entry was declared. Serialized as the filename label
+/// (`"pnpm-workspace.yaml"` or `"package.json"`) so the value in JSON output
+/// matches the value users write in `ignoreDependencyOverrides[].source`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum DependencyOverrideSource {
     /// Top-level `overrides:` key in `pnpm-workspace.yaml`.
+    #[serde(rename = "pnpm-workspace.yaml")]
     PnpmWorkspaceYaml,
     /// `pnpm.overrides` in a root `package.json`.
+    #[serde(rename = "package.json")]
     PnpmPackageJson,
 }
 

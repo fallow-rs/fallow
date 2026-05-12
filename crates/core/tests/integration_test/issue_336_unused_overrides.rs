@@ -195,9 +195,10 @@ fn severity_off_short_circuits() {
 }
 
 #[test]
-fn parent_chain_override_carries_transitive_hint() {
-    // Use a fresh fixture-shaped construction here so the parent-chain finding
-    // does fire (`react` NOT declared anywhere). We synthesize via a tempdir.
+fn unused_overrides_carry_transitive_hint_on_every_shape() {
+    // Both bare-target AND parent-chain unused findings must carry the
+    // transitive-CVE hint so agents can de-prioritize. Synthesize a tempdir
+    // with one of each shape and confirm the hint fires on both.
     use std::fs;
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
@@ -208,7 +209,7 @@ fn parent_chain_override_carries_transitive_hint() {
     .expect("write root pkg");
     fs::write(
         root.join("pnpm-workspace.yaml"),
-        "packages:\n  - 'packages/*'\n\noverrides:\n  \"unrelated-parent>orphaned-target\": \"^1.0.0\"\n",
+        "packages:\n  - 'packages/*'\n\noverrides:\n  bare-orphan: \"^1.0.0\"\n  \"unrelated-parent>orphaned-target\": \"^1.0.0\"\n",
     )
     .expect("write yaml");
 
@@ -216,12 +217,12 @@ fn parent_chain_override_carries_transitive_hint() {
         FallowConfig::default().resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
-    assert_eq!(results.unused_dependency_overrides.len(), 1);
-    let finding = &results.unused_dependency_overrides[0];
-    assert_eq!(finding.target_package, "orphaned-target");
-    assert_eq!(finding.parent_package.as_deref(), Some("unrelated-parent"));
-    assert!(
-        finding.hint.is_some(),
-        "parent-chain override should carry the transitive-CVE hint"
-    );
+    assert_eq!(results.unused_dependency_overrides.len(), 2);
+    for finding in &results.unused_dependency_overrides {
+        assert!(
+            finding.hint.is_some(),
+            "every unused override (bare-target or parent-chain) should carry the transitive hint; missing on {:?}",
+            finding.raw_key
+        );
+    }
 }
