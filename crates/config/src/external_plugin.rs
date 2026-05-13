@@ -1,4 +1,3 @@
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
@@ -186,24 +185,13 @@ fn parse_plugin(content: &str, format: &PluginFormat, path: &Path) -> Option<Ext
                 None
             }
         },
-        PluginFormat::Jsonc => {
-            let mut stripped = String::new();
-            match json_comments::StripComments::new(content.as_bytes())
-                .read_to_string(&mut stripped)
-            {
-                Ok(_) => match serde_json::from_str::<ExternalPluginDef>(&stripped) {
-                    Ok(plugin) => Some(plugin),
-                    Err(e) => {
-                        tracing::warn!("failed to parse external plugin {}: {e}", path.display());
-                        None
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!("failed to strip comments from {}: {e}", path.display());
-                    None
-                }
+        PluginFormat::Jsonc => match crate::jsonc::parse_to_value::<ExternalPluginDef>(content) {
+            Ok(plugin) => Some(plugin),
+            Err(e) => {
+                tracing::warn!("failed to parse external plugin {}: {e}", path.display());
+                None
             }
-        }
+        },
     }
 }
 
@@ -541,11 +529,7 @@ exports = ["default"]
             /* Block comment */
             "entryPoints": ["src/**/*.ts"]
         }"#;
-        let mut stripped = String::new();
-        json_comments::StripComments::new(jsonc_str.as_bytes())
-            .read_to_string(&mut stripped)
-            .unwrap();
-        let plugin: ExternalPluginDef = serde_json::from_str(&stripped).unwrap();
+        let plugin: ExternalPluginDef = crate::jsonc::parse_to_value(jsonc_str).unwrap();
         assert_eq!(plugin.name, "my-jsonc-plugin");
         assert_eq!(plugin.enablers, vec!["my-pkg"]);
         assert_eq!(plugin.entry_points, vec!["src/**/*.ts"]);

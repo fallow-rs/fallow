@@ -73,7 +73,7 @@ fn reset_inter_file_warn_dedup_for_test() {
 }
 
 /// Rule for ignoring specific exports.
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct IgnoreExportRule {
     /// Glob pattern for files.
     pub file: String,

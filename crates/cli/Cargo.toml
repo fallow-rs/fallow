@@ -45,7 +45,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml_ng = { workspace = true }
 bitcode = { workspace = true }
-json_comments = { workspace = true }
+jsonc-parser = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 notify = { workspace = true }

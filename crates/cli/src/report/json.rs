@@ -3,6 +3,7 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use fallow_config::FallowConfig;
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 
@@ -85,13 +86,14 @@ pub(super) fn print_grouped_json(
     resolver: &OwnershipResolver,
 ) -> ExitCode {
     let root_prefix = format!("{}/", root.display());
+    let config_fixable = FallowConfig::find_config_path(root).is_some();
 
     let group_values: Vec<serde_json::Value> = groups
         .iter()
         .filter_map(|group| {
             let mut value = serde_json::to_value(&group.results).ok()?;
             strip_root_prefix(&mut value, &root_prefix);
-            inject_actions(&mut value);
+            inject_actions(&mut value, config_fixable);
             harmonize_multi_kind_suppress_line_actions(&mut value);
 
             if let serde_json::Value::Object(ref mut map) = value {
@@ -298,7 +300,7 @@ pub fn build_json(
     // action fields (static strings and package names) are not processed
     // by the path stripper.
     strip_root_prefix(&mut output, &root_prefix);
-    inject_actions(&mut output);
+    inject_actions(&mut output, FallowConfig::find_config_path(root).is_some());
     harmonize_multi_kind_suppress_line_actions(&mut output);
     Ok(output)
 }
@@ -625,6 +627,7 @@ fn build_actions(
     item: &serde_json::Value,
     issue_key: &str,
     spec: &ActionSpec,
+    config_fixable: bool,
 ) -> serde_json::Value {
     let mut actions = Vec::with_capacity(2);
     let cross_workspace_dependency = is_dependency_issue(issue_key)
@@ -650,7 +653,7 @@ fn build_actions(
     {
         actions.push(serde_json::json!({
             "type": "add-to-config",
-            "auto_fixable": false,
+            "auto_fixable": config_fixable,
             "description": "Add an ignoreExports rule so these files are excluded from duplicate-export grouping (use when this duplication is an intentional namespace-barrel API).",
             "config_key": "ignoreExports",
             "value": value,
@@ -851,7 +854,7 @@ fn is_dependency_issue(issue_key: &str) -> bool {
 ///
 /// Walks each known issue-type array and appends an `actions` field
 /// to every item, providing machine-actionable fix and suppress hints.
-fn inject_actions(output: &mut serde_json::Value) {
+fn inject_actions(output: &mut serde_json::Value, config_fixable: bool) {
     let Some(map) = output.as_object_mut() else {
         return;
     };
@@ -864,7 +867,7 @@ fn inject_actions(output: &mut serde_json::Value) {
             continue;
         };
         for item in arr {
-            let actions = build_actions(item, key, &spec);
+            let actions = build_actions(item, key, &spec, config_fixable);
             if let serde_json::Value::Object(obj) = item {
                 obj.insert("actions".to_string(), actions);
             }
@@ -2606,6 +2609,65 @@ mod tests {
         assert_eq!(locs.len(), 2);
         assert_eq!(locs[0]["line"], 10);
         assert_eq!(locs[1]["line"], 25);
+    }
+
+    #[test]
+    fn duplicate_export_add_to_config_is_auto_fixable_when_config_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join(".fallowrc.json"), "{}\n").unwrap();
+        let mut results = AnalysisResults::default();
+        results.duplicate_exports.push(DuplicateExport {
+            export_name: "Button".to_string(),
+            locations: vec![
+                DuplicateLocation {
+                    path: root.join("src/ui.ts"),
+                    line: 10,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: root.join("src/components.ts"),
+                    line: 25,
+                    col: 0,
+                },
+            ],
+        });
+
+        let output = build_json(&results, root, Duration::ZERO).unwrap();
+        let actions = output["duplicate_exports"][0]["actions"]
+            .as_array()
+            .unwrap();
+        assert_eq!(actions[0]["type"], "add-to-config");
+        assert_eq!(actions[0]["auto_fixable"], true);
+    }
+
+    #[test]
+    fn duplicate_export_add_to_config_is_not_auto_fixable_without_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let mut results = AnalysisResults::default();
+        results.duplicate_exports.push(DuplicateExport {
+            export_name: "Button".to_string(),
+            locations: vec![
+                DuplicateLocation {
+                    path: root.join("src/ui.ts"),
+                    line: 10,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: root.join("src/components.ts"),
+                    line: 25,
+                    col: 0,
+                },
+            ],
+        });
+
+        let output = build_json(&results, root, Duration::ZERO).unwrap();
+        let actions = output["duplicate_exports"][0]["actions"]
+            .as_array()
+            .unwrap();
+        assert_eq!(actions[0]["type"], "add-to-config");
+        assert_eq!(actions[0]["auto_fixable"], false);
     }
 
     #[test]

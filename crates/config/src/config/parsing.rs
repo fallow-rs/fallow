@@ -1,4 +1,3 @@
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -70,10 +69,14 @@ pub(super) fn deep_merge_json(base: &mut serde_json::Value, overlay: serde_json:
 pub(super) fn parse_config_to_value(path: &Path) -> Result<serde_json::Value, miette::Report> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| miette::miette!("Failed to read config file {}: {}", path.display(), e))?;
+    // Strip a leading UTF-8 BOM so Windows-authored configs parse cleanly.
+    // jsonc-parser and serde_yaml_ng both reject `\u{FEFF}` as an unexpected
+    // token; matches the pre-existing behaviour in workspace/parsers.rs.
+    let content = content.trim_start_matches('\u{FEFF}');
 
     match ConfigFormat::from_path(path) {
         ConfigFormat::Toml => {
-            let toml_value: toml::Value = toml::from_str(&content).map_err(|e| {
+            let toml_value: toml::Value = toml::from_str(content).map_err(|e| {
                 miette::miette!("Failed to parse config file {}: {}", path.display(), e)
             })?;
             serde_json::to_value(toml_value).map_err(|e| {
@@ -84,17 +87,8 @@ pub(super) fn parse_config_to_value(path: &Path) -> Result<serde_json::Value, mi
                 )
             })
         }
-        ConfigFormat::Json => {
-            let mut stripped = String::new();
-            json_comments::StripComments::new(content.as_bytes())
-                .read_to_string(&mut stripped)
-                .map_err(|e| {
-                    miette::miette!("Failed to strip comments from {}: {}", path.display(), e)
-                })?;
-            serde_json::from_str(&stripped).map_err(|e| {
-                miette::miette!("Failed to parse config file {}: {}", path.display(), e)
-            })
-        }
+        ConfigFormat::Json => crate::jsonc::parse_to_value(content)
+            .map_err(|e| miette::miette!("Failed to parse config file {}: {}", path.display(), e)),
     }
 }
 
@@ -424,17 +418,7 @@ fn fetch_url_config(url: &str, source: &str) -> Result<serde_json::Value, miette
             )
         })?;
 
-    // Strip JSONC comments before parsing.
-    let mut stripped = String::new();
-    json_comments::StripComments::new(body.as_bytes())
-        .read_to_string(&mut stripped)
-        .map_err(|e| {
-            miette::miette!(
-                "Failed to strip comments from remote config {url} (referenced from {source}): {e}"
-            )
-        })?;
-
-    serde_json::from_str(&stripped).map_err(|e| {
+    crate::jsonc::parse_to_value(&body).map_err(|e| {
         miette::miette!(
             "Failed to parse remote config as JSON from {url} (referenced from {source}): {e}. \
              Only JSON/JSONC is supported for URL-sourced configs"
@@ -762,8 +746,6 @@ impl FallowConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Read as _;
-
     use super::*;
     use crate::PackageJson;
     use crate::config::format::OutputFormat;
@@ -1009,11 +991,7 @@ unknown_field = true
                 "unused-files": "warn"
             }
         }"#;
-        let mut stripped = String::new();
-        json_comments::StripComments::new(jsonc_str.as_bytes())
-            .read_to_string(&mut stripped)
-            .unwrap();
-        let config: FallowConfig = serde_json::from_str(&stripped).unwrap();
+        let config: FallowConfig = crate::jsonc::parse_to_value(jsonc_str).unwrap();
         assert_eq!(config.entry, vec!["src/main.ts"]);
         assert_eq!(config.rules.unused_files, Severity::Warn);
     }

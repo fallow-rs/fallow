@@ -16,18 +16,19 @@ dunce = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml_ng = { workspace = true }
-json_comments = { workspace = true }
+jsonc-parser = { workspace = true }
 toml = { workspace = true }
+toml_edit = { workspace = true }
 schemars = { workspace = true }
 glob = { workspace = true }
 globset = { workspace = true }
 miette = { workspace = true }
 rustc-hash = { workspace = true }
+tempfile = { workspace = true }
 tracing = { workspace = true }
 ureq = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
 proptest = { workspace = true }
 
 [lints]

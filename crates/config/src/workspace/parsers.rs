@@ -1,10 +1,8 @@
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 /// Parse `tsconfig.json` at the project root and extract `references[].path` directories.
 ///
-/// Returns directories that exist on disk. tsconfig.json is JSONC (comments + trailing commas),
-/// so we strip both before parsing.
+/// Returns directories that exist on disk. tsconfig.json is JSONC (comments + trailing commas).
 pub(super) fn parse_tsconfig_references(root: &Path) -> Vec<PathBuf> {
     let tsconfig_path = root.join("tsconfig.json");
     let Ok(content) = std::fs::read_to_string(&tsconfig_path) else {
@@ -14,19 +12,7 @@ pub(super) fn parse_tsconfig_references(root: &Path) -> Vec<PathBuf> {
     // Strip UTF-8 BOM if present (common in Windows-authored tsconfig files)
     let content = content.trim_start_matches('\u{FEFF}');
 
-    // Strip JSONC comments
-    let mut stripped = String::new();
-    if json_comments::StripComments::new(content.as_bytes())
-        .read_to_string(&mut stripped)
-        .is_err()
-    {
-        return Vec::new();
-    }
-
-    // Strip trailing commas (common in tsconfig.json)
-    let cleaned = strip_trailing_commas(&stripped);
-
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&cleaned) else {
+    let Ok(value) = crate::jsonc::parse_to_value::<serde_json::Value>(content) else {
         return Vec::new();
     };
 
@@ -50,19 +36,12 @@ pub(super) fn parse_tsconfig_references(root: &Path) -> Vec<PathBuf> {
 /// Parse `tsconfig.json` at the project root and extract `compilerOptions.rootDir`.
 ///
 /// Returns `None` if the file is missing, malformed, or has no `rootDir` set.
-/// Strips JSONC comments and trailing commas before parsing.
 pub fn parse_tsconfig_root_dir(root: &Path) -> Option<String> {
     let tsconfig_path = root.join("tsconfig.json");
     let content = std::fs::read_to_string(&tsconfig_path).ok()?;
     let content = content.trim_start_matches('\u{FEFF}');
 
-    let mut stripped = String::new();
-    json_comments::StripComments::new(content.as_bytes())
-        .read_to_string(&mut stripped)
-        .ok()?;
-
-    let cleaned = strip_trailing_commas(&stripped);
-    let value: serde_json::Value = serde_json::from_str(&cleaned).ok()?;
+    let value: serde_json::Value = crate::jsonc::parse_to_value(content).ok()?;
 
     value
         .get("compilerOptions")
@@ -80,6 +59,7 @@ pub fn parse_tsconfig_root_dir(root: &Path) -> Option<String> {
 ///
 /// tsconfig.json commonly uses trailing commas which are valid JSONC but not valid JSON.
 /// This strips them so `serde_json` can parse the content.
+#[cfg(test)]
 pub(super) fn strip_trailing_commas(input: &str) -> String {
     let bytes = input.as_bytes();
     let len = bytes.len();

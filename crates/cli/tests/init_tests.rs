@@ -83,14 +83,11 @@ fn init_created_config_is_valid_json() {
     let dir = init_temp_dir("valid");
     run_fallow_raw(&["init", "--root", dir.to_str().unwrap(), "--quiet"]);
     let content = fs::read_to_string(dir.join(".fallowrc.json")).unwrap();
-    let mut stripped = String::new();
-    std::io::Read::read_to_string(
-        &mut json_comments::StripComments::new(content.as_bytes()),
-        &mut stripped,
-    )
-    .unwrap_or_else(|e| panic!("init should produce valid JSONC: {e}\ncontent: {content}"));
-    let _: serde_json::Value = serde_json::from_str(&stripped)
-        .unwrap_or_else(|e| panic!("init should produce valid JSONC: {e}\ncontent: {content}"));
+    let _: serde_json::Value =
+        jsonc_parser::parse_to_serde_value(&content, &jsonc_parser::ParseOptions::default())
+            .unwrap_or_else(|e| {
+                panic!("init should produce valid JSONC: {e}\ncontent: {content}");
+            });
     cleanup(&dir);
 }
 

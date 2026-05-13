@@ -1,7 +1,4 @@
-use std::io::Write;
 use std::path::Path;
-
-use tempfile::NamedTempFile;
 
 /// Read a source file, validate it is within the project root, and detect line endings.
 ///
@@ -34,15 +31,7 @@ pub(super) fn write_fixed_content(
     atomic_write(path, result.as_bytes())
 }
 
-/// Atomically write content to a file via a temporary file and rename.
-pub(super) fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let mut tmp = NamedTempFile::new_in(dir)?;
-    tmp.write_all(content)?;
-    tmp.as_file().sync_all()?;
-    tmp.persist(path).map_err(|e| e.error)?;
-    Ok(())
-}
+pub(super) use fallow_config::atomic_write;
 
 #[cfg(test)]
 mod tests {

@@ -768,13 +768,8 @@ mod tests {
     }
 
     fn parse_jsonc_config(content: &str) -> serde_json::Value {
-        let mut stripped = String::new();
-        std::io::Read::read_to_string(
-            &mut json_comments::StripComments::new(content.as_bytes()),
-            &mut stripped,
-        )
-        .expect("strip json comments");
-        serde_json::from_str(&stripped).expect("parse generated jsonc")
+        jsonc_parser::parse_to_serde_value(content, &jsonc_parser::ParseOptions::default())
+            .expect("parse generated jsonc")
     }
 
     #[test]

@@ -6,6 +6,7 @@ use std::process::ExitCode;
 use fallow_config::OutputFormat;
 
 mod catalog;
+mod config;
 mod deps;
 mod enum_helpers;
 mod enum_members;
@@ -95,6 +96,15 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
 
     had_write_error |=
         deps::apply_dependency_fixes(opts.root, &results, opts.output, opts.dry_run, &mut fixes);
+
+    had_write_error |= config::apply_config_fixes(
+        opts.root,
+        opts.config_path.as_ref(),
+        &results,
+        opts.output,
+        opts.dry_run,
+        &mut fixes,
+    );
 
     // Group unused enum members by file path for batch editing.
     if !results.unused_enum_members.is_empty() {

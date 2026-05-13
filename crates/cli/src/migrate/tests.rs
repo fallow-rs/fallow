@@ -1,5 +1,3 @@
-use std::io::Read as _;
-
 use super::jscpd::migrate_jscpd;
 use super::jsonc::{generate_jsonc, indent_json_value};
 use super::knip::migrate_knip;
@@ -154,11 +152,9 @@ fn jsonc_output_deserializes_as_valid_config() {
         sources: vec!["knip.json".to_string()],
     };
     let output = generate_jsonc(&result);
-    let mut stripped = String::new();
-    json_comments::StripComments::new(output.as_bytes())
-        .read_to_string(&mut stripped)
-        .unwrap();
-    let config: fallow_config::FallowConfig = serde_json::from_str(&stripped).unwrap();
+    let config: fallow_config::FallowConfig =
+        jsonc_parser::parse_to_serde_value(&output, &jsonc_parser::ParseOptions::default())
+            .unwrap();
     assert_eq!(config.entry, vec!["src/index.ts"]);
     assert_eq!(config.ignore_dependencies, vec!["lodash"]);
 }
@@ -1059,11 +1055,9 @@ fn jsonc_full_roundtrip_with_all_fields() {
         sources: vec!["knip.json".to_string()],
     };
     let output = generate_jsonc(&result);
-    let mut stripped = String::new();
-    json_comments::StripComments::new(output.as_bytes())
-        .read_to_string(&mut stripped)
-        .unwrap();
-    let config: fallow_config::FallowConfig = serde_json::from_str(&stripped).unwrap();
+    let config: fallow_config::FallowConfig =
+        jsonc_parser::parse_to_serde_value(&output, &jsonc_parser::ParseOptions::default())
+            .unwrap();
     assert_eq!(config.entry, vec!["src/main.ts", "src/worker.ts"]);
     assert_eq!(config.ignore_patterns, vec!["build/**"]);
     assert_eq!(config.ignore_dependencies, vec!["react", "lodash"]);
@@ -1143,11 +1137,9 @@ fn jsonc_output_only_rules() {
     assert!(!output.contains("\"ignorePatterns\""));
     assert!(!output.contains("\"duplicates\""));
     // Should be valid JSONC that round-trips
-    let mut stripped = String::new();
-    json_comments::StripComments::new(output.as_bytes())
-        .read_to_string(&mut stripped)
-        .unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&stripped).unwrap();
+    let parsed: serde_json::Value =
+        jsonc_parser::parse_to_serde_value(&output, &jsonc_parser::ParseOptions::default())
+            .unwrap();
     let rules = parsed.get("rules").unwrap().as_object().unwrap();
     assert_eq!(rules.get("unused-files").unwrap(), "error");
     assert_eq!(rules.get("unused-exports").unwrap(), "off");

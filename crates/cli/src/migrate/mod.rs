@@ -7,7 +7,6 @@ mod knip_tables;
 mod tests;
 mod toml_gen;
 
-use std::io::Read as _;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -341,35 +340,30 @@ fn migrate_from_file(path: &Path) -> Result<MigrationResult, String> {
     })
 }
 
-/// Load a JSON or JSONC file, stripping comments and trailing commas if present.
+/// Load a JSON or JSONC file, accepting comments and trailing commas.
 fn load_json_or_jsonc(path: &Path) -> Result<serde_json::Value, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
 
-    // Try plain JSON first
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) {
-        return Ok(value);
+    jsonc_parser::parse_to_serde_value(&content, &jsonc_parse_options())
+        .map_err(|e| format!("failed to parse {}: {e}", path.display()))
+}
+
+fn jsonc_parse_options() -> jsonc_parser::ParseOptions {
+    jsonc_parser::ParseOptions {
+        allow_comments: true,
+        allow_loose_object_property_names: false,
+        allow_trailing_commas: true,
+        allow_missing_commas: false,
+        allow_single_quoted_strings: false,
+        allow_hexadecimal_numbers: false,
+        allow_unary_plus_numbers: false,
     }
-
-    // Try stripping comments (JSONC)
-    let mut stripped = String::new();
-    json_comments::StripComments::new(content.as_bytes())
-        .read_to_string(&mut stripped)
-        .map_err(|e| format!("failed to strip comments from {}: {e}", path.display()))?;
-
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&stripped) {
-        return Ok(value);
-    }
-
-    // Real-world JSONC (e.g. knip.jsonc, tsconfig.json) frequently uses
-    // trailing commas. serde_json rejects them, so strip them as a final
-    // pass before reporting a parse error to the user.
-    let cleaned = strip_trailing_commas(&stripped);
-    serde_json::from_str(&cleaned).map_err(|e| format!("failed to parse {}: {e}", path.display()))
 }
 
 /// Strip JSONC-style trailing commas (`,` immediately before `}` or `]`)
 /// without touching commas inside string literals.
+#[cfg(test)]
 fn strip_trailing_commas(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let bytes = input.as_bytes();
@@ -416,6 +410,7 @@ fn strip_trailing_commas(input: &str) -> String {
     out
 }
 
+#[cfg(test)]
 fn comma_follows_json_value(bytes: &[u8], comma_index: usize) -> bool {
     let Some(prev) = bytes[..comma_index]
         .iter()

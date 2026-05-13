@@ -215,9 +215,9 @@ export interface AddToConfigAction {
  */
 type: "add-to-config"
 /**
- * Always false for config actions.
+ * True when `fallow fix` can apply this config action automatically for the current action type. `ignoreExports` duplicate-export actions are auto-fixable when a config file exists; older scalar config-ignore actions remain manual.
  */
-auto_fixable: false
+auto_fixable: boolean
 /**
  * Human-readable description of the config change.
  */

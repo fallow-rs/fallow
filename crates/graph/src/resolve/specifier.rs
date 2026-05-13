@@ -2,7 +2,6 @@
 
 use std::ffi::OsString;
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use globset::{Glob, GlobSetBuilder};
@@ -387,71 +386,19 @@ fn read_json_file(path: &Path) -> Option<Value> {
     if let Ok(json) = serde_json::from_str::<Value>(&content) {
         return Some(json);
     }
-    let mut stripped = String::new();
-    json_comments::StripComments::new(content.as_bytes())
-        .read_to_string(&mut stripped)
-        .ok()?;
-    serde_json::from_str(&stripped)
-        .or_else(|_| serde_json::from_str(&strip_trailing_commas(&stripped)))
-        .ok()
+    jsonc_parser::parse_to_serde_value::<Value>(&content, &jsonc_parse_options()).ok()
 }
 
-fn strip_trailing_commas(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let bytes = input.as_bytes();
-    let mut i = 0;
-    let mut last_emit = 0;
-    let mut in_string = false;
-    let mut escaped = false;
-
-    while i < bytes.len() {
-        let b = bytes[i];
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if b == b'\\' {
-                escaped = true;
-            } else if b == b'"' {
-                in_string = false;
-            }
-            i += 1;
-            continue;
-        }
-        if b == b'"' {
-            in_string = true;
-            i += 1;
-            continue;
-        }
-        if b == b',' {
-            let mut j = i + 1;
-            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-                j += 1;
-            }
-            if j < bytes.len()
-                && (bytes[j] == b'}' || bytes[j] == b']')
-                && comma_follows_json_value(bytes, i)
-            {
-                out.push_str(&input[last_emit..i]);
-                last_emit = i + 1;
-            }
-        }
-        i += 1;
+fn jsonc_parse_options() -> jsonc_parser::ParseOptions {
+    jsonc_parser::ParseOptions {
+        allow_comments: true,
+        allow_loose_object_property_names: false,
+        allow_trailing_commas: true,
+        allow_missing_commas: false,
+        allow_single_quoted_strings: false,
+        allow_hexadecimal_numbers: false,
+        allow_unary_plus_numbers: false,
     }
-
-    out.push_str(&input[last_emit..]);
-    out
-}
-
-fn comma_follows_json_value(bytes: &[u8], comma_index: usize) -> bool {
-    let Some(prev) = bytes[..comma_index]
-        .iter()
-        .rev()
-        .copied()
-        .find(|b| !b.is_ascii_whitespace())
-    else {
-        return false;
-    };
-    matches!(prev, b'"' | b'}' | b']' | b'0'..=b'9' | b'e' | b'l')
 }
 
 fn path_alias_pattern_matches(pattern: &str, specifier: &str) -> bool {

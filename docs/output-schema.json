@@ -1940,8 +1940,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "const": false,
-          "description": "Always false for config actions."
+          "description": "True when `fallow fix` can apply this config action automatically for the current action type. `ignoreExports` duplicate-export actions are auto-fixable when a config file exists; older scalar config-ignore actions remain manual."
         },
         "description": {
           "type": "string",

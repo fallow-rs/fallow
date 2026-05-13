@@ -165,6 +165,169 @@ fn fix_folds_imported_enum_with_all_members_unused() {
     );
 }
 
+#[test]
+fn fix_adds_ignore_exports_config_rules_for_duplicate_exports() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src/one")).unwrap();
+    std::fs::create_dir_all(root.join("src/two")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"dup-config","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(root.join(".fallowrc.json"), "{}\n").unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "export { Button } from './one';\nexport { Button as Button2 } from './two';\nconsole.log(Button2);\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("src/one/index.ts"), "export const Button = 1;\n").unwrap();
+    std::fs::write(root.join("src/two/index.ts"), "export const Button = 2;\n").unwrap();
+
+    let output = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    assert_eq!(
+        output.code, 0,
+        "fix should exit 0, stdout: {}, stderr: {}",
+        output.stdout, output.stderr
+    );
+
+    let json = parse_json(&output);
+    let fixes = json["fixes"].as_array().unwrap();
+    let config_fix = fixes
+        .iter()
+        .find(|fix| fix["type"] == "add_ignore_exports")
+        .expect("fix output should include an ignoreExports config edit");
+    assert_eq!(config_fix["applied"], true);
+    assert_eq!(config_fix["config_key"], "ignoreExports");
+    assert_eq!(config_fix["entries"].as_array().unwrap().len(), 2);
+
+    let config: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join(".fallowrc.json")).unwrap())
+            .unwrap();
+    let ignore_exports = config["ignoreExports"].as_array().unwrap();
+    assert_eq!(ignore_exports[0]["file"], "src/one/index.ts");
+    assert_eq!(ignore_exports[1]["file"], "src/two/index.ts");
+
+    let output = run_fallow_in_root(
+        "dead-code",
+        root,
+        &["--duplicate-exports", "--format", "json", "--quiet"],
+    );
+    assert_eq!(
+        output.code, 0,
+        "post-fix check should pass: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["summary"]["duplicate_exports"].as_u64(), Some(0));
+}
+
+/// A Windows-authored `.fallowrc.json` with a UTF-8 BOM must round-trip
+/// through `fallow fix --yes` without breaking the parse on the next run.
+/// The CST parser (jsonc-parser) rejects a leading BOM, so the writer must
+/// strip and restore it.
+#[test]
+fn fix_round_trips_utf8_bom_on_json_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src/one")).unwrap();
+    std::fs::create_dir_all(root.join("src/two")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"bom-config","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    let bom_input = "\u{FEFF}{\n  \"entry\": [\"src/index.ts\"]\n}\n";
+    std::fs::write(root.join(".fallowrc.json"), bom_input).unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "export { Button } from './one';\nexport { Button as Button2 } from './two';\nconsole.log(Button2);\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("src/one/index.ts"), "export const Button = 1;\n").unwrap();
+    std::fs::write(root.join("src/two/index.ts"), "export const Button = 2;\n").unwrap();
+
+    let output = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    assert_eq!(
+        output.code, 0,
+        "fix should succeed on BOM-prefixed config: {}",
+        output.stderr
+    );
+
+    let written = std::fs::read_to_string(root.join(".fallowrc.json")).unwrap();
+    assert!(
+        written.starts_with('\u{FEFF}'),
+        "BOM stripped from output (got bytes {:?})",
+        &written.as_bytes()[..written.len().min(8)]
+    );
+
+    // Round-trip: a follow-up analysis must still load this config cleanly.
+    let post = run_fallow_in_root(
+        "dead-code",
+        root,
+        &["--duplicate-exports", "--format", "json", "--quiet"],
+    );
+    assert_eq!(
+        post.code, 0,
+        "post-fix analysis must succeed on BOM-preserved config: {}",
+        post.stderr
+    );
+    let json = parse_json(&post);
+    assert_eq!(json["summary"]["duplicate_exports"].as_u64(), Some(0));
+}
+
+/// `fallow fix` on a symlinked config file must write through to the target
+/// rather than replacing the symlink with a regular file. Common in Docker
+/// images where configs are mounted from a sibling directory.
+#[cfg(unix)]
+#[test]
+fn fix_writes_through_symlinked_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let real_dir = root.join("config-source");
+    std::fs::create_dir_all(&real_dir).unwrap();
+    std::fs::create_dir_all(root.join("src/one")).unwrap();
+    std::fs::create_dir_all(root.join("src/two")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"symlink-config","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    let real_path = real_dir.join(".fallowrc.json");
+    std::fs::write(&real_path, "{}\n").unwrap();
+    std::os::unix::fs::symlink(&real_path, root.join(".fallowrc.json")).unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "export { Button } from './one';\nexport { Button as Button2 } from './two';\nconsole.log(Button2);\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("src/one/index.ts"), "export const Button = 1;\n").unwrap();
+    std::fs::write(root.join("src/two/index.ts"), "export const Button = 2;\n").unwrap();
+
+    let output = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    assert_eq!(
+        output.code, 0,
+        "fix on symlinked config should succeed: {}",
+        output.stderr
+    );
+
+    // The symlink must still BE a symlink after the write (atomic_write
+    // canonicalized to the target).
+    let meta = std::fs::symlink_metadata(root.join(".fallowrc.json")).unwrap();
+    assert!(
+        meta.file_type().is_symlink(),
+        "symlink was replaced with regular file by atomic_write"
+    );
+
+    // The target must contain the new ignoreExports entries.
+    let target_content = std::fs::read_to_string(&real_path).unwrap();
+    assert!(
+        target_content.contains("\"ignoreExports\""),
+        "symlink target was not updated, got: {target_content}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // fix without --yes in non-TTY
 // ---------------------------------------------------------------------------
