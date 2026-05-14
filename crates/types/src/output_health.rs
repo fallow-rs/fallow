@@ -212,3 +212,94 @@ pub enum RefactoringTargetActionType {
     /// Suppress the underlying complexity finding with an inline comment.
     SuppressLine,
 }
+
+/// Suggested action attached to an [`UntestedFile`] coverage-gap finding.
+///
+/// `inject_health_actions` emits a two-entry array on every untested-file
+/// item: an `add-tests` primary action (scaffold tests for the runtime
+/// file) and a `suppress-file` action (`// fallow-ignore-file coverage-gaps`).
+/// Both variants share the same struct shape; the field that is populated
+/// (`note` for `add-tests`, `comment` for `suppress-file`) depends on the
+/// `kind`.
+///
+/// [`UntestedFile`]: ../../fallow-cli/src/health_types/coverage.rs
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UntestedFileAction {
+    /// Action type identifier.
+    #[serde(rename = "type")]
+    pub kind: UntestedFileActionType,
+    /// Whether `fallow fix` can auto-apply this action. Today both
+    /// variants are manual.
+    pub auto_fixable: bool,
+    /// Human-readable description of the action.
+    pub description: String,
+    /// Additional context for the `add-tests` variant (explains why no
+    /// test path reaches this file). Absent on `suppress-file`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// The file-level comment to insert. Present on `suppress-file`
+    /// (`// fallow-ignore-file coverage-gaps`). Absent on `add-tests`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+}
+
+/// Discriminant for [`UntestedFileAction::kind`]. Mirrors the action types
+/// emitted by `build_untested_file_actions`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum UntestedFileActionType {
+    /// Scaffold tests that exercise the runtime file.
+    AddTests,
+    /// Suppress coverage-gap reporting for this file with a file-level
+    /// comment.
+    SuppressFile,
+}
+
+/// Suggested action attached to an [`UntestedExport`] coverage-gap
+/// finding.
+///
+/// `inject_health_actions` emits a two-entry array on every untested-export
+/// item: an `add-test-import` primary action (import the export from a
+/// test-reachable module) and a `suppress-file` action
+/// (`// fallow-ignore-file coverage-gaps`). The export-specific variant
+/// `add-test-import` reflects that a test-reachable reference chain, not
+/// just any test coverage, is what closes the gap.
+///
+/// [`UntestedExport`]: ../../fallow-cli/src/health_types/coverage.rs
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UntestedExportAction {
+    /// Action type identifier.
+    #[serde(rename = "type")]
+    pub kind: UntestedExportActionType,
+    /// Whether `fallow fix` can auto-apply this action. Today both
+    /// variants are manual.
+    pub auto_fixable: bool,
+    /// Human-readable description of the action.
+    pub description: String,
+    /// Additional context for the `add-test-import` variant (explains the
+    /// runtime-reachable / test-unreachable asymmetry). Absent on
+    /// `suppress-file`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// The file-level comment to insert. Present on `suppress-file`
+    /// (`// fallow-ignore-file coverage-gaps`). Absent on
+    /// `add-test-import`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+}
+
+/// Discriminant for [`UntestedExportAction::kind`]. Mirrors the action
+/// types emitted by `build_untested_export_actions`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum UntestedExportActionType {
+    /// Import and exercise the export from a test-reachable module.
+    AddTestImport,
+    /// Suppress coverage-gap reporting for the export's file with a
+    /// file-level comment.
+    SuppressFile,
+}

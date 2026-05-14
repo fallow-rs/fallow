@@ -53,7 +53,8 @@ use fallow_types::output::{
 };
 use fallow_types::output_health::{
     HealthFindingAction, HealthFindingActionType, HotspotAction, HotspotActionHeuristic,
-    HotspotActionType, RefactoringTargetAction, RefactoringTargetActionType,
+    HotspotActionType, RefactoringTargetAction, RefactoringTargetActionType, UntestedExportAction,
+    UntestedExportActionType, UntestedFileAction, UntestedFileActionType,
 };
 use fallow_types::results::{
     AnalysisResults, BoundaryViolation, CircularDependency, DependencyLocation,
@@ -219,6 +220,27 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "HealthFindingAction",
         "HotspotAction",
         "RefactoringTargetAction",
+        "UntestedExportAction",
+        "UntestedFileAction",
+        // crates/cli/src/health_types/runtime_coverage.rs - per-finding
+        // helpers + enums emitted as separate definitions in the
+        // committed schema. The full subtree is drift-checked so a
+        // future Rust field change in a helper fires the gate.
+        "RuntimeCoverageAction",
+        "RuntimeCoverageBlastRadiusEntry",
+        "RuntimeCoverageCaptureQuality",
+        "RuntimeCoverageConfidence",
+        "RuntimeCoverageEvidence",
+        "RuntimeCoverageFinding",
+        "RuntimeCoverageHotPath",
+        "RuntimeCoverageImportanceEntry",
+        "RuntimeCoverageMessage",
+        "RuntimeCoverageReportVerdict",
+        "RuntimeCoverageRiskBand",
+        "RuntimeCoverageSignal",
+        "RuntimeCoverageSummary",
+        "RuntimeCoverageVerdict",
+        "RuntimeCoverageWatermark",
     ]
 }
 
@@ -269,6 +291,15 @@ fn finding_definition_names() -> &'static [&'static str] {
         "HealthFinding",
         "HotspotEntry",
         "RefactoringTarget",
+        // Coverage-gap items (`coverage_gaps.files[]` and
+        // `coverage_gaps.exports[]`). `inject_health_actions` walks both
+        // arrays and appends an `actions` field to every item, but the
+        // Rust source structs do not carry the field, so the schema
+        // augmentation pass grafts it on per `finding_augmentation`.
+        // Neither flows through `fallow audit`, so `introduced` is
+        // omitted.
+        "UntestedExport",
+        "UntestedFile",
     ]
 }
 
@@ -310,6 +341,14 @@ fn finding_augmentation(name: &str) -> FindingAugmentation {
         },
         "RefactoringTarget" => FindingAugmentation {
             actions_item_ref: "#/definitions/RefactoringTargetAction",
+            include_introduced: false,
+        },
+        "UntestedFile" => FindingAugmentation {
+            actions_item_ref: "#/definitions/UntestedFileAction",
+            include_introduced: false,
+        },
+        "UntestedExport" => FindingAugmentation {
+            actions_item_ref: "#/definitions/UntestedExportAction",
             include_introduced: false,
         },
         _ => DEFAULT_FINDING_AUGMENTATION,
@@ -427,6 +466,10 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<HotspotActionHeuristic>();
     let _ = generator.subschema_for::<RefactoringTargetAction>();
     let _ = generator.subschema_for::<RefactoringTargetActionType>();
+    let _ = generator.subschema_for::<UntestedFileAction>();
+    let _ = generator.subschema_for::<UntestedFileActionType>();
+    let _ = generator.subschema_for::<UntestedExportAction>();
+    let _ = generator.subschema_for::<UntestedExportActionType>();
 
     // `apply_transforms = true` runs any registered schema transforms (e.g.
     // inline-subschemas) before returning, matching what `into_root_schema_for`

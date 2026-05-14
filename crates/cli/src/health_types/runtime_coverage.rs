@@ -281,6 +281,7 @@ pub struct RuntimeCoverageFinding {
     pub confidence: RuntimeCoverageConfidence,
     pub evidence: RuntimeCoverageEvidence,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(default))]
     pub actions: Vec<RuntimeCoverageAction>,
 }
 
@@ -303,6 +304,7 @@ pub struct RuntimeCoverageHotPath {
     /// means the busiest, `0` means the quietest function that qualified.
     pub percentile: u8,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(default))]
     pub actions: Vec<RuntimeCoverageAction>,
 }
 

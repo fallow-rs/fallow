@@ -743,7 +743,7 @@
 
     "RuntimeCoverageSummary": {
       "type": "object",
-      "required": ["data_source", "last_received_at", "functions_tracked", "functions_hit", "functions_unhit", "functions_untracked", "coverage_percent", "trace_count", "period_days", "deployments_seen"],
+      "required": ["data_source", "functions_tracked", "functions_hit", "functions_unhit", "functions_untracked", "coverage_percent", "trace_count", "period_days", "deployments_seen"],
       "properties": {
         "data_source": {
           "type": "string",
@@ -1763,7 +1763,12 @@
       "required": ["path", "value_export_count"],
       "properties": {
         "path": { "type": "string", "description": "File path (relative to project root)." },
-        "value_export_count": { "type": "integer", "description": "Number of value exports declared by the file." }
+        "value_export_count": { "type": "integer", "description": "Number of value exports declared by the file." },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UntestedFileAction" },
+          "description": "Suggested actions to close the coverage gap for this file. Always emitted (`add-tests` + `suppress-file`)."
+        }
       }
     },
     "UntestedExport": {
@@ -1774,7 +1779,68 @@
         "path": { "type": "string", "description": "File path (relative to project root)." },
         "export_name": { "type": "string", "description": "Export name." },
         "line": { "type": "integer", "description": "1-based source line." },
-        "col": { "type": "integer", "description": "0-based source column." }
+        "col": { "type": "integer", "description": "0-based source column." },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UntestedExportAction" },
+          "description": "Suggested actions to close the coverage gap for this export. Always emitted (`add-test-import` + `suppress-file`)."
+        }
+      }
+    },
+    "UntestedFileAction": {
+      "description": "A suggested action attached to a coverage-gap `UntestedFile` item. Two variants are emitted unconditionally per finding: an `add-tests` primary (scaffold tests reaching the runtime file) and a `suppress-file` action (`// fallow-ignore-file coverage-gaps`).",
+      "type": "object",
+      "required": ["type", "auto_fixable", "description"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["add-tests", "suppress-file"],
+          "description": "Action type identifier."
+        },
+        "auto_fixable": {
+          "type": "boolean",
+          "description": "Whether `fallow fix` can auto-apply this action. Today always false for both variants."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the action."
+        },
+        "note": {
+          "type": "string",
+          "description": "Context for the `add-tests` variant explaining the runtime-reachable / test-unreachable asymmetry. Absent on `suppress-file`."
+        },
+        "comment": {
+          "type": "string",
+          "description": "The file-level comment to insert (`// fallow-ignore-file coverage-gaps`). Present on `suppress-file`, absent on `add-tests`."
+        }
+      }
+    },
+    "UntestedExportAction": {
+      "description": "A suggested action attached to a coverage-gap `UntestedExport` item. Two variants are emitted unconditionally per finding: an `add-test-import` primary (import the export from a test-reachable module) and a `suppress-file` action (`// fallow-ignore-file coverage-gaps`).",
+      "type": "object",
+      "required": ["type", "auto_fixable", "description"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["add-test-import", "suppress-file"],
+          "description": "Action type identifier."
+        },
+        "auto_fixable": {
+          "type": "boolean",
+          "description": "Whether `fallow fix` can auto-apply this action. Today always false for both variants."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the action."
+        },
+        "note": {
+          "type": "string",
+          "description": "Context for the `add-test-import` variant explaining the runtime-reachable / test-unreachable asymmetry. Absent on `suppress-file`."
+        },
+        "comment": {
+          "type": "string",
+          "description": "The file-level comment to insert (`// fallow-ignore-file coverage-gaps`). Present on `suppress-file`, absent on `add-test-import`."
+        }
       }
     },
 

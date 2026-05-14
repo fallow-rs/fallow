@@ -2058,6 +2058,35 @@ path: string
  * Number of value exports declared by the file.
  */
 value_export_count: number
+/**
+ * Suggested actions to close the coverage gap for this file. Always emitted (`add-tests` + `suppress-file`).
+ */
+actions?: UntestedFileAction[]
+}
+/**
+ * A suggested action attached to a coverage-gap `UntestedFile` item. Two variants are emitted unconditionally per finding: an `add-tests` primary (scaffold tests reaching the runtime file) and a `suppress-file` action (`// fallow-ignore-file coverage-gaps`).
+ */
+export interface UntestedFileAction {
+/**
+ * Action type identifier.
+ */
+type: ("add-tests" | "suppress-file")
+/**
+ * Whether `fallow fix` can auto-apply this action. Today always false for both variants.
+ */
+auto_fixable: boolean
+/**
+ * Human-readable description of the action.
+ */
+description: string
+/**
+ * Context for the `add-tests` variant explaining the runtime-reachable / test-unreachable asymmetry. Absent on `suppress-file`.
+ */
+note?: string
+/**
+ * The file-level comment to insert (`// fallow-ignore-file coverage-gaps`). Present on `suppress-file`, absent on `add-tests`.
+ */
+comment?: string
 }
 /**
  * A runtime export that no test-reachable module references.
@@ -2079,6 +2108,35 @@ line: number
  * 0-based source column.
  */
 col: number
+/**
+ * Suggested actions to close the coverage gap for this export. Always emitted (`add-test-import` + `suppress-file`).
+ */
+actions?: UntestedExportAction[]
+}
+/**
+ * A suggested action attached to a coverage-gap `UntestedExport` item. Two variants are emitted unconditionally per finding: an `add-test-import` primary (import the export from a test-reachable module) and a `suppress-file` action (`// fallow-ignore-file coverage-gaps`).
+ */
+export interface UntestedExportAction {
+/**
+ * Action type identifier.
+ */
+type: ("add-test-import" | "suppress-file")
+/**
+ * Whether `fallow fix` can auto-apply this action. Today always false for both variants.
+ */
+auto_fixable: boolean
+/**
+ * Human-readable description of the action.
+ */
+description: string
+/**
+ * Context for the `add-test-import` variant explaining the runtime-reachable / test-unreachable asymmetry. Absent on `suppress-file`.
+ */
+note?: string
+/**
+ * The file-level comment to insert (`// fallow-ignore-file coverage-gaps`). Present on `suppress-file`, absent on `add-test-import`.
+ */
+comment?: string
 }
 /**
  * Runtime coverage findings merged into the health report or emitted by `fallow coverage analyze`. Present in health output when --runtime-coverage is used. Shape mirrors the runtime coverage JSON contract; cloud mode fetches runtime facts explicitly and merges them locally with AST/static analysis.
@@ -2124,7 +2182,7 @@ data_source: ("local" | "cloud")
 /**
  * Timestamp of the newest runtime payload included in the report. Null for local single-capture artifacts that do not carry cloud receipt metadata.
  */
-last_received_at: (string | null)
+last_received_at?: (string | null)
 /**
  * Number of functions the sidecar could observe in the V8 or Istanbul dump.
  */

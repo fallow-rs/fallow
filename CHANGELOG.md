@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Internal
+
+- **The health output subtree now derives `JsonSchema` behind a `schema` cargo feature on `fallow-cli`, so the drift gate covers `HealthFinding`, `HealthSummary`, `HealthScore` + `HealthScorePenalties`, `VitalSigns` + `VitalSignsCounts` + `RiskProfile`, `HotspotEntry` + `HotspotSummary` + `OwnershipMetrics` + `ContributorEntry`, `RefactoringTarget` + `TargetThresholds`, `HealthTrend` + `TrendCount`, `FileHealthScore`, `LargeFunctionEntry`, `CoverageGaps` + `CoverageGapSummary` + `UntestedFile` + `UntestedExport`, and the full `RuntimeCoverageReport` subtree (`RuntimeCoverageSummary`, `RuntimeCoverageCaptureQuality`, `RuntimeCoverageEvidence`, `RuntimeCoverageAction`, `RuntimeCoverageMessage`, `RuntimeCoverageFinding`, `RuntimeCoverageHotPath`, `RuntimeCoverageBlastRadiusEntry`, `RuntimeCoverageImportanceEntry`, plus the protocol-derived signal / verdict / watermark / confidence / risk-band enums).** Per-finding action wrappers (`HealthFindingAction`, `HotspotAction`, `RefactoringTargetAction`, `UntestedFileAction`, `UntestedExportAction`) are typed in `fallow_types::output_health` so the action arrays attached to health findings, hotspots, refactoring targets, and coverage-gap items are now drift-checked too. Fields previously emitted by the JSON layer but missing from the schema (`HotspotEntry.is_test_path`, `OwnershipMetrics.suggested_reviewers`, the four `VitalSignsCounts` fields `duplicated_lines` / `total_lines` / `files_scored` / `total_deps`, and the `actions` arrays on `UntestedFile` + `UntestedExport`) are now documented. `OwnershipMetrics.unowned` and `RuntimeCoverageSummary.last_received_at` drop from `required` to match their `Option<T>` sources. The `crates/cli/src/report/json.rs` emission path is unchanged; the new types are schema-only for this PR. (Refs [#338](https://github.com/fallow-rs/fallow/issues/338))
+
 ## [2.74.0] - 2026-05-14
 
 ### Added
