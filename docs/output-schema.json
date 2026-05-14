@@ -2308,7 +2308,7 @@
     },
     "UnresolvedImport": {
       "type": "object",
-      "required": ["path", "specifier", "line", "col", "actions"],
+      "required": ["path", "specifier", "line", "col", "specifier_col", "actions"],
       "properties": {
         "path": {
           "type": "string",
@@ -2324,7 +2324,11 @@
         },
         "col": {
           "type": "integer",
-          "description": "0-based byte column offset."
+          "description": "0-based byte column offset of the import statement."
+        },
+        "specifier_col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the source string literal (the specifier in quotes). Used by the LSP to underline just the specifier, not the entire import line."
         },
         "actions": {
           "type": "array",
@@ -2753,6 +2757,10 @@
         "raw_key": {
           "type": "string",
           "description": "Full original override key as written."
+        },
+        "target_package": {
+          "type": "string",
+          "description": "Parsed target package name when the key was syntactically valid (the empty-value reason path). Absent for unparsable-key findings. Used by add-to-config actions to emit a paste-ready ignoreDependencyOverrides value."
         },
         "raw_value": {
           "type": "string",

@@ -85,6 +85,52 @@ A minimal plugin needs:
 
 See the [Plugin Authoring Guide](docs/plugin-authoring.md) for the full trait API and external plugin format.
 
+## Editing the JSON output contract
+
+Fallow's JSON output schema lives in `docs/output-schema.json` (JSON Schema draft-07) and is consumed by downstream tools (VS Code extension TypeScript codegen, GitHub Action jq scripts, AI agents using AJV validation).
+
+The schema covers two layers, with different ownership rules:
+
+### Layer 1: types derived from Rust
+
+The per-finding structs in `crates/types/src/results.rs` and `crates/core/src/duplicates/types.rs`, plus the JSON-layer augmentation types in `crates/types/src/output.rs`, carry `#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]`. The full list of derived definitions is `derived_definition_names()` in `crates/cli/src/bin/schema_emit.rs`.
+
+A drift gate (`cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit`) compares the derived shape against the committed `docs/output-schema.json` and fails when:
+- a Rust struct gains a field that is missing from the schema,
+- a Rust struct loses a field that is still listed in the schema,
+- a Rust field is required but the schema has it optional (or vice versa).
+
+To regenerate the in-scope `definitions` blocks against the Rust source of truth:
+
+```bash
+cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit > /tmp/emitted-schema.json
+# then reconcile the matching entries in docs/output-schema.json against /tmp/emitted-schema.json
+```
+
+A strict structural gate (`#[ignore]`d for now, runs with `-- --ignored`) covers shape-level drift (descriptions, integer formats, nullable union choices). It will land on the default gate once the prose-migration phase syncs descriptions into Rust doc comments.
+
+### Layer 2: hand-written sections
+
+Until a follow-up migrates them, these sections of `docs/output-schema.json` stay hand-maintained:
+
+- Top-level metadata (`$schema`, `title`, `oneOf`)
+- Envelope definitions: `CombinedOutput`, `CheckOutput`, `CheckGroupedOutput`, `DupesOutput`, `HealthOutput`, `AuditOutput`, `ExplainOutput`, `CoverageSetupOutput`, `CodeClimateOutput`, `ReviewEnvelopeOutput`, `ReviewReconcileOutput`
+- Health subtree: `HealthFinding`, `HotspotEntry`, `FileHealthScore`, `RefactoringTarget`, `VitalSigns`, `HealthScore`, `CoverageGaps`, `RuntimeCoverageReport`, and their action types
+- Utility types: `SchemaVersion`, `ToolVersion`, `ElapsedMs`, `Meta`, `EntryPoints`, `BaselineDeltas`, `BaselineMatch`, `RegressionResult`, `AuditIntroduced`, `CheckSummary`
+
+If you add a new finding type or change one in scope, the Rust derive is the source of truth: the drift gate forces the schema to follow. If you add a new envelope or health-tree entry, update `docs/output-schema.json` directly and add a follow-up issue to migrate that type into Rust derives.
+
+### After editing the schema
+
+If `docs/output-schema.json` changed, regenerate the VS Code extension's TypeScript types:
+
+```bash
+cd editors/vscode
+pnpm run codegen:types   # writes editors/vscode/src/generated/output-contract.d.ts
+```
+
+CI runs `pnpm run check:codegen` to confirm the committed generated file matches a fresh regeneration.
+
 ## Git conventions
 
 - **Conventional commits**: `feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`

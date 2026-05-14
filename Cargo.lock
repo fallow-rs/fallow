@@ -819,6 +819,7 @@ dependencies = [
  "proptest",
  "rayon",
  "rustc-hash 2.1.2",
+ "schemars",
  "serde",
  "serde_json",
  "serde_yaml_ng",
@@ -882,6 +883,7 @@ dependencies = [
  "rayon",
  "regex",
  "rustc-hash 2.1.2",
+ "schemars",
  "serde",
  "serde_json",
  "serde_yaml_ng",
@@ -1000,6 +1002,7 @@ version = "2.74.0"
 dependencies = [
  "bitcode",
  "oxc_span",
+ "schemars",
  "serde",
  "serde_json",
 ]

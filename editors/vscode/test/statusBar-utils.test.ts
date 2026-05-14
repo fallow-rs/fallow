@@ -257,7 +257,7 @@ describe("buildParamsFromCli", () => {
         },
       ],
       unresolved_imports: [
-        { path: "d.ts", specifier: "./missing", line: 1, col: 0, actions: [] },
+        { path: "d.ts", specifier: "./missing", line: 1, col: 0, specifier_col: 0, actions: [] },
       ],
       private_type_leaks: [
         {

@@ -20,6 +20,11 @@ name = "stub_sidecar"
 path = "src/bin/stub_sidecar.rs"
 required-features = ["test-sidecar-key"]
 
+[[bin]]
+name = "fallow-schema-emit"
+path = "src/bin/schema_emit.rs"
+required-features = ["schema-emit"]
+
 [features]
 default = []
 # Test-only feature that swaps the sidecar binary-signing verify key and the
@@ -28,6 +33,16 @@ default = []
 # enabled in release builds; a compile_error! at
 # crates/cli/src/health/coverage.rs guards against that.
 test-sidecar-key = []
+# Build-only feature that enables the `fallow-schema-emit` binary, which
+# regenerates `docs/output-schema.json` from the Rust source of truth. Pulls in
+# schemars and activates the `schema` feature on `fallow-types` and
+# `fallow-core`. Not part of the published CLI; used by the schema drift gate
+# and contributors editing result types.
+schema-emit = [
+    "fallow-types/schema",
+    "fallow-core/schema",
+    "dep:schemars",
+]
 
 [dependencies]
 fallow-core = { workspace = true }
@@ -60,6 +75,11 @@ ureq = { workspace = true }
 url = "2"
 http = "1"
 xxhash-rust = { workspace = true }
+
+# Schema-emit support: pulled in only when the `schema-emit` feature is active
+# (via the dedicated bin target above). Keeps schemars out of the default
+# release binary.
+schemars = { workspace = true, optional = true }
 
 [lib]
 name = "fallow_cli"

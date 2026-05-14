@@ -382,9 +382,13 @@ specifier: string
  */
 line: number
 /**
- * 0-based byte column offset.
+ * 0-based byte column offset of the import statement.
  */
 col: number
+/**
+ * 0-based byte column offset of the source string literal (the specifier in quotes). Used by the LSP to underline just the specifier, not the entire import line.
+ */
+specifier_col: number
 /**
  * Suggested actions to resolve this issue.
  */
@@ -705,6 +709,10 @@ export interface MisconfiguredDependencyOverride {
  * Full original override key as written.
  */
 raw_key: string
+/**
+ * Parsed target package name when the key was syntactically valid (the empty-value reason path). Absent for unparsable-key findings. Used by add-to-config actions to emit a paste-ready ignoreDependencyOverrides value.
+ */
+target_package?: string
 /**
  * Right-hand side of the entry, exactly as written. Empty when the value was missing.
  */

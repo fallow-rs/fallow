@@ -389,6 +389,7 @@ pub struct MemberInfo {
 /// assert_ne!(MemberKind::ClassMethod, MemberKind::ClassProperty);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum MemberKind {
     /// A TypeScript enum member.

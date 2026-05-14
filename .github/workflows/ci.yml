@@ -99,11 +99,17 @@ jobs:
       - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
         run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests
 
+      - name: Run schema drift gate (feature-gated schema-emit binary)
+        run: cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Clippy (test-sidecar-key feature)
         run: cargo clippy -p fallow-cli --features test-sidecar-key --all-targets -- -D warnings
+
+      - name: Clippy (schema-emit feature)
+        run: cargo clippy -p fallow-cli --features schema-emit --bin fallow-schema-emit --tests -- -D warnings
 
       - name: Format
         run: cargo fmt --all -- --check

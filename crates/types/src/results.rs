@@ -13,6 +13,7 @@ use crate::suppress::IssueKind;
 /// Used to surface entry-point detection status in human and JSON output,
 /// so library authors can verify that fallow found the right entry points.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EntryPointSummary {
     /// Total number of entry points detected.
     pub total: usize,
@@ -40,6 +41,7 @@ pub struct EntryPointSummary {
 /// assert!(results.has_issues());
 /// ```
 #[derive(Debug, Default, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AnalysisResults {
     /// Files not reachable from any entry point.
     pub unused_files: Vec<UnusedFile>,
@@ -386,6 +388,7 @@ fn catalog_sort_key(name: &str) -> (u8, &str) {
 
 /// A file that is not reachable from any entry point.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedFile {
     /// Absolute path to the unused file.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -394,6 +397,7 @@ pub struct UnusedFile {
 
 /// An export that is never imported by other modules.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedExport {
     /// File containing the unused export.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -414,6 +418,7 @@ pub struct UnusedExport {
 
 /// A public export signature that references a same-file private type.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PrivateTypeLeak {
     /// File containing the exported symbol.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -432,6 +437,7 @@ pub struct PrivateTypeLeak {
 
 /// A dependency that is listed in package.json but never imported.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedDependency {
     /// Package name, including internal workspace package names.
     pub package_name: String,
@@ -448,6 +454,7 @@ pub struct UnusedDependency {
         serialize_with = "serde_path::serialize_vec",
         skip_serializing_if = "Vec::is_empty"
     )]
+    #[cfg_attr(feature = "schema", schemars(default))]
     pub used_in_workspaces: Vec<PathBuf>,
 }
 
@@ -468,6 +475,7 @@ pub struct UnusedDependency {
 /// assert!(format!("{opt:?}").contains("OptionalDependencies"));
 /// ```
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub enum DependencyLocation {
     /// Listed in `dependencies`.
@@ -480,6 +488,7 @@ pub enum DependencyLocation {
 
 /// An unused enum or class member.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedMember {
     /// File containing the unused member.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -498,6 +507,7 @@ pub struct UnusedMember {
 
 /// An import that could not be resolved.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnresolvedImport {
     /// File containing the unresolved import.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -515,6 +525,7 @@ pub struct UnresolvedImport {
 
 /// A dependency used in code but not listed in package.json.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnlistedDependency {
     /// Package name, including internal workspace package names.
     pub package_name: String,
@@ -524,6 +535,7 @@ pub struct UnlistedDependency {
 
 /// A location where an import occurs.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ImportSite {
     /// File containing the import.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -536,6 +548,7 @@ pub struct ImportSite {
 
 /// An export that appears multiple times across the project.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DuplicateExport {
     /// The duplicated export name.
     pub export_name: String,
@@ -545,6 +558,7 @@ pub struct DuplicateExport {
 
 /// A location where a duplicate export appears.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DuplicateLocation {
     /// File containing the duplicate export.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -559,6 +573,7 @@ pub struct DuplicateLocation {
 /// In production builds, type imports are erased, so this dependency
 /// is not needed at runtime and could be moved to devDependencies.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TypeOnlyDependency {
     /// npm package name.
     pub package_name: String,
@@ -575,6 +590,7 @@ pub struct TypeOnlyDependency {
 /// The default catalog (top-level `catalog:` key) uses `catalog_name: "default"`.
 /// Named catalogs (under `catalogs.<name>:`) use their declared name.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedCatalogEntry {
     /// Package name declared in the catalog (e.g. `"react"`, `"@scope/lib"`).
     pub entry_name: String,
@@ -600,6 +616,7 @@ pub struct UnusedCatalogEntry {
 
 /// A named `catalogs.<name>:` group in `pnpm-workspace.yaml` with no package entries.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EmptyCatalogGroup {
     /// Catalog group name declared under the top-level `catalogs:` map.
     pub catalog_name: String,
@@ -621,6 +638,7 @@ pub struct EmptyCatalogGroup {
 /// uses `catalog_name: "default"`. Named catalogs (`catalog:react17`) use the
 /// declared catalog name.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnresolvedCatalogReference {
     /// Package name being referenced via the catalog protocol (e.g. `"react"`).
     pub entry_name: String,
@@ -649,6 +667,7 @@ pub struct UnresolvedCatalogReference {
 /// (`"pnpm-workspace.yaml"` or `"package.json"`) so the value in JSON output
 /// matches the value users write in `ignoreDependencyOverrides[].source`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum DependencyOverrideSource {
     /// Top-level `overrides:` key in `pnpm-workspace.yaml`.
     #[serde(rename = "pnpm-workspace.yaml")]
@@ -682,6 +701,7 @@ impl std::fmt::Display for DependencyOverrideSource {
 /// readable lockfile fall back to package manifest checks; the `hint` field
 /// flags that conservative mode.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedDependencyOverride {
     /// The full original override key as written in the source (e.g.
     /// `"react>react-dom"`, `"@types/react@<18"`). Preserved for round-trip
@@ -723,6 +743,7 @@ pub struct UnusedDependencyOverride {
 /// either fail at install time or silently no-op on these entries; surfacing
 /// them statically catches the issue before pnpm does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum DependencyOverrideMisconfigReason {
     /// The override key could not be parsed into a recognised pnpm shape
@@ -747,6 +768,7 @@ impl DependencyOverrideMisconfigReason {
 /// `error` because pnpm refuses to install (or silently produces a no-op
 /// override) when it encounters these shapes.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MisconfiguredDependencyOverride {
     /// The full original override key as written in the source.
     pub raw_key: String,
@@ -778,6 +800,7 @@ pub struct MisconfiguredDependencyOverride {
 /// A production dependency that is only imported by test files.
 /// Since it is never used in production code, it could be moved to devDependencies.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TestOnlyDependency {
     /// npm package name.
     pub package_name: String,
@@ -789,7 +812,18 @@ pub struct TestOnlyDependency {
 }
 
 /// A circular dependency chain detected in the module graph.
+///
+/// The `line` and `col` fields carry `#[serde(default)]` so callers reading
+/// historical baseline JSON without these fields can still deserialize the
+/// struct, but the JSON output layer always emits them (u32 always
+/// serializes, never via `skip_serializing_if`). The schemars derive sees
+/// the serde defaults and marks both fields optional in the generated
+/// schema; the explicit `extend("required" = ...)` override here keeps the
+/// schema's `required` array honest about what the JSON output actually
+/// contains.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(extend("required" = ["files", "length", "line", "col"])))]
 pub struct CircularDependency {
     /// Files forming the cycle, in import order.
     #[serde(serialize_with = "serde_path::serialize_vec")]
@@ -809,6 +843,7 @@ pub struct CircularDependency {
 
 /// An import that crosses an architecture boundary rule.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BoundaryViolation {
     /// The file making the disallowed import.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -830,6 +865,7 @@ pub struct BoundaryViolation {
 
 /// The origin of a stale suppression: inline comment or JSDoc tag.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum SuppressionOrigin {
     /// A `// fallow-ignore-next-line` or `// fallow-ignore-file` comment.
@@ -849,6 +885,7 @@ pub enum SuppressionOrigin {
 
 /// A suppression comment or JSDoc tag that no longer matches any issue.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct StaleSuppression {
     /// File containing the stale suppression.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -924,6 +961,7 @@ impl StaleSuppression {
 
 /// The detection method used to identify a feature flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum FlagKind {
     /// Environment variable check (e.g., `process.env.FEATURE_X`).
@@ -936,6 +974,7 @@ pub enum FlagKind {
 
 /// Detection confidence for a feature flag finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum FlagConfidence {
     /// Low confidence: heuristic match (config object patterns).
@@ -948,6 +987,7 @@ pub enum FlagConfidence {
 
 /// A detected feature flag use site.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FeatureFlag {
     /// File containing the feature flag usage.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -990,6 +1030,7 @@ const _: () = assert!(std::mem::size_of::<FeatureFlag>() <= 160);
 /// Usage count for an export symbol. Used by the LSP Code Lens to show
 /// reference counts above each export declaration.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ExportUsage {
     /// File containing the export.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -1009,6 +1050,7 @@ pub struct ExportUsage {
 
 /// A location where an export is referenced (import site in another file).
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReferenceLocation {
     /// File containing the import that references the export.
     #[serde(serialize_with = "serde_path::serialize")]

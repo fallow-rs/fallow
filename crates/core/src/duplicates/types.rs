@@ -9,6 +9,7 @@ pub use fallow_config::{DetectionMode, DuplicatesConfig};
 
 /// A single instance of duplicated code at a specific location.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CloneInstance {
     /// Path to the file containing this clone instance.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -27,6 +28,7 @@ pub struct CloneInstance {
 
 /// A group of code clones -- the same (or normalized-equivalent) code appearing in multiple places.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CloneGroup {
     /// All instances where this duplicated code appears.
     pub instances: Vec<CloneInstance>,
@@ -38,6 +40,7 @@ pub struct CloneGroup {
 
 /// The kind of refactoring suggested for a clone family.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum RefactoringKind {
     /// Extract a shared function/utility.
     ExtractFunction,
@@ -47,6 +50,7 @@ pub enum RefactoringKind {
 
 /// A refactoring suggestion for a clone family.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RefactoringSuggestion {
     /// What kind of refactoring is suggested.
     pub kind: RefactoringKind,
@@ -62,6 +66,7 @@ pub struct RefactoringSuggestion {
 /// they form a family — indicating a deeper structural relationship that should
 /// be refactored together rather than group-by-group.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CloneFamily {
     /// The files involved in this family (sorted for stable output).
     #[serde(serialize_with = "serde_path::serialize_vec")]
@@ -79,6 +84,7 @@ pub struct CloneFamily {
 /// A detected mirrored directory pattern: two directory prefixes that contain
 /// identical files (e.g., `src/` and `deno/lib/`).
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MirroredDirectory {
     /// First directory path (lexically smaller).
     pub dir_a: String,
@@ -110,6 +116,7 @@ pub struct DefaultIgnoreSkips {
 
 /// Overall duplication analysis report.
 #[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DuplicationReport {
     /// All detected clone groups.
     pub clone_groups: Vec<CloneGroup>,
@@ -173,6 +180,7 @@ impl DuplicationReport {
 
 /// Aggregate duplication statistics.
 #[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DuplicationStats {
     /// Total files analyzed.
     pub total_files: usize,
