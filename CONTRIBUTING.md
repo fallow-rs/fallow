@@ -93,7 +93,9 @@ The schema covers two layers, with different ownership rules:
 
 ### Layer 1: types derived from Rust
 
-The per-finding structs in `crates/types/src/results.rs` and `crates/core/src/duplicates/types.rs`, plus the JSON-layer augmentation types in `crates/types/src/output.rs`, carry `#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]`. The full list of derived definitions is `derived_definition_names()` in `crates/cli/src/bin/schema_emit.rs`.
+The per-finding structs in `crates/types/src/results.rs` and `crates/core/src/duplicates/types.rs`, the JSON-layer augmentation types in `crates/types/src/output.rs`, the per-finding action wrappers in `crates/types/src/output_health.rs`, and the health output subtree in `crates/cli/src/health_types/` carry `#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]`. The full list of derived definitions is `derived_definition_names()` in `crates/cli/src/bin/schema_emit.rs`.
+
+The health types live on `fallow-cli` (the binary crate) rather than `fallow-types`, so deriving `JsonSchema` on them required a sibling `schema` cargo feature on `fallow-cli`. The `schema-emit` feature now depends on `fallow-cli/schema` alongside `fallow-types/schema` + `fallow-core/schema`, so a single `cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit` covers the whole tree.
 
 A drift gate (`cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit`) compares the derived shape against the committed `docs/output-schema.json` and fails when:
 - a Rust struct gains a field that is missing from the schema,
@@ -115,10 +117,9 @@ Until a follow-up migrates them, these sections of `docs/output-schema.json` sta
 
 - Top-level metadata (`$schema`, `title`, `oneOf`)
 - Envelope definitions: `CombinedOutput`, `CheckOutput`, `CheckGroupedOutput`, `DupesOutput`, `HealthOutput`, `AuditOutput`, `ExplainOutput`, `CoverageSetupOutput`, `CodeClimateOutput`, `ReviewEnvelopeOutput`, `ReviewReconcileOutput`
-- Health subtree: `HealthFinding`, `HotspotEntry`, `FileHealthScore`, `RefactoringTarget`, `VitalSigns`, `HealthScore`, `CoverageGaps`, `RuntimeCoverageReport`, and their action types
 - Utility types: `SchemaVersion`, `ToolVersion`, `ElapsedMs`, `Meta`, `EntryPoints`, `BaselineDeltas`, `BaselineMatch`, `RegressionResult`, `AuditIntroduced`, `CheckSummary`
 
-If you add a new finding type or change one in scope, the Rust derive is the source of truth: the drift gate forces the schema to follow. If you add a new envelope or health-tree entry, update `docs/output-schema.json` directly and add a follow-up issue to migrate that type into Rust derives.
+If you add a new finding type or change one in scope (per-finding result struct, duplication subtype, health output struct, health action wrapper), the Rust derive is the source of truth: the drift gate forces the schema to follow. If you add a new envelope, update `docs/output-schema.json` directly and add a follow-up issue to migrate that type into Rust derives.
 
 ### After editing the schema
 

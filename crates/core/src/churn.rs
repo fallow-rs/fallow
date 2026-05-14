@@ -29,6 +29,7 @@ pub struct SinceDuration {
 
 /// Churn trend indicator based on comparing recent vs older halves of the analysis period.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ChurnTrend {
     /// Recent half has >1.5× the commits of the older half.

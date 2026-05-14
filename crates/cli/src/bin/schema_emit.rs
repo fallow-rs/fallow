@@ -33,6 +33,14 @@ use std::process::ExitCode;
 use schemars::generate::SchemaSettings;
 use serde_json::{Map, Value};
 
+use fallow_cli::health_types::{
+    ContributorEntry, ContributorIdentifierFormat, CoverageGapSummary, CoverageGaps, CoverageModel,
+    CoverageTier, ExceededThreshold, FileHealthScore, FindingSeverity, HealthFinding, HealthScore,
+    HealthScorePenalties, HealthSummary, HealthTrend, HotspotEntry, HotspotSummary,
+    LargeFunctionEntry, OwnershipMetrics, RecommendationCategory, RefactoringTarget, RiskProfile,
+    RuntimeCoverageReport, TargetThresholds, TrendCount, UntestedExport, UntestedFile, VitalSigns,
+    VitalSignsCounts,
+};
 use fallow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
     RefactoringKind, RefactoringSuggestion,
@@ -42,6 +50,10 @@ use fallow_types::output::{
     AddToConfigAction, AddToConfigKind, AddToConfigValue, FixAction, FixActionType,
     IgnoreExportsRule, IssueAction, SuppressFileAction, SuppressFileKind, SuppressLineAction,
     SuppressLineKind, SuppressLineScope,
+};
+use fallow_types::output_health::{
+    HealthFindingAction, HealthFindingActionType, HotspotAction, HotspotActionHeuristic,
+    HotspotActionType, RefactoringTargetAction, RefactoringTargetActionType,
 };
 use fallow_types::results::{
     AnalysisResults, BoundaryViolation, CircularDependency, DependencyLocation,
@@ -180,6 +192,33 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "IssueAction",
         "SuppressFileAction",
         "SuppressLineAction",
+        // crates/cli/src/health_types/ - health output subtree
+        "ContributorEntry",
+        "CoverageGapSummary",
+        "CoverageGaps",
+        "FileHealthScore",
+        "HealthFinding",
+        "HealthScore",
+        "HealthScorePenalties",
+        "HealthSummary",
+        "HealthTrend",
+        "HotspotEntry",
+        "HotspotSummary",
+        "LargeFunctionEntry",
+        "OwnershipMetrics",
+        "RefactoringTarget",
+        "RiskProfile",
+        "RuntimeCoverageReport",
+        "TargetThresholds",
+        "TrendCount",
+        "UntestedExport",
+        "UntestedFile",
+        "VitalSigns",
+        "VitalSignsCounts",
+        // crates/types/src/output_health.rs - per-finding action wrappers
+        "HealthFindingAction",
+        "HotspotAction",
+        "RefactoringTargetAction",
     ]
 }
 
@@ -199,12 +238,13 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
 /// ...). The required-flag inconsistency is tracked by a follow-up; the
 /// augmentation step itself is non-opinionated.
 fn finding_definition_names() -> &'static [&'static str] {
-    // Each entry MUST appear in `actions_for_issue_type` in
-    // `crates/cli/src/report/json.rs` (the JSON layer's action injector).
-    // `StaleSuppression` is intentionally excluded: the JSON layer does not
-    // inject actions on stale_suppressions today, and the committed schema
-    // matches that.
+    // Each entry MUST appear in `actions_for_issue_type` (dead-code findings)
+    // or `inject_health_actions` (health findings) in
+    // `crates/cli/src/report/json.rs`. `StaleSuppression` is intentionally
+    // excluded: the JSON layer does not inject actions on stale_suppressions
+    // today, and the committed schema matches that.
     &[
+        // Dead-code findings (actions[] -> IssueAction, with `introduced`)
         "BoundaryViolation",
         "CircularDependency",
         "DuplicateExport",
@@ -222,7 +262,58 @@ fn finding_definition_names() -> &'static [&'static str] {
         "UnusedExport",
         "UnusedFile",
         "UnusedMember",
+        // Health findings (actions[] -> per-finding action wrapper).
+        // `introduced` attaches per `finding_augmentation` below: HealthFinding
+        // is audit-aware (carries `introduced`), HotspotEntry and
+        // RefactoringTarget are not.
+        "HealthFinding",
+        "HotspotEntry",
+        "RefactoringTarget",
     ]
+}
+
+/// Per-finding override for `augment_finding_definition`.
+///
+/// The default augmentation attaches `actions: array<IssueAction>` and an
+/// `introduced` audit-mode flag. Health findings carry a typed action wrapper
+/// (`HealthFindingAction`, `HotspotAction`, `RefactoringTargetAction`), and
+/// only `HealthFinding` carries the audit `introduced` flag today.
+#[derive(Debug, Clone, Copy)]
+struct FindingAugmentation {
+    /// Schema `$ref` for the items in the `actions` array.
+    actions_item_ref: &'static str,
+    /// Whether to attach the optional `introduced` audit breadcrumb.
+    include_introduced: bool,
+}
+
+/// Augmentation applied to dead-code findings: actions ref `IssueAction`,
+/// `introduced` flag attached.
+const DEFAULT_FINDING_AUGMENTATION: FindingAugmentation = FindingAugmentation {
+    actions_item_ref: "#/definitions/IssueAction",
+    include_introduced: true,
+};
+
+/// Pick the augmentation for a specific finding. Health findings use typed
+/// per-finding action wrappers and (with the exception of `HealthFinding`)
+/// skip the audit `introduced` flag because hotspot ranking and refactoring
+/// targets do not run through `fallow audit`'s introduced-vs-inherited
+/// classifier.
+fn finding_augmentation(name: &str) -> FindingAugmentation {
+    match name {
+        "HealthFinding" => FindingAugmentation {
+            actions_item_ref: "#/definitions/HealthFindingAction",
+            include_introduced: true,
+        },
+        "HotspotEntry" => FindingAugmentation {
+            actions_item_ref: "#/definitions/HotspotAction",
+            include_introduced: false,
+        },
+        "RefactoringTarget" => FindingAugmentation {
+            actions_item_ref: "#/definitions/RefactoringTargetAction",
+            include_introduced: false,
+        },
+        _ => DEFAULT_FINDING_AUGMENTATION,
+    }
 }
 
 /// Build derived schemas for every in-scope type using one shared generator.
@@ -298,6 +389,45 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<AddToConfigValue>();
     let _ = generator.subschema_for::<IgnoreExportsRule>();
 
+    // Health output subtree (crates/cli/src/health_types/).
+    let _ = generator.subschema_for::<HealthSummary>();
+    let _ = generator.subschema_for::<HealthFinding>();
+    let _ = generator.subschema_for::<ExceededThreshold>();
+    let _ = generator.subschema_for::<FindingSeverity>();
+    let _ = generator.subschema_for::<CoverageTier>();
+    let _ = generator.subschema_for::<CoverageModel>();
+    let _ = generator.subschema_for::<LargeFunctionEntry>();
+    let _ = generator.subschema_for::<FileHealthScore>();
+    let _ = generator.subschema_for::<HotspotEntry>();
+    let _ = generator.subschema_for::<HotspotSummary>();
+    let _ = generator.subschema_for::<OwnershipMetrics>();
+    let _ = generator.subschema_for::<ContributorEntry>();
+    let _ = generator.subschema_for::<ContributorIdentifierFormat>();
+    let _ = generator.subschema_for::<RefactoringTarget>();
+    let _ = generator.subschema_for::<RecommendationCategory>();
+    let _ = generator.subschema_for::<TargetThresholds>();
+    let _ = generator.subschema_for::<HealthTrend>();
+    let _ = generator.subschema_for::<TrendCount>();
+    let _ = generator.subschema_for::<CoverageGaps>();
+    let _ = generator.subschema_for::<CoverageGapSummary>();
+    let _ = generator.subschema_for::<UntestedFile>();
+    let _ = generator.subschema_for::<UntestedExport>();
+    let _ = generator.subschema_for::<HealthScore>();
+    let _ = generator.subschema_for::<HealthScorePenalties>();
+    let _ = generator.subschema_for::<VitalSigns>();
+    let _ = generator.subschema_for::<VitalSignsCounts>();
+    let _ = generator.subschema_for::<RiskProfile>();
+    let _ = generator.subschema_for::<RuntimeCoverageReport>();
+
+    // Per-finding action wrapper types (crates/types/src/output_health.rs).
+    let _ = generator.subschema_for::<HealthFindingAction>();
+    let _ = generator.subschema_for::<HealthFindingActionType>();
+    let _ = generator.subschema_for::<HotspotAction>();
+    let _ = generator.subschema_for::<HotspotActionType>();
+    let _ = generator.subschema_for::<HotspotActionHeuristic>();
+    let _ = generator.subschema_for::<RefactoringTargetAction>();
+    let _ = generator.subschema_for::<RefactoringTargetActionType>();
+
     // `apply_transforms = true` runs any registered schema transforms (e.g.
     // inline-subschemas) before returning, matching what `into_root_schema_for`
     // would have produced. We do not register custom transforms, so this is a
@@ -340,7 +470,10 @@ fn merge_with_committed(derived: &Map<String, Value>) -> Result<Value, String> {
         let mut value = derived_schema.clone();
         normalize_schema(&mut value);
         if finding_names.contains(name) {
-            augment_finding_definition(&mut value)?;
+            augment_finding_definition(&mut value, finding_augmentation(name))?;
+        }
+        if *name == "RuntimeCoverageReport" {
+            augment_runtime_coverage_report(&mut value)?;
         }
         definitions.insert((*name).to_string(), value);
     }
@@ -377,7 +510,17 @@ fn merge_with_committed(derived: &Map<String, Value>) -> Result<Value, String> {
 /// `actions` property (e.g. because a future PR refactors the JSON layer to
 /// serialize through typed wrappers), the augmentation step skips and the
 /// derived shape wins.
-fn augment_finding_definition(value: &mut Value) -> Result<(), String> {
+///
+/// `augmentation` selects the `actions[]` `$ref` and whether `introduced` is
+/// attached. Dead-code findings use [`DEFAULT_FINDING_AUGMENTATION`] (actions
+/// of type `IssueAction`, `introduced` attached); health findings use the
+/// matching per-finding wrapper (`HealthFindingAction` / `HotspotAction` /
+/// `RefactoringTargetAction`) and skip `introduced` when the finding does not
+/// flow through `fallow audit`.
+fn augment_finding_definition(
+    value: &mut Value,
+    augmentation: FindingAugmentation,
+) -> Result<(), String> {
     let object = value
         .as_object_mut()
         .ok_or_else(|| "finding definition is not a JSON object".to_string())?;
@@ -394,12 +537,12 @@ fn augment_finding_definition(value: &mut Value) -> Result<(), String> {
             "actions".to_string(),
             serde_json::json!({
                 "type": "array",
-                "items": { "$ref": "#/definitions/IssueAction" },
+                "items": { "$ref": augmentation.actions_item_ref },
                 "description": "Suggested actions to resolve this issue."
             }),
         );
     }
-    if !properties.contains_key("introduced") {
+    if augmentation.include_introduced && !properties.contains_key("introduced") {
         properties.insert(
             "introduced".to_string(),
             serde_json::json!({ "$ref": "#/definitions/AuditIntroduced" }),
@@ -409,29 +552,84 @@ fn augment_finding_definition(value: &mut Value) -> Result<(), String> {
     Ok(())
 }
 
+/// Add the runtime-coverage `schema_version` envelope marker to the derived
+/// `RuntimeCoverageReport` schema.
+///
+/// The CLI injects `runtime_coverage.schema_version: "1"` into every JSON
+/// output that carries a runtime coverage block (see
+/// `crates/cli/src/report/json.rs::inject_runtime_coverage_report_schema_version`).
+/// The Rust source struct does not carry a matching field today, so the
+/// derived schema would otherwise miss it and the drift gate would fire.
+/// Graft the property + `required` entry on derivation so the public
+/// contract stays in lock-step with the wire.
+///
+/// MAINTENANCE: the `enum: ["1"]` constraint is tightly coupled to
+/// `RUNTIME_COVERAGE_SCHEMA_VERSION` in
+/// `crates/cli/src/report/json.rs`. Bumping that constant requires
+/// updating the enum list here in the same PR; otherwise the drift gate
+/// stays green while the emitted document quietly disagrees with the
+/// wire.
+///
+/// Idempotent: if a future PR adds a typed `schema_version` field to
+/// `RuntimeCoverageReport`, schemars derives the property natively and the
+/// augmentation step skips.
+fn augment_runtime_coverage_report(value: &mut Value) -> Result<(), String> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "RuntimeCoverageReport definition is not a JSON object".to_string())?;
+
+    let properties = object
+        .entry("properties")
+        .or_insert_with(|| Value::Object(Map::new()));
+    let properties = properties
+        .as_object_mut()
+        .ok_or_else(|| "RuntimeCoverageReport `properties` is not a JSON object".to_string())?;
+
+    if !properties.contains_key("schema_version") {
+        properties.insert(
+            "schema_version".to_string(),
+            serde_json::json!({
+                "type": "string",
+                "enum": ["1"],
+                "description": "Runtime coverage JSON contract version. Independent of the top-level fallow JSON schema_version."
+            }),
+        );
+    }
+
+    let required = object
+        .entry("required")
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if let Value::Array(arr) = required
+        && !arr.iter().any(|v| v.as_str() == Some("schema_version"))
+    {
+        arr.push(Value::String("schema_version".to_string()));
+    }
+
+    Ok(())
+}
+
 /// Apply post-processing to derived schemas so they match the conventions of
-/// the hand-written `docs/output-schema.json`:
+/// the hand-written `docs/output-schema.json`.
+///
+/// Production normalization (this function, applied to the emitted document):
 ///
 /// - Drop the `$schema` keyword that schemars writes on each subschema; only
 ///   the top-level document carries it.
 /// - Schemars 1 prefers `$ref` -> `#/$defs/Foo`, but the committed file uses
 ///   `#/definitions/Foo`. Rewrite refs so they line up with the merged
 ///   document layout.
-/// - Collapse `type: ["X", "null"]` (schemars `Option<T>` output) to
-///   `type: "X"` so the derived shape matches the existing committed
-///   convention of marking optionals via `skip_serializing_if` without a
-///   nullable type marker.
-/// - Drop `format`/`minimum`/`maximum` keywords that schemars derives from
-///   Rust integer widths (`format: "uint32"`, etc.). The committed schema
-///   does not constrain integer ranges this way today; Phase 7 follow-up
-///   tightens the committed schema if we want to keep the stricter
-///   constraints.
-/// - Collapse single-element `allOf: [{$ref: X}]` wrappers to the bare
-///   `{$ref: X}`. Schemars 1 emits the wrapper when a variant carries a
-///   doc comment.
-/// - Drop multi-line / single-line `description` keys (deferred to the
-///   prose-migration phase; today doc-comment prose and committed-schema
-///   prose are intentionally out of step).
+///
+/// Drift-comparison normalization (the `normalize_one` helper inside
+/// `#[cfg(test)] mod drift_tests`, applied ONLY before structural equality
+/// checks): drops `format`/`minimum`/`maximum`/`description` keywords,
+/// collapses `type: ["X", "null"]` to `type: "X"`, collapses single-element
+/// `allOf: [{$ref: X}]` wrappers to the bare `$ref`, and canonicalizes
+/// `oneOf`/`anyOf`. Those rewrites do NOT run on the emitted document;
+/// they exist so the drift gate can compare structures while tolerating
+/// schemars' integer-format hints, nullable-union output, and doc-comment
+/// prose churn that the committed schema does not encode the same way.
+/// Editing this function's behavior should usually be mirrored in
+/// `normalize_one`, and vice versa.
 fn normalize_schema(value: &mut Value) {
     match value {
         Value::Object(map) => {
@@ -574,8 +772,12 @@ mod drift_tests {
             let mut value = derived_schema.clone();
             normalize_schema(&mut value);
             if finding_names.contains(name) {
-                augment_finding_definition(&mut value)
+                augment_finding_definition(&mut value, finding_augmentation(name))
                     .expect("augment_finding_definition must not fail");
+            }
+            if *name == "RuntimeCoverageReport" {
+                augment_runtime_coverage_report(&mut value)
+                    .expect("augment_runtime_coverage_report must not fail");
             }
             out.insert((*name).to_string(), value);
         }
@@ -611,10 +813,12 @@ mod drift_tests {
         }
     }
 
-    /// Augmentation attaches the `actions` array and `introduced` flag to
-    /// every finding type. Today the required-flag for `actions` is decided
-    /// by the committed schema per-type (some findings list it, some do
-    /// not); the augmentation step is non-opinionated.
+    /// Augmentation attaches the `actions` array to every finding type, and
+    /// the `introduced` flag to every audit-aware finding (see
+    /// `finding_augmentation`: hotspot and refactoring target are not
+    /// audit-aware today, so their derived schemas must NOT carry
+    /// `introduced`). The required-flag for `actions` is decided by the
+    /// committed schema per-type; the augmentation step is non-opinionated.
     #[test]
     fn augmentation_attaches_actions_and_introduced_to_each_finding() {
         let derived = derived_definitions_for_drift();
@@ -630,10 +834,18 @@ mod drift_tests {
                 properties.contains_key("actions"),
                 "finding `{name}` was not augmented with `actions`",
             );
-            assert!(
-                properties.contains_key("introduced"),
-                "finding `{name}` was not augmented with `introduced`",
-            );
+            let aug = finding_augmentation(name);
+            if aug.include_introduced {
+                assert!(
+                    properties.contains_key("introduced"),
+                    "finding `{name}` was not augmented with `introduced` (audit-aware finding)",
+                );
+            } else {
+                assert!(
+                    !properties.contains_key("introduced"),
+                    "finding `{name}` carries `introduced` but `finding_augmentation` opted out",
+                );
+            }
         }
     }
 

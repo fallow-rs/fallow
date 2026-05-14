@@ -11,6 +11,7 @@ use std::path::PathBuf;
 /// it to be the top-line signal. In standalone analysis (no change
 /// scope), `cold-code-detected` remains primary.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeCoverageReportVerdict {
     Clean,
@@ -28,6 +29,7 @@ pub enum RuntimeCoverageReportVerdict {
 /// stable: severity-descending so the first entry mirrors a sensible
 /// non-PR-context verdict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeCoverageSignal {
     LicenseExpiredGrace,
@@ -73,6 +75,7 @@ impl fmt::Display for RuntimeCoverageReportVerdict {
 
 /// Per-finding verdict. Replaces the 0.1 `state` field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeCoverageVerdict {
     SafeToDelete,
@@ -116,6 +119,7 @@ impl fmt::Display for RuntimeCoverageVerdict {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeCoverageConfidence {
     VeryHigh,
@@ -147,6 +151,7 @@ impl fmt::Display for RuntimeCoverageConfidence {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeCoverageWatermark {
     TrialExpired,
@@ -173,6 +178,7 @@ impl fmt::Display for RuntimeCoverageWatermark {
 
 /// Runtime coverage source used to produce the summary.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeCoverageDataSource {
     #[default]
@@ -198,6 +204,7 @@ impl fmt::Display for RuntimeCoverageDataSource {
 
 /// Summary block mirroring `fallow_cov_protocol::Summary` (0.3 shape).
 #[derive(Debug, Clone, Default, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageSummary {
     pub data_source: RuntimeCoverageDataSource,
     pub last_received_at: Option<String>,
@@ -219,6 +226,7 @@ pub struct RuntimeCoverageSummary {
 
 /// Capture-quality telemetry (mirrors `fallow_cov_protocol::CaptureQuality`).
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageCaptureQuality {
     pub window_seconds: u64,
     pub instances_observed: u32,
@@ -228,6 +236,7 @@ pub struct RuntimeCoverageCaptureQuality {
 
 /// Supporting evidence for a finding (mirrors `fallow_cov_protocol::Evidence`).
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageEvidence {
     pub static_status: String,
     pub test_coverage: String,
@@ -239,6 +248,7 @@ pub struct RuntimeCoverageEvidence {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageAction {
     /// Stable action identifier. Serialized as `type` in JSON to match the
     /// `actions[].type` contract shared with every other `fallow health` finding.
@@ -249,12 +259,14 @@ pub struct RuntimeCoverageAction {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageMessage {
     pub code: String,
     pub message: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageFinding {
     /// Stable content-hash ID of the form `fallow:prod:<hash>`.
     pub id: String,
@@ -273,6 +285,7 @@ pub struct RuntimeCoverageFinding {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageHotPath {
     /// Stable content-hash ID of the form `fallow:hot:<hash>`.
     pub id: String,
@@ -294,6 +307,7 @@ pub struct RuntimeCoverageHotPath {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeCoverageRiskBand {
     Low,
@@ -319,6 +333,7 @@ impl fmt::Display for RuntimeCoverageRiskBand {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageBlastRadiusEntry {
     /// Stable content-hash ID of the form `fallow:blast:<hash>`.
     pub id: String,
@@ -333,6 +348,7 @@ pub struct RuntimeCoverageBlastRadiusEntry {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageImportanceEntry {
     /// Stable content-hash ID of the form `fallow:importance:<hash>`.
     pub id: String,
@@ -347,6 +363,7 @@ pub struct RuntimeCoverageImportanceEntry {
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageReport {
     pub verdict: RuntimeCoverageReportVerdict,
     /// All signals captured by post-processing. Independent of `verdict`,
@@ -354,17 +371,21 @@ pub struct RuntimeCoverageReport {
     /// context. Empty when the report is `Clean` and not under license
     /// grace. Order is stable severity-descending.
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(default))]
     pub signals: Vec<RuntimeCoverageSignal>,
     pub summary: RuntimeCoverageSummary,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(default))]
     pub findings: Vec<RuntimeCoverageFinding>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(default))]
     pub hot_paths: Vec<RuntimeCoverageHotPath>,
     pub blast_radius: Vec<RuntimeCoverageBlastRadiusEntry>,
     pub importance: Vec<RuntimeCoverageImportanceEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watermark: Option<RuntimeCoverageWatermark>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(default))]
     pub warnings: Vec<RuntimeCoverageMessage>,
 }
 

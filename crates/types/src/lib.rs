@@ -16,6 +16,13 @@ pub mod extract;
 /// adopt these types in a follow-up.
 #[cfg(feature = "schema")]
 pub mod output;
+/// Schema-side wrappers for the per-action types attached to health findings,
+/// hotspots, and refactoring targets. Separated from [`output`] so the
+/// generic `IssueAction` tree stays focused while the health-specific
+/// variants (with their own `type` discriminant enums) live in a dedicated
+/// module. Gated on the `schema` cargo feature.
+#[cfg(feature = "schema")]
+pub mod output_health;
 /// Analysis result types: unused files, exports, dependencies, and members.
 pub mod results;
 /// Custom serde serializers for cross-platform path output.

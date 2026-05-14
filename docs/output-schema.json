@@ -661,7 +661,7 @@
 
     "RuntimeCoverageReport": {
       "type": "object",
-      "required": ["schema_version", "verdict", "summary"],
+      "required": ["schema_version", "verdict", "summary", "blast_radius", "importance"],
       "description": "Runtime coverage findings merged into the health report or emitted by `fallow coverage analyze`. Present in health output when --runtime-coverage is used. Shape mirrors the runtime coverage JSON contract; cloud mode fetches runtime facts explicitly and merges them locally with AST/static analysis.",
       "properties": {
         "schema_version": {
@@ -1496,12 +1496,16 @@
         "ownership": {
           "$ref": "#/definitions/OwnershipMetrics",
           "description": "Per-file ownership signals. Only present when --ownership is used."
+        },
+        "is_test_path": {
+          "type": "boolean",
+          "description": "True when the file path matches a test or mock convention (e.g. `**/__tests__/**`, `**/*.test.*`, `**/*.spec.*`, `**/__mocks__/**`). Tagged so consumers can decide whether to weight or filter test hotspots downstream. Omitted when false."
         }
       }
     },
     "OwnershipMetrics": {
       "type": "object",
-      "required": ["bus_factor", "contributor_count", "top_contributor", "unowned", "drift"],
+      "required": ["bus_factor", "contributor_count", "top_contributor", "drift"],
       "description": "Per-file ownership signals derived from git author history and CODEOWNERS. Only computed when --ownership is requested.",
       "properties": {
         "bus_factor": {
@@ -1521,7 +1525,12 @@
         "recent_contributors": {
           "type": "array",
           "items": { "$ref": "#/definitions/ContributorEntry" },
-          "description": "Up to three additional contributors by share, ordered descending. Useful for review routing."
+          "description": "Up to three additional contributors by share, ordered descending. Useful for review routing. Omitted when empty."
+        },
+        "suggested_reviewers": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ContributorEntry" },
+          "description": "Contributors whose last touch is within 90 days, ordered by share descending. First-class field so consumers do not have to reconstruct it from `recent_contributors` filtered by `stale_days`. Excludes the top contributor. Omitted when empty."
         },
         "declared_owner": {
           "type": ["string", "null"],
@@ -2050,7 +2059,7 @@
       }
     },
     "RefactoringTargetAction": {
-      "description": "A suggested action for a refactoring target.",
+      "description": "A suggested action for a refactoring target. The suppress-line variant emitted here does NOT carry a placement hint: a RefactoringTarget points at a file, not a specific declaration site, so per-line placement has no referent. Consumers that want placement metadata should follow the target's `evidence.complex_functions` back to the matching HealthFinding and read placement from that action instead.",
       "type": "object",
       "required": ["type", "auto_fixable", "description"],
       "properties": {
@@ -2074,10 +2083,6 @@
         "comment": {
           "type": "string",
           "description": "The inline comment to insert. Present for suppress-line actions when evidence exists."
-        },
-        "placement": {
-          "type": "string",
-          "description": "Where to insert the suppress comment. Present for suppress-line actions."
         }
       }
     },
@@ -3202,11 +3207,16 @@
     "VitalSignsCounts": {
       "type": "object",
       "description": "Raw counts behind the vital signs percentages.",
+      "required": ["total_files", "total_exports", "dead_files", "dead_exports", "total_deps"],
       "properties": {
         "total_files": { "type": "integer", "description": "Total number of discovered source files." },
         "total_exports": { "type": "integer", "description": "Total number of exports across all files." },
         "dead_files": { "type": "integer", "description": "Number of unreachable files." },
-        "dead_exports": { "type": "integer", "description": "Number of unused exports." }
+        "dead_exports": { "type": "integer", "description": "Number of unused exports." },
+        "duplicated_lines": { "type": "integer", "description": "Lines reported as duplicated by the duplication pipeline. Omitted when duplication did not run." },
+        "total_lines": { "type": "integer", "description": "Total lines of code across analyzed files. Omitted when the duplication pipeline did not contribute totals." },
+        "files_scored": { "type": "integer", "description": "Number of files that participated in file-level health scoring. Omitted when --file-scores was not requested." },
+        "total_deps": { "type": "integer", "description": "Total declared dependencies (dependencies + devDependencies + optionalDependencies) backing the dependency-density vital sign." }
       }
     },
 

@@ -1467,6 +1467,10 @@ trend: ("accelerating" | "stable" | "cooling")
  */
 actions?: HotspotAction[]
 ownership?: OwnershipMetrics
+/**
+ * True when the file path matches a test or mock convention (e.g. `** /__tests__/**`, `** /*.test.*`, `** /*.spec.*`, `** /__mocks__/**`). Tagged so consumers can decide whether to weight or filter test hotspots downstream. Omitted when false.
+ */
+is_test_path?: boolean
 }
 /**
  * A suggested action for a hotspot file. Ownership-derived action types (low-bus-factor, unowned-hotspot, ownership-drift) appear only when --ownership is enabled.
@@ -1511,9 +1515,13 @@ bus_factor: number
 contributor_count: number
 top_contributor: ContributorEntry
 /**
- * Up to three additional contributors by share, ordered descending. Useful for review routing.
+ * Up to three additional contributors by share, ordered descending. Useful for review routing. Omitted when empty.
  */
 recent_contributors?: ContributorEntry[]
+/**
+ * Contributors whose last touch is within 90 days, ordered by share descending. First-class field so consumers do not have to reconstruct it from `recent_contributors` filtered by `stale_days`. Excludes the top contributor. Omitted when empty.
+ */
+suggested_reviewers?: ContributorEntry[]
 /**
  * CODEOWNERS-resolved primary owner for this file, when a rule matches.
  */
@@ -1521,7 +1529,7 @@ declared_owner?: (string | null)
 /**
  * Tristate: true = CODEOWNERS file exists but no rule matches; false = a rule matches; null = no CODEOWNERS file discovered for the repository.
  */
-unowned: (boolean | null)
+unowned?: (boolean | null)
 /**
  * True when ownership has drifted from the original author to a new top contributor (file age >= 30 days, original author share < 10%).
  */
@@ -1665,19 +1673,35 @@ export interface VitalSignsCounts {
 /**
  * Total number of discovered source files.
  */
-total_files?: number
+total_files: number
 /**
  * Total number of exports across all files.
  */
-total_exports?: number
+total_exports: number
 /**
  * Number of unreachable files.
  */
-dead_files?: number
+dead_files: number
 /**
  * Number of unused exports.
  */
-dead_exports?: number
+dead_exports: number
+/**
+ * Lines reported as duplicated by the duplication pipeline. Omitted when duplication did not run.
+ */
+duplicated_lines?: number
+/**
+ * Total lines of code across analyzed files. Omitted when the duplication pipeline did not contribute totals.
+ */
+total_lines?: number
+/**
+ * Number of files that participated in file-level health scoring. Omitted when --file-scores was not requested.
+ */
+files_scored?: number
+/**
+ * Total declared dependencies (dependencies + devDependencies + optionalDependencies) backing the dependency-density vital sign.
+ */
+total_deps: number
 }
 /**
  * Risk profile: percentage of functions in each risk bin. Bins depend on the measured property (unit size or parameter count).
@@ -1865,7 +1889,7 @@ cycle_path?: string[]
 actions?: RefactoringTargetAction[]
 }
 /**
- * A suggested action for a refactoring target.
+ * A suggested action for a refactoring target. The suppress-line variant emitted here does NOT carry a placement hint: a RefactoringTarget points at a file, not a specific declaration site, so per-line placement has no referent. Consumers that want placement metadata should follow the target's `evidence.complex_functions` back to the matching HealthFinding and read placement from that action instead.
  */
 export interface RefactoringTargetAction {
 /**
@@ -1888,10 +1912,6 @@ category?: string
  * The inline comment to insert. Present for suppress-line actions when evidence exists.
  */
 comment?: string
-/**
- * Where to insert the suppress comment. Present for suppress-line actions.
- */
-placement?: string
 }
 /**
  * Adaptive percentile-based thresholds derived from the project's metric distribution. Used for priority scoring and rule matching.
@@ -2085,11 +2105,11 @@ hot_paths?: RuntimeCoverageHotPath[]
 /**
  * First-class blast-radius entries for runtime-observed functions. Present whenever runtime coverage analysis runs.
  */
-blast_radius?: RuntimeCoverageBlastRadiusEntry[]
+blast_radius: RuntimeCoverageBlastRadiusEntry[]
 /**
  * First-class production-importance entries for runtime-observed functions. Present whenever runtime coverage analysis runs.
  */
-importance?: RuntimeCoverageImportanceEntry[]
+importance: RuntimeCoverageImportanceEntry[]
 watermark?: RuntimeCoverageWatermark
 /**
  * Non-fatal merge or coverage diagnostics. Omitted when empty.

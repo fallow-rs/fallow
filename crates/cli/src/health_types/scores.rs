@@ -56,6 +56,7 @@ pub const MI_DENSITY_MIN_LINES: f64 = 50.0;
 pub const HEALTH_SCORE_FORMULA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthScore {
     /// Formula version used to compute the score and penalties.
     pub formula_version: u32,
@@ -72,6 +73,7 @@ pub struct HealthScore {
 /// Each field shows how many points were subtracted for that component.
 /// `None` means the metric was not available (pipeline didn't run).
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthScorePenalties {
     /// Points lost from dead files (max 15).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -148,6 +150,7 @@ pub const fn letter_grade(score: f64) -> &'static str {
 /// The high watermark default is 70 (matches Istanbul `lines: 70`).
 /// Partial is anything in `(0, 70)`. None is `<= 0`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CoverageTier {
     /// 0% coverage: file is not test-reachable, or Istanbul reports 0%.
@@ -178,6 +181,7 @@ impl CoverageTier {
 
 /// A single function that exceeds a complexity threshold.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthFinding {
     /// Absolute file path.
     pub path: std::path::PathBuf,
@@ -218,6 +222,7 @@ pub struct HealthFinding {
 
 /// Which complexity threshold was exceeded.
 #[derive(Debug, Clone, Copy, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ExceededThreshold {
     /// Only cyclomatic exceeded.
@@ -300,6 +305,7 @@ impl ExceededThreshold {
 /// Determined by the highest tier reached across both cognitive and cyclomatic
 /// scores. Default thresholds: cognitive 25/40, cyclomatic 30/50.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, clap::ValueEnum)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum FindingSeverity {
     /// Above threshold but manageable (cognitive < 25 or cyclomatic < 30).
@@ -363,6 +369,7 @@ pub fn compute_finding_severity(
 
 /// A function exceeding the very-high-risk size threshold (>60 LOC).
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct LargeFunctionEntry {
     /// Absolute file path.
     pub path: std::path::PathBuf,
@@ -376,6 +383,7 @@ pub struct LargeFunctionEntry {
 
 /// Summary statistics for the health report.
 #[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthSummary {
     /// Number of files analyzed.
     pub files_analyzed: usize,
@@ -459,6 +467,7 @@ impl Default for HealthSummary {
 /// - **dead_code_ratio**: fraction of value exports (excluding type-only exports) with zero references (0.0–1.0)
 /// - **fan_out_penalty**: logarithmic scaling with cap at 15 points; reflects diminishing marginal risk of additional imports
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FileHealthScore {
     /// File path (absolute; stripped to relative in output).
     pub path: std::path::PathBuf,
@@ -494,6 +503,7 @@ pub struct FileHealthScore {
 
 /// Coverage model used for CRAP score computation.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CoverageModel {
     /// Binary model: test-reachable = CC, untested = CC^2 + CC.
@@ -526,6 +536,7 @@ pub enum CoverageModel {
 /// Score uses within-project max normalization. Higher score = higher risk.
 /// Fan-in is shown separately as "blast radius" — not baked into the score.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HotspotEntry {
     /// File path (absolute; stripped to relative in output).
     pub path: std::path::PathBuf,
@@ -555,12 +566,14 @@ pub struct HotspotEntry {
     /// maintenance IS real work), but tagging them lets consumers decide
     /// whether to weight or filter them downstream.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[cfg_attr(feature = "schema", schemars(default))]
     pub is_test_path: bool,
 }
 
 /// Per-author summary emitted in [`OwnershipMetrics::top_contributor`] and
 /// [`OwnershipMetrics::recent_contributors`].
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ContributorEntry {
     /// Display string per the configured email mode: raw email
     /// (`alice@example.com`), local-part handle (`alice`), or stable hash
@@ -583,6 +596,7 @@ pub struct ContributorEntry {
 
 /// Format discriminator for [`ContributorEntry::identifier`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ContributorIdentifierFormat {
     /// Raw author email as recorded in git history.
@@ -598,6 +612,7 @@ pub enum ContributorIdentifierFormat {
 /// passes `--ownership`. All fields are derived from git history and the
 /// repository's CODEOWNERS file (if any).
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct OwnershipMetrics {
     /// Avelino truck factor: minimum number of contributors covering at
     /// least 50% of recency-weighted commits.
@@ -612,6 +627,7 @@ pub struct OwnershipMetrics {
     /// Up to three additional contributors by share, ordered desc.
     /// Useful for "who else could review this file" routing.
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(default))]
     pub recent_contributors: Vec<ContributorEntry>,
 
     /// Contributors whose last touch is within 90 days, ordered by share
@@ -621,6 +637,7 @@ pub struct OwnershipMetrics {
     /// contributor (they are the sole author being flagged); consumers
     /// wanting the full list can union with `top_contributor`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(default))]
     pub suggested_reviewers: Vec<ContributorEntry>,
 
     /// CODEOWNERS-resolved owner for this file, if a rule matched.
@@ -645,6 +662,7 @@ pub struct OwnershipMetrics {
 
 /// Summary statistics for hotspot analysis.
 #[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HotspotSummary {
     /// Analysis window display string (e.g., "6 months").
     pub since: String,

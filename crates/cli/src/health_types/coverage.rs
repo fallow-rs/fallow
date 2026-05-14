@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 /// Runtime code that no test dependency path reaches.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UntestedFile {
     /// Absolute file path.
     pub path: PathBuf,
@@ -11,6 +12,7 @@ pub struct UntestedFile {
 
 /// Runtime export that no test-reachable module references.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UntestedExport {
     /// Absolute file path.
     pub path: PathBuf,
@@ -24,6 +26,7 @@ pub struct UntestedExport {
 
 /// Aggregate coverage-gap counters for the current analysis scope.
 #[derive(Debug, Clone, Default, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageGapSummary {
     /// Runtime-reachable files in scope.
     pub runtime_files: usize,
@@ -39,14 +42,17 @@ pub struct CoverageGapSummary {
 
 /// Static test coverage gaps derived from the module graph.
 #[derive(Debug, Clone, Default, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageGaps {
     /// Summary metrics for the current analysis scope.
     pub summary: CoverageGapSummary,
     /// Runtime files with no test dependency path.
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(default))]
     pub files: Vec<UntestedFile>,
     /// Runtime exports with no test-reachable reference chain.
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(default))]
     pub exports: Vec<UntestedExport>,
 }
 

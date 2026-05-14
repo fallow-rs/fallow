@@ -17,6 +17,7 @@ pub const SNAPSHOT_SCHEMA_VERSION: u32 = 8;
 /// (e.g., `duplication_pct` is `None` unless the duplication pipeline was run,
 /// `hotspot_count` is `None` without git history).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct VitalSigns {
     /// Percentage of files not reachable from any entry point.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -89,6 +90,7 @@ pub struct VitalSigns {
 ///
 /// Percentages sum to approximately 100.0 (subject to rounding).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[allow(
     clippy::struct_field_names,
     reason = "risk suffix conveys that higher values are worse"
@@ -109,6 +111,7 @@ pub struct RiskProfile {
 /// Stored alongside `VitalSigns` in snapshots so that Phase 2b trend reporting
 /// can decompose percentage changes into numerator vs denominator shifts.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct VitalSignsCounts {
     pub total_files: usize,
     pub total_exports: usize,

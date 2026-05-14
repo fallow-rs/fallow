@@ -5,6 +5,7 @@
 /// Derived from the project's metric distribution (percentile-based with floors).
 /// Exposed in JSON output so consumers can interpret scores in context.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[allow(
     clippy::struct_field_names,
     reason = "triggered in bin but not lib — #[expect] would be unfulfilled in lib"
@@ -22,6 +23,7 @@ pub struct TargetThresholds {
 
 /// Category of refactoring recommendation.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RecommendationCategory {
     /// Actively-changing file with growing complexity — highest urgency.
@@ -72,6 +74,7 @@ impl RecommendationCategory {
 
 /// A contributing factor that triggered or strengthened a recommendation.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ContributingFactor {
     /// Metric name (matches JSON field names: `"fan_in"`, `"dead_code_ratio"`, etc.).
     pub metric: &'static str,
@@ -103,6 +106,7 @@ pub struct ContributingFactor {
 /// Surfaces quick wins: high-priority, low-effort targets rank first.
 /// Effort estimate for a refactoring target.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum EffortEstimate {
     /// Small file, few functions, low fan-in — quick to address.
@@ -142,6 +146,7 @@ impl EffortEstimate {
 /// - **Medium**: heuristic thresholds (fan-in/fan-out coupling)
 /// - **Low**: depends on git history quality (churn-based recommendations)
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Confidence {
     /// Recommendation based on deterministic analysis (graph, AST).
@@ -169,6 +174,7 @@ impl Confidence {
 /// Provides enough detail for an AI agent to act on a recommendation
 /// without a second tool call.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TargetEvidence {
     /// Names of unused exports (populated for `RemoveDeadCode` targets).
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -183,6 +189,7 @@ pub struct TargetEvidence {
 
 /// A function referenced in target evidence.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EvidenceFunction {
     /// Function name.
     pub name: String,
@@ -193,6 +200,7 @@ pub struct EvidenceFunction {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RefactoringTarget {
     /// Absolute file path (stripped to relative in output).
     pub path: std::path::PathBuf,
@@ -211,6 +219,7 @@ pub struct RefactoringTarget {
     pub confidence: Confidence,
     /// Which metric values contributed to this recommendation.
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(default))]
     pub factors: Vec<ContributingFactor>,
     /// Structured evidence linking to specific analysis data.
     #[serde(skip_serializing_if = "Option::is_none")]

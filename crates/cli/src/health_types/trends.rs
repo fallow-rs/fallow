@@ -2,6 +2,7 @@
 
 /// Health trend comparison: current run vs. a previous snapshot.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthTrend {
     /// The snapshot being compared against.
     pub compared_to: TrendPoint,
@@ -15,6 +16,7 @@ pub struct HealthTrend {
 
 /// A reference to a snapshot used in trend comparison.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TrendPoint {
     /// ISO 8601 timestamp of the snapshot.
     pub timestamp: String,
@@ -37,6 +39,7 @@ pub struct TrendPoint {
 
 /// A single metric's trend between two snapshots.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TrendMetric {
     /// Metric identifier (e.g., `"score"`, `"dead_file_pct"`).
     pub name: &'static str,
@@ -62,6 +65,7 @@ pub struct TrendMetric {
 
 /// Raw numerator/denominator for a percentage metric.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TrendCount {
     /// The numerator (e.g., dead files count).
     pub value: usize,
@@ -71,6 +75,7 @@ pub struct TrendCount {
 
 /// Direction of a metric's change, semantically (improving/declining/stable).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum TrendDirection {
     /// The metric moved in a beneficial direction.

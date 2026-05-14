@@ -1,0 +1,214 @@
+//! Schema-side counterparts of the `actions` array attached to each health
+//! finding by the JSON output layer
+//! (`crates/cli/src/report/json.rs::inject_health_actions`).
+//!
+//! The runtime emission path still builds these objects via
+//! `serde_json::json!` macros; the typed wrappers here exist so that
+//! `JsonSchema` can derive the per-action shape from a single Rust source
+//! of truth. Whenever the runtime emitter changes (new action variant,
+//! new optional field, renamed property), update the matching type in this
+//! module FIRST so the drift gate flags the divergence before review.
+//!
+//! Gated by the `schema` cargo feature on `fallow-types`. Non-schema builds
+//! never compile this module, keeping the runtime payload zero-cost.
+
+use serde::Serialize;
+
+/// Suggested action attached to a [`HealthFinding`].
+///
+/// Each complexity finding carries an array of these on the JSON wire
+/// (`findings[].actions[]`). The action selector in
+/// `crates/cli/src/report/json.rs::build_health_finding_actions` picks the
+/// primary action based on which thresholds triggered the finding and the
+/// bucketed coverage tier. See [`HealthFindingActionType`] for the full
+/// discriminant list.
+///
+/// `note`, `comment`, and `placement` are populated per-variant: refactor
+/// actions carry a `note`, suppress-line / suppress-file actions carry
+/// `comment` plus `placement`, and the coverage-leaning actions
+/// (`add-tests`, `increase-coverage`) carry only `note`.
+///
+/// [`HealthFinding`]: ../../fallow-cli/src/health_types/scores.rs
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct HealthFindingAction {
+    /// Action type identifier. Kebab-case per the JSON output contract.
+    #[serde(rename = "type")]
+    pub kind: HealthFindingActionType,
+    /// Whether `fallow fix` can auto-apply this action. Today every health
+    /// finding action is manual, but the field is non-singleton so a future
+    /// auto-applier (e.g., an LLM-driven `refactor-function` worker) does
+    /// not need a schema change.
+    pub auto_fixable: bool,
+    /// Human-readable description of the action.
+    pub description: String,
+    /// Additional context (e.g., the canonical CRAP formula, or a hint
+    /// about which branch type to extract). Present on most action types;
+    /// dropped only when the description carries the full ask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// The inline comment to insert (e.g.,
+    /// `// fallow-ignore-next-line complexity` or
+    /// `<!-- fallow-ignore-file complexity -->`). Present on
+    /// `suppress-line` and `suppress-file` action variants.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+    /// Where to insert the suppress comment
+    /// (e.g., `above-function-declaration`, `above-angular-decorator`, or
+    /// `top-of-template`). Present on `suppress-line` and `suppress-file`
+    /// action variants.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<String>,
+}
+
+/// Discriminant for [`HealthFindingAction::kind`]. Mirrors the action types
+/// emitted by `build_health_finding_actions`. A single finding's `actions`
+/// array may carry multiple entries of different types: a finding that
+/// exceeded both cyclomatic and CRAP at `coverage_tier: partial` will get
+/// BOTH `increase-coverage` AND `refactor-function`, plus the trailing
+/// `suppress-line`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum HealthFindingActionType {
+    /// Refactor the function to reduce complexity. Emitted when
+    /// cyclomatic/cognitive triggered the finding, when full coverage
+    /// still cannot bring CRAP below `max_crap_threshold`, or as a
+    /// secondary action when cyclomatic is within 5 of the cyclomatic
+    /// threshold AND cognitive is at or above the cognitive floor.
+    RefactorFunction,
+    /// Add tests for a CRAP-triggered finding whose coverage tier is
+    /// `none` (no test path reaches the function).
+    AddTests,
+    /// Increase test coverage for a CRAP-triggered finding whose coverage
+    /// tier is `partial` or `high` (some test path exists; add targeted
+    /// assertions for uncovered branches).
+    IncreaseCoverage,
+    /// Suppress with an HTML comment at the top of the template. Used for
+    /// synthetic Angular `<template>` findings on `.html` files where a
+    /// line suppression cannot be expressed.
+    SuppressFile,
+    /// Suppress with an inline `// fallow-ignore-next-line complexity`
+    /// comment above the function or Angular decorator.
+    SuppressLine,
+}
+
+/// Suggested action attached to a [`HotspotEntry`].
+///
+/// The action list always begins with `refactor-file` plus `add-tests`.
+/// Ownership-derived variants (`low-bus-factor`, `unowned-hotspot`,
+/// `ownership-drift`) are appended only when `--ownership` is active AND
+/// the corresponding signal fires for the hotspot.
+///
+/// [`HotspotEntry`]: ../../fallow-cli/src/health_types/scores.rs
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct HotspotAction {
+    /// Action type identifier.
+    #[serde(rename = "type")]
+    pub kind: HotspotActionType,
+    /// Whether `fallow fix` can auto-apply this action. Today every
+    /// hotspot action is manual.
+    pub auto_fixable: bool,
+    /// Human-readable description of the action.
+    pub description: String,
+    /// Additional context for the action. Absent on `low-bus-factor` when
+    /// the finding's description already carries the full ask (no
+    /// suggested reviewers and not a low-commit file).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// Suggested CODEOWNERS pattern. Present only on `unowned-hotspot`
+    /// actions. Derived per the [`heuristic`](Self::heuristic) field;
+    /// consumers should branch on [`heuristic`](Self::heuristic) rather
+    /// than assume a stable algorithm.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_pattern: Option<String>,
+    /// Strategy used to derive [`suggested_pattern`](Self::suggested_pattern).
+    /// Reserved for future evolution (`codeowners-cluster`, etc.).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heuristic: Option<HotspotActionHeuristic>,
+}
+
+/// Discriminant for [`HotspotAction::kind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum HotspotActionType {
+    /// Refactor the hotspot file (high complexity plus frequent change).
+    RefactorFile,
+    /// Add test coverage to reduce change risk on the hotspot file.
+    AddTests,
+    /// Bus factor of 1: a single recent contributor owns the file.
+    /// Emitted only with `--ownership`.
+    LowBusFactor,
+    /// Hotspot matches no CODEOWNERS rule (a rules file exists but no
+    /// pattern matches). Emitted only with `--ownership`.
+    UnownedHotspot,
+    /// Ownership has drifted from the original author to a new top
+    /// contributor. Emitted only with `--ownership`.
+    OwnershipDrift,
+}
+
+/// Strategy discriminant for the suggested CODEOWNERS pattern attached to
+/// an `unowned-hotspot` action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum HotspotActionHeuristic {
+    /// Suggest the deepest directory containing the file (e.g.,
+    /// `/src/api/users/`). Keeps the suggestion reviewable while staying
+    /// a directory pattern rather than a per-file rule.
+    DirectoryDeepest,
+}
+
+/// Suggested action attached to a [`RefactoringTarget`].
+///
+/// The list always begins with `apply-refactoring`. A trailing
+/// `suppress-line` is appended only when the target carries `evidence`
+/// linking to specific functions (e.g., `extract_complex_functions`,
+/// `add_test_coverage`).
+///
+/// Unlike [`HealthFindingAction`], the `suppress-line` variant emitted
+/// here does NOT carry a `placement` field: the parent
+/// [`RefactoringTarget`] points at a file (not a specific function
+/// declaration site), so a per-line placement hint would have no
+/// referent. Consumers that want the placement metadata should follow
+/// the target's `evidence.complex_functions` back to the matching
+/// [`HealthFinding`] and read placement from THAT action instead.
+///
+/// [`RefactoringTarget`]: ../../fallow-cli/src/health_types/targets.rs
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RefactoringTargetAction {
+    /// Action type identifier.
+    #[serde(rename = "type")]
+    pub kind: RefactoringTargetActionType,
+    /// Whether `fallow fix` can auto-apply this action. Today both
+    /// variants are manual.
+    pub auto_fixable: bool,
+    /// Human-readable description of the action. For `apply-refactoring`
+    /// this is the target's own `recommendation` string; for
+    /// `suppress-line` it is the suppression prompt.
+    pub description: String,
+    /// Recommendation category for `apply-refactoring` actions. Mirrors
+    /// the parent target's
+    /// [`category`](../../fallow-cli/src/health_types/targets.rs.html)
+    /// field so consumers can route on the action alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// The inline comment to insert. Present on `suppress-line` actions
+    /// when evidence exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+}
+
+/// Discriminant for [`RefactoringTargetAction::kind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum RefactoringTargetActionType {
+    /// Apply the recommended refactoring (extract, split, decouple, etc.).
+    ApplyRefactoring,
+    /// Suppress the underlying complexity finding with an inline comment.
+    SuppressLine,
+}
