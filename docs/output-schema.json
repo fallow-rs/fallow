@@ -1152,6 +1152,11 @@
           "enum": ["owner", "directory", "package", "section"],
           "description": "Resolver mode used for partitioning. Present only when `--group-by` is active."
         },
+        "total_issues": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total clone groups across all buckets when `--group-by` is active. Mirrors the grouped check / health envelopes so MCP and CI consumers can read the same key across commands."
+        },
         "groups": {
           "type": "array",
           "description": "Per-group buckets when `--group-by` is active. Each clone group is attributed to its largest-owner key (most instances; alphabetical tiebreak). Sort: most clone groups first, then alphabetical, with `(unowned)` pinned last.",

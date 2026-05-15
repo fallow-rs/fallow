@@ -6,10 +6,12 @@ use std::time::Duration;
 use fallow_config::FallowConfig;
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
+use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 
 use super::shared::NAMESPACE_BARREL_HINT;
 use super::{emit_json, normalize_uri};
 use crate::explain;
+use crate::output_envelope::{DupesOutput, GroupByMode};
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
 
 /// JSON Pointer fragment URL describing the shape of the `value` field on an
@@ -1903,9 +1905,17 @@ pub fn build_duplication_json(
     elapsed: Duration,
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let report_value = serde_json::to_value(report)?;
-
-    let mut output = build_json_envelope(report_value, elapsed);
+    let envelope = DupesOutput {
+        schema_version: SchemaVersion(SCHEMA_VERSION),
+        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
+        report: report.clone(),
+        grouped_by: None,
+        total_issues: None,
+        groups: None,
+        meta: None,
+    };
+    let mut output = serde_json::to_value(&envelope)?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
     inject_dupes_actions(&mut output);
@@ -1959,24 +1969,27 @@ pub fn build_grouped_duplication_json(
     elapsed: Duration,
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let report_value = serde_json::to_value(report)?;
-    let mut output = build_json_envelope(report_value, elapsed);
     let root_prefix = format!("{}/", root.display());
+    // Mirror the grouped check / health envelopes which expose `total_issues`
+    // so MCP and CI consumers can read the same key across commands. For
+    // dupes the count is total clone groups (sum is preserved across
+    // grouping; each clone group is attributed to exactly one bucket).
+    let envelope = DupesOutput {
+        schema_version: SchemaVersion(SCHEMA_VERSION),
+        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
+        report: report.clone(),
+        grouped_by: Some(group_by_mode_from_label(grouping.mode)),
+        total_issues: Some(report.clone_groups.len()),
+        // Per-group buckets are serialized separately below so each carries
+        // its own path-stripping + actions injection; splice them in via the
+        // `Value` post-pass.
+        groups: None,
+        meta: None,
+    };
+    let mut output = serde_json::to_value(&envelope)?;
     strip_root_prefix(&mut output, &root_prefix);
     inject_dupes_actions(&mut output);
-
-    if let serde_json::Value::Object(ref mut map) = output {
-        map.insert("grouped_by".to_string(), serde_json::json!(grouping.mode));
-        // Mirror the grouped check / health envelopes which expose
-        // `total_issues` so MCP and CI consumers can read the same key
-        // across all three commands. For dupes the count is total clone
-        // groups (sum is preserved across grouping; each clone group is
-        // attributed to exactly one bucket).
-        map.insert(
-            "total_issues".to_string(),
-            serde_json::json!(report.clone_groups.len()),
-        );
-    }
 
     let group_values: Vec<serde_json::Value> = grouping
         .groups
@@ -1998,6 +2011,20 @@ pub fn build_grouped_duplication_json(
     }
 
     Ok(output)
+}
+
+/// Map a free-form grouping mode label (`"package"`, `"owner"`, ...) to the
+/// typed [`GroupByMode`] enum. Unknown labels fall through to
+/// [`GroupByMode::Owner`] because the upstream grouping pipeline only emits
+/// the four documented modes; the fallback exists to keep this helper
+/// infallible without piping a Result through every grouped envelope builder.
+fn group_by_mode_from_label(label: &str) -> GroupByMode {
+    match label {
+        "directory" => GroupByMode::Directory,
+        "package" => GroupByMode::Package,
+        "section" => GroupByMode::Section,
+        _ => GroupByMode::Owner,
+    }
 }
 
 pub(super) fn print_grouped_duplication_json(

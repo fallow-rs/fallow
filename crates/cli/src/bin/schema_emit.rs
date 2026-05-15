@@ -41,6 +41,7 @@ use fallow_cli::health_types::{
     RuntimeCoverageReport, TargetThresholds, TrendCount, UntestedExport, UntestedFile, VitalSigns,
     VitalSignsCounts,
 };
+use fallow_cli::output_envelope::{DupesOutput, GroupByMode};
 use fallow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
     RefactoringKind, RefactoringSuggestion,
@@ -262,6 +263,8 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "RuntimeCoverageSummary",
         "RuntimeCoverageVerdict",
         "RuntimeCoverageWatermark",
+        // crates/cli/src/output_envelope.rs - per-command envelope structs.
+        "DupesOutput",
     ]
 }
 
@@ -495,6 +498,10 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<Meta>();
     let _ = generator.subschema_for::<MetaMetric>();
     let _ = generator.subschema_for::<MetaRule>();
+
+    // Per-command envelope structs (crates/cli/src/output_envelope.rs).
+    let _ = generator.subschema_for::<DupesOutput>();
+    let _ = generator.subschema_for::<GroupByMode>();
 
     // Per-finding action wrapper types (crates/types/src/output_health.rs).
     let _ = generator.subschema_for::<HealthFindingAction>();

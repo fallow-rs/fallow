@@ -7,11 +7,12 @@
 
 /// File discovery types: discovered files, file IDs, and entry points.
 pub mod discover;
-/// JSON-output envelope and utility types: `CheckOutput`, `HealthOutput`, ...
-/// plus `SchemaVersion`, `Meta`, `BaselineDeltas`, and friends. Gated on the
-/// `schema` cargo feature; the JSON emission layer adopts them via the
-/// `schema-emit` flow.
-#[cfg(feature = "schema")]
+/// JSON-output envelope and utility types: `SchemaVersion`, `ToolVersion`,
+/// `ElapsedMs`, `AuditIntroduced`, plus the shared `Meta`, `BaselineDeltas`,
+/// `BaselineMatch`, `RegressionResult`, `EntryPoints`, and `CheckSummary`
+/// shapes referenced by every per-command envelope. The structs are always
+/// compiled (the JSON emission layer constructs them at runtime); the
+/// `schemars::JsonSchema` derive is gated per-struct on the `schema` feature.
 pub mod envelope;
 /// Module extraction types: exports, imports, re-exports, and member info.
 pub mod extract;
