@@ -1,0 +1,267 @@
+//! Typed envelope and utility-shape structs for the JSON output contract.
+//!
+//! Today the JSON serialization layer (`crates/cli/src/report/json.rs`) builds
+//! its envelopes (`CheckOutput`, `HealthOutput`, ...) via `serde_json::json!`
+//! macros and ad-hoc map merging. The types in this module are the schema-side
+//! counterpart of those envelopes plus a small set of utility shapes
+//! (`SchemaVersion`, `Meta`, `BaselineDeltas`, ...) that the envelopes
+//! reference.
+//!
+//! Gated on the `schema` cargo feature so consumers that do not need the
+//! `schemars::JsonSchema` derive (every crate except `fallow-cli` with
+//! `--features schema-emit`) skip the schemars compile cost.
+
+use std::collections::BTreeMap;
+
+use serde::Serialize;
+
+/// Schema version for a fallow JSON envelope. Top-level fallow envelopes carry
+/// a `schema_version` field whose Rust source is this newtype; the JSON wire
+/// shape is the bare integer.
+///
+/// Bump policy: ADDITIVE changes (new optional fields, new optional struct
+/// fields, new array entries, new MCP tools, new CLI flags) do NOT bump the
+/// version; consumers receive new fields without breaking. BREAKING changes
+/// (renamed fields, removed fields, type changes, enum-variant removals,
+/// semantic changes) DO bump. To detect newly-added fields without a bump,
+/// check field presence via JSON-key existence rather than gating on the
+/// version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(transparent)]
+pub struct SchemaVersion(pub u32);
+
+/// Fallow CLI version that produced this envelope. Renders to the JSON wire as
+/// a bare string (e.g. `"2.74.0"`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(transparent)]
+pub struct ToolVersion(pub String);
+
+/// Analysis duration in milliseconds. Renders to the JSON wire as a bare
+/// integer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(transparent)]
+pub struct ElapsedMs(pub u64);
+
+/// Audit-mode marker emitted on each finding when `fallow audit --format json`
+/// runs with a base ref. `true` means the finding's structural key was not
+/// present at the base ref (introduced by the current changeset); `false`
+/// means it was inherited.
+///
+/// Outside of audit sub-results the field is omitted, so call sites typically
+/// hold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(transparent)]
+pub struct AuditIntroduced(pub bool);
+
+/// Entry-point detection summary embedded in `CheckOutput` and the combined
+/// envelope.
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct EntryPoints {
+    /// Total number of detected entry points.
+    pub total: usize,
+    /// Breakdown of entry points by detection source (e.g., `"package.json"`,
+    /// `"next.js"`, `"config entry"`). Underscored keys so dashboards can
+    /// drill into individual sources.
+    pub sources: BTreeMap<String, usize>,
+}
+
+/// Per-category issue counts for dead-code analysis. Always present in
+/// `CheckOutput`; when `--summary` is used the individual issue arrays are
+/// omitted but this object stays populated.
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CheckSummary {
+    /// Total number of issues across all categories.
+    pub total_issues: usize,
+    /// Unused source files.
+    pub unused_files: usize,
+    /// Unused value exports.
+    pub unused_exports: usize,
+    /// Unused type exports.
+    pub unused_types: usize,
+    /// Public exports whose signature references same-file private types.
+    pub private_type_leaks: usize,
+    /// Combined count of unused entries across `dependencies`,
+    /// `devDependencies`, and `optionalDependencies`. The per-section
+    /// breakdown lives in the individual issue arrays on `CheckOutput`.
+    pub unused_dependencies: usize,
+    /// Unused enum members.
+    pub unused_enum_members: usize,
+    /// Unused class members.
+    pub unused_class_members: usize,
+    /// Imports that could not be resolved against the project's module graph.
+    pub unresolved_imports: usize,
+    /// Dependencies imported but absent from `package.json`.
+    pub unlisted_dependencies: usize,
+    /// Same-named exports declared in more than one module.
+    pub duplicate_exports: usize,
+    /// Production dependencies only used via type-only imports (could be
+    /// devDependencies). Only populated in production mode.
+    pub type_only_dependencies: usize,
+    /// Production dependencies only imported by test files (could be
+    /// devDependencies).
+    pub test_only_dependencies: usize,
+    /// Cycles detected in the import graph.
+    pub circular_dependencies: usize,
+    /// Imports that cross architecture boundary rules.
+    pub boundary_violations: usize,
+    /// Suppression comments that no longer match a finding.
+    pub stale_suppressions: usize,
+    /// Unused pnpm-workspace catalog entries.
+    pub unused_catalog_entries: usize,
+    /// Empty named catalog groups.
+    pub empty_catalog_groups: usize,
+    /// Workspace package.json catalog references the workspace catalogs
+    /// do not declare.
+    pub unresolved_catalog_references: usize,
+    /// Pnpm `overrides:` entries whose target package is not declared by any
+    /// workspace package and not present in the lockfile.
+    pub unused_dependency_overrides: usize,
+    /// Pnpm `overrides:` entries whose key or value cannot be parsed.
+    pub misconfigured_dependency_overrides: usize,
+}
+
+/// Per-category delta comparison against a saved baseline. Only present in
+/// `CheckOutput` when `--baseline` is used.
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BaselineDeltas {
+    /// Net change in total issues vs baseline (positive = more issues).
+    pub total_delta: i64,
+    /// Per-category breakdown of current, baseline, and delta counts.
+    pub per_category: BTreeMap<String, BaselineCategoryDelta>,
+}
+
+/// Single-category baseline delta entry inside [`BaselineDeltas::per_category`].
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BaselineCategoryDelta {
+    /// Current issue count for this category.
+    pub current: usize,
+    /// Baseline issue count for this category.
+    pub baseline: usize,
+    /// Change from baseline (current - baseline).
+    pub delta: i64,
+}
+
+/// Baseline match statistics. Shows how many baseline entries existed and how
+/// many matched current issues. Useful for detecting stale baselines
+/// programmatically. Only present in `CheckOutput` when `--baseline` is used.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BaselineMatch {
+    /// Total number of entries in the loaded baseline file.
+    pub entries: usize,
+    /// Number of baseline entries that matched current issues and were
+    /// filtered.
+    pub matched: usize,
+}
+
+/// Result of regression detection (`--fail-on-regression`). Compares current
+/// issue counts against a baseline from config or an explicit file.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RegressionResult {
+    /// Outcome of the regression check.
+    pub status: RegressionStatus,
+    /// Baseline total before the change. Absent when status is `skipped`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_total: Option<i64>,
+    /// Current total after the change. Absent when status is `skipped`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_total: Option<i64>,
+    /// Difference current - baseline. Absent when status is `skipped`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delta: Option<i64>,
+    /// Configured tolerance, interpreted per [`RegressionToleranceKind`].
+    /// Absent when status is `skipped`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tolerance: Option<f64>,
+    /// Interpretation of the tolerance value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tolerance_kind: Option<RegressionToleranceKind>,
+    /// Whether the regression exceeded the tolerance.
+    pub exceeded: bool,
+    /// Only present when status is `skipped`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Status of a regression-check pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum RegressionStatus {
+    /// Issue count within tolerance.
+    Pass,
+    /// Issue count exceeded tolerance.
+    Exceeded,
+    /// Regression check did not run (missing baseline, etc.).
+    Skipped,
+}
+
+/// Interpretation of [`RegressionResult::tolerance`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum RegressionToleranceKind {
+    /// Tolerance is interpreted as an absolute issue-count delta.
+    Absolute,
+    /// Tolerance is interpreted as a percentage of the baseline total.
+    Percentage,
+}
+
+/// Metric and rule definitions emitted under `_meta` when `--explain` is
+/// passed (always present in MCP responses). Helps AI agents and CI systems
+/// interpret metric values without re-reading the docs site.
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct Meta {
+    /// URL to the documentation page for this command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs: Option<String>,
+    /// Per-metric definitions: name, description, range, interpretation.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metrics: BTreeMap<String, MetaMetric>,
+    /// Per-rule definitions for check command output.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub rules: BTreeMap<String, MetaRule>,
+}
+
+/// Single-metric definition inside [`Meta::metrics`].
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MetaMetric {
+    /// Human-readable metric name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// What this metric measures and how it is computed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Valid value range (e.g., `"[0, 100]"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<String>,
+    /// How to read the value (e.g., `"lower is better"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interpretation: Option<String>,
+}
+
+/// Single-rule definition inside [`Meta::rules`].
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MetaRule {
+    /// Human-readable rule name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// What this rule detects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// URL to the rule documentation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs: Option<String>,
+}

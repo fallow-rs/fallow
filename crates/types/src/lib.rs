@@ -7,9 +7,15 @@
 
 /// File discovery types: discovered files, file IDs, and entry points.
 pub mod discover;
+/// JSON-output envelope and utility types: `CheckOutput`, `HealthOutput`, ...
+/// plus `SchemaVersion`, `Meta`, `BaselineDeltas`, and friends. Gated on the
+/// `schema` cargo feature; the JSON emission layer adopts them via the
+/// `schema-emit` flow.
+#[cfg(feature = "schema")]
+pub mod envelope;
 /// Module extraction types: exports, imports, re-exports, and member info.
 pub mod extract;
-/// JSON-output augmentation types: `IssueAction` enum + variants, `AuditIntroduced`.
+/// JSON-output augmentation types: `IssueAction` enum + variants.
 /// Schema-side counterpart of the augmentations the JSON layer adds to each
 /// finding. Gated on the `schema` cargo feature so the (rare) consumers of
 /// the typed output contract opt in explicitly; the JSON emission path will

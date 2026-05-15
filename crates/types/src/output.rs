@@ -15,15 +15,6 @@
 
 use serde::Serialize;
 
-/// Marker emitted on each finding when `fallow audit --format json` runs with
-/// a base ref. `true` means the finding's structural key was not present at
-/// the base ref (introduced by the current changeset); `false` means it was
-/// inherited from the base ref.
-///
-/// Outside of audit sub-results the field is omitted, hence the wrapping
-/// `Option<...>` on every output struct.
-pub type AuditIntroduced = bool;
-
 /// A suggested action attached to a finding in the JSON output. Each finding
 /// carries an `actions` array; consumers (agents, IDE clients, CI bots) can
 /// dispatch on the `type` discriminant to choose the right remediation.

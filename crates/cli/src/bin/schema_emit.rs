@@ -45,6 +45,11 @@ use fallow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
     RefactoringKind, RefactoringSuggestion,
 };
+use fallow_types::envelope::{
+    AuditIntroduced, BaselineCategoryDelta, BaselineDeltas, BaselineMatch, CheckSummary, ElapsedMs,
+    EntryPoints, Meta, MetaMetric, MetaRule, RegressionResult, RegressionStatus,
+    RegressionToleranceKind, SchemaVersion, ToolVersion,
+};
 use fallow_types::extract::MemberKind;
 use fallow_types::output::{
     AddToConfigAction, AddToConfigKind, AddToConfigValue, FixAction, FixActionType,
@@ -222,6 +227,22 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "RefactoringTargetAction",
         "UntestedExportAction",
         "UntestedFileAction",
+        // crates/types/src/envelope.rs - shared envelope / utility shapes.
+        // Scalar utility newtypes (SchemaVersion / ToolVersion / ElapsedMs /
+        // AuditIntroduced) have no properties to drift-check; they are
+        // registered so refs from envelopes resolve and so future shape
+        // tightening (range constraints, enum variants) flows through the
+        // gate.
+        "AuditIntroduced",
+        "BaselineDeltas",
+        "BaselineMatch",
+        "CheckSummary",
+        "ElapsedMs",
+        "EntryPoints",
+        "Meta",
+        "RegressionResult",
+        "SchemaVersion",
+        "ToolVersion",
         // crates/cli/src/health_types/runtime_coverage.rs - per-finding
         // helpers + enums emitted as separate definitions in the
         // committed schema. The full subtree is drift-checked so a
@@ -457,6 +478,23 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<VitalSignsCounts>();
     let _ = generator.subschema_for::<RiskProfile>();
     let _ = generator.subschema_for::<RuntimeCoverageReport>();
+
+    // Envelope and utility shapes (crates/types/src/envelope.rs).
+    let _ = generator.subschema_for::<SchemaVersion>();
+    let _ = generator.subschema_for::<ToolVersion>();
+    let _ = generator.subschema_for::<ElapsedMs>();
+    let _ = generator.subschema_for::<AuditIntroduced>();
+    let _ = generator.subschema_for::<EntryPoints>();
+    let _ = generator.subschema_for::<CheckSummary>();
+    let _ = generator.subschema_for::<BaselineDeltas>();
+    let _ = generator.subschema_for::<BaselineCategoryDelta>();
+    let _ = generator.subschema_for::<BaselineMatch>();
+    let _ = generator.subschema_for::<RegressionResult>();
+    let _ = generator.subschema_for::<RegressionStatus>();
+    let _ = generator.subschema_for::<RegressionToleranceKind>();
+    let _ = generator.subschema_for::<Meta>();
+    let _ = generator.subschema_for::<MetaMetric>();
+    let _ = generator.subschema_for::<MetaRule>();
 
     // Per-finding action wrapper types (crates/types/src/output_health.rs).
     let _ = generator.subschema_for::<HealthFindingAction>();
