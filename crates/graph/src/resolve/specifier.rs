@@ -34,10 +34,24 @@ pub(super) fn create_resolver(active_plugins: &[String], extra_conditions: &[Str
         // Support TypeScript's node16/nodenext module resolution where .ts files
         // are imported with .js extensions (e.g., `import './api.js'` for `api.ts`).
         extension_alias: vec![
+            // Glimmer single-file components live in `.gts` / `.gjs` files
+            // but the canonical TypeScript-bundler / Glint convention is to
+            // write the import with a `.ts` (or `.js`) extension and have
+            // the resolver pick up the Glimmer sibling. `.gts` / `.gjs` are
+            // framework-specific extensions that don't collide with anything
+            // else, so this is applied unconditionally rather than gated on
+            // the Ember plugin.
             (
                 ".js".into(),
-                vec![".ts".into(), ".tsx".into(), ".js".into()],
+                vec![
+                    ".ts".into(),
+                    ".tsx".into(),
+                    ".gts".into(),
+                    ".js".into(),
+                    ".gjs".into(),
+                ],
             ),
+            (".ts".into(), vec![".gts".into(), ".ts".into()]),
             (".jsx".into(), vec![".tsx".into(), ".jsx".into()]),
             (".mjs".into(), vec![".mts".into(), ".mjs".into()]),
             (".cjs".into(), vec![".cts".into(), ".cjs".into()]),
