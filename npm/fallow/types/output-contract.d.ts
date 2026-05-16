@@ -175,6 +175,10 @@ export type RegressionStatus = ("pass" | "exceeded" | "skipped")
  */
 export type RegressionToleranceKind = ("absolute" | "percentage")
 /**
+ * The kind of refactoring suggested for a clone family.
+ */
+export type RefactoringKind = ("ExtractFunction" | "ExtractModule")
+/**
  * Which complexity threshold was exceeded.
  */
 export type ExceededThreshold = ("cyclomatic" | "cognitive" | "both" | "crap" | "cyclomatic_crap" | "cognitive_crap" | "all")
@@ -344,7 +348,7 @@ export type CoverageSetupSchemaVersion = "1"
 /**
  * Framework label inside coverage setup output.
  */
-export type CoverageSetupFramework = ("nextjs" | "nest_js" | "nuxt" | "svelte_kit" | "astro" | "remix" | "vite" | "plain_node" | "unknown")
+export type CoverageSetupFramework = ("nextjs" | "nestjs" | "nuxt" | "sveltekit" | "astro" | "remix" | "vite" | "plain_node" | "unknown")
 /**
  * Package manager label inside coverage setup output.
  */
@@ -1696,11 +1700,11 @@ suggestions: RefactoringSuggestion[]
  */
 actions: CloneFamilyAction[]
 }
-export interface RefactoringSuggestion {
 /**
- * What kind of refactoring is suggested.
+ * A refactoring suggestion for a clone family.
  */
-kind: ("ExtractFunction" | "ExtractModule")
+export interface RefactoringSuggestion {
+kind: RefactoringKind
 /**
  * Human-readable description of the suggestion.
  */
@@ -1758,7 +1762,7 @@ shared_files: string[]
 total_lines: number
 }
 /**
- * Aggregate duplication statistics for the analyzed project.
+ * Aggregate duplication statistics.
  */
 export interface DuplicationStats {
 /**
@@ -1786,19 +1790,22 @@ total_tokens: number
  */
 duplicated_tokens: number
 /**
- * Number of clone groups in the reported `clone_groups[]` array. Matches `clone_groups[].length` post `minOccurrences` filtering; the count of groups hidden by the filter is exposed in `clone_groups_below_min_occurrences`.
+ * Number of clone groups found.
  */
 clone_groups: number
 /**
- * Total clone instances across all reported groups. Matches `clone_groups[]`'s flattened instance count post `minOccurrences` filtering.
+ * Total clone instances across all groups.
  */
 clone_instances: number
 /**
- * Percentage of duplicated lines (0.0 to 100.0). Always reflects the FULL corpus, computed BEFORE the `minOccurrences` filter so trend lines and `threshold` gates stay stable when the filter changes.
+ * Percentage of duplicated lines (0.0 - 100.0). Computed BEFORE the
+ * `minOccurrences` filter so trend lines and threshold gates stay
+ * stable when the filter changes.
  */
 duplication_percentage: number
 /**
- * Number of clone groups hidden by `duplicates.minOccurrences`. Absent (or `0`) when the filter is at its default of `2` and nothing was hidden. Pre-filter clone group count = `clone_groups + clone_groups_below_min_occurrences`.
+ * Number of clone groups hidden by the `minOccurrences` filter.
+ * Always 0 when the filter is at its default of 2.
  */
 clone_groups_below_min_occurrences?: number
 }

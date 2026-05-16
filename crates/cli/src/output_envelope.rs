@@ -116,10 +116,12 @@ pub enum CoverageSetupFramework {
     #[serde(rename = "nextjs")]
     NextJs,
     /// NestJS (`framework: "nestjs"`).
+    #[serde(rename = "nestjs")]
     NestJs,
     /// Nuxt (`framework: "nuxt"`).
     Nuxt,
     /// SvelteKit (`framework: "sveltekit"`).
+    #[serde(rename = "sveltekit")]
     SvelteKit,
     /// Astro (`framework: "astro"`).
     Astro,

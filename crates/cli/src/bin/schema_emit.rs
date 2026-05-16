@@ -315,12 +315,12 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
 /// added here, otherwise the emitted schema will under-document the JSON
 /// output and the drift test will flag the missing entry.
 ///
-/// Whether `actions` is `required` on each entry is decided by the
-/// committed schema, not by the augmentation: today some finding types list
-/// `actions` in their `required` array (`UnusedFile`, `UnusedExport`, ...)
-/// while others do not (`EmptyCatalogGroup`, `MisconfiguredDependencyOverride`,
-/// ...). The required-flag inconsistency is tracked by a follow-up; the
-/// augmentation step itself is non-opinionated.
+/// `augment_finding_definition` unconditionally pushes `"actions"` into the
+/// per-finding `required` array. The runtime always emits `actions: [...]`
+/// (possibly empty) on every finding, so requiring the field on the wire is
+/// honest. The previous "augmentation is non-opinionated" stance was a
+/// pre-Phase-8 escape hatch that documented some finding types as having
+/// optional `actions` while emitting them; it is retired.
 fn finding_definition_names() -> &'static [&'static str] {
     // Each entry MUST appear in `actions_for_issue_type` (dead-code findings)
     // or `inject_health_actions` (health findings) in
@@ -662,16 +662,20 @@ fn merge_with_committed(derived: &Map<String, Value>) -> Result<Value, String> {
 
     // Schemars produces transitively-referenced helper definitions for every
     // typed enum / payload subtype on the in-scope structs (`FixActionType`,
-    // the kebab-case kind enums, `DependencyLocation`,
-    // `MemberKind`, etc.). The drift gate only compares the explicit
-    // `derived_definition_names()` list, but the emitted schema's `$ref`
-    // graph still points at every helper, so a regenerated schema with any
-    // missing helper has dangling references and is invalid. Insert every
-    // remaining derived definition into the merged document so the emitted
-    // schema is self-consistent. Names already populated above (the in-scope
-    // primary types) are not overwritten.
+    // `SuppressAutoFixable`, the kebab-case kind enums, `DependencyLocation`,
+    // `MemberKind`, `CoverageSetupFramework`, etc.). After Phase 8 every
+    // helper that appears in `docs/output-schema.json` is a derived artifact,
+    // so always overwrite the committed entry rather than preserving it. The
+    // previous "skip if already present" guard silently froze the helper
+    // shape on the first regen; any subsequent change to a serde rename or
+    // schemars attribute would be invisible until the helper was manually
+    // deleted from the committed file. The explicit `derived_definition_names()`
+    // list above is the drift-checked surface; this loop fills in every
+    // transitively-referenced helper so the `$ref` graph resolves.
+    let in_scope: rustc_hash::FxHashSet<&'static str> =
+        derived_definition_names().iter().copied().collect();
     for (name, value) in derived {
-        if definitions.contains_key(name) {
+        if in_scope.contains(name.as_str()) {
             continue;
         }
         let mut value = value.clone();
@@ -1089,12 +1093,13 @@ mod drift_tests {
         let committed = committed_definitions();
         let derived = derived_definitions_for_drift();
         // Augmentation keys live only in the committed schema for finding
-        // types because they get grafted on by `augment_finding_definition`,
-        // or for envelopes whose Rust side leaves the property as a
-        // post-pass `serde_json::Value` insertion (`actions_meta` on
-        // `HealthOutput` is injected by `inject_health_actions` rather than
-        // modelled as a typed `Option<...>` field on the envelope struct).
-        // Permit them to differ in either direction without firing the gate.
+        // types because they get grafted on by `augment_finding_definition`.
+        // `actions_meta` was previously here for the `HealthOutput` post-pass
+        // injection, but Phase 8 modelled it as `Option<HealthActionsMeta>` on
+        // `HealthReport` (flattened into `HealthOutput`) so schemars emits the
+        // field natively; the runtime `inject_health_actions` post-pass still
+        // populates it. Permit `actions` / `introduced` to differ between
+        // sides without firing the gate; everything else must match.
         const AUGMENTATION_KEYS: &[&str] = &["actions", "introduced"];
 
         let mut failures: Vec<String> = Vec::new();

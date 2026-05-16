@@ -4619,19 +4619,10 @@
     },
     "RefactoringSuggestion": {
       "type": "object",
-      "required": [
-        "kind",
-        "description",
-        "estimated_savings"
-      ],
       "properties": {
         "kind": {
-          "type": "string",
-          "enum": [
-            "ExtractFunction",
-            "ExtractModule"
-          ],
-          "description": "What kind of refactoring is suggested."
+          "description": "What kind of refactoring is suggested.",
+          "$ref": "#/definitions/RefactoringKind"
         },
         "description": {
           "type": "string",
@@ -4641,22 +4632,16 @@
           "type": "integer",
           "description": "Estimated lines that could be eliminated."
         }
-      }
+      },
+      "required": [
+        "kind",
+        "description",
+        "estimated_savings"
+      ],
+      "description": "A refactoring suggestion for a clone family."
     },
     "DuplicationStats": {
       "type": "object",
-      "required": [
-        "total_files",
-        "files_with_clones",
-        "total_lines",
-        "duplicated_lines",
-        "total_tokens",
-        "duplicated_tokens",
-        "clone_groups",
-        "clone_instances",
-        "duplication_percentage"
-      ],
-      "description": "Aggregate duplication statistics for the analyzed project.",
       "properties": {
         "total_files": {
           "type": "integer",
@@ -4684,23 +4669,33 @@
         },
         "clone_groups": {
           "type": "integer",
-          "description": "Number of clone groups in the reported `clone_groups[]` array. Matches `clone_groups[].length` post `minOccurrences` filtering; the count of groups hidden by the filter is exposed in `clone_groups_below_min_occurrences`."
+          "description": "Number of clone groups found."
         },
         "clone_instances": {
           "type": "integer",
-          "description": "Total clone instances across all reported groups. Matches `clone_groups[]`'s flattened instance count post `minOccurrences` filtering."
+          "description": "Total clone instances across all groups."
         },
         "duplication_percentage": {
           "type": "number",
-          "description": "Percentage of duplicated lines (0.0 to 100.0). Always reflects the FULL corpus, computed BEFORE the `minOccurrences` filter so trend lines and `threshold` gates stay stable when the filter changes.",
-          "minimum": 0,
-          "maximum": 100
+          "description": "Percentage of duplicated lines (0.0 - 100.0). Computed BEFORE the\n`minOccurrences` filter so trend lines and threshold gates stay\nstable when the filter changes."
         },
         "clone_groups_below_min_occurrences": {
           "type": "integer",
-          "description": "Number of clone groups hidden by `duplicates.minOccurrences`. Absent (or `0`) when the filter is at its default of `2` and nothing was hidden. Pre-filter clone group count = `clone_groups + clone_groups_below_min_occurrences`."
+          "description": "Number of clone groups hidden by the `minOccurrences` filter.\nAlways 0 when the filter is at its default of 2."
         }
-      }
+      },
+      "required": [
+        "total_files",
+        "files_with_clones",
+        "total_lines",
+        "duplicated_lines",
+        "total_tokens",
+        "duplicated_tokens",
+        "clone_groups",
+        "clone_instances",
+        "duplication_percentage"
+      ],
+      "description": "Aggregate duplication statistics."
     },
     "RegressionResult": {
       "type": "object",
@@ -6756,7 +6751,7 @@
         },
         {
           "type": "string",
-          "const": "nest_js",
+          "const": "nestjs",
           "description": "NestJS (`framework: \"nestjs\"`)."
         },
         {
@@ -6766,7 +6761,7 @@
         },
         {
           "type": "string",
-          "const": "svelte_kit",
+          "const": "sveltekit",
           "description": "SvelteKit (`framework: \"sveltekit\"`)."
         },
         {
