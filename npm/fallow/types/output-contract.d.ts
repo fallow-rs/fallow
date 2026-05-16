@@ -1790,11 +1790,15 @@ total_tokens: number
  */
 duplicated_tokens: number
 /**
- * Number of clone groups found.
+ * Number of clone groups in the reported `clone_groups[]` array.
+ * Matches `clone_groups[].length` post `minOccurrences` filtering; the
+ * count of groups hidden by the filter is exposed in
+ * `clone_groups_below_min_occurrences`.
  */
 clone_groups: number
 /**
- * Total clone instances across all groups.
+ * Total clone instances across all reported groups. Matches the sum of
+ * `clone_groups[].locations[].length` post `minOccurrences` filtering.
  */
 clone_instances: number
 /**

@@ -4669,11 +4669,11 @@
         },
         "clone_groups": {
           "type": "integer",
-          "description": "Number of clone groups found."
+          "description": "Number of clone groups in the reported `clone_groups[]` array.\nMatches `clone_groups[].length` post `minOccurrences` filtering; the\ncount of groups hidden by the filter is exposed in\n`clone_groups_below_min_occurrences`."
         },
         "clone_instances": {
           "type": "integer",
-          "description": "Total clone instances across all groups."
+          "description": "Total clone instances across all reported groups. Matches the sum of\n`clone_groups[].locations[].length` post `minOccurrences` filtering."
         },
         "duplication_percentage": {
           "type": "number",

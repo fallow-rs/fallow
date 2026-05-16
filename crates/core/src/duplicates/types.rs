@@ -194,9 +194,13 @@ pub struct DuplicationStats {
     pub total_tokens: usize,
     /// Tokens that are part of at least one clone.
     pub duplicated_tokens: usize,
-    /// Number of clone groups found.
+    /// Number of clone groups in the reported `clone_groups[]` array.
+    /// Matches `clone_groups[].length` post `minOccurrences` filtering; the
+    /// count of groups hidden by the filter is exposed in
+    /// `clone_groups_below_min_occurrences`.
     pub clone_groups: usize,
-    /// Total clone instances across all groups.
+    /// Total clone instances across all reported groups. Matches the sum of
+    /// `clone_groups[].locations[].length` post `minOccurrences` filtering.
     pub clone_instances: usize,
     /// Percentage of duplicated lines (0.0 - 100.0). Computed BEFORE the
     /// `minOccurrences` filter so trend lines and threshold gates stay
