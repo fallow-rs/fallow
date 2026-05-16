@@ -25,6 +25,7 @@ const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 
 /// Verdict for the audit command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum AuditVerdict {
     /// No issues in changed files.
@@ -36,7 +37,8 @@ pub enum AuditVerdict {
 }
 
 /// Per-category summary counts for the audit result.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AuditSummary {
     pub dead_code_issues: usize,
     pub dead_code_has_errors: bool,
@@ -46,7 +48,8 @@ pub struct AuditSummary {
 }
 
 /// New-vs-inherited issue counts for audit.
-#[derive(Debug, Default, serde::Serialize)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AuditAttribution {
     pub gate: AuditGate,
     pub dead_code_introduced: usize,

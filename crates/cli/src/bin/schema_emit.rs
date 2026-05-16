@@ -42,13 +42,13 @@ use fallow_cli::health_types::{
     VitalSignsCounts,
 };
 use fallow_cli::output_envelope::{
-    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CodeClimateIssue, CodeClimateIssueKind,
-    CodeClimateLines, CodeClimateLocation, CodeClimateOutput, CodeClimateSeverity, CombinedOutput,
-    DupesOutput, ExplainOutput, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
-    GitLabReviewPosition, GitLabReviewPositionType, GroupByMode, HealthOutput,
-    ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta,
-    ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewProvider, ReviewReconcileOutput,
-    ReviewReconcileSchema,
+    AuditCommand, AuditOutput, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CodeClimateIssue,
+    CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation, CodeClimateOutput,
+    CodeClimateSeverity, CombinedOutput, DupesOutput, ExplainOutput, GitHubReviewComment,
+    GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition, GitLabReviewPositionType,
+    GroupByMode, HealthOutput, ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent,
+    ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewProvider,
+    ReviewReconcileOutput, ReviewReconcileSchema,
 };
 use fallow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
@@ -272,6 +272,7 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "RuntimeCoverageVerdict",
         "RuntimeCoverageWatermark",
         // crates/cli/src/output_envelope.rs - per-command envelope structs.
+        "AuditOutput",
         "CheckGroupedEntry",
         "CheckGroupedOutput",
         "CheckOutput",
@@ -522,6 +523,8 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<MetaRule>();
 
     // Per-command envelope structs (crates/cli/src/output_envelope.rs).
+    let _ = generator.subschema_for::<AuditOutput>();
+    let _ = generator.subschema_for::<AuditCommand>();
     let _ = generator.subschema_for::<CombinedOutput>();
     let _ = generator.subschema_for::<CheckOutput>();
     let _ = generator.subschema_for::<CheckGroupedOutput>();

@@ -44,7 +44,73 @@ use fallow_types::envelope::{
 };
 use serde::Serialize;
 
+use crate::audit::{AuditAttribution, AuditSummary, AuditVerdict};
 use crate::health_types::{HealthGroup, HealthReport};
+
+/// Envelope emitted by `fallow audit --format json`. Combines dead code,
+/// complexity, and duplication scoped to changed files with a verdict
+/// (`pass` / `warn` / `fail`), a per-category summary, optional
+/// new-vs-inherited attribution, and full sub-results.
+///
+/// Like [`CombinedOutput`], `audit`'s `duplication` and `complexity`
+/// sub-keys hold bare body types (`DuplicationReport` / `HealthReport`)
+/// rather than the per-command envelope shapes; `dead_code` is the full
+/// [`CheckOutput`] envelope. The committed schema's `$ref`s for those
+/// sub-keys are the pre-Phase-5 shape (see the matching note on
+/// `CombinedOutput`); the property-key drift gate only checks key
+/// membership.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AuditOutput {
+    /// Schema version for this output format.
+    pub schema_version: SchemaVersion,
+    /// Fallow tool version that produced this output.
+    pub version: ToolVersion,
+    /// Singleton command discriminator (always `"audit"`).
+    pub command: AuditCommand,
+    /// Overall verdict: `pass` (no issues), `warn` (warn-severity only,
+    /// exit 0), or `fail` (error-severity issues, exit 1).
+    pub verdict: AuditVerdict,
+    /// Number of files changed between base ref and HEAD.
+    pub changed_files_count: u32,
+    /// Git ref used as comparison base (explicit or auto-detected).
+    pub base_ref: String,
+    /// Short SHA of HEAD. Omitted when git is unavailable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_sha: Option<String>,
+    /// Analysis duration in milliseconds.
+    pub elapsed_ms: ElapsedMs,
+    /// Only emitted when `--performance` is set. `true` means audit reused
+    /// the current run's keys as the base snapshot (the docs-only-diff
+    /// fast path); `false` means the regular base worktree analysis ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_snapshot_skipped: Option<bool>,
+    /// Per-category summary counts.
+    pub summary: AuditSummary,
+    /// Counts split by whether each finding was introduced by the current
+    /// changeset or already existed at the base ref.
+    pub attribution: AuditAttribution,
+    /// Full dead-code results. Absent when no changed files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dead_code: Option<CheckOutput>,
+    /// Full duplication results (bare body, not the full `DupesOutput`
+    /// envelope). Absent when no changed files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duplication: Option<DuplicationReport>,
+    /// Full complexity results (bare body, not the full `HealthOutput`
+    /// envelope). Absent when no changed files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub complexity: Option<HealthReport>,
+}
+
+/// Singleton `command` discriminator for [`AuditOutput`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum AuditCommand {
+    /// The only valid command discriminator for `AuditOutput`.
+    Audit,
+}
 
 /// Envelope emitted by bare `fallow --format json` (the combined
 /// invocation). Wraps the per-analysis sub-results inside a single envelope

@@ -15,6 +15,12 @@ mod api;
     unused_imports,
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
+pub mod audit;
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse"
+)]
 mod baseline;
 #[allow(
     dead_code,
