@@ -42,7 +42,12 @@ use fallow_cli::health_types::{
     VitalSignsCounts,
 };
 use fallow_cli::output_envelope::{
-    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, DupesOutput, GroupByMode, HealthOutput,
+    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CodeClimateIssue, CodeClimateIssueKind,
+    CodeClimateLines, CodeClimateLocation, CodeClimateOutput, CodeClimateSeverity, DupesOutput,
+    ExplainOutput, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
+    GitLabReviewPositionType, GroupByMode, HealthOutput, ReviewCheckConclusion, ReviewComment,
+    ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema,
+    ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema,
 };
 use fallow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
@@ -269,9 +274,17 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "CheckGroupedEntry",
         "CheckGroupedOutput",
         "CheckOutput",
+        "CodeClimateIssue",
+        "CodeClimateOutput",
         "DupesOutput",
+        "ExplainOutput",
+        "GitHubReviewComment",
+        "GitLabReviewComment",
+        "GitLabReviewPosition",
         "HealthGroup",
         "HealthOutput",
+        "ReviewEnvelopeOutput",
+        "ReviewReconcileOutput",
     ]
 }
 
@@ -515,6 +528,27 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<fallow_cli::health_types::HealthGroup>();
     let _ = generator.subschema_for::<fallow_cli::health_types::HealthReport>();
     let _ = generator.subschema_for::<GroupByMode>();
+    let _ = generator.subschema_for::<ExplainOutput>();
+    let _ = generator.subschema_for::<CodeClimateOutput>();
+    let _ = generator.subschema_for::<CodeClimateIssue>();
+    let _ = generator.subschema_for::<CodeClimateIssueKind>();
+    let _ = generator.subschema_for::<CodeClimateSeverity>();
+    let _ = generator.subschema_for::<CodeClimateLocation>();
+    let _ = generator.subschema_for::<CodeClimateLines>();
+    let _ = generator.subschema_for::<ReviewEnvelopeOutput>();
+    let _ = generator.subschema_for::<ReviewEnvelopeEvent>();
+    let _ = generator.subschema_for::<ReviewComment>();
+    let _ = generator.subschema_for::<GitHubReviewComment>();
+    let _ = generator.subschema_for::<GitHubReviewSide>();
+    let _ = generator.subschema_for::<GitLabReviewComment>();
+    let _ = generator.subschema_for::<GitLabReviewPosition>();
+    let _ = generator.subschema_for::<GitLabReviewPositionType>();
+    let _ = generator.subschema_for::<ReviewEnvelopeMeta>();
+    let _ = generator.subschema_for::<ReviewEnvelopeSchema>();
+    let _ = generator.subschema_for::<ReviewProvider>();
+    let _ = generator.subschema_for::<ReviewCheckConclusion>();
+    let _ = generator.subschema_for::<ReviewReconcileOutput>();
+    let _ = generator.subschema_for::<ReviewReconcileSchema>();
 
     // Per-finding action wrapper types (crates/types/src/output_health.rs).
     let _ = generator.subschema_for::<HealthFindingAction>();

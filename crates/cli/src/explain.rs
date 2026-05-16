@@ -477,18 +477,25 @@ pub fn run_explain(issue_type: &str, output: OutputFormat) -> ExitCode {
     };
     let guide = rule_guide(rule);
     match output {
-        OutputFormat::Json => crate::report::emit_json(
-            &json!({
-                "id": rule.id,
-                "name": rule.name,
-                "summary": rule.short,
-                "rationale": rule.full,
-                "example": guide.example,
-                "how_to_fix": guide.how_to_fix,
-                "docs": rule_docs_url(rule),
-            }),
-            "explain",
-        ),
+        OutputFormat::Json => {
+            let envelope = crate::output_envelope::ExplainOutput {
+                id: rule.id.to_string(),
+                name: rule.name.to_string(),
+                summary: rule.short.to_string(),
+                rationale: rule.full.to_string(),
+                example: guide.example.to_string(),
+                how_to_fix: guide.how_to_fix.to_string(),
+                docs: rule_docs_url(rule),
+            };
+            match serde_json::to_value(&envelope) {
+                Ok(value) => crate::report::emit_json(&value, "explain"),
+                Err(e) => crate::error::emit_error(
+                    &format!("JSON serialization error: {e}"),
+                    2,
+                    output,
+                ),
+            }
+        }
         OutputFormat::Human => print_explain_human(rule, &guide),
         OutputFormat::Compact => print_explain_compact(rule),
         OutputFormat::Markdown => print_explain_markdown(rule, &guide),

@@ -126,6 +126,10 @@ fn reconcile_review(
     emit_reconcile_result(provider, target, &envelope, opts, &plan, &applied)
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "comment / fingerprint counts on a single PR are bounded well below u32::MAX"
+)]
 fn emit_reconcile_result(
     provider: CiProvider,
     target: Option<&str>,
@@ -134,29 +138,34 @@ fn emit_reconcile_result(
     plan: &ReconcilePlan,
     applied: &ApplyResult,
 ) -> ExitCode {
-    crate::report::emit_json(
-        &serde_json::json!({
-            "schema": "fallow-review-reconcile/v1",
-            "provider": match provider {
-                CiProvider::Github => "github",
-                CiProvider::Gitlab => "gitlab",
-            },
-            "target": target,
-            "dry_run": opts.dry_run,
-            "comments": envelope_comments_len(envelope),
-            "current_fingerprints": plan.current.len(),
-            "existing_fingerprints": plan.existing.len(),
-            "new_fingerprints": plan.new.len(),
-            "stale_fingerprints": plan.stale.len(),
-            "new": &plan.new,
-            "stale": &plan.stale,
-            "provider_warning": &plan.provider_warning,
-            "resolution_comments_posted": applied.resolution_comments_posted,
-            "threads_resolved": applied.threads_resolved,
-            "apply_errors": applied.errors,
-        }),
-        "review reconcile",
-    )
+    let envelope_struct = crate::output_envelope::ReviewReconcileOutput {
+        schema: crate::output_envelope::ReviewReconcileSchema::V1,
+        provider: match provider {
+            CiProvider::Github => crate::output_envelope::ReviewProvider::Github,
+            CiProvider::Gitlab => crate::output_envelope::ReviewProvider::Gitlab,
+        },
+        target: target.map(str::to_owned),
+        dry_run: opts.dry_run,
+        comments: envelope_comments_len(envelope) as u32,
+        current_fingerprints: plan.current.len() as u32,
+        existing_fingerprints: plan.existing.len() as u32,
+        new_fingerprints: plan.new.len() as u32,
+        stale_fingerprints: plan.stale.len() as u32,
+        new: plan.new.clone(),
+        stale: plan.stale.clone(),
+        provider_warning: plan.provider_warning.clone(),
+        resolution_comments_posted: applied.resolution_comments_posted as u32,
+        threads_resolved: applied.threads_resolved as u32,
+        apply_errors: applied.errors.clone(),
+    };
+    match serde_json::to_value(&envelope_struct) {
+        Ok(value) => crate::report::emit_json(&value, "review reconcile"),
+        Err(e) => emit_error(
+            &format!("JSON serialization error: {e}"),
+            2,
+            fallow_config::OutputFormat::Json,
+        ),
+    }
 }
 
 fn read_envelope(path: &Path) -> Result<Value, String> {

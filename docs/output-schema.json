@@ -3275,7 +3275,7 @@
     "ReviewReconcileOutput": {
       "title": "fallow ci reconcile-review --format json",
       "type": "object",
-      "required": ["schema", "provider", "target", "dry_run", "comments", "current_fingerprints", "existing_fingerprints", "new_fingerprints", "stale_fingerprints", "new", "stale", "resolution_comments_posted", "threads_resolved", "apply_errors"],
+      "required": ["schema", "provider", "dry_run", "comments", "current_fingerprints", "existing_fingerprints", "new_fingerprints", "stale_fingerprints", "new", "stale", "resolution_comments_posted", "threads_resolved", "apply_errors"],
       "properties": {
         "schema": { "type": "string", "const": "fallow-review-reconcile/v1" },
         "provider": { "type": "string", "enum": ["github", "gitlab"] },

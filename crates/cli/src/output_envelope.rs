@@ -20,6 +20,21 @@
 //! relativisation and the per-finding `actions` injection still run as
 //! post-passes on the `Value` tree because they cross result-type boundaries
 //! that typed wrappers do not.
+//!
+//! The CodeClimate (`CodeClimateOutput` + sub-types) and review-envelope
+//! (`ReviewEnvelopeOutput` + sub-types) shapes are NOT constructed at
+//! runtime today: `crates/cli/src/report/codeclimate.rs` builds CodeClimate
+//! issues via a `cc_issue` helper that returns `serde_json::Value`, and the
+//! review-envelope renderer (`crates/cli/src/report/ci/review.rs`) builds
+//! provider-specific comment payloads via `serde_json::json!`. Migrating
+//! those builders is a follow-up; the types here exist so the drift gate
+//! can lock the schema shape against Rust source even though the runtime
+//! emit is still dynamic.
+
+#![allow(
+    dead_code,
+    reason = "review and codeclimate envelope structs document the schema shape; runtime emit is still Value-based pending a follow-up that swaps each builder"
+)]
 
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
@@ -211,6 +226,318 @@ pub struct HealthOutput {
     /// is passed (always present in MCP responses).
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
+}
+
+/// Envelope emitted by `fallow explain <issue-type> --format json`.
+///
+/// Standalone rule explanation. This command does not run project analysis
+/// and intentionally returns a compact object without `schema_version` /
+/// `version` metadata; consumers that need those should call any other
+/// fallow JSON-producing command.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct ExplainOutput {
+    /// Canonical rule id, for example `fallow/unused-export`.
+    pub id: String,
+    /// Human-readable rule name.
+    pub name: String,
+    /// Short one-line explanation of the issue.
+    pub summary: String,
+    /// Why the issue matters and what fallow checks.
+    pub rationale: String,
+    /// Concrete example of the finding.
+    pub example: String,
+    /// Recommended fix or suppression guidance.
+    pub how_to_fix: String,
+    /// Docs URL for the rule.
+    pub docs: String,
+}
+
+/// Envelope emitted by `fallow --format codeclimate` and
+/// `fallow --format gitlab-codequality`. GitLab Code Quality consumes the
+/// same shape. The wire form is a bare JSON array, not an object.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(transparent)]
+pub struct CodeClimateOutput(pub Vec<CodeClimateIssue>);
+
+/// Single CodeClimate-compatible issue inside [`CodeClimateOutput`].
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CodeClimateIssue {
+    /// Always the literal string `"issue"`.
+    #[serde(rename = "type")]
+    pub kind: CodeClimateIssueKind,
+    /// Fallow rule identifier (always starts with `fallow/`).
+    pub check_name: String,
+    /// Human-readable description of the finding.
+    pub description: String,
+    /// Free-form categories applied by the report renderer.
+    pub categories: Vec<String>,
+    /// CodeClimate-style severity.
+    pub severity: CodeClimateSeverity,
+    /// Stable fingerprint used by CI dashboards to deduplicate findings
+    /// across runs.
+    pub fingerprint: String,
+    /// File path + start line of the finding.
+    pub location: CodeClimateLocation,
+}
+
+/// Discriminator value for [`CodeClimateIssue::kind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum CodeClimateIssueKind {
+    /// The only valid CodeClimate type today.
+    Issue,
+}
+
+/// CodeClimate severity scale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum CodeClimateSeverity {
+    /// Informational.
+    Info,
+    /// Minor finding.
+    Minor,
+    /// Major finding.
+    Major,
+    /// Critical finding.
+    Critical,
+    /// Blocker (highest severity).
+    Blocker,
+}
+
+/// Location block inside [`CodeClimateIssue::location`].
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CodeClimateLocation {
+    /// File path relative to the analysed root.
+    pub path: String,
+    /// Wrapper carrying the begin line so the schema lines up with
+    /// CodeClimate's spec.
+    pub lines: CodeClimateLines,
+}
+
+/// `lines.begin` for [`CodeClimateLocation`].
+#[derive(Debug, Clone, Copy, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CodeClimateLines {
+    /// 1-based start line.
+    pub begin: u32,
+}
+
+/// Envelope emitted by `fallow --format review-github` / `review-gitlab`.
+/// Consumed by `action/scripts/review.sh` and `ci/scripts/review.sh` to
+/// post inline PR / MR review comments.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ReviewEnvelopeOutput {
+    /// GitHub review event. Omitted for GitLab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<ReviewEnvelopeEvent>,
+    /// Review summary body (rendered above per-line comments).
+    pub body: String,
+    /// Per-line comments. Each is either a [`GitHubReviewComment`] or a
+    /// [`GitLabReviewComment`] depending on `meta.provider`.
+    pub comments: Vec<ReviewComment>,
+    /// Envelope metadata block.
+    pub meta: ReviewEnvelopeMeta,
+}
+
+/// Singleton GitHub review-event marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum ReviewEnvelopeEvent {
+    /// GitHub review event for an unblocking comment review.
+    #[serde(rename = "COMMENT")]
+    Comment,
+}
+
+/// Per-line review comment. Schema is an `anyOf` between GitHub and GitLab
+/// shapes; at runtime every entry in a single envelope comes from the same
+/// provider because the envelope is built from one provider's branch in
+/// `crates/cli/src/report/ci/review.rs::render_review_envelope`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(untagged)]
+pub enum ReviewComment {
+    /// GitHub-shaped pull-request review comment.
+    GitHub(GitHubReviewComment),
+    /// GitLab-shaped merge-request discussion comment.
+    GitLab(GitLabReviewComment),
+}
+
+/// GitHub pull-request review comment.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct GitHubReviewComment {
+    /// File path the comment targets, repo-root relative.
+    pub path: String,
+    /// 1-indexed line number the comment targets.
+    pub line: u32,
+    /// Always the literal string `"RIGHT"`; GitHub review comments target
+    /// current-state/new-side lines; deletion-side comments are not modeled
+    /// yet.
+    pub side: GitHubReviewSide,
+    /// Markdown body of the comment.
+    pub body: String,
+    /// Stable fingerprint for the comment, used by `fallow ci
+    /// reconcile-review` to detect carryover comments across PR revisions.
+    pub fingerprint: String,
+}
+
+/// Singleton side discriminator for [`GitHubReviewComment::side`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum GitHubReviewSide {
+    /// GitHub review comments target the new-side line range.
+    #[serde(rename = "RIGHT")]
+    Right,
+}
+
+/// GitLab merge-request discussion comment.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct GitLabReviewComment {
+    /// Markdown body of the comment.
+    pub body: String,
+    /// Position block describing where the comment attaches on the diff.
+    pub position: GitLabReviewPosition,
+    /// Stable fingerprint for the comment.
+    pub fingerprint: String,
+}
+
+/// `position` block inside [`GitLabReviewComment`]. Mirrors the GitLab
+/// merge-request discussion-position API.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct GitLabReviewPosition {
+    /// Merge-request base SHA.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_sha: Option<String>,
+    /// Merge-request start SHA.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_sha: Option<String>,
+    /// Merge-request head SHA.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_sha: Option<String>,
+    /// Always `"text"` today.
+    pub position_type: GitLabReviewPositionType,
+    /// File path on the base side.
+    pub old_path: String,
+    /// File path on the head side.
+    pub new_path: String,
+    /// 1-indexed line on the head side.
+    pub new_line: u32,
+}
+
+/// Singleton position-type discriminator for [`GitLabReviewPosition`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum GitLabReviewPositionType {
+    /// Plain-text diff position (only kind fallow emits today).
+    Text,
+}
+
+/// `meta` block inside [`ReviewEnvelopeOutput`].
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ReviewEnvelopeMeta {
+    /// Envelope schema marker, always `fallow-review-envelope/v1`.
+    pub schema: ReviewEnvelopeSchema,
+    /// Which provider this envelope is shaped for.
+    pub provider: ReviewProvider,
+    /// Check conclusion derived from the underlying findings. Emitted only
+    /// for GitHub envelopes today.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_conclusion: Option<ReviewCheckConclusion>,
+}
+
+/// Schema-version discriminator for the review envelope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum ReviewEnvelopeSchema {
+    /// First release of the review envelope format.
+    #[serde(rename = "fallow-review-envelope/v1")]
+    V1,
+}
+
+/// Review-envelope provider tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum ReviewProvider {
+    /// GitHub pull-request review envelope.
+    Github,
+    /// GitLab merge-request discussion envelope.
+    Gitlab,
+}
+
+/// `meta.check_conclusion` for the GitHub review envelope. Maps to the
+/// GitHub Checks API conclusion field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum ReviewCheckConclusion {
+    /// No findings.
+    Success,
+    /// Findings but none gated as failure.
+    Neutral,
+    /// At least one finding gated as failure.
+    Failure,
+}
+
+/// Envelope emitted by `fallow ci reconcile-review --format json`. Used by
+/// CI integrations to drive comment carry-over and stale-comment cleanup
+/// across PR / MR revisions.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ReviewReconcileOutput {
+    /// Envelope schema marker, always `fallow-review-reconcile/v1`.
+    pub schema: ReviewReconcileSchema,
+    /// Which provider this reconcile pass was for.
+    pub provider: ReviewProvider,
+    /// PR / MR target identifier supplied to `fallow ci reconcile-review`.
+    /// `null` when the command ran without an explicit target.
+    pub target: Option<String>,
+    /// Whether the reconcile ran in dry-run mode.
+    pub dry_run: bool,
+    /// Number of comments in the supplied review envelope.
+    pub comments: u32,
+    /// Total fingerprints discovered in the supplied envelope.
+    pub current_fingerprints: u32,
+    /// Existing fingerprints already posted on the PR / MR.
+    pub existing_fingerprints: u32,
+    /// Newly-introduced fingerprints (current minus existing).
+    pub new_fingerprints: u32,
+    /// Stale fingerprints (existing minus current).
+    pub stale_fingerprints: u32,
+    /// Identifiers of the new fingerprints (subset of comments).
+    pub new: Vec<String>,
+    /// Identifiers of the stale fingerprints (subset of existing).
+    pub stale: Vec<String>,
+    /// Optional warning when the provider API was unreachable or
+    /// auth-rejected. `null` on the happy path.
+    pub provider_warning: Option<String>,
+    /// Resolution comments actually posted (zero on dry runs).
+    pub resolution_comments_posted: u32,
+    /// Stale review threads actually resolved (zero on dry runs).
+    pub threads_resolved: u32,
+    /// Errors collected during apply, one entry per failure.
+    pub apply_errors: Vec<String>,
+}
+
+/// Schema-version discriminator for the review reconcile envelope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum ReviewReconcileSchema {
+    /// First release of the review reconcile format.
+    #[serde(rename = "fallow-review-reconcile/v1")]
+    V1,
 }
 
 /// Resolver mode label for grouped envelopes (dead-code, dupes, health).
