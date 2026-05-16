@@ -71,12 +71,6 @@ export type FixActionType = ("remove-export" | "delete-file" | "remove-dependenc
  */
 export type SuppressLineKind = "suppress-line"
 /**
- * `auto_fixable` field on suppress actions: always literally `false` per the
- * public contract, but typed as a singleton enum so the derived schema
- * renders it as `"const": false` rather than the generic `boolean`.
- */
-export type SuppressAutoFixable = "false"
-/**
  * Scope marker for line suppressions that span multiple locations.
  */
 export type SuppressLineScope = "per-location"
@@ -732,7 +726,7 @@ path: string
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -776,7 +770,7 @@ type: SuppressLineKind
 /**
  * Always false for suppress actions.
  */
-auto_fixable: SuppressAutoFixable
+auto_fixable: boolean
 /**
  * Human-readable description of the suppression.
  */
@@ -806,7 +800,7 @@ type: SuppressFileKind
 /**
  * Always false for suppress actions.
  */
-auto_fixable: SuppressAutoFixable
+auto_fixable: boolean
 /**
  * Human-readable description of the suppression.
  */
@@ -915,7 +909,7 @@ is_re_export: boolean
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -949,7 +943,7 @@ span_start: number
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -980,7 +974,7 @@ used_in_workspaces?: string[]
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -1014,7 +1008,7 @@ col: number
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -1045,7 +1039,7 @@ specifier_col: number
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -1063,7 +1057,7 @@ imported_from: ImportSite[]
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -1098,7 +1092,7 @@ locations: DuplicateLocation[]
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -1139,7 +1133,7 @@ line: number
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -1162,7 +1156,7 @@ line: number
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -1201,7 +1195,7 @@ is_cross_package?: boolean
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -1239,7 +1233,7 @@ col: number
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -1298,7 +1292,7 @@ hardcoded_consumers?: string[]
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -1320,7 +1314,7 @@ line: number
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -1368,7 +1362,7 @@ available_in_catalogs?: string[]
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -1430,7 +1424,7 @@ hint?: (string | null)
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -1479,7 +1473,7 @@ line: number
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: IssueAction[]
+actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -1668,6 +1662,11 @@ token_count: number
  * Number of lines in the duplicated block.
  */
 line_count: number
+/**
+ * Suggested actions to resolve this issue.
+ */
+actions: CloneGroupAction[]
+introduced?: AuditIntroduced
 }
 /**
  * A single instance of duplicated code at a specific location.
@@ -1699,6 +1698,27 @@ end_col: number
 fragment: string
 }
 /**
+ * A suggested action for a clone group.
+ */
+export interface CloneGroupAction {
+/**
+ * Action type identifier.
+ */
+type: ("extract-shared" | "suppress-line")
+/**
+ * Whether fallow can auto-fix this action.
+ */
+auto_fixable: boolean
+/**
+ * Human-readable description of the action.
+ */
+description: string
+/**
+ * The inline comment to insert (e.g., '// fallow-ignore-next-line code-duplication'). Present for suppress-line actions.
+ */
+comment?: string
+}
+/**
  * A clone family: a set of clone groups that share the same file set.
  * 
  * When multiple clone groups are all duplicated between the same set of files,
@@ -1726,6 +1746,10 @@ total_duplicated_tokens: number
  * Refactoring suggestions for this family.
  */
 suggestions: RefactoringSuggestion[]
+/**
+ * Suggested actions to resolve this issue.
+ */
+actions: CloneFamilyAction[]
 }
 export interface RefactoringSuggestion {
 /**
@@ -1740,6 +1764,31 @@ description: string
  * Estimated lines that could be eliminated.
  */
 estimated_savings: number
+}
+/**
+ * A suggested action for a clone family.
+ */
+export interface CloneFamilyAction {
+/**
+ * Action type identifier.
+ */
+type: ("extract-shared" | "apply-suggestion" | "suppress-line")
+/**
+ * Whether fallow can auto-fix this action.
+ */
+auto_fixable: boolean
+/**
+ * Human-readable description of the action.
+ */
+description: string
+/**
+ * Additional context for the action.
+ */
+note?: string
+/**
+ * The inline comment to insert (e.g., '// fallow-ignore-next-line code-duplication'). Present for suppress-line actions.
+ */
+comment?: string
 }
 /**
  * A detected mirrored directory pattern: two directory prefixes that contain
@@ -1935,7 +1984,7 @@ coverage_tier?: (CoverageTier | null)
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: HealthFindingAction[]
+actions: HealthFindingAction[]
 introduced?: AuditIntroduced
 }
 /**
@@ -2398,7 +2447,7 @@ value_export_count: number
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: UntestedFileAction[]
+actions: UntestedFileAction[]
 }
 /**
  * Suggested action attached to an [`UntestedFile`] coverage-gap finding.
@@ -2460,7 +2509,7 @@ col: number
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: UntestedExportAction[]
+actions: UntestedExportAction[]
 }
 /**
  * Suggested action attached to an [`UntestedExport`] coverage-gap
@@ -2569,7 +2618,7 @@ is_test_path?: boolean
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: HotspotAction[]
+actions: HotspotAction[]
 }
 /**
  * Per-file ownership signals attached to hotspot entries when the user
@@ -2934,7 +2983,7 @@ evidence?: (TargetEvidence | null)
 /**
  * Suggested actions to resolve this issue.
  */
-actions?: RefactoringTargetAction[]
+actions: RefactoringTargetAction[]
 }
 /**
  * A contributing factor that triggered or strengthened a recommendation.

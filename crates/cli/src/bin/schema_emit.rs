@@ -361,6 +361,15 @@ fn finding_definition_names() -> &'static [&'static str] {
         // omitted.
         "UntestedExport",
         "UntestedFile",
+        // Duplication findings (`clone_groups[]` and `clone_families[]`).
+        // `inject_dupes_actions` in `crates/cli/src/report/json.rs` walks
+        // both arrays and appends an `actions` field to every item; the
+        // Rust source structs (`CloneGroup`, `CloneFamily` in
+        // `crates/core/src/duplicates/types.rs`) do not carry the field.
+        // `CloneGroup` carries the audit `introduced` flag because
+        // `fallow audit` attributes clone groups; `CloneFamily` does not.
+        "CloneFamily",
+        "CloneGroup",
     ]
 }
 
@@ -411,6 +420,14 @@ fn finding_augmentation(name: &str) -> FindingAugmentation {
         "UntestedExport" => FindingAugmentation {
             actions_item_ref: "#/definitions/UntestedExportAction",
             include_introduced: false,
+        },
+        "CloneFamily" => FindingAugmentation {
+            actions_item_ref: "#/definitions/CloneFamilyAction",
+            include_introduced: false,
+        },
+        "CloneGroup" => FindingAugmentation {
+            actions_item_ref: "#/definitions/CloneGroupAction",
+            include_introduced: true,
         },
         _ => DEFAULT_FINDING_AUGMENTATION,
     }
@@ -643,7 +660,7 @@ fn merge_with_committed(derived: &Map<String, Value>) -> Result<Value, String> {
 
     // Schemars produces transitively-referenced helper definitions for every
     // typed enum / payload subtype on the in-scope structs (`FixActionType`,
-    // `SuppressAutoFixable`, the kebab-case kind enums, `DependencyLocation`,
+    // the kebab-case kind enums, `DependencyLocation`,
     // `MemberKind`, etc.). The drift gate only compares the explicit
     // `derived_definition_names()` list, but the emitted schema's `$ref`
     // graph still points at every helper, so a regenerated schema with any
@@ -710,6 +727,15 @@ fn augment_finding_definition(
             "introduced".to_string(),
             serde_json::json!({ "$ref": "#/definitions/AuditIntroduced" }),
         );
+    }
+
+    let required = object
+        .entry("required")
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if let Value::Array(arr) = required
+        && !arr.iter().any(|v| v.as_str() == Some("actions"))
+    {
+        arr.push(Value::String("actions".to_string()));
     }
 
     Ok(())
@@ -1204,7 +1230,7 @@ mod drift_tests {
     /// document. A dangling ref means the schema is invalid for AJV-strict
     /// consumers and would fail downstream validation. Schemars produces
     /// helper definitions for typed enum / payload subtypes
-    /// (`FixActionType`, `SuppressAutoFixable`, `DependencyLocation`,
+    /// (`FixActionType`, `DependencyLocation`,
     /// `MemberKind`, ...) on the in-scope structs; if `merge_with_committed`
     /// drops any of them, this test fires.
     #[test]

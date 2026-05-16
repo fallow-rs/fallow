@@ -2519,7 +2519,8 @@
         "line_count",
         "param_count",
         "exceeded",
-        "severity"
+        "severity",
+        "actions"
       ],
       "description": "A single function that exceeds a complexity threshold."
     },
@@ -2727,7 +2728,8 @@
         "lines_deleted",
         "complexity_density",
         "fan_in",
-        "trend"
+        "trend",
+        "actions"
       ],
       "description": "A hotspot: a file that is both complex and frequently changing.\n\n## Score Formula\n\n```text\nnormalized_churn = weighted_commits / max_weighted_commits   (0..1)\nnormalized_complexity = complexity_density / max_density      (0..1)\nscore = normalized_churn × normalized_complexity × 100       (0..100)\n```\n\nScore uses within-project max normalization. Higher score = higher risk.\nFan-in is shown separately as \"blast radius\" — not baked into the score."
     },
@@ -2961,7 +2963,8 @@
         "recommendation",
         "category",
         "effort",
-        "confidence"
+        "confidence",
+        "actions"
       ]
     },
     "TargetThresholds": {
@@ -3156,7 +3159,8 @@
       },
       "required": [
         "path",
-        "value_export_count"
+        "value_export_count",
+        "actions"
       ],
       "description": "Runtime code that no test dependency path reaches."
     },
@@ -3195,7 +3199,8 @@
         "path",
         "export_name",
         "line",
-        "col"
+        "col",
+        "actions"
       ],
       "description": "Runtime export that no test-reachable module references."
     },
@@ -3718,12 +3723,8 @@
           ]
         },
         "auto_fixable": {
-          "description": "Always false for suppress actions.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/SuppressAutoFixable"
-            }
-          ]
+          "type": "boolean",
+          "description": "Always false for suppress actions."
         },
         "description": {
           "type": "string",
@@ -3765,12 +3766,8 @@
           ]
         },
         "auto_fixable": {
-          "description": "Always false for suppress actions.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/SuppressAutoFixable"
-            }
-          ]
+          "type": "boolean",
+          "description": "Always false for suppress actions."
         },
         "description": {
           "type": "string",
@@ -4064,7 +4061,8 @@
         }
       },
       "required": [
-        "path"
+        "path",
+        "actions"
       ],
       "description": "A file that is not reachable from any entry point."
     },
@@ -4123,7 +4121,8 @@
         "line",
         "col",
         "span_start",
-        "is_re_export"
+        "is_re_export",
+        "actions"
       ],
       "description": "An export that is never imported by other modules."
     },
@@ -4177,7 +4176,8 @@
         "type_name",
         "line",
         "col",
-        "span_start"
+        "span_start",
+        "actions"
       ],
       "description": "A public export signature that references a same-file private type."
     },
@@ -4228,7 +4228,8 @@
         "package_name",
         "location",
         "path",
-        "line"
+        "line",
+        "actions"
       ],
       "description": "A dependency that is listed in package.json but never imported."
     },
@@ -4284,7 +4285,8 @@
         "member_name",
         "kind",
         "line",
-        "col"
+        "col",
+        "actions"
       ],
       "description": "An unused enum or class member."
     },
@@ -4333,7 +4335,8 @@
         "specifier",
         "line",
         "col",
-        "specifier_col"
+        "specifier_col",
+        "actions"
       ],
       "description": "An import that could not be resolved."
     },
@@ -4364,7 +4367,8 @@
       },
       "required": [
         "package_name",
-        "imported_from"
+        "imported_from",
+        "actions"
       ],
       "description": "A dependency used in code but not listed in package.json."
     },
@@ -4422,7 +4426,8 @@
       },
       "required": [
         "export_name",
-        "locations"
+        "locations",
+        "actions"
       ],
       "description": "An export that appears multiple times across the project."
     },
@@ -4484,7 +4489,8 @@
       "required": [
         "package_name",
         "path",
-        "line"
+        "line",
+        "actions"
       ],
       "description": "A production dependency that is only used via type-only imports.\nIn production builds, type imports are erased, so this dependency\nis not needed at runtime and could be moved to devDependencies."
     },
@@ -4519,7 +4525,8 @@
       "required": [
         "package_name",
         "path",
-        "line"
+        "line",
+        "actions"
       ],
       "description": "A production dependency that is only imported by test files.\nSince it is never used in production code, it could be moved to devDependencies."
     },
@@ -4572,7 +4579,8 @@
         "files",
         "length",
         "line",
-        "col"
+        "col",
+        "actions"
       ],
       "description": "A circular dependency chain detected in the module graph.\n\nThe `line` and `col` fields carry `#[serde(default)]` so callers reading\nhistorical baseline JSON without these fields can still deserialize the\nstruct, but the JSON output layer always emits them (u32 always\nserializes, never via `skip_serializing_if`). The schemars derive sees\nthe serde defaults and marks both fields optional in the generated\nschema; the explicit `extend(\"required\" = ...)` override here keeps the\nschema's `required` array honest about what the JSON output actually\ncontains."
     },
@@ -4629,7 +4637,8 @@
         "to_zone",
         "import_specifier",
         "line",
-        "col"
+        "col",
+        "actions"
       ],
       "description": "An import that crosses an architecture boundary rule."
     },
@@ -4712,7 +4721,8 @@
         "entry_name",
         "catalog_name",
         "path",
-        "line"
+        "line",
+        "actions"
       ],
       "description": "A pnpm catalog entry declared in pnpm-workspace.yaml that no workspace package\nreferences via the `catalog:` protocol.\n\nThe default catalog (top-level `catalog:` key) uses `catalog_name: \"default\"`.\nNamed catalogs (under `catalogs.<name>:`) use their declared name."
     },
@@ -4747,7 +4757,8 @@
       "required": [
         "catalog_name",
         "path",
-        "line"
+        "line",
+        "actions"
       ],
       "description": "A named `catalogs.<name>:` group in `pnpm-workspace.yaml` with no package entries."
     },
@@ -4794,7 +4805,8 @@
         "entry_name",
         "catalog_name",
         "path",
-        "line"
+        "line",
+        "actions"
       ],
       "description": "A workspace package.json reference (`catalog:` or `catalog:<name>`) that points\nat a catalog which does not declare the consumed package.\n\n`pnpm install` errors at install time with `ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL`\nwhen this happens. fallow surfaces it statically so the failure is caught at\n`fallow check` time, before any install.\n\nThe default catalog (bare `catalog:` references the top-level `catalog:` map)\nuses `catalog_name: \"default\"`. Named catalogs (`catalog:react17`) use the\ndeclared catalog name."
     },
@@ -4869,7 +4881,8 @@
         "version_range",
         "source",
         "path",
-        "line"
+        "line",
+        "actions"
       ],
       "description": "An entry in pnpm's `overrides:` map (or the legacy `pnpm.overrides` in\n`package.json`) whose target package is not declared in any workspace\n`package.json` and is not present in `pnpm-lock.yaml`. Projects without a\nreadable lockfile fall back to package manifest checks; the `hint` field\nflags that conservative mode."
     },
@@ -4934,7 +4947,8 @@
         "reason",
         "source",
         "path",
-        "line"
+        "line",
+        "actions"
       ],
       "description": "An override entry whose key or value is malformed. Default severity is\n`error` because pnpm refuses to install (or silently produces a no-op\noverride) when it encounters these shapes."
     },
@@ -4959,12 +4973,23 @@
           "format": "uint",
           "minimum": 0,
           "description": "Number of lines in the duplicated block."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CloneGroupAction"
+          },
+          "description": "Suggested actions to resolve this issue."
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
         "instances",
         "token_count",
-        "line_count"
+        "line_count",
+        "actions"
       ],
       "description": "A group of code clones -- the same (or normalized-equivalent) code appearing in multiple places."
     },
@@ -5049,6 +5074,13 @@
             "$ref": "#/definitions/RefactoringSuggestion"
           },
           "description": "Refactoring suggestions for this family."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CloneFamilyAction"
+          },
+          "description": "Suggested actions to resolve this issue."
         }
       },
       "required": [
@@ -5056,7 +5088,8 @@
         "groups",
         "total_duplicated_lines",
         "total_duplicated_tokens",
-        "suggestions"
+        "suggestions",
+        "actions"
       ],
       "description": "A clone family: a set of clone groups that share the same file set.\n\nWhen multiple clone groups are all duplicated between the same set of files,\nthey form a family — indicating a deeper structural relationship that should\nbe refactored together rather than group-by-group."
     },

@@ -127,7 +127,7 @@ pub struct SuppressLineAction {
     #[serde(rename = "type")]
     pub kind: SuppressLineKind,
     /// Always false for suppress actions.
-    pub auto_fixable: SuppressAutoFixable,
+    pub auto_fixable: bool,
     /// Human-readable description of the suppression.
     pub description: String,
     /// The inline comment to place above the line (e.g.,
@@ -151,25 +151,6 @@ pub enum SuppressLineKind {
     SuppressLine,
 }
 
-/// `auto_fixable` field on suppress actions: always literally `false` per the
-/// public contract, but typed as a singleton enum so the derived schema
-/// renders it as `"const": false` rather than the generic `boolean`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub enum SuppressAutoFixable {
-    /// Always false for suppress actions.
-    #[serde(rename = "false")]
-    False,
-}
-
-impl SuppressAutoFixable {
-    /// Canonical zero-cost constructor.
-    #[must_use]
-    pub const fn never() -> Self {
-        Self::False
-    }
-}
-
 /// Scope marker for line suppressions that span multiple locations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -188,7 +169,7 @@ pub struct SuppressFileAction {
     #[serde(rename = "type")]
     pub kind: SuppressFileKind,
     /// Always false for suppress actions.
-    pub auto_fixable: SuppressAutoFixable,
+    pub auto_fixable: bool,
     /// Human-readable description of the suppression.
     pub description: String,
     /// The file-level comment to place at the top of the file (e.g.,
