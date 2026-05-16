@@ -160,6 +160,38 @@ pub fn filter_issues_from_env(issues: Vec<CiIssue>) -> Vec<CiIssue> {
     )
 }
 
+/// Filter for the typed PR-comment renderer (`print_pr_comment`).
+///
+/// Project-level rule findings (dependency / catalog / override hygiene that
+/// lives in `package.json` / `pnpm-workspace.yaml`) bypass the diff filter
+/// because the PR diff rarely touches the anchored line even though the
+/// finding is the reason CI fails. Source-anchored findings still go through
+/// the configured filter (`FALLOW_DIFF_FILTER`, default `added`) so the
+/// comment stays focused on what the PR actually changed.
+///
+/// Sorting is restored after the partition + merge so downstream rendering
+/// sees the same `(path, line, fingerprint)` order as the unfiltered input.
+#[must_use]
+pub fn filter_issues_for_summary(issues: Vec<CiIssue>) -> Vec<CiIssue> {
+    summary_filter_with(issues, filter_issues_from_env)
+}
+
+/// Partition + delegate helper for `filter_issues_for_summary`. Generic over
+/// the source-level filter so tests can call it with `filter_issues_from_path`
+/// against a tempdir diff without poking at `FALLOW_DIFF_FILE`.
+fn summary_filter_with<F>(issues: Vec<CiIssue>, source_filter: F) -> Vec<CiIssue>
+where
+    F: FnOnce(Vec<CiIssue>) -> Vec<CiIssue>,
+{
+    let (project_level, diff_relevant): (Vec<CiIssue>, Vec<CiIssue>) = issues
+        .into_iter()
+        .partition(|issue| super::pr_comment::is_project_level_rule(&issue.rule_id));
+    let mut kept = source_filter(diff_relevant);
+    kept.extend(project_level);
+    kept.sort_by(|a, b| (&a.path, a.line, &a.fingerprint).cmp(&(&b.path, b.line, &b.fingerprint)));
+    kept
+}
+
 #[must_use]
 pub fn filter_issues_from_path(
     issues: Vec<CiIssue>,
@@ -275,6 +307,104 @@ mod tests {
         };
         let kept = filter_issues_from_path(vec![issue], &path, DiffFilterMode::Added, 3);
         assert_eq!(kept.len(), 1, "missing diff must fall through unfiltered");
+    }
+
+    #[test]
+    fn summary_filter_keeps_project_level_findings_when_diff_misses_them() {
+        // The bug from #381: a `pnpm.overrides` entry in `package.json`
+        // becomes unused (transitive dep no longer in the resolved tree),
+        // but the PR diff doesn't touch the override line. The default
+        // `Added` filter drops the finding from the summary even though CI
+        // exits non-zero because of the same finding, leaving the user with
+        // a comment body that says "No findings."
+        //
+        // `summary_filter_with` bypasses the filter for project-level rules
+        // so the override finding stays in the body. The diff used here
+        // doesn't even include `package.json` to make the bypass clear.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let diff_path = dir.path().join("pr.diff");
+        std::fs::write(
+            &diff_path,
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -0,0 +1,1 @@\n\
+             +new line\n",
+        )
+        .expect("write");
+
+        let project_level = CiIssue {
+            rule_id: "fallow/unused-dependency-override".into(),
+            description: "Override stale".into(),
+            severity: "minor".into(),
+            path: "package.json".into(),
+            line: 42,
+            fingerprint: "override".into(),
+        };
+        let source_level_in_diff = CiIssue {
+            rule_id: "fallow/unused-export".into(),
+            description: "Export unused".into(),
+            severity: "minor".into(),
+            path: "src/a.ts".into(),
+            line: 1,
+            fingerprint: "in-diff".into(),
+        };
+        let source_level_outside_diff = CiIssue {
+            rule_id: "fallow/unused-export".into(),
+            description: "Export unused".into(),
+            severity: "minor".into(),
+            path: "src/b.ts".into(),
+            line: 1,
+            fingerprint: "out-diff".into(),
+        };
+        let kept = summary_filter_with(
+            vec![
+                project_level,
+                source_level_in_diff,
+                source_level_outside_diff,
+            ],
+            |src| filter_issues_from_path(src, &diff_path, DiffFilterMode::Added, 3),
+        );
+        let fingerprints: Vec<&str> = kept.iter().map(|i| i.fingerprint.as_str()).collect();
+        assert!(
+            fingerprints.contains(&"override"),
+            "project-level finding must survive missing-diff: {fingerprints:?}"
+        );
+        assert!(
+            fingerprints.contains(&"in-diff"),
+            "source-level finding inside diff must be kept: {fingerprints:?}"
+        );
+        assert!(
+            !fingerprints.contains(&"out-diff"),
+            "source-level finding outside diff must be dropped: {fingerprints:?}"
+        );
+    }
+
+    #[test]
+    fn summary_filter_preserves_path_line_fingerprint_sort_order() {
+        // The partition step shuffles project-level issues to the back of
+        // the vec; the post-merge sort restores the canonical ordering the
+        // renderer expects.
+        let a = CiIssue {
+            rule_id: "fallow/unused-export".into(),
+            description: "a".into(),
+            severity: "minor".into(),
+            path: "src/a.ts".into(),
+            line: 1,
+            fingerprint: "a".into(),
+        };
+        let b = CiIssue {
+            rule_id: "fallow/unused-dependency".into(),
+            description: "b".into(),
+            severity: "minor".into(),
+            path: "package.json".into(),
+            line: 5,
+            fingerprint: "b".into(),
+        };
+        let kept = summary_filter_with(vec![a, b], |issues| issues);
+        // `package.json` sorts before `src/a.ts` lexicographically.
+        assert_eq!(kept[0].fingerprint, "b");
+        assert_eq!(kept[1].fingerprint, "a");
     }
 
     #[test]

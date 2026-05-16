@@ -702,31 +702,27 @@ fn try_extract_property_callback_import<'a, 'b>(
         return None;
     }
 
-    let import_expr = match &prop.value {
-        Expression::ArrowFunctionExpression(arrow) => {
-            if arrow.expression {
-                let Some(Statement::ExpressionStatement(expr_stmt)) = arrow.body.statements.first()
-                else {
-                    return None;
-                };
-                extract_import_expression(&expr_stmt.expression)?
-            } else {
-                extract_import_from_return_body(&arrow.body.statements)?
-            }
-        }
-        Expression::FunctionExpression(func) => {
-            let body = func.body.as_ref()?;
-            extract_import_from_return_body(&body.statements)?
-        }
-        _ => return None,
-    };
+    let import_expr = extract_import_from_callable(&prop.value)?;
     let Expression::StringLiteral(lit) = &import_expr.source else {
         return None;
     };
     Some((import_expr, &lit.value))
 }
 
-fn extract_import_expression<'a, 'b>(expr: &'b Expression<'a>) -> Option<&'b ImportExpression<'a>> {
+/// Peel layers around a dynamic `import('SPEC')` and return the underlying
+/// `ImportExpression` node.
+///
+/// Recognises three shells that don't change the import semantics:
+/// - `import('SPEC')` — direct
+/// - `await import('SPEC')` — async-context await
+/// - `(import('SPEC'))` — parenthesised expression
+///
+/// Returns `None` for any other expression shape, including non-static
+/// specifiers, member accesses on imports, or `.then()` chains.
+#[must_use]
+pub fn extract_import_expression<'a, 'b>(
+    expr: &'b Expression<'a>,
+) -> Option<&'b ImportExpression<'a>> {
     match expr {
         Expression::AwaitExpression(await_expr) => extract_import_expression(&await_expr.argument),
         Expression::ImportExpression(imp) => Some(imp),
@@ -747,38 +743,11 @@ fn try_extract_arrow_wrapped_import<'a, 'b>(
     arguments: &'b [Argument<'a>],
 ) -> Option<(&'b ImportExpression<'a>, &'b str)> {
     for arg in arguments {
-        let import_expr = match arg {
-            Argument::ArrowFunctionExpression(arrow) => {
-                if arrow.expression {
-                    // Expression body: `() => import('./x')`
-                    let Some(Statement::ExpressionStatement(expr_stmt)) =
-                        arrow.body.statements.first()
-                    else {
-                        continue;
-                    };
-                    let Expression::ImportExpression(imp) = &expr_stmt.expression else {
-                        continue;
-                    };
-                    imp
-                } else {
-                    // Block body: `() => { return import('./x'); }`
-                    let Some(imp) = extract_import_from_return_body(&arrow.body.statements) else {
-                        continue;
-                    };
-                    imp
-                }
-            }
-            Argument::FunctionExpression(func) => {
-                // `function() { return import('./x'); }`
-                let Some(body) = &func.body else {
-                    continue;
-                };
-                let Some(imp) = extract_import_from_return_body(&body.statements) else {
-                    continue;
-                };
-                imp
-            }
-            _ => continue,
+        let Some(expr) = arg.as_expression() else {
+            continue;
+        };
+        let Some(import_expr) = extract_import_from_callable(expr) else {
+            continue;
         };
         let Expression::StringLiteral(lit) = &import_expr.source else {
             continue;
@@ -788,8 +757,15 @@ fn try_extract_arrow_wrapped_import<'a, 'b>(
     None
 }
 
-/// Extract an `import()` expression from a block body's return statement.
-fn extract_import_from_return_body<'a, 'b>(
+/// Extract an `import()` expression from a block-body's return statement.
+///
+/// Walks `stmts` from end to start and returns the import found in the first
+/// `return import('SPEC')` it sees. Non-return statements are skipped, so
+/// guard clauses and side-effect statements before the return do not block
+/// the lookup. Returns `None` if no return statement carries an extractable
+/// dynamic import (per [`extract_import_expression`]).
+#[must_use]
+pub fn extract_import_from_return_body<'a, 'b>(
     stmts: &'b [Statement<'a>],
 ) -> Option<&'b ImportExpression<'a>> {
     for stmt in stmts.iter().rev() {
@@ -801,6 +777,52 @@ fn extract_import_from_return_body<'a, 'b>(
         }
     }
     None
+}
+
+/// Peel a callable expression that wraps a single dynamic `import('SPEC')`.
+///
+/// This is the shared "callable → import" peel used wherever fallow needs to
+/// look inside a deferred-loader thunk. Three shapes are accepted:
+///
+/// - Concise arrow body: `() => import('SPEC')` — runs the body expression
+///   through [`extract_import_expression`], which also accepts the equivalent
+///   `await import('SPEC')` (under `async () => ...`) and parenthesised
+///   `(import('SPEC'))` shells.
+/// - Block arrow body: `() => { ...; return import('SPEC') }` — returns the
+///   import from the last return statement via
+///   [`extract_import_from_return_body`].
+/// - Function expression: `function () { return import('SPEC') }` — same
+///   block-body treatment.
+///
+/// Anything else (non-callable expressions, callables whose body does not
+/// terminate in a dynamic import, computed specifiers) yields `None`.
+///
+/// Used by `try_extract_arrow_wrapped_import` (call-argument navigation),
+/// `try_extract_property_callback_import` (object-property navigation), and
+/// the config-parser array-element navigation in `fallow-core`. Each caller
+/// owns its outer search; this helper owns the inner peel.
+#[must_use]
+pub fn extract_import_from_callable<'a, 'b>(
+    expr: &'b Expression<'a>,
+) -> Option<&'b ImportExpression<'a>> {
+    match expr {
+        Expression::ArrowFunctionExpression(arrow) => {
+            if arrow.expression {
+                let Statement::ExpressionStatement(expr_stmt) = arrow.body.statements.first()?
+                else {
+                    return None;
+                };
+                extract_import_expression(&expr_stmt.expression)
+            } else {
+                extract_import_from_return_body(&arrow.body.statements)
+            }
+        }
+        Expression::FunctionExpression(func) => {
+            let body = func.body.as_ref()?;
+            extract_import_from_return_body(&body.statements)
+        }
+        _ => None,
+    }
 }
 
 /// Result from extracting a `.then()` callback on a dynamic import.

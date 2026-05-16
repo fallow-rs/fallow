@@ -1588,7 +1588,7 @@ fn glimmer_typescript_imports_use_tsconfig_path_aliases() {
         !unused_file_paths
             .iter()
             .any(|path| path.ends_with("app/services/my-service.ts")),
-        ".gts imports should resolve tsconfig path aliases and keep my-service.ts reachable: \
+        "multi-template .gts imports should resolve tsconfig path aliases and keep my-service.ts reachable: \
          {unused_file_paths:?}"
     );
     assert!(

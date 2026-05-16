@@ -7,7 +7,7 @@ use bitcode::{Decode, Encode};
 use crate::MemberKind;
 
 /// Cache version, bump when the cache format or cached extraction semantics change.
-pub(super) const CACHE_VERSION: u32 = 76;
+pub(super) const CACHE_VERSION: u32 = 79;
 
 /// Duplication token cache version — bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -188,6 +188,9 @@ pub struct CachedDynamicImport {
     pub destructured_names: Vec<String>,
     /// Local variable name for namespace imports.
     pub local_name: Option<String>,
+    /// True when this dynamic import was synthesised by fallow (see
+    /// `DynamicImportInfo::is_speculative`).
+    pub is_speculative: bool,
 }
 
 /// Cached `require()` call data.

@@ -55,9 +55,9 @@ schema-emit = [
 fallow-core = { workspace = true }
 fallow-config = { workspace = true }
 fallow-types = { workspace = true }
-fallow-v8-coverage = { version = "2.74.0", path = "../v8-coverage" }
+fallow-v8-coverage = { version = "2.75.0", path = "../v8-coverage" }
 fallow-cov-protocol = "0.5"
-fallow-license = { version = "2.74.0", path = "../license" }
+fallow-license = { version = "2.75.0", path = "../license" }
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 clap = { workspace = true }
 dunce = { workspace = true }

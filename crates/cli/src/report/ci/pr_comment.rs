@@ -219,6 +219,40 @@ pub fn category_for_rule(rule_id: &str) -> &'static str {
     crate::explain::rule_by_id(rule_id).map_or("Dead code", |def| def.category)
 }
 
+/// Rule ids whose findings describe a project-wide config state (dependency
+/// hygiene, catalog state, override hygiene) rather than a change touching a
+/// specific source line. These findings anchor at fixed lines inside
+/// `package.json` / `pnpm-workspace.yaml`; the resolved-tree shifts that
+/// trigger them rarely coincide with a diff on the anchored line, so the
+/// line-based diff filter would silently hide them while CI still exits
+/// non-zero because of the same finding.
+///
+/// `filter_issues_for_summary` consults this list so the PR-comment body
+/// always explains config-anchored findings, matching the typical user
+/// expectation that `comment: true` produces a body covering every
+/// CI-failure reason. The review-envelope path keeps the unconditional
+/// filter because inline review comments must anchor on diff lines.
+const PROJECT_LEVEL_RULE_IDS: &[&str] = &[
+    "fallow/unused-catalog-entry",
+    "fallow/empty-catalog-group",
+    "fallow/unresolved-catalog-reference",
+    "fallow/unused-dependency-override",
+    "fallow/misconfigured-dependency-override",
+    "fallow/unused-dependency",
+    "fallow/unused-dev-dependency",
+    "fallow/unused-optional-dependency",
+    "fallow/type-only-dependency",
+    "fallow/test-only-dependency",
+];
+
+/// True when the rule's findings reflect project-wide config state and
+/// should bypass diff-aware filtering in the typed PR-comment renderer.
+/// See `PROJECT_LEVEL_RULE_IDS` for the full list and rationale.
+#[must_use]
+pub fn is_project_level_rule(rule_id: &str) -> bool {
+    PROJECT_LEVEL_RULE_IDS.contains(&rule_id)
+}
+
 /// Stable category ordering for the sticky comment. Reviewers see categories
 /// in the same order across PRs / runs, which matters for muscle memory.
 const CATEGORY_ORDER: [&str; 6] = [
@@ -308,7 +342,8 @@ fn sanitize_marker_segment(value: &str) -> String {
 
 #[must_use]
 pub fn print_pr_comment(command: &str, provider: Provider, codeclimate: &Value) -> ExitCode {
-    let issues = super::diff_filter::filter_issues_from_env(issues_from_codeclimate(codeclimate));
+    let issues =
+        super::diff_filter::filter_issues_for_summary(issues_from_codeclimate(codeclimate));
     println!("{}", render_pr_comment(command, provider, &issues));
     ExitCode::SUCCESS
 }
@@ -520,6 +555,52 @@ mod tests {
             escape_md(raw),
             r"Export 'helperFn' is never imported by other modules"
         );
+    }
+
+    #[test]
+    fn is_project_level_rule_covers_config_anchored_dependency_findings() {
+        for rule_id in PROJECT_LEVEL_RULE_IDS {
+            assert!(
+                is_project_level_rule(rule_id),
+                "{rule_id} must be project-level"
+            );
+        }
+        // Per-source-file rules stay diff-filterable so the comment body
+        // keeps focus on the lines a PR actually changed.
+        for rule_id in [
+            "fallow/unused-file",
+            "fallow/unused-export",
+            "fallow/unused-type",
+            "fallow/unused-enum-member",
+            "fallow/unused-class-member",
+            "fallow/unresolved-import",
+            "fallow/unlisted-dependency",
+            "fallow/duplicate-export",
+            "fallow/circular-dependency",
+            "fallow/boundary-violation",
+            "fallow/stale-suppression",
+            "fallow/private-type-leak",
+            "fallow/high-complexity",
+            "fallow/high-crap-score",
+        ] {
+            assert!(
+                !is_project_level_rule(rule_id),
+                "{rule_id} must NOT be project-level"
+            );
+        }
+    }
+
+    #[test]
+    fn project_level_rule_ids_each_register_in_explain_registry() {
+        // Drift guard: every project-level id must resolve to a `RuleDef` so
+        // the SARIF help URI, `_meta`, and sticky-comment category stay
+        // consistent with the bypass list.
+        for rule_id in PROJECT_LEVEL_RULE_IDS {
+            assert!(
+                crate::explain::rule_by_id(rule_id).is_some(),
+                "{rule_id} listed in PROJECT_LEVEL_RULE_IDS but not in explain registry"
+            );
+        }
     }
 
     #[test]

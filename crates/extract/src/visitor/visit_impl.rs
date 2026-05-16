@@ -697,6 +697,7 @@ impl ModuleInfoExtractor {
                 span: expr.span,
                 destructured_names: Vec::new(),
                 local_name: None,
+                is_speculative: false,
             });
         }
     }
@@ -1282,6 +1283,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     span: expr.span,
                     destructured_names: Vec::new(),
                     local_name: None,
+                    is_speculative: false,
                 });
             }
             Expression::TemplateLiteral(tpl)
@@ -1323,6 +1325,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         span: expr.span,
                         destructured_names: Vec::new(),
                         local_name: None,
+                        is_speculative: false,
                     });
                 }
             }
@@ -1461,6 +1464,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 span: import_expr.span,
                 destructured_names: vec!["default".to_string()],
                 local_name: None,
+                is_speculative: false,
             });
             self.handled_import_spans.insert(import_expr.span);
         }
@@ -1505,6 +1509,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 span: expr.span,
                 destructured_names: Vec::new(),
                 local_name: None,
+                is_speculative: false,
             });
 
             // Synthesize the `__mocks__/<file>` sibling only when vitest will
@@ -1514,6 +1519,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             // Synthesizing in the factory case produces a spurious
             // `unresolved-import` finding when no `__mocks__/<file>` exists.
             // See issue #311.
+            //
+            // Marked `is_speculative: true` so the resolver silently drops the
+            // entry when no `__mocks__/<file>` exists on disk. Vitest's
+            // auto-mock system works in-memory and does not require a
+            // `__mocks__/` directory the way Jest does, so the synthesised
+            // path is a credit hint, not a contract the user must satisfy.
+            // Without the speculative drop, projects that rely on Vitest's
+            // in-memory auto-mocking surface a spurious `unresolved-import`
+            // finding pointing at a path they never wrote. See issue #378.
             if !vi_mock_has_factory(expr)
                 && let Some(mock_source) = vitest_auto_mock_source(&target_source)
             {
@@ -1522,6 +1536,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     span: expr.span,
                     destructured_names: Vec::new(),
                     local_name: Some(String::new()),
+                    is_speculative: true,
                 });
             }
         }
@@ -1635,6 +1650,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 span: then_cb.import_span,
                 destructured_names: then_cb.destructured_names,
                 local_name: then_cb.local_name,
+                is_speculative: false,
             });
         }
 
@@ -1647,6 +1663,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 span: import_expr.span,
                 destructured_names: vec!["default".to_string()],
                 local_name: None,
+                is_speculative: false,
             });
             self.handled_import_spans.insert(import_expr.span);
         }
@@ -1670,6 +1687,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 span: expr.span,
                 destructured_names: Vec::new(),
                 local_name: None,
+                is_speculative: false,
             });
         }
 

@@ -578,6 +578,13 @@ pub struct DynamicImportInfo {
     /// The local variable name for `const x = await import(...)`.
     /// Used for namespace import narrowing via member access tracking.
     pub local_name: Option<String>,
+    /// True when this dynamic import was synthesised by fallow rather than
+    /// appearing in user source (e.g. the Vitest `__mocks__/<file>` auto-mock
+    /// sibling that pairs with a `vi.mock('./foo')` call). When the resolver
+    /// cannot find the synthesised target, the entry is dropped silently
+    /// instead of surfacing as an `unresolved-import` finding pointing at a
+    /// path the user never wrote.
+    pub is_speculative: bool,
 }
 
 /// A `require()` call.

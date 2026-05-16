@@ -29,133 +29,721 @@
  */
 export type FallowJsonOutput = (CombinedOutput | CheckOutput | CheckGroupedOutput | HealthOutput | DupesOutput | AuditOutput | ExplainOutput | CoverageSetupOutput | CodeClimateOutput | ReviewEnvelopeOutput | ReviewReconcileOutput)
 /**
- * Schema version for this output format (independent of tool version). Bump policy: ADDITIVE changes (new optional top-level fields, new optional struct fields, new array entries, new MCP tools, new CLI flags that map to new optional fields) do NOT bump the version; consumers receive new fields without breaking. BREAKING changes (renamed fields, removed fields, type changes, enum-variant removals, semantic changes to existing fields) DO bump. To detect newly-added fields without a bump, check field presence via JSON-key existence rather than gating on the version. v4 was introduced alongside fallow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence block, renamed summary fields); v5 introduced health_score formula_version 2 with scale-invariant scoring semantics; v6 widened `AddToConfigAction.value` from a scalar string to `oneOf: [string, array]` so the new `ignoreExports` action can carry a paste-ready array of `{ file, exports }` rule objects (the legacy `ignoreDependencies` etc. variants still emit strings, so consumers that switch on `config_key` keep working unchanged). The runtime-coverage block is extended additively as the protocol evolves (currently 0.3, which adds an optional capture_quality summary field). Other additive examples: dupes --group-by adds optional grouped_by, total_issues, groups fields without bumping.
+ * Schema version for a fallow JSON envelope. Top-level fallow envelopes carry
+ * a `schema_version` field whose Rust source is this newtype; the JSON wire
+ * shape is the bare integer.
+ * 
+ * Bump policy: ADDITIVE changes (new optional fields, new optional struct
+ * fields, new array entries, new MCP tools, new CLI flags) do NOT bump the
+ * version; consumers receive new fields without breaking. BREAKING changes
+ * (renamed fields, removed fields, type changes, enum-variant removals,
+ * semantic changes) DO bump. To detect newly-added fields without a bump,
+ * check field presence via JSON-key existence rather than gating on the
+ * version.
  */
 export type SchemaVersion = 6
 /**
- * Fallow tool version that produced this output.
+ * Fallow CLI version that produced this envelope. Renders to the JSON wire as
+ * a bare string (e.g. `"2.74.0"`).
  */
 export type ToolVersion = string
 /**
- * Analysis duration in milliseconds.
+ * Analysis duration in milliseconds. Renders to the JSON wire as a bare
+ * integer.
  */
 export type ElapsedMs = number
 /**
- * A suggested action for resolving an issue. Each issue includes an array of possible actions: a fix action (auto-fixable or manual), suppress-line, suppress-file, and/or add-to-config.
+ * A suggested action attached to a finding in the JSON output. Each finding
+ * carries an `actions` array; consumers (agents, IDE clients, CI bots) can
+ * dispatch on the `type` discriminant to choose the right remediation.
+ * 
+ * The discriminator is `type` (snake_case `type` field), the payload uses the
+ * matching kebab-case identifier per variant.
  */
 export type IssueAction = (FixAction | SuppressLineAction | SuppressFileAction | AddToConfigAction)
 /**
- * Only present inside `fallow audit --format json` sub-results. true means this finding's structural key was not present at the base ref; false means it was inherited from the base ref.
+ * Discriminant string for [`FixAction`]. Kebab-case per the JSON output
+ * contract.
+ */
+export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override")
+/**
+ * Singleton discriminant for [`SuppressLineAction`].
+ */
+export type SuppressLineKind = "suppress-line"
+/**
+ * `auto_fixable` field on suppress actions: always literally `false` per the
+ * public contract, but typed as a singleton enum so the derived schema
+ * renders it as `"const": false` rather than the generic `boolean`.
+ */
+export type SuppressAutoFixable = "false"
+/**
+ * Scope marker for line suppressions that span multiple locations.
+ */
+export type SuppressLineScope = "per-location"
+/**
+ * Singleton discriminant for [`SuppressFileAction`].
+ */
+export type SuppressFileKind = "suppress-file"
+/**
+ * Singleton discriminant for [`AddToConfigAction`].
+ */
+export type AddToConfigKind = "add-to-config"
+/**
+ * Value payload for [`AddToConfigAction::value`]. The variants line up with
+ * the documented per-`config_key` shapes; deserialization is untagged so
+ * downstream consumers can switch on the JSON value's type.
+ */
+export type AddToConfigValue = (string | IgnoreExportsRule[] | {
+[k: string]: unknown
+})
+/**
+ * Audit-mode marker emitted on each finding when `fallow audit --format json`
+ * runs with a base ref. `true` means the finding's structural key was not
+ * present at the base ref (introduced by the current changeset); `false`
+ * means it was inherited.
+ * 
+ * Outside of audit sub-results the field is omitted, so call sites typically
+ * hold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean.
  */
 export type AuditIntroduced = boolean
 /**
- * Overall report verdict. Independent of the per-finding verdict.
+ * Where in package.json a dependency is listed.
+ * 
+ * # Examples
+ * 
+ * ```
+ * use fallow_types::results::DependencyLocation;
+ * 
+ * // All three variants are constructible
+ * let loc = DependencyLocation::Dependencies;
+ * let dev = DependencyLocation::DevDependencies;
+ * let opt = DependencyLocation::OptionalDependencies;
+ * // Debug output includes the variant name
+ * assert!(format!("{loc:?}").contains("Dependencies"));
+ * assert!(format!("{dev:?}").contains("DevDependencies"));
+ * assert!(format!("{opt:?}").contains("OptionalDependencies"));
+ * ```
+ */
+export type DependencyLocation = ("dependencies" | "devDependencies" | "optionalDependencies")
+/**
+ * The kind of member.
+ * 
+ * # Examples
+ * 
+ * ```
+ * use fallow_types::extract::MemberKind;
+ * 
+ * let kind = MemberKind::EnumMember;
+ * assert_eq!(kind, MemberKind::EnumMember);
+ * assert_ne!(kind, MemberKind::ClassMethod);
+ * assert_ne!(MemberKind::ClassMethod, MemberKind::ClassProperty);
+ * ```
+ */
+export type MemberKind = ("enum_member" | "class_method" | "class_property" | "namespace_member")
+/**
+ * The origin of a stale suppression: inline comment or JSDoc tag.
+ */
+export type SuppressionOrigin = ({
+/**
+ * The issue kind token from the comment (e.g., "unused-exports"), or None for blanket.
+ */
+issue_kind?: (string | null)
+/**
+ * Whether this was a file-level suppression.
+ */
+is_file_level: boolean
+type: "comment"
+} | {
+/**
+ * The name of the export that was tagged.
+ */
+export_name: string
+type: "jsdoc_tag"
+})
+/**
+ * Where an override entry was declared. Serialized as the filename label
+ * (`"pnpm-workspace.yaml"` or `"package.json"`) so the value in JSON output
+ * matches the value users write in `ignoreDependencyOverrides[].source`.
+ */
+export type DependencyOverrideSource = ("pnpm-workspace.yaml" | "package.json")
+/**
+ * Why a dependency-override entry is misconfigured. `pnpm install` would
+ * either fail at install time or silently no-op on these entries; surfacing
+ * them statically catches the issue before pnpm does.
+ */
+export type DependencyOverrideMisconfigReason = ("unparsable-key" | "empty-value")
+/**
+ * Status of a regression-check pass.
+ */
+export type RegressionStatus = ("pass" | "exceeded" | "skipped")
+/**
+ * Interpretation of [`RegressionResult::tolerance`].
+ */
+export type RegressionToleranceKind = ("absolute" | "percentage")
+/**
+ * Which complexity threshold was exceeded.
+ */
+export type ExceededThreshold = ("cyclomatic" | "cognitive" | "both" | "crap" | "cyclomatic_crap" | "cognitive_crap" | "all")
+/**
+ * Severity tier indicating how far a function exceeds complexity thresholds.
+ * 
+ * Determined by the highest tier reached across both cognitive and cyclomatic
+ * scores. Default thresholds: cognitive 25/40, cyclomatic 30/50.
+ */
+export type FindingSeverity = ("moderate" | "high" | "critical")
+/**
+ * Coverage tier classification for CRAP findings.
+ * 
+ * Bucketed coverage signal that lets action consumers (AI agents, IDE
+ * extensions, CI integrations) pick the right remediation without knowing
+ * the underlying coverage values:
+ * - `None`: file has no test reachability (estimated model 0% band) or
+ *   Istanbul data shows 0% statement coverage. The right action is
+ *   "add tests from scratch."
+ * - `Partial`: some coverage exists (estimated model 40% band, or
+ *   Istanbul shows >0% but below the high watermark). The right
+ *   action is "increase coverage on uncovered branches."
+ * - `High`: coverage is at or above the high watermark (estimated model
+ *   85% band, or Istanbul shows >= 70%). Action selection still checks
+ *   the CRAP formula before deciding whether coverage or refactoring is
+ *   the better remediation.
+ * 
+ * The high watermark default is 70 (matches Istanbul `lines: 70`).
+ * Partial is anything in `(0, 70)`. None is `<= 0`.
+ */
+export type CoverageTier = ("none" | "partial" | "high")
+/**
+ * Discriminant for [`HealthFindingAction::kind`]. Mirrors the action types
+ * emitted by `build_health_finding_actions`. A single finding's `actions`
+ * array may carry multiple entries of different types: a finding that
+ * exceeded both cyclomatic and CRAP at `coverage_tier: partial` will get
+ * BOTH `increase-coverage` AND `refactor-function`, plus the trailing
+ * `suppress-line`.
+ */
+export type HealthFindingActionType = ("refactor-function" | "add-tests" | "increase-coverage" | "suppress-file" | "suppress-line")
+/**
+ * Coverage model used for CRAP score computation.
+ */
+export type CoverageModel = ("static_binary" | "static_estimated" | "istanbul")
+/**
+ * Discriminant for [`UntestedFileAction::kind`]. Mirrors the action types
+ * emitted by `build_untested_file_actions`.
+ */
+export type UntestedFileActionType = ("add-tests" | "suppress-file")
+/**
+ * Discriminant for [`UntestedExportAction::kind`]. Mirrors the action
+ * types emitted by `build_untested_export_actions`.
+ */
+export type UntestedExportActionType = ("add-test-import" | "suppress-file")
+/**
+ * Churn trend indicator based on comparing recent vs older halves of the analysis period.
+ */
+export type ChurnTrend = ("accelerating" | "stable" | "cooling")
+/**
+ * Format discriminator for [`ContributorEntry::identifier`].
+ */
+export type ContributorIdentifierFormat = ("raw" | "handle" | "hash")
+/**
+ * Discriminant for [`HotspotAction::kind`].
+ */
+export type HotspotActionType = ("refactor-file" | "add-tests" | "low-bus-factor" | "unowned-hotspot" | "ownership-drift")
+/**
+ * Strategy discriminant for the suggested CODEOWNERS pattern attached to
+ * an `unowned-hotspot` action.
+ */
+export type HotspotActionHeuristic = "directory-deepest"
+/**
+ * Top-level verdict for the whole runtime-coverage report. Mirrors
+ * `fallow_cov_protocol::ReportVerdict`. The verdict is the SINGLE most
+ * actionable finding; for the full set of findings see
+ * [`RuntimeCoverageReport::signals`]. The verdict promotes `hot-path-touched`
+ * above `cold-code-detected` in PR-review context (when the CLI was
+ * given a change-scope: `--diff-file` or `--changed-since`) because the
+ * touched-hot-path is event-tied to the current diff and reviewers need
+ * it to be the top-line signal. In standalone analysis (no change
+ * scope), `cold-code-detected` remains primary.
  */
 export type RuntimeCoverageReportVerdict = ("clean" | "hot-path-touched" | "cold-code-detected" | "license-expired-grace" | "unknown")
 /**
- * Discrete signal captured during runtime-coverage post-processing. Multiple signals can apply to a single report; `verdict` collapses to the most actionable one for the current context.
+ * Discrete signal captured during runtime-coverage post-processing.
+ * `verdict` collapses to one summary value; `signals` enumerates ALL
+ * findings the report carries so JSON consumers, CI dashboards, and
+ * agents can reason about them independently of the headline. Order is
+ * stable: severity-descending so the first entry mirrors a sensible
+ * non-PR-context verdict.
  */
 export type RuntimeCoverageSignal = ("license-expired-grace" | "cold-code-detected" | "hot-path-touched")
 /**
- * Protocol-level per-function runtime coverage verdict derived from the decision table in fallow-cov-protocol. The CLI's `runtime_coverage.findings` array omits `active` entries even though the underlying enum still includes it.
+ * Runtime coverage source used to produce the summary.
+ */
+export type RuntimeCoverageDataSource = ("local" | "cloud")
+/**
+ * Per-finding verdict. Replaces the 0.1 `state` field.
  */
 export type RuntimeCoverageVerdict = ("safe_to_delete" | "review_required" | "coverage_unavailable" | "low_traffic" | "active" | "unknown")
-/**
- * Confidence level for a runtime coverage finding.
- */
 export type RuntimeCoverageConfidence = ("very_high" | "high" | "medium" | "low" | "none" | "unknown")
-/**
- * Blast-radius risk band. The current thresholds are high at >=20 static callers or >=1,000,000 traffic-weighted caller reach; medium at >=5 callers or >=50,000 weighted reach; low otherwise.
- */
 export type RuntimeCoverageRiskBand = ("low" | "medium" | "high")
-/**
- * License or trial watermark applied to runtime coverage output.
- */
 export type RuntimeCoverageWatermark = ("trial-expired" | "license-expired-grace" | "unknown")
 /**
- * CodeClimate-compatible issue array. GitLab Code Quality consumes the same shape.
+ * Category of refactoring recommendation.
+ */
+export type RecommendationCategory = ("urgent_churn_complexity" | "break_circular_dependency" | "split_high_impact" | "remove_dead_code" | "extract_complex_functions" | "extract_dependencies" | "add_test_coverage")
+/**
+ * A ranked refactoring recommendation for a file.
+ * 
+ * ## Priority Formula
+ * 
+ * ```text
+ * priority = min(density, 1) × 30 + hotspot_boost × 25 + dead_code × 20 + fan_in_norm × 15 + fan_out_norm × 10
+ * ```
+ * 
+ * Fan-in and fan-out normalization uses adaptive percentile-based thresholds
+ * (p95 of the project distribution, with floors) instead of fixed constants.
+ * 
+ * ## Efficiency (default sort)
+ * 
+ * ```text
+ * efficiency = priority / effort_numeric   (Low=1, Medium=2, High=3)
+ * ```
+ * 
+ * Surfaces quick wins: high-priority, low-effort targets rank first.
+ * Effort estimate for a refactoring target.
+ */
+export type EffortEstimate = ("low" | "medium" | "high")
+/**
+ * Confidence level for a refactoring recommendation.
+ * 
+ * Based on the data source reliability:
+ * - **High**: deterministic graph/AST analysis (dead code, circular deps, complexity)
+ * - **Medium**: heuristic thresholds (fan-in/fan-out coupling)
+ * - **Low**: depends on git history quality (churn-based recommendations)
+ */
+export type Confidence = ("high" | "medium" | "low")
+/**
+ * Discriminant for [`RefactoringTargetAction::kind`].
+ */
+export type RefactoringTargetActionType = ("apply-refactoring" | "suppress-line")
+/**
+ * Direction of a metric's change, semantically (improving/declining/stable).
+ */
+export type TrendDirection = ("improving" | "declining" | "stable")
+/**
+ * Resolver mode label for grouped envelopes (dead-code, dupes, health).
+ * 
+ * `owner` groups by CODEOWNERS team, `directory` groups by top-level
+ * directory prefix, `package` groups by workspace package name, `section`
+ * groups by GitLab CODEOWNERS `[Section]` header name.
+ */
+export type GroupByMode = ("owner" | "directory" | "package" | "section")
+/**
+ * Singleton `command` discriminator for [`AuditOutput`].
+ */
+export type AuditCommand = "audit"
+/**
+ * Verdict for the audit command.
+ */
+export type AuditVerdict = ("pass" | "warn" | "fail")
+/**
+ * Gating mode for `fallow audit`.
+ */
+export type AuditGate = ("new-only" | "all")
+/**
+ * Singleton schema-version discriminator for [`CoverageSetupOutput`].
+ */
+export type CoverageSetupSchemaVersion = "1"
+/**
+ * Framework label inside coverage setup output.
+ */
+export type CoverageSetupFramework = ("nextjs" | "nest_js" | "nuxt" | "svelte_kit" | "astro" | "remix" | "vite" | "plain_node" | "unknown")
+/**
+ * Package manager label inside coverage setup output.
+ */
+export type CoverageSetupPackageManager = ("npm" | "pnpm" | "yarn" | "bun")
+/**
+ * Runtime target inside coverage setup output.
+ */
+export type CoverageSetupRuntimeTarget = ("node" | "browser")
+/**
+ * Discriminator value for [`CodeClimateIssue::kind`].
+ */
+export type CodeClimateIssueKind = "issue"
+/**
+ * CodeClimate severity scale.
+ */
+export type CodeClimateSeverity = ("info" | "minor" | "major" | "critical" | "blocker")
+/**
+ * Envelope emitted by `fallow --format codeclimate` and
+ * `fallow --format gitlab-codequality`. GitLab Code Quality consumes the
+ * same shape. The wire form is a bare JSON array, not an object.
  */
 export type CodeClimateOutput = CodeClimateIssue[]
+/**
+ * Singleton GitHub review-event marker.
+ */
+export type ReviewEnvelopeEvent = "COMMENT"
+/**
+ * Per-line review comment. Schema is an `anyOf` between GitHub and GitLab
+ * shapes; at runtime every entry in a single envelope comes from the same
+ * provider because the envelope is built from one provider's branch in
+ * `crates/cli/src/report/ci/review.rs::render_review_envelope`.
+ */
+export type ReviewComment = (GitHubReviewComment | GitLabReviewComment)
+/**
+ * Singleton side discriminator for [`GitHubReviewComment::side`].
+ */
+export type GitHubReviewSide = "RIGHT"
+/**
+ * Singleton position-type discriminator for [`GitLabReviewPosition`].
+ */
+export type GitLabReviewPositionType = "text"
+/**
+ * Schema-version discriminator for the review envelope.
+ */
+export type ReviewEnvelopeSchema = "fallow-review-envelope/v1"
+/**
+ * Review-envelope provider tag.
+ */
+export type ReviewProvider = ("github" | "gitlab")
+/**
+ * `meta.check_conclusion` for the GitHub review envelope. Maps to the
+ * GitHub Checks API conclusion field.
+ */
+export type ReviewCheckConclusion = ("success" | "neutral" | "failure")
+/**
+ * Schema-version discriminator for the review reconcile envelope.
+ */
+export type ReviewReconcileSchema = "fallow-review-reconcile/v1"
 
 /**
- * Combined output from bare `fallow` invocation. Contains results from all enabled analyses (check, dupes, health). Use --only/--skip to select.
+ * Envelope emitted by bare `fallow --format json` (the combined
+ * invocation). Wraps the per-analysis sub-results inside a single envelope
+ * with the standard `schema_version` / `version` / `elapsed_ms` header.
+ * 
+ * Each sub-result is `Option<...>` so `--only` / `--skip` can suppress a
+ * pass without leaving an empty key on the wire. The `check` sub-result is
+ * the full [`CheckOutput`] envelope (including its own `schema_version` /
+ * `version` / `elapsed_ms`), but `dupes` and `health` are the bare body
+ * types: the runtime emit calls `serde_json::to_value(&report)` on
+ * `DuplicationReport` / `HealthReport` directly rather than wrapping them
+ * in their per-command envelope. The committed schema points `dupes` at
+ * `#/definitions/DuplicationReport` and `health` at
+ * `#/definitions/HealthReport` so the documented shape matches the
+ * wire; the `committed_property_refs_match_derived_property_refs`
+ * drift test enforces the alignment.
  */
 export interface CombinedOutput {
+/**
+ * Schema version for this output format.
+ */
 schema_version: SchemaVersion
+/**
+ * Fallow tool version that produced this output.
+ */
 version: ToolVersion
+/**
+ * Analysis duration in milliseconds.
+ */
 elapsed_ms: ElapsedMs
-check?: CheckOutput
-dupes?: DuplicationReport
-health?: HealthReport
+/**
+ * Dead-code analysis sub-envelope. Absent when `--skip check`.
+ */
+check?: (CheckOutput | null)
+/**
+ * Duplication analysis body (bare `DuplicationReport`, not the full
+ * `DupesOutput` envelope). Absent when `--skip dupes`.
+ */
+dupes?: (DuplicationReport | null)
+/**
+ * Complexity analysis body (bare `HealthReport`, not the full
+ * `HealthOutput` envelope). Absent when `--skip health`.
+ */
+health?: (HealthReport | null)
 }
+/**
+ * Envelope emitted by `fallow dead-code --format json` (plus the `check`
+ * block inside the combined and audit envelopes).
+ * 
+ * The body is the full `AnalysisResults` flattened into the envelope so
+ * every issue array (`unused_files`, `unused_exports`, ...) lives at the
+ * top level, matching the existing wire shape. `entry_points` lifts the
+ * otherwise `#[serde(skip)]`'d `AnalysisResults::entry_point_summary` back
+ * into the JSON output. `summary` carries the per-category counts the
+ * JSON layer always emits.
+ */
 export interface CheckOutput {
+/**
+ * Schema version for this output format.
+ */
 schema_version: SchemaVersion
+/**
+ * Fallow tool version that produced this output.
+ */
 version: ToolVersion
+/**
+ * Analysis duration in milliseconds.
+ */
 elapsed_ms: ElapsedMs
 /**
  * Total number of issues found across all categories.
  */
 total_issues: number
+/**
+ * Entry-point detection summary. Present when the analysis populated
+ * the metadata block; absent in synthesised fixtures.
+ */
+entry_points?: (EntryPoints | null)
+/**
+ * Per-category issue counts. Always present in real runs.
+ */
+summary: CheckSummary
+/**
+ * Files not reachable from any entry point.
+ */
 unused_files: UnusedFile[]
+/**
+ * Exports never imported by other modules.
+ */
 unused_exports: UnusedExport[]
+/**
+ * Type exports never imported by other modules.
+ */
 unused_types: UnusedExport[]
+/**
+ * Exported symbols whose public signature references same-file private types.
+ */
 private_type_leaks: PrivateTypeLeak[]
+/**
+ * Dependencies listed in package.json but never imported.
+ */
 unused_dependencies: UnusedDependency[]
+/**
+ * Dev dependencies listed in package.json but never imported.
+ */
 unused_dev_dependencies: UnusedDependency[]
+/**
+ * Optional dependencies listed in package.json but never imported.
+ */
 unused_optional_dependencies: UnusedDependency[]
+/**
+ * Enum members never accessed.
+ */
 unused_enum_members: UnusedMember[]
+/**
+ * Class members never accessed.
+ */
 unused_class_members: UnusedMember[]
+/**
+ * Import specifiers that could not be resolved.
+ */
 unresolved_imports: UnresolvedImport[]
+/**
+ * Dependencies used in code but not listed in package.json.
+ */
 unlisted_dependencies: UnlistedDependency[]
+/**
+ * Exports with the same name across multiple modules.
+ */
 duplicate_exports: DuplicateExport[]
+/**
+ * Production dependencies only used via type-only imports (could be devDependencies).
+ * Only populated in production mode.
+ */
 type_only_dependencies: TypeOnlyDependency[]
+/**
+ * Production dependencies only imported by test files (could be devDependencies).
+ */
 test_only_dependencies?: TestOnlyDependency[]
+/**
+ * Circular dependency chains detected in the module graph.
+ */
 circular_dependencies: CircularDependency[]
+/**
+ * Imports that cross architecture boundary rules.
+ */
 boundary_violations?: BoundaryViolation[]
+/**
+ * Suppression comments or JSDoc tags that no longer match any issue.
+ */
 stale_suppressions?: StaleSuppression[]
 /**
- * Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not referenced by any workspace package via the catalog: protocol.
+ * Entries in pnpm-workspace.yaml catalogs that no workspace package references.
  */
 unused_catalog_entries?: UnusedCatalogEntry[]
 /**
- * Named groups under pnpm-workspace.yaml's catalogs: section that declare no package entries. The top-level catalog: map is not reported.
+ * Empty named groups under pnpm-workspace.yaml's catalogs: section.
  */
 empty_catalog_groups?: EmptyCatalogGroup[]
 /**
- * Workspace package.json references to catalogs (catalog: or catalog:<name>) that do not declare the consumed package. pnpm install will error until the named catalog grows to include the package or the reference is switched / removed.
+ * Workspace package.json references to pnpm catalogs that don't declare the package.
  */
 unresolved_catalog_references?: UnresolvedCatalogReference[]
 /**
- * Entries in pnpm-workspace.yaml's overrides: section, or package.json's pnpm.overrides block, whose target package is not declared by any workspace package and is not present in pnpm-lock.yaml. Default severity is warn because projects without a readable lockfile fall back to manifest-only checks; the hint field flags those conservative cases.
+ * Entries in pnpm `overrides:` / `pnpm.overrides` whose target package is not
+ * declared by any workspace package and not resolved in pnpm-lock.yaml.
  */
 unused_dependency_overrides?: UnusedDependencyOverride[]
 /**
- * pnpm.overrides entries whose key or value does not parse as a valid override spec (empty key, empty value, malformed selector, unbalanced parent matcher). pnpm install will reject these. Default severity is error.
+ * Entries in pnpm `overrides:` / `pnpm.overrides` whose key or value cannot be parsed.
  */
 misconfigured_dependency_overrides?: MisconfiguredDependencyOverride[]
-entry_points?: EntryPoints
-summary: CheckSummary
-baseline_deltas?: BaselineDeltas
-baseline?: BaselineMatch
-regression?: RegressionResult
-_meta?: Meta
+/**
+ * Per-category delta comparison against a saved baseline. Only present
+ * when `--baseline` is used (today only via the combined invocation).
+ */
+baseline_deltas?: (BaselineDeltas | null)
+/**
+ * Baseline match statistics. Only present when `--baseline` is used.
+ */
+baseline?: (BaselineMatch | null)
+/**
+ * Regression check result. Only present when `--fail-on-regression` is
+ * used.
+ */
+regression?: (RegressionResult | null)
+/**
+ * `_meta` block with metric / rule definitions, emitted when `--explain`
+ * is passed (always present in MCP responses).
+ */
+_meta?: (Meta | null)
 }
+/**
+ * Entry-point detection summary embedded in `CheckOutput` and the combined
+ * envelope.
+ */
+export interface EntryPoints {
+/**
+ * Total number of detected entry points.
+ */
+total: number
+/**
+ * Breakdown of entry points by detection source (e.g., `"package.json"`,
+ * `"next.js"`, `"config entry"`). Underscored keys so dashboards can
+ * drill into individual sources.
+ */
+sources: {
+[k: string]: number
+}
+}
+/**
+ * Per-category issue counts for dead-code analysis. Always present in
+ * `CheckOutput`; when `--summary` is used the individual issue arrays are
+ * omitted but this object stays populated.
+ */
+export interface CheckSummary {
+/**
+ * Total number of issues across all categories.
+ */
+total_issues: number
+/**
+ * Unused source files.
+ */
+unused_files: number
+/**
+ * Unused value exports.
+ */
+unused_exports: number
+/**
+ * Unused type exports.
+ */
+unused_types: number
+/**
+ * Public exports whose signature references same-file private types.
+ */
+private_type_leaks: number
+/**
+ * Combined count of unused entries across `dependencies`,
+ * `devDependencies`, and `optionalDependencies`. The per-section
+ * breakdown lives in the individual issue arrays on `CheckOutput`.
+ */
+unused_dependencies: number
+/**
+ * Unused enum members.
+ */
+unused_enum_members: number
+/**
+ * Unused class members.
+ */
+unused_class_members: number
+/**
+ * Imports that could not be resolved against the project's module graph.
+ */
+unresolved_imports: number
+/**
+ * Dependencies imported but absent from `package.json`.
+ */
+unlisted_dependencies: number
+/**
+ * Same-named exports declared in more than one module.
+ */
+duplicate_exports: number
+/**
+ * Production dependencies only used via type-only imports (could be
+ * devDependencies). Only populated in production mode.
+ */
+type_only_dependencies: number
+/**
+ * Production dependencies only imported by test files (could be
+ * devDependencies).
+ */
+test_only_dependencies: number
+/**
+ * Cycles detected in the import graph.
+ */
+circular_dependencies: number
+/**
+ * Imports that cross architecture boundary rules.
+ */
+boundary_violations: number
+/**
+ * Suppression comments that no longer match a finding.
+ */
+stale_suppressions: number
+/**
+ * Unused pnpm-workspace catalog entries.
+ */
+unused_catalog_entries: number
+/**
+ * Empty named catalog groups.
+ */
+empty_catalog_groups: number
+/**
+ * Workspace package.json catalog references the workspace catalogs
+ * do not declare.
+ */
+unresolved_catalog_references: number
+/**
+ * Pnpm `overrides:` entries whose target package is not declared by any
+ * workspace package and not present in the lockfile.
+ */
+unused_dependency_overrides: number
+/**
+ * Pnpm `overrides:` entries whose key or value cannot be parsed.
+ */
+misconfigured_dependency_overrides: number
+}
+/**
+ * A file that is not reachable from any entry point.
+ */
 export interface UnusedFile {
 /**
- * File path (forward slashes, relative to project root).
+ * Absolute path to the unused file.
  */
 path: string
 /**
  * Suggested actions to resolve this issue.
  */
-actions: IssueAction[]
+actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
+/**
+ * A code-change fix. `type` is one of the kebab-case identifiers in
+ * [`FixActionType`].
+ */
 export interface FixAction {
 /**
  * Kebab-case identifier for the fix action.
  */
-type: ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override")
+type: FixActionType
 /**
  * Whether `fallow fix` can apply this fix automatically.
  */
@@ -165,61 +753,84 @@ auto_fixable: boolean
  */
 description: string
 /**
- * Optional context note. Present on non-auto-fixable actions, and on auto-fixable re-export findings to warn about public API surface.
+ * Optional context note. Present on non-auto-fixable actions, and on
+ * auto-fixable re-export findings to warn about public API surface.
  */
-note?: string
+note?: (string | null)
 /**
- * Only present on `update-catalog-reference` actions: catalogs in the same workspace that DO declare the package, sorted lexicographically. Lets agents pick the catalog to switch to without re-reading the source.
+ * Only present on `update-catalog-reference` actions: catalogs in the
+ * same workspace that DO declare the package, sorted lexicographically.
+ * Lets agents pick the catalog to switch to without re-reading the
+ * source.
  */
-available_in_catalogs?: string[]
+available_in_catalogs?: (string[] | null)
 }
+/**
+ * Inline-comment suppression for a single finding line.
+ */
 export interface SuppressLineAction {
 /**
  * Action type identifier.
  */
-type: "suppress-line"
+type: SuppressLineKind
 /**
  * Always false for suppress actions.
  */
-auto_fixable: false
+auto_fixable: SuppressAutoFixable
 /**
  * Human-readable description of the suppression.
  */
 description: string
 /**
- * The inline comment to place above the line (e.g., '// fallow-ignore-next-line unused-export'). When multiple suppressible findings share the same path and line, this may contain a comma-separated issue-kind list such as '// fallow-ignore-next-line unused-export, complexity'.
+ * The inline comment to place above the line (e.g.,
+ * `// fallow-ignore-next-line unused-export`). When multiple
+ * suppressible findings share the same path and line, this may contain a
+ * comma-separated issue-kind list such as
+ * `// fallow-ignore-next-line unused-export, complexity`.
  */
 comment: string
 /**
- * Present on multi-location issue types (e.g., duplicate_exports) to indicate the comment must be applied at each location.
+ * Present on multi-location issue types (e.g., `duplicate_exports`) to
+ * indicate the comment must be applied at each location.
  */
-scope?: "per-location"
+scope?: (SuppressLineScope | null)
 }
+/**
+ * File-wide suppression placed at the top of the source file.
+ */
 export interface SuppressFileAction {
 /**
  * Action type identifier.
  */
-type: "suppress-file"
+type: SuppressFileKind
 /**
  * Always false for suppress actions.
  */
-auto_fixable: false
+auto_fixable: SuppressAutoFixable
 /**
  * Human-readable description of the suppression.
  */
 description: string
 /**
- * The file-level comment to place at the top of the file (e.g., '// fallow-ignore-file unused-file').
+ * The file-level comment to place at the top of the file (e.g.,
+ * `// fallow-ignore-file unused-file`).
  */
 comment: string
 }
+/**
+ * Edit a fallow config file (`.fallowrc.json`, `fallow.toml`, etc.) to
+ * add the offending value to an `ignore*` rule.
+ */
 export interface AddToConfigAction {
 /**
  * Action type identifier.
  */
-type: "add-to-config"
+type: AddToConfigKind
 /**
- * True when `fallow fix` can apply this config action automatically for the current action type. `ignoreExports` duplicate-export actions are auto-fixable when a config file exists; older scalar config-ignore actions remain manual.
+ * True when `fallow fix` can apply this config action automatically for
+ * the current action type. `ignoreExports` duplicate-export actions are
+ * auto-fixable when a config file exists; older scalar config-ignore
+ * actions remain manual.
  */
 auto_fixable: boolean
 /**
@@ -227,26 +838,54 @@ auto_fixable: boolean
  */
 description: string
 /**
- * The fallow config key to add the value to (e.g., 'ignoreDependencies').
+ * The fallow config key to add the value to (e.g.,
+ * `ignoreDependencies`).
  */
 config_key: string
 /**
- * Value to add to the config key. Shape depends on `config_key`. For scalar config keys (`ignoreDependencies`, others) this is a string such as `"lodash"`. For `ignoreExports` this is an array of `{ file, exports }` rule objects so the snippet can be merged into the user's config verbatim. For `ignoreCatalogReferences` and `ignoreDependencyOverrides` this is an object whose shape matches the rule entry users add to their fallow config.
+ * Value to add to the config key. Shape depends on `config_key`. For
+ * scalar config keys (`ignoreDependencies`, others) this is a string
+ * such as `"lodash"`. For `ignoreExports` this is an array of
+ * `{ file, exports }` rule objects so the snippet can be merged into
+ * the user's config verbatim. For `ignoreCatalogReferences` and
+ * `ignoreDependencyOverrides` this is an object whose shape matches the
+ * rule entry users add to their fallow config.
  */
-value: (string | {
-file: string
-exports: string[]
-}[] | {
-
-})
+value: AddToConfigValue
 /**
- * Optional URL pointing at a stable JSON Schema fragment that describes the shape of `value`. Agents that intend to validate `value` before writing it into a user's config can fetch the linked schema and run it against `value`. The URL is a JSON Pointer fragment into fallow's main config schema (e.g. `schema.json#/properties/ignoreExports` for the ignoreExports action, or `schema.json#/properties/ignoreDependencies/items` for the per-package ignoreDependencies action). Strictly additive: consumers that ignore the field keep working unchanged.
+ * Optional URL pointing at a stable JSON Schema fragment that describes
+ * the shape of `value`. Agents that intend to validate `value` before
+ * writing it into a user's config can fetch the linked schema and run
+ * it against `value`. The URL is a JSON Pointer fragment into fallow's
+ * main config schema (e.g.
+ * `schema.json#/properties/ignoreExports` for the ignoreExports
+ * action, or `schema.json#/properties/ignoreDependencies/items` for
+ * the per-package ignoreDependencies action). Strictly additive:
+ * consumers that ignore the field keep working unchanged.
  */
-value_schema?: string
+value_schema?: (string | null)
 }
+/**
+ * Single `ignoreExports` rule entry. The fallow config accepts an array of
+ * these under the `ignoreExports` key.
+ */
+export interface IgnoreExportsRule {
+/**
+ * File path (forward slashes, relative to project root) to which this
+ * rule applies. Globs are accepted.
+ */
+file: string
+/**
+ * Names of exports inside `file` to silently treat as used.
+ */
+exports: string[]
+}
+/**
+ * An export that is never imported by other modules.
+ */
 export interface UnusedExport {
 /**
- * File path containing the unused export.
+ * File containing the unused export.
  */
 path: string
 /**
@@ -254,11 +893,11 @@ path: string
  */
 export_name: string
 /**
- * Whether this is a type-only export (interface, type alias).
+ * Whether this is a type-only export.
  */
 is_type_only: boolean
 /**
- * 1-based line number.
+ * 1-based line number of the export.
  */
 line: number
 /**
@@ -276,24 +915,27 @@ is_re_export: boolean
 /**
  * Suggested actions to resolve this issue.
  */
-actions: IssueAction[]
+actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
+/**
+ * A public export signature that references a same-file private type.
+ */
 export interface PrivateTypeLeak {
 /**
- * File path containing the exported signature.
+ * File containing the exported symbol.
  */
 path: string
 /**
- * Name of the exported symbol whose signature references a private type.
+ * Export whose public signature leaks the private type.
  */
 export_name: string
 /**
- * Name of the same-file private type referenced by the exported signature.
+ * Private type referenced by the public signature.
  */
 type_name: string
 /**
- * 1-based line number.
+ * 1-based line number of the leaking type reference.
  */
 line: number
 /**
@@ -301,26 +943,30 @@ line: number
  */
 col: number
 /**
- * Byte offset of the private type reference in the source file.
+ * Byte offset of the type reference.
  */
 span_start: number
 /**
  * Suggested actions to resolve this issue.
  */
-actions: IssueAction[]
+actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
+/**
+ * A dependency that is listed in package.json but never imported.
+ */
 export interface UnusedDependency {
 /**
  * Package name, including internal workspace package names.
  */
 package_name: string
 /**
- * Which section of package.json the dependency is listed in.
+ * Whether this is in `dependencies`, `devDependencies`, or `optionalDependencies`.
  */
-location: ("dependencies" | "devDependencies" | "optionalDependencies")
+location: DependencyLocation
 /**
  * Path to the package.json where this dependency is listed.
+ * For root deps this is `<root>/package.json`, for workspace deps it is `<ws>/package.json`.
  */
 path: string
 /**
@@ -334,12 +980,15 @@ used_in_workspaces?: string[]
 /**
  * Suggested actions to resolve this issue.
  */
-actions: IssueAction[]
+actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
+/**
+ * An unused enum or class member.
+ */
 export interface UnusedMember {
 /**
- * File path containing the unused member.
+ * File containing the unused member.
  */
 path: string
 /**
@@ -351,9 +1000,9 @@ parent_name: string
  */
 member_name: string
 /**
- * Member kind (e.g., EnumMember, ClassMethod, ClassProperty).
+ * Whether this is an enum member, class method, or class property.
  */
-kind: string
+kind: MemberKind
 /**
  * 1-based line number.
  */
@@ -365,12 +1014,15 @@ col: number
 /**
  * Suggested actions to resolve this issue.
  */
-actions: IssueAction[]
+actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
+/**
+ * An import that could not be resolved.
+ */
 export interface UnresolvedImport {
 /**
- * File path containing the unresolved import.
+ * File containing the unresolved import.
  */
 path: string
 /**
@@ -386,30 +1038,37 @@ line: number
  */
 col: number
 /**
- * 0-based byte column offset of the source string literal (the specifier in quotes). Used by the LSP to underline just the specifier, not the entire import line.
+ * 0-based byte column offset of the source string literal (the specifier in quotes).
+ * Used by the LSP to underline just the specifier, not the entire import line.
  */
 specifier_col: number
 /**
  * Suggested actions to resolve this issue.
  */
-actions: IssueAction[]
+actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
+/**
+ * A dependency used in code but not listed in package.json.
+ */
 export interface UnlistedDependency {
 /**
- * Package name, including internal workspace package names, that is imported but not listed in package.json.
+ * Package name, including internal workspace package names.
  */
 package_name: string
 /**
- * Import sites where this unlisted dependency is used.
+ * Import sites where this unlisted dependency is used (file path, line, column).
  */
 imported_from: ImportSite[]
 /**
  * Suggested actions to resolve this issue.
  */
-actions: IssueAction[]
+actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
+/**
+ * A location where an import occurs.
+ */
 export interface ImportSite {
 /**
  * File containing the import.
@@ -424,21 +1083,27 @@ line: number
  */
 col: number
 }
+/**
+ * An export that appears multiple times across the project.
+ */
 export interface DuplicateExport {
 /**
- * The export name that appears in multiple modules.
+ * The duplicated export name.
  */
 export_name: string
 /**
- * Locations where this export name is defined.
+ * Locations where this export name appears.
  */
 locations: DuplicateLocation[]
 /**
  * Suggested actions to resolve this issue.
  */
-actions: IssueAction[]
+actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
+/**
+ * A location where a duplicate export appears.
+ */
 export interface DuplicateLocation {
 /**
  * File containing the duplicate export.
@@ -453,13 +1118,18 @@ line: number
  */
 col: number
 }
+/**
+ * A production dependency that is only used via type-only imports.
+ * In production builds, type imports are erased, so this dependency
+ * is not needed at runtime and could be moved to devDependencies.
+ */
 export interface TypeOnlyDependency {
 /**
- * Production dependency that is only used via type-only imports.
+ * npm package name.
  */
 package_name: string
 /**
- * Path to the package.json where this dependency is listed.
+ * Path to the package.json where the dependency is listed.
  */
 path: string
 /**
@@ -469,16 +1139,20 @@ line: number
 /**
  * Suggested actions to resolve this issue.
  */
-actions: IssueAction[]
+actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
+/**
+ * A production dependency that is only imported by test files.
+ * Since it is never used in production code, it could be moved to devDependencies.
+ */
 export interface TestOnlyDependency {
 /**
- * Production dependency that is only imported by test files — consider moving to devDependencies.
+ * npm package name.
  */
 package_name: string
 /**
- * Path to the package.json where this dependency is listed.
+ * Path to the package.json where the dependency is listed.
  */
 path: string
 /**
@@ -488,12 +1162,24 @@ line: number
 /**
  * Suggested actions to resolve this issue.
  */
-actions: IssueAction[]
+actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
+/**
+ * A circular dependency chain detected in the module graph.
+ * 
+ * The `line` and `col` fields carry `#[serde(default)]` so callers reading
+ * historical baseline JSON without these fields can still deserialize the
+ * struct, but the JSON output layer always emits them (u32 always
+ * serializes, never via `skip_serializing_if`). The schemars derive sees
+ * the serde defaults and marks both fields optional in the generated
+ * schema; the explicit `extend("required" = ...)` override here keeps the
+ * schema's `required` array honest about what the JSON output actually
+ * contains.
+ */
 export interface CircularDependency {
 /**
- * File paths forming the import cycle, in cycle order.
+ * Files forming the cycle, in import order.
  */
 files: string[]
 /**
@@ -501,7 +1187,7 @@ files: string[]
  */
 length: number
 /**
- * 1-based line number of the import that starts the cycle.
+ * 1-based line number of the import that starts the cycle (in the first file).
  */
 line: number
 /**
@@ -509,38 +1195,41 @@ line: number
  */
 col: number
 /**
- * Whether this cycle crosses workspace package boundaries. Only present when true.
+ * Whether this cycle crosses workspace package boundaries.
  */
 is_cross_package?: boolean
 /**
  * Suggested actions to resolve this issue.
  */
-actions: IssueAction[]
+actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
+/**
+ * An import that crosses an architecture boundary rule.
+ */
 export interface BoundaryViolation {
 /**
- * Relative path to the file making the disallowed import.
+ * The file making the disallowed import.
  */
 from_path: string
 /**
- * Relative path to the file being imported.
+ * The file being imported that violates the boundary.
  */
 to_path: string
 /**
- * Architecture zone of the importing file.
+ * The zone the importing file belongs to.
  */
 from_zone: string
 /**
- * Architecture zone of the imported file.
+ * The zone the imported file belongs to.
  */
 to_zone: string
 /**
- * Relative path of the imported file (used as specifier).
+ * The raw import specifier from the source file.
  */
 import_specifier: string
 /**
- * 1-based line number of the import statement.
+ * 1-based line number of the import statement in the source file.
  */
 line: number
 /**
@@ -550,235 +1239,252 @@ col: number
 /**
  * Suggested actions to resolve this issue.
  */
-actions: IssueAction[]
+actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
+/**
+ * A suppression comment or JSDoc tag that no longer matches any issue.
+ */
 export interface StaleSuppression {
 /**
- * Relative path to the file containing the stale suppression.
+ * File containing the stale suppression.
  */
 path: string
 /**
- * 1-based line number of the suppression comment or JSDoc tag.
+ * 1-based line number of the suppression comment or tag.
  */
 line: number
 /**
  * 0-based byte column offset.
  */
 col: number
-origin: ({
-type: "comment"
 /**
- * The issue kind token (e.g. 'unused-exports'). Absent for blanket suppressions.
+ * The origin and details of the stale suppression.
  */
-issue_kind?: string
-/**
- * True for fallow-ignore-file, false for fallow-ignore-next-line.
- */
-is_file_level?: boolean
-} | {
-type: "jsdoc_tag"
-/**
- * Name of the export that was tagged @expected-unused.
- */
-export_name: string
-})
-introduced?: AuditIntroduced
+origin: SuppressionOrigin
 }
 /**
- * A package declared in a pnpm-workspace.yaml catalog that is not referenced by any workspace package via the catalog: protocol.
+ * A pnpm catalog entry declared in pnpm-workspace.yaml that no workspace package
+ * references via the `catalog:` protocol.
+ * 
+ * The default catalog (top-level `catalog:` key) uses `catalog_name: "default"`.
+ * Named catalogs (under `catalogs.<name>:`) use their declared name.
  */
 export interface UnusedCatalogEntry {
 /**
- * Package name declared in the catalog (e.g. 'react').
+ * Package name declared in the catalog (e.g. `"react"`, `"@scope/lib"`).
  */
 entry_name: string
 /**
- * Catalog group name. 'default' for the top-level catalog: map, or the named catalog key for entries under catalogs.<name>:.
+ * Catalog group: `"default"` for the top-level `catalog:` map, or the
+ * named catalog key for entries declared under `catalogs.<name>:`.
  */
 catalog_name: string
 /**
- * Relative path to pnpm-workspace.yaml.
+ * Path to `pnpm-workspace.yaml`, relative to the analyzed root.
  */
 path: string
 /**
- * 1-based line number of the catalog entry.
+ * 1-based line number of the catalog entry within `pnpm-workspace.yaml`.
  */
 line: number
 /**
- * Workspace package.json paths that declare the same package with a hardcoded version range instead of catalog:. Omitted when empty.
+ * Workspace `package.json` files that declare the same package with a
+ * hardcoded version range instead of `catalog:`. Empty when no consumer
+ * uses a hardcoded version. Sorted lexicographically for deterministic
+ * output.
  */
 hardcoded_consumers?: string[]
+/**
+ * Suggested actions to resolve this issue.
+ */
 actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
- * A named pnpm catalog group under catalogs: with no package entries.
+ * A named `catalogs.<name>:` group in `pnpm-workspace.yaml` with no package entries.
  */
 export interface EmptyCatalogGroup {
 /**
- * Named catalog group under the top-level catalogs: map.
+ * Catalog group name declared under the top-level `catalogs:` map.
  */
 catalog_name: string
 /**
- * Relative path to pnpm-workspace.yaml.
+ * Path to `pnpm-workspace.yaml`, relative to the analyzed root.
  */
 path: string
 /**
- * 1-based line number of the empty catalog group header.
+ * 1-based line number of the empty group header within `pnpm-workspace.yaml`.
  */
 line: number
+/**
+ * Suggested actions to resolve this issue.
+ */
 actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
- * A workspace package.json reference (catalog: or catalog:<name>) pointing at a catalog that does not declare the consumed package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL.
+ * A workspace package.json reference (`catalog:` or `catalog:<name>`) that points
+ * at a catalog which does not declare the consumed package.
+ * 
+ * `pnpm install` errors at install time with `ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL`
+ * when this happens. fallow surfaces it statically so the failure is caught at
+ * `fallow check` time, before any install.
+ * 
+ * The default catalog (bare `catalog:` references the top-level `catalog:` map)
+ * uses `catalog_name: "default"`. Named catalogs (`catalog:react17`) use the
+ * declared catalog name.
  */
 export interface UnresolvedCatalogReference {
 /**
- * Package name being referenced via the catalog protocol (e.g. 'old-react').
+ * Package name being referenced via the catalog protocol (e.g. `"react"`).
  */
 entry_name: string
 /**
- * Catalog group the reference points at. 'default' for bare catalog: references, or the named catalog key for catalog:<name> references.
+ * Catalog group the reference points at: `"default"` for bare `catalog:` references,
+ * or the named catalog key for `catalog:<name>` references.
  */
 catalog_name: string
 /**
- * Relative path to the consumer package.json.
+ * Absolute path to the consumer `package.json`. Matches the storage
+ * convention used by every path-anchored finding type (`UnusedFile`,
+ * `UnresolvedImport`, `UnusedExport`, etc.) so the shared filtering
+ * pipelines (`filter_results_by_changed_files`, per-file overrides,
+ * audit attribution) work without a separate root-join pass. JSON
+ * output strips the project-root prefix via `serde_path::serialize`.
  */
 path: string
 /**
- * 1-based line number of the dependency entry in the consumer package.json.
+ * 1-based line number of the dependency entry in the consumer `package.json`.
  */
 line: number
 /**
- * Other catalogs in the same workspace that DO declare this package, sorted lexicographically. When non-empty, the suggested fix is to flip the reference to one of those catalogs; when empty, the fix is to add the missing entry to the named catalog or to remove the reference. Omitted when empty.
+ * Other catalogs (in the same `pnpm-workspace.yaml`) that DO declare this
+ * package. Empty when no catalog has the package. Sorted lexicographically.
+ * Lets agents and humans decide whether to switch the reference to a
+ * different catalog or to add the entry to the named catalog.
  */
 available_in_catalogs?: string[]
+/**
+ * Suggested actions to resolve this issue.
+ */
 actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
- * A pnpm.overrides entry whose target package is not declared in any workspace package.json (directly or as a declared parent in a parent>child override). May still be intentional for a transitive CVE pin; see `hint`.
+ * An entry in pnpm's `overrides:` map (or the legacy `pnpm.overrides` in
+ * `package.json`) whose target package is not declared in any workspace
+ * `package.json` and is not present in `pnpm-lock.yaml`. Projects without a
+ * readable lockfile fall back to package manifest checks; the `hint` field
+ * flags that conservative mode.
  */
 export interface UnusedDependencyOverride {
 /**
- * Full original override key as written (e.g. 'react>react-dom', '@types/react@<18').
+ * The full original override key as written in the source (e.g.
+ * `"react>react-dom"`, `"@types/react@<18"`). Preserved for round-trip
+ * reporting so agents see the unmodified spelling.
  */
 raw_key: string
 /**
- * Target package the override rewrites (rightmost segment for parent>child keys).
+ * The target package the override rewrites (e.g. `"react-dom"` for
+ * `"react>react-dom"`, `"@types/react"` for `"@types/react@<18"`).
  */
 target_package: string
 /**
- * Optional parent package (left side of `>`). Omitted for bare-target keys.
+ * Optional parent package (left side of `>`). `None` for bare-target keys.
  */
-parent_package?: string
+parent_package?: (string | null)
 /**
- * Optional version selector on the target (e.g. '<18' for '@types/react@<18'). Omitted when absent.
+ * Optional version selector on the target (e.g. `Some("<18")` for
+ * `"@types/react@<18"`).
  */
-version_constraint?: string
+version_constraint?: (string | null)
 /**
- * Right-hand side of the entry: the version pnpm should force.
+ * The right-hand side of the entry: the version pnpm should force.
  */
 version_range: string
 /**
- * File the override was declared in. Matches the value users write in `ignoreDependencyOverrides[].source`.
+ * Where the override entry was declared.
  */
-source: ("pnpm-workspace.yaml" | "package.json")
+source: DependencyOverrideSource
 /**
- * Relative path to the source file.
+ * Path to the source file. `pnpm-workspace.yaml` or a `package.json`,
+ * stored as an absolute filesystem path so `--changed-since` and
+ * per-file `overrides.rules` can compare directly against the analyzer's
+ * changed-set / per-path rule lookups. JSON serialization strips the
+ * project root via `serde_path::serialize`, matching the
+ * `UnresolvedCatalogReference` convention.
  */
 path: string
 /**
- * 1-based line number of the entry.
+ * 1-based line number of the entry within the source file.
  */
 line: number
 /**
- * Soft hint reminding consumers to verify the override before removal. Present because projects without a readable lockfile use the conservative package-manifest fallback. Omitted when absent.
+ * Soft hint reminding consumers to verify the override before removal.
+ * Emitted on every unused-override finding (both bare-target and
+ * parent-chain shapes) because projects without a readable lockfile still
+ * use the conservative package-manifest fallback.
  */
-hint?: string
+hint?: (string | null)
+/**
+ * Suggested actions to resolve this issue.
+ */
 actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
- * A pnpm.overrides entry whose key or value does not parse as a valid pnpm override spec. `pnpm install` will reject these.
+ * An override entry whose key or value is malformed. Default severity is
+ * `error` because pnpm refuses to install (or silently produces a no-op
+ * override) when it encounters these shapes.
  */
 export interface MisconfiguredDependencyOverride {
 /**
- * Full original override key as written.
+ * The full original override key as written in the source.
  */
 raw_key: string
 /**
- * Parsed target package name when the key was syntactically valid (the empty-value reason path). Absent for unparsable-key findings. Used by add-to-config actions to emit a paste-ready ignoreDependencyOverrides value.
+ * Parsed target package name when the key was syntactically valid (the
+ * `EmptyValue` reason path). `None` for `UnparsableKey` findings whose
+ * key could not be parsed at all. Used by JSON `add-to-config` actions to
+ * emit a paste-ready `ignoreDependencyOverrides` value that matches the
+ * suppression matcher (which also keys on `target_package`); avoids the
+ * pitfall where `raw_key` like `"react@<18"` would not match the rule
+ * that targets package `"react"`.
  */
-target_package?: string
+target_package?: (string | null)
 /**
- * Right-hand side of the entry, exactly as written. Empty when the value was missing.
+ * The right-hand side of the entry, exactly as written. Empty when the
+ * value was missing.
  */
 raw_value: string
 /**
- * Classifier for the misconfiguration. 'unparsable-key' = the key is not a valid pnpm shape; 'empty-value' = the value is missing, empty, or contains line breaks.
+ * Classifier for the misconfiguration.
  */
-reason: ("unparsable-key" | "empty-value")
+reason: DependencyOverrideMisconfigReason
 /**
- * File the override was declared in.
+ * Where the override entry was declared.
  */
-source: ("pnpm-workspace.yaml" | "package.json")
+source: DependencyOverrideSource
 /**
- * Relative path to the source file.
+ * Path to the source file. Stored as an absolute filesystem path so
+ * `--changed-since` and per-file `overrides.rules` can compare directly.
+ * JSON serialization strips the project root via `serde_path::serialize`.
  */
 path: string
 /**
- * 1-based line number of the entry.
+ * 1-based line number of the entry within the source file.
  */
 line: number
+/**
+ * Suggested actions to resolve this issue.
+ */
 actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
- * Entry point detection summary showing total detected entry points and their sources.
- */
-export interface EntryPoints {
-/**
- * Total number of detected entry points.
- */
-total: number
-/**
- * Breakdown of entry points by detection source (e.g., 'package.json', 'next.js', 'config entry').
- */
-sources: {
-[k: string]: number
-}
-}
-/**
- * Per-category issue counts for dead code analysis. `unused_dependencies` is the combined count across `dependencies`, `devDependencies`, and `optionalDependencies`; the per-section breakdown lives in the individual issue arrays on `CheckOutput`.
- */
-export interface CheckSummary {
-total_issues: number
-unused_files: number
-unused_exports: number
-unused_types: number
-private_type_leaks: number
-unused_dependencies: number
-unused_enum_members: number
-unused_class_members: number
-unresolved_imports: number
-unlisted_dependencies: number
-duplicate_exports: number
-type_only_dependencies: number
-test_only_dependencies: number
-circular_dependencies: number
-boundary_violations: number
-stale_suppressions: number
-unused_catalog_entries: number
-empty_catalog_groups: number
-unresolved_catalog_references: number
-unused_dependency_overrides: number
-misconfigured_dependency_overrides: number
-}
-/**
- * Per-category delta comparison against a saved baseline. Shows current count, baseline count, and delta for each category.
+ * Per-category delta comparison against a saved baseline. Only present in
+ * `CheckOutput` when `--baseline` is used.
  */
 export interface BaselineDeltas {
 /**
@@ -789,7 +1495,13 @@ total_delta: number
  * Per-category breakdown of current, baseline, and delta counts.
  */
 per_category: {
-[k: string]: {
+[k: string]: BaselineCategoryDelta
+}
+}
+/**
+ * Single-category baseline delta entry inside [`BaselineDeltas::per_category`].
+ */
+export interface BaselineCategoryDelta {
 /**
  * Current issue count for this category.
  */
@@ -803,10 +1515,10 @@ baseline: number
  */
 delta: number
 }
-}
-}
 /**
- * Baseline match statistics. Shows how many baseline entries existed and how many matched current issues. Useful for detecting stale baselines programmatically.
+ * Baseline match statistics. Shows how many baseline entries existed and how
+ * many matched current issues. Useful for detecting stale baselines
+ * programmatically. Only present in `CheckOutput` when `--baseline` is used.
  */
 export interface BaselineMatch {
 /**
@@ -814,91 +1526,134 @@ export interface BaselineMatch {
  */
 entries: number
 /**
- * Number of baseline entries that matched current issues and were filtered.
+ * Number of baseline entries that matched current issues and were
+ * filtered.
  */
 matched: number
 }
 /**
- * Result of regression detection (--fail-on-regression). Compares current issue counts against a baseline from config or an explicit file.
+ * Result of regression detection (`--fail-on-regression`). Compares current
+ * issue counts against a baseline from config or an explicit file.
  */
 export interface RegressionResult {
-status: ("pass" | "exceeded" | "skipped")
-baseline_total?: number
-current_total?: number
-delta?: number
-tolerance?: number
-tolerance_kind?: ("absolute" | "percentage")
+/**
+ * Outcome of the regression check.
+ */
+status: RegressionStatus
+/**
+ * Baseline total before the change. Absent when status is `skipped`.
+ */
+baseline_total?: (number | null)
+/**
+ * Current total after the change. Absent when status is `skipped`.
+ */
+current_total?: (number | null)
+/**
+ * Difference current - baseline. Absent when status is `skipped`.
+ */
+delta?: (number | null)
+/**
+ * Configured tolerance, interpreted per [`RegressionToleranceKind`].
+ * Absent when status is `skipped`.
+ */
+tolerance?: (number | null)
+/**
+ * Interpretation of the tolerance value.
+ */
+tolerance_kind?: (RegressionToleranceKind | null)
+/**
+ * Whether the regression exceeded the tolerance.
+ */
 exceeded: boolean
 /**
- * Only present when status is 'skipped'.
+ * Only present when status is `skipped`.
  */
-reason?: string
+reason?: (string | null)
 }
 /**
- * Metric definitions and documentation links. Included when --explain is passed (always present in MCP responses). Helps AI agents and CI systems interpret metric values.
+ * Metric and rule definitions emitted under `_meta` when `--explain` is
+ * passed (always present in MCP responses). Helps AI agents and CI systems
+ * interpret metric values without re-reading the docs site.
  */
 export interface Meta {
 /**
  * URL to the documentation page for this command.
  */
-docs?: string
+docs?: (string | null)
 /**
  * Per-metric definitions: name, description, range, interpretation.
  */
 metrics?: {
-[k: string]: {
-/**
- * Human-readable metric name.
- */
-name?: string
-/**
- * What this metric measures and how it is computed.
- */
-description?: string
-/**
- * Valid value range (e.g., '[0, 100]').
- */
-range?: string
-/**
- * How to read the value (e.g., 'lower is better').
- */
-interpretation?: string
-}
+[k: string]: MetaMetric
 }
 /**
  * Per-rule definitions for check command output.
  */
 rules?: {
-[k: string]: {
+[k: string]: MetaRule
+}
+}
+/**
+ * Single-metric definition inside [`Meta::metrics`].
+ */
+export interface MetaMetric {
+/**
+ * Human-readable metric name.
+ */
+name?: (string | null)
+/**
+ * What this metric measures and how it is computed.
+ */
+description?: (string | null)
+/**
+ * Valid value range (e.g., `"[0, 100]"`).
+ */
+range?: (string | null)
+/**
+ * How to read the value (e.g., `"lower is better"`).
+ */
+interpretation?: (string | null)
+}
+/**
+ * Single-rule definition inside [`Meta::rules`].
+ */
+export interface MetaRule {
 /**
  * Human-readable rule name.
  */
-name?: string
+name?: (string | null)
 /**
  * What this rule detects.
  */
-description?: string
+description?: (string | null)
 /**
  * URL to the rule documentation.
  */
-docs?: string
-}
-}
+docs?: (string | null)
 }
 /**
- * Duplication analysis body. Mirrors `fallow_core::duplicates::DuplicationReport`. Emitted as the value of `combined.dupes` and `audit.duplication`, where the JSON layer does NOT wrap it in the `DupesOutput` envelope (no `schema_version` / `version` / `elapsed_ms` header).
+ * Overall duplication analysis report.
  */
 export interface DuplicationReport {
+/**
+ * All detected clone groups.
+ */
 clone_groups: CloneGroup[]
+/**
+ * Clone families: groups of clone groups sharing the same file set.
+ */
 clone_families: CloneFamily[]
 /**
- * Omitted when empty.
+ * Detected mirrored directory trees (directories with many identical files).
  */
 mirrored_directories?: MirroredDirectory[]
+/**
+ * Aggregate statistics.
+ */
 stats: DuplicationStats
 }
 /**
- * A group of code clones — the same (or normalized-equivalent) code appearing in multiple places.
+ * A group of code clones -- the same (or normalized-equivalent) code appearing in multiple places.
  */
 export interface CloneGroup {
 /**
@@ -906,25 +1661,20 @@ export interface CloneGroup {
  */
 instances: CloneInstance[]
 /**
- * Number of normalized source tokens in the duplicated block.
+ * Number of tokens in the duplicated block.
  */
 token_count: number
 /**
- * Number of source lines in the duplicated block.
+ * Number of lines in the duplicated block.
  */
 line_count: number
-/**
- * Suggested actions to eliminate this clone group.
- */
-actions?: CloneGroupAction[]
-introduced?: AuditIntroduced
 }
 /**
  * A single instance of duplicated code at a specific location.
  */
 export interface CloneInstance {
 /**
- * File path (relative to project root).
+ * Path to the file containing this clone instance.
  */
 file: string
 /**
@@ -949,32 +1699,15 @@ end_col: number
 fragment: string
 }
 /**
- * A suggested action for a clone group.
- */
-export interface CloneGroupAction {
-/**
- * Action type identifier.
- */
-type: ("extract-shared" | "suppress-line")
-/**
- * Whether fallow can auto-fix this action.
- */
-auto_fixable: boolean
-/**
- * Human-readable description of the action.
- */
-description: string
-/**
- * The inline comment to insert (e.g., '// fallow-ignore-next-line code-duplication'). Present for suppress-line actions.
- */
-comment?: string
-}
-/**
- * A clone family: a set of clone groups sharing the same file set, indicating systematic duplication.
+ * A clone family: a set of clone groups that share the same file set.
+ * 
+ * When multiple clone groups are all duplicated between the same set of files,
+ * they form a family — indicating a deeper structural relationship that should
+ * be refactored together rather than group-by-group.
  */
 export interface CloneFamily {
 /**
- * Files involved in this family (sorted).
+ * The files involved in this family (sorted for stable output).
  */
 files: string[]
 /**
@@ -982,21 +1715,17 @@ files: string[]
  */
 groups: CloneGroup[]
 /**
- * Total duplicated lines across all groups in this family.
+ * Total number of duplicated lines across all groups.
  */
 total_duplicated_lines: number
 /**
- * Total duplicated tokens across all groups in this family.
+ * Total number of duplicated tokens across all groups.
  */
 total_duplicated_tokens: number
 /**
  * Refactoring suggestions for this family.
  */
 suggestions: RefactoringSuggestion[]
-/**
- * Suggested actions to eliminate duplication in this family.
- */
-actions?: CloneFamilyAction[]
 }
 export interface RefactoringSuggestion {
 /**
@@ -1013,44 +1742,20 @@ description: string
 estimated_savings: number
 }
 /**
- * A suggested action for a clone family.
- */
-export interface CloneFamilyAction {
-/**
- * Action type identifier.
- */
-type: ("extract-shared" | "apply-suggestion" | "suppress-line")
-/**
- * Whether fallow can auto-fix this action.
- */
-auto_fixable: boolean
-/**
- * Human-readable description of the action.
- */
-description: string
-/**
- * Additional context for the action.
- */
-note?: string
-/**
- * The inline comment to insert (e.g., '// fallow-ignore-next-line code-duplication'). Present for suppress-line actions.
- */
-comment?: string
-}
-/**
- * A pair of directories with high structural duplication, indicating systematic copy-paste of directory trees.
+ * A detected mirrored directory pattern: two directory prefixes that contain
+ * identical files (e.g., `src/` and `deno/lib/`).
  */
 export interface MirroredDirectory {
 /**
- * First directory path (relative to project root).
+ * First directory path (lexically smaller).
  */
 dir_a: string
 /**
- * Second directory path (relative to project root).
+ * Second directory path.
  */
 dir_b: string
 /**
- * File names that appear in both directories with duplicated content.
+ * Filenames shared between the two directories.
  */
 shared_files: string[]
 /**
@@ -1104,30 +1809,77 @@ duplication_percentage: number
 clone_groups_below_min_occurrences?: number
 }
 /**
- * Health / complexity analysis body. Mirrors `fallow_cli::health_types::HealthReport`. Emitted as the value of `combined.health` and `audit.complexity`, where the JSON layer does NOT wrap it in the `HealthOutput` envelope (no `schema_version` / `version` / `elapsed_ms` header). Path stripping and `inject_health_actions` still run on the bare body, so per-finding `actions` arrays appear here as they do inside `HealthOutput`.
+ * Result of complexity analysis for reporting.
  */
 export interface HealthReport {
+/**
+ * Functions exceeding thresholds.
+ */
 findings: HealthFinding[]
+/**
+ * Summary statistics.
+ */
 summary: HealthSummary
-vital_signs?: VitalSigns
-health_score?: HealthScore
+/**
+ * Project-wide vital signs (always computed from available data).
+ */
+vital_signs?: (VitalSigns | null)
+/**
+ * Project-wide health score (only populated with `--score`).
+ */
+health_score?: (HealthScore | null)
+/**
+ * Per-file health scores (only populated with `--file-scores` or `--hotspots`).
+ */
 file_scores?: FileHealthScore[]
-coverage_gaps?: CoverageGaps
+/**
+ * Static coverage gaps.
+ * 
+ * Populated when coverage gaps are explicitly requested, or when the
+ * top-level `health` command allows config severity to surface them in the
+ * default report.
+ */
+coverage_gaps?: (CoverageGaps | null)
+/**
+ * Hotspot entries (only populated with `--hotspots`).
+ */
 hotspots?: HotspotEntry[]
-hotspot_summary?: HotspotSummary
-runtime_coverage?: RuntimeCoverageReport
+/**
+ * Hotspot analysis summary (only set with `--hotspots`).
+ */
+hotspot_summary?: (HotspotSummary | null)
+/**
+ * Runtime coverage findings from the paid sidecar (only populated with
+ * `--runtime-coverage`).
+ */
+runtime_coverage?: (RuntimeCoverageReport | null)
+/**
+ * Functions exceeding 60 LOC (only populated when unit size very-high-risk >= 3%).
+ */
 large_functions?: LargeFunctionEntry[]
+/**
+ * Ranked refactoring recommendations (only populated with `--targets`).
+ */
 targets?: RefactoringTarget[]
-target_thresholds?: TargetThresholds
-health_trend?: HealthTrend
+/**
+ * Adaptive thresholds used for target scoring (only set with `--targets`).
+ */
+target_thresholds?: (TargetThresholds | null)
+/**
+ * Health trend comparison against a previous snapshot (only set with `--trend`).
+ */
+health_trend?: (HealthTrend | null)
 }
+/**
+ * A single function that exceeds a complexity threshold.
+ */
 export interface HealthFinding {
 /**
- * File path (relative to project root).
+ * Absolute file path.
  */
 path: string
 /**
- * Function name, "<anonymous>" for unnamed functions/arrows, or "<template>" for synthetic Angular template findings.
+ * Function name.
  */
 name: string
 /**
@@ -1135,61 +1887,84 @@ name: string
  */
 line: number
 /**
- * 0-based byte column offset.
+ * 0-based column.
  */
 col: number
 /**
- * McCabe cyclomatic complexity (1 + decision points).
+ * Cyclomatic complexity.
  */
 cyclomatic: number
 /**
- * SonarSource cognitive complexity (structural + nesting penalty).
+ * Cognitive complexity.
  */
 cognitive: number
 /**
- * Number of lines in the function body.
+ * Number of lines in the function.
  */
 line_count: number
 /**
- * Number of parameters (excluding TypeScript's this parameter).
+ * Number of parameters.
  */
 param_count: number
 /**
- * Which threshold(s) this finding exceeds. `crap` and its combinations are emitted when `max_crap_threshold` is crossed.
+ * Which threshold was exceeded.
  */
-exceeded: ("cyclomatic" | "cognitive" | "both" | "crap" | "cyclomatic_crap" | "cognitive_crap" | "all")
+exceeded: ExceededThreshold
 /**
- * CRAP score (rounded to one decimal). Present only when the function exceeded the CRAP threshold; absent otherwise.
+ * How far above the threshold: moderate (just above), high, or critical.
  */
-crap?: number
+severity: FindingSeverity
 /**
- * Per-function statement coverage percentage (0.0 to 100.0) used to derive `crap`. Present only when Istanbul coverage data matched the function; absent for the estimated model or unmatched functions.
+ * CRAP score (`CC^2 * (1 - cov/100)^3 + CC`), rounded to one decimal.
+ * Present when the function also exceeded `--max-crap`, otherwise absent.
  */
-coverage_pct?: number
+crap?: (number | null)
 /**
- * Bucketed coverage tier used to drive action selection. Present whenever CRAP triggered the finding (Istanbul or estimated), absent otherwise. `none` = coverage is at most 0% (file not test-reachable, or Istanbul reports 0); `partial` = coverage is in `(0, 70)`; `high` = coverage is at or above the high watermark (default `>= 70`, or the estimated 85% band).
+ * Per-function statement coverage percentage (0.0 to 100.0) used to
+ * derive `crap`. Present when Istanbul data matched the function,
+ * otherwise absent (estimated model or unmatched functions).
  */
-coverage_tier?: ("none" | "partial" | "high")
+coverage_pct?: (number | null)
 /**
- * How far above the threshold: moderate (just above), high (recommended for extraction), or critical (immediate extraction candidate). Defaults: cognitive 25/40, cyclomatic 30/50.
+ * Bucketed coverage tier (`none`/`partial`/`high`) used to drive
+ * action selection in JSON output. Present whenever CRAP triggered
+ * the finding (Istanbul or estimated), absent for findings that only
+ * exceeded cyclomatic/cognitive without CRAP context.
  */
-severity: ("moderate" | "high" | "critical")
+coverage_tier?: (CoverageTier | null)
 /**
- * Suggested actions to address this complex finding.
+ * Suggested actions to resolve this issue.
  */
 actions?: HealthFindingAction[]
 introduced?: AuditIntroduced
 }
 /**
- * A suggested action for a health complexity finding.
+ * Suggested action attached to a [`HealthFinding`].
+ * 
+ * Each complexity finding carries an array of these on the JSON wire
+ * (`findings[].actions[]`). The action selector in
+ * `crates/cli/src/report/json.rs::build_health_finding_actions` picks the
+ * primary action based on which thresholds triggered the finding and the
+ * bucketed coverage tier. See [`HealthFindingActionType`] for the full
+ * discriminant list.
+ * 
+ * `note`, `comment`, and `placement` are populated per-variant: refactor
+ * actions carry a `note`, suppress-line / suppress-file actions carry
+ * `comment` plus `placement`, and the coverage-leaning actions
+ * (`add-tests`, `increase-coverage`) carry only `note`.
+ * 
+ * [`HealthFinding`]: ../../fallow-cli/src/health_types/scores.rs
  */
 export interface HealthFindingAction {
 /**
- * Action type identifier. A single finding's `actions` array can carry MULTIPLE entries of different types: e.g., a finding that exceeded both cyclomatic and CRAP at `coverage_tier`: partial will get BOTH `increase-coverage` AND `refactor-function`, plus `suppress-line`. Consumers that select a single action should treat the FIRST non-`suppress-{line,file}` action as primary. `add-tests` is emitted when CRAP triggered the finding, the function has no test coverage (`coverage_tier`: none), and full coverage can bring CRAP below `max_crap_threshold` (cyclomatic < threshold, since CRAP bottoms out at CC at 100% coverage). `increase-coverage` is emitted when CRAP triggered the finding, some coverage exists (`coverage_tier`: partial or high), and full coverage can bring CRAP below `max_crap_threshold`; the description steers toward targeted branch coverage rather than scaffolding new tests. `refactor-function` is emitted when cyclomatic/cognitive triggered the finding, when full coverage still cannot bring CRAP below `max_crap_threshold` (cyclomatic >= threshold), or as a secondary action when cyclomatic is within 5 of the cyclomatic threshold AND cognitive is at or above `max_cognitive_threshold / 2` (the cognitive floor suppresses false positives on flat type-tag dispatchers and JSX render maps where high cyclomatic comes from a single switch with near-zero cognitive load). `suppress-file` is emitted instead of `suppress-line` for synthetic Angular `<template>` findings on `.html` files, because line-suppression comments cannot be expressed in HTML; the `comment` field carries `<!-- fallow-ignore-file complexity -->` and `placement` is `top-of-template`.
+ * Action type identifier. Kebab-case per the JSON output contract.
  */
-type: ("refactor-function" | "add-tests" | "increase-coverage" | "suppress-file" | "suppress-line")
+type: HealthFindingActionType
 /**
- * Whether fallow can auto-fix this action.
+ * Whether `fallow fix` can auto-apply this action. Today every health
+ * finding action is manual, but the field is non-singleton so a future
+ * auto-applier (e.g., an LLM-driven `refactor-function` worker) does
+ * not need a schema change.
  */
 auto_fixable: boolean
 /**
@@ -1197,21 +1972,32 @@ auto_fixable: boolean
  */
 description: string
 /**
- * Additional context for the action.
+ * Additional context (e.g., the canonical CRAP formula, or a hint
+ * about which branch type to extract). Present on most action types;
+ * dropped only when the description carries the full ask.
  */
-note?: string
+note?: (string | null)
 /**
- * The inline comment to insert (e.g., '// fallow-ignore-next-line complexity' or '<!-- fallow-ignore-file complexity -->'). Present for suppress actions.
+ * The inline comment to insert (e.g.,
+ * `// fallow-ignore-next-line complexity` or
+ * `<!-- fallow-ignore-file complexity -->`). Present on
+ * `suppress-line` and `suppress-file` action variants.
  */
-comment?: string
+comment?: (string | null)
 /**
- * Where to insert the suppress comment (e.g., 'above-function-declaration', 'above-angular-decorator', or 'top-of-template'). Present for suppress actions.
+ * Where to insert the suppress comment
+ * (e.g., `above-function-declaration`, `above-angular-decorator`, or
+ * `top-of-template`). Present on `suppress-line` and `suppress-file`
+ * action variants.
  */
-placement?: string
+placement?: (string | null)
 }
+/**
+ * Summary statistics for the health report.
+ */
 export interface HealthSummary {
 /**
- * Number of files analyzed for complexity.
+ * Number of files analyzed.
  */
 files_analyzed: number
 /**
@@ -1219,72 +2005,79 @@ files_analyzed: number
  */
 functions_analyzed: number
 /**
- * Number of functions exceeding at least one threshold (before --top truncation).
+ * Number of functions above threshold.
  */
 functions_above_threshold: number
 /**
- * Configured cyclomatic complexity threshold.
+ * Configured cyclomatic threshold.
  */
 max_cyclomatic_threshold: number
 /**
- * Configured cognitive complexity threshold.
+ * Configured cognitive threshold.
  */
 max_cognitive_threshold: number
 /**
- * Configured CRAP (Change Risk Anti-Patterns) score threshold. Functions meeting or exceeding this score appear as findings with the `crap` and optional `coverage_pct` fields populated.
+ * Configured CRAP threshold. Functions meeting or exceeding this score
+ * are reported alongside complexity findings.
  */
 max_crap_threshold: number
 /**
- * Number of files with health scores. Only present when --file-scores is used. 0 indicates the flag was set but scoring failed.
+ * Number of files scored (only set with `--file-scores`).
  */
-files_scored?: number
+files_scored?: (number | null)
 /**
- * Average maintainability index across all scored files (before --top truncation). Only present when --file-scores is used and at least one file was scored.
+ * Average maintainability index across all scored files (only set with `--file-scores`).
  */
-average_maintainability?: number
+average_maintainability?: (number | null)
 /**
- * Coverage model used for CRAP score computation. 'static_estimated' (default) uses per-function graph-based estimation from export references: directly test-referenced = 85%, indirectly reachable = 40%, untested = 0%. 'istanbul' uses real per-function statement coverage from a coverage-final.json file (--coverage flag or auto-detected). 'static_binary' is the legacy binary model. Only present when file scores are computed.
+ * Coverage model used for CRAP computation (None when file scores not computed).
  */
-coverage_model?: ("static_binary" | "static_estimated" | "istanbul")
+coverage_model?: (CoverageModel | null)
 /**
- * Number of functions matched against Istanbul coverage data. Only present when coverage_model is 'istanbul'.
+ * Number of functions matched against Istanbul coverage data.
+ * Only present when `coverage_model` is `istanbul`.
  */
-istanbul_matched?: number
+istanbul_matched?: (number | null)
 /**
- * Total functions evaluated for Istanbul matching. Only present when coverage_model is 'istanbul'.
+ * Total functions that could potentially be matched.
+ * Only present when `coverage_model` is `istanbul`.
  */
-istanbul_total?: number
+istanbul_total?: (number | null)
 /**
- * Number of findings with critical severity (cognitive >= 40 or cyclomatic >= 50).
+ * Number of findings with critical severity.
  */
 severity_critical_count: number
 /**
- * Number of findings with high severity (cognitive 25-39 or cyclomatic 30-49).
+ * Number of findings with high severity.
  */
 severity_high_count: number
 /**
- * Number of findings with moderate severity (below high thresholds).
+ * Number of findings with moderate severity.
  */
 severity_moderate_count: number
 }
 /**
- * Project-wide vital signs metrics. Optional fields are null when the corresponding analysis was not run.
+ * Project-wide vital signs — a fixed set of metrics for trend tracking.
+ * 
+ * Metrics are `Option` when the data source was not available in the current run
+ * (e.g., `duplication_pct` is `None` unless the duplication pipeline was run,
+ * `hotspot_count` is `None` without git history).
  */
 export interface VitalSigns {
 /**
- * Percentage of unreachable files.
+ * Percentage of files not reachable from any entry point.
  */
 dead_file_pct?: (number | null)
 /**
- * Percentage of unused exports.
+ * Percentage of exports never imported by other modules.
  */
 dead_export_pct?: (number | null)
 /**
- * Average cyclomatic complexity.
+ * Average cyclomatic complexity across all functions.
  */
 avg_cyclomatic: number
 /**
- * Percentage of functions at or above the critical cyclomatic threshold. Used by the scale-invariant health score.
+ * Percentage of functions at or above the critical cyclomatic threshold.
  */
 critical_complexity_pct?: (number | null)
 /**
@@ -1292,31 +2085,31 @@ critical_complexity_pct?: (number | null)
  */
 p90_cyclomatic: number
 /**
- * Code duplication percentage. Null if duplication pipeline was not run.
+ * Code duplication percentage (None if duplication pipeline was not run).
  */
 duplication_pct?: (number | null)
 /**
- * Files with hotspot score >= 50. Null if git history unavailable.
+ * Number of hotspot files (score >= 50). None if git history unavailable.
  */
 hotspot_count?: (number | null)
 /**
- * Files in the top 1% of the within-project hotspot ranking. Null if git history unavailable.
+ * Number of files in the top 1% of the within-project hotspot ranking.
  */
 hotspot_top_pct_count?: (number | null)
 /**
- * Average maintainability index (0-100).
+ * Average maintainability index across all scored files (0–100).
  */
 maintainability_avg?: (number | null)
 /**
- * Percentage of scored files with maintainability index below 70. Null if file scores were not computed.
+ * Percentage of scored files with maintainability index below 70.
  */
 maintainability_low_pct?: (number | null)
 /**
- * Number of unused dependencies.
+ * Number of unused dependencies (dependencies + devDependencies + optional).
  */
 unused_dep_count?: (number | null)
 /**
- * Unused dependencies per 1,000 files. Null if dead code analysis did not run.
+ * Unused dependencies per 1,000 files.
  */
 unused_deps_per_k_files?: (number | null)
 /**
@@ -1324,68 +2117,62 @@ unused_deps_per_k_files?: (number | null)
  */
 circular_dep_count?: (number | null)
 /**
- * Circular dependency chains per 1,000 files. Null if dead code analysis did not run.
+ * Circular dependency chains per 1,000 files.
  */
 circular_deps_per_k_files?: (number | null)
-counts?: VitalSignsCounts
-unit_size_profile?: RiskProfile
 /**
- * Functions above 60 LOC per 1,000 functions. Null if no functions analyzed.
+ * Raw counts backing the percentages (for orientation header display).
+ */
+counts?: (VitalSignsCounts | null)
+/**
+ * Function size risk profile: percentage of functions in each size bin.
+ */
+unit_size_profile?: (RiskProfile | null)
+/**
+ * Functions above 60 LOC per 1,000 functions.
  */
 functions_over_60_loc_per_k?: (number | null)
-unit_interfacing_profile?: RiskProfile
 /**
- * 95th percentile fan-in across all files. Null if file scores not computed.
+ * Parameter count risk profile: percentage of functions in each param bin.
+ */
+unit_interfacing_profile?: (RiskProfile | null)
+/**
+ * 95th percentile fan-in across all files.
  */
 p95_fan_in?: (number | null)
 /**
- * Percentage of files with fan-in above the effective threshold. Null if file scores not computed.
+ * Percentage of files with fan-in above the project's p95 threshold.
  */
 coupling_high_pct?: (number | null)
 /**
- * Total lines of code across all parsed modules. 0 if no modules parsed.
+ * Total lines of code across all parsed modules.
  */
 total_loc?: number
 }
 /**
- * Raw counts behind the vital signs percentages.
+ * Raw counts backing the vital signs percentages.
+ * 
+ * Stored alongside `VitalSigns` in snapshots so that Phase 2b trend reporting
+ * can decompose percentage changes into numerator vs denominator shifts.
  */
 export interface VitalSignsCounts {
-/**
- * Total number of discovered source files.
- */
 total_files: number
-/**
- * Total number of exports across all files.
- */
 total_exports: number
-/**
- * Number of unreachable files.
- */
 dead_files: number
-/**
- * Number of unused exports.
- */
 dead_exports: number
-/**
- * Lines reported as duplicated by the duplication pipeline. Omitted when duplication did not run.
- */
-duplicated_lines?: number
-/**
- * Total lines of code across analyzed files. Omitted when the duplication pipeline did not contribute totals.
- */
-total_lines?: number
-/**
- * Number of files that participated in file-level health scoring. Omitted when --file-scores was not requested.
- */
-files_scored?: number
-/**
- * Total declared dependencies (dependencies + devDependencies + optionalDependencies) backing the dependency-density vital sign.
- */
+duplicated_lines?: (number | null)
+total_lines?: (number | null)
+files_scored?: (number | null)
 total_deps: number
 }
 /**
- * Risk profile: percentage of functions in each risk bin. Bins depend on the measured property (unit size or parameter count).
+ * Risk profile: percentage of functions in each risk bin.
+ * 
+ * Bins are defined by thresholds that depend on the measured property:
+ * - **Unit size**: low risk (1-15 LOC), medium risk (16-30), high risk (31-60), very high risk (>60)
+ * - **Unit interfacing**: low risk (0-2 params), medium risk (3-4), high risk (5-6), very high risk (>=7)
+ * 
+ * Percentages sum to approximately 100.0 (subject to rounding).
  */
 export interface RiskProfile {
 /**
@@ -1405,79 +2192,102 @@ high_risk: number
  */
 very_high_risk: number
 }
-/**
- * Project-level health score. Score = 100 minus available penalties from dead code, complexity, maintainability, hotspots, unused deps, circular deps, unit size, coupling, and duplication. Missing metrics do not penalize; --score computes the score and duplication penalty, while churn-backed hotspot penalties require hotspot analysis (--hotspots, or --targets with --score).
- */
 export interface HealthScore {
 /**
- * Health score formula version. Version 2 uses scale-invariant density/tail metrics for monorepo-safe scoring.
+ * Formula version used to compute the score and penalties.
  */
 formula_version: number
 /**
- * Overall score (0-100, higher is better). Reproducible: 100 - sum(penalties) == score.
+ * Overall score (0–100, higher is better).
  */
 score: number
 /**
- * Letter grade. A: score >= 85, B: 70-84, C: 55-69, D: 40-54, F: below 40.
+ * Letter grade: A, B, C, D, or F.
  */
-grade: ("A" | "B" | "C" | "D" | "F")
+grade: string
+/**
+ * Per-component penalty breakdown. Shows what drove the score down.
+ */
 penalties: HealthScorePenalties
 }
 /**
- * Per-component penalty breakdown. Each field shows points subtracted. None/absent means the metric was not available (pipeline didn't run). Sum of all penalties = 100 - score.
+ * Per-component penalty breakdown for the health score.
+ * 
+ * Each field shows how many points were subtracted for that component.
+ * `None` means the metric was not available (pipeline didn't run).
  */
 export interface HealthScorePenalties {
 /**
- * Points lost from dead files (max 15). Null if dead code pipeline not run.
+ * Points lost from dead files (max 15).
  */
 dead_files?: (number | null)
 /**
- * Points lost from dead exports (max 15). Null if dead code pipeline not run.
+ * Points lost from dead exports (max 15).
  */
 dead_exports?: (number | null)
 /**
- * Points lost from critical-complexity density (max 20). Older snapshots without density fields fall back to average cyclomatic complexity above 1.5.
+ * Points lost from critical-complexity density (max 20).
  */
 complexity: number
 /**
- * Points lost from legacy p90 cyclomatic complexity above 10. Current scale-invariant runs report 0 because tail complexity is folded into complexity.
+ * Points lost from legacy p90 cyclomatic complexity (0 for current scale-invariant runs).
  */
 p90_complexity: number
 /**
- * Points lost from low maintainability density (max 15). Null if file-scores not computed.
+ * Points lost from low maintainability index density (max 15).
  */
 maintainability?: (number | null)
 /**
- * Points lost from top-percentile hotspot density (max 10). Null if hotspots not computed.
+ * Points lost from hotspot files (max 10).
  */
 hotspots?: (number | null)
 /**
- * Points lost from unused dependency density (max 25). Null if dead code pipeline not run.
+ * Points lost from unused dependency density (max 25).
  */
 unused_deps?: (number | null)
 /**
- * Points lost from circular dependency density (max 25). Null if dead code pipeline not run.
+ * Points lost from circular dependency density (max 25).
  */
 circular_deps?: (number | null)
 /**
- * Points lost from oversized-function density (max 10). Null if no functions analyzed.
+ * Points lost from oversized-function density (max 10).
  */
 unit_size?: (number | null)
 /**
- * Points lost from coupling concentration density (max 5). Null if file scores not computed.
+ * Points lost from coupling concentration density (max 5).
  */
 coupling?: (number | null)
 /**
- * Points lost from code duplication (max 10). Penalty = min(max(0, duplication_pct - 5) * 1, 10). Null if duplication pipeline not run.
+ * Points lost from code duplication (max 10).
  */
 duplication?: (number | null)
 }
 /**
- * Per-file health score. Formula: MI = 100 - (complexity_density x 30) - (dead_code_ratio x 20) - min(ln(fan_out+1) x 4, 15), clamped to [0, 100]. Type-only exports excluded from dead_code_ratio. CRAP scores combine cyclomatic complexity with static test reachability.
+ * Per-file health score combining complexity, coupling, and dead code metrics.
+ * 
+ * Files with zero functions (barrel files, re-export files) are excluded by default.
+ * 
+ * ## Maintainability Index Formula
+ * 
+ * ```text
+ * dampening = min(lines / 50, 1.0)
+ * fan_out_penalty = min(ln(fan_out + 1) × 4, 15)
+ * maintainability = 100
+ *     - (complexity_density × 30 × dampening)
+ *     - (dead_code_ratio × 20)
+ *     - fan_out_penalty
+ * ```
+ * 
+ * Clamped to \[0, 100\]. Higher is better. The dampening factor prevents
+ * complexity density from dominating the score on small files (< 50 lines).
+ * 
+ * - **complexity_density**: total cyclomatic complexity / lines of code
+ * - **dead_code_ratio**: fraction of value exports (excluding type-only exports) with zero references (0.0–1.0)
+ * - **fan_out_penalty**: logarithmic scaling with cap at 15 points; reflects diminishing marginal risk of additional imports
  */
 export interface FileHealthScore {
 /**
- * File path (relative to project root).
+ * File path (absolute; stripped to relative in output).
  */
 path: string
 /**
@@ -1485,11 +2295,13 @@ path: string
  */
 fan_in: number
 /**
- * Number of files this file directly imports.
+ * Number of files this file imports.
  */
 fan_out: number
 /**
- * Fraction of value exports (excluding type-only) with zero references (0.0–1.0).
+ * Fraction of value exports with zero references (0.0–1.0). Files with no value exports get 0.0.
+ * Type-only exports (interfaces, type aliases) are excluded from both numerator and denominator
+ * to avoid inflating the ratio for well-typed codebases that export props types alongside components.
  */
 dead_code_ratio: number
 /**
@@ -1501,11 +2313,11 @@ complexity_density: number
  */
 maintainability_index: number
 /**
- * Sum of cyclomatic complexity across all functions in this file.
+ * Sum of cyclomatic complexity across all functions.
  */
 total_cyclomatic: number
 /**
- * Sum of cognitive complexity across all functions in this file.
+ * Sum of cognitive complexity across all functions.
  */
 total_cognitive: number
 /**
@@ -1513,29 +2325,36 @@ total_cognitive: number
  */
 function_count: number
 /**
- * Total lines of code in the file.
+ * Total lines of code (from line_offsets).
  */
 lines: number
 /**
- * Maximum CRAP score among functions in this file. Computed via the active `coverage_model` per the canonical formula CC^2 * (1 - cov/100)^3 + CC (Savoia & Evans, 2007). Coverage source: `static_estimated` (default, graph-based per-function estimate), `istanbul` (real per-function statement coverage from --coverage), or the legacy `static_binary` (whole-file 0%/100%, retained for compatibility).
+ * Maximum CRAP score among functions in this file.
+ * Computed via the active `CoverageModel`: `StaticEstimated` (default,
+ * graph-based per-function estimate), `Istanbul` (real per-function
+ * statement coverage from `--coverage`), or the legacy `StaticBinary`.
+ * Formula: `CC^2 * (1 - cov/100)^3 + CC`.
  */
 crap_max: number
 /**
- * Count of functions with CRAP score >= 30 (CC >= 5 without test dependency path).
+ * Count of functions with CRAP >= 30 (CC >= 5 without test path).
  */
 crap_above_threshold: number
 }
 /**
- * Static test coverage gaps derived from the module graph. Shows runtime files and exports with no test dependency path.
+ * Static test coverage gaps derived from the module graph.
  */
 export interface CoverageGaps {
+/**
+ * Summary metrics for the current analysis scope.
+ */
 summary: CoverageGapSummary
 /**
- * Runtime files with no test dependency path. Omitted when empty.
+ * Runtime files with no test dependency path.
  */
 files?: UntestedFile[]
 /**
- * Runtime exports with no test-reachable reference chain. Omitted when empty.
+ * Runtime exports with no test-reachable reference chain.
  */
 exports?: UntestedExport[]
 }
@@ -1565,11 +2384,11 @@ untested_files: number
 untested_exports: number
 }
 /**
- * A runtime file with no test dependency path.
+ * Runtime code that no test dependency path reaches.
  */
 export interface UntestedFile {
 /**
- * File path (relative to project root).
+ * Absolute file path.
  */
 path: string
 /**
@@ -1577,20 +2396,30 @@ path: string
  */
 value_export_count: number
 /**
- * Suggested actions to close the coverage gap for this file. Always emitted (`add-tests` + `suppress-file`).
+ * Suggested actions to resolve this issue.
  */
 actions?: UntestedFileAction[]
 }
 /**
- * A suggested action attached to a coverage-gap `UntestedFile` item. Two variants are emitted unconditionally per finding: an `add-tests` primary (scaffold tests reaching the runtime file) and a `suppress-file` action (`// fallow-ignore-file coverage-gaps`).
+ * Suggested action attached to an [`UntestedFile`] coverage-gap finding.
+ * 
+ * `inject_health_actions` emits a two-entry array on every untested-file
+ * item: an `add-tests` primary action (scaffold tests for the runtime
+ * file) and a `suppress-file` action (`// fallow-ignore-file coverage-gaps`).
+ * Both variants share the same struct shape; the field that is populated
+ * (`note` for `add-tests`, `comment` for `suppress-file`) depends on the
+ * `kind`.
+ * 
+ * [`UntestedFile`]: ../../fallow-cli/src/health_types/coverage.rs
  */
 export interface UntestedFileAction {
 /**
  * Action type identifier.
  */
-type: ("add-tests" | "suppress-file")
+type: UntestedFileActionType
 /**
- * Whether `fallow fix` can auto-apply this action. Today always false for both variants.
+ * Whether `fallow fix` can auto-apply this action. Today both
+ * variants are manual.
  */
 auto_fixable: boolean
 /**
@@ -1598,20 +2427,22 @@ auto_fixable: boolean
  */
 description: string
 /**
- * Context for the `add-tests` variant explaining the runtime-reachable / test-unreachable asymmetry. Absent on `suppress-file`.
+ * Additional context for the `add-tests` variant (explains why no
+ * test path reaches this file). Absent on `suppress-file`.
  */
-note?: string
+note?: (string | null)
 /**
- * The file-level comment to insert (`// fallow-ignore-file coverage-gaps`). Present on `suppress-file`, absent on `add-tests`.
+ * The file-level comment to insert. Present on `suppress-file`
+ * (`// fallow-ignore-file coverage-gaps`). Absent on `add-tests`.
  */
-comment?: string
+comment?: (string | null)
 }
 /**
- * A runtime export that no test-reachable module references.
+ * Runtime export that no test-reachable module references.
  */
 export interface UntestedExport {
 /**
- * File path (relative to project root).
+ * Absolute file path.
  */
 path: string
 /**
@@ -1627,20 +2458,31 @@ line: number
  */
 col: number
 /**
- * Suggested actions to close the coverage gap for this export. Always emitted (`add-test-import` + `suppress-file`).
+ * Suggested actions to resolve this issue.
  */
 actions?: UntestedExportAction[]
 }
 /**
- * A suggested action attached to a coverage-gap `UntestedExport` item. Two variants are emitted unconditionally per finding: an `add-test-import` primary (import the export from a test-reachable module) and a `suppress-file` action (`// fallow-ignore-file coverage-gaps`).
+ * Suggested action attached to an [`UntestedExport`] coverage-gap
+ * finding.
+ * 
+ * `inject_health_actions` emits a two-entry array on every untested-export
+ * item: an `add-test-import` primary action (import the export from a
+ * test-reachable module) and a `suppress-file` action
+ * (`// fallow-ignore-file coverage-gaps`). The export-specific variant
+ * `add-test-import` reflects that a test-reachable reference chain, not
+ * just any test coverage, is what closes the gap.
+ * 
+ * [`UntestedExport`]: ../../fallow-cli/src/health_types/coverage.rs
  */
 export interface UntestedExportAction {
 /**
  * Action type identifier.
  */
-type: ("add-test-import" | "suppress-file")
+type: UntestedExportActionType
 /**
- * Whether `fallow fix` can auto-apply this action. Today always false for both variants.
+ * Whether `fallow fix` can auto-apply this action. Today both
+ * variants are manual.
  */
 auto_fixable: boolean
 /**
@@ -1648,20 +2490,35 @@ auto_fixable: boolean
  */
 description: string
 /**
- * Context for the `add-test-import` variant explaining the runtime-reachable / test-unreachable asymmetry. Absent on `suppress-file`.
+ * Additional context for the `add-test-import` variant (explains the
+ * runtime-reachable / test-unreachable asymmetry). Absent on
+ * `suppress-file`.
  */
-note?: string
+note?: (string | null)
 /**
- * The file-level comment to insert (`// fallow-ignore-file coverage-gaps`). Present on `suppress-file`, absent on `add-test-import`.
+ * The file-level comment to insert. Present on `suppress-file`
+ * (`// fallow-ignore-file coverage-gaps`). Absent on
+ * `add-test-import`.
  */
-comment?: string
+comment?: (string | null)
 }
 /**
- * A hotspot: a file that is both complex and frequently changing. Score = normalized_churn × normalized_complexity × 100 (0–100, higher = riskier).
+ * A hotspot: a file that is both complex and frequently changing.
+ * 
+ * ## Score Formula
+ * 
+ * ```text
+ * normalized_churn = weighted_commits / max_weighted_commits   (0..1)
+ * normalized_complexity = complexity_density / max_density      (0..1)
+ * score = normalized_churn × normalized_complexity × 100       (0..100)
+ * ```
+ * 
+ * Score uses within-project max normalization. Higher score = higher risk.
+ * Fan-in is shown separately as "blast radius" — not baked into the score.
  */
 export interface HotspotEntry {
 /**
- * File path (relative to project root).
+ * File path (absolute; stripped to relative in output).
  */
 path: string
 /**
@@ -1669,7 +2526,7 @@ path: string
  */
 score: number
 /**
- * Number of commits touching this file in the analysis window.
+ * Number of commits in the analysis window.
  */
 commits: number
 /**
@@ -1677,15 +2534,15 @@ commits: number
  */
 weighted_commits: number
 /**
- * Total lines added across all commits in the window.
+ * Total lines added across all commits.
  */
 lines_added: number
 /**
- * Total lines deleted across all commits in the window.
+ * Total lines deleted across all commits.
  */
 lines_deleted: number
 /**
- * Total cyclomatic complexity / lines of code.
+ * Cyclomatic complexity / lines of code.
  */
 complexity_density: number
 /**
@@ -1693,100 +2550,104 @@ complexity_density: number
  */
 fan_in: number
 /**
- * Churn trend: accelerating (recent > 1.5× older), stable, or cooling (recent < 0.67× older).
+ * Churn trend: accelerating, stable, or cooling.
  */
-trend: ("accelerating" | "stable" | "cooling")
+trend: ChurnTrend
 /**
- * Suggested actions to reduce hotspot risk.
+ * Ownership signals (bus factor, contributors, declared owner, drift).
+ * Populated only when `--ownership` is requested.
  */
-actions?: HotspotAction[]
-ownership?: OwnershipMetrics
+ownership?: (OwnershipMetrics | null)
 /**
- * True when the file path matches a test or mock convention (e.g. `** /__tests__/**`, `** /*.test.*`, `** /*.spec.*`, `** /__mocks__/**`). Tagged so consumers can decide whether to weight or filter test hotspots downstream. Omitted when false.
+ * True when the file path matches a test/mock convention (e.g.
+ * `** /__tests__/**`, `** /*.test.*`, `** /*.spec.*`, `** /__mocks__/**`).
+ * Test files are intentionally included in hotspot ranking (test
+ * maintenance IS real work), but tagging them lets consumers decide
+ * whether to weight or filter them downstream.
  */
 is_test_path?: boolean
+/**
+ * Suggested actions to resolve this issue.
+ */
+actions?: HotspotAction[]
 }
 /**
- * A suggested action for a hotspot file. Ownership-derived action types (low-bus-factor, unowned-hotspot, ownership-drift) appear only when --ownership is enabled.
- */
-export interface HotspotAction {
-/**
- * Action type identifier.
- */
-type: ("refactor-file" | "add-tests" | "low-bus-factor" | "unowned-hotspot" | "ownership-drift")
-/**
- * Whether fallow can auto-fix this action.
- */
-auto_fixable: boolean
-/**
- * Human-readable description of the action.
- */
-description: string
-/**
- * Additional context for the action.
- */
-note?: string
-/**
- * Suggested CODEOWNERS pattern. Only present on unowned-hotspot actions. Derived per the heuristic field; consumers should branch on heuristic rather than assume a stable algorithm.
- */
-suggested_pattern?: string
-/**
- * Strategy used to derive suggested_pattern. Reserved for future evolution (e.g., 'codeowners-cluster').
- */
-heuristic?: "directory-deepest"
-}
-/**
- * Per-file ownership signals derived from git author history and CODEOWNERS. Only computed when --ownership is requested.
+ * Per-file ownership signals attached to hotspot entries when the user
+ * passes `--ownership`. All fields are derived from git history and the
+ * repository's CODEOWNERS file (if any).
  */
 export interface OwnershipMetrics {
 /**
- * Avelino truck factor: minimum contributors covering at least 50% of recency-weighted commits in the analysis window. Lower = higher knowledge-loss risk.
+ * Avelino truck factor: minimum number of contributors covering at
+ * least 50% of recency-weighted commits.
  */
 bus_factor: number
 /**
- * Distinct authors after bot filtering.
+ * Distinct authors in the analysis window after bot filtering.
  */
 contributor_count: number
+/**
+ * The highest-share contributor.
+ */
 top_contributor: ContributorEntry
 /**
- * Up to three additional contributors by share, ordered descending. Useful for review routing. Omitted when empty.
+ * Up to three additional contributors by share, ordered desc.
+ * Useful for "who else could review this file" routing.
  */
 recent_contributors?: ContributorEntry[]
 /**
- * Contributors whose last touch is within 90 days, ordered by share descending. First-class field so consumers do not have to reconstruct it from `recent_contributors` filtered by `stale_days`. Excludes the top contributor. Omitted when empty.
+ * Contributors whose last touch is within 90 days, ordered by share
+ * descending. First-class field so AI agents do not have to
+ * reconstruct it from [`recent_contributors`](Self::recent_contributors)
+ * filtered by [`ContributorEntry::stale_days`]. Excludes the top
+ * contributor (they are the sole author being flagged); consumers
+ * wanting the full list can union with `top_contributor`.
  */
 suggested_reviewers?: ContributorEntry[]
 /**
- * CODEOWNERS-resolved primary owner for this file, when a rule matches.
+ * CODEOWNERS-resolved owner for this file, if a rule matched.
+ * Only the primary (first) owner of the matched rule is reported.
  */
 declared_owner?: (string | null)
 /**
- * Tristate: true = CODEOWNERS file exists but no rule matches; false = a rule matches; null = no CODEOWNERS file discovered for the repository.
+ * Tristate: `Some(true)` = CODEOWNERS file exists but no rule matches
+ * this file; `Some(false)` = a CODEOWNERS rule matches; `None` = no
+ * CODEOWNERS file was discovered for the repository (cannot determine).
  */
 unowned?: (boolean | null)
 /**
- * True when ownership has drifted from the original author to a new top contributor (file age >= 30 days, original author share < 10%).
+ * True when ownership has drifted from the original author to a new
+ * top contributor. Pairs with [`drift_reason`](Self::drift_reason).
  */
 drift: boolean
 /**
- * Human-readable explanation of the drift. Field is omitted (not null) when drift is false.
+ * Human-readable explanation of the drift, populated only when
+ * [`drift`](Self::drift) is true.
  */
-drift_reason?: string
+drift_reason?: (string | null)
 }
 /**
- * Per-author contribution summary. The identifier is rendered per the configured ownership.emailMode (handle, hash, or raw); the format field discriminates the three so type-aware consumers can branch without re-parsing.
+ * Per-author summary emitted in [`OwnershipMetrics::top_contributor`] and
+ * [`OwnershipMetrics::recent_contributors`].
  */
 export interface ContributorEntry {
 /**
- * Display string for the contributor. Raw email when format=raw (e.g. alice@example.com), local-part handle when format=handle (e.g. alice), or non-cryptographic pseudonym when format=hash (e.g. xxh3:abcdef0123456789). Do not assume this is an email address.
+ * Display string per the configured email mode: raw email
+ * (`alice@example.com`), local-part handle (`alice`), or stable hash
+ * pseudonym (`xxh3:<16hex>`). The format depends on `format`.
+ * 
+ * Renamed from `email` because in `handle` and `hash` modes the value
+ * is no longer an email address; consumers tempted to use it as one
+ * (e.g. `mailto:`) would be wrong.
  */
 identifier: string
 /**
- * Discriminator for identifier shape. Set by ownership.emailMode at analysis time.
+ * Format of [`identifier`](Self::identifier): `raw`, `handle`, or `hash`.
+ * Lets type-aware consumers branch without re-parsing the string.
  */
-format: ("raw" | "handle" | "hash")
+format: ContributorIdentifierFormat
 /**
- * Recency-weighted share of total weighted commits, rounded to three decimals.
+ * Recency-weighted share of total weighted commits (0..1, three decimals).
  */
 share: number
 /**
@@ -1798,9 +2659,55 @@ stale_days: number
  */
 commits: number
 }
+/**
+ * Suggested action attached to a [`HotspotEntry`].
+ * 
+ * The action list always begins with `refactor-file` plus `add-tests`.
+ * Ownership-derived variants (`low-bus-factor`, `unowned-hotspot`,
+ * `ownership-drift`) are appended only when `--ownership` is active AND
+ * the corresponding signal fires for the hotspot.
+ * 
+ * [`HotspotEntry`]: ../../fallow-cli/src/health_types/scores.rs
+ */
+export interface HotspotAction {
+/**
+ * Action type identifier.
+ */
+type: HotspotActionType
+/**
+ * Whether `fallow fix` can auto-apply this action. Today every
+ * hotspot action is manual.
+ */
+auto_fixable: boolean
+/**
+ * Human-readable description of the action.
+ */
+description: string
+/**
+ * Additional context for the action. Absent on `low-bus-factor` when
+ * the finding's description already carries the full ask (no
+ * suggested reviewers and not a low-commit file).
+ */
+note?: (string | null)
+/**
+ * Suggested CODEOWNERS pattern. Present only on `unowned-hotspot`
+ * actions. Derived per the [`heuristic`](Self::heuristic) field;
+ * consumers should branch on [`heuristic`](Self::heuristic) rather
+ * than assume a stable algorithm.
+ */
+suggested_pattern?: (string | null)
+/**
+ * Strategy used to derive [`suggested_pattern`](Self::suggested_pattern).
+ * Reserved for future evolution (`codeowners-cluster`, etc.).
+ */
+heuristic?: (HotspotActionHeuristic | null)
+}
+/**
+ * Summary statistics for hotspot analysis.
+ */
 export interface HotspotSummary {
 /**
- * Analysis window display string (e.g., '6 months').
+ * Analysis window display string (e.g., "6 months").
  */
 since: string
 /**
@@ -1820,179 +2727,94 @@ files_excluded: number
  */
 shallow_clone: boolean
 }
-/**
- * Runtime coverage findings merged into the health report or emitted by `fallow coverage analyze`. Present in health output when --runtime-coverage is used. Shape mirrors the runtime coverage JSON contract; cloud mode fetches runtime facts explicitly and merges them locally with AST/static analysis.
- */
 export interface RuntimeCoverageReport {
-/**
- * Runtime coverage JSON contract version. This is scoped to the runtime_coverage block and is independent of the top-level fallow JSON schema_version.
- */
-schema_version: "1"
 verdict: RuntimeCoverageReportVerdict
 /**
- * Every runtime-coverage signal the report carries, severity-descending. Independent of `verdict`. Empty when `verdict` is `clean` and there is no license grace. Used by JSON / SARIF / MCP consumers that want the complete set rather than the headline.
+ * All signals captured by post-processing. Independent of `verdict`,
+ * which is the single most actionable signal under the current
+ * context. Empty when the report is `Clean` and not under license
+ * grace. Order is stable severity-descending.
  */
 signals?: RuntimeCoverageSignal[]
 summary: RuntimeCoverageSummary
-/**
- * Surfaced runtime coverage findings (`safe_to_delete`, `review_required`, `low_traffic`, `coverage_unavailable`). Omitted when empty. `active` functions stay out of this list so the CLI output remains actionable.
- */
 findings?: RuntimeCoverageFinding[]
-/**
- * Top runtime functions by invocation count. Omitted when empty.
- */
 hot_paths?: RuntimeCoverageHotPath[]
-/**
- * First-class blast-radius entries for runtime-observed functions. Present whenever runtime coverage analysis runs.
- */
 blast_radius: RuntimeCoverageBlastRadiusEntry[]
-/**
- * First-class production-importance entries for runtime-observed functions. Present whenever runtime coverage analysis runs.
- */
 importance: RuntimeCoverageImportanceEntry[]
-watermark?: RuntimeCoverageWatermark
-/**
- * Non-fatal merge or coverage diagnostics. Omitted when empty.
- */
+watermark?: (RuntimeCoverageWatermark | null)
 warnings?: RuntimeCoverageMessage[]
+/**
+ * Runtime coverage JSON contract version. Independent of the top-level fallow JSON schema_version.
+ */
+schema_version: "1"
 }
+/**
+ * Summary block mirroring `fallow_cov_protocol::Summary` (0.3 shape).
+ */
 export interface RuntimeCoverageSummary {
-/**
- * Runtime evidence source used for this report. Local mode reads a supplied runtime coverage artifact; cloud mode pulls the latest fallow.cloud runtime context after explicit opt-in.
- */
-data_source: ("local" | "cloud")
-/**
- * Timestamp of the newest runtime payload included in the report. Null for local single-capture artifacts that do not carry cloud receipt metadata.
- */
+data_source: RuntimeCoverageDataSource
 last_received_at?: (string | null)
-/**
- * Number of functions the sidecar could observe in the V8 or Istanbul dump.
- */
 functions_tracked: number
-/**
- * Tracked functions that received at least one invocation.
- */
 functions_hit: number
-/**
- * Tracked functions that were never invoked.
- */
 functions_unhit: number
-/**
- * Functions the sidecar could not track (lazy-parsed, worker thread, dynamic code, unresolved source map).
- */
 functions_untracked: number
-/**
- * Ratio of functions_hit / functions_tracked, expressed as a percent.
- */
 coverage_percent: number
-/**
- * Total number of observed invocations across all functions. Denominator for low-traffic classification.
- */
 trace_count: number
-/**
- * Days of observation covered by the supplied dump (Phase 2 local analysis emits 0 — set by the beacon/cloud in Phase 3+).
- */
 period_days: number
-/**
- * Distinct deployments contributing to the supplied dump (Phase 2 local analysis emits 0).
- */
 deployments_seen: number
-capture_quality?: RuntimeCoverageCaptureQuality
+/**
+ * Capture-quality telemetry. `None` for protocol-0.2 sidecars; protocol-0.3+
+ * sidecars always populate it. Fuels the human-output short-window warning
+ * and the quantified trial CTA, and is passed through to JSON consumers so
+ * agent pipelines can surface the same signal.
+ */
+capture_quality?: (RuntimeCoverageCaptureQuality | null)
 }
 /**
- * Quality-of-capture signals emitted by the sidecar so the CLI can explain short-window captures honestly instead of letting users blame the tool.
+ * Capture-quality telemetry (mirrors `fallow_cov_protocol::CaptureQuality`).
  */
 export interface RuntimeCoverageCaptureQuality {
-/**
- * Total observation window in seconds. Finer-grained than period_days (which rounds up to whole days).
- */
 window_seconds: number
-/**
- * Number of distinct production instances that contributed to the dump.
- */
 instances_observed: number
-/**
- * True when the untracked-function ratio exceeds the sidecar's lazy-parse threshold (30%). Signals that many untracked functions likely reflect lazy-parsed code rather than unreachable code.
- */
 lazy_parse_warning: boolean
-/**
- * functions_untracked / functions_tracked as a percentage, rounded to 2 decimal places.
- */
 untracked_ratio_percent: number
 }
 export interface RuntimeCoverageFinding {
 /**
- * Stable content-hash ID of the form `fallow:prod:<hash>`, where <hash> is the first 8 hex characters of SHA-256(file + function + line + 'prod').
+ * Stable content-hash ID of the form `fallow:prod:<hash>`.
  */
 id: string
-/**
- * File path relative to the project root.
- */
 path: string
-/**
- * Static function name as reported in the merged coverage result.
- */
 function: string
-/**
- * 1-indexed line number the function starts on.
- */
 line: number
 verdict: RuntimeCoverageVerdict
 /**
- * Observed invocation count for the function. Omitted when the function is untracked (lazy-parsed, worker-thread isolate, dynamic code).
+ * Raw V8 invocation count. `None` when the function was untracked
+ * (lazy-parsed, worker thread, or dynamic code).
  */
-invocations?: number
+invocations?: (number | null)
 confidence: RuntimeCoverageConfidence
 evidence: RuntimeCoverageEvidence
-/**
- * Suggested actions for this finding. Omitted when empty.
- */
 actions?: RuntimeCoverageAction[]
 }
 /**
- * Supporting evidence for a runtime coverage finding. Mirrors the rows of the decision table.
+ * Supporting evidence for a finding (mirrors `fallow_cov_protocol::Evidence`).
  */
 export interface RuntimeCoverageEvidence {
-/**
- * `used` when the function is reachable in the module graph, `unused` otherwise.
- */
-static_status: ("used" | "unused")
-/**
- * `covered` when the project's test suite hits this function, `not_covered` otherwise.
- */
-test_coverage: ("covered" | "not_covered")
-/**
- * `tracked` when V8 observed the function, `untracked` otherwise.
- */
-v8_tracking: ("tracked" | "untracked")
-/**
- * Reason the function is untracked. Populated only when v8_tracking is `untracked`. Values: `lazy_parsed`, `worker_thread`, `dynamic_eval`, `unknown`.
- */
-untracked_reason?: string
-/**
- * Days of observation backing this finding.
- */
+static_status: string
+test_coverage: string
+v8_tracking: string
+untracked_reason?: (string | null)
 observation_days: number
-/**
- * Distinct deployments backing this finding.
- */
 deployments_observed: number
 }
-/**
- * Suggested follow-up action for a runtime coverage finding.
- */
 export interface RuntimeCoverageAction {
 /**
- * Action identifier, normalized to `type` in JSON output. Known values emitted by `fallow coverage analyze`: `delete-cold-code` (verdict=safe_to_delete), `review-runtime` (verdict=review_required). The sidecar may emit additional protocol-specific identifiers; consumers should treat unknown values as forward-compat extensions.
+ * Stable action identifier. Serialized as `type` in JSON to match the
+ * `actions[].type` contract shared with every other `fallow health` finding.
  */
 type: string
-/**
- * Human-readable recommendation.
- */
 description: string
-/**
- * Whether fallow can apply this action automatically.
- */
 auto_fixable: boolean
 }
 export interface RuntimeCoverageHotPath {
@@ -2000,33 +2822,23 @@ export interface RuntimeCoverageHotPath {
  * Stable content-hash ID of the form `fallow:hot:<hash>`.
  */
 id: string
-/**
- * File path relative to the project root.
- */
 path: string
-/**
- * Function name for the hot path.
- */
 function: string
-/**
- * 1-indexed line number the function starts on.
- */
 line: number
 /**
- * 1-indexed line the function ends on (inclusive). `0` indicates the value was unavailable (older protocol-0.4 sidecars), in which case consumers MUST treat the range as a single line at `line`.
+ * 1-indexed line the function ends on (inclusive). Mirrors
+ * `fallow_cov_protocol::HotPath::end_line` (added in protocol 0.5).
+ * Older 0.4-shape sidecars omit the field on the wire; serde defaults
+ * to `0`, which the line-overlap filter MUST treat as a single-line
+ * range (`line..=line`) rather than a span.
  */
 end_line: number
-/**
- * Observed invocation count for the hot path.
- */
 invocations: number
 /**
- * Percentile rank over this response's hot-path distribution. 100 = busiest, 0 = quietest that still qualified.
+ * Percentile rank over this response's hot-path distribution. `100`
+ * means the busiest, `0` means the quietest function that qualified.
  */
 percentile: number
-/**
- * Suggested actions for this hot path (e.g., review-on-change). Omitted when empty.
- */
 actions?: RuntimeCoverageAction[]
 }
 export interface RuntimeCoverageBlastRadiusEntry {
@@ -2034,30 +2846,12 @@ export interface RuntimeCoverageBlastRadiusEntry {
  * Stable content-hash ID of the form `fallow:blast:<hash>`.
  */
 id: string
-/**
- * File path relative to the project root.
- */
 file: string
-/**
- * Function name for the blast-radius entry.
- */
 function: string
-/**
- * 1-indexed line number the function starts on.
- */
 line: number
-/**
- * Static caller count from the module graph.
- */
 caller_count: number
-/**
- * Caller reach weighted by observed runtime traffic.
- */
 caller_count_weighted_by_traffic: number
-/**
- * Distinct deploy SHAs that touched the function in the observation window. Cloud mode only; omitted in local mode.
- */
-deploys_touched?: number
+deploys_touched?: (number | null)
 risk_band: RuntimeCoverageRiskBand
 }
 export interface RuntimeCoverageImportanceEntry {
@@ -2065,59 +2859,29 @@ export interface RuntimeCoverageImportanceEntry {
  * Stable content-hash ID of the form `fallow:importance:<hash>`.
  */
 id: string
-/**
- * File path relative to the project root.
- */
 file: string
-/**
- * Function name for the importance entry.
- */
 function: string
-/**
- * 1-indexed line number the function starts on.
- */
 line: number
-/**
- * Observed invocation count for this function.
- */
 invocations: number
-/**
- * Cyclomatic complexity from the static health pipeline.
- */
 cyclomatic: number
-/**
- * Number of CODEOWNERS owners matched for this file. Zero means no owner was resolved.
- */
 owner_count: number
-/**
- * 0-100 explainable score from log-scaled traffic, capped complexity weight, and ownership-risk weight.
- */
 importance_score: number
-/**
- * Templated one-sentence explanation for the score.
- */
 reason: string
 }
 export interface RuntimeCoverageMessage {
-/**
- * Stable warning code.
- */
 code: string
-/**
- * Human-readable warning message.
- */
 message: string
 }
 /**
- * A function exceeding 60 lines of code (very high risk size bin).
+ * A function exceeding the very-high-risk size threshold (>60 LOC).
  */
 export interface LargeFunctionEntry {
 /**
- * File path (relative to project root).
+ * Absolute file path.
  */
 path: string
 /**
- * Function name, or "<anonymous>" for unnamed functions/arrows.
+ * Function name.
  */
 name: string
 /**
@@ -2125,49 +2889,63 @@ name: string
  */
 line: number
 /**
- * Number of lines in the function body.
+ * Number of lines in the function.
  */
 line_count: number
 }
 export interface RefactoringTarget {
 /**
- * File path (relative to project root).
+ * Absolute file path (stripped to relative in output).
  */
 path: string
 /**
- * Weighted priority score (0-100). Higher = more urgent.
+ * Priority score (0–100, higher = more urgent).
  */
 priority: number
 /**
- * priority / effort_numeric (Low=1, Medium=2, High=3). Default sort order.
+ * Efficiency score (priority / effort). Higher = better quick-win value.
+ * Surfaces low-effort, high-priority targets first.
  */
 efficiency: number
 /**
- * Human-readable one-line recommendation.
+ * One-line actionable recommendation.
  */
 recommendation: string
 /**
- * Recommendation category.
+ * Recommendation category for tooling/filtering.
  */
-category: ("urgent_churn_complexity" | "break_circular_dependency" | "split_high_impact" | "remove_dead_code" | "extract_complex_functions" | "extract_dependencies")
+category: RecommendationCategory
 /**
- * Heuristic effort estimate.
+ * Estimated effort to address this target.
  */
-effort: ("low" | "medium" | "high")
+effort: EffortEstimate
 /**
- * Data source reliability. High = deterministic analysis, Medium = heuristic, Low = git-dependent.
+ * Confidence in this recommendation based on data source reliability.
  */
-confidence: ("high" | "medium" | "low")
+confidence: Confidence
 /**
- * Contributing factors that triggered this recommendation. Empty array omitted from JSON.
+ * Which metric values contributed to this recommendation.
  */
-factors?: {
+factors?: ContributingFactor[]
 /**
- * Metric name (fan_in, dead_code_ratio, etc.).
+ * Structured evidence linking to specific analysis data.
+ */
+evidence?: (TargetEvidence | null)
+/**
+ * Suggested actions to resolve this issue.
+ */
+actions?: RefactoringTargetAction[]
+}
+/**
+ * A contributing factor that triggered or strengthened a recommendation.
+ */
+export interface ContributingFactor {
+/**
+ * Metric name (matches JSON field names: `"fan_in"`, `"dead_code_ratio"`, etc.).
  */
 metric: string
 /**
- * Raw metric value.
+ * Raw metric value for programmatic use.
  */
 value: number
 /**
@@ -2178,64 +2956,100 @@ threshold: number
  * Human-readable explanation.
  */
 detail: string
-}[]
-/**
- * Structured evidence for supported categories. Omitted when not applicable.
- */
-evidence?: {
-/**
- * Names of unused exports (for remove_dead_code).
- */
-unused_exports?: string[]
-/**
- * Complex functions with line numbers (for extract_complex_functions).
- */
-complex_functions?: {
-name?: string
-line?: number
-cognitive?: number
-}[]
-/**
- * Files in the import cycle (for break_circular_dependency).
- */
-cycle_path?: string[]
 }
 /**
- * Suggested actions for this refactoring target.
+ * Evidence linking a target back to specific analysis data.
+ * 
+ * Provides enough detail for an AI agent to act on a recommendation
+ * without a second tool call.
  */
-actions?: RefactoringTargetAction[]
+export interface TargetEvidence {
+/**
+ * Names of unused exports (populated for `RemoveDeadCode` targets).
+ */
+unused_exports: string[]
+/**
+ * Complex functions with line numbers and cognitive scores (populated for `ExtractComplexFunctions`).
+ */
+complex_functions: EvidenceFunction[]
+/**
+ * Files forming the import cycle (populated for `BreakCircularDependency` targets).
+ */
+cycle_path: string[]
 }
 /**
- * A suggested action for a refactoring target. The suppress-line variant emitted here does NOT carry a placement hint: a RefactoringTarget points at a file, not a specific declaration site, so per-line placement has no referent. Consumers that want placement metadata should follow the target's `evidence.complex_functions` back to the matching HealthFinding and read placement from that action instead.
+ * A function referenced in target evidence.
+ */
+export interface EvidenceFunction {
+/**
+ * Function name.
+ */
+name: string
+/**
+ * 1-based line number.
+ */
+line: number
+/**
+ * Cognitive complexity score.
+ */
+cognitive: number
+}
+/**
+ * Suggested action attached to a [`RefactoringTarget`].
+ * 
+ * The list always begins with `apply-refactoring`. A trailing
+ * `suppress-line` is appended only when the target carries `evidence`
+ * linking to specific functions (e.g., `extract_complex_functions`,
+ * `add_test_coverage`).
+ * 
+ * Unlike [`HealthFindingAction`], the `suppress-line` variant emitted
+ * here does NOT carry a `placement` field: the parent
+ * [`RefactoringTarget`] points at a file (not a specific function
+ * declaration site), so a per-line placement hint would have no
+ * referent. Consumers that want the placement metadata should follow
+ * the target's `evidence.complex_functions` back to the matching
+ * [`HealthFinding`] and read placement from THAT action instead.
+ * 
+ * [`RefactoringTarget`]: ../../fallow-cli/src/health_types/targets.rs
  */
 export interface RefactoringTargetAction {
 /**
  * Action type identifier.
  */
-type: ("apply-refactoring" | "suppress-line")
+type: RefactoringTargetActionType
 /**
- * Whether fallow can auto-fix this action.
+ * Whether `fallow fix` can auto-apply this action. Today both
+ * variants are manual.
  */
 auto_fixable: boolean
 /**
- * Human-readable description of the action.
+ * Human-readable description of the action. For `apply-refactoring`
+ * this is the target's own `recommendation` string; for
+ * `suppress-line` it is the suppression prompt.
  */
 description: string
 /**
- * The recommendation category for apply-refactoring actions.
+ * Recommendation category for `apply-refactoring` actions. Mirrors
+ * the parent target's
+ * [`category`](../../fallow-cli/src/health_types/targets.rs.html)
+ * field so consumers can route on the action alone.
  */
-category?: string
+category?: (string | null)
 /**
- * The inline comment to insert. Present for suppress-line actions when evidence exists.
+ * The inline comment to insert. Present on `suppress-line` actions
+ * when evidence exists.
  */
-comment?: string
+comment?: (string | null)
 }
 /**
- * Adaptive percentile-based thresholds derived from the project's metric distribution. Used for priority scoring and rule matching.
+ * Adaptive thresholds used for refactoring target scoring.
+ * 
+ * Derived from the project's metric distribution (percentile-based with floors).
+ * Exposed in JSON output so consumers can interpret scores in context.
  */
 export interface TargetThresholds {
 /**
- * Fan-in saturation for priority formula (p95, floor 5).
+ * Fan-in saturation point for priority formula (p95, floor 5).
  */
 fan_in_p95: number
 /**
@@ -2243,22 +3057,39 @@ fan_in_p95: number
  */
 fan_in_p75: number
 /**
- * Fan-out saturation for priority formula (p95, floor 8).
+ * Fan-out saturation point for priority formula (p95, floor 8).
  */
 fan_out_p95: number
 /**
- * Fan-out high threshold for rules and factors (p90, floor 5).
+ * Fan-out high threshold for rules and contributing factors (p90, floor 5).
  */
 fan_out_p90: number
 }
 /**
- * Trend comparison between the current run and a previous snapshot. Shows per-metric deltas with directional indicators.
+ * Health trend comparison: current run vs. a previous snapshot.
  */
 export interface HealthTrend {
 /**
  * The snapshot being compared against.
  */
-compared_to: {
+compared_to: TrendPoint
+/**
+ * Per-metric deltas.
+ */
+metrics: TrendMetric[]
+/**
+ * Number of snapshots found in the snapshot directory.
+ */
+snapshots_loaded: number
+/**
+ * Overall direction across all metrics.
+ */
+overall_direction: TrendDirection
+}
+/**
+ * A reference to a snapshot used in trend comparison.
+ */
+export interface TrendPoint {
 /**
  * ISO 8601 timestamp of the snapshot.
  */
@@ -2266,23 +3097,34 @@ timestamp: string
 /**
  * Git SHA at time of snapshot.
  */
-git_sha?: string
+git_sha?: (string | null)
 /**
  * Health score from the snapshot (stored, not re-derived).
  */
-score?: number
+score?: (number | null)
 /**
  * Letter grade from the snapshot.
  */
-grade?: string
-}
-metrics: {
+grade?: (string | null)
 /**
- * Metric identifier (e.g., 'score', 'dead_file_pct').
+ * Coverage model used for CRAP computation in this snapshot.
+ */
+coverage_model?: (CoverageModel | null)
+/**
+ * Schema version of the compared snapshot.
+ */
+snapshot_schema_version?: (number | null)
+}
+/**
+ * A single metric's trend between two snapshots.
+ */
+export interface TrendMetric {
+/**
+ * Metric identifier (e.g., `"score"`, `"dead_file_pct"`).
  */
 name: string
 /**
- * Human-readable label.
+ * Human-readable label (e.g., `"Health Score"`, `"Dead Files"`).
  */
 label: string
 /**
@@ -2294,25 +3136,28 @@ previous: number
  */
 current: number
 /**
- * Absolute change (current - previous).
+ * Absolute change (current − previous).
  */
 delta: number
-direction: ("improving" | "declining" | "stable")
 /**
- * Unit for display (e.g., '%', '').
+ * Direction of change.
+ */
+direction: TrendDirection
+/**
+ * Unit for display (e.g., `"%"`, `""`, `"pts"`).
  */
 unit: string
-previous_count?: TrendCount
-current_count?: TrendCount
-}[]
 /**
- * Number of snapshots found in the snapshot directory.
+ * Raw count from previous snapshot (for JSON consumers).
  */
-snapshots_loaded: number
-overall_direction: ("improving" | "declining" | "stable")
+previous_count?: (TrendCount | null)
+/**
+ * Raw count from current run (for JSON consumers).
+ */
+current_count?: (TrendCount | null)
 }
 /**
- * Raw numerator/denominator for a percentage metric in trend comparison.
+ * Raw numerator/denominator for a percentage metric.
  */
 export interface TrendCount {
 /**
@@ -2325,289 +3170,483 @@ value: number
 total: number
 }
 /**
- * Grouped dead code output produced when --group-by is active. Issues are partitioned into groups (by CODEOWNERS team, directory prefix, workspace package, or GitLab CODEOWNERS section) instead of flat arrays.
+ * Envelope emitted by `fallow dead-code --group-by ... --format json`.
+ * 
+ * Issues are partitioned into resolver buckets (CODEOWNERS team, directory
+ * prefix, workspace package, or GitLab CODEOWNERS section) instead of flat
+ * arrays. Each bucket carries the same issue-array shape as the ungrouped
+ * `CheckOutput` body, plus per-group `key` / `owners` / `total_issues`.
  */
 export interface CheckGroupedOutput {
+/**
+ * Schema version for this output format.
+ */
 schema_version: SchemaVersion
+/**
+ * Fallow tool version that produced this output.
+ */
 version: ToolVersion
+/**
+ * Analysis duration in milliseconds.
+ */
 elapsed_ms: ElapsedMs
 /**
- * The grouping strategy used. 'owner' groups by CODEOWNERS team, 'directory' groups by top-level directory prefix, 'package' groups by workspace package name, 'section' groups by GitLab CODEOWNERS `[Section]` header name.
+ * The grouping strategy used.
  */
-grouped_by: ("owner" | "directory" | "package" | "section")
+grouped_by: GroupByMode
 /**
  * Total number of issues across all groups.
  */
 total_issues: number
 /**
- * One entry per group, each containing the same issue arrays as the ungrouped CheckOutput.
+ * One entry per group; each contains the same issue arrays as
+ * `CheckOutput` plus the group key and per-group total.
  */
 groups: CheckGroupedEntry[]
-_meta?: Meta
+/**
+ * `_meta` block with metric / rule definitions, emitted when `--explain`
+ * is passed.
+ */
+_meta?: (Meta | null)
 }
 /**
- * A single group within grouped dead code output. Contains the group key, a per-group total, and the same issue arrays as CheckOutput.
+ * Single resolver bucket inside `CheckGroupedOutput`. Carries the group's
+ * identifier, optional section owners, and a per-group flattened
+ * `AnalysisResults`.
  */
 export interface CheckGroupedEntry {
 /**
- * Group identifier. For 'owner' grouping: the CODEOWNERS team (e.g., '@team-name'). For 'directory' grouping: the top-level directory prefix (e.g., 'src/components'). For 'section' grouping: the GitLab CODEOWNERS section name (e.g., 'billing'), or '(no section)' for files owned by a rule declared before any section header.
+ * Group identifier produced by the resolver. For `package` grouping:
+ * workspace package name. For `owner` grouping: the CODEOWNERS team.
+ * For `directory` grouping: the top-level directory prefix. For
+ * `section` grouping: the GitLab CODEOWNERS section name (or
+ * `(no section)` / `(unowned)` for unmatched files).
  */
 key: string
 /**
- * Section default owners (GitLab CODEOWNERS `[Section] @owner1 @owner2`). Emitted only when grouped_by is 'section'. Empty for the '(no section)' and '(unowned)' buckets.
+ * Section default owners (GitLab CODEOWNERS `[Section] @owner1
+ * @owner2`). Emitted only when `grouped_by` is `section`. Empty for
+ * the `(no section)` and `(unowned)` buckets.
  */
-owners?: string[]
+owners?: (string[] | null)
 /**
  * Total number of issues in this group.
  */
 total_issues: number
+/**
+ * Files not reachable from any entry point.
+ */
 unused_files: UnusedFile[]
+/**
+ * Exports never imported by other modules.
+ */
 unused_exports: UnusedExport[]
+/**
+ * Type exports never imported by other modules.
+ */
 unused_types: UnusedExport[]
+/**
+ * Exported symbols whose public signature references same-file private types.
+ */
 private_type_leaks: PrivateTypeLeak[]
+/**
+ * Dependencies listed in package.json but never imported.
+ */
 unused_dependencies: UnusedDependency[]
+/**
+ * Dev dependencies listed in package.json but never imported.
+ */
 unused_dev_dependencies: UnusedDependency[]
+/**
+ * Optional dependencies listed in package.json but never imported.
+ */
 unused_optional_dependencies: UnusedDependency[]
+/**
+ * Enum members never accessed.
+ */
 unused_enum_members: UnusedMember[]
+/**
+ * Class members never accessed.
+ */
 unused_class_members: UnusedMember[]
+/**
+ * Import specifiers that could not be resolved.
+ */
 unresolved_imports: UnresolvedImport[]
+/**
+ * Dependencies used in code but not listed in package.json.
+ */
 unlisted_dependencies: UnlistedDependency[]
+/**
+ * Exports with the same name across multiple modules.
+ */
 duplicate_exports: DuplicateExport[]
+/**
+ * Production dependencies only used via type-only imports (could be devDependencies).
+ * Only populated in production mode.
+ */
 type_only_dependencies: TypeOnlyDependency[]
+/**
+ * Production dependencies only imported by test files (could be devDependencies).
+ */
 test_only_dependencies?: TestOnlyDependency[]
+/**
+ * Circular dependency chains detected in the module graph.
+ */
 circular_dependencies: CircularDependency[]
+/**
+ * Imports that cross architecture boundary rules.
+ */
 boundary_violations?: BoundaryViolation[]
+/**
+ * Suppression comments or JSDoc tags that no longer match any issue.
+ */
 stale_suppressions?: StaleSuppression[]
+/**
+ * Entries in pnpm-workspace.yaml catalogs that no workspace package references.
+ */
 unused_catalog_entries?: UnusedCatalogEntry[]
+/**
+ * Empty named groups under pnpm-workspace.yaml's catalogs: section.
+ */
 empty_catalog_groups?: EmptyCatalogGroup[]
+/**
+ * Workspace package.json references to pnpm catalogs that don't declare the package.
+ */
 unresolved_catalog_references?: UnresolvedCatalogReference[]
+/**
+ * Entries in pnpm `overrides:` / `pnpm.overrides` whose target package is not
+ * declared by any workspace package and not resolved in pnpm-lock.yaml.
+ */
 unused_dependency_overrides?: UnusedDependencyOverride[]
+/**
+ * Entries in pnpm `overrides:` / `pnpm.overrides` whose key or value cannot be parsed.
+ */
 misconfigured_dependency_overrides?: MisconfiguredDependencyOverride[]
 }
-export interface HealthOutput {
-schema_version: SchemaVersion
-version: ToolVersion
-elapsed_ms: ElapsedMs
-summary: HealthSummary
 /**
- * Functions and synthetic template entries exceeding complexity thresholds, sorted by the --sort criteria.
+ * Envelope emitted by `fallow health --format json` (plus the `health` block
+ * inside the combined and audit envelopes).
+ * 
+ * The body is `HealthReport` flattened into the envelope so every report
+ * field (`findings`, `summary`, `vital_signs`, `hotspots`, ...) lives at the
+ * top level. Grouped runs populate `grouped_by` + `groups` with per-bucket
+ * recomputed metrics. The `actions_meta` breadcrumb is NOT modeled here:
+ * `inject_health_actions` adds it as a post-pass on the `serde_json::Value`
+ * tree, and the drift gate tolerates the gap via its `AUGMENTATION_KEYS`
+ * list because the typed wrapper would force every caller to plumb the
+ * suppression context through, which buys nothing today.
+ */
+export interface HealthOutput {
+/**
+ * Schema version for this output format.
+ */
+schema_version: SchemaVersion
+/**
+ * Fallow tool version that produced this output.
+ */
+version: ToolVersion
+/**
+ * Analysis duration in milliseconds.
+ */
+elapsed_ms: ElapsedMs
+/**
+ * Functions exceeding thresholds.
  */
 findings: HealthFinding[]
 /**
- * Per-file health scores. Only present when --file-scores is used. Sorted by maintainability_index ascending (worst first). Zero-function files (barrels) are excluded by default.
+ * Summary statistics.
+ */
+summary: HealthSummary
+/**
+ * Project-wide vital signs (always computed from available data).
+ */
+vital_signs?: (VitalSigns | null)
+/**
+ * Project-wide health score (only populated with `--score`).
+ */
+health_score?: (HealthScore | null)
+/**
+ * Per-file health scores (only populated with `--file-scores` or `--hotspots`).
  */
 file_scores?: FileHealthScore[]
 /**
- * Hotspot entries combining git churn with complexity. Only present when --hotspots is used. Sorted by score descending (highest risk first).
+ * Static coverage gaps.
+ * 
+ * Populated when coverage gaps are explicitly requested, or when the
+ * top-level `health` command allows config severity to surface them in the
+ * default report.
+ */
+coverage_gaps?: (CoverageGaps | null)
+/**
+ * Hotspot entries (only populated with `--hotspots`).
  */
 hotspots?: HotspotEntry[]
-hotspot_summary?: HotspotSummary
-vital_signs?: VitalSigns
-health_score?: HealthScore
 /**
- * Functions exceeding 60 LOC (very high risk). Only present when unit size very-high-risk bin >= 3%. Sorted by line count descending.
+ * Hotspot analysis summary (only set with `--hotspots`).
+ */
+hotspot_summary?: (HotspotSummary | null)
+/**
+ * Runtime coverage findings from the paid sidecar (only populated with
+ * `--runtime-coverage`).
+ */
+runtime_coverage?: (RuntimeCoverageReport | null)
+/**
+ * Functions exceeding 60 LOC (only populated when unit size very-high-risk >= 3%).
  */
 large_functions?: LargeFunctionEntry[]
 /**
- * Ranked refactoring recommendations. Only present when --targets is used. Sorted by efficiency (priority/effort) descending.
+ * Ranked refactoring recommendations (only populated with `--targets`).
  */
 targets?: RefactoringTarget[]
-target_thresholds?: TargetThresholds
-health_trend?: HealthTrend
-coverage_gaps?: CoverageGaps
-runtime_coverage?: RuntimeCoverageReport
 /**
- * Resolver mode used when --group-by is active. Present only on grouped output. The top-level `vital_signs`, `health_score`, and `summary` keep the active run scope (for example after --workspace); per-group versions live inside each entry of `groups`.
+ * Adaptive thresholds used for target scoring (only set with `--targets`).
  */
-grouped_by?: ("owner" | "directory" | "package" | "section")
+target_thresholds?: (TargetThresholds | null)
 /**
- * Per-group health output, present only when --group-by is active. Each group recomputes its own vital_signs and health_score from the files in that group, mirroring how --workspace scopes a single subset.
+ * Health trend comparison against a previous snapshot (only set with `--trend`).
  */
-groups?: HealthGroup[]
+health_trend?: (HealthTrend | null)
 /**
- * Audit breadcrumb explaining systemic action-array adjustments. Present only when at least one adjustment was made (e.g., health finding suppression hints omitted because a baseline is active). When --group-by is active, each entry of `groups` may carry its own `actions_meta` describing the same omission so per-group consumers do not need to walk back to the report root.
+ * Resolver mode used when `--group-by` is active. Absent on ungrouped
+ * output.
  */
-actions_meta?: {
+grouped_by?: (GroupByMode | null)
 /**
- * True when `suppress-line` actions were not emitted on health findings.
+ * Per-group health output, present only when `--group-by` is active.
+ * Each group recomputes its own `vital_signs` and `health_score` from
+ * the files in that group, mirroring how `--workspace` scopes a single
+ * subset.
  */
-suppression_hints_omitted: boolean
+groups?: (HealthGroup[] | null)
 /**
- * Why suppression hints were omitted. `baseline-active` = `--baseline` or `--save-baseline` was passed; `config-disabled` = `health.suggestInlineSuppression: false`; `unspecified` = caller omitted hints without setting a reason.
+ * `_meta` block with metric / rule definitions, emitted when `--explain`
+ * is passed (always present in MCP responses).
  */
-reason: string
-/**
- * The report section affected by this metadata. Other health sections can still carry their own suppress actions.
- */
-scope: "health-findings"
-}
-_meta?: Meta
+_meta?: (Meta | null)
 }
 /**
- * A health report scoped to a single resolver bucket (workspace package, CODEOWNERS owner, directory, or GitLab CODEOWNERS section). Carries per-group vital_signs / health_score plus the per-file output (findings, file scores, hotspots, large functions, refactoring targets) restricted to the same subset.
+ * A health report scoped to a single group.
+ * 
+ * `key` is the group label produced by the resolver (workspace package name,
+ * CODEOWNERS owner, directory, or section). `owners` is populated only for
+ * `--group-by section` (mirrors dead-code grouped output).
+ * 
+ * Per-group `vital_signs` and `health_score` are recomputed from the
+ * files in the group, so they answer "what is the health of workspace X" in
+ * a single invocation. `files_analyzed` and `functions_above_threshold`
+ * summarise the subset for parity with the project-level
+ * [`crate::health_types::HealthSummary`].
  */
 export interface HealthGroup {
 /**
- * Group identifier produced by the resolver. For 'package' grouping: workspace package name (e.g. '@scope/app-a') or '(root)' for files outside any workspace. For 'owner' grouping: the CODEOWNERS team. For 'directory' grouping: the top-level directory prefix. For 'section' grouping: the GitLab CODEOWNERS section name, or '(no section)' / '(unowned)' for unmatched files.
+ * Group label.
  */
 key: string
 /**
- * Section default owners (GitLab CODEOWNERS `[Section] @owner1 @owner2`). Present only when grouped_by is 'section'.
+ * Section default owners (`--group-by section` only).
  */
-owners?: string[]
+owners?: (string[] | null)
 /**
- * Number of files in this group after workspace, ignore, and changed-since filters.
+ * Files participating in this group after workspace and ignore filters.
  */
 files_analyzed: number
 /**
- * Number of findings rendered for this group (post-baseline / post-`--top` truncation, mirroring HealthSummary semantics).
+ * Number of findings in this group, mirroring the project-level
+ * `summary.functions_above_threshold` semantics post-baseline /
+ * post-`--top` truncation. When `--top` was supplied this reflects the
+ * rendered finding count, not the un-truncated total.
  */
 functions_above_threshold: number
-vital_signs?: VitalSigns
-health_score?: HealthScore
 /**
- * Findings restricted to files in this group. Omitted when empty.
+ * Per-group vital signs (None when `--score-only` suppressed them).
+ */
+vital_signs?: (VitalSigns | null)
+/**
+ * Per-group health score (None when `--score` was not requested).
+ */
+health_score?: (HealthScore | null)
+/**
+ * Findings restricted to files in this group.
  */
 findings?: HealthFinding[]
 /**
- * File scores restricted to files in this group. Omitted when empty.
+ * File scores restricted to files in this group.
  */
 file_scores?: FileHealthScore[]
 /**
- * Hotspots restricted to files in this group. Omitted when empty.
+ * Hotspots restricted to files in this group.
  */
 hotspots?: HotspotEntry[]
 /**
- * Large functions in files belonging to this group. Omitted when empty.
+ * Large functions in files belonging to this group.
  */
 large_functions?: LargeFunctionEntry[]
 /**
- * Refactoring targets in files belonging to this group. Omitted when empty.
+ * Refactoring targets in files belonging to this group.
  */
 targets?: RefactoringTarget[]
 }
 /**
- * Duplication analysis output. Contains clone groups (individual duplicates), clone families (groups sharing the same files), and aggregate statistics. With --group-by, the project-level fields stay populated and an additional `grouped_by` + `groups` envelope is appended.
+ * Envelope emitted by `fallow dupes --format json` (plus the `dupes` block
+ * inside the combined and audit envelopes).
+ * 
+ * The body is the full `DuplicationReport` flattened into the envelope so
+ * the wire shape stays `{ schema_version, version, elapsed_ms, clone_groups,
+ * clone_families, stats, ... }` exactly as the existing JSON layer emits.
+ * `grouped_by` / `groups` / `total_issues` are populated by the grouped
+ * builder; on the ungrouped path they stay `None` and `skip_serializing_if`
+ * drops them.
  */
 export interface DupesOutput {
+/**
+ * Schema version for this output format.
+ */
 schema_version: SchemaVersion
+/**
+ * Fallow tool version that produced this output.
+ */
 version: ToolVersion
+/**
+ * Analysis duration in milliseconds.
+ */
 elapsed_ms: ElapsedMs
 /**
- * All detected clone groups. Each group contains 2+ instances of identical or near-identical code.
+ * All detected clone groups.
  */
 clone_groups: CloneGroup[]
 /**
- * Clone families: groups of clone groups sharing the same file set, indicating systematic duplication patterns.
+ * Clone families: groups of clone groups sharing the same file set.
  */
 clone_families: CloneFamily[]
-stats: DuplicationStats
 /**
- * Directory pairs with high structural duplication. Only present when mirrored directories are detected.
+ * Detected mirrored directory trees (directories with many identical files).
  */
 mirrored_directories?: MirroredDirectory[]
 /**
- * Resolver mode used for partitioning. Present only when `--group-by` is active.
+ * Aggregate statistics.
  */
-grouped_by?: ("owner" | "directory" | "package" | "section")
-/**
- * Total clone groups across all buckets when `--group-by` is active. Mirrors the grouped check / health envelopes so MCP and CI consumers can read the same key across commands.
- */
-total_issues?: number
-/**
- * Per-group buckets when `--group-by` is active. Each clone group is attributed to its largest-owner key (most instances; alphabetical tiebreak). Sort: most clone groups first, then alphabetical, with `(unowned)` pinned last.
- */
-groups?: DuplicationGroup[]
-_meta?: Meta
-}
-/**
- * A single grouped duplication bucket. Per-group `stats` are dedup-aware and computed over the FULL group BEFORE any `--top` truncation.
- */
-export interface DuplicationGroup {
-/**
- * Group label (owner / directory / package / section). `(unowned)` for files with no CODEOWNERS rule, `(no section)` for pre-section rules in section mode.
- */
-key: string
 stats: DuplicationStats
 /**
- * Clone groups attributed to this owner. Each group's `primary_owner` is its largest-owner key; per-instance `owner` lets consumers see cross-bucket fan-out without re-resolving paths.
+ * Resolver mode used for partitioning. Present only when `--group-by` is
+ * active.
  */
-clone_groups: AttributedCloneGroup[]
-clone_families: CloneFamily[]
+grouped_by?: (GroupByMode | null)
+/**
+ * Total clone groups across all buckets when `--group-by` is active.
+ * Mirrors the grouped check / health envelopes which expose
+ * `total_issues` so MCP and CI consumers can read the same key across
+ * commands.
+ */
+total_issues?: (number | null)
+/**
+ * Per-group buckets when `--group-by` is active. Each clone group is
+ * attributed to its largest-owner key (most instances; alphabetical
+ * tiebreak).
+ */
+groups?: {
+[k: string]: unknown
 }
 /**
- * A clone group annotated with its largest-owner attribution and per-instance owner keys.
+ * `_meta` block with metric / rule definitions, emitted when `--explain`
+ * is passed (always present in MCP responses).
  */
-export interface AttributedCloneGroup {
-/**
- * Largest-owner attribution: the resolver key with the most instances in this clone group. Ties broken alphabetically (smallest key wins).
- */
-primary_owner: string
-token_count: number
-line_count: number
-/**
- * Each instance carries its own `owner` field alongside the standard CloneInstance shape.
- */
-instances: {
-file: string
-start_line: number
-end_line: number
-start_col: number
-end_col: number
-fragment: string
-/**
- * Resolver key for this specific instance (per-instance, not the group-level largest-owner).
- */
-owner: string
-}[]
-/**
- * Suggested actions for this clone group (extract-shared, suppress-line, etc.).
- */
-actions?: unknown[]
+_meta?: (Meta | null)
 }
 /**
- * Audit output combining dead code, complexity, and duplication scoped to changed files. Returns a verdict (pass/warn/fail) with per-category summary, optional new-vs-inherited attribution, and full sub-results.
+ * Envelope emitted by `fallow audit --format json`. Combines dead code,
+ * complexity, and duplication scoped to changed files with a verdict
+ * (`pass` / `warn` / `fail`), a per-category summary, optional
+ * new-vs-inherited attribution, and full sub-results.
+ * 
+ * Like [`CombinedOutput`], `audit`'s `duplication` and `complexity`
+ * sub-keys hold bare body types (`DuplicationReport` / `HealthReport`)
+ * rather than the per-command envelope shapes; `dead_code` is the full
+ * [`CheckOutput`] envelope. The committed schema points `duplication`
+ * at `#/definitions/DuplicationReport` and `complexity` at
+ * `#/definitions/HealthReport` so the documented shape matches the
+ * wire; the `committed_property_refs_match_derived_property_refs`
+ * drift test enforces the alignment.
  */
 export interface AuditOutput {
-schema_version: SchemaVersion
-version: ToolVersion
-command: "audit"
 /**
- * pass = no issues, warn = warn-severity only (exit 0), fail = error-severity issues (exit 1)
+ * Schema version for this output format.
  */
-verdict: ("pass" | "warn" | "fail")
+schema_version: SchemaVersion
 /**
- * Number of files changed between base ref and HEAD
+ * Fallow tool version that produced this output.
+ */
+version: ToolVersion
+/**
+ * Singleton command discriminator (always `"audit"`).
+ */
+command: AuditCommand
+/**
+ * Overall verdict: `pass` (no issues), `warn` (warn-severity only,
+ * exit 0), or `fail` (error-severity issues, exit 1).
+ */
+verdict: AuditVerdict
+/**
+ * Number of files changed between base ref and HEAD.
  */
 changed_files_count: number
 /**
- * Git ref used as comparison base (explicit or auto-detected)
+ * Git ref used as comparison base (explicit or auto-detected).
  */
 base_ref: string
 /**
- * Short SHA of HEAD (omitted if git unavailable)
+ * Short SHA of HEAD. Omitted when git is unavailable.
  */
-head_sha?: string
+head_sha?: (string | null)
+/**
+ * Analysis duration in milliseconds.
+ */
 elapsed_ms: ElapsedMs
 /**
- * Only emitted when --performance is set. true means audit reused the current run's keys as the base snapshot because every changed file was either a non-behavioral doc or token-equivalent at the base ref (the docs-only-diff fast path); false means the regular base worktree analysis ran.
+ * Only emitted when `--performance` is set. `true` means audit reused
+ * the current run's keys as the base snapshot (the docs-only-diff
+ * fast path); `false` means the regular base worktree analysis ran.
  */
-base_snapshot_skipped?: boolean
-summary: {
-dead_code_issues?: number
-dead_code_has_errors?: boolean
-complexity_findings?: number
-max_cyclomatic?: (number | null)
-duplication_clone_groups?: number
+base_snapshot_skipped?: (boolean | null)
+/**
+ * Per-category summary counts.
+ */
+summary: AuditSummary
+/**
+ * Counts split by whether each finding was introduced by the current
+ * changeset or already existed at the base ref.
+ */
+attribution: AuditAttribution
+/**
+ * Full dead-code results. Absent when no changed files.
+ */
+dead_code?: (CheckOutput | null)
+/**
+ * Full duplication results (bare body, not the full `DupesOutput`
+ * envelope). Absent when no changed files.
+ */
+duplication?: (DuplicationReport | null)
+/**
+ * Full complexity results (bare body, not the full `HealthOutput`
+ * envelope). Absent when no changed files.
+ */
+complexity?: (HealthReport | null)
 }
 /**
- * Counts split by whether each finding was introduced by the current changeset or already existed at the base ref. The default audit gate is new-only, so inherited findings are context. With audit.gate or --gate set to all, audit skips the extra base-snapshot attribution pass and these counts stay zero.
+ * Per-category summary counts for the audit result.
  */
-attribution: {
+export interface AuditSummary {
+dead_code_issues: number
+dead_code_has_errors: boolean
+complexity_findings: number
+max_cyclomatic?: (number | null)
+duplication_clone_groups: number
+}
 /**
- * Which findings affect the audit verdict.
+ * New-vs-inherited issue counts for audit.
  */
-gate: ("new-only" | "all")
+export interface AuditAttribution {
+gate: AuditGate
 dead_code_introduced: number
 dead_code_inherited: number
 complexity_introduced: number
@@ -2615,16 +3654,17 @@ complexity_inherited: number
 duplication_introduced: number
 duplication_inherited: number
 }
-dead_code?: CheckOutput
-duplication?: DuplicationReport
-complexity?: HealthReport
-}
 /**
- * Standalone rule explanation for one issue type. This command does not run project analysis and intentionally returns a compact object without schema_version/version metadata.
+ * Envelope emitted by `fallow explain <issue-type> --format json`.
+ * 
+ * Standalone rule explanation. This command does not run project analysis
+ * and intentionally returns a compact object without `schema_version` /
+ * `version` metadata; consumers that need those should call any other
+ * fallow JSON-producing command.
  */
 export interface ExplainOutput {
 /**
- * Canonical rule id, for example fallow/unused-export.
+ * Canonical rule id, for example `fallow/unused-export`.
  */
 id: string
 /**
@@ -2653,134 +3693,401 @@ how_to_fix: string
 docs: string
 }
 /**
- * Deterministic agent-readable runtime coverage setup instructions. In workspaces, members contains one entry per detected runtime package and runtime_targets is the union of all member targets. With --explain, an optional _meta object describes fields, enums, and warning semantics.
+ * Envelope emitted by `fallow coverage setup --json`. Deterministic
+ * agent-readable runtime coverage setup instructions. In workspaces,
+ * `members` carries one entry per detected runtime package; `runtime_targets`
+ * is the union of all member targets.
+ * 
+ * The runtime path in `crates/cli/src/coverage/mod.rs::build_setup_json`
+ * still constructs the wire shape via `serde_json::json!` macros (one per
+ * member, snippet, and file-to-edit). The typed struct here serves as the
+ * schema source of truth via the drift gate; a follow-up can swap the
+ * runtime over without changing the wire.
  */
 export interface CoverageSetupOutput {
-schema_version: "1"
 /**
- * Primary detected runtime framework. For workspaces this mirrors the first emitted runtime member; unknown means no runtime member was detected.
+ * Standalone coverage setup envelope version (always `"1"`).
  */
-framework_detected: ("nextjs" | "nestjs" | "nuxt" | "sveltekit" | "astro" | "remix" | "vite" | "plain_node" | "unknown")
-package_manager?: ("npm" | "pnpm" | "yarn" | "bun" | null)
+schema_version: CoverageSetupSchemaVersion
+/**
+ * Primary detected runtime framework. For workspaces this mirrors the
+ * first emitted runtime member; `unknown` means no runtime member was
+ * detected.
+ */
+framework_detected: CoverageSetupFramework
+/**
+ * Detected JavaScript package manager. `null` when none could be
+ * resolved.
+ */
+package_manager?: (CoverageSetupPackageManager | null)
 /**
  * Union of runtime targets across emitted members.
  */
-runtime_targets: ("node" | "browser")[]
+runtime_targets: CoverageSetupRuntimeTarget[]
 /**
- * Per-runtime-workspace setup recipes. Pure aggregator roots and build-only library packages are omitted.
+ * Per-runtime-workspace setup recipes. Pure aggregator roots and
+ * build-only library packages are omitted.
  */
 members: CoverageSetupMember[]
-config_written?: null
+/**
+ * Always `null` today. Reserved for a future "config has been written
+ * to disk" indicator.
+ */
+config_written?: {
+[k: string]: unknown
+}
+/**
+ * Shell commands the agent should run from the workspace root.
+ */
 commands: string[]
 /**
- * Compatibility copy of the primary member's files, with workspace prefixes when the primary member is not the root.
+ * Compatibility copy of the primary member's files, with workspace
+ * prefixes when the primary member is not the root.
  */
 files_to_edit: CoverageSetupFileToEdit[]
 /**
- * Compatibility copy of the primary member's snippets, with workspace prefixes when the primary member is not the root.
+ * Compatibility copy of the primary member's snippets, with workspace
+ * prefixes when the primary member is not the root.
  */
 snippets: CoverageSetupSnippet[]
+/**
+ * Optional Dockerfile RUN/COPY snippet to enable the beacon in
+ * containerised deployments.
+ */
 dockerfile_snippet?: (string | null)
+/**
+ * Ordered next-step instructions for the agent / human operator.
+ */
 next_steps: string[]
+/**
+ * Non-fatal warnings raised during setup detection.
+ */
 warnings: string[]
 /**
- * Optional explain metadata emitted only with fallow coverage setup --json --explain.
+ * `_meta` block emitted only when `--explain` is passed.
  */
 _meta?: {
 [k: string]: unknown
 }
 }
+/**
+ * Per-workspace setup recipe inside [`CoverageSetupOutput::members`].
+ */
 export interface CoverageSetupMember {
+/**
+ * Workspace package name (or root marker for single-package projects).
+ */
 name: string
 /**
- * Workspace path relative to the analyzed root, or . for the root member.
+ * Workspace path relative to the analysed root, or `.` for the root
+ * member.
  */
 path: string
-framework_detected: ("nextjs" | "nestjs" | "nuxt" | "sveltekit" | "astro" | "remix" | "vite" | "plain_node" | "unknown")
-package_manager?: ("npm" | "pnpm" | "yarn" | "bun" | null)
-runtime_targets: ("node" | "browser")[]
+/**
+ * Framework detected for this member.
+ */
+framework_detected: CoverageSetupFramework
+/**
+ * Package manager detected for this member.
+ */
+package_manager?: (CoverageSetupPackageManager | null)
+/**
+ * Runtime targets supported by this member's framework.
+ */
+runtime_targets: CoverageSetupRuntimeTarget[]
+/**
+ * Files the agent should edit to wire in the beacon.
+ */
 files_to_edit: CoverageSetupFileToEdit[]
+/**
+ * Code snippets the agent should paste into the edited files.
+ */
 snippets: CoverageSetupSnippet[]
+/**
+ * Optional Dockerfile snippet specific to this member.
+ */
 dockerfile_snippet?: (string | null)
+/**
+ * Member-scoped warnings.
+ */
 warnings: string[]
 }
+/**
+ * Single file to edit inside [`CoverageSetupMember::files_to_edit`] or
+ * [`CoverageSetupOutput::files_to_edit`].
+ */
 export interface CoverageSetupFileToEdit {
+/**
+ * Workspace-relative path to the file to edit.
+ */
 path: string
+/**
+ * Why the file needs editing (e.g. `"Mount the beacon middleware"`).
+ */
 reason: string
 }
+/**
+ * Single code snippet inside [`CoverageSetupMember::snippets`] or
+ * [`CoverageSetupOutput::snippets`].
+ */
 export interface CoverageSetupSnippet {
+/**
+ * Short label identifying the snippet (used by the human renderer).
+ */
 label: string
+/**
+ * Workspace-relative path the snippet should be pasted into.
+ */
 path: string
+/**
+ * Snippet content (literal source text).
+ */
 content: string
 }
+/**
+ * Single CodeClimate-compatible issue inside [`CodeClimateOutput`].
+ */
 export interface CodeClimateIssue {
-type: "issue"
+/**
+ * Always the literal string `"issue"`.
+ */
+type: CodeClimateIssueKind
+/**
+ * Fallow rule identifier (always starts with `fallow/`).
+ */
 check_name: string
+/**
+ * Human-readable description of the finding.
+ */
 description: string
+/**
+ * Free-form categories applied by the report renderer.
+ */
 categories: string[]
-severity: ("info" | "minor" | "major" | "critical" | "blocker")
+/**
+ * CodeClimate-style severity.
+ */
+severity: CodeClimateSeverity
+/**
+ * Stable fingerprint used by CI dashboards to deduplicate findings
+ * across runs.
+ */
 fingerprint: string
-location: {
-path: string
-lines: {
-begin: number
-}
-}
+/**
+ * File path + start line of the finding.
+ */
+location: CodeClimateLocation
 }
 /**
- * Typed review envelope consumed by action/scripts/review.sh and ci/scripts/review.sh.
+ * Location block inside [`CodeClimateIssue::location`].
+ */
+export interface CodeClimateLocation {
+/**
+ * File path relative to the analysed root.
+ */
+path: string
+/**
+ * Wrapper carrying the begin line so the schema lines up with
+ * CodeClimate's spec.
+ */
+lines: CodeClimateLines
+}
+/**
+ * `lines.begin` for [`CodeClimateLocation`].
+ */
+export interface CodeClimateLines {
+/**
+ * 1-based start line.
+ */
+begin: number
+}
+/**
+ * Envelope emitted by `fallow --format review-github` / `review-gitlab`.
+ * Consumed by `action/scripts/review.sh` and `ci/scripts/review.sh` to
+ * post inline PR / MR review comments.
  */
 export interface ReviewEnvelopeOutput {
 /**
  * GitHub review event. Omitted for GitLab.
  */
-event?: "COMMENT"
+event?: (ReviewEnvelopeEvent | null)
+/**
+ * Review summary body (rendered above per-line comments).
+ */
 body: string
-comments: (GitHubReviewComment | GitLabReviewComment)[]
-meta: {
-schema: "fallow-review-envelope/v1"
-provider: ("github" | "gitlab")
-check_conclusion?: ("success" | "neutral" | "failure")
+/**
+ * Per-line comments. Each is either a [`GitHubReviewComment`] or a
+ * [`GitLabReviewComment`] depending on `meta.provider`.
+ */
+comments: ReviewComment[]
+/**
+ * Envelope metadata block.
+ */
+meta: ReviewEnvelopeMeta
 }
-}
+/**
+ * GitHub pull-request review comment.
+ */
 export interface GitHubReviewComment {
+/**
+ * File path the comment targets, repo-root relative.
+ */
 path: string
+/**
+ * 1-indexed line number the comment targets.
+ */
 line: number
 /**
- * GitHub review comments target current-state/new-side lines; deletion-side comments are not modeled yet.
+ * Always the literal string `"RIGHT"`; GitHub review comments target
+ * current-state/new-side lines; deletion-side comments are not modeled
+ * yet.
  */
-side: "RIGHT"
+side: GitHubReviewSide
+/**
+ * Markdown body of the comment.
+ */
 body: string
+/**
+ * Stable fingerprint for the comment, used by `fallow ci
+ * reconcile-review` to detect carryover comments across PR revisions.
+ */
 fingerprint: string
 }
+/**
+ * GitLab merge-request discussion comment.
+ */
 export interface GitLabReviewComment {
+/**
+ * Markdown body of the comment.
+ */
 body: string
+/**
+ * Position block describing where the comment attaches on the diff.
+ */
 position: GitLabReviewPosition
+/**
+ * Stable fingerprint for the comment.
+ */
 fingerprint: string
 }
+/**
+ * `position` block inside [`GitLabReviewComment`]. Mirrors the GitLab
+ * merge-request discussion-position API.
+ */
 export interface GitLabReviewPosition {
-base_sha?: string
-start_sha?: string
-head_sha?: string
-position_type: "text"
+/**
+ * Merge-request base SHA.
+ */
+base_sha?: (string | null)
+/**
+ * Merge-request start SHA.
+ */
+start_sha?: (string | null)
+/**
+ * Merge-request head SHA.
+ */
+head_sha?: (string | null)
+/**
+ * Always `"text"` today.
+ */
+position_type: GitLabReviewPositionType
+/**
+ * File path on the base side.
+ */
 old_path: string
+/**
+ * File path on the head side.
+ */
 new_path: string
+/**
+ * 1-indexed line on the head side.
+ */
 new_line: number
 }
+/**
+ * `meta` block inside [`ReviewEnvelopeOutput`].
+ */
+export interface ReviewEnvelopeMeta {
+/**
+ * Envelope schema marker, always `fallow-review-envelope/v1`.
+ */
+schema: ReviewEnvelopeSchema
+/**
+ * Which provider this envelope is shaped for.
+ */
+provider: ReviewProvider
+/**
+ * Check conclusion derived from the underlying findings. Emitted only
+ * for GitHub envelopes today.
+ */
+check_conclusion?: (ReviewCheckConclusion | null)
+}
+/**
+ * Envelope emitted by `fallow ci reconcile-review --format json`. Used by
+ * CI integrations to drive comment carry-over and stale-comment cleanup
+ * across PR / MR revisions.
+ */
 export interface ReviewReconcileOutput {
-schema: "fallow-review-reconcile/v1"
-provider: ("github" | "gitlab")
+/**
+ * Envelope schema marker, always `fallow-review-reconcile/v1`.
+ */
+schema: ReviewReconcileSchema
+/**
+ * Which provider this reconcile pass was for.
+ */
+provider: ReviewProvider
+/**
+ * PR / MR target identifier supplied to `fallow ci reconcile-review`.
+ * `null` when the command ran without an explicit target.
+ */
 target?: (string | null)
+/**
+ * Whether the reconcile ran in dry-run mode.
+ */
 dry_run: boolean
+/**
+ * Number of comments in the supplied review envelope.
+ */
 comments: number
+/**
+ * Total fingerprints discovered in the supplied envelope.
+ */
 current_fingerprints: number
+/**
+ * Existing fingerprints already posted on the PR / MR.
+ */
 existing_fingerprints: number
+/**
+ * Newly-introduced fingerprints (current minus existing).
+ */
 new_fingerprints: number
+/**
+ * Stale fingerprints (existing minus current).
+ */
 stale_fingerprints: number
+/**
+ * Identifiers of the new fingerprints (subset of comments).
+ */
 new: string[]
+/**
+ * Identifiers of the stale fingerprints (subset of existing).
+ */
 stale: string[]
+/**
+ * Optional warning when the provider API was unreachable or
+ * auth-rejected. `null` on the happy path.
+ */
 provider_warning?: (string | null)
+/**
+ * Resolution comments actually posted (zero on dry runs).
+ */
 resolution_comments_posted: number
+/**
+ * Stale review threads actually resolved (zero on dry runs).
+ */
 threads_resolved: number
+/**
+ * Errors collected during apply, one entry per failure.
+ */
 apply_errors: string[]
 }

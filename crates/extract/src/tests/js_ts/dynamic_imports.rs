@@ -127,6 +127,14 @@ fn vitest_mock_records_target_and_auto_mock_sibling() {
         .find(|imp| imp.source == "./services/__mocks__/api")
         .expect("auto-mock import should be recorded");
     assert_eq!(auto_mock.local_name, Some(String::new()));
+    assert!(
+        auto_mock.is_speculative,
+        "auto-mock sibling synthesised by fallow must carry is_speculative=true so the resolver drops it silently when no __mocks__/<file> exists on disk (issue #378)"
+    );
+    assert!(
+        !target.is_speculative,
+        "vi.mock target itself is real user code and must not be marked speculative"
+    );
 }
 
 #[test]

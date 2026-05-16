@@ -1,0 +1,7 @@
+{
+  "name": "issue-378-vi-mock-no-sibling",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  }
+}

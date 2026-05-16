@@ -99,6 +99,7 @@ fn make_dynamic(
         span: dummy_span(),
         destructured_names: destructured.into_iter().map(String::from).collect(),
         local_name: local_name.map(String::from),
+        is_speculative: false,
     }
 }
 
@@ -347,6 +348,7 @@ fn dynamic_import_destructured_takes_priority_over_local_name() {
             span: dummy_span(),
             destructured_names: vec!["a".into()],
             local_name: Some("mod".into()),
+            is_speculative: false,
         };
         let file = Path::new("/project/src/app.ts");
         let result = resolve_single_dynamic_import(ctx, file, &imp);
@@ -1245,6 +1247,7 @@ fn dynamic_import_empty_destructured_and_no_local_is_side_effect() {
             span: dummy_span(),
             destructured_names: vec![],
             local_name: None,
+            is_speculative: false,
         };
         let file = Path::new("/project/src/app.ts");
         let result = resolve_single_dynamic_import(ctx, file, &imp);
@@ -1259,6 +1262,49 @@ fn dynamic_import_empty_destructured_and_no_local_is_side_effect() {
 }
 
 #[test]
+fn speculative_dynamic_import_drops_when_unresolvable() {
+    // Issue #378: synthesised auto-mock siblings (Vitest `__mocks__/<file>`)
+    // must be dropped silently when the path does not exist on disk. The user
+    // never wrote the synthesised path, so a missing target should not
+    // surface as an `unresolved-import` finding.
+    with_empty_ctx(|ctx| {
+        let imp = DynamicImportInfo {
+            source: "./services/__mocks__/api".into(),
+            span: dummy_span(),
+            destructured_names: vec![],
+            local_name: Some(String::new()),
+            is_speculative: true,
+        };
+        let file = Path::new("/project/src/app.test.ts");
+        let result = resolve_single_dynamic_import(ctx, file, &imp);
+        assert!(
+            result.is_empty(),
+            "speculative imports whose target is Unresolvable must be dropped, got: {result:?}"
+        );
+    });
+}
+
+#[test]
+fn non_speculative_dynamic_import_keeps_unresolvable_entry() {
+    // Sanity guard: only speculative imports get the drop treatment.
+    // User-written `import('./missing')` must still produce a ResolvedImport
+    // with an Unresolvable target so `find_unresolved_imports` can report it.
+    with_empty_ctx(|ctx| {
+        let imp = DynamicImportInfo {
+            source: "./missing".into(),
+            span: dummy_span(),
+            destructured_names: vec![],
+            local_name: None,
+            is_speculative: false,
+        };
+        let file = Path::new("/project/src/app.ts");
+        let result = resolve_single_dynamic_import(ctx, file, &imp);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0].target, ResolveResult::Unresolvable(_)));
+    });
+}
+
+#[test]
 fn dynamic_import_preserves_source_span() {
     with_empty_ctx(|ctx| {
         let imp = DynamicImportInfo {
@@ -1266,6 +1312,7 @@ fn dynamic_import_preserves_source_span() {
             span: Span::new(42, 84),
             destructured_names: vec!["x".into()],
             local_name: None,
+            is_speculative: false,
         };
         let file = Path::new("/project/src/app.ts");
         let result = resolve_single_dynamic_import(ctx, file, &imp);

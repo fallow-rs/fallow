@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "2.74.0"
+version = "2.75.0"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
@@ -14,12 +14,12 @@ keywords = ["typescript", "javascript", "lint", "static-analysis", "code-quality
 categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
-fallow-core = { version = "2.74.0", path = "crates/core" }
-fallow-config = { version = "2.74.0", path = "crates/config" }
-fallow-extract = { version = "2.74.0", path = "crates/extract" }
-fallow-graph = { version = "2.74.0", path = "crates/graph" }
-fallow-types = { version = "2.74.0", path = "crates/types" }
-fallow-cli = { version = "2.74.0", path = "crates/cli" }
+fallow-core = { version = "2.75.0", path = "crates/core" }
+fallow-config = { version = "2.75.0", path = "crates/config" }
+fallow-extract = { version = "2.75.0", path = "crates/extract" }
+fallow-graph = { version = "2.75.0", path = "crates/graph" }
+fallow-types = { version = "2.75.0", path = "crates/types" }
+fallow-cli = { version = "2.75.0", path = "crates/cli" }
 
 # Parsing & analysis
 oxc_allocator = "0.126"

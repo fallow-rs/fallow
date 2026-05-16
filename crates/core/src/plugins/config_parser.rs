@@ -13,6 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
+use fallow_extract::visitor::extract_import_from_callable;
 use oxc_allocator::Allocator;
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
@@ -438,6 +439,94 @@ pub fn extract_config_array_object_strings(
         (!results.is_empty()).then_some(results)
     })
     .unwrap_or_default()
+}
+
+/// Extract static specifiers from thunk-wrapped dynamic imports inside an
+/// array property.
+///
+/// Captures the `SPEC` argument from each `() => import('SPEC')` element of
+/// an array nested under `prop_path` in the config's default-exported object.
+///
+/// # The pattern
+///
+/// Configs and registries that need to defer module evaluation commonly hold
+/// arrays of *thunks* — zero-argument arrow functions whose body is a single
+/// dynamic import:
+///
+/// ```ts
+/// export default defineConfig({
+///     modules: [
+///         () => import('./feature-a'),
+///         { file: () => import('./feature-b'), enabled: true },
+///     ],
+/// })
+/// ```
+///
+/// `import('SPEC')` is the ECMAScript dynamic-import expression (TC39
+/// dynamic-import proposal, shipped in ES2020): a runtime module loader call
+/// that returns a `Promise<Module>`. Wrapping it in `() => import('SPEC')`
+/// turns "load module X now" into "value that, when invoked, loads module X"
+/// — a thunk the host can call lazily.
+///
+/// The technique predates any single framework. It's the same shape used by
+/// route-level code-splitting (`Vue Router`, `React Router`, `Next.js`),
+/// `React.lazy`, Webpack's documented dynamic-import code-splitting recipes,
+/// and any registry that wants to keep boot cheap, break import cycles, or
+/// let bundlers tree-shake unused branches. Configs that adopt the pattern
+/// can therefore declare large module graphs without forcing eager
+/// evaluation of every entry at config parse time.
+///
+/// # Recognised array element shapes
+///
+/// - Concise arrow: `() => import('SPEC')`
+/// - Block-body arrow with explicit return: `() => { return import('SPEC') }`
+/// - Object form with a `file` property holding the arrow:
+///   `{ file: () => import('SPEC'), /* peer fields */ }`
+///
+/// Non-matching elements (string literals, variables, template-string
+/// specifiers, computed expressions) are silently skipped: callers receive
+/// only the statically-resolvable specifiers, in source order.
+#[must_use]
+pub fn extract_lazy_imports_in_array(source: &str, path: &Path, prop_path: &[&str]) -> Vec<String> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let array_expr = get_nested_expression(obj, prop_path)?;
+        let Expression::ArrayExpression(arr) = array_expr else {
+            return None;
+        };
+        let mut specs = Vec::new();
+        for element in &arr.elements {
+            let Some(expr) = element.as_expression() else {
+                continue;
+            };
+            if let Some(spec) = lazy_import_specifier(expr) {
+                specs.push(spec);
+            }
+        }
+        (!specs.is_empty()).then_some(specs)
+    })
+    .unwrap_or_default()
+}
+
+/// Read a lazy-import specifier from a single array element expression.
+///
+/// Two outer shapes are accepted at this level (array-element navigation):
+/// - A bare callable: `() => import('SPEC')` or the function-expression
+///   equivalent.
+/// - An object with a `file` property holding the callable:
+///   `{ file: () => import('SPEC'), /* peer fields */ }`.
+///
+/// The actual callable → import peeling is delegated to
+/// [`extract_import_from_callable`], which is shared with the visitor-side
+/// dynamic-import helpers so all three navigation pipelines stay in lockstep
+/// when ECMAScript adds new wrapper shapes.
+fn lazy_import_specifier(expr: &Expression<'_>) -> Option<String> {
+    let callable = match expr {
+        Expression::ObjectExpression(obj) => &find_property(obj, "file")?.value,
+        _ => expr,
+    };
+    let import_expr = extract_import_from_callable(callable)?;
+    expression_to_string(&import_expr.source)
 }
 
 /// Extract a string-like option from a plugin tuple inside a config plugin array.
@@ -1262,6 +1351,87 @@ mod tests {
 
     fn ts_path() -> PathBuf {
         PathBuf::from("config.ts")
+    }
+
+    #[test]
+    fn extract_lazy_imports_bare_arrows() {
+        let source = r"
+            import { defineConfig } from '@adonisjs/core/app'
+            export default defineConfig({
+                preloads: [
+                    () => import('#start/routes'),
+                    () => import('#start/kernel'),
+                ],
+            })
+        ";
+        let specs = extract_lazy_imports_in_array(source, &ts_path(), &["preloads"]);
+        assert_eq!(specs, vec!["#start/routes", "#start/kernel"]);
+    }
+
+    #[test]
+    fn extract_lazy_imports_object_form_with_file_key() {
+        let source = r"
+            export default defineConfig({
+                providers: [
+                    () => import('@adonisjs/core/providers/app_provider'),
+                    {
+                        file: () => import('@adonisjs/core/providers/repl_provider'),
+                        environment: ['repl', 'test'],
+                    },
+                ],
+            })
+        ";
+        let specs = extract_lazy_imports_in_array(source, &ts_path(), &["providers"]);
+        assert_eq!(
+            specs,
+            vec![
+                "@adonisjs/core/providers/app_provider",
+                "@adonisjs/core/providers/repl_provider",
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_lazy_imports_block_body_with_return() {
+        // Less common but legal: explicit return body. Still supported.
+        let source = r"
+            export default defineConfig({
+                commands: [
+                    () => { return import('@adonisjs/core/commands') },
+                ],
+            })
+        ";
+        let specs = extract_lazy_imports_in_array(source, &ts_path(), &["commands"]);
+        assert_eq!(specs, vec!["@adonisjs/core/commands"]);
+    }
+
+    #[test]
+    fn extract_lazy_imports_skips_unknown_element_shapes() {
+        // Mixed array with strings, numbers, objects without `file` — these
+        // are not lazy imports and must be silently ignored.
+        let source = r"
+            export default defineConfig({
+                commands: [
+                    'string-entry',
+                    42,
+                    { other: 'value' },
+                    () => import('@adonisjs/lucid/commands'),
+                ],
+            })
+        ";
+        let specs = extract_lazy_imports_in_array(source, &ts_path(), &["commands"]);
+        assert_eq!(specs, vec!["@adonisjs/lucid/commands"]);
+    }
+
+    #[test]
+    fn extract_lazy_imports_missing_property_returns_empty() {
+        let source = r"
+            export default defineConfig({
+                preloads: [() => import('#start/routes')],
+            })
+        ";
+        let specs = extract_lazy_imports_in_array(source, &ts_path(), &["providers"]);
+        assert!(specs.is_empty());
     }
 
     #[test]

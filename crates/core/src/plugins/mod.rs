@@ -28,6 +28,7 @@ const TEST_ENTRY_POINT_PLUGINS: &[&str] = &[
 ];
 
 const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
+    "adonis",
     "angular",
     "astro",
     "convex",
@@ -961,6 +962,7 @@ mod tooling;
 pub use registry::{AggregatedPluginResult, PluginRegistry};
 pub use tooling::is_known_tooling_dependency;
 
+mod adonis;
 mod angular;
 mod astro;
 mod ava;

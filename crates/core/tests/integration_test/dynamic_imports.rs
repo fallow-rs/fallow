@@ -201,6 +201,53 @@ fn vitest_vi_mock_factory_credits_target_and_skips_auto_mock_synthesis() {
     );
 }
 
+#[test]
+fn vitest_vi_mock_without_sibling_does_not_surface_unresolved_import() {
+    // Issue #378: `vi.mock('./foo')` without a `__mocks__/foo` sibling on disk
+    // must NOT produce an `unresolved-import` finding pointing at the
+    // synthesised `__mocks__/<file>` path. Vitest's auto-mock system works
+    // in-memory and does not require the sibling the way Jest does.
+    //
+    // The fixture exercises both shapes: a tsconfig path alias
+    // (`@/utils/exportElementAsPng`) and a relative specifier
+    // (`../utils/sibling`). Neither has a `__mocks__/` sibling on disk.
+    let root = fixture_path("issue-378-vi-mock-no-sibling");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|imp| imp.specifier.as_str())
+        .collect();
+    assert!(
+        unresolved.is_empty(),
+        "vi.mock auto-mock synthesis with no on-disk sibling must not surface as `unresolved-import`, got: {unresolved:?}"
+    );
+
+    // Sanity: the real mock targets stay credited (not flagged unused) and
+    // the test file itself is reachable through normal test discovery.
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| {
+            f.path
+                .strip_prefix(&root)
+                .unwrap_or(&f.path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    assert!(
+        !unused_files.contains(&"src/utils/exportElementAsPng.ts".to_string()),
+        "alias-resolved vi.mock target must still be credited as referenced, got unused_files: {unused_files:?}"
+    );
+    assert!(
+        !unused_files.contains(&"src/utils/sibling.ts".to_string()),
+        "relative vi.mock target must still be credited as referenced, got unused_files: {unused_files:?}"
+    );
+}
+
 // ── Dynamic import pattern resolution ──────────────────────────
 
 #[test]

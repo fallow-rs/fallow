@@ -793,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-cli"
-version = "2.74.0"
+version = "2.75.0"
 dependencies = [
  "base64",
  "bitcode",
@@ -835,7 +835,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-config"
-version = "2.74.0"
+version = "2.75.0"
 dependencies = [
  "dunce",
  "glob",
@@ -857,7 +857,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-core"
-version = "2.74.0"
+version = "2.75.0"
 dependencies = [
  "bitcode",
  "criterion",
@@ -907,7 +907,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-extract"
-version = "2.74.0"
+version = "2.75.0"
 dependencies = [
  "bitcode",
  "fallow-types",
@@ -928,7 +928,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-graph"
-version = "2.74.0"
+version = "2.75.0"
 dependencies = [
  "dunce",
  "fallow-config",
@@ -948,7 +948,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-license"
-version = "2.74.0"
+version = "2.75.0"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -959,7 +959,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-lsp"
-version = "2.74.0"
+version = "2.75.0"
 dependencies = [
  "fallow-config",
  "fallow-core",
@@ -975,7 +975,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-mcp"
-version = "2.74.0"
+version = "2.75.0"
 dependencies = [
  "rmcp",
  "schemars",
@@ -987,7 +987,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-node"
-version = "2.74.0"
+version = "2.75.0"
 dependencies = [
  "fallow-cli",
  "napi",
@@ -998,7 +998,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-types"
-version = "2.74.0"
+version = "2.75.0"
 dependencies = [
  "bitcode",
  "oxc_span",
@@ -1009,7 +1009,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-v8-coverage"
-version = "2.74.0"
+version = "2.75.0"
 dependencies = [
  "serde",
  "serde_json",

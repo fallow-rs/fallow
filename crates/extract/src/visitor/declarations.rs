@@ -349,6 +349,7 @@ impl ModuleInfoExtractor {
                     span: import_expr.span,
                     destructured_names: names,
                     local_name: None,
+                    is_speculative: false,
                 });
                 self.handled_import_spans.insert(import_expr.span);
             }
@@ -360,6 +361,7 @@ impl ModuleInfoExtractor {
                     span: import_expr.span,
                     destructured_names: Vec::new(),
                     local_name: Some(local),
+                    is_speculative: false,
                 });
                 self.handled_import_spans.insert(import_expr.span);
             }

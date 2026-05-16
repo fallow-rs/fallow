@@ -1,6 +1,6 @@
 {
   "name": "@fallow-cli/fallow-node",
-  "version": "2.74.0",
+  "version": "2.75.0",
   "description": "Native Node.js bindings for fallow dead-code, duplication, and health analyses.",
   "main": "index.js",
   "types": "index.d.ts",
@@ -64,13 +64,13 @@
     "@napi-rs/cli": "3.6.0"
   },
   "optionalDependencies": {
-    "@fallow-cli/fallow-node-darwin-arm64": "2.74.0",
-    "@fallow-cli/fallow-node-darwin-x64": "2.74.0",
-    "@fallow-cli/fallow-node-linux-arm64-gnu": "2.74.0",
-    "@fallow-cli/fallow-node-linux-arm64-musl": "2.74.0",
-    "@fallow-cli/fallow-node-linux-x64-gnu": "2.74.0",
-    "@fallow-cli/fallow-node-linux-x64-musl": "2.74.0",
-    "@fallow-cli/fallow-node-win32-arm64-msvc": "2.74.0",
-    "@fallow-cli/fallow-node-win32-x64-msvc": "2.74.0"
+    "@fallow-cli/fallow-node-darwin-arm64": "2.75.0",
+    "@fallow-cli/fallow-node-darwin-x64": "2.75.0",
+    "@fallow-cli/fallow-node-linux-arm64-gnu": "2.75.0",
+    "@fallow-cli/fallow-node-linux-arm64-musl": "2.75.0",
+    "@fallow-cli/fallow-node-linux-x64-gnu": "2.75.0",
+    "@fallow-cli/fallow-node-linux-x64-musl": "2.75.0",
+    "@fallow-cli/fallow-node-win32-arm64-msvc": "2.75.0",
+    "@fallow-cli/fallow-node-win32-x64-msvc": "2.75.0"
   }
 }

@@ -433,6 +433,7 @@ fn module_to_cached_roundtrip_dynamic_imports() {
             span: Span::new(0, 10),
             destructured_names: Vec::new(),
             local_name: None,
+            is_speculative: false,
         }],
         require_calls: vec![RequireCallInfo {
             source: "fs".to_string(),
@@ -1507,6 +1508,7 @@ fn module_to_cached_roundtrip_dynamic_import_with_local() {
             span: Span::new(0, 20),
             destructured_names: vec![],
             local_name: Some("mod".to_string()),
+            is_speculative: false,
         }],
         require_calls: vec![],
         member_accesses: vec![],

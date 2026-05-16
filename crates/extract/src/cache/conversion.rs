@@ -123,6 +123,7 @@ pub fn cached_to_module_opts(
             span: Span::new(d.span_start, d.span_end),
             destructured_names: d.destructured_names.clone(),
             local_name: d.local_name.clone(),
+            is_speculative: d.is_speculative,
         })
         .collect();
 
@@ -308,6 +309,7 @@ pub fn module_to_cached(
                 span_end: d.span.end,
                 destructured_names: d.destructured_names.clone(),
                 local_name: d.local_name.clone(),
+                is_speculative: d.is_speculative,
             })
             .collect(),
         require_calls: module

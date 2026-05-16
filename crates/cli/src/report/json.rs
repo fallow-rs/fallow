@@ -4174,13 +4174,49 @@ mod tests {
         let raw = std::fs::read_to_string(&schema_path)
             .expect("docs/output-schema.json must be readable for the drift-guard test");
         let schema: serde_json::Value = serde_json::from_str(&raw).expect("schema parses");
-        let enum_values: std::collections::BTreeSet<String> =
-            schema["definitions"]["HealthFindingAction"]["properties"]["type"]["enum"]
-                .as_array()
-                .expect("HealthFindingAction.type.enum is an array")
-                .iter()
-                .filter_map(|v| v.as_str().map(str::to_owned))
-                .collect();
+        // Phase 5 derives `HealthFindingActionType` from a Rust enum whose
+        // schemars derive produces `oneOf: [{const: ...}, ...]` (one branch
+        // per variant) rather than a flat `enum: [...]`. We accept either
+        // form here so the drift guard tolerates a future schemars-version
+        // flip back to the flat shape.
+        let type_field = &schema["definitions"]["HealthFindingAction"]["properties"]["type"];
+        let type_def = if let Some(reference) = type_field.get("$ref").and_then(|r| r.as_str()) {
+            let name = reference
+                .strip_prefix("#/definitions/")
+                .expect("HealthFindingAction.type $ref points into #/definitions/");
+            &schema["definitions"][name]
+        } else if let Some(arr) = type_field.get("allOf").and_then(|a| a.as_array())
+            && let Some(reference) = arr
+                .first()
+                .and_then(|v| v.get("$ref"))
+                .and_then(|r| r.as_str())
+        {
+            let name = reference
+                .strip_prefix("#/definitions/")
+                .expect("HealthFindingAction.type allOf $ref points into #/definitions/");
+            &schema["definitions"][name]
+        } else {
+            type_field
+        };
+        let mut enum_values: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        if let Some(arr) = type_def.get("enum").and_then(|e| e.as_array()) {
+            for v in arr {
+                if let Some(s) = v.as_str() {
+                    enum_values.insert(s.to_owned());
+                }
+            }
+        }
+        if let Some(arr) = type_def.get("oneOf").and_then(|e| e.as_array()) {
+            for branch in arr {
+                if let Some(s) = branch.get("const").and_then(|c| c.as_str()) {
+                    enum_values.insert(s.to_owned());
+                }
+            }
+        }
+        assert!(
+            !enum_values.is_empty(),
+            "could not extract HealthFindingActionType variants from schema (neither `enum` nor `oneOf` with `const` branches)"
+        );
 
         for ty in &emitted {
             assert!(

@@ -19,6 +19,7 @@ use oxc_span::Span;
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{DynamicImportInfo, DynamicImportPattern, ImportInfo, ImportedName};
 
+use super::ResolveResult;
 use super::ResolvedImport;
 use super::fallbacks::make_glob_from_pattern;
 use super::specifier::resolve_specifier;
@@ -43,6 +44,17 @@ pub(super) fn resolve_single_dynamic_import(
     imp: &DynamicImportInfo,
 ) -> Vec<ResolvedImport> {
     let target = resolve_specifier(ctx, file_path, &imp.source, false);
+
+    // Speculative imports are synthesised by fallow (e.g. the Vitest
+    // `__mocks__/<file>` auto-mock sibling) to credit a side-effect file when
+    // it exists. The user never wrote the synthesised path, so when it fails
+    // to resolve drop the entry silently rather than surfacing it as an
+    // `unresolved-import` finding. The credit path is unaffected: a
+    // speculative import whose target resolves still produces a regular
+    // `ResolvedImport`. See issue #378.
+    if imp.is_speculative && matches!(target, ResolveResult::Unresolvable(_)) {
+        return Vec::new();
+    }
 
     if !imp.destructured_names.is_empty() {
         // `const { a, b } = await import('./x')` -> Named imports
