@@ -215,10 +215,11 @@ pub struct CoverageSetupSnippet {
 /// Like [`CombinedOutput`], `audit`'s `duplication` and `complexity`
 /// sub-keys hold bare body types (`DuplicationReport` / `HealthReport`)
 /// rather than the per-command envelope shapes; `dead_code` is the full
-/// [`CheckOutput`] envelope. The committed schema's `$ref`s for those
-/// sub-keys are the pre-Phase-5 shape (see the matching note on
-/// `CombinedOutput`); the property-key drift gate only checks key
-/// membership.
+/// [`CheckOutput`] envelope. The committed schema points `duplication`
+/// at `#/definitions/DuplicationReport` and `complexity` at
+/// `#/definitions/HealthReport` so the documented shape matches the
+/// wire; the `committed_property_refs_match_derived_property_refs`
+/// drift test enforces the alignment.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AuditOutput {
@@ -282,11 +283,11 @@ pub enum AuditCommand {
 /// `version` / `elapsed_ms`), but `dupes` and `health` are the bare body
 /// types: the runtime emit calls `serde_json::to_value(&report)` on
 /// `DuplicationReport` / `HealthReport` directly rather than wrapping them
-/// in their per-command envelope. The committed schema's `$ref` for those
-/// sub-keys still points at `DupesOutput` / `HealthOutput`, which is the
-/// preserved pre-Phase-5 shape (the property-key drift gate only checks
-/// the `dupes` / `health` keys exist; tightening the referenced type is a
-/// follow-up).
+/// in their per-command envelope. The committed schema points `dupes` at
+/// `#/definitions/DuplicationReport` and `health` at
+/// `#/definitions/HealthReport` so the documented shape matches the
+/// wire; the `committed_property_refs_match_derived_property_refs`
+/// drift test enforces the alignment.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CombinedOutput {

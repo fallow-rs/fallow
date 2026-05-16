@@ -28,9 +28,9 @@
         "schema_version": { "$ref": "#/definitions/SchemaVersion" },
         "version": { "$ref": "#/definitions/ToolVersion" },
         "elapsed_ms": { "$ref": "#/definitions/ElapsedMs" },
-        "check": { "$ref": "#/definitions/CheckOutput", "description": "Dead code analysis results (omitted if --skip check)" },
-        "dupes": { "$ref": "#/definitions/DupesOutput", "description": "Duplication analysis results (omitted if --skip dupes)" },
-        "health": { "$ref": "#/definitions/HealthOutput", "description": "Health/complexity analysis results (omitted if --skip health)" }
+        "check": { "$ref": "#/definitions/CheckOutput", "description": "Dead code analysis results (omitted if --skip check). Full `CheckOutput` envelope with schema_version / version / elapsed_ms header." },
+        "dupes": { "$ref": "#/definitions/DuplicationReport", "description": "Duplication analysis body (omitted if --skip dupes). Bare `DuplicationReport`, NOT wrapped in the `DupesOutput` envelope: no schema_version / version / elapsed_ms header on this sub-key, only the body fields (clone_groups, clone_families, mirrored_directories?, stats)." },
+        "health": { "$ref": "#/definitions/HealthReport", "description": "Health / complexity analysis body (omitted if --skip health). Bare `HealthReport`, NOT wrapped in the `HealthOutput` envelope: no schema_version / version / elapsed_ms header on this sub-key, only the body fields plus injected per-finding `actions` arrays." }
       }
     },
 
@@ -93,9 +93,9 @@
             "duplication_inherited": { "type": "integer" }
           }
         },
-        "dead_code": { "$ref": "#/definitions/CheckOutput", "description": "Full dead code results (omitted if no changed files). Issue objects include introduced: true/false when audit can compare against the base ref." },
-        "duplication": { "$ref": "#/definitions/DupesOutput", "description": "Full duplication results (omitted if no changed files). Clone groups include introduced: true/false when audit can compare against the base ref." },
-        "complexity": { "$ref": "#/definitions/HealthOutput", "description": "Full complexity results (omitted if no changed files). Findings include introduced: true/false when audit can compare against the base ref." }
+        "dead_code": { "$ref": "#/definitions/CheckOutput", "description": "Full dead code envelope (omitted if no changed files). Issue objects include introduced: true/false when audit can compare against the base ref." },
+        "duplication": { "$ref": "#/definitions/DuplicationReport", "description": "Duplication analysis body (omitted if no changed files). Bare `DuplicationReport`, NOT wrapped in the `DupesOutput` envelope: no schema_version / version / elapsed_ms header on this sub-key. Clone groups include introduced: true/false when audit can compare against the base ref." },
+        "complexity": { "$ref": "#/definitions/HealthReport", "description": "Health / complexity body (omitted if no changed files). Bare `HealthReport`, NOT wrapped in the `HealthOutput` envelope: no schema_version / version / elapsed_ms header on this sub-key. Findings include introduced: true/false when audit can compare against the base ref." }
       }
     },
 
@@ -1139,6 +1139,64 @@
           "type": "string",
           "description": "Templated one-sentence explanation for the score."
         }
+      }
+    },
+
+    "DuplicationReport": {
+      "type": "object",
+      "description": "Duplication analysis body. Mirrors `fallow_core::duplicates::DuplicationReport`. Emitted as the value of `combined.dupes` and `audit.duplication`, where the JSON layer does NOT wrap it in the `DupesOutput` envelope (no `schema_version` / `version` / `elapsed_ms` header).",
+      "required": ["clone_groups", "clone_families", "stats"],
+      "properties": {
+        "clone_groups": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/CloneGroup" }
+        },
+        "clone_families": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/CloneFamily" }
+        },
+        "mirrored_directories": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/MirroredDirectory" },
+          "description": "Omitted when empty."
+        },
+        "stats": { "$ref": "#/definitions/DuplicationStats" }
+      }
+    },
+
+    "HealthReport": {
+      "type": "object",
+      "description": "Health / complexity analysis body. Mirrors `fallow_cli::health_types::HealthReport`. Emitted as the value of `combined.health` and `audit.complexity`, where the JSON layer does NOT wrap it in the `HealthOutput` envelope (no `schema_version` / `version` / `elapsed_ms` header). Path stripping and `inject_health_actions` still run on the bare body, so per-finding `actions` arrays appear here as they do inside `HealthOutput`.",
+      "required": ["findings", "summary"],
+      "properties": {
+        "findings": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/HealthFinding" }
+        },
+        "summary": { "$ref": "#/definitions/HealthSummary" },
+        "vital_signs": { "$ref": "#/definitions/VitalSigns" },
+        "health_score": { "$ref": "#/definitions/HealthScore" },
+        "file_scores": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/FileHealthScore" }
+        },
+        "coverage_gaps": { "$ref": "#/definitions/CoverageGaps" },
+        "hotspots": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/HotspotEntry" }
+        },
+        "hotspot_summary": { "$ref": "#/definitions/HotspotSummary" },
+        "runtime_coverage": { "$ref": "#/definitions/RuntimeCoverageReport" },
+        "large_functions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/LargeFunctionEntry" }
+        },
+        "targets": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/RefactoringTarget" }
+        },
+        "target_thresholds": { "$ref": "#/definitions/TargetThresholds" },
+        "health_trend": { "$ref": "#/definitions/HealthTrend" }
       }
     },
 

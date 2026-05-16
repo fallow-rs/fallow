@@ -85,8 +85,8 @@ schema_version: SchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 check?: CheckOutput
-dupes?: DupesOutput
-health?: HealthOutput
+dupes?: DuplicationReport
+health?: HealthReport
 }
 export interface CheckOutput {
 schema_version: SchemaVersion
@@ -886,38 +886,16 @@ docs?: string
 }
 }
 /**
- * Duplication analysis output. Contains clone groups (individual duplicates), clone families (groups sharing the same files), and aggregate statistics. With --group-by, the project-level fields stay populated and an additional `grouped_by` + `groups` envelope is appended.
+ * Duplication analysis body. Mirrors `fallow_core::duplicates::DuplicationReport`. Emitted as the value of `combined.dupes` and `audit.duplication`, where the JSON layer does NOT wrap it in the `DupesOutput` envelope (no `schema_version` / `version` / `elapsed_ms` header).
  */
-export interface DupesOutput {
-schema_version: SchemaVersion
-version: ToolVersion
-elapsed_ms: ElapsedMs
-/**
- * All detected clone groups. Each group contains 2+ instances of identical or near-identical code.
- */
+export interface DuplicationReport {
 clone_groups: CloneGroup[]
-/**
- * Clone families: groups of clone groups sharing the same file set, indicating systematic duplication patterns.
- */
 clone_families: CloneFamily[]
-stats: DuplicationStats
 /**
- * Directory pairs with high structural duplication. Only present when mirrored directories are detected.
+ * Omitted when empty.
  */
 mirrored_directories?: MirroredDirectory[]
-/**
- * Resolver mode used for partitioning. Present only when `--group-by` is active.
- */
-grouped_by?: ("owner" | "directory" | "package" | "section")
-/**
- * Total clone groups across all buckets when `--group-by` is active. Mirrors the grouped check / health envelopes so MCP and CI consumers can read the same key across commands.
- */
-total_issues?: number
-/**
- * Per-group buckets when `--group-by` is active. Each clone group is attributed to its largest-owner key (most instances; alphabetical tiebreak). Sort: most clone groups first, then alphabetical, with `(unowned)` pinned last.
- */
-groups?: DuplicationGroup[]
-_meta?: Meta
+stats: DuplicationStats
 }
 /**
  * A group of code clones — the same (or normalized-equivalent) code appearing in multiple places.
@@ -1060,6 +1038,27 @@ note?: string
 comment?: string
 }
 /**
+ * A pair of directories with high structural duplication, indicating systematic copy-paste of directory trees.
+ */
+export interface MirroredDirectory {
+/**
+ * First directory path (relative to project root).
+ */
+dir_a: string
+/**
+ * Second directory path (relative to project root).
+ */
+dir_b: string
+/**
+ * File names that appear in both directories with duplicated content.
+ */
+shared_files: string[]
+/**
+ * Total duplicated lines across all shared files.
+ */
+total_lines: number
+}
+/**
  * Aggregate duplication statistics for the analyzed project.
  */
 export interface DuplicationStats {
@@ -1105,187 +1104,22 @@ duplication_percentage: number
 clone_groups_below_min_occurrences?: number
 }
 /**
- * A pair of directories with high structural duplication, indicating systematic copy-paste of directory trees.
+ * Health / complexity analysis body. Mirrors `fallow_cli::health_types::HealthReport`. Emitted as the value of `combined.health` and `audit.complexity`, where the JSON layer does NOT wrap it in the `HealthOutput` envelope (no `schema_version` / `version` / `elapsed_ms` header). Path stripping and `inject_health_actions` still run on the bare body, so per-finding `actions` arrays appear here as they do inside `HealthOutput`.
  */
-export interface MirroredDirectory {
-/**
- * First directory path (relative to project root).
- */
-dir_a: string
-/**
- * Second directory path (relative to project root).
- */
-dir_b: string
-/**
- * File names that appear in both directories with duplicated content.
- */
-shared_files: string[]
-/**
- * Total duplicated lines across all shared files.
- */
-total_lines: number
-}
-/**
- * A single grouped duplication bucket. Per-group `stats` are dedup-aware and computed over the FULL group BEFORE any `--top` truncation.
- */
-export interface DuplicationGroup {
-/**
- * Group label (owner / directory / package / section). `(unowned)` for files with no CODEOWNERS rule, `(no section)` for pre-section rules in section mode.
- */
-key: string
-stats: DuplicationStats
-/**
- * Clone groups attributed to this owner. Each group's `primary_owner` is its largest-owner key; per-instance `owner` lets consumers see cross-bucket fan-out without re-resolving paths.
- */
-clone_groups: AttributedCloneGroup[]
-clone_families: CloneFamily[]
-}
-/**
- * A clone group annotated with its largest-owner attribution and per-instance owner keys.
- */
-export interface AttributedCloneGroup {
-/**
- * Largest-owner attribution: the resolver key with the most instances in this clone group. Ties broken alphabetically (smallest key wins).
- */
-primary_owner: string
-token_count: number
-line_count: number
-/**
- * Each instance carries its own `owner` field alongside the standard CloneInstance shape.
- */
-instances: {
-file: string
-start_line: number
-end_line: number
-start_col: number
-end_col: number
-fragment: string
-/**
- * Resolver key for this specific instance (per-instance, not the group-level largest-owner).
- */
-owner: string
-}[]
-/**
- * Suggested actions for this clone group (extract-shared, suppress-line, etc.).
- */
-actions?: unknown[]
-}
-export interface HealthOutput {
-schema_version: SchemaVersion
-version: ToolVersion
-elapsed_ms: ElapsedMs
-summary: HealthSummary
-/**
- * Functions and synthetic template entries exceeding complexity thresholds, sorted by the --sort criteria.
- */
+export interface HealthReport {
 findings: HealthFinding[]
-/**
- * Per-file health scores. Only present when --file-scores is used. Sorted by maintainability_index ascending (worst first). Zero-function files (barrels) are excluded by default.
- */
-file_scores?: FileHealthScore[]
-/**
- * Hotspot entries combining git churn with complexity. Only present when --hotspots is used. Sorted by score descending (highest risk first).
- */
-hotspots?: HotspotEntry[]
-hotspot_summary?: HotspotSummary
+summary: HealthSummary
 vital_signs?: VitalSigns
 health_score?: HealthScore
-/**
- * Functions exceeding 60 LOC (very high risk). Only present when unit size very-high-risk bin >= 3%. Sorted by line count descending.
- */
+file_scores?: FileHealthScore[]
+coverage_gaps?: CoverageGaps
+hotspots?: HotspotEntry[]
+hotspot_summary?: HotspotSummary
+runtime_coverage?: RuntimeCoverageReport
 large_functions?: LargeFunctionEntry[]
-/**
- * Ranked refactoring recommendations. Only present when --targets is used. Sorted by efficiency (priority/effort) descending.
- */
 targets?: RefactoringTarget[]
 target_thresholds?: TargetThresholds
 health_trend?: HealthTrend
-coverage_gaps?: CoverageGaps
-runtime_coverage?: RuntimeCoverageReport
-/**
- * Resolver mode used when --group-by is active. Present only on grouped output. The top-level `vital_signs`, `health_score`, and `summary` keep the active run scope (for example after --workspace); per-group versions live inside each entry of `groups`.
- */
-grouped_by?: ("owner" | "directory" | "package" | "section")
-/**
- * Per-group health output, present only when --group-by is active. Each group recomputes its own vital_signs and health_score from the files in that group, mirroring how --workspace scopes a single subset.
- */
-groups?: HealthGroup[]
-/**
- * Audit breadcrumb explaining systemic action-array adjustments. Present only when at least one adjustment was made (e.g., health finding suppression hints omitted because a baseline is active). When --group-by is active, each entry of `groups` may carry its own `actions_meta` describing the same omission so per-group consumers do not need to walk back to the report root.
- */
-actions_meta?: {
-/**
- * True when `suppress-line` actions were not emitted on health findings.
- */
-suppression_hints_omitted: boolean
-/**
- * Why suppression hints were omitted. `baseline-active` = `--baseline` or `--save-baseline` was passed; `config-disabled` = `health.suggestInlineSuppression: false`; `unspecified` = caller omitted hints without setting a reason.
- */
-reason: string
-/**
- * The report section affected by this metadata. Other health sections can still carry their own suppress actions.
- */
-scope: "health-findings"
-}
-_meta?: Meta
-}
-export interface HealthSummary {
-/**
- * Number of files analyzed for complexity.
- */
-files_analyzed: number
-/**
- * Total number of functions found.
- */
-functions_analyzed: number
-/**
- * Number of functions exceeding at least one threshold (before --top truncation).
- */
-functions_above_threshold: number
-/**
- * Configured cyclomatic complexity threshold.
- */
-max_cyclomatic_threshold: number
-/**
- * Configured cognitive complexity threshold.
- */
-max_cognitive_threshold: number
-/**
- * Configured CRAP (Change Risk Anti-Patterns) score threshold. Functions meeting or exceeding this score appear as findings with the `crap` and optional `coverage_pct` fields populated.
- */
-max_crap_threshold: number
-/**
- * Number of files with health scores. Only present when --file-scores is used. 0 indicates the flag was set but scoring failed.
- */
-files_scored?: number
-/**
- * Average maintainability index across all scored files (before --top truncation). Only present when --file-scores is used and at least one file was scored.
- */
-average_maintainability?: number
-/**
- * Coverage model used for CRAP score computation. 'static_estimated' (default) uses per-function graph-based estimation from export references: directly test-referenced = 85%, indirectly reachable = 40%, untested = 0%. 'istanbul' uses real per-function statement coverage from a coverage-final.json file (--coverage flag or auto-detected). 'static_binary' is the legacy binary model. Only present when file scores are computed.
- */
-coverage_model?: ("static_binary" | "static_estimated" | "istanbul")
-/**
- * Number of functions matched against Istanbul coverage data. Only present when coverage_model is 'istanbul'.
- */
-istanbul_matched?: number
-/**
- * Total functions evaluated for Istanbul matching. Only present when coverage_model is 'istanbul'.
- */
-istanbul_total?: number
-/**
- * Number of findings with critical severity (cognitive >= 40 or cyclomatic >= 50).
- */
-severity_critical_count: number
-/**
- * Number of findings with high severity (cognitive 25-39 or cyclomatic 30-49).
- */
-severity_high_count: number
-/**
- * Number of findings with moderate severity (below high thresholds).
- */
-severity_moderate_count: number
 }
 export interface HealthFinding {
 /**
@@ -1375,222 +1209,63 @@ comment?: string
  */
 placement?: string
 }
+export interface HealthSummary {
 /**
- * Per-file health score. Formula: MI = 100 - (complexity_density x 30) - (dead_code_ratio x 20) - min(ln(fan_out+1) x 4, 15), clamped to [0, 100]. Type-only exports excluded from dead_code_ratio. CRAP scores combine cyclomatic complexity with static test reachability.
- */
-export interface FileHealthScore {
-/**
- * File path (relative to project root).
- */
-path: string
-/**
- * Number of files that import this file.
- */
-fan_in: number
-/**
- * Number of files this file directly imports.
- */
-fan_out: number
-/**
- * Fraction of value exports (excluding type-only) with zero references (0.0–1.0).
- */
-dead_code_ratio: number
-/**
- * Total cyclomatic complexity / lines of code.
- */
-complexity_density: number
-/**
- * Weighted composite score (0–100, higher is better).
- */
-maintainability_index: number
-/**
- * Sum of cyclomatic complexity across all functions in this file.
- */
-total_cyclomatic: number
-/**
- * Sum of cognitive complexity across all functions in this file.
- */
-total_cognitive: number
-/**
- * Number of functions in this file.
- */
-function_count: number
-/**
- * Total lines of code in the file.
- */
-lines: number
-/**
- * Maximum CRAP score among functions in this file. Computed via the active `coverage_model` per the canonical formula CC^2 * (1 - cov/100)^3 + CC (Savoia & Evans, 2007). Coverage source: `static_estimated` (default, graph-based per-function estimate), `istanbul` (real per-function statement coverage from --coverage), or the legacy `static_binary` (whole-file 0%/100%, retained for compatibility).
- */
-crap_max: number
-/**
- * Count of functions with CRAP score >= 30 (CC >= 5 without test dependency path).
- */
-crap_above_threshold: number
-}
-/**
- * A hotspot: a file that is both complex and frequently changing. Score = normalized_churn × normalized_complexity × 100 (0–100, higher = riskier).
- */
-export interface HotspotEntry {
-/**
- * File path (relative to project root).
- */
-path: string
-/**
- * Hotspot score (0–100). Higher means more risk.
- */
-score: number
-/**
- * Number of commits touching this file in the analysis window.
- */
-commits: number
-/**
- * Recency-weighted commit count (exponential decay, half-life 90 days).
- */
-weighted_commits: number
-/**
- * Total lines added across all commits in the window.
- */
-lines_added: number
-/**
- * Total lines deleted across all commits in the window.
- */
-lines_deleted: number
-/**
- * Total cyclomatic complexity / lines of code.
- */
-complexity_density: number
-/**
- * Number of files that import this file (blast radius).
- */
-fan_in: number
-/**
- * Churn trend: accelerating (recent > 1.5× older), stable, or cooling (recent < 0.67× older).
- */
-trend: ("accelerating" | "stable" | "cooling")
-/**
- * Suggested actions to reduce hotspot risk.
- */
-actions?: HotspotAction[]
-ownership?: OwnershipMetrics
-/**
- * True when the file path matches a test or mock convention (e.g. `** /__tests__/**`, `** /*.test.*`, `** /*.spec.*`, `** /__mocks__/**`). Tagged so consumers can decide whether to weight or filter test hotspots downstream. Omitted when false.
- */
-is_test_path?: boolean
-}
-/**
- * A suggested action for a hotspot file. Ownership-derived action types (low-bus-factor, unowned-hotspot, ownership-drift) appear only when --ownership is enabled.
- */
-export interface HotspotAction {
-/**
- * Action type identifier.
- */
-type: ("refactor-file" | "add-tests" | "low-bus-factor" | "unowned-hotspot" | "ownership-drift")
-/**
- * Whether fallow can auto-fix this action.
- */
-auto_fixable: boolean
-/**
- * Human-readable description of the action.
- */
-description: string
-/**
- * Additional context for the action.
- */
-note?: string
-/**
- * Suggested CODEOWNERS pattern. Only present on unowned-hotspot actions. Derived per the heuristic field; consumers should branch on heuristic rather than assume a stable algorithm.
- */
-suggested_pattern?: string
-/**
- * Strategy used to derive suggested_pattern. Reserved for future evolution (e.g., 'codeowners-cluster').
- */
-heuristic?: "directory-deepest"
-}
-/**
- * Per-file ownership signals derived from git author history and CODEOWNERS. Only computed when --ownership is requested.
- */
-export interface OwnershipMetrics {
-/**
- * Avelino truck factor: minimum contributors covering at least 50% of recency-weighted commits in the analysis window. Lower = higher knowledge-loss risk.
- */
-bus_factor: number
-/**
- * Distinct authors after bot filtering.
- */
-contributor_count: number
-top_contributor: ContributorEntry
-/**
- * Up to three additional contributors by share, ordered descending. Useful for review routing. Omitted when empty.
- */
-recent_contributors?: ContributorEntry[]
-/**
- * Contributors whose last touch is within 90 days, ordered by share descending. First-class field so consumers do not have to reconstruct it from `recent_contributors` filtered by `stale_days`. Excludes the top contributor. Omitted when empty.
- */
-suggested_reviewers?: ContributorEntry[]
-/**
- * CODEOWNERS-resolved primary owner for this file, when a rule matches.
- */
-declared_owner?: (string | null)
-/**
- * Tristate: true = CODEOWNERS file exists but no rule matches; false = a rule matches; null = no CODEOWNERS file discovered for the repository.
- */
-unowned?: (boolean | null)
-/**
- * True when ownership has drifted from the original author to a new top contributor (file age >= 30 days, original author share < 10%).
- */
-drift: boolean
-/**
- * Human-readable explanation of the drift. Field is omitted (not null) when drift is false.
- */
-drift_reason?: string
-}
-/**
- * Per-author contribution summary. The identifier is rendered per the configured ownership.emailMode (handle, hash, or raw); the format field discriminates the three so type-aware consumers can branch without re-parsing.
- */
-export interface ContributorEntry {
-/**
- * Display string for the contributor. Raw email when format=raw (e.g. alice@example.com), local-part handle when format=handle (e.g. alice), or non-cryptographic pseudonym when format=hash (e.g. xxh3:abcdef0123456789). Do not assume this is an email address.
- */
-identifier: string
-/**
- * Discriminator for identifier shape. Set by ownership.emailMode at analysis time.
- */
-format: ("raw" | "handle" | "hash")
-/**
- * Recency-weighted share of total weighted commits, rounded to three decimals.
- */
-share: number
-/**
- * Days since this contributor last touched the file.
- */
-stale_days: number
-/**
- * Total commits by this contributor in the analysis window.
- */
-commits: number
-}
-export interface HotspotSummary {
-/**
- * Analysis window display string (e.g., '6 months').
- */
-since: string
-/**
- * Minimum commits threshold.
- */
-min_commits: number
-/**
- * Number of files with churn data meeting the threshold.
+ * Number of files analyzed for complexity.
  */
 files_analyzed: number
 /**
- * Number of files excluded (below min_commits).
+ * Total number of functions found.
  */
-files_excluded: number
+functions_analyzed: number
 /**
- * Whether the repository is a shallow clone.
+ * Number of functions exceeding at least one threshold (before --top truncation).
  */
-shallow_clone: boolean
+functions_above_threshold: number
+/**
+ * Configured cyclomatic complexity threshold.
+ */
+max_cyclomatic_threshold: number
+/**
+ * Configured cognitive complexity threshold.
+ */
+max_cognitive_threshold: number
+/**
+ * Configured CRAP (Change Risk Anti-Patterns) score threshold. Functions meeting or exceeding this score appear as findings with the `crap` and optional `coverage_pct` fields populated.
+ */
+max_crap_threshold: number
+/**
+ * Number of files with health scores. Only present when --file-scores is used. 0 indicates the flag was set but scoring failed.
+ */
+files_scored?: number
+/**
+ * Average maintainability index across all scored files (before --top truncation). Only present when --file-scores is used and at least one file was scored.
+ */
+average_maintainability?: number
+/**
+ * Coverage model used for CRAP score computation. 'static_estimated' (default) uses per-function graph-based estimation from export references: directly test-referenced = 85%, indirectly reachable = 40%, untested = 0%. 'istanbul' uses real per-function statement coverage from a coverage-final.json file (--coverage flag or auto-detected). 'static_binary' is the legacy binary model. Only present when file scores are computed.
+ */
+coverage_model?: ("static_binary" | "static_estimated" | "istanbul")
+/**
+ * Number of functions matched against Istanbul coverage data. Only present when coverage_model is 'istanbul'.
+ */
+istanbul_matched?: number
+/**
+ * Total functions evaluated for Istanbul matching. Only present when coverage_model is 'istanbul'.
+ */
+istanbul_total?: number
+/**
+ * Number of findings with critical severity (cognitive >= 40 or cyclomatic >= 50).
+ */
+severity_critical_count: number
+/**
+ * Number of findings with high severity (cognitive 25-39 or cyclomatic 30-49).
+ */
+severity_high_count: number
+/**
+ * Number of findings with moderate severity (below high thresholds).
+ */
+severity_moderate_count: number
 }
 /**
  * Project-wide vital signs metrics. Optional fields are null when the corresponding analysis was not run.
@@ -1798,220 +1473,57 @@ coupling?: (number | null)
 duplication?: (number | null)
 }
 /**
- * A function exceeding 60 lines of code (very high risk size bin).
+ * Per-file health score. Formula: MI = 100 - (complexity_density x 30) - (dead_code_ratio x 20) - min(ln(fan_out+1) x 4, 15), clamped to [0, 100]. Type-only exports excluded from dead_code_ratio. CRAP scores combine cyclomatic complexity with static test reachability.
  */
-export interface LargeFunctionEntry {
+export interface FileHealthScore {
 /**
  * File path (relative to project root).
  */
 path: string
 /**
- * Function name, or "<anonymous>" for unnamed functions/arrows.
+ * Number of files that import this file.
  */
-name: string
+fan_in: number
 /**
- * 1-based line number.
+ * Number of files this file directly imports.
  */
-line: number
+fan_out: number
 /**
- * Number of lines in the function body.
+ * Fraction of value exports (excluding type-only) with zero references (0.0–1.0).
  */
-line_count: number
-}
-export interface RefactoringTarget {
+dead_code_ratio: number
 /**
- * File path (relative to project root).
+ * Total cyclomatic complexity / lines of code.
  */
-path: string
+complexity_density: number
 /**
- * Weighted priority score (0-100). Higher = more urgent.
+ * Weighted composite score (0–100, higher is better).
  */
-priority: number
+maintainability_index: number
 /**
- * priority / effort_numeric (Low=1, Medium=2, High=3). Default sort order.
+ * Sum of cyclomatic complexity across all functions in this file.
  */
-efficiency: number
+total_cyclomatic: number
 /**
- * Human-readable one-line recommendation.
+ * Sum of cognitive complexity across all functions in this file.
  */
-recommendation: string
+total_cognitive: number
 /**
- * Recommendation category.
+ * Number of functions in this file.
  */
-category: ("urgent_churn_complexity" | "break_circular_dependency" | "split_high_impact" | "remove_dead_code" | "extract_complex_functions" | "extract_dependencies")
+function_count: number
 /**
- * Heuristic effort estimate.
+ * Total lines of code in the file.
  */
-effort: ("low" | "medium" | "high")
+lines: number
 /**
- * Data source reliability. High = deterministic analysis, Medium = heuristic, Low = git-dependent.
+ * Maximum CRAP score among functions in this file. Computed via the active `coverage_model` per the canonical formula CC^2 * (1 - cov/100)^3 + CC (Savoia & Evans, 2007). Coverage source: `static_estimated` (default, graph-based per-function estimate), `istanbul` (real per-function statement coverage from --coverage), or the legacy `static_binary` (whole-file 0%/100%, retained for compatibility).
  */
-confidence: ("high" | "medium" | "low")
+crap_max: number
 /**
- * Contributing factors that triggered this recommendation. Empty array omitted from JSON.
+ * Count of functions with CRAP score >= 30 (CC >= 5 without test dependency path).
  */
-factors?: {
-/**
- * Metric name (fan_in, dead_code_ratio, etc.).
- */
-metric: string
-/**
- * Raw metric value.
- */
-value: number
-/**
- * Threshold that was exceeded.
- */
-threshold: number
-/**
- * Human-readable explanation.
- */
-detail: string
-}[]
-/**
- * Structured evidence for supported categories. Omitted when not applicable.
- */
-evidence?: {
-/**
- * Names of unused exports (for remove_dead_code).
- */
-unused_exports?: string[]
-/**
- * Complex functions with line numbers (for extract_complex_functions).
- */
-complex_functions?: {
-name?: string
-line?: number
-cognitive?: number
-}[]
-/**
- * Files in the import cycle (for break_circular_dependency).
- */
-cycle_path?: string[]
-}
-/**
- * Suggested actions for this refactoring target.
- */
-actions?: RefactoringTargetAction[]
-}
-/**
- * A suggested action for a refactoring target. The suppress-line variant emitted here does NOT carry a placement hint: a RefactoringTarget points at a file, not a specific declaration site, so per-line placement has no referent. Consumers that want placement metadata should follow the target's `evidence.complex_functions` back to the matching HealthFinding and read placement from that action instead.
- */
-export interface RefactoringTargetAction {
-/**
- * Action type identifier.
- */
-type: ("apply-refactoring" | "suppress-line")
-/**
- * Whether fallow can auto-fix this action.
- */
-auto_fixable: boolean
-/**
- * Human-readable description of the action.
- */
-description: string
-/**
- * The recommendation category for apply-refactoring actions.
- */
-category?: string
-/**
- * The inline comment to insert. Present for suppress-line actions when evidence exists.
- */
-comment?: string
-}
-/**
- * Adaptive percentile-based thresholds derived from the project's metric distribution. Used for priority scoring and rule matching.
- */
-export interface TargetThresholds {
-/**
- * Fan-in saturation for priority formula (p95, floor 5).
- */
-fan_in_p95: number
-/**
- * Fan-in moderate threshold for contributing factors (p75, floor 3).
- */
-fan_in_p75: number
-/**
- * Fan-out saturation for priority formula (p95, floor 8).
- */
-fan_out_p95: number
-/**
- * Fan-out high threshold for rules and factors (p90, floor 5).
- */
-fan_out_p90: number
-}
-/**
- * Trend comparison between the current run and a previous snapshot. Shows per-metric deltas with directional indicators.
- */
-export interface HealthTrend {
-/**
- * The snapshot being compared against.
- */
-compared_to: {
-/**
- * ISO 8601 timestamp of the snapshot.
- */
-timestamp: string
-/**
- * Git SHA at time of snapshot.
- */
-git_sha?: string
-/**
- * Health score from the snapshot (stored, not re-derived).
- */
-score?: number
-/**
- * Letter grade from the snapshot.
- */
-grade?: string
-}
-metrics: {
-/**
- * Metric identifier (e.g., 'score', 'dead_file_pct').
- */
-name: string
-/**
- * Human-readable label.
- */
-label: string
-/**
- * Previous value (from snapshot).
- */
-previous: number
-/**
- * Current value (from this run).
- */
-current: number
-/**
- * Absolute change (current - previous).
- */
-delta: number
-direction: ("improving" | "declining" | "stable")
-/**
- * Unit for display (e.g., '%', '').
- */
-unit: string
-previous_count?: TrendCount
-current_count?: TrendCount
-}[]
-/**
- * Number of snapshots found in the snapshot directory.
- */
-snapshots_loaded: number
-overall_direction: ("improving" | "declining" | "stable")
-}
-/**
- * Raw numerator/denominator for a percentage metric in trend comparison.
- */
-export interface TrendCount {
-/**
- * The numerator (e.g., dead files count).
- */
-value: number
-/**
- * The denominator (e.g., total files).
- */
-total: number
+crap_above_threshold: number
 }
 /**
  * Static test coverage gaps derived from the module graph. Shows runtime files and exports with no test dependency path.
@@ -2143,6 +1655,170 @@ note?: string
  * The file-level comment to insert (`// fallow-ignore-file coverage-gaps`). Present on `suppress-file`, absent on `add-test-import`.
  */
 comment?: string
+}
+/**
+ * A hotspot: a file that is both complex and frequently changing. Score = normalized_churn × normalized_complexity × 100 (0–100, higher = riskier).
+ */
+export interface HotspotEntry {
+/**
+ * File path (relative to project root).
+ */
+path: string
+/**
+ * Hotspot score (0–100). Higher means more risk.
+ */
+score: number
+/**
+ * Number of commits touching this file in the analysis window.
+ */
+commits: number
+/**
+ * Recency-weighted commit count (exponential decay, half-life 90 days).
+ */
+weighted_commits: number
+/**
+ * Total lines added across all commits in the window.
+ */
+lines_added: number
+/**
+ * Total lines deleted across all commits in the window.
+ */
+lines_deleted: number
+/**
+ * Total cyclomatic complexity / lines of code.
+ */
+complexity_density: number
+/**
+ * Number of files that import this file (blast radius).
+ */
+fan_in: number
+/**
+ * Churn trend: accelerating (recent > 1.5× older), stable, or cooling (recent < 0.67× older).
+ */
+trend: ("accelerating" | "stable" | "cooling")
+/**
+ * Suggested actions to reduce hotspot risk.
+ */
+actions?: HotspotAction[]
+ownership?: OwnershipMetrics
+/**
+ * True when the file path matches a test or mock convention (e.g. `** /__tests__/**`, `** /*.test.*`, `** /*.spec.*`, `** /__mocks__/**`). Tagged so consumers can decide whether to weight or filter test hotspots downstream. Omitted when false.
+ */
+is_test_path?: boolean
+}
+/**
+ * A suggested action for a hotspot file. Ownership-derived action types (low-bus-factor, unowned-hotspot, ownership-drift) appear only when --ownership is enabled.
+ */
+export interface HotspotAction {
+/**
+ * Action type identifier.
+ */
+type: ("refactor-file" | "add-tests" | "low-bus-factor" | "unowned-hotspot" | "ownership-drift")
+/**
+ * Whether fallow can auto-fix this action.
+ */
+auto_fixable: boolean
+/**
+ * Human-readable description of the action.
+ */
+description: string
+/**
+ * Additional context for the action.
+ */
+note?: string
+/**
+ * Suggested CODEOWNERS pattern. Only present on unowned-hotspot actions. Derived per the heuristic field; consumers should branch on heuristic rather than assume a stable algorithm.
+ */
+suggested_pattern?: string
+/**
+ * Strategy used to derive suggested_pattern. Reserved for future evolution (e.g., 'codeowners-cluster').
+ */
+heuristic?: "directory-deepest"
+}
+/**
+ * Per-file ownership signals derived from git author history and CODEOWNERS. Only computed when --ownership is requested.
+ */
+export interface OwnershipMetrics {
+/**
+ * Avelino truck factor: minimum contributors covering at least 50% of recency-weighted commits in the analysis window. Lower = higher knowledge-loss risk.
+ */
+bus_factor: number
+/**
+ * Distinct authors after bot filtering.
+ */
+contributor_count: number
+top_contributor: ContributorEntry
+/**
+ * Up to three additional contributors by share, ordered descending. Useful for review routing. Omitted when empty.
+ */
+recent_contributors?: ContributorEntry[]
+/**
+ * Contributors whose last touch is within 90 days, ordered by share descending. First-class field so consumers do not have to reconstruct it from `recent_contributors` filtered by `stale_days`. Excludes the top contributor. Omitted when empty.
+ */
+suggested_reviewers?: ContributorEntry[]
+/**
+ * CODEOWNERS-resolved primary owner for this file, when a rule matches.
+ */
+declared_owner?: (string | null)
+/**
+ * Tristate: true = CODEOWNERS file exists but no rule matches; false = a rule matches; null = no CODEOWNERS file discovered for the repository.
+ */
+unowned?: (boolean | null)
+/**
+ * True when ownership has drifted from the original author to a new top contributor (file age >= 30 days, original author share < 10%).
+ */
+drift: boolean
+/**
+ * Human-readable explanation of the drift. Field is omitted (not null) when drift is false.
+ */
+drift_reason?: string
+}
+/**
+ * Per-author contribution summary. The identifier is rendered per the configured ownership.emailMode (handle, hash, or raw); the format field discriminates the three so type-aware consumers can branch without re-parsing.
+ */
+export interface ContributorEntry {
+/**
+ * Display string for the contributor. Raw email when format=raw (e.g. alice@example.com), local-part handle when format=handle (e.g. alice), or non-cryptographic pseudonym when format=hash (e.g. xxh3:abcdef0123456789). Do not assume this is an email address.
+ */
+identifier: string
+/**
+ * Discriminator for identifier shape. Set by ownership.emailMode at analysis time.
+ */
+format: ("raw" | "handle" | "hash")
+/**
+ * Recency-weighted share of total weighted commits, rounded to three decimals.
+ */
+share: number
+/**
+ * Days since this contributor last touched the file.
+ */
+stale_days: number
+/**
+ * Total commits by this contributor in the analysis window.
+ */
+commits: number
+}
+export interface HotspotSummary {
+/**
+ * Analysis window display string (e.g., '6 months').
+ */
+since: string
+/**
+ * Minimum commits threshold.
+ */
+min_commits: number
+/**
+ * Number of files with churn data meeting the threshold.
+ */
+files_analyzed: number
+/**
+ * Number of files excluded (below min_commits).
+ */
+files_excluded: number
+/**
+ * Whether the repository is a shallow clone.
+ */
+shallow_clone: boolean
 }
 /**
  * Runtime coverage findings merged into the health report or emitted by `fallow coverage analyze`. Present in health output when --runtime-coverage is used. Shape mirrors the runtime coverage JSON contract; cloud mode fetches runtime facts explicitly and merges them locally with AST/static analysis.
@@ -2433,47 +2109,220 @@ code: string
 message: string
 }
 /**
- * A health report scoped to a single resolver bucket (workspace package, CODEOWNERS owner, directory, or GitLab CODEOWNERS section). Carries per-group vital_signs / health_score plus the per-file output (findings, file scores, hotspots, large functions, refactoring targets) restricted to the same subset.
+ * A function exceeding 60 lines of code (very high risk size bin).
  */
-export interface HealthGroup {
+export interface LargeFunctionEntry {
 /**
- * Group identifier produced by the resolver. For 'package' grouping: workspace package name (e.g. '@scope/app-a') or '(root)' for files outside any workspace. For 'owner' grouping: the CODEOWNERS team. For 'directory' grouping: the top-level directory prefix. For 'section' grouping: the GitLab CODEOWNERS section name, or '(no section)' / '(unowned)' for unmatched files.
+ * File path (relative to project root).
  */
-key: string
+path: string
 /**
- * Section default owners (GitLab CODEOWNERS `[Section] @owner1 @owner2`). Present only when grouped_by is 'section'.
+ * Function name, or "<anonymous>" for unnamed functions/arrows.
  */
-owners?: string[]
+name: string
 /**
- * Number of files in this group after workspace, ignore, and changed-since filters.
+ * 1-based line number.
  */
-files_analyzed: number
+line: number
 /**
- * Number of findings rendered for this group (post-baseline / post-`--top` truncation, mirroring HealthSummary semantics).
+ * Number of lines in the function body.
  */
-functions_above_threshold: number
-vital_signs?: VitalSigns
-health_score?: HealthScore
+line_count: number
+}
+export interface RefactoringTarget {
 /**
- * Findings restricted to files in this group. Omitted when empty.
+ * File path (relative to project root).
  */
-findings?: HealthFinding[]
+path: string
 /**
- * File scores restricted to files in this group. Omitted when empty.
+ * Weighted priority score (0-100). Higher = more urgent.
  */
-file_scores?: FileHealthScore[]
+priority: number
 /**
- * Hotspots restricted to files in this group. Omitted when empty.
+ * priority / effort_numeric (Low=1, Medium=2, High=3). Default sort order.
  */
-hotspots?: HotspotEntry[]
+efficiency: number
 /**
- * Large functions in files belonging to this group. Omitted when empty.
+ * Human-readable one-line recommendation.
  */
-large_functions?: LargeFunctionEntry[]
+recommendation: string
 /**
- * Refactoring targets in files belonging to this group. Omitted when empty.
+ * Recommendation category.
  */
-targets?: RefactoringTarget[]
+category: ("urgent_churn_complexity" | "break_circular_dependency" | "split_high_impact" | "remove_dead_code" | "extract_complex_functions" | "extract_dependencies")
+/**
+ * Heuristic effort estimate.
+ */
+effort: ("low" | "medium" | "high")
+/**
+ * Data source reliability. High = deterministic analysis, Medium = heuristic, Low = git-dependent.
+ */
+confidence: ("high" | "medium" | "low")
+/**
+ * Contributing factors that triggered this recommendation. Empty array omitted from JSON.
+ */
+factors?: {
+/**
+ * Metric name (fan_in, dead_code_ratio, etc.).
+ */
+metric: string
+/**
+ * Raw metric value.
+ */
+value: number
+/**
+ * Threshold that was exceeded.
+ */
+threshold: number
+/**
+ * Human-readable explanation.
+ */
+detail: string
+}[]
+/**
+ * Structured evidence for supported categories. Omitted when not applicable.
+ */
+evidence?: {
+/**
+ * Names of unused exports (for remove_dead_code).
+ */
+unused_exports?: string[]
+/**
+ * Complex functions with line numbers (for extract_complex_functions).
+ */
+complex_functions?: {
+name?: string
+line?: number
+cognitive?: number
+}[]
+/**
+ * Files in the import cycle (for break_circular_dependency).
+ */
+cycle_path?: string[]
+}
+/**
+ * Suggested actions for this refactoring target.
+ */
+actions?: RefactoringTargetAction[]
+}
+/**
+ * A suggested action for a refactoring target. The suppress-line variant emitted here does NOT carry a placement hint: a RefactoringTarget points at a file, not a specific declaration site, so per-line placement has no referent. Consumers that want placement metadata should follow the target's `evidence.complex_functions` back to the matching HealthFinding and read placement from that action instead.
+ */
+export interface RefactoringTargetAction {
+/**
+ * Action type identifier.
+ */
+type: ("apply-refactoring" | "suppress-line")
+/**
+ * Whether fallow can auto-fix this action.
+ */
+auto_fixable: boolean
+/**
+ * Human-readable description of the action.
+ */
+description: string
+/**
+ * The recommendation category for apply-refactoring actions.
+ */
+category?: string
+/**
+ * The inline comment to insert. Present for suppress-line actions when evidence exists.
+ */
+comment?: string
+}
+/**
+ * Adaptive percentile-based thresholds derived from the project's metric distribution. Used for priority scoring and rule matching.
+ */
+export interface TargetThresholds {
+/**
+ * Fan-in saturation for priority formula (p95, floor 5).
+ */
+fan_in_p95: number
+/**
+ * Fan-in moderate threshold for contributing factors (p75, floor 3).
+ */
+fan_in_p75: number
+/**
+ * Fan-out saturation for priority formula (p95, floor 8).
+ */
+fan_out_p95: number
+/**
+ * Fan-out high threshold for rules and factors (p90, floor 5).
+ */
+fan_out_p90: number
+}
+/**
+ * Trend comparison between the current run and a previous snapshot. Shows per-metric deltas with directional indicators.
+ */
+export interface HealthTrend {
+/**
+ * The snapshot being compared against.
+ */
+compared_to: {
+/**
+ * ISO 8601 timestamp of the snapshot.
+ */
+timestamp: string
+/**
+ * Git SHA at time of snapshot.
+ */
+git_sha?: string
+/**
+ * Health score from the snapshot (stored, not re-derived).
+ */
+score?: number
+/**
+ * Letter grade from the snapshot.
+ */
+grade?: string
+}
+metrics: {
+/**
+ * Metric identifier (e.g., 'score', 'dead_file_pct').
+ */
+name: string
+/**
+ * Human-readable label.
+ */
+label: string
+/**
+ * Previous value (from snapshot).
+ */
+previous: number
+/**
+ * Current value (from this run).
+ */
+current: number
+/**
+ * Absolute change (current - previous).
+ */
+delta: number
+direction: ("improving" | "declining" | "stable")
+/**
+ * Unit for display (e.g., '%', '').
+ */
+unit: string
+previous_count?: TrendCount
+current_count?: TrendCount
+}[]
+/**
+ * Number of snapshots found in the snapshot directory.
+ */
+snapshots_loaded: number
+overall_direction: ("improving" | "declining" | "stable")
+}
+/**
+ * Raw numerator/denominator for a percentage metric in trend comparison.
+ */
+export interface TrendCount {
+/**
+ * The numerator (e.g., dead files count).
+ */
+value: number
+/**
+ * The denominator (e.g., total files).
+ */
+total: number
 }
 /**
  * Grouped dead code output produced when --group-by is active. Issues are partitioned into groups (by CODEOWNERS team, directory prefix, workspace package, or GitLab CODEOWNERS section) instead of flat arrays.
@@ -2535,6 +2384,187 @@ unresolved_catalog_references?: UnresolvedCatalogReference[]
 unused_dependency_overrides?: UnusedDependencyOverride[]
 misconfigured_dependency_overrides?: MisconfiguredDependencyOverride[]
 }
+export interface HealthOutput {
+schema_version: SchemaVersion
+version: ToolVersion
+elapsed_ms: ElapsedMs
+summary: HealthSummary
+/**
+ * Functions and synthetic template entries exceeding complexity thresholds, sorted by the --sort criteria.
+ */
+findings: HealthFinding[]
+/**
+ * Per-file health scores. Only present when --file-scores is used. Sorted by maintainability_index ascending (worst first). Zero-function files (barrels) are excluded by default.
+ */
+file_scores?: FileHealthScore[]
+/**
+ * Hotspot entries combining git churn with complexity. Only present when --hotspots is used. Sorted by score descending (highest risk first).
+ */
+hotspots?: HotspotEntry[]
+hotspot_summary?: HotspotSummary
+vital_signs?: VitalSigns
+health_score?: HealthScore
+/**
+ * Functions exceeding 60 LOC (very high risk). Only present when unit size very-high-risk bin >= 3%. Sorted by line count descending.
+ */
+large_functions?: LargeFunctionEntry[]
+/**
+ * Ranked refactoring recommendations. Only present when --targets is used. Sorted by efficiency (priority/effort) descending.
+ */
+targets?: RefactoringTarget[]
+target_thresholds?: TargetThresholds
+health_trend?: HealthTrend
+coverage_gaps?: CoverageGaps
+runtime_coverage?: RuntimeCoverageReport
+/**
+ * Resolver mode used when --group-by is active. Present only on grouped output. The top-level `vital_signs`, `health_score`, and `summary` keep the active run scope (for example after --workspace); per-group versions live inside each entry of `groups`.
+ */
+grouped_by?: ("owner" | "directory" | "package" | "section")
+/**
+ * Per-group health output, present only when --group-by is active. Each group recomputes its own vital_signs and health_score from the files in that group, mirroring how --workspace scopes a single subset.
+ */
+groups?: HealthGroup[]
+/**
+ * Audit breadcrumb explaining systemic action-array adjustments. Present only when at least one adjustment was made (e.g., health finding suppression hints omitted because a baseline is active). When --group-by is active, each entry of `groups` may carry its own `actions_meta` describing the same omission so per-group consumers do not need to walk back to the report root.
+ */
+actions_meta?: {
+/**
+ * True when `suppress-line` actions were not emitted on health findings.
+ */
+suppression_hints_omitted: boolean
+/**
+ * Why suppression hints were omitted. `baseline-active` = `--baseline` or `--save-baseline` was passed; `config-disabled` = `health.suggestInlineSuppression: false`; `unspecified` = caller omitted hints without setting a reason.
+ */
+reason: string
+/**
+ * The report section affected by this metadata. Other health sections can still carry their own suppress actions.
+ */
+scope: "health-findings"
+}
+_meta?: Meta
+}
+/**
+ * A health report scoped to a single resolver bucket (workspace package, CODEOWNERS owner, directory, or GitLab CODEOWNERS section). Carries per-group vital_signs / health_score plus the per-file output (findings, file scores, hotspots, large functions, refactoring targets) restricted to the same subset.
+ */
+export interface HealthGroup {
+/**
+ * Group identifier produced by the resolver. For 'package' grouping: workspace package name (e.g. '@scope/app-a') or '(root)' for files outside any workspace. For 'owner' grouping: the CODEOWNERS team. For 'directory' grouping: the top-level directory prefix. For 'section' grouping: the GitLab CODEOWNERS section name, or '(no section)' / '(unowned)' for unmatched files.
+ */
+key: string
+/**
+ * Section default owners (GitLab CODEOWNERS `[Section] @owner1 @owner2`). Present only when grouped_by is 'section'.
+ */
+owners?: string[]
+/**
+ * Number of files in this group after workspace, ignore, and changed-since filters.
+ */
+files_analyzed: number
+/**
+ * Number of findings rendered for this group (post-baseline / post-`--top` truncation, mirroring HealthSummary semantics).
+ */
+functions_above_threshold: number
+vital_signs?: VitalSigns
+health_score?: HealthScore
+/**
+ * Findings restricted to files in this group. Omitted when empty.
+ */
+findings?: HealthFinding[]
+/**
+ * File scores restricted to files in this group. Omitted when empty.
+ */
+file_scores?: FileHealthScore[]
+/**
+ * Hotspots restricted to files in this group. Omitted when empty.
+ */
+hotspots?: HotspotEntry[]
+/**
+ * Large functions in files belonging to this group. Omitted when empty.
+ */
+large_functions?: LargeFunctionEntry[]
+/**
+ * Refactoring targets in files belonging to this group. Omitted when empty.
+ */
+targets?: RefactoringTarget[]
+}
+/**
+ * Duplication analysis output. Contains clone groups (individual duplicates), clone families (groups sharing the same files), and aggregate statistics. With --group-by, the project-level fields stay populated and an additional `grouped_by` + `groups` envelope is appended.
+ */
+export interface DupesOutput {
+schema_version: SchemaVersion
+version: ToolVersion
+elapsed_ms: ElapsedMs
+/**
+ * All detected clone groups. Each group contains 2+ instances of identical or near-identical code.
+ */
+clone_groups: CloneGroup[]
+/**
+ * Clone families: groups of clone groups sharing the same file set, indicating systematic duplication patterns.
+ */
+clone_families: CloneFamily[]
+stats: DuplicationStats
+/**
+ * Directory pairs with high structural duplication. Only present when mirrored directories are detected.
+ */
+mirrored_directories?: MirroredDirectory[]
+/**
+ * Resolver mode used for partitioning. Present only when `--group-by` is active.
+ */
+grouped_by?: ("owner" | "directory" | "package" | "section")
+/**
+ * Total clone groups across all buckets when `--group-by` is active. Mirrors the grouped check / health envelopes so MCP and CI consumers can read the same key across commands.
+ */
+total_issues?: number
+/**
+ * Per-group buckets when `--group-by` is active. Each clone group is attributed to its largest-owner key (most instances; alphabetical tiebreak). Sort: most clone groups first, then alphabetical, with `(unowned)` pinned last.
+ */
+groups?: DuplicationGroup[]
+_meta?: Meta
+}
+/**
+ * A single grouped duplication bucket. Per-group `stats` are dedup-aware and computed over the FULL group BEFORE any `--top` truncation.
+ */
+export interface DuplicationGroup {
+/**
+ * Group label (owner / directory / package / section). `(unowned)` for files with no CODEOWNERS rule, `(no section)` for pre-section rules in section mode.
+ */
+key: string
+stats: DuplicationStats
+/**
+ * Clone groups attributed to this owner. Each group's `primary_owner` is its largest-owner key; per-instance `owner` lets consumers see cross-bucket fan-out without re-resolving paths.
+ */
+clone_groups: AttributedCloneGroup[]
+clone_families: CloneFamily[]
+}
+/**
+ * A clone group annotated with its largest-owner attribution and per-instance owner keys.
+ */
+export interface AttributedCloneGroup {
+/**
+ * Largest-owner attribution: the resolver key with the most instances in this clone group. Ties broken alphabetically (smallest key wins).
+ */
+primary_owner: string
+token_count: number
+line_count: number
+/**
+ * Each instance carries its own `owner` field alongside the standard CloneInstance shape.
+ */
+instances: {
+file: string
+start_line: number
+end_line: number
+start_col: number
+end_col: number
+fragment: string
+/**
+ * Resolver key for this specific instance (per-instance, not the group-level largest-owner).
+ */
+owner: string
+}[]
+/**
+ * Suggested actions for this clone group (extract-shared, suppress-line, etc.).
+ */
+actions?: unknown[]
+}
 /**
  * Audit output combining dead code, complexity, and duplication scoped to changed files. Returns a verdict (pass/warn/fail) with per-category summary, optional new-vs-inherited attribution, and full sub-results.
  */
@@ -2586,8 +2616,8 @@ duplication_introduced: number
 duplication_inherited: number
 }
 dead_code?: CheckOutput
-duplication?: DupesOutput
-complexity?: HealthOutput
+duplication?: DuplicationReport
+complexity?: HealthReport
 }
 /**
  * Standalone rule explanation for one issue type. This command does not run project analysis and intentionally returns a compact object without schema_version/version metadata.

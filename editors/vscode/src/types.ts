@@ -54,7 +54,15 @@ export type {
 } from "./generated/output-contract.js";
 
 export type { CheckOutput as FallowCheckResult } from "./generated/output-contract.js";
-export type { DupesOutput as FallowDupesResult } from "./generated/output-contract.js";
+// The VS Code extension reads dupes only via the combined invocation
+// (`fallow --format json`), where `combined.dupes` is the bare
+// `DuplicationReport` body, NOT the full `DupesOutput` envelope with
+// schema_version / version / elapsed_ms. Aliasing `FallowDupesResult`
+// to `DuplicationReport` keeps every downstream consumer's existing
+// usage (clone_groups, clone_families, stats, mirrored_directories)
+// honest. If a future VS Code feature calls `fallow dupes` standalone,
+// switch its return type to the full `DupesOutput` instead.
+export type { DuplicationReport as FallowDupesResult } from "./generated/output-contract.js";
 export type { CombinedOutput as FallowCombinedResult } from "./generated/output-contract.js";
 
 export type { DuplicationMode, IssueTypeConfig, TraceLevel } from "./settings.js";

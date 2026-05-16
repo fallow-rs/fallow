@@ -342,9 +342,6 @@ describe("buildParamsFromCli", () => {
 
   it("propagates duplication stats from the dupes result so the tooltip matches the status bar text", () => {
     const dupes: FallowDupesResult = {
-      schema_version: 6,
-      version: "0.0.0-test",
-      elapsed_ms: 0,
       clone_groups: [],
       clone_families: [],
       stats: {

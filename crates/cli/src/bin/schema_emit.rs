@@ -274,6 +274,13 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "RuntimeCoverageSummary",
         "RuntimeCoverageVerdict",
         "RuntimeCoverageWatermark",
+        // Bare body shapes referenced from CombinedOutput / AuditOutput
+        // for the sub-results where the wire emits the body without
+        // envelope-header wrapping. Drift-checking them here forces the
+        // committed `$ref`s on the parent envelopes to resolve against the
+        // same shape the wire produces.
+        "DuplicationReport",
+        "HealthReport",
         // crates/cli/src/output_envelope.rs - per-command envelope structs.
         "AuditOutput",
         "CheckGroupedEntry",
@@ -1107,6 +1114,89 @@ mod drift_tests {
             if failures.len() == 1 { "" } else { "s" },
             failures.join("\n  - "),
         );
+    }
+
+    /// Targeted property-`$ref` drift gate. For every property on every
+    /// in-scope definition, if BOTH sides have a `$ref` at the same key,
+    /// the ref targets must match. Catches the specific failure mode where
+    /// the committed schema documents a sub-key as pointing at one
+    /// definition (e.g. `CombinedOutput.dupes` -> `DupesOutput`) while the
+    /// derived Rust source actually produces a different shape on the wire
+    /// (bare `DuplicationReport`). The property-key gate above misses this
+    /// because the property exists on both sides under the same name; only
+    /// the `$ref` VALUE differs.
+    ///
+    /// Canonicalisation reuses [`normalize_one`] so schemars's
+    /// `allOf: [{$ref: X}]` wrapper around doc-bearing fields and
+    /// `anyOf: [{$ref: X}, {type: null}]` wrapper around `Option<T>`
+    /// fields both collapse to bare `$ref` before comparison.
+    /// Per-array `items.$ref` is intentionally NOT compared: arrays whose
+    /// element type changes already fire the property-key gate via
+    /// transitive schemas, and adding items-level checks here would
+    /// require deeper structural unification that belongs in the
+    /// `#[ignore]`d strict gate.
+    #[test]
+    fn committed_property_refs_match_derived_property_refs() {
+        let committed = committed_definitions();
+        let derived = derived_definitions_for_drift();
+        let mut failures: Vec<String> = Vec::new();
+
+        for name in derived_definition_names() {
+            let Some(committed_entry) = committed.get(*name) else {
+                continue;
+            };
+            let Some(derived_entry) = derived.get(*name) else {
+                continue;
+            };
+
+            let committed_props = committed_entry.get("properties").and_then(Value::as_object);
+            let derived_props = derived_entry.get("properties").and_then(Value::as_object);
+
+            if let (Some(committed_props), Some(derived_props)) = (committed_props, derived_props) {
+                for (key, derived_value) in derived_props {
+                    let Some(committed_value) = committed_props.get(key) else {
+                        continue;
+                    };
+                    let derived_ref = canonical_ref(derived_value);
+                    let committed_ref = canonical_ref(committed_value);
+                    if let (Some(dref), Some(cref)) = (&derived_ref, &committed_ref)
+                        && dref != cref
+                    {
+                        failures.push(format!(
+                            "drift on `{name}.{key}`: derived schema points at `{dref}` but committed schema points at `{cref}`"
+                        ));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "schema `$ref` drift detected ({} issue{}):\n\n  - {}\n\nThe wire format produced by the Rust source disagrees with the type the committed schema documents. Either update `docs/output-schema.json` to point at the type the wire actually emits, or change the runtime to produce the documented shape.",
+            failures.len(),
+            if failures.len() == 1 { "" } else { "s" },
+            failures.join("\n  - "),
+        );
+    }
+
+    /// Extract the canonical `$ref` target from a property value, peeling
+    /// schemars' `allOf` / `anyOf` / `oneOf` wrappers. Returns `None` for
+    /// properties that do not reference another definition at the top
+    /// level (primitive types, arrays, free-form objects).
+    fn canonical_ref(value: &Value) -> Option<String> {
+        let mut canonical = value.clone();
+        normalize_one(&mut canonical);
+        if let Some(Value::String(s)) = canonical.get("$ref") {
+            return Some(s.clone());
+        }
+        if let Some(Value::Array(arr)) = canonical.get("oneOf") {
+            for variant in arr {
+                if let Some(Value::String(s)) = variant.get("$ref") {
+                    return Some(s.clone());
+                }
+            }
+        }
+        None
     }
 
     /// The emitted schema's `$ref` graph must close: every `#/definitions/X`

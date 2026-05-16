@@ -116,7 +116,7 @@ A strict structural gate (`#[ignore]`d for now, runs with `-- --ignored`) covers
 Until a follow-up migrates them, these sections of `docs/output-schema.json` stay hand-maintained:
 
 - Top-level metadata (`$schema`, `title`, `oneOf`)
-- Out-of-scope sub-shapes referenced by typed envelopes via `$ref` (e.g. `CombinedOutput.dupes` / `audit.duplication` still point at `DupesOutput`, though the wire emits the bare `DuplicationReport` body)
+- The `committed_property_refs_match_derived_property_refs` drift test catches `$ref`-value drift between derived and committed property shapes (e.g. if a future change repoints `CombinedOutput.dupes` away from `DuplicationReport`). The `#[ignore]`d strict structural gate covers descriptions, integer formats, and nullable-union shape choices; flipping it on is Phase 8's job.
 
 If you add a new finding type, envelope, or utility shape, derive `JsonSchema` on the matching Rust struct, register it in `derived_definition_names()`, and the drift gate forces the schema to follow. Adding a new envelope means adding a new file under `crates/cli/src/output_envelope.rs` and adding the type to the top-level `oneOf` in `docs/output-schema.json`.
 
