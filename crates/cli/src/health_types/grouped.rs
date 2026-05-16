@@ -26,6 +26,7 @@ use crate::health_types::{
 /// summarise the subset for parity with the project-level
 /// [`crate::health_types::HealthSummary`].
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthGroup {
     /// Group label.
     pub key: String,
@@ -46,19 +47,19 @@ pub struct HealthGroup {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health_score: Option<HealthScore>,
     /// Findings restricted to files in this group.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub findings: Vec<HealthFinding>,
     /// File scores restricted to files in this group.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub file_scores: Vec<FileHealthScore>,
     /// Hotspots restricted to files in this group.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hotspots: Vec<HotspotEntry>,
     /// Large functions in files belonging to this group.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub large_functions: Vec<LargeFunctionEntry>,
     /// Refactoring targets in files belonging to this group.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<RefactoringTarget>,
 }
 

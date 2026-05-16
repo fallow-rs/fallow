@@ -12,7 +12,7 @@ use super::shared::NAMESPACE_BARREL_HINT;
 use super::{emit_json, normalize_uri};
 use crate::explain;
 use crate::output_envelope::{
-    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, DupesOutput, GroupByMode,
+    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, DupesOutput, GroupByMode, HealthOutput,
 };
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
 
@@ -149,33 +149,6 @@ pub(super) fn print_grouped_json(
 )]
 pub(crate) const SCHEMA_VERSION: u32 = 6;
 const RUNTIME_COVERAGE_SCHEMA_VERSION: &str = "1";
-
-/// Build a JSON envelope with standard metadata fields at the top.
-///
-/// Creates a JSON object with `schema_version`, `version`, and `elapsed_ms`,
-/// then merges all fields from `report_value` into the envelope.
-/// Fields from `report_value` appear after the metadata header.
-fn build_json_envelope(report_value: serde_json::Value, elapsed: Duration) -> serde_json::Value {
-    let mut map = serde_json::Map::new();
-    map.insert(
-        "schema_version".to_string(),
-        serde_json::json!(SCHEMA_VERSION),
-    );
-    map.insert(
-        "version".to_string(),
-        serde_json::json!(env!("CARGO_PKG_VERSION")),
-    );
-    map.insert(
-        "elapsed_ms".to_string(),
-        serde_json::json!(elapsed.as_millis()),
-    );
-    if let serde_json::Value::Object(report_map) = report_value {
-        for (key, value) in report_map {
-            map.insert(key, value);
-        }
-    }
-    serde_json::Value::Object(map)
-}
 
 fn inject_runtime_coverage_schema_version(output: &mut serde_json::Value) {
     let serde_json::Value::Object(map) = output else {
@@ -1769,8 +1742,16 @@ pub fn build_health_json(
     explain: bool,
     action_opts: HealthActionOptions,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let report_value = serde_json::to_value(report)?;
-    let mut output = build_json_envelope(report_value, elapsed);
+    let envelope = HealthOutput {
+        schema_version: SchemaVersion(SCHEMA_VERSION),
+        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
+        report: report.clone(),
+        grouped_by: None,
+        groups: None,
+        meta: None,
+    };
+    let mut output = serde_json::to_value(&envelope)?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
     inject_runtime_coverage_schema_version(&mut output);
@@ -1825,16 +1806,6 @@ pub fn build_grouped_health_json(
     action_opts: HealthActionOptions,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let root_prefix = format!("{}/", root.display());
-    let report_value = serde_json::to_value(report)?;
-    let mut output = build_json_envelope(report_value, elapsed);
-    strip_root_prefix(&mut output, &root_prefix);
-    inject_runtime_coverage_schema_version(&mut output);
-    inject_health_actions(&mut output, action_opts);
-
-    if let serde_json::Value::Object(ref mut map) = output {
-        map.insert("grouped_by".to_string(), serde_json::json!(grouping.mode));
-    }
-
     // Per-group sub-envelopes share the project-level suppression state:
     // baseline-active and config-disabled apply uniformly, so each group's
     // `actions` array honors the same opts AND each group emits its own
@@ -1842,6 +1813,23 @@ pub fn build_grouped_health_json(
     // is intentional: consumers that only walk the `groups` array (e.g.,
     // per-team dashboards) still see the omission reason without needing to
     // walk back up to the report root.
+    let envelope = HealthOutput {
+        schema_version: SchemaVersion(SCHEMA_VERSION),
+        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
+        report: report.clone(),
+        grouped_by: Some(group_by_mode_from_label(grouping.mode)),
+        // `groups` is serialised separately below so each entry can run
+        // through the path-stripping + actions injection passes (which only
+        // walk the top-level map).
+        groups: None,
+        meta: None,
+    };
+    let mut output = serde_json::to_value(&envelope)?;
+    strip_root_prefix(&mut output, &root_prefix);
+    inject_runtime_coverage_schema_version(&mut output);
+    inject_health_actions(&mut output, action_opts);
+
     let group_values: Vec<serde_json::Value> = grouping
         .groups
         .iter()
@@ -2170,8 +2158,17 @@ mod tests {
             ..Default::default()
         };
 
-        let report_value = serde_json::to_value(&report).expect("should serialize health report");
-        let mut output = build_json_envelope(report_value, Duration::from_millis(7));
+        let envelope = HealthOutput {
+            schema_version: SchemaVersion(SCHEMA_VERSION),
+            version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+            elapsed_ms: ElapsedMs(7),
+            report,
+            grouped_by: None,
+            groups: None,
+            meta: None,
+        };
+        let mut output =
+            serde_json::to_value(&envelope).expect("should serialize health envelope");
         strip_root_prefix(&mut output, "/project/");
         inject_runtime_coverage_schema_version(&mut output);
         inject_health_actions(&mut output, HealthActionOptions::default());
@@ -3061,44 +3058,6 @@ mod tests {
         let meta = serde_json::json!({ "new": true });
         insert_meta(&mut output, meta.clone());
         assert_eq!(output["_meta"], meta);
-    }
-
-    // ── build_json_envelope ─────────────────────────────────────────
-
-    #[test]
-    fn build_json_envelope_has_metadata_fields() {
-        let report = serde_json::json!({ "findings": [] });
-        let elapsed = Duration::from_millis(42);
-        let output = build_json_envelope(report, elapsed);
-
-        assert_eq!(output["schema_version"], 6);
-        assert!(output["version"].is_string());
-        assert_eq!(output["elapsed_ms"], 42);
-        assert!(output["findings"].is_array());
-    }
-
-    #[test]
-    fn build_json_envelope_metadata_appears_first() {
-        let report = serde_json::json!({ "data": "value" });
-        let output = build_json_envelope(report, Duration::from_millis(10));
-
-        let keys: Vec<&String> = output.as_object().unwrap().keys().collect();
-        assert_eq!(keys[0], "schema_version");
-        assert_eq!(keys[1], "version");
-        assert_eq!(keys[2], "elapsed_ms");
-    }
-
-    #[test]
-    fn build_json_envelope_non_object_report() {
-        // If report_value is not an Object, only metadata fields appear
-        let report = serde_json::json!("not an object");
-        let output = build_json_envelope(report, Duration::from_millis(0));
-
-        let obj = output.as_object().unwrap();
-        assert_eq!(obj.len(), 3);
-        assert!(obj.contains_key("schema_version"));
-        assert!(obj.contains_key("version"));
-        assert!(obj.contains_key("elapsed_ms"));
     }
 
     // ── strip_root_prefix with null value ──

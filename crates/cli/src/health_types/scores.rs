@@ -382,7 +382,7 @@ pub struct LargeFunctionEntry {
 }
 
 /// Summary statistics for the health report.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthSummary {
     /// Number of files analyzed.
@@ -661,7 +661,7 @@ pub struct OwnershipMetrics {
 }
 
 /// Summary statistics for hotspot analysis.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HotspotSummary {
     /// Analysis window display string (e.g., "6 months").

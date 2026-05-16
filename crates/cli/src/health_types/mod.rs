@@ -39,7 +39,8 @@ pub struct HealthTimings {
 }
 
 /// Result of complexity analysis for reporting.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthReport {
     /// Functions exceeding thresholds.
     pub findings: Vec<HealthFinding>,
@@ -52,7 +53,7 @@ pub struct HealthReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health_score: Option<HealthScore>,
     /// Per-file health scores (only populated with `--file-scores` or `--hotspots`).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub file_scores: Vec<FileHealthScore>,
     /// Static coverage gaps.
     ///
@@ -62,7 +63,7 @@ pub struct HealthReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coverage_gaps: Option<CoverageGaps>,
     /// Hotspot entries (only populated with `--hotspots`).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hotspots: Vec<HotspotEntry>,
     /// Hotspot analysis summary (only set with `--hotspots`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -72,10 +73,10 @@ pub struct HealthReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_coverage: Option<RuntimeCoverageReport>,
     /// Functions exceeding 60 LOC (only populated when unit size very-high-risk >= 3%).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub large_functions: Vec<LargeFunctionEntry>,
     /// Ranked refactoring recommendations (only populated with `--targets`).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<RefactoringTarget>,
     /// Adaptive thresholds used for target scoring (only set with `--targets`).
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -29,6 +29,8 @@ use fallow_types::envelope::{
 };
 use serde::Serialize;
 
+use crate::health_types::{HealthGroup, HealthReport};
+
 /// Envelope emitted by `fallow dupes --format json` (plus the `dupes` block
 /// inside the combined and audit envelopes).
 ///
@@ -169,6 +171,46 @@ pub struct CheckGroupedEntry {
     /// Per-group issue arrays restricted to files in this group.
     #[serde(flatten)]
     pub results: AnalysisResults,
+}
+
+/// Envelope emitted by `fallow health --format json` (plus the `health` block
+/// inside the combined and audit envelopes).
+///
+/// The body is `HealthReport` flattened into the envelope so every report
+/// field (`findings`, `summary`, `vital_signs`, `hotspots`, ...) lives at the
+/// top level. Grouped runs populate `grouped_by` + `groups` with per-bucket
+/// recomputed metrics. The `actions_meta` breadcrumb is NOT modeled here:
+/// `inject_health_actions` adds it as a post-pass on the `serde_json::Value`
+/// tree, and the drift gate tolerates the gap via its `AUGMENTATION_KEYS`
+/// list because the typed wrapper would force every caller to plumb the
+/// suppression context through, which buys nothing today.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct HealthOutput {
+    /// Schema version for this output format.
+    pub schema_version: SchemaVersion,
+    /// Fallow tool version that produced this output.
+    pub version: ToolVersion,
+    /// Analysis duration in milliseconds.
+    pub elapsed_ms: ElapsedMs,
+    /// All fields from `HealthReport` flattened in so the wire shape stays
+    /// a single object.
+    #[serde(flatten)]
+    pub report: HealthReport,
+    /// Resolver mode used when `--group-by` is active. Absent on ungrouped
+    /// output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grouped_by: Option<GroupByMode>,
+    /// Per-group health output, present only when `--group-by` is active.
+    /// Each group recomputes its own `vital_signs` and `health_score` from
+    /// the files in that group, mirroring how `--workspace` scopes a single
+    /// subset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub groups: Option<Vec<HealthGroup>>,
+    /// `_meta` block with metric / rule definitions, emitted when `--explain`
+    /// is passed (always present in MCP responses).
+    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Meta>,
 }
 
 /// Resolver mode label for grouped envelopes (dead-code, dupes, health).

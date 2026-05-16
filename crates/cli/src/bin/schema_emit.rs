@@ -42,7 +42,7 @@ use fallow_cli::health_types::{
     VitalSignsCounts,
 };
 use fallow_cli::output_envelope::{
-    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, DupesOutput, GroupByMode,
+    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, DupesOutput, GroupByMode, HealthOutput,
 };
 use fallow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
@@ -270,6 +270,8 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "CheckGroupedOutput",
         "CheckOutput",
         "DupesOutput",
+        "HealthGroup",
+        "HealthOutput",
     ]
 }
 
@@ -509,6 +511,9 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<CheckGroupedOutput>();
     let _ = generator.subschema_for::<CheckGroupedEntry>();
     let _ = generator.subschema_for::<DupesOutput>();
+    let _ = generator.subschema_for::<HealthOutput>();
+    let _ = generator.subschema_for::<fallow_cli::health_types::HealthGroup>();
+    let _ = generator.subschema_for::<fallow_cli::health_types::HealthReport>();
     let _ = generator.subschema_for::<GroupByMode>();
 
     // Per-finding action wrapper types (crates/types/src/output_health.rs).
@@ -965,9 +970,13 @@ mod drift_tests {
         let committed = committed_definitions();
         let derived = derived_definitions_for_drift();
         // Augmentation keys live only in the committed schema for finding
-        // types because they get grafted on by `augment_finding_definition`.
+        // types because they get grafted on by `augment_finding_definition`,
+        // or for envelopes whose Rust side leaves the property as a
+        // post-pass `serde_json::Value` insertion (`actions_meta` on
+        // `HealthOutput` is injected by `inject_health_actions` rather than
+        // modelled as a typed `Option<...>` field on the envelope struct).
         // Permit them to differ in either direction without firing the gate.
-        const AUGMENTATION_KEYS: &[&str] = &["actions", "introduced"];
+        const AUGMENTATION_KEYS: &[&str] = &["actions", "introduced", "actions_meta"];
 
         let mut failures: Vec<String> = Vec::new();
         for name in derived_definition_names() {
