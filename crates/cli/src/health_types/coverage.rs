@@ -40,7 +40,8 @@ pub struct CoverageGapSummary {
     pub untested_exports: usize,
 }
 
-/// Static test coverage gaps derived from the module graph.
+/// Static test coverage gaps derived from the module graph. Shows runtime files
+/// and exports with no test dependency path.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageGaps {

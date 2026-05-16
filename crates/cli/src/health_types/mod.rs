@@ -73,7 +73,8 @@ pub struct HealthActionsMeta {
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthReport {
-    /// Functions exceeding thresholds.
+    /// Functions and synthetic template entries exceeding complexity
+    /// thresholds, sorted by the --sort criteria.
     pub findings: Vec<HealthFinding>,
     /// Summary statistics.
     pub summary: HealthSummary,
@@ -83,7 +84,9 @@ pub struct HealthReport {
     /// Project-wide health score (only populated with `--score`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health_score: Option<HealthScore>,
-    /// Per-file health scores (only populated with `--file-scores` or `--hotspots`).
+    /// Per-file health scores. Only present when --file-scores is used. Sorted
+    /// by maintainability_index ascending (worst first). Zero-function files
+    /// (barrels) are excluded by default.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub file_scores: Vec<FileHealthScore>,
     /// Static coverage gaps.
@@ -93,7 +96,8 @@ pub struct HealthReport {
     /// default report.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coverage_gaps: Option<CoverageGaps>,
-    /// Hotspot entries (only populated with `--hotspots`).
+    /// Hotspot entries combining git churn with complexity. Only present when
+    /// --hotspots is used. Sorted by score descending (highest risk first).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hotspots: Vec<HotspotEntry>,
     /// Hotspot analysis summary (only set with `--hotspots`).
@@ -103,10 +107,12 @@ pub struct HealthReport {
     /// `--runtime-coverage`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_coverage: Option<RuntimeCoverageReport>,
-    /// Functions exceeding 60 LOC (only populated when unit size very-high-risk >= 3%).
+    /// Functions exceeding 60 LOC (very high risk). Only present when unit size
+    /// very-high-risk bin >= 3%. Sorted by line count descending.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub large_functions: Vec<LargeFunctionEntry>,
-    /// Ranked refactoring recommendations (only populated with `--targets`).
+    /// Ranked refactoring recommendations. Only present when --targets is used.
+    /// Sorted by efficiency (priority/effort) descending.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<RefactoringTarget>,
     /// Adaptive thresholds used for target scoring (only set with `--targets`).
@@ -115,10 +121,12 @@ pub struct HealthReport {
     /// Health trend comparison against a previous snapshot (only set with `--trend`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health_trend: Option<HealthTrend>,
-    /// Auditable breadcrumb recording why `suppress-line` action hints were
-    /// omitted from this report. Absent when no suppression occurred; set
-    /// post-construction by `inject_health_actions` when the runtime had
-    /// the suppression context that the typed builders do not plumb.
+    /// Audit breadcrumb explaining systemic action-array adjustments. Present
+    /// only when at least one adjustment was made (e.g., health finding
+    /// suppression hints omitted because a baseline is active). When --group-by
+    /// is active, each entry of `groups` may carry its own `actions_meta`
+    /// describing the same omission so per-group consumers do not need to walk
+    /// back to the report root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actions_meta: Option<HealthActionsMeta>,
 }

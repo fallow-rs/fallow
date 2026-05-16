@@ -15,17 +15,25 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-/// Schema version for a fallow JSON envelope. Top-level fallow envelopes carry
-/// a `schema_version` field whose Rust source is this newtype; the JSON wire
-/// shape is the bare integer.
-///
-/// Bump policy: ADDITIVE changes (new optional fields, new optional struct
-/// fields, new array entries, new MCP tools, new CLI flags) do NOT bump the
-/// version; consumers receive new fields without breaking. BREAKING changes
-/// (renamed fields, removed fields, type changes, enum-variant removals,
-/// semantic changes) DO bump. To detect newly-added fields without a bump,
-/// check field presence via JSON-key existence rather than gating on the
-/// version.
+/// Schema version for this output format (independent of tool version). Bump
+/// policy: ADDITIVE changes (new optional top-level fields, new optional struct
+/// fields, new array entries, new MCP tools, new CLI flags that map to new
+/// optional fields) do NOT bump the version; consumers receive new fields
+/// without breaking. BREAKING changes (renamed fields, removed fields, type
+/// changes, enum-variant removals, semantic changes to existing fields) DO
+/// bump. To detect newly-added fields without a bump, check field presence via
+/// JSON-key existence rather than gating on the version. v4 was introduced
+/// alongside fallow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence
+/// block, renamed summary fields); v5 introduced health_score formula_version 2
+/// with scale-invariant scoring semantics; v6 widened `AddToConfigAction.value`
+/// from a scalar string to `oneOf: [string, array]` so the new `ignoreExports`
+/// action can carry a paste-ready array of `{ file, exports }` rule objects
+/// (the legacy `ignoreDependencies` etc. variants still emit strings, so
+/// consumers that switch on `config_key` keep working unchanged). The
+/// runtime-coverage block is extended additively as the protocol evolves
+/// (currently 0.3, which adds an optional capture_quality summary field). Other
+/// additive examples: dupes --group-by adds optional grouped_by, total_issues,
+/// groups fields without bumping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(transparent)]

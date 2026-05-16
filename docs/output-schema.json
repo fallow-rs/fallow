@@ -138,14 +138,14 @@
             "boolean",
             "null"
           ],
-          "description": "Only emitted when `--performance` is set. `true` means audit reused\nthe current run's keys as the base snapshot (the docs-only-diff\nfast path); `false` means the regular base worktree analysis ran."
+          "description": "Only emitted when --performance is set. true means audit reused the\ncurrent run's keys as the base snapshot because every changed file was\neither a non-behavioral doc or token-equivalent at the base ref (the\ndocs-only-diff fast path); false means the regular base worktree\nanalysis ran."
         },
         "summary": {
           "description": "Per-category summary counts.",
           "$ref": "#/definitions/AuditSummary"
         },
         "attribution": {
-          "description": "Counts split by whether each finding was introduced by the current\nchangeset or already existed at the base ref.",
+          "description": "Counts split by whether each finding was introduced by the current\nchangeset or already existed at the base ref. The default audit gate is\nnew-only, so inherited findings are context. With audit.gate or --gate\nset to all, audit skips the extra base-snapshot attribution pass and\nthese counts stay zero.",
           "$ref": "#/definitions/AuditAttribution"
         },
         "dead_code": {
@@ -157,7 +157,7 @@
               "type": "null"
             }
           ],
-          "description": "Full dead-code results. Absent when no changed files."
+          "description": "Full dead code results (omitted if no changed files). Issue objects\ninclude introduced: true/false when audit can compare against the base\nref."
         },
         "duplication": {
           "anyOf": [
@@ -168,7 +168,7 @@
               "type": "null"
             }
           ],
-          "description": "Full duplication results (bare body, not the full `DupesOutput`\nenvelope). Absent when no changed files."
+          "description": "Full duplication results (omitted if no changed files). Clone groups\ninclude introduced: true/false when audit can compare against the base\nref."
         },
         "complexity": {
           "anyOf": [
@@ -179,7 +179,7 @@
               "type": "null"
             }
           ],
-          "description": "Full complexity results (bare body, not the full `HealthOutput`\nenvelope). Absent when no changed files."
+          "description": "Full complexity results (omitted if no changed files). Findings include\nintroduced: true/false when audit can compare against the base ref."
         }
       },
       "required": [
@@ -491,7 +491,7 @@
           "description": "Entry-point detection summary. Present when the analysis populated\nthe metadata block; absent in synthesised fixtures."
         },
         "summary": {
-          "description": "Per-category issue counts. Always present in real runs.",
+          "description": "Per-category issue counts. Always present. When --summary is used,\nindividual issue arrays are omitted.",
           "$ref": "#/definitions/CheckSummary"
         },
         "unused_files": {
@@ -618,35 +618,35 @@
           "items": {
             "$ref": "#/definitions/UnusedCatalogEntry"
           },
-          "description": "Entries in pnpm-workspace.yaml catalogs that no workspace package references."
+          "description": "Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not\nreferenced by any workspace package via the catalog: protocol."
         },
         "empty_catalog_groups": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/EmptyCatalogGroup"
           },
-          "description": "Empty named groups under pnpm-workspace.yaml's catalogs: section."
+          "description": "Named groups under pnpm-workspace.yaml's catalogs: section that declare\nno package entries. The top-level catalog: map is not reported."
         },
         "unresolved_catalog_references": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/UnresolvedCatalogReference"
           },
-          "description": "Workspace package.json references to pnpm catalogs that don't declare the package."
+          "description": "Workspace package.json references to catalogs (catalog: or\ncatalog:<name>) that do not declare the consumed package. pnpm install\nwill error until the named catalog grows to include the package or the\nreference is switched / removed."
         },
         "unused_dependency_overrides": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/UnusedDependencyOverride"
           },
-          "description": "Entries in pnpm `overrides:` / `pnpm.overrides` whose target package is not\ndeclared by any workspace package and not resolved in pnpm-lock.yaml."
+          "description": "Entries in pnpm-workspace.yaml's overrides: section, or package.json's\npnpm.overrides block, whose target package is not declared by any\nworkspace package and is not present in pnpm-lock.yaml. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases."
         },
         "misconfigured_dependency_overrides": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/MisconfiguredDependencyOverride"
           },
-          "description": "Entries in pnpm `overrides:` / `pnpm.overrides` whose key or value cannot be parsed."
+          "description": "pnpm.overrides entries whose key or value does not parse as a valid\noverride spec (empty key, empty value, malformed selector, unbalanced\nparent matcher). pnpm install will reject these. Default severity is\nerror."
         },
         "baseline_deltas": {
           "anyOf": [
@@ -733,7 +733,7 @@
           "$ref": "#/definitions/ElapsedMs"
         },
         "grouped_by": {
-          "description": "The grouping strategy used.",
+          "description": "The grouping strategy used. 'owner' groups by CODEOWNERS team,\n'directory' groups by top-level directory prefix, 'package' groups by\nworkspace package name, 'section' groups by GitLab CODEOWNERS\n`[Section]` header name.",
           "$ref": "#/definitions/GroupByMode"
         },
         "total_issues": {
@@ -919,35 +919,35 @@
           "items": {
             "$ref": "#/definitions/UnusedCatalogEntry"
           },
-          "description": "Entries in pnpm-workspace.yaml catalogs that no workspace package references."
+          "description": "Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not\nreferenced by any workspace package via the catalog: protocol."
         },
         "empty_catalog_groups": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/EmptyCatalogGroup"
           },
-          "description": "Empty named groups under pnpm-workspace.yaml's catalogs: section."
+          "description": "Named groups under pnpm-workspace.yaml's catalogs: section that declare\nno package entries. The top-level catalog: map is not reported."
         },
         "unresolved_catalog_references": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/UnresolvedCatalogReference"
           },
-          "description": "Workspace package.json references to pnpm catalogs that don't declare the package."
+          "description": "Workspace package.json references to catalogs (catalog: or\ncatalog:<name>) that do not declare the consumed package. pnpm install\nwill error until the named catalog grows to include the package or the\nreference is switched / removed."
         },
         "unused_dependency_overrides": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/UnusedDependencyOverride"
           },
-          "description": "Entries in pnpm `overrides:` / `pnpm.overrides` whose target package is not\ndeclared by any workspace package and not resolved in pnpm-lock.yaml."
+          "description": "Entries in pnpm-workspace.yaml's overrides: section, or package.json's\npnpm.overrides block, whose target package is not declared by any\nworkspace package and is not present in pnpm-lock.yaml. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases."
         },
         "misconfigured_dependency_overrides": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/MisconfiguredDependencyOverride"
           },
-          "description": "Entries in pnpm `overrides:` / `pnpm.overrides` whose key or value cannot be parsed."
+          "description": "pnpm.overrides entries whose key or value does not parse as a valid\noverride spec (empty key, empty value, malformed selector, unbalanced\nparent matcher). pnpm install will reject these. Default severity is\nerror."
         }
       },
       "required": [
@@ -990,7 +990,7 @@
           "items": {
             "$ref": "#/definitions/HealthFinding"
           },
-          "description": "Functions exceeding thresholds."
+          "description": "Functions and synthetic template entries exceeding complexity\nthresholds, sorted by the --sort criteria."
         },
         "summary": {
           "description": "Summary statistics.",
@@ -1023,7 +1023,7 @@
           "items": {
             "$ref": "#/definitions/FileHealthScore"
           },
-          "description": "Per-file health scores (only populated with `--file-scores` or `--hotspots`)."
+          "description": "Per-file health scores. Only present when --file-scores is used. Sorted\nby maintainability_index ascending (worst first). Zero-function files\n(barrels) are excluded by default."
         },
         "coverage_gaps": {
           "anyOf": [
@@ -1041,7 +1041,7 @@
           "items": {
             "$ref": "#/definitions/HotspotEntry"
           },
-          "description": "Hotspot entries (only populated with `--hotspots`)."
+          "description": "Hotspot entries combining git churn with complexity. Only present when\n--hotspots is used. Sorted by score descending (highest risk first)."
         },
         "hotspot_summary": {
           "anyOf": [
@@ -1070,14 +1070,14 @@
           "items": {
             "$ref": "#/definitions/LargeFunctionEntry"
           },
-          "description": "Functions exceeding 60 LOC (only populated when unit size very-high-risk >= 3%)."
+          "description": "Functions exceeding 60 LOC (very high risk). Only present when unit size\nvery-high-risk bin >= 3%. Sorted by line count descending."
         },
         "targets": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/RefactoringTarget"
           },
-          "description": "Ranked refactoring recommendations (only populated with `--targets`)."
+          "description": "Ranked refactoring recommendations. Only present when --targets is used.\nSorted by efficiency (priority/effort) descending."
         },
         "target_thresholds": {
           "anyOf": [
@@ -1110,7 +1110,7 @@
               "type": "null"
             }
           ],
-          "description": "Auditable breadcrumb recording why `suppress-line` action hints were\nomitted from this report. Absent when no suppression occurred; set\npost-construction by `inject_health_actions` when the runtime had\nthe suppression context that the typed builders do not plumb."
+          "description": "Audit breadcrumb explaining systemic action-array adjustments. Present\nonly when at least one adjustment was made (e.g., health finding\nsuppression hints omitted because a baseline is active). When --group-by\nis active, each entry of `groups` may carry its own `actions_meta`\ndescribing the same omission so per-group consumers do not need to walk\nback to the report root."
         },
         "grouped_by": {
           "anyOf": [
@@ -1121,7 +1121,7 @@
               "type": "null"
             }
           ],
-          "description": "Resolver mode used when `--group-by` is active. Absent on ungrouped\noutput."
+          "description": "Resolver mode used when --group-by is active. Present only on grouped\noutput. The top-level `vital_signs`, `health_score`, and `summary` keep\nthe active run scope (for example after --workspace); per-group versions\nlive inside each entry of `groups`."
         },
         "groups": {
           "type": [
@@ -1160,7 +1160,7 @@
       "properties": {
         "key": {
           "type": "string",
-          "description": "Group label."
+          "description": "Group identifier produced by the resolver. For 'package' grouping:\nworkspace package name (e.g. '@scope/app-a') or '(root)' for files\noutside any workspace. For 'owner' grouping: the CODEOWNERS team. For\n'directory' grouping: the top-level directory prefix. For 'section'\ngrouping: the GitLab CODEOWNERS section name, or '(no section)' /\n'(unowned)' for unmatched files."
         },
         "owners": {
           "type": [
@@ -1170,7 +1170,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Section default owners (`--group-by section` only)."
+          "description": "Section default owners (GitLab CODEOWNERS `[Section] @owner1 @owner2`).\nPresent only when grouped_by is 'section'."
         },
         "files_analyzed": {
           "type": "integer",
@@ -1189,7 +1189,7 @@
               "type": "null"
             }
           ],
-          "description": "Per-group vital signs (None when `--score-only` suppressed them)."
+          "description": "Per-group vital signs recomputed from the files in this group. Absent\nwhen --score-only suppressed top-level vital signs."
         },
         "health_score": {
           "anyOf": [
@@ -1200,7 +1200,7 @@
               "type": "null"
             }
           ],
-          "description": "Per-group health score (None when `--score` was not requested)."
+          "description": "Per-group health score recomputed from the per-group vital signs. Absent\nwhen --score was not requested."
         },
         "findings": {
           "type": "array",
@@ -1260,6 +1260,7 @@
       "type": "object",
       "properties": {
         "verdict": {
+          "description": "Single most actionable runtime-coverage signal under the current\ncontext. In PR-review context (CLI saw `--diff-file` or\n`--changed-since`) the verdict is `hot-path-touched` whenever a hot\nfunction was touched, regardless of cold-code findings; in standalone\nanalysis `cold-code-detected` remains primary. For the full set of\nfindings the report carries, see `signals`.",
           "$ref": "#/definitions/RuntimeCoverageReportVerdict"
         },
         "signals": {
@@ -1270,31 +1271,36 @@
           "description": "All signals captured by post-processing. Independent of `verdict`,\nwhich is the single most actionable signal under the current\ncontext. Empty when the report is `Clean` and not under license\ngrace. Order is stable severity-descending."
         },
         "summary": {
+          "description": "Aggregate tracked / hit / unhit / untracked counts for the analyzed\nruntime coverage input.",
           "$ref": "#/definitions/RuntimeCoverageSummary"
         },
         "findings": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/RuntimeCoverageFinding"
-          }
+          },
+          "description": "Surfaced runtime coverage findings (`safe_to_delete`, `review_required`,\n`low_traffic`, `coverage_unavailable`). Omitted when empty. `active`\nfunctions stay out of this list so the CLI output remains actionable."
         },
         "hot_paths": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/RuntimeCoverageHotPath"
-          }
+          },
+          "description": "Top runtime functions by invocation count. Omitted when empty."
         },
         "blast_radius": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/RuntimeCoverageBlastRadiusEntry"
-          }
+          },
+          "description": "First-class blast-radius entries for runtime-observed functions. Present\nwhenever runtime coverage analysis runs."
         },
         "importance": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/RuntimeCoverageImportanceEntry"
-          }
+          },
+          "description": "First-class production-importance entries for runtime-observed\nfunctions. Present whenever runtime coverage analysis runs."
         },
         "watermark": {
           "anyOf": [
@@ -1304,20 +1310,22 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "License/trial watermark for grace-mode output. Omitted when not\napplicable."
         },
         "warnings": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/RuntimeCoverageMessage"
-          }
+          },
+          "description": "Non-fatal merge or coverage diagnostics. Omitted when empty."
         },
         "schema_version": {
           "type": "string",
           "enum": [
             "1"
           ],
-          "description": "Runtime coverage JSON contract version. Independent of the top-level fallow JSON schema_version."
+          "description": "Runtime coverage JSON contract version. This is scoped to the runtime_coverage block and is independent of the top-level fallow JSON schema_version."
         }
       },
       "required": [
@@ -1326,7 +1334,8 @@
         "blast_radius",
         "importance",
         "schema_version"
-      ]
+      ],
+      "description": "Runtime coverage findings merged into the health report or emitted by\n`fallow coverage analyze`. Present in health output when --runtime-coverage\nis used. Shape mirrors the runtime coverage JSON contract; cloud mode\nfetches runtime facts explicitly and merges them locally with AST/static\nanalysis."
     },
     "CoverageAnalyzeOutput": {
       "title": "fallow coverage analyze --format json",
@@ -1367,37 +1376,47 @@
       "type": "object",
       "properties": {
         "data_source": {
+          "description": "Runtime evidence source used for this report. Local mode reads a\nsupplied runtime coverage artifact; cloud mode pulls the latest\nfallow.cloud runtime context after explicit opt-in.",
           "$ref": "#/definitions/RuntimeCoverageDataSource"
         },
         "last_received_at": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Timestamp of the newest runtime payload included in the report. Null for\nlocal single-capture artifacts that do not carry cloud receipt metadata."
         },
         "functions_tracked": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of functions the sidecar could observe in the V8 or Istanbul\ndump."
         },
         "functions_hit": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Tracked functions that received at least one invocation."
         },
         "functions_unhit": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Tracked functions that were never invoked."
         },
         "functions_untracked": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Functions the sidecar could not track (lazy-parsed, worker thread,\ndynamic code, unresolved source map)."
         },
         "coverage_percent": {
-          "type": "number"
+          "type": "number",
+          "description": "Ratio of functions_hit / functions_tracked, expressed as a percent."
         },
         "trace_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Total number of observed invocations across all functions. Denominator\nfor low-traffic classification."
         },
         "period_days": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Days of observation covered by the supplied dump (Phase 2 local analysis\nemits 0 — set by the beacon/cloud in Phase 3+)."
         },
         "deployments_seen": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Distinct deployments contributing to the supplied dump (Phase 2 local\nanalysis emits 0)."
         },
         "capture_quality": {
           "anyOf": [
@@ -1428,16 +1447,20 @@
       "type": "object",
       "properties": {
         "window_seconds": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Total observation window in seconds. Finer-grained than period_days\n(which rounds up to whole days)."
         },
         "instances_observed": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of distinct production instances that contributed to the dump."
         },
         "lazy_parse_warning": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "True when the untracked-function ratio exceeds the sidecar's lazy-parse\nthreshold (30%). Signals that many untracked functions likely reflect\nlazy-parsed code rather than unreachable code."
         },
         "untracked_ratio_percent": {
-          "type": "number"
+          "type": "number",
+          "description": "functions_untracked / functions_tracked as a percentage, rounded to 2\ndecimal places."
         }
       },
       "required": [
@@ -1446,7 +1469,7 @@
         "lazy_parse_warning",
         "untracked_ratio_percent"
       ],
-      "description": "Capture-quality telemetry (mirrors `fallow_cov_protocol::CaptureQuality`)."
+      "description": "Quality-of-capture signals emitted by the sidecar so the CLI can explain\nshort-window captures honestly instead of letting users blame the tool."
     },
     "RuntimeCoverageReportVerdict": {
       "type": "string",
@@ -1469,7 +1492,7 @@
         "active",
         "unknown"
       ],
-      "description": "Per-finding verdict. Replaces the 0.1 `state` field."
+      "description": "Protocol-level per-function runtime coverage verdict derived from the\ndecision table in fallow-cov-protocol. The CLI's `runtime_coverage.findings`\narray omits `active` entries even though the underlying enum still includes\nit."
     },
     "RuntimeCoverageSignal": {
       "type": "string",
@@ -1489,31 +1512,38 @@
         "low",
         "none",
         "unknown"
-      ]
+      ],
+      "description": "Confidence level for a runtime coverage finding."
     },
     "RuntimeCoverageEvidence": {
       "type": "object",
       "properties": {
         "static_status": {
-          "type": "string"
+          "type": "string",
+          "description": "`used` when the function is reachable in the module graph, `unused`\notherwise."
         },
         "test_coverage": {
-          "type": "string"
+          "type": "string",
+          "description": "`covered` when the project's test suite hits this function,\n`not_covered` otherwise."
         },
         "v8_tracking": {
-          "type": "string"
+          "type": "string",
+          "description": "`tracked` when V8 observed the function, `untracked` otherwise."
         },
         "untracked_reason": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Reason the function is untracked. Populated only when v8_tracking is\n`untracked`. Values: `lazy_parsed`, `worker_thread`, `dynamic_eval`,\n`unknown`."
         },
         "observation_days": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Days of observation backing this finding."
         },
         "deployments_observed": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Distinct deployments backing this finding."
         }
       },
       "required": [
@@ -1531,27 +1561,30 @@
         "trial-expired",
         "license-expired-grace",
         "unknown"
-      ]
+      ],
+      "description": "License or trial watermark applied to runtime coverage output."
     },
     "RuntimeCoverageAction": {
       "type": "object",
       "properties": {
         "type": {
           "type": "string",
-          "description": "Stable action identifier. Serialized as `type` in JSON to match the\n`actions[].type` contract shared with every other `fallow health` finding."
+          "description": "Action identifier, normalized to `type` in JSON output. Known values\nemitted by `fallow coverage analyze`: `delete-cold-code`\n(verdict=safe_to_delete), `review-runtime` (verdict=review_required).\nThe sidecar may emit additional protocol-specific identifiers;\nconsumers should treat unknown values as forward-compat extensions."
         },
         "description": {
           "type": "string"
         },
         "auto_fixable": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether fallow can apply this action automatically."
         }
       },
       "required": [
         "type",
         "description",
         "auto_fixable"
-      ]
+      ],
+      "description": "Suggested follow-up action for a runtime coverage finding."
     },
     "RuntimeCoverageMessage": {
       "type": "object",
@@ -1560,7 +1593,8 @@
           "type": "string"
         },
         "message": {
-          "type": "string"
+          "type": "string",
+          "description": "Human-readable warning message."
         }
       },
       "required": [
@@ -1573,16 +1607,19 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Stable content-hash ID of the form `fallow:prod:<hash>`."
+          "description": "Stable content-hash ID of the form `fallow:prod:<hash>`, where <hash> is\nthe first 8 hex characters of SHA-256(file + function + line + 'prod')."
         },
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the project root."
         },
         "function": {
-          "type": "string"
+          "type": "string",
+          "description": "Static function name as reported in the merged coverage result."
         },
         "line": {
-          "type": "integer"
+          "type": "integer",
+          "description": "1-indexed line number the function starts on."
         },
         "verdict": {
           "$ref": "#/definitions/RuntimeCoverageVerdict"
@@ -1604,7 +1641,8 @@
           "type": "array",
           "items": {
             "$ref": "#/definitions/RuntimeCoverageAction"
-          }
+          },
+          "description": "Suggested actions for this finding. Omitted when empty."
         }
       },
       "required": [
@@ -1625,20 +1663,24 @@
           "description": "Stable content-hash ID of the form `fallow:hot:<hash>`."
         },
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the project root."
         },
         "function": {
-          "type": "string"
+          "type": "string",
+          "description": "Function name for the hot path."
         },
         "line": {
-          "type": "integer"
+          "type": "integer",
+          "description": "1-indexed line number the function starts on."
         },
         "end_line": {
           "type": "integer",
           "description": "1-indexed line the function ends on (inclusive). Mirrors\n`fallow_cov_protocol::HotPath::end_line` (added in protocol 0.5).\nOlder 0.4-shape sidecars omit the field on the wire; serde defaults\nto `0`, which the line-overlap filter MUST treat as a single-line\nrange (`line..=line`) rather than a span."
         },
         "invocations": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Observed invocation count for the hot path."
         },
         "percentile": {
           "type": "integer",
@@ -1648,7 +1690,8 @@
           "type": "array",
           "items": {
             "$ref": "#/definitions/RuntimeCoverageAction"
-          }
+          },
+          "description": "Suggested actions for this hot path (e.g., review-on-change). Omitted\nwhen empty."
         }
       },
       "required": [
@@ -1667,7 +1710,8 @@
         "low",
         "medium",
         "high"
-      ]
+      ],
+      "description": "Blast-radius risk band. The current thresholds are high at >=20 static\ncallers or >=1,000,000 traffic-weighted caller reach; medium at >=5 callers\nor >=50,000 weighted reach; low otherwise."
     },
     "RuntimeCoverageBlastRadiusEntry": {
       "type": "object",
@@ -1677,25 +1721,31 @@
           "description": "Stable content-hash ID of the form `fallow:blast:<hash>`."
         },
         "file": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the project root."
         },
         "function": {
-          "type": "string"
+          "type": "string",
+          "description": "Function name for the blast-radius entry."
         },
         "line": {
-          "type": "integer"
+          "type": "integer",
+          "description": "1-indexed line number the function starts on."
         },
         "caller_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Static caller count from the module graph."
         },
         "caller_count_weighted_by_traffic": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Caller reach weighted by observed runtime traffic."
         },
         "deploys_touched": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Distinct deploy SHAs that touched the function in the observation\nwindow. Cloud mode only; omitted in local mode."
         },
         "risk_band": {
           "$ref": "#/definitions/RuntimeCoverageRiskBand"
@@ -1719,28 +1769,36 @@
           "description": "Stable content-hash ID of the form `fallow:importance:<hash>`."
         },
         "file": {
-          "type": "string"
+          "type": "string",
+          "description": "File path relative to the project root."
         },
         "function": {
-          "type": "string"
+          "type": "string",
+          "description": "Function name for the importance entry."
         },
         "line": {
-          "type": "integer"
+          "type": "integer",
+          "description": "1-indexed line number the function starts on."
         },
         "invocations": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Observed invocation count for this function."
         },
         "cyclomatic": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Cyclomatic complexity from the static health pipeline."
         },
         "owner_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of CODEOWNERS owners matched for this file. Zero means no owner\nwas resolved."
         },
         "importance_score": {
-          "type": "number"
+          "type": "number",
+          "description": "0-100 explainable score from log-scaled traffic, capped complexity\nweight, and ownership-risk weight."
         },
         "reason": {
-          "type": "string"
+          "type": "string",
+          "description": "Templated one-sentence explanation for the score."
         }
       },
       "required": [
@@ -1763,14 +1821,14 @@
           "items": {
             "$ref": "#/definitions/CloneGroup"
           },
-          "description": "All detected clone groups."
+          "description": "All detected clone groups. Each group contains 2+ instances of identical\nor near-identical code."
         },
         "clone_families": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CloneFamily"
           },
-          "description": "Clone families: groups of clone groups sharing the same file set."
+          "description": "Clone families: groups of clone groups sharing the same file set,\nindicating systematic duplication patterns."
         },
         "mirrored_directories": {
           "type": "array",
@@ -1799,7 +1857,7 @@
           "items": {
             "$ref": "#/definitions/HealthFinding"
           },
-          "description": "Functions exceeding thresholds."
+          "description": "Functions and synthetic template entries exceeding complexity\nthresholds, sorted by the --sort criteria."
         },
         "summary": {
           "description": "Summary statistics.",
@@ -1832,7 +1890,7 @@
           "items": {
             "$ref": "#/definitions/FileHealthScore"
           },
-          "description": "Per-file health scores (only populated with `--file-scores` or `--hotspots`)."
+          "description": "Per-file health scores. Only present when --file-scores is used. Sorted\nby maintainability_index ascending (worst first). Zero-function files\n(barrels) are excluded by default."
         },
         "coverage_gaps": {
           "anyOf": [
@@ -1850,7 +1908,7 @@
           "items": {
             "$ref": "#/definitions/HotspotEntry"
           },
-          "description": "Hotspot entries (only populated with `--hotspots`)."
+          "description": "Hotspot entries combining git churn with complexity. Only present when\n--hotspots is used. Sorted by score descending (highest risk first)."
         },
         "hotspot_summary": {
           "anyOf": [
@@ -1879,14 +1937,14 @@
           "items": {
             "$ref": "#/definitions/LargeFunctionEntry"
           },
-          "description": "Functions exceeding 60 LOC (only populated when unit size very-high-risk >= 3%)."
+          "description": "Functions exceeding 60 LOC (very high risk). Only present when unit size\nvery-high-risk bin >= 3%. Sorted by line count descending."
         },
         "targets": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/RefactoringTarget"
           },
-          "description": "Ranked refactoring recommendations (only populated with `--targets`)."
+          "description": "Ranked refactoring recommendations. Only present when --targets is used.\nSorted by efficiency (priority/effort) descending."
         },
         "target_thresholds": {
           "anyOf": [
@@ -1919,7 +1977,7 @@
               "type": "null"
             }
           ],
-          "description": "Auditable breadcrumb recording why `suppress-line` action hints were\nomitted from this report. Absent when no suppression occurred; set\npost-construction by `inject_health_actions` when the runtime had\nthe suppression context that the typed builders do not plumb."
+          "description": "Audit breadcrumb explaining systemic action-array adjustments. Present\nonly when at least one adjustment was made (e.g., health finding\nsuppression hints omitted because a baseline is active). When --group-by\nis active, each entry of `groups` may carry its own `actions_meta`\ndescribing the same omission so per-group consumers do not need to walk\nback to the report root."
         }
       },
       "required": [
@@ -1948,14 +2006,14 @@
           "items": {
             "$ref": "#/definitions/CloneGroup"
           },
-          "description": "All detected clone groups."
+          "description": "All detected clone groups. Each group contains 2+ instances of identical\nor near-identical code."
         },
         "clone_families": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CloneFamily"
           },
-          "description": "Clone families: groups of clone groups sharing the same file set."
+          "description": "Clone families: groups of clone groups sharing the same file set,\nindicating systematic duplication patterns."
         },
         "mirrored_directories": {
           "type": "array",
@@ -1987,7 +2045,7 @@
           "description": "Total clone groups across all buckets when `--group-by` is active.\nMirrors the grouped check / health envelopes which expose\n`total_issues` so MCP and CI consumers can read the same key across\ncommands."
         },
         "groups": {
-          "description": "Per-group buckets when `--group-by` is active. Each clone group is\nattributed to its largest-owner key (most instances; alphabetical\ntiebreak)."
+          "description": "Per-group buckets when `--group-by` is active. Each clone group is\nattributed to its largest-owner key (most instances; alphabetical\ntiebreak). Sort: most clone groups first, then alphabetical, with\n`(unowned)` pinned last."
         },
         "_meta": {
           "anyOf": [
@@ -2112,7 +2170,7 @@
     },
     "SchemaVersion": {
       "type": "integer",
-      "description": "Schema version for a fallow JSON envelope. Top-level fallow envelopes carry\na `schema_version` field whose Rust source is this newtype; the JSON wire\nshape is the bare integer.\n\nBump policy: ADDITIVE changes (new optional fields, new optional struct\nfields, new array entries, new MCP tools, new CLI flags) do NOT bump the\nversion; consumers receive new fields without breaking. BREAKING changes\n(renamed fields, removed fields, type changes, enum-variant removals,\nsemantic changes) DO bump. To detect newly-added fields without a bump,\ncheck field presence via JSON-key existence rather than gating on the\nversion."
+      "description": "Schema version for this output format (independent of tool version). Bump\npolicy: ADDITIVE changes (new optional top-level fields, new optional struct\nfields, new array entries, new MCP tools, new CLI flags that map to new\noptional fields) do NOT bump the version; consumers receive new fields\nwithout breaking. BREAKING changes (renamed fields, removed fields, type\nchanges, enum-variant removals, semantic changes to existing fields) DO\nbump. To detect newly-added fields without a bump, check field presence via\nJSON-key existence rather than gating on the version. v4 was introduced\nalongside fallow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence\nblock, renamed summary fields); v5 introduced health_score formula_version 2\nwith scale-invariant scoring semantics; v6 widened `AddToConfigAction.value`\nfrom a scalar string to `oneOf: [string, array]` so the new `ignoreExports`\naction can carry a paste-ready array of `{ file, exports }` rule objects\n(the legacy `ignoreDependencies` etc. variants still emit strings, so\nconsumers that switch on `config_key` keep working unchanged). The\nruntime-coverage block is extended additively as the protocol evolves\n(currently 0.3, which adds an optional capture_quality summary field). Other\nadditive examples: dupes --group-by adds optional grouped_by, total_issues,\ngroups fields without bumping."
     },
     "ToolVersion": {
       "type": "string",
@@ -2137,7 +2195,7 @@
         },
         "functions_above_threshold": {
           "type": "integer",
-          "description": "Number of functions above threshold."
+          "description": "Number of functions exceeding at least one threshold (before --top\ntruncation)."
         },
         "max_cyclomatic_threshold": {
           "type": "integer",
@@ -2149,21 +2207,21 @@
         },
         "max_crap_threshold": {
           "type": "number",
-          "description": "Configured CRAP threshold. Functions meeting or exceeding this score\nare reported alongside complexity findings."
+          "description": "Configured CRAP (Change Risk Anti-Patterns) score threshold. Functions\nmeeting or exceeding this score appear as findings with the `crap` and\noptional `coverage_pct` fields populated."
         },
         "files_scored": {
           "type": [
             "integer",
             "null"
           ],
-          "description": "Number of files scored (only set with `--file-scores`)."
+          "description": "Number of files with health scores. Only present when --file-scores is\nused. 0 indicates the flag was set but scoring failed."
         },
         "average_maintainability": {
           "type": [
             "number",
             "null"
           ],
-          "description": "Average maintainability index across all scored files (only set with `--file-scores`)."
+          "description": "Average maintainability index across all scored files (before --top\ntruncation). Only present when --file-scores is used and at least one\nfile was scored."
         },
         "coverage_model": {
           "anyOf": [
@@ -2174,7 +2232,7 @@
               "type": "null"
             }
           ],
-          "description": "Coverage model used for CRAP computation (None when file scores not computed)."
+          "description": "Coverage model used for CRAP score computation. 'static_estimated'\n(default) uses per-function graph-based estimation from export\nreferences: directly test-referenced = 85%, indirectly reachable = 40%,\nuntested = 0%. 'istanbul' uses real per-function statement coverage from\na coverage-final.json file (--coverage flag or auto-detected).\n'static_binary' is the legacy binary model. Only present when file\nscores are computed."
         },
         "istanbul_matched": {
           "type": [
@@ -2192,11 +2250,11 @@
         },
         "severity_critical_count": {
           "type": "integer",
-          "description": "Number of findings with critical severity."
+          "description": "Number of findings with critical severity (cognitive >= 40 or cyclomatic\n>= 50)."
         },
         "severity_high_count": {
           "type": "integer",
-          "description": "Number of findings with high severity."
+          "description": "Number of findings with high severity (cognitive 25-39 or cyclomatic\n30-49)."
         },
         "severity_moderate_count": {
           "type": "integer",
@@ -2225,7 +2283,7 @@
         },
         "name": {
           "type": "string",
-          "description": "Function name."
+          "description": "Function name, \"<anonymous>\" for unnamed functions/arrows, or\n\"<template>\" for synthetic Angular template findings."
         },
         "line": {
           "type": "integer",
@@ -2243,7 +2301,7 @@
         },
         "cognitive": {
           "type": "integer",
-          "description": "Cognitive complexity."
+          "description": "SonarSource cognitive complexity (structural + nesting penalty)."
         },
         "line_count": {
           "type": "integer",
@@ -2251,14 +2309,14 @@
         },
         "param_count": {
           "type": "integer",
-          "description": "Number of parameters."
+          "description": "Number of parameters (excluding TypeScript's this parameter)."
         },
         "exceeded": {
-          "description": "Which threshold was exceeded.",
+          "description": "Which threshold(s) this finding exceeds. `crap` and its combinations are\nemitted when `max_crap_threshold` is crossed.",
           "$ref": "#/definitions/ExceededThreshold"
         },
         "severity": {
-          "description": "How far above the threshold: moderate (just above), high, or critical.",
+          "description": "How far above the threshold: moderate (just above), high (recommended\nfor extraction), or critical (immediate extraction candidate). Defaults:\ncognitive 25/40, cyclomatic 30/50.",
           "$ref": "#/definitions/FindingSeverity"
         },
         "crap": {
@@ -2284,7 +2342,7 @@
               "type": "null"
             }
           ],
-          "description": "Bucketed coverage tier (`none`/`partial`/`high`) used to drive\naction selection in JSON output. Present whenever CRAP triggered\nthe finding (Istanbul or estimated), absent for findings that only\nexceeded cyclomatic/cognitive without CRAP context."
+          "description": "Bucketed coverage tier used to drive action selection. Present whenever\nCRAP triggered the finding (Istanbul or estimated), absent otherwise.\n`none` = coverage is at most 0% (file not test-reachable, or Istanbul\nreports 0); `partial` = coverage is in `(0, 70)`; `high` = coverage is\nat or above the high watermark (default `>= 70`, or the estimated 85%\nband)."
         },
         "actions": {
           "type": "array",
@@ -2321,7 +2379,7 @@
         },
         "name": {
           "type": "string",
-          "description": "Function name."
+          "description": "Function name, or \"<anonymous>\" for unnamed functions/arrows."
         },
         "line": {
           "type": "integer",
@@ -2389,7 +2447,7 @@
         },
         "crap_max": {
           "type": "number",
-          "description": "Maximum CRAP score among functions in this file.\nComputed via the active `CoverageModel`: `StaticEstimated` (default,\ngraph-based per-function estimate), `Istanbul` (real per-function\nstatement coverage from `--coverage`), or the legacy `StaticBinary`.\nFormula: `CC^2 * (1 - cov/100)^3 + CC`."
+          "description": "Maximum CRAP score among functions in this file. Computed via the active\n`coverage_model` per the canonical formula CC^2 * (1 - cov/100)^3 + CC\n(Savoia & Evans, 2007). Coverage source: `static_estimated` (default,\ngraph-based per-function estimate), `istanbul` (real per-function\nstatement coverage from --coverage), or the legacy `static_binary`\n(whole-file 0%/100%, retained for compatibility)."
         },
         "crap_above_threshold": {
           "type": "integer",
@@ -2451,7 +2509,7 @@
           "description": "Number of files that import this file (blast radius)."
         },
         "trend": {
-          "description": "Churn trend: accelerating, stable, or cooling.",
+          "description": "Churn trend: accelerating (recent > 1.5× older), stable, or cooling\n(recent < 0.67× older).",
           "$ref": "#/definitions/ChurnTrend"
         },
         "ownership": {
@@ -2496,7 +2554,7 @@
       "properties": {
         "bus_factor": {
           "type": "integer",
-          "description": "Avelino truck factor: minimum number of contributors covering at\nleast 50% of recency-weighted commits."
+          "description": "Avelino truck factor: minimum contributors covering at least 50% of\nrecency-weighted commits in the analysis window. Lower = higher\nknowledge-loss risk."
         },
         "contributor_count": {
           "type": "integer",
@@ -2581,7 +2639,7 @@
         "stale_days",
         "commits"
       ],
-      "description": "Per-author summary emitted in [`OwnershipMetrics::top_contributor`] and\n[`OwnershipMetrics::recent_contributors`]."
+      "description": "Per-author contribution summary. The identifier is rendered per the\nconfigured ownership.emailMode (handle, hash, or raw); the format field\ndiscriminates the three so type-aware consumers can branch without\nre-parsing."
     },
     "HotspotSummary": {
       "type": "object",
@@ -2658,7 +2716,7 @@
           "items": {
             "$ref": "#/definitions/ContributingFactor"
           },
-          "description": "Which metric values contributed to this recommendation."
+          "description": "Contributing factors that triggered this recommendation. Empty array\nomitted from JSON."
         },
         "evidence": {
           "anyOf": [
@@ -2747,7 +2805,7 @@
         "snapshots_loaded",
         "overall_direction"
       ],
-      "description": "Health trend comparison: current run vs. a previous snapshot."
+      "description": "Trend comparison between the current run and a previous snapshot. Shows\nper-metric deltas with directional indicators."
     },
     "TrendCount": {
       "type": "object",
@@ -2792,7 +2850,7 @@
       "required": [
         "summary"
       ],
-      "description": "Static test coverage gaps derived from the module graph."
+      "description": "Static test coverage gaps derived from the module graph. Shows runtime files\nand exports with no test dependency path."
     },
     "CoverageGapSummary": {
       "type": "object",
@@ -2968,15 +3026,15 @@
       "properties": {
         "formula_version": {
           "type": "integer",
-          "description": "Formula version used to compute the score and penalties."
+          "description": "Health score formula version. Version 2 uses scale-invariant\ndensity/tail metrics for monorepo-safe scoring."
         },
         "score": {
           "type": "number",
-          "description": "Overall score (0–100, higher is better)."
+          "description": "Overall score (0-100, higher is better). Reproducible: 100 -\nsum(penalties) == score."
         },
         "grade": {
           "type": "string",
-          "description": "Letter grade: A, B, C, D, or F."
+          "description": "Letter grade. A: score >= 85, B: 70-84, C: 55-69, D: 40-54, F: below 40."
         },
         "penalties": {
           "description": "Per-component penalty breakdown. Shows what drove the score down.",
@@ -2988,7 +3046,8 @@
         "score",
         "grade",
         "penalties"
-      ]
+      ],
+      "description": "Project-level health score. Score = 100 minus available penalties from dead\ncode, complexity, maintainability, hotspots, unused deps, circular deps,\nunit size, coupling, and duplication. Missing metrics do not penalize;\n--score computes the score and duplication penalty, while churn-backed\nhotspot penalties require hotspot analysis (--hotspots, or --targets with\n--score)."
     },
     "HealthScorePenalties": {
       "type": "object",
@@ -2998,22 +3057,22 @@
             "number",
             "null"
           ],
-          "description": "Points lost from dead files (max 15)."
+          "description": "Points lost from dead files (max 15). Null if dead code pipeline not\nrun."
         },
         "dead_exports": {
           "type": [
             "number",
             "null"
           ],
-          "description": "Points lost from dead exports (max 15)."
+          "description": "Points lost from dead exports (max 15). Null if dead code pipeline not\nrun."
         },
         "complexity": {
           "type": "number",
-          "description": "Points lost from critical-complexity density (max 20)."
+          "description": "Points lost from critical-complexity density (max 20). Older snapshots\nwithout density fields fall back to average cyclomatic complexity above\n1.5."
         },
         "p90_complexity": {
           "type": "number",
-          "description": "Points lost from legacy p90 cyclomatic complexity (0 for current scale-invariant runs)."
+          "description": "Points lost from legacy p90 cyclomatic complexity above 10. Current\nscale-invariant runs report 0 because tail complexity is folded into\ncomplexity."
         },
         "maintainability": {
           "type": [
@@ -3027,42 +3086,42 @@
             "number",
             "null"
           ],
-          "description": "Points lost from hotspot files (max 10)."
+          "description": "Points lost from top-percentile hotspot density (max 10). Null if\nhotspots not computed."
         },
         "unused_deps": {
           "type": [
             "number",
             "null"
           ],
-          "description": "Points lost from unused dependency density (max 25)."
+          "description": "Points lost from unused dependency density (max 25). Null if dead code\npipeline not run."
         },
         "circular_deps": {
           "type": [
             "number",
             "null"
           ],
-          "description": "Points lost from circular dependency density (max 25)."
+          "description": "Points lost from circular dependency density (max 25). Null if dead code\npipeline not run."
         },
         "unit_size": {
           "type": [
             "number",
             "null"
           ],
-          "description": "Points lost from oversized-function density (max 10)."
+          "description": "Points lost from oversized-function density (max 10). Null if no\nfunctions analyzed."
         },
         "coupling": {
           "type": [
             "number",
             "null"
           ],
-          "description": "Points lost from coupling concentration density (max 5)."
+          "description": "Points lost from coupling concentration density (max 5). Null if file\nscores not computed."
         },
         "duplication": {
           "type": [
             "number",
             "null"
           ],
-          "description": "Points lost from code duplication (max 10)."
+          "description": "Points lost from code duplication (max 10). Penalty = min(max(0,\nduplication_pct - 5) * 1, 10). Null if duplication pipeline not run."
         }
       },
       "required": [
@@ -3097,7 +3156,7 @@
             "number",
             "null"
           ],
-          "description": "Percentage of functions at or above the critical cyclomatic threshold."
+          "description": "Percentage of functions at or above the critical cyclomatic threshold.\nUsed by the scale-invariant health score."
         },
         "p90_cyclomatic": {
           "type": "integer",
@@ -3136,7 +3195,7 @@
             "number",
             "null"
           ],
-          "description": "Percentage of scored files with maintainability index below 70."
+          "description": "Percentage of scored files with maintainability index below 70. Null if\nfile scores were not computed."
         },
         "unused_dep_count": {
           "type": [
@@ -3150,7 +3209,7 @@
             "number",
             "null"
           ],
-          "description": "Unused dependencies per 1,000 files."
+          "description": "Unused dependencies per 1,000 files. Null if dead code analysis did not\nrun."
         },
         "circular_dep_count": {
           "type": [
@@ -3164,7 +3223,7 @@
             "number",
             "null"
           ],
-          "description": "Circular dependency chains per 1,000 files."
+          "description": "Circular dependency chains per 1,000 files. Null if dead code analysis\ndid not run."
         },
         "counts": {
           "anyOf": [
@@ -3193,7 +3252,7 @@
             "number",
             "null"
           ],
-          "description": "Functions above 60 LOC per 1,000 functions."
+          "description": "Functions above 60 LOC per 1,000 functions. Null if no functions\nanalyzed."
         },
         "unit_interfacing_profile": {
           "anyOf": [
@@ -3211,7 +3270,7 @@
             "integer",
             "null"
           ],
-          "description": "95th percentile fan-in across all files."
+          "description": "95th percentile fan-in across all files. Null if file scores not\ncomputed."
         },
         "coupling_high_pct": {
           "type": [
@@ -3431,7 +3490,7 @@
       "type": "object",
       "properties": {
         "type": {
-          "description": "Action type identifier. Kebab-case per the JSON output contract.",
+          "description": "Action type identifier. A single finding's `actions` array can carry\nMULTIPLE entries of different types: e.g., a finding that exceeded\nboth cyclomatic and CRAP at `coverage_tier`: partial will get BOTH\n`increase-coverage` AND `refactor-function`, plus `suppress-line`.\nConsumers that select a single action should treat the FIRST\nnon-`suppress-{line,file}` action as primary. `add-tests` is emitted\nwhen CRAP triggered the finding, the function has no test coverage\n(`coverage_tier`: none), and full coverage can bring CRAP below\n`max_crap_threshold` (cyclomatic < threshold, since CRAP bottoms out\nat CC at 100% coverage). `increase-coverage` is emitted when CRAP\ntriggered the finding, some coverage exists (`coverage_tier`: partial\nor high), and full coverage can bring CRAP below `max_crap_threshold`;\nthe description steers toward targeted branch coverage rather than\nscaffolding new tests. `refactor-function` is emitted when\ncyclomatic/cognitive triggered the finding, when full coverage still\ncannot bring CRAP below `max_crap_threshold` (cyclomatic >=\nthreshold), or as a secondary action when cyclomatic is within 5 of\nthe cyclomatic threshold AND cognitive is at or above\n`max_cognitive_threshold / 2` (the cognitive floor suppresses false\npositives on flat type-tag dispatchers and JSX render maps where\nhigh cyclomatic comes from a single switch with near-zero cognitive\nload). `suppress-file` is emitted instead of `suppress-line` for\nsynthetic Angular `<template>` findings on `.html` files, because\nline-suppression comments cannot be expressed in HTML; the `comment`\nfield carries `<!-- fallow-ignore-file complexity -->` and\n`placement` is `top-of-template`.",
           "$ref": "#/definitions/HealthFindingActionType"
         },
         "auto_fixable": {
@@ -3910,7 +3969,7 @@
       "properties": {
         "package_name": {
           "type": "string",
-          "description": "Package name, including internal workspace package names."
+          "description": "Package name, including internal workspace package names, that is\nimported but not listed in package.json."
         },
         "imported_from": {
           "type": "array",
@@ -4028,7 +4087,7 @@
       "properties": {
         "package_name": {
           "type": "string",
-          "description": "npm package name."
+          "description": "Production dependency that is only used via type-only imports."
         },
         "path": {
           "type": "string",
@@ -4064,7 +4123,7 @@
       "properties": {
         "package_name": {
           "type": "string",
-          "description": "npm package name."
+          "description": "Production dependency that is only imported by test files — consider\nmoving to devDependencies."
         },
         "path": {
           "type": "string",
@@ -4388,7 +4447,7 @@
           "description": "The right-hand side of the entry: the version pnpm should force."
         },
         "source": {
-          "description": "Where the override entry was declared.",
+          "description": "File the override was declared in. Matches the value users write in\n`ignoreDependencyOverrides[].source`.",
           "$ref": "#/definitions/DependencyOverrideSource"
         },
         "path": {
@@ -4447,7 +4506,7 @@
           "description": "The right-hand side of the entry, exactly as written. Empty when the\nvalue was missing."
         },
         "reason": {
-          "description": "Classifier for the misconfiguration.",
+          "description": "Classifier for the misconfiguration. 'unparsable-key' = the key is not a\nvalid pnpm shape; 'empty-value' = the value is missing, empty, or\ncontains line breaks.",
           "$ref": "#/definitions/DependencyOverrideMisconfigReason"
         },
         "source": {
@@ -4677,11 +4736,11 @@
         },
         "duplication_percentage": {
           "type": "number",
-          "description": "Percentage of duplicated lines (0.0 - 100.0). Computed BEFORE the\n`minOccurrences` filter so trend lines and threshold gates stay\nstable when the filter changes."
+          "description": "Percentage of duplicated lines (0.0 to 100.0). Always reflects the FULL\ncorpus, computed BEFORE the `minOccurrences` filter so trend lines and\n`threshold` gates stay stable when the filter changes."
         },
         "clone_groups_below_min_occurrences": {
           "type": "integer",
-          "description": "Number of clone groups hidden by the `minOccurrences` filter.\nAlways 0 when the filter is at its default of 2."
+          "description": "Number of clone groups hidden by `duplicates.minOccurrences`. Absent (or\n`0`) when the filter is at its default of `2` and nothing was hidden.\nPre-filter clone group count = `clone_groups +\nclone_groups_below_min_occurrences`."
         }
       },
       "required": [
@@ -5263,10 +5322,12 @@
       "type": "object",
       "properties": {
         "total_files": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Total number of discovered source files."
         },
         "total_exports": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Total number of exports across all files."
         },
         "dead_files": {
           "type": "integer"
@@ -5482,35 +5543,35 @@
           "items": {
             "$ref": "#/definitions/UnusedCatalogEntry"
           },
-          "description": "Entries in pnpm-workspace.yaml catalogs that no workspace package references."
+          "description": "Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not\nreferenced by any workspace package via the catalog: protocol."
         },
         "empty_catalog_groups": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/EmptyCatalogGroup"
           },
-          "description": "Empty named groups under pnpm-workspace.yaml's catalogs: section."
+          "description": "Named groups under pnpm-workspace.yaml's catalogs: section that declare\nno package entries. The top-level catalog: map is not reported."
         },
         "unresolved_catalog_references": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/UnresolvedCatalogReference"
           },
-          "description": "Workspace package.json references to pnpm catalogs that don't declare the package."
+          "description": "Workspace package.json references to catalogs (catalog: or\ncatalog:<name>) that do not declare the consumed package. pnpm install\nwill error until the named catalog grows to include the package or the\nreference is switched / removed."
         },
         "unused_dependency_overrides": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/UnusedDependencyOverride"
           },
-          "description": "Entries in pnpm `overrides:` / `pnpm.overrides` whose target package is not\ndeclared by any workspace package and not resolved in pnpm-lock.yaml."
+          "description": "Entries in pnpm-workspace.yaml's overrides: section, or package.json's\npnpm.overrides block, whose target package is not declared by any\nworkspace package and is not present in pnpm-lock.yaml. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases."
         },
         "misconfigured_dependency_overrides": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/MisconfiguredDependencyOverride"
           },
-          "description": "Entries in pnpm `overrides:` / `pnpm.overrides` whose key or value cannot be parsed."
+          "description": "pnpm.overrides entries whose key or value does not parse as a valid\noverride spec (empty key, empty value, malformed selector, unbalanced\nparent matcher). pnpm install will reject these. Default severity is\nerror."
         }
       },
       "required": [

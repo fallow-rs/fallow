@@ -786,7 +786,7 @@ fn augment_runtime_coverage_report(value: &mut Value) -> Result<(), String> {
             serde_json::json!({
                 "type": "string",
                 "enum": ["1"],
-                "description": "Runtime coverage JSON contract version. Independent of the top-level fallow JSON schema_version."
+                "description": "Runtime coverage JSON contract version. This is scoped to the runtime_coverage block and is independent of the top-level fallow JSON schema_version."
             }),
         );
     }

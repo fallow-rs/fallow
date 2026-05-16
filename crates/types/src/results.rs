@@ -81,20 +81,31 @@ pub struct AnalysisResults {
     /// Suppression comments or JSDoc tags that no longer match any issue.
     #[serde(default)]
     pub stale_suppressions: Vec<StaleSuppression>,
-    /// Entries in pnpm-workspace.yaml catalogs that no workspace package references.
+    /// Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not
+    /// referenced by any workspace package via the catalog: protocol.
     #[serde(default)]
     pub unused_catalog_entries: Vec<UnusedCatalogEntry>,
-    /// Empty named groups under pnpm-workspace.yaml's catalogs: section.
+    /// Named groups under pnpm-workspace.yaml's catalogs: section that declare
+    /// no package entries. The top-level catalog: map is not reported.
     #[serde(default)]
     pub empty_catalog_groups: Vec<EmptyCatalogGroup>,
-    /// Workspace package.json references to pnpm catalogs that don't declare the package.
+    /// Workspace package.json references to catalogs (catalog: or
+    /// catalog:<name>) that do not declare the consumed package. pnpm install
+    /// will error until the named catalog grows to include the package or the
+    /// reference is switched / removed.
     #[serde(default)]
     pub unresolved_catalog_references: Vec<UnresolvedCatalogReference>,
-    /// Entries in pnpm `overrides:` / `pnpm.overrides` whose target package is not
-    /// declared by any workspace package and not resolved in pnpm-lock.yaml.
+    /// Entries in pnpm-workspace.yaml's overrides: section, or package.json's
+    /// pnpm.overrides block, whose target package is not declared by any
+    /// workspace package and is not present in pnpm-lock.yaml. Default severity
+    /// is warn because projects without a readable lockfile fall back to
+    /// manifest-only checks; the hint field flags those conservative cases.
     #[serde(default)]
     pub unused_dependency_overrides: Vec<UnusedDependencyOverride>,
-    /// Entries in pnpm `overrides:` / `pnpm.overrides` whose key or value cannot be parsed.
+    /// pnpm.overrides entries whose key or value does not parse as a valid
+    /// override spec (empty key, empty value, malformed selector, unbalanced
+    /// parent matcher). pnpm install will reject these. Default severity is
+    /// error.
     #[serde(default)]
     pub misconfigured_dependency_overrides: Vec<MisconfiguredDependencyOverride>,
     /// Number of suppression entries that matched an issue during analysis.
@@ -527,7 +538,8 @@ pub struct UnresolvedImport {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnlistedDependency {
-    /// Package name, including internal workspace package names.
+    /// Package name, including internal workspace package names, that is
+    /// imported but not listed in package.json.
     pub package_name: String,
     /// Import sites where this unlisted dependency is used (file path, line, column).
     pub imported_from: Vec<ImportSite>,
@@ -575,7 +587,7 @@ pub struct DuplicateLocation {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TypeOnlyDependency {
-    /// npm package name.
+    /// Production dependency that is only used via type-only imports.
     pub package_name: String,
     /// Path to the package.json where the dependency is listed.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -719,7 +731,8 @@ pub struct UnusedDependencyOverride {
     pub version_constraint: Option<String>,
     /// The right-hand side of the entry: the version pnpm should force.
     pub version_range: String,
-    /// Where the override entry was declared.
+    /// File the override was declared in. Matches the value users write in
+    /// `ignoreDependencyOverrides[].source`.
     pub source: DependencyOverrideSource,
     /// Path to the source file. `pnpm-workspace.yaml` or a `package.json`,
     /// stored as an absolute filesystem path so `--changed-since` and
@@ -784,7 +797,9 @@ pub struct MisconfiguredDependencyOverride {
     /// The right-hand side of the entry, exactly as written. Empty when the
     /// value was missing.
     pub raw_value: String,
-    /// Classifier for the misconfiguration.
+    /// Classifier for the misconfiguration. 'unparsable-key' = the key is not a
+    /// valid pnpm shape; 'empty-value' = the value is missing, empty, or
+    /// contains line breaks.
     pub reason: DependencyOverrideMisconfigReason,
     /// Where the override entry was declared.
     pub source: DependencyOverrideSource,
@@ -802,7 +817,8 @@ pub struct MisconfiguredDependencyOverride {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TestOnlyDependency {
-    /// npm package name.
+    /// Production dependency that is only imported by test files — consider
+    /// moving to devDependencies.
     pub package_name: String,
     /// Path to the package.json where the dependency is listed.
     #[serde(serialize_with = "serde_path::serialize")]

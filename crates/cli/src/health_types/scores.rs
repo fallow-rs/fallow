@@ -57,12 +57,20 @@ pub const HEALTH_SCORE_FORMULA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+/// Project-level health score. Score = 100 minus available penalties from dead
+/// code, complexity, maintainability, hotspots, unused deps, circular deps,
+/// unit size, coupling, and duplication. Missing metrics do not penalize;
+/// --score computes the score and duplication penalty, while churn-backed
+/// hotspot penalties require hotspot analysis (--hotspots, or --targets with
+/// --score).
 pub struct HealthScore {
-    /// Formula version used to compute the score and penalties.
+    /// Health score formula version. Version 2 uses scale-invariant
+    /// density/tail metrics for monorepo-safe scoring.
     pub formula_version: u32,
-    /// Overall score (0–100, higher is better).
+    /// Overall score (0-100, higher is better). Reproducible: 100 -
+    /// sum(penalties) == score.
     pub score: f64,
-    /// Letter grade: A, B, C, D, or F.
+    /// Letter grade. A: score >= 85, B: 70-84, C: 55-69, D: 40-54, F: below 40.
     pub grade: &'static str,
     /// Per-component penalty breakdown. Shows what drove the score down.
     pub penalties: HealthScorePenalties,
@@ -75,35 +83,47 @@ pub struct HealthScore {
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthScorePenalties {
-    /// Points lost from dead files (max 15).
+    /// Points lost from dead files (max 15). Null if dead code pipeline not
+    /// run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dead_files: Option<f64>,
-    /// Points lost from dead exports (max 15).
+    /// Points lost from dead exports (max 15). Null if dead code pipeline not
+    /// run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dead_exports: Option<f64>,
-    /// Points lost from critical-complexity density (max 20).
+    /// Points lost from critical-complexity density (max 20). Older snapshots
+    /// without density fields fall back to average cyclomatic complexity above
+    /// 1.5.
     pub complexity: f64,
-    /// Points lost from legacy p90 cyclomatic complexity (0 for current scale-invariant runs).
+    /// Points lost from legacy p90 cyclomatic complexity above 10. Current
+    /// scale-invariant runs report 0 because tail complexity is folded into
+    /// complexity.
     pub p90_complexity: f64,
     /// Points lost from low maintainability index density (max 15).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub maintainability: Option<f64>,
-    /// Points lost from hotspot files (max 10).
+    /// Points lost from top-percentile hotspot density (max 10). Null if
+    /// hotspots not computed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hotspots: Option<f64>,
-    /// Points lost from unused dependency density (max 25).
+    /// Points lost from unused dependency density (max 25). Null if dead code
+    /// pipeline not run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unused_deps: Option<f64>,
-    /// Points lost from circular dependency density (max 25).
+    /// Points lost from circular dependency density (max 25). Null if dead code
+    /// pipeline not run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub circular_deps: Option<f64>,
-    /// Points lost from oversized-function density (max 10).
+    /// Points lost from oversized-function density (max 10). Null if no
+    /// functions analyzed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unit_size: Option<f64>,
-    /// Points lost from coupling concentration density (max 5).
+    /// Points lost from coupling concentration density (max 5). Null if file
+    /// scores not computed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coupling: Option<f64>,
-    /// Points lost from code duplication (max 10).
+    /// Points lost from code duplication (max 10). Penalty = min(max(0,
+    /// duplication_pct - 5) * 1, 10). Null if duplication pipeline not run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duplication: Option<f64>,
 }
@@ -185,7 +205,8 @@ impl CoverageTier {
 pub struct HealthFinding {
     /// Absolute file path.
     pub path: std::path::PathBuf,
-    /// Function name.
+    /// Function name, "<anonymous>" for unnamed functions/arrows, or
+    /// "<template>" for synthetic Angular template findings.
     pub name: String,
     /// 1-based line number.
     pub line: u32,
@@ -193,15 +214,18 @@ pub struct HealthFinding {
     pub col: u32,
     /// Cyclomatic complexity.
     pub cyclomatic: u16,
-    /// Cognitive complexity.
+    /// SonarSource cognitive complexity (structural + nesting penalty).
     pub cognitive: u16,
     /// Number of lines in the function.
     pub line_count: u32,
-    /// Number of parameters.
+    /// Number of parameters (excluding TypeScript's this parameter).
     pub param_count: u8,
-    /// Which threshold was exceeded.
+    /// Which threshold(s) this finding exceeds. `crap` and its combinations are
+    /// emitted when `max_crap_threshold` is crossed.
     pub exceeded: ExceededThreshold,
-    /// How far above the threshold: moderate (just above), high, or critical.
+    /// How far above the threshold: moderate (just above), high (recommended
+    /// for extraction), or critical (immediate extraction candidate). Defaults:
+    /// cognitive 25/40, cyclomatic 30/50.
     pub severity: FindingSeverity,
     /// CRAP score (`CC^2 * (1 - cov/100)^3 + CC`), rounded to one decimal.
     /// Present when the function also exceeded `--max-crap`, otherwise absent.
@@ -212,10 +236,12 @@ pub struct HealthFinding {
     /// otherwise absent (estimated model or unmatched functions).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coverage_pct: Option<f64>,
-    /// Bucketed coverage tier (`none`/`partial`/`high`) used to drive
-    /// action selection in JSON output. Present whenever CRAP triggered
-    /// the finding (Istanbul or estimated), absent for findings that only
-    /// exceeded cyclomatic/cognitive without CRAP context.
+    /// Bucketed coverage tier used to drive action selection. Present whenever
+    /// CRAP triggered the finding (Istanbul or estimated), absent otherwise.
+    /// `none` = coverage is at most 0% (file not test-reachable, or Istanbul
+    /// reports 0); `partial` = coverage is in `(0, 70)`; `high` = coverage is
+    /// at or above the high watermark (default `>= 70`, or the estimated 85%
+    /// band).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coverage_tier: Option<CoverageTier>,
 }
@@ -373,7 +399,7 @@ pub fn compute_finding_severity(
 pub struct LargeFunctionEntry {
     /// Absolute file path.
     pub path: std::path::PathBuf,
-    /// Function name.
+    /// Function name, or "<anonymous>" for unnamed functions/arrows.
     pub name: String,
     /// 1-based line number.
     pub line: u32,
@@ -389,22 +415,33 @@ pub struct HealthSummary {
     pub files_analyzed: usize,
     /// Total number of functions found.
     pub functions_analyzed: usize,
-    /// Number of functions above threshold.
+    /// Number of functions exceeding at least one threshold (before --top
+    /// truncation).
     pub functions_above_threshold: usize,
     /// Configured cyclomatic threshold.
     pub max_cyclomatic_threshold: u16,
     /// Configured cognitive threshold.
     pub max_cognitive_threshold: u16,
-    /// Configured CRAP threshold. Functions meeting or exceeding this score
-    /// are reported alongside complexity findings.
+    /// Configured CRAP (Change Risk Anti-Patterns) score threshold. Functions
+    /// meeting or exceeding this score appear as findings with the `crap` and
+    /// optional `coverage_pct` fields populated.
     pub max_crap_threshold: f64,
-    /// Number of files scored (only set with `--file-scores`).
+    /// Number of files with health scores. Only present when --file-scores is
+    /// used. 0 indicates the flag was set but scoring failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub files_scored: Option<usize>,
-    /// Average maintainability index across all scored files (only set with `--file-scores`).
+    /// Average maintainability index across all scored files (before --top
+    /// truncation). Only present when --file-scores is used and at least one
+    /// file was scored.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub average_maintainability: Option<f64>,
-    /// Coverage model used for CRAP computation (None when file scores not computed).
+    /// Coverage model used for CRAP score computation. 'static_estimated'
+    /// (default) uses per-function graph-based estimation from export
+    /// references: directly test-referenced = 85%, indirectly reachable = 40%,
+    /// untested = 0%. 'istanbul' uses real per-function statement coverage from
+    /// a coverage-final.json file (--coverage flag or auto-detected).
+    /// 'static_binary' is the legacy binary model. Only present when file
+    /// scores are computed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coverage_model: Option<CoverageModel>,
     /// Number of functions matched against Istanbul coverage data.
@@ -415,9 +452,11 @@ pub struct HealthSummary {
     /// Only present when `coverage_model` is `istanbul`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub istanbul_total: Option<usize>,
-    /// Number of findings with critical severity.
+    /// Number of findings with critical severity (cognitive >= 40 or cyclomatic
+    /// >= 50).
     pub severity_critical_count: usize,
-    /// Number of findings with high severity.
+    /// Number of findings with high severity (cognitive 25-39 or cyclomatic
+    /// 30-49).
     pub severity_high_count: usize,
     /// Number of findings with moderate severity.
     pub severity_moderate_count: usize,
@@ -491,11 +530,12 @@ pub struct FileHealthScore {
     pub function_count: usize,
     /// Total lines of code (from line_offsets).
     pub lines: u32,
-    /// Maximum CRAP score among functions in this file.
-    /// Computed via the active `CoverageModel`: `StaticEstimated` (default,
-    /// graph-based per-function estimate), `Istanbul` (real per-function
-    /// statement coverage from `--coverage`), or the legacy `StaticBinary`.
-    /// Formula: `CC^2 * (1 - cov/100)^3 + CC`.
+    /// Maximum CRAP score among functions in this file. Computed via the active
+    /// `coverage_model` per the canonical formula CC^2 * (1 - cov/100)^3 + CC
+    /// (Savoia & Evans, 2007). Coverage source: `static_estimated` (default,
+    /// graph-based per-function estimate), `istanbul` (real per-function
+    /// statement coverage from --coverage), or the legacy `static_binary`
+    /// (whole-file 0%/100%, retained for compatibility).
     pub crap_max: f64,
     /// Count of functions with CRAP >= 30 (CC >= 5 without test path).
     pub crap_above_threshold: usize,
@@ -554,7 +594,8 @@ pub struct HotspotEntry {
     pub complexity_density: f64,
     /// Number of files that import this file (blast radius).
     pub fan_in: usize,
-    /// Churn trend: accelerating, stable, or cooling.
+    /// Churn trend: accelerating (recent > 1.5× older), stable, or cooling
+    /// (recent < 0.67× older).
     pub trend: fallow_core::churn::ChurnTrend,
     /// Ownership signals (bus factor, contributors, declared owner, drift).
     /// Populated only when `--ownership` is requested.
@@ -570,8 +611,10 @@ pub struct HotspotEntry {
     pub is_test_path: bool,
 }
 
-/// Per-author summary emitted in [`OwnershipMetrics::top_contributor`] and
-/// [`OwnershipMetrics::recent_contributors`].
+/// Per-author contribution summary. The identifier is rendered per the
+/// configured ownership.emailMode (handle, hash, or raw); the format field
+/// discriminates the three so type-aware consumers can branch without
+/// re-parsing.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ContributorEntry {
@@ -614,8 +657,9 @@ pub enum ContributorIdentifierFormat {
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct OwnershipMetrics {
-    /// Avelino truck factor: minimum number of contributors covering at
-    /// least 50% of recency-weighted commits.
+    /// Avelino truck factor: minimum contributors covering at least 50% of
+    /// recency-weighted commits in the analysis window. Lower = higher
+    /// knowledge-loss risk.
     pub bus_factor: u32,
 
     /// Distinct authors in the analysis window after bot filtering.

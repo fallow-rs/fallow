@@ -217,7 +217,8 @@ pub struct RefactoringTarget {
     pub effort: EffortEstimate,
     /// Confidence in this recommendation based on data source reliability.
     pub confidence: Confidence,
-    /// Which metric values contributed to this recommendation.
+    /// Contributing factors that triggered this recommendation. Empty array
+    /// omitted from JSON.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub factors: Vec<ContributingFactor>,

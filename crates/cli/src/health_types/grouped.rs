@@ -28,9 +28,15 @@ use crate::health_types::{
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthGroup {
-    /// Group label.
+    /// Group identifier produced by the resolver. For 'package' grouping:
+    /// workspace package name (e.g. '@scope/app-a') or '(root)' for files
+    /// outside any workspace. For 'owner' grouping: the CODEOWNERS team. For
+    /// 'directory' grouping: the top-level directory prefix. For 'section'
+    /// grouping: the GitLab CODEOWNERS section name, or '(no section)' /
+    /// '(unowned)' for unmatched files.
     pub key: String,
-    /// Section default owners (`--group-by section` only).
+    /// Section default owners (GitLab CODEOWNERS `[Section] @owner1 @owner2`).
+    /// Present only when grouped_by is 'section'.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owners: Option<Vec<String>>,
     /// Files participating in this group after workspace and ignore filters.
@@ -40,10 +46,12 @@ pub struct HealthGroup {
     /// post-`--top` truncation. When `--top` was supplied this reflects the
     /// rendered finding count, not the un-truncated total.
     pub functions_above_threshold: usize,
-    /// Per-group vital signs (None when `--score-only` suppressed them).
+    /// Per-group vital signs recomputed from the files in this group. Absent
+    /// when --score-only suppressed top-level vital signs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vital_signs: Option<VitalSigns>,
-    /// Per-group health score (None when `--score` was not requested).
+    /// Per-group health score recomputed from the per-group vital signs. Absent
+    /// when --score was not requested.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health_score: Option<HealthScore>,
     /// Findings restricted to files in this group.

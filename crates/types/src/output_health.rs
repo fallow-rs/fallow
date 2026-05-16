@@ -32,7 +32,32 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthFindingAction {
-    /// Action type identifier. Kebab-case per the JSON output contract.
+    /// Action type identifier. A single finding's `actions` array can carry
+    /// MULTIPLE entries of different types: e.g., a finding that exceeded
+    /// both cyclomatic and CRAP at `coverage_tier`: partial will get BOTH
+    /// `increase-coverage` AND `refactor-function`, plus `suppress-line`.
+    /// Consumers that select a single action should treat the FIRST
+    /// non-`suppress-{line,file}` action as primary. `add-tests` is emitted
+    /// when CRAP triggered the finding, the function has no test coverage
+    /// (`coverage_tier`: none), and full coverage can bring CRAP below
+    /// `max_crap_threshold` (cyclomatic < threshold, since CRAP bottoms out
+    /// at CC at 100% coverage). `increase-coverage` is emitted when CRAP
+    /// triggered the finding, some coverage exists (`coverage_tier`: partial
+    /// or high), and full coverage can bring CRAP below `max_crap_threshold`;
+    /// the description steers toward targeted branch coverage rather than
+    /// scaffolding new tests. `refactor-function` is emitted when
+    /// cyclomatic/cognitive triggered the finding, when full coverage still
+    /// cannot bring CRAP below `max_crap_threshold` (cyclomatic >=
+    /// threshold), or as a secondary action when cyclomatic is within 5 of
+    /// the cyclomatic threshold AND cognitive is at or above
+    /// `max_cognitive_threshold / 2` (the cognitive floor suppresses false
+    /// positives on flat type-tag dispatchers and JSX render maps where
+    /// high cyclomatic comes from a single switch with near-zero cognitive
+    /// load). `suppress-file` is emitted instead of `suppress-line` for
+    /// synthetic Angular `<template>` findings on `.html` files, because
+    /// line-suppression comments cannot be expressed in HTML; the `comment`
+    /// field carries `<!-- fallow-ignore-file complexity -->` and
+    /// `placement` is `top-of-template`.
     #[serde(rename = "type")]
     pub kind: HealthFindingActionType,
     /// Whether `fallow fix` can auto-apply this action. Today every health

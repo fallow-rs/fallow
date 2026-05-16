@@ -118,9 +118,11 @@ pub struct DefaultIgnoreSkips {
 #[derive(Debug, Clone, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DuplicationReport {
-    /// All detected clone groups.
+    /// All detected clone groups. Each group contains 2+ instances of identical
+    /// or near-identical code.
     pub clone_groups: Vec<CloneGroup>,
-    /// Clone families: groups of clone groups sharing the same file set.
+    /// Clone families: groups of clone groups sharing the same file set,
+    /// indicating systematic duplication patterns.
     pub clone_families: Vec<CloneFamily>,
     /// Detected mirrored directory trees (directories with many identical files).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -202,12 +204,14 @@ pub struct DuplicationStats {
     /// Total clone instances across all reported groups. Matches the sum of
     /// `clone_groups[].locations[].length` post `minOccurrences` filtering.
     pub clone_instances: usize,
-    /// Percentage of duplicated lines (0.0 - 100.0). Computed BEFORE the
-    /// `minOccurrences` filter so trend lines and threshold gates stay
-    /// stable when the filter changes.
+    /// Percentage of duplicated lines (0.0 to 100.0). Always reflects the FULL
+    /// corpus, computed BEFORE the `minOccurrences` filter so trend lines and
+    /// `threshold` gates stay stable when the filter changes.
     pub duplication_percentage: f64,
-    /// Number of clone groups hidden by the `minOccurrences` filter.
-    /// Always 0 when the filter is at its default of 2.
+    /// Number of clone groups hidden by `duplicates.minOccurrences`. Absent (or
+    /// `0`) when the filter is at its default of `2` and nothing was hidden.
+    /// Pre-filter clone group count = `clone_groups +
+    /// clone_groups_below_min_occurrences`.
     #[serde(default, skip_serializing_if = "is_zero_usize")]
     pub clone_groups_below_min_occurrences: usize,
 }

@@ -1,6 +1,7 @@
 //! Trend types — comparing current run against a saved snapshot.
 
-/// Health trend comparison: current run vs. a previous snapshot.
+/// Trend comparison between the current run and a previous snapshot. Shows
+/// per-metric deltas with directional indicators.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthTrend {

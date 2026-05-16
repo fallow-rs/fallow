@@ -245,25 +245,33 @@ pub struct AuditOutput {
     pub head_sha: Option<String>,
     /// Analysis duration in milliseconds.
     pub elapsed_ms: ElapsedMs,
-    /// Only emitted when `--performance` is set. `true` means audit reused
-    /// the current run's keys as the base snapshot (the docs-only-diff
-    /// fast path); `false` means the regular base worktree analysis ran.
+    /// Only emitted when --performance is set. true means audit reused the
+    /// current run's keys as the base snapshot because every changed file was
+    /// either a non-behavioral doc or token-equivalent at the base ref (the
+    /// docs-only-diff fast path); false means the regular base worktree
+    /// analysis ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_snapshot_skipped: Option<bool>,
     /// Per-category summary counts.
     pub summary: AuditSummary,
     /// Counts split by whether each finding was introduced by the current
-    /// changeset or already existed at the base ref.
+    /// changeset or already existed at the base ref. The default audit gate is
+    /// new-only, so inherited findings are context. With audit.gate or --gate
+    /// set to all, audit skips the extra base-snapshot attribution pass and
+    /// these counts stay zero.
     pub attribution: AuditAttribution,
-    /// Full dead-code results. Absent when no changed files.
+    /// Full dead code results (omitted if no changed files). Issue objects
+    /// include introduced: true/false when audit can compare against the base
+    /// ref.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dead_code: Option<CheckOutput>,
-    /// Full duplication results (bare body, not the full `DupesOutput`
-    /// envelope). Absent when no changed files.
+    /// Full duplication results (omitted if no changed files). Clone groups
+    /// include introduced: true/false when audit can compare against the base
+    /// ref.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duplication: Option<DuplicationReport>,
-    /// Full complexity results (bare body, not the full `HealthOutput`
-    /// envelope). Absent when no changed files.
+    /// Full complexity results (omitted if no changed files). Findings include
+    /// introduced: true/false when audit can compare against the base ref.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub complexity: Option<HealthReport>,
 }
@@ -354,7 +362,8 @@ pub struct DupesOutput {
     pub total_issues: Option<usize>,
     /// Per-group buckets when `--group-by` is active. Each clone group is
     /// attributed to its largest-owner key (most instances; alphabetical
-    /// tiebreak).
+    /// tiebreak). Sort: most clone groups first, then alphabetical, with
+    /// `(unowned)` pinned last.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groups: Option<serde_json::Value>,
     /// `_meta` block with metric / rule definitions, emitted when `--explain`
@@ -388,7 +397,8 @@ pub struct CheckOutput {
     /// the metadata block; absent in synthesised fixtures.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry_points: Option<EntryPoints>,
-    /// Per-category issue counts. Always present in real runs.
+    /// Per-category issue counts. Always present. When --summary is used,
+    /// individual issue arrays are omitted.
     pub summary: CheckSummary,
     /// All issue arrays flattened in from `AnalysisResults`.
     #[serde(flatten)]
@@ -431,7 +441,10 @@ pub struct CheckGroupedOutput {
     pub version: ToolVersion,
     /// Analysis duration in milliseconds.
     pub elapsed_ms: ElapsedMs,
-    /// The grouping strategy used.
+    /// The grouping strategy used. 'owner' groups by CODEOWNERS team,
+    /// 'directory' groups by top-level directory prefix, 'package' groups by
+    /// workspace package name, 'section' groups by GitLab CODEOWNERS
+    /// `[Section]` header name.
     pub grouped_by: GroupByMode,
     /// Total number of issues across all groups.
     pub total_issues: usize,
@@ -493,8 +506,10 @@ pub struct HealthOutput {
     /// a single object.
     #[serde(flatten)]
     pub report: HealthReport,
-    /// Resolver mode used when `--group-by` is active. Absent on ungrouped
-    /// output.
+    /// Resolver mode used when --group-by is active. Present only on grouped
+    /// output. The top-level `vital_signs`, `health_score`, and `summary` keep
+    /// the active run scope (for example after --workspace); per-group versions
+    /// live inside each entry of `groups`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grouped_by: Option<GroupByMode>,
     /// Per-group health output, present only when `--group-by` is active.

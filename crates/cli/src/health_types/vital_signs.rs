@@ -28,6 +28,7 @@ pub struct VitalSigns {
     /// Average cyclomatic complexity across all functions.
     pub avg_cyclomatic: f64,
     /// Percentage of functions at or above the critical cyclomatic threshold.
+    /// Used by the scale-invariant health score.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub critical_complexity_pct: Option<f64>,
     /// 90th percentile cyclomatic complexity.
@@ -44,19 +45,22 @@ pub struct VitalSigns {
     /// Average maintainability index across all scored files (0–100).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub maintainability_avg: Option<f64>,
-    /// Percentage of scored files with maintainability index below 70.
+    /// Percentage of scored files with maintainability index below 70. Null if
+    /// file scores were not computed.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub maintainability_low_pct: Option<f64>,
     /// Number of unused dependencies (dependencies + devDependencies + optional).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unused_dep_count: Option<u32>,
-    /// Unused dependencies per 1,000 files.
+    /// Unused dependencies per 1,000 files. Null if dead code analysis did not
+    /// run.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub unused_deps_per_k_files: Option<f64>,
     /// Number of circular dependency chains.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub circular_dep_count: Option<u32>,
-    /// Circular dependency chains per 1,000 files.
+    /// Circular dependency chains per 1,000 files. Null if dead code analysis
+    /// did not run.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub circular_deps_per_k_files: Option<f64>,
     /// Raw counts backing the percentages (for orientation header display).
@@ -65,13 +69,15 @@ pub struct VitalSigns {
     /// Function size risk profile: percentage of functions in each size bin.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub unit_size_profile: Option<RiskProfile>,
-    /// Functions above 60 LOC per 1,000 functions.
+    /// Functions above 60 LOC per 1,000 functions. Null if no functions
+    /// analyzed.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub functions_over_60_loc_per_k: Option<f64>,
     /// Parameter count risk profile: percentage of functions in each param bin.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub unit_interfacing_profile: Option<RiskProfile>,
-    /// 95th percentile fan-in across all files.
+    /// 95th percentile fan-in across all files. Null if file scores not
+    /// computed.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub p95_fan_in: Option<u32>,
     /// Percentage of files with fan-in above the project's p95 threshold.
@@ -113,7 +119,9 @@ pub struct RiskProfile {
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct VitalSignsCounts {
+    /// Total number of discovered source files.
     pub total_files: usize,
+    /// Total number of exports across all files.
     pub total_exports: usize,
     pub dead_files: usize,
     pub dead_exports: usize,
