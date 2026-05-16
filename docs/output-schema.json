@@ -475,8 +475,6 @@
         },
         "total_issues": {
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
           "description": "Total number of issues found across all categories."
         },
         "entry_points": {
@@ -738,8 +736,6 @@
         },
         "total_issues": {
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
           "description": "Total number of issues across all groups."
         },
         "groups": {
@@ -791,8 +787,6 @@
         },
         "total_issues": {
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
           "description": "Total number of issues in this group."
         },
         "unused_files": {
@@ -2189,8 +2183,6 @@
         },
         "functions_analyzed": {
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
           "description": "Total number of functions found."
         },
         "functions_above_threshold": {
@@ -2287,8 +2279,6 @@
         },
         "line": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "1-based line number."
         },
         "col": {
@@ -2407,8 +2397,6 @@
         },
         "fan_in": {
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
           "description": "Number of files that import this file."
         },
         "fan_out": {
@@ -2437,8 +2425,6 @@
         },
         "function_count": {
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
           "description": "Number of functions in this file."
         },
         "lines": {
@@ -2487,7 +2473,6 @@
         },
         "weighted_commits": {
           "type": "number",
-          "format": "double",
           "description": "Recency-weighted commit count (exponential decay, half-life 90 days)."
         },
         "lines_added": {
@@ -2504,8 +2489,6 @@
         },
         "fan_in": {
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
           "description": "Number of files that import this file (blast radius)."
         },
         "trend": {
@@ -2650,20 +2633,14 @@
         },
         "min_commits": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "Minimum commits threshold."
         },
         "files_analyzed": {
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
           "description": "Number of files with churn data meeting the threshold."
         },
         "files_excluded": {
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
           "description": "Number of files excluded (below min_commits)."
         },
         "shallow_clone": {
@@ -3387,8 +3364,8 @@
           "$ref": "#/definitions/SuppressLineKind"
         },
         "auto_fixable": {
-          "description": "Always false for suppress actions.",
-          "$ref": "#/definitions/SuppressAutoFixable"
+          "type": "boolean",
+          "description": "Always false for suppress actions."
         },
         "description": {
           "type": "string",
@@ -3426,8 +3403,8 @@
           "$ref": "#/definitions/SuppressFileKind"
         },
         "auto_fixable": {
-          "description": "Always false for suppress actions.",
-          "$ref": "#/definitions/SuppressAutoFixable"
+          "type": "boolean",
+          "description": "Always false for suppress actions."
         },
         "description": {
           "type": "string",
@@ -3727,14 +3704,10 @@
         },
         "col": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "0-based byte column offset."
         },
         "span_start": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "Byte offset into the source file (used by the fix command)."
         },
         "is_re_export": {
@@ -3785,8 +3758,6 @@
         },
         "col": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "0-based byte column offset."
         },
         "span_start": {
@@ -3832,8 +3803,6 @@
         },
         "line": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "1-based line number of the dependency entry in package.json."
         },
         "used_in_workspaces": {
@@ -3884,14 +3853,10 @@
         },
         "line": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "1-based line number."
         },
         "col": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "0-based byte column offset."
         },
         "actions": {
@@ -3929,14 +3894,10 @@
         },
         "line": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "1-based line number."
         },
         "col": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "0-based byte column offset of the import statement."
         },
         "specifier_col": {
@@ -4005,14 +3966,10 @@
         },
         "line": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "1-based line number."
         },
         "col": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "0-based byte column offset."
         }
       },
@@ -4064,14 +4021,10 @@
         },
         "line": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "1-based line number."
         },
         "col": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "0-based byte column offset."
         }
       },
@@ -4095,8 +4048,6 @@
         },
         "line": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "1-based line number of the dependency entry in package.json."
         },
         "actions": {
@@ -4131,8 +4082,6 @@
         },
         "line": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "1-based line number of the dependency entry in package.json."
         },
         "actions": {
@@ -4166,8 +4115,6 @@
         },
         "length": {
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
           "description": "Number of files in the cycle."
         },
         "line": {
@@ -4176,10 +4123,7 @@
         },
         "col": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
-          "description": "0-based byte column offset of the import that starts the cycle.",
-          "default": 0
+          "description": "0-based byte column offset of the import that starts the cycle."
         },
         "is_cross_package": {
           "type": "boolean",
@@ -4234,8 +4178,6 @@
         },
         "col": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "0-based byte column offset of the import statement."
         },
         "actions": {
@@ -4274,8 +4216,6 @@
         },
         "col": {
           "type": "integer",
-          "format": "uint32",
-          "minimum": 0,
           "description": "0-based byte column offset."
         },
         "origin": {
@@ -4589,26 +4529,18 @@
         },
         "start_line": {
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
           "description": "1-based start line of the clone."
         },
         "end_line": {
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
           "description": "1-based end line of the clone."
         },
         "start_col": {
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
           "description": "0-based start column."
         },
         "end_col": {
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
           "description": "0-based end column."
         },
         "fragment": {

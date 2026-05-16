@@ -448,17 +448,8 @@ export type ReviewReconcileSchema = "fallow-review-reconcile/v1"
  * drift test enforces the alignment.
  */
 export interface CombinedOutput {
-/**
- * Schema version for this output format.
- */
 schema_version: SchemaVersion
-/**
- * Fallow tool version that produced this output.
- */
 version: ToolVersion
-/**
- * Analysis duration in milliseconds.
- */
 elapsed_ms: ElapsedMs
 /**
  * Dead-code analysis sub-envelope. Absent when `--skip check`.
@@ -487,17 +478,8 @@ health?: (HealthReport | null)
  * JSON layer always emits.
  */
 export interface CheckOutput {
-/**
- * Schema version for this output format.
- */
 schema_version: SchemaVersion
-/**
- * Fallow tool version that produced this output.
- */
 version: ToolVersion
-/**
- * Analysis duration in milliseconds.
- */
 elapsed_ms: ElapsedMs
 /**
  * Total number of issues found across all categories.
@@ -791,7 +773,10 @@ available_in_catalogs?: (string[] | null)
  */
 export interface SuppressLineAction {
 type: SuppressLineKind
-auto_fixable: SuppressAutoFixable
+/**
+ * Always false for suppress actions.
+ */
+auto_fixable: boolean
 /**
  * Human-readable description of the suppression.
  */
@@ -815,7 +800,10 @@ scope?: (SuppressLineScope | null)
  */
 export interface SuppressFileAction {
 type: SuppressFileKind
-auto_fixable: SuppressAutoFixable
+/**
+ * Always false for suppress actions.
+ */
+auto_fixable: boolean
 /**
  * Human-readable description of the suppression.
  */
@@ -1627,9 +1615,6 @@ clone_families: CloneFamily[]
  * Detected mirrored directory trees (directories with many identical files).
  */
 mirrored_directories?: MirroredDirectory[]
-/**
- * Aggregate statistics.
- */
 stats: DuplicationStats
 }
 /**
@@ -1861,9 +1846,6 @@ export interface HealthReport {
  * thresholds, sorted by the --sort criteria.
  */
 findings: HealthFinding[]
-/**
- * Summary statistics.
- */
 summary: HealthSummary
 /**
  * Project-wide vital signs (always computed from available data).
@@ -2444,9 +2426,6 @@ crap_above_threshold: number
  * and exports with no test dependency path.
  */
 export interface CoverageGaps {
-/**
- * Summary metrics for the current analysis scope.
- */
 summary: CoverageGapSummary
 /**
  * Runtime files with no test dependency path.
@@ -3465,17 +3444,8 @@ scope: string
  * `CheckOutput` body, plus per-group `key` / `owners` / `total_issues`.
  */
 export interface CheckGroupedOutput {
-/**
- * Schema version for this output format.
- */
 schema_version: SchemaVersion
-/**
- * Fallow tool version that produced this output.
- */
 version: ToolVersion
-/**
- * Analysis duration in milliseconds.
- */
 elapsed_ms: ElapsedMs
 grouped_by: GroupByMode
 /**
@@ -3814,17 +3784,8 @@ actions_meta?: (HealthActionsMeta | null)
  * drops them.
  */
 export interface DupesOutput {
-/**
- * Schema version for this output format.
- */
 schema_version: SchemaVersion
-/**
- * Fallow tool version that produced this output.
- */
 version: ToolVersion
-/**
- * Analysis duration in milliseconds.
- */
 elapsed_ms: ElapsedMs
 /**
  * All detected clone groups. Each group contains 2+ instances of identical
@@ -4226,9 +4187,6 @@ export interface GitLabReviewComment {
  * Markdown body of the comment.
  */
 body: string
-/**
- * Position block describing where the comment attaches on the diff.
- */
 position: GitLabReviewPosition
 /**
  * Stable fingerprint for the comment.
