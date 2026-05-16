@@ -57,16 +57,16 @@ pub mod explain;
 mod health;
 /// Health / complexity analysis report types.
 pub mod health_types;
-/// Typed envelope structs for the JSON output contract. Live here rather
-/// than in `fallow-types` because the body fields reach into `fallow-core`
-/// and into this crate's own `health_types`.
-pub mod output_envelope;
 #[allow(
     dead_code,
     unused_imports,
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
 mod license;
+/// Typed envelope structs for the JSON output contract. Live here rather
+/// than in `fallow-types` because the body fields reach into `fallow-core`
+/// and into this crate's own `health_types`.
+pub mod output_envelope;
 
 /// Programmatic Rust API reused by the NAPI bindings.
 pub mod programmatic;

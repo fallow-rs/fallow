@@ -169,8 +169,13 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     boundary_violations: filtered.boundary_violations?.length ?? 0,
     stale_suppressions: filtered.stale_suppressions?.length ?? 0,
     unused_catalog_entries: filtered.unused_catalog_entries?.length ?? 0,
+    empty_catalog_groups: filtered.empty_catalog_groups?.length ?? 0,
     unresolved_catalog_references:
       filtered.unresolved_catalog_references?.length ?? 0,
+    unused_dependency_overrides:
+      filtered.unused_dependency_overrides?.length ?? 0,
+    misconfigured_dependency_overrides:
+      filtered.misconfigured_dependency_overrides?.length ?? 0,
   };
   return {
     ...filtered,

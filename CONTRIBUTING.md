@@ -93,9 +93,9 @@ The schema covers two layers, with different ownership rules:
 
 ### Layer 1: types derived from Rust
 
-The per-finding structs in `crates/types/src/results.rs` and `crates/core/src/duplicates/types.rs`, the JSON-layer augmentation types in `crates/types/src/output.rs`, the per-finding action wrappers in `crates/types/src/output_health.rs`, and the health output subtree in `crates/cli/src/health_types/` carry `#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]`. The full list of derived definitions is `derived_definition_names()` in `crates/cli/src/bin/schema_emit.rs`.
+The per-finding structs in `crates/types/src/results.rs` and `crates/core/src/duplicates/types.rs`, the JSON-layer augmentation types in `crates/types/src/output.rs`, the per-finding action wrappers in `crates/types/src/output_health.rs`, the health output subtree in `crates/cli/src/health_types/`, the shared envelope and utility shapes in `crates/types/src/envelope.rs`, and the per-command envelope structs in `crates/cli/src/output_envelope.rs` all carry `#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]`. The full list of derived definitions is `derived_definition_names()` in `crates/cli/src/bin/schema_emit.rs`.
 
-The health types live on `fallow-cli` (the binary crate) rather than `fallow-types`, so deriving `JsonSchema` on them required a sibling `schema` cargo feature on `fallow-cli`. The `schema-emit` feature now depends on `fallow-cli/schema` alongside `fallow-types/schema` + `fallow-core/schema`, so a single `cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit` covers the whole tree.
+The health and envelope types live on `fallow-cli` (the binary crate) rather than `fallow-types`, so deriving `JsonSchema` on them required a sibling `schema` cargo feature on `fallow-cli`. The `schema-emit` feature now depends on `fallow-cli/schema` alongside `fallow-types/schema` + `fallow-core/schema`, so a single `cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit` covers the whole tree.
 
 A drift gate (`cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit`) compares the derived shape against the committed `docs/output-schema.json` and fails when:
 - a Rust struct gains a field that is missing from the schema,
@@ -116,10 +116,9 @@ A strict structural gate (`#[ignore]`d for now, runs with `-- --ignored`) covers
 Until a follow-up migrates them, these sections of `docs/output-schema.json` stay hand-maintained:
 
 - Top-level metadata (`$schema`, `title`, `oneOf`)
-- Envelope definitions: `CombinedOutput`, `CheckOutput`, `CheckGroupedOutput`, `DupesOutput`, `HealthOutput`, `AuditOutput`, `ExplainOutput`, `CoverageSetupOutput`, `CodeClimateOutput`, `ReviewEnvelopeOutput`, `ReviewReconcileOutput`
-- Utility types: `SchemaVersion`, `ToolVersion`, `ElapsedMs`, `Meta`, `EntryPoints`, `BaselineDeltas`, `BaselineMatch`, `RegressionResult`, `AuditIntroduced`, `CheckSummary`
+- Out-of-scope sub-shapes referenced by typed envelopes via `$ref` (e.g. `CombinedOutput.dupes` / `audit.duplication` still point at `DupesOutput`, though the wire emits the bare `DuplicationReport` body)
 
-If you add a new finding type or change one in scope (per-finding result struct, duplication subtype, health output struct, health action wrapper), the Rust derive is the source of truth: the drift gate forces the schema to follow. If you add a new envelope, update `docs/output-schema.json` directly and add a follow-up issue to migrate that type into Rust derives.
+If you add a new finding type, envelope, or utility shape, derive `JsonSchema` on the matching Rust struct, register it in `derived_definition_names()`, and the drift gate forces the schema to follow. Adding a new envelope means adding a new file under `crates/cli/src/output_envelope.rs` and adding the type to the top-level `oneOf` in `docs/output-schema.json`.
 
 ### After editing the schema
 

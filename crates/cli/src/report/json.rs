@@ -2167,8 +2167,7 @@ mod tests {
             groups: None,
             meta: None,
         };
-        let mut output =
-            serde_json::to_value(&envelope).expect("should serialize health envelope");
+        let mut output = serde_json::to_value(&envelope).expect("should serialize health envelope");
         strip_root_prefix(&mut output, "/project/");
         inject_runtime_coverage_schema_version(&mut output);
         inject_health_actions(&mut output, HealthActionOptions::default());

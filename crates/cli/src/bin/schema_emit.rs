@@ -42,15 +42,16 @@ use fallow_cli::health_types::{
     VitalSignsCounts,
 };
 use fallow_cli::output_envelope::{
-    AuditCommand, AuditOutput, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CodeClimateIssue,
-    CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation, CodeClimateOutput,
-    CodeClimateSeverity, CombinedOutput, CoverageSetupFileToEdit, CoverageSetupFramework,
-    CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
+    AuditCommand, AuditOutput, CheckGroupedEntry, CheckGroupedOutput, CheckOutput,
+    CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
+    CodeClimateOutput, CodeClimateSeverity, CombinedOutput, CoverageSetupFileToEdit,
+    CoverageSetupFramework, CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
     CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion, CoverageSetupSnippet, DupesOutput,
-    ExplainOutput, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
-    GitLabReviewPositionType, GroupByMode, HealthOutput, ReviewCheckConclusion, ReviewComment,
-    ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema,
-    ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema,
+    ExplainOutput, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
+    GitLabReviewPosition, GitLabReviewPositionType, GroupByMode, HealthOutput,
+    ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta,
+    ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewProvider, ReviewReconcileOutput,
+    ReviewReconcileSchema,
 };
 use fallow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,

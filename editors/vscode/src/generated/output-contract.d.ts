@@ -109,10 +109,10 @@ unresolved_imports: UnresolvedImport[]
 unlisted_dependencies: UnlistedDependency[]
 duplicate_exports: DuplicateExport[]
 type_only_dependencies: TypeOnlyDependency[]
-test_only_dependencies: TestOnlyDependency[]
+test_only_dependencies?: TestOnlyDependency[]
 circular_dependencies: CircularDependency[]
-boundary_violations: BoundaryViolation[]
-stale_suppressions: StaleSuppression[]
+boundary_violations?: BoundaryViolation[]
+stale_suppressions?: StaleSuppression[]
 /**
  * Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not referenced by any workspace package via the catalog: protocol.
  */
@@ -134,7 +134,7 @@ unused_dependency_overrides?: UnusedDependencyOverride[]
  */
 misconfigured_dependency_overrides?: MisconfiguredDependencyOverride[]
 entry_points?: EntryPoints
-summary?: CheckSummary
+summary: CheckSummary
 baseline_deltas?: BaselineDeltas
 baseline?: BaselineMatch
 regression?: RegressionResult
@@ -752,28 +752,30 @@ sources: {
 }
 }
 /**
- * Per-category issue counts for dead code analysis.
+ * Per-category issue counts for dead code analysis. `unused_dependencies` is the combined count across `dependencies`, `devDependencies`, and `optionalDependencies`; the per-section breakdown lives in the individual issue arrays on `CheckOutput`.
  */
 export interface CheckSummary {
-unused_files?: number
-unused_exports?: number
-unused_types?: number
-private_type_leaks?: number
-unused_dependencies?: number
-unused_dev_dependencies?: number
-unused_enum_members?: number
-unused_class_members?: number
-unresolved_imports?: number
-unlisted_dependencies?: number
-duplicate_exports?: number
-circular_dependencies?: number
-boundary_violations?: number
-stale_suppressions?: number
-unused_catalog_entries?: number
-empty_catalog_groups?: number
-unresolved_catalog_references?: number
-unused_dependency_overrides?: number
-misconfigured_dependency_overrides?: number
+total_issues: number
+unused_files: number
+unused_exports: number
+unused_types: number
+private_type_leaks: number
+unused_dependencies: number
+unused_enum_members: number
+unused_class_members: number
+unresolved_imports: number
+unlisted_dependencies: number
+duplicate_exports: number
+type_only_dependencies: number
+test_only_dependencies: number
+circular_dependencies: number
+boundary_violations: number
+stale_suppressions: number
+unused_catalog_entries: number
+empty_catalog_groups: number
+unresolved_catalog_references: number
+unused_dependency_overrides: number
+misconfigured_dependency_overrides: number
 }
 /**
  * Per-category delta comparison against a saved baseline. Shows current count, baseline count, and delta for each category.
@@ -907,6 +909,10 @@ mirrored_directories?: MirroredDirectory[]
  * Resolver mode used for partitioning. Present only when `--group-by` is active.
  */
 grouped_by?: ("owner" | "directory" | "package" | "section")
+/**
+ * Total clone groups across all buckets when `--group-by` is active. Mirrors the grouped check / health envelopes so MCP and CI consumers can read the same key across commands.
+ */
+total_issues?: number
 /**
  * Per-group buckets when `--group-by` is active. Each clone group is attributed to its largest-owner key (most instances; alphabetical tiebreak). Sort: most clone groups first, then alphabetical, with `(unowned)` pinned last.
  */
@@ -2519,10 +2525,15 @@ unresolved_imports: UnresolvedImport[]
 unlisted_dependencies: UnlistedDependency[]
 duplicate_exports: DuplicateExport[]
 type_only_dependencies: TypeOnlyDependency[]
-test_only_dependencies: TestOnlyDependency[]
+test_only_dependencies?: TestOnlyDependency[]
 circular_dependencies: CircularDependency[]
-boundary_violations: BoundaryViolation[]
+boundary_violations?: BoundaryViolation[]
 stale_suppressions?: StaleSuppression[]
+unused_catalog_entries?: UnusedCatalogEntry[]
+empty_catalog_groups?: EmptyCatalogGroup[]
+unresolved_catalog_references?: UnresolvedCatalogReference[]
+unused_dependency_overrides?: UnusedDependencyOverride[]
+misconfigured_dependency_overrides?: MisconfiguredDependencyOverride[]
 }
 /**
  * Audit output combining dead code, complexity, and duplication scoped to changed files. Returns a verdict (pass/warn/fail) with per-category summary, optional new-vs-inherited attribution, and full sub-results.
@@ -2620,7 +2631,7 @@ schema_version: "1"
  * Primary detected runtime framework. For workspaces this mirrors the first emitted runtime member; unknown means no runtime member was detected.
  */
 framework_detected: ("nextjs" | "nestjs" | "nuxt" | "sveltekit" | "astro" | "remix" | "vite" | "plain_node" | "unknown")
-package_manager: ("npm" | "pnpm" | "yarn" | "bun" | null)
+package_manager?: ("npm" | "pnpm" | "yarn" | "bun" | null)
 /**
  * Union of runtime targets across emitted members.
  */
@@ -2629,7 +2640,7 @@ runtime_targets: ("node" | "browser")[]
  * Per-runtime-workspace setup recipes. Pure aggregator roots and build-only library packages are omitted.
  */
 members: CoverageSetupMember[]
-config_written: null
+config_written?: null
 commands: string[]
 /**
  * Compatibility copy of the primary member's files, with workspace prefixes when the primary member is not the root.
@@ -2639,7 +2650,7 @@ files_to_edit: CoverageSetupFileToEdit[]
  * Compatibility copy of the primary member's snippets, with workspace prefixes when the primary member is not the root.
  */
 snippets: CoverageSetupSnippet[]
-dockerfile_snippet: (string | null)
+dockerfile_snippet?: (string | null)
 next_steps: string[]
 warnings: string[]
 /**
@@ -2656,11 +2667,11 @@ name: string
  */
 path: string
 framework_detected: ("nextjs" | "nestjs" | "nuxt" | "sveltekit" | "astro" | "remix" | "vite" | "plain_node" | "unknown")
-package_manager: ("npm" | "pnpm" | "yarn" | "bun" | null)
+package_manager?: ("npm" | "pnpm" | "yarn" | "bun" | null)
 runtime_targets: ("node" | "browser")[]
 files_to_edit: CoverageSetupFileToEdit[]
 snippets: CoverageSetupSnippet[]
-dockerfile_snippet: (string | null)
+dockerfile_snippet?: (string | null)
 warnings: string[]
 }
 export interface CoverageSetupFileToEdit {
@@ -2729,7 +2740,7 @@ new_line: number
 export interface ReviewReconcileOutput {
 schema: "fallow-review-reconcile/v1"
 provider: ("github" | "gitlab")
-target: (string | null)
+target?: (string | null)
 dry_run: boolean
 comments: number
 current_fingerprints: number
