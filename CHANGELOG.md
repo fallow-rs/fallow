@@ -38,7 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Istanbul `--coverage` now matches functions written as multiline typed async arrows.** Istanbul producers (Jest, nyc, c8, babel-plugin-istanbul) are inconsistent about `FnEntry.line`: some emit the declaration line, others the body start. Fallow extracts function positions at the declaration, so multiline TS signatures like `export const elementsFrom = async (...): Promise<T> => {...}` lost their coverage match whenever the producer pointed `line` at the body. The loader now indexes both the producer's effective line and the declaration start as aliases so lookups by declaration position resolve through the exact and name-fuzzy paths, and the anonymous-by-position fallback is guarded by a column-distance cap so the new aliases never credit unrelated functions sitting above a multiline arrow. (Closes [#370](https://github.com/fallow-rs/fallow/issues/370). Thanks [@Guria](https://github.com/Guria) for the report.)
 
->>>>>>> origin/main
 ## [2.74.0] - 2026-05-14
 
 ### Added
