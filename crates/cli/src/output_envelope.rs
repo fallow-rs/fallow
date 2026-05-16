@@ -46,6 +46,43 @@ use serde::Serialize;
 
 use crate::health_types::{HealthGroup, HealthReport};
 
+/// Envelope emitted by bare `fallow --format json` (the combined
+/// invocation). Wraps the per-analysis sub-results inside a single envelope
+/// with the standard `schema_version` / `version` / `elapsed_ms` header.
+///
+/// Each sub-result is `Option<...>` so `--only` / `--skip` can suppress a
+/// pass without leaving an empty key on the wire. The `check` sub-result is
+/// the full [`CheckOutput`] envelope (including its own `schema_version` /
+/// `version` / `elapsed_ms`), but `dupes` and `health` are the bare body
+/// types: the runtime emit calls `serde_json::to_value(&report)` on
+/// `DuplicationReport` / `HealthReport` directly rather than wrapping them
+/// in their per-command envelope. The committed schema's `$ref` for those
+/// sub-keys still points at `DupesOutput` / `HealthOutput`, which is the
+/// preserved pre-Phase-5 shape (the property-key drift gate only checks
+/// the `dupes` / `health` keys exist; tightening the referenced type is a
+/// follow-up).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CombinedOutput {
+    /// Schema version for this output format.
+    pub schema_version: SchemaVersion,
+    /// Fallow tool version that produced this output.
+    pub version: ToolVersion,
+    /// Analysis duration in milliseconds.
+    pub elapsed_ms: ElapsedMs,
+    /// Dead-code analysis sub-envelope. Absent when `--skip check`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<CheckOutput>,
+    /// Duplication analysis body (bare `DuplicationReport`, not the full
+    /// `DupesOutput` envelope). Absent when `--skip dupes`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dupes: Option<DuplicationReport>,
+    /// Complexity analysis body (bare `HealthReport`, not the full
+    /// `HealthOutput` envelope). Absent when `--skip health`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<HealthReport>,
+}
+
 /// Envelope emitted by `fallow dupes --format json` (plus the `dupes` block
 /// inside the combined and audit envelopes).
 ///

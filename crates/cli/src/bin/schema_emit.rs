@@ -43,11 +43,12 @@ use fallow_cli::health_types::{
 };
 use fallow_cli::output_envelope::{
     CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CodeClimateIssue, CodeClimateIssueKind,
-    CodeClimateLines, CodeClimateLocation, CodeClimateOutput, CodeClimateSeverity, DupesOutput,
-    ExplainOutput, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
-    GitLabReviewPositionType, GroupByMode, HealthOutput, ReviewCheckConclusion, ReviewComment,
-    ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema,
-    ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema,
+    CodeClimateLines, CodeClimateLocation, CodeClimateOutput, CodeClimateSeverity, CombinedOutput,
+    DupesOutput, ExplainOutput, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
+    GitLabReviewPosition, GitLabReviewPositionType, GroupByMode, HealthOutput,
+    ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta,
+    ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewProvider, ReviewReconcileOutput,
+    ReviewReconcileSchema,
 };
 use fallow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
@@ -276,6 +277,7 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "CheckOutput",
         "CodeClimateIssue",
         "CodeClimateOutput",
+        "CombinedOutput",
         "DupesOutput",
         "ExplainOutput",
         "GitHubReviewComment",
@@ -520,6 +522,7 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<MetaRule>();
 
     // Per-command envelope structs (crates/cli/src/output_envelope.rs).
+    let _ = generator.subschema_for::<CombinedOutput>();
     let _ = generator.subschema_for::<CheckOutput>();
     let _ = generator.subschema_for::<CheckGroupedOutput>();
     let _ = generator.subschema_for::<CheckGroupedEntry>();

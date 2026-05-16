@@ -498,19 +498,31 @@ fn print_combined_json(
     _explain: bool,
     config_fixable: bool,
 ) -> ExitCode {
-    let mut combined = serde_json::Map::new();
-    combined.insert(
-        "schema_version".into(),
-        serde_json::Value::Number(crate::report::SCHEMA_VERSION.into()),
-    );
-    combined.insert(
-        "version".into(),
-        serde_json::Value::String(env!("CARGO_PKG_VERSION").to_string()),
-    );
-    combined.insert(
-        "elapsed_ms".into(),
-        serde_json::Value::Number(serde_json::Number::from(elapsed.as_millis() as u64)),
-    );
+    // Build the envelope shell as a typed `CombinedOutput`, then convert
+    // to a `serde_json::Value` so the remaining sub-result post-processing
+    // (path stripping, action injection, regression / baseline /
+    // baseline_deltas insertion) can continue to run as `Value` mutations.
+    // The sub-result Options stay `None` here and the per-pass branches
+    // below splice the populated values in.
+    let envelope = crate::output_envelope::CombinedOutput {
+        schema_version: fallow_types::envelope::SchemaVersion(crate::report::SCHEMA_VERSION),
+        version: fallow_types::envelope::ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        elapsed_ms: fallow_types::envelope::ElapsedMs(elapsed.as_millis() as u64),
+        check: None,
+        dupes: None,
+        health: None,
+    };
+    let mut combined = match serde_json::to_value(&envelope) {
+        Ok(serde_json::Value::Object(map)) => map,
+        Ok(_) => unreachable!("CombinedOutput serializes as a JSON object"),
+        Err(e) => {
+            return emit_error(
+                &format!("JSON serialization error: {e}"),
+                2,
+                OutputFormat::Json,
+            );
+        }
+    };
 
     if let Some(result) = check {
         match report::build_json_with_config_fixable(
