@@ -263,7 +263,7 @@
     "CheckOutput": {
       "title": "fallow dead-code --format json",
       "type": "object",
-      "required": ["schema_version", "version", "elapsed_ms", "total_issues", "unused_files", "unused_exports", "unused_types", "private_type_leaks", "unused_dependencies", "unused_dev_dependencies", "unused_optional_dependencies", "unused_enum_members", "unused_class_members", "unresolved_imports", "unlisted_dependencies", "duplicate_exports", "type_only_dependencies", "test_only_dependencies", "circular_dependencies", "boundary_violations", "stale_suppressions"],
+      "required": ["schema_version", "version", "elapsed_ms", "total_issues", "summary", "unused_files", "unused_exports", "unused_types", "private_type_leaks", "unused_dependencies", "unused_dev_dependencies", "unused_optional_dependencies", "unused_enum_members", "unused_class_members", "unresolved_imports", "unlisted_dependencies", "duplicate_exports", "type_only_dependencies", "circular_dependencies"],
       "properties": {
         "schema_version": { "$ref": "#/definitions/SchemaVersion" },
         "version": { "$ref": "#/definitions/ToolVersion" },
@@ -419,7 +419,7 @@
     "CheckGroupedEntry": {
       "description": "A single group within grouped dead code output. Contains the group key, a per-group total, and the same issue arrays as CheckOutput.",
       "type": "object",
-      "required": ["key", "total_issues", "unused_files", "unused_exports", "unused_types", "private_type_leaks", "unused_dependencies", "unused_dev_dependencies", "unused_optional_dependencies", "unused_enum_members", "unused_class_members", "unresolved_imports", "unlisted_dependencies", "duplicate_exports", "type_only_dependencies", "test_only_dependencies", "circular_dependencies", "boundary_violations"],
+      "required": ["key", "total_issues", "unused_files", "unused_exports", "unused_types", "private_type_leaks", "unused_dependencies", "unused_dev_dependencies", "unused_optional_dependencies", "unused_enum_members", "unused_class_members", "unresolved_imports", "unlisted_dependencies", "duplicate_exports", "type_only_dependencies", "circular_dependencies"],
       "properties": {
         "key": {
           "type": "string",
@@ -501,6 +501,26 @@
         "stale_suppressions": {
           "type": "array",
           "items": { "$ref": "#/definitions/StaleSuppression" }
+        },
+        "unused_catalog_entries": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UnusedCatalogEntry" }
+        },
+        "empty_catalog_groups": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/EmptyCatalogGroup" }
+        },
+        "unresolved_catalog_references": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UnresolvedCatalogReference" }
+        },
+        "unused_dependency_overrides": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UnusedDependencyOverride" }
+        },
+        "misconfigured_dependency_overrides": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/MisconfiguredDependencyOverride" }
         }
       }
     },
