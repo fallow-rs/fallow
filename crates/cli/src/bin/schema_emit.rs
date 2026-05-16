@@ -44,11 +44,13 @@ use fallow_cli::health_types::{
 use fallow_cli::output_envelope::{
     AuditCommand, AuditOutput, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CodeClimateIssue,
     CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation, CodeClimateOutput,
-    CodeClimateSeverity, CombinedOutput, DupesOutput, ExplainOutput, GitHubReviewComment,
-    GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition, GitLabReviewPositionType,
-    GroupByMode, HealthOutput, ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent,
-    ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewProvider,
-    ReviewReconcileOutput, ReviewReconcileSchema,
+    CodeClimateSeverity, CombinedOutput, CoverageSetupFileToEdit, CoverageSetupFramework,
+    CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
+    CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion, CoverageSetupSnippet, DupesOutput,
+    ExplainOutput, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
+    GitLabReviewPositionType, GroupByMode, HealthOutput, ReviewCheckConclusion, ReviewComment,
+    ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema,
+    ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema,
 };
 use fallow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
@@ -279,6 +281,10 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "CodeClimateIssue",
         "CodeClimateOutput",
         "CombinedOutput",
+        "CoverageSetupFileToEdit",
+        "CoverageSetupMember",
+        "CoverageSetupOutput",
+        "CoverageSetupSnippet",
         "DupesOutput",
         "ExplainOutput",
         "GitHubReviewComment",
@@ -525,6 +531,14 @@ fn derived_definitions() -> Map<String, Value> {
     // Per-command envelope structs (crates/cli/src/output_envelope.rs).
     let _ = generator.subschema_for::<AuditOutput>();
     let _ = generator.subschema_for::<AuditCommand>();
+    let _ = generator.subschema_for::<CoverageSetupOutput>();
+    let _ = generator.subschema_for::<CoverageSetupMember>();
+    let _ = generator.subschema_for::<CoverageSetupFileToEdit>();
+    let _ = generator.subschema_for::<CoverageSetupSnippet>();
+    let _ = generator.subschema_for::<CoverageSetupSchemaVersion>();
+    let _ = generator.subschema_for::<CoverageSetupFramework>();
+    let _ = generator.subschema_for::<CoverageSetupPackageManager>();
+    let _ = generator.subschema_for::<CoverageSetupRuntimeTarget>();
     let _ = generator.subschema_for::<CombinedOutput>();
     let _ = generator.subschema_for::<CheckOutput>();
     let _ = generator.subschema_for::<CheckGroupedOutput>();

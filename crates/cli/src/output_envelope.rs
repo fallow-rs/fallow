@@ -47,6 +47,166 @@ use serde::Serialize;
 use crate::audit::{AuditAttribution, AuditSummary, AuditVerdict};
 use crate::health_types::{HealthGroup, HealthReport};
 
+/// Envelope emitted by `fallow coverage setup --json`. Deterministic
+/// agent-readable runtime coverage setup instructions. In workspaces,
+/// `members` carries one entry per detected runtime package; `runtime_targets`
+/// is the union of all member targets.
+///
+/// The runtime path in `crates/cli/src/coverage/mod.rs::build_setup_json`
+/// still constructs the wire shape via `serde_json::json!` macros (one per
+/// member, snippet, and file-to-edit). The typed struct here serves as the
+/// schema source of truth via the drift gate; a follow-up can swap the
+/// runtime over without changing the wire.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CoverageSetupOutput {
+    /// Standalone coverage setup envelope version (always `"1"`).
+    pub schema_version: CoverageSetupSchemaVersion,
+    /// Primary detected runtime framework. For workspaces this mirrors the
+    /// first emitted runtime member; `unknown` means no runtime member was
+    /// detected.
+    pub framework_detected: CoverageSetupFramework,
+    /// Detected JavaScript package manager. `null` when none could be
+    /// resolved.
+    pub package_manager: Option<CoverageSetupPackageManager>,
+    /// Union of runtime targets across emitted members.
+    pub runtime_targets: Vec<CoverageSetupRuntimeTarget>,
+    /// Per-runtime-workspace setup recipes. Pure aggregator roots and
+    /// build-only library packages are omitted.
+    pub members: Vec<CoverageSetupMember>,
+    /// Always `null` today. Reserved for a future "config has been written
+    /// to disk" indicator.
+    pub config_written: Option<serde_json::Value>,
+    /// Shell commands the agent should run from the workspace root.
+    pub commands: Vec<String>,
+    /// Compatibility copy of the primary member's files, with workspace
+    /// prefixes when the primary member is not the root.
+    pub files_to_edit: Vec<CoverageSetupFileToEdit>,
+    /// Compatibility copy of the primary member's snippets, with workspace
+    /// prefixes when the primary member is not the root.
+    pub snippets: Vec<CoverageSetupSnippet>,
+    /// Optional Dockerfile RUN/COPY snippet to enable the beacon in
+    /// containerised deployments.
+    pub dockerfile_snippet: Option<String>,
+    /// Ordered next-step instructions for the agent / human operator.
+    pub next_steps: Vec<String>,
+    /// Non-fatal warnings raised during setup detection.
+    pub warnings: Vec<String>,
+    /// `_meta` block emitted only when `--explain` is passed.
+    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
+}
+
+/// Singleton schema-version discriminator for [`CoverageSetupOutput`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum CoverageSetupSchemaVersion {
+    /// First release of the coverage setup envelope.
+    #[serde(rename = "1")]
+    V1,
+}
+
+/// Framework label inside coverage setup output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum CoverageSetupFramework {
+    /// Next.js (`framework: "nextjs"`).
+    #[serde(rename = "nextjs")]
+    NextJs,
+    /// NestJS (`framework: "nestjs"`).
+    NestJs,
+    /// Nuxt (`framework: "nuxt"`).
+    Nuxt,
+    /// SvelteKit (`framework: "sveltekit"`).
+    SvelteKit,
+    /// Astro (`framework: "astro"`).
+    Astro,
+    /// Remix (`framework: "remix"`).
+    Remix,
+    /// Vite (`framework: "vite"`).
+    Vite,
+    /// Plain Node.js (no framework).
+    PlainNode,
+    /// Could not determine.
+    Unknown,
+}
+
+/// Package manager label inside coverage setup output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum CoverageSetupPackageManager {
+    /// `npm`.
+    Npm,
+    /// `pnpm`.
+    Pnpm,
+    /// `yarn`.
+    Yarn,
+    /// `bun`.
+    Bun,
+}
+
+/// Runtime target inside coverage setup output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum CoverageSetupRuntimeTarget {
+    /// Node.js runtime target.
+    Node,
+    /// Browser runtime target.
+    Browser,
+}
+
+/// Per-workspace setup recipe inside [`CoverageSetupOutput::members`].
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CoverageSetupMember {
+    /// Workspace package name (or root marker for single-package projects).
+    pub name: String,
+    /// Workspace path relative to the analysed root, or `.` for the root
+    /// member.
+    pub path: String,
+    /// Framework detected for this member.
+    pub framework_detected: CoverageSetupFramework,
+    /// Package manager detected for this member.
+    pub package_manager: Option<CoverageSetupPackageManager>,
+    /// Runtime targets supported by this member's framework.
+    pub runtime_targets: Vec<CoverageSetupRuntimeTarget>,
+    /// Files the agent should edit to wire in the beacon.
+    pub files_to_edit: Vec<CoverageSetupFileToEdit>,
+    /// Code snippets the agent should paste into the edited files.
+    pub snippets: Vec<CoverageSetupSnippet>,
+    /// Optional Dockerfile snippet specific to this member.
+    pub dockerfile_snippet: Option<String>,
+    /// Member-scoped warnings.
+    pub warnings: Vec<String>,
+}
+
+/// Single file to edit inside [`CoverageSetupMember::files_to_edit`] or
+/// [`CoverageSetupOutput::files_to_edit`].
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CoverageSetupFileToEdit {
+    /// Workspace-relative path to the file to edit.
+    pub path: String,
+    /// Why the file needs editing (e.g. `"Mount the beacon middleware"`).
+    pub reason: String,
+}
+
+/// Single code snippet inside [`CoverageSetupMember::snippets`] or
+/// [`CoverageSetupOutput::snippets`].
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CoverageSetupSnippet {
+    /// Short label identifying the snippet (used by the human renderer).
+    pub label: String,
+    /// Workspace-relative path the snippet should be pasted into.
+    pub path: String,
+    /// Snippet content (literal source text).
+    pub content: String,
+}
+
 /// Envelope emitted by `fallow audit --format json`. Combines dead code,
 /// complexity, and duplication scoped to changed files with a verdict
 /// (`pass` / `warn` / `fail`), a per-category summary, optional

@@ -148,7 +148,7 @@
       "title": "fallow coverage setup --json",
       "description": "Deterministic agent-readable runtime coverage setup instructions. In workspaces, members contains one entry per detected runtime package and runtime_targets is the union of all member targets. With --explain, an optional _meta object describes fields, enums, and warning semantics.",
       "type": "object",
-      "required": ["schema_version", "framework_detected", "package_manager", "runtime_targets", "members", "config_written", "commands", "files_to_edit", "snippets", "dockerfile_snippet", "next_steps", "warnings"],
+      "required": ["schema_version", "framework_detected", "runtime_targets", "members", "commands", "files_to_edit", "snippets", "next_steps", "warnings"],
       "properties": {
         "schema_version": { "type": "string", "enum": ["1"] },
         "framework_detected": {
@@ -205,7 +205,7 @@
 
     "CoverageSetupMember": {
       "type": "object",
-      "required": ["name", "path", "framework_detected", "package_manager", "runtime_targets", "files_to_edit", "snippets", "dockerfile_snippet", "warnings"],
+      "required": ["name", "path", "framework_detected", "runtime_targets", "files_to_edit", "snippets", "warnings"],
       "properties": {
         "name": { "type": "string" },
         "path": {
