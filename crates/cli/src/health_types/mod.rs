@@ -38,6 +38,37 @@ pub struct HealthTimings {
     pub total_ms: f64,
 }
 
+/// Auditable breadcrumb recording when health-finding `suppress-line`
+/// action hints were omitted from the report.
+///
+/// Emitted at the report root by `inject_health_actions` when it was
+/// called with `omit_suppress_line: true`. Lets consumers see "where did
+/// the suppress-line hints go?" without having to grep the config or CLI
+/// history.
+///
+/// Stable `reason` codes:
+/// - `baseline-active`: a baseline is active and inline ignores would
+///   become dead annotations once the baseline regenerates.
+/// - `config-disabled`: `health.suggestInlineSuppression` is `false`.
+/// - `unspecified`: the caller did not record a reason.
+///
+/// The runtime path constructs this breadcrumb as a `serde_json::Value`
+/// post-pass in `inject_health_actions` rather than on the typed envelope,
+/// because the suppression context lives inside the report builder. The
+/// typed shape here exists so the schema documents the field instead of
+/// hiding it behind a JSON-tree augmentation.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct HealthActionsMeta {
+    /// Always `true` when the breadcrumb is emitted. Absent from the wire
+    /// when no suppression occurred.
+    pub suppression_hints_omitted: bool,
+    /// Stable code describing why the suppression occurred.
+    pub reason: String,
+    /// Scope of the omission. Always `"health-findings"` today.
+    pub scope: String,
+}
+
 /// Result of complexity analysis for reporting.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -84,6 +115,12 @@ pub struct HealthReport {
     /// Health trend comparison against a previous snapshot (only set with `--trend`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health_trend: Option<HealthTrend>,
+    /// Auditable breadcrumb recording why `suppress-line` action hints were
+    /// omitted from this report. Absent when no suppression occurred; set
+    /// post-construction by `inject_health_actions` when the runtime had
+    /// the suppression context that the typed builders do not plumb.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actions_meta: Option<HealthActionsMeta>,
 }
 
 #[cfg(test)]
@@ -107,6 +144,7 @@ impl Default for HealthReport {
             targets: vec![],
             target_thresholds: None,
             health_trend: None,
+            actions_meta: None,
         }
     }
 }

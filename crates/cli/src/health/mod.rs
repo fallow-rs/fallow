@@ -1649,6 +1649,7 @@ fn assemble_health_report(
             target_thresholds
         },
         health_trend,
+        actions_meta: None,
     }
 }
 

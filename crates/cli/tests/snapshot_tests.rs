@@ -1951,6 +1951,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
         target_thresholds: None,
         health_trend: None,
         runtime_coverage: None,
+        actions_meta: None,
     }
 }
 
@@ -2070,6 +2071,7 @@ const fn empty_health_report() -> HealthReport {
         target_thresholds: None,
         health_trend: None,
         runtime_coverage: None,
+        actions_meta: None,
     }
 }
 

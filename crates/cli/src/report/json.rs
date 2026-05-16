@@ -1068,7 +1068,8 @@ const SECONDARY_REFACTOR_BAND: u16 = 5;
 /// When omitted, a top-level `actions_meta` object on the report records
 /// the omission and the reason so consumers can audit "where did
 /// health finding suppress-line go?" without having to grep the config
-/// or CLI history.
+/// or CLI history. Wire shape is documented by `HealthActionsMeta` in
+/// `crates/cli/src/health_types/`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HealthActionOptions {
     /// Skip emission of `suppress-line` action entries.
@@ -1178,6 +1179,9 @@ pub(crate) fn inject_health_actions(output: &mut serde_json::Value, opts: Health
 
     // Auditable breadcrumb: when the suppress-line hint was omitted, record
     // it at the report root so consumers don't have to infer the absence.
+    // Wire shape mirrors `HealthActionsMeta` in `crates/cli/src/health_types/`;
+    // the JSON injection lives here (rather than on the typed envelope) because
+    // the suppression context only becomes known inside the report builder.
     if opts.omit_suppress_line {
         let reason = opts.omit_reason.unwrap_or("unspecified");
         map.insert(
@@ -4165,7 +4169,11 @@ mod tests {
             }
         }
 
-        // Load the schema enum once.
+        // Load the schema enum once. Phase 8 derives `HealthFindingActionType`
+        // from a Rust enum whose schemars derive produces `oneOf: [{const: ...},
+        // ...]` (one branch per variant) rather than a flat `enum: [...]`. We
+        // accept either form here so the drift guard tolerates a future
+        // schemars-version flip back to the flat shape.
         let schema_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..")
@@ -4174,26 +4182,11 @@ mod tests {
         let raw = std::fs::read_to_string(&schema_path)
             .expect("docs/output-schema.json must be readable for the drift-guard test");
         let schema: serde_json::Value = serde_json::from_str(&raw).expect("schema parses");
-        // Phase 5 derives `HealthFindingActionType` from a Rust enum whose
-        // schemars derive produces `oneOf: [{const: ...}, ...]` (one branch
-        // per variant) rather than a flat `enum: [...]`. We accept either
-        // form here so the drift guard tolerates a future schemars-version
-        // flip back to the flat shape.
         let type_field = &schema["definitions"]["HealthFindingAction"]["properties"]["type"];
         let type_def = if let Some(reference) = type_field.get("$ref").and_then(|r| r.as_str()) {
             let name = reference
                 .strip_prefix("#/definitions/")
                 .expect("HealthFindingAction.type $ref points into #/definitions/");
-            &schema["definitions"][name]
-        } else if let Some(arr) = type_field.get("allOf").and_then(|a| a.as_array())
-            && let Some(reference) = arr
-                .first()
-                .and_then(|v| v.get("$ref"))
-                .and_then(|r| r.as_str())
-        {
-            let name = reference
-                .strip_prefix("#/definitions/")
-                .expect("HealthFindingAction.type allOf $ref points into #/definitions/");
             &schema["definitions"][name]
         } else {
             type_field

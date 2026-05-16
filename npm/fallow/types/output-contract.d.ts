@@ -234,10 +234,6 @@ export type UntestedExportActionType = ("add-test-import" | "suppress-file")
  */
 export type ChurnTrend = ("accelerating" | "stable" | "cooling")
 /**
- * Format discriminator for [`ContributorEntry::identifier`].
- */
-export type ContributorIdentifierFormat = ("raw" | "handle" | "hash")
-/**
  * Discriminant for [`HotspotAction::kind`].
  */
 export type HotspotActionType = ("refactor-file" | "add-tests" | "low-bus-factor" | "unowned-hotspot" | "ownership-drift")
@@ -486,9 +482,6 @@ total_issues: number
  * the metadata block; absent in synthesised fixtures.
  */
 entry_points?: (EntryPoints | null)
-/**
- * Per-category issue counts. Always present in real runs.
- */
 summary: CheckSummary
 /**
  * Files not reachable from any entry point.
@@ -734,9 +727,6 @@ introduced?: AuditIntroduced
  * [`FixActionType`].
  */
 export interface FixAction {
-/**
- * Kebab-case identifier for the fix action.
- */
 type: FixActionType
 /**
  * Whether `fallow fix` can apply this fix automatically.
@@ -763,14 +753,8 @@ available_in_catalogs?: (string[] | null)
  * Inline-comment suppression for a single finding line.
  */
 export interface SuppressLineAction {
-/**
- * Action type identifier.
- */
 type: SuppressLineKind
-/**
- * Always false for suppress actions.
- */
-auto_fixable: boolean
+auto_fixable: SuppressAutoFixable
 /**
  * Human-readable description of the suppression.
  */
@@ -793,14 +777,8 @@ scope?: (SuppressLineScope | null)
  * File-wide suppression placed at the top of the source file.
  */
 export interface SuppressFileAction {
-/**
- * Action type identifier.
- */
 type: SuppressFileKind
-/**
- * Always false for suppress actions.
- */
-auto_fixable: boolean
+auto_fixable: SuppressAutoFixable
 /**
  * Human-readable description of the suppression.
  */
@@ -816,9 +794,6 @@ comment: string
  * add the offending value to an `ignore*` rule.
  */
 export interface AddToConfigAction {
-/**
- * Action type identifier.
- */
 type: AddToConfigKind
 /**
  * True when `fallow fix` can apply this config action automatically for
@@ -836,15 +811,6 @@ description: string
  * `ignoreDependencies`).
  */
 config_key: string
-/**
- * Value to add to the config key. Shape depends on `config_key`. For
- * scalar config keys (`ignoreDependencies`, others) this is a string
- * such as `"lodash"`. For `ignoreExports` this is an array of
- * `{ file, exports }` rule objects so the snippet can be merged into
- * the user's config verbatim. For `ignoreCatalogReferences` and
- * `ignoreDependencyOverrides` this is an object whose shape matches the
- * rule entry users add to their fallow config.
- */
 value: AddToConfigValue
 /**
  * Optional URL pointing at a stable JSON Schema fragment that describes
@@ -954,9 +920,6 @@ export interface UnusedDependency {
  * Package name, including internal workspace package names.
  */
 package_name: string
-/**
- * Whether this is in `dependencies`, `devDependencies`, or `optionalDependencies`.
- */
 location: DependencyLocation
 /**
  * Path to the package.json where this dependency is listed.
@@ -993,9 +956,6 @@ parent_name: string
  * Name of the unused member.
  */
 member_name: string
-/**
- * Whether this is an enum member, class method, or class property.
- */
 kind: MemberKind
 /**
  * 1-based line number.
@@ -1252,9 +1212,6 @@ line: number
  * 0-based byte column offset.
  */
 col: number
-/**
- * The origin and details of the stale suppression.
- */
 origin: SuppressionOrigin
 }
 /**
@@ -1397,9 +1354,6 @@ version_constraint?: (string | null)
  * The right-hand side of the entry: the version pnpm should force.
  */
 version_range: string
-/**
- * Where the override entry was declared.
- */
 source: DependencyOverrideSource
 /**
  * Path to the source file. `pnpm-workspace.yaml` or a `package.json`,
@@ -1452,13 +1406,7 @@ target_package?: (string | null)
  * value was missing.
  */
 raw_value: string
-/**
- * Classifier for the misconfiguration.
- */
 reason: DependencyOverrideMisconfigReason
-/**
- * Where the override entry was declared.
- */
 source: DependencyOverrideSource
 /**
  * Path to the source file. Stored as an absolute filesystem path so
@@ -1530,9 +1478,6 @@ matched: number
  * issue counts against a baseline from config or an explicit file.
  */
 export interface RegressionResult {
-/**
- * Outcome of the regression check.
- */
 status: RegressionStatus
 /**
  * Baseline total before the change. Absent when status is `skipped`.
@@ -1918,6 +1863,13 @@ target_thresholds?: (TargetThresholds | null)
  * Health trend comparison against a previous snapshot (only set with `--trend`).
  */
 health_trend?: (HealthTrend | null)
+/**
+ * Auditable breadcrumb recording why `suppress-line` action hints were
+ * omitted from this report. Absent when no suppression occurred; set
+ * post-construction by `inject_health_actions` when the runtime had
+ * the suppression context that the typed builders do not plumb.
+ */
+actions_meta?: (HealthActionsMeta | null)
 }
 /**
  * A single function that exceeds a complexity threshold.
@@ -1955,13 +1907,7 @@ line_count: number
  * Number of parameters.
  */
 param_count: number
-/**
- * Which threshold was exceeded.
- */
 exceeded: ExceededThreshold
-/**
- * How far above the threshold: moderate (just above), high, or critical.
- */
 severity: FindingSeverity
 /**
  * CRAP score (`CC^2 * (1 - cov/100)^3 + CC`), rounded to one decimal.
@@ -2005,9 +1951,6 @@ introduced?: AuditIntroduced
  * [`HealthFinding`]: ../../fallow-cli/src/health_types/scores.rs
  */
 export interface HealthFindingAction {
-/**
- * Action type identifier. Kebab-case per the JSON output contract.
- */
 type: HealthFindingActionType
 /**
  * Whether `fallow fix` can auto-apply this action. Today every health
@@ -2254,9 +2197,6 @@ score: number
  * Letter grade: A, B, C, D, or F.
  */
 grade: string
-/**
- * Per-component penalty breakdown. Shows what drove the score down.
- */
 penalties: HealthScorePenalties
 }
 /**
@@ -2462,9 +2402,6 @@ actions: UntestedFileAction[]
  * [`UntestedFile`]: ../../fallow-cli/src/health_types/coverage.rs
  */
 export interface UntestedFileAction {
-/**
- * Action type identifier.
- */
 type: UntestedFileActionType
 /**
  * Whether `fallow fix` can auto-apply this action. Today both
@@ -2525,9 +2462,6 @@ actions: UntestedExportAction[]
  * [`UntestedExport`]: ../../fallow-cli/src/health_types/coverage.rs
  */
 export interface UntestedExportAction {
-/**
- * Action type identifier.
- */
 type: UntestedExportActionType
 /**
  * Whether `fallow fix` can auto-apply this action. Today both
@@ -2598,9 +2532,6 @@ complexity_density: number
  * Number of files that import this file (blast radius).
  */
 fan_in: number
-/**
- * Churn trend: accelerating, stable, or cooling.
- */
 trend: ChurnTrend
 /**
  * Ownership signals (bus factor, contributors, declared owner, drift).
@@ -2635,9 +2566,6 @@ bus_factor: number
  * Distinct authors in the analysis window after bot filtering.
  */
 contributor_count: number
-/**
- * The highest-share contributor.
- */
 top_contributor: ContributorEntry
 /**
  * Up to three additional contributors by share, ordered desc.
@@ -2691,10 +2619,9 @@ export interface ContributorEntry {
  */
 identifier: string
 /**
- * Format of [`identifier`](Self::identifier): `raw`, `handle`, or `hash`.
- * Lets type-aware consumers branch without re-parsing the string.
+ * Total commits by this contributor in the analysis window.
  */
-format: ContributorIdentifierFormat
+commits: number
 /**
  * Recency-weighted share of total weighted commits (0..1, three decimals).
  */
@@ -2703,10 +2630,6 @@ share: number
  * Days since this contributor last touched the file.
  */
 stale_days: number
-/**
- * Total commits by this contributor in the analysis window.
- */
-commits: number
 }
 /**
  * Suggested action attached to a [`HotspotEntry`].
@@ -2719,9 +2642,6 @@ commits: number
  * [`HotspotEntry`]: ../../fallow-cli/src/health_types/scores.rs
  */
 export interface HotspotAction {
-/**
- * Action type identifier.
- */
 type: HotspotActionType
 /**
  * Whether `fallow fix` can auto-apply this action. Today every
@@ -2960,17 +2880,8 @@ efficiency: number
  * One-line actionable recommendation.
  */
 recommendation: string
-/**
- * Recommendation category for tooling/filtering.
- */
 category: RecommendationCategory
-/**
- * Estimated effort to address this target.
- */
 effort: EffortEstimate
-/**
- * Confidence in this recommendation based on data source reliability.
- */
 confidence: Confidence
 /**
  * Which metric values contributed to this recommendation.
@@ -3062,9 +2973,6 @@ cognitive: number
  * [`RefactoringTarget`]: ../../fallow-cli/src/health_types/targets.rs
  */
 export interface RefactoringTargetAction {
-/**
- * Action type identifier.
- */
 type: RefactoringTargetActionType
 /**
  * Whether `fallow fix` can auto-apply this action. Today both
@@ -3118,9 +3026,6 @@ fan_out_p90: number
  * Health trend comparison: current run vs. a previous snapshot.
  */
 export interface HealthTrend {
-/**
- * The snapshot being compared against.
- */
 compared_to: TrendPoint
 /**
  * Per-metric deltas.
@@ -3130,9 +3035,6 @@ metrics: TrendMetric[]
  * Number of snapshots found in the snapshot directory.
  */
 snapshots_loaded: number
-/**
- * Overall direction across all metrics.
- */
 overall_direction: TrendDirection
 }
 /**
@@ -3188,9 +3090,6 @@ current: number
  * Absolute change (current − previous).
  */
 delta: number
-/**
- * Direction of change.
- */
 direction: TrendDirection
 /**
  * Unit for display (e.g., `"%"`, `""`, `"pts"`).
@@ -3219,6 +3118,42 @@ value: number
 total: number
 }
 /**
+ * Auditable breadcrumb recording when health-finding `suppress-line`
+ * action hints were omitted from the report.
+ * 
+ * Emitted at the report root by `inject_health_actions` when it was
+ * called with `omit_suppress_line: true`. Lets consumers see "where did
+ * the suppress-line hints go?" without having to grep the config or CLI
+ * history.
+ * 
+ * Stable `reason` codes:
+ * - `baseline-active`: a baseline is active and inline ignores would
+ *   become dead annotations once the baseline regenerates.
+ * - `config-disabled`: `health.suggestInlineSuppression` is `false`.
+ * - `unspecified`: the caller did not record a reason.
+ * 
+ * The runtime path constructs this breadcrumb as a `serde_json::Value`
+ * post-pass in `inject_health_actions` rather than on the typed envelope,
+ * because the suppression context lives inside the report builder. The
+ * typed shape here exists so the schema documents the field instead of
+ * hiding it behind a JSON-tree augmentation.
+ */
+export interface HealthActionsMeta {
+/**
+ * Always `true` when the breadcrumb is emitted. Absent from the wire
+ * when no suppression occurred.
+ */
+suppression_hints_omitted: boolean
+/**
+ * Stable code describing why the suppression occurred.
+ */
+reason: string
+/**
+ * Scope of the omission. Always `"health-findings"` today.
+ */
+scope: string
+}
+/**
  * Envelope emitted by `fallow dead-code --group-by ... --format json`.
  * 
  * Issues are partitioned into resolver buckets (CODEOWNERS team, directory
@@ -3239,9 +3174,6 @@ version: ToolVersion
  * Analysis duration in milliseconds.
  */
 elapsed_ms: ElapsedMs
-/**
- * The grouping strategy used.
- */
 grouped_by: GroupByMode
 /**
  * Total number of issues across all groups.
@@ -3378,34 +3310,22 @@ misconfigured_dependency_overrides?: MisconfiguredDependencyOverride[]
  * inside the combined and audit envelopes).
  * 
  * The body is `HealthReport` flattened into the envelope so every report
- * field (`findings`, `summary`, `vital_signs`, `hotspots`, ...) lives at the
- * top level. Grouped runs populate `grouped_by` + `groups` with per-bucket
- * recomputed metrics. The `actions_meta` breadcrumb is NOT modeled here:
- * `inject_health_actions` adds it as a post-pass on the `serde_json::Value`
- * tree, and the drift gate tolerates the gap via its `AUGMENTATION_KEYS`
- * list because the typed wrapper would force every caller to plumb the
- * suppression context through, which buys nothing today.
+ * field (`findings`, `summary`, `vital_signs`, `hotspots`, `actions_meta`,
+ * ...) lives at the top level. Grouped runs populate `grouped_by` +
+ * `groups` with per-bucket recomputed metrics. The `actions_meta`
+ * breadcrumb is modeled on `HealthReport` as an `Option<HealthActionsMeta>`
+ * so the schema documents the field; `inject_health_actions` still
+ * populates it post-construction on the `serde_json::Value` tree because
+ * the suppression context lives inside the report builder.
  */
 export interface HealthOutput {
-/**
- * Schema version for this output format.
- */
 schema_version: SchemaVersion
-/**
- * Fallow tool version that produced this output.
- */
 version: ToolVersion
-/**
- * Analysis duration in milliseconds.
- */
 elapsed_ms: ElapsedMs
 /**
  * Functions exceeding thresholds.
  */
 findings: HealthFinding[]
-/**
- * Summary statistics.
- */
 summary: HealthSummary
 /**
  * Project-wide vital signs (always computed from available data).
@@ -3456,6 +3376,13 @@ target_thresholds?: (TargetThresholds | null)
  * Health trend comparison against a previous snapshot (only set with `--trend`).
  */
 health_trend?: (HealthTrend | null)
+/**
+ * Auditable breadcrumb recording why `suppress-line` action hints were
+ * omitted from this report. Absent when no suppression occurred; set
+ * post-construction by `inject_health_actions` when the runtime had
+ * the suppression context that the typed builders do not plumb.
+ */
+actions_meta?: (HealthActionsMeta | null)
 /**
  * Resolver mode used when `--group-by` is active. Absent on ungrouped
  * output.
@@ -3535,6 +3462,13 @@ large_functions?: LargeFunctionEntry[]
  * Refactoring targets in files belonging to this group.
  */
 targets?: RefactoringTarget[]
+/**
+ * Auditable breadcrumb recording why `suppress-line` action hints
+ * were omitted from this group's findings. Mirrors the project-level
+ * `HealthReport.actions_meta`; populated by `inject_health_actions`
+ * per group when the suppression context applies uniformly.
+ */
+actions_meta?: (HealthActionsMeta | null)
 }
 /**
  * Envelope emitted by `fallow dupes --format json` (plus the `dupes` block
@@ -3572,9 +3506,6 @@ clone_families: CloneFamily[]
  * Detected mirrored directory trees (directories with many identical files).
  */
 mirrored_directories?: MirroredDirectory[]
-/**
- * Aggregate statistics.
- */
 stats: DuplicationStats
 /**
  * Resolver mode used for partitioning. Present only when `--group-by` is
@@ -3618,22 +3549,9 @@ _meta?: (Meta | null)
  * drift test enforces the alignment.
  */
 export interface AuditOutput {
-/**
- * Schema version for this output format.
- */
 schema_version: SchemaVersion
-/**
- * Fallow tool version that produced this output.
- */
 version: ToolVersion
-/**
- * Singleton command discriminator (always `"audit"`).
- */
 command: AuditCommand
-/**
- * Overall verdict: `pass` (no issues), `warn` (warn-severity only,
- * exit 0), or `fail` (error-severity issues, exit 1).
- */
 verdict: AuditVerdict
 /**
  * Number of files changed between base ref and HEAD.
@@ -3647,9 +3565,6 @@ base_ref: string
  * Short SHA of HEAD. Omitted when git is unavailable.
  */
 head_sha?: (string | null)
-/**
- * Analysis duration in milliseconds.
- */
 elapsed_ms: ElapsedMs
 /**
  * Only emitted when `--performance` is set. `true` means audit reused
@@ -3657,14 +3572,7 @@ elapsed_ms: ElapsedMs
  * fast path); `false` means the regular base worktree analysis ran.
  */
 base_snapshot_skipped?: (boolean | null)
-/**
- * Per-category summary counts.
- */
 summary: AuditSummary
-/**
- * Counts split by whether each finding was introduced by the current
- * changeset or already existed at the base ref.
- */
 attribution: AuditAttribution
 /**
  * Full dead-code results. Absent when no changed files.
@@ -3754,15 +3662,7 @@ docs: string
  * runtime over without changing the wire.
  */
 export interface CoverageSetupOutput {
-/**
- * Standalone coverage setup envelope version (always `"1"`).
- */
 schema_version: CoverageSetupSchemaVersion
-/**
- * Primary detected runtime framework. For workspaces this mirrors the
- * first emitted runtime member; `unknown` means no runtime member was
- * detected.
- */
 framework_detected: CoverageSetupFramework
 /**
  * Detected JavaScript package manager. `null` when none could be
@@ -3832,9 +3732,6 @@ name: string
  * member.
  */
 path: string
-/**
- * Framework detected for this member.
- */
 framework_detected: CoverageSetupFramework
 /**
  * Package manager detected for this member.
@@ -3897,9 +3794,6 @@ content: string
  * Single CodeClimate-compatible issue inside [`CodeClimateOutput`].
  */
 export interface CodeClimateIssue {
-/**
- * Always the literal string `"issue"`.
- */
 type: CodeClimateIssueKind
 /**
  * Fallow rule identifier (always starts with `fallow/`).
@@ -3913,18 +3807,12 @@ description: string
  * Free-form categories applied by the report renderer.
  */
 categories: string[]
-/**
- * CodeClimate-style severity.
- */
 severity: CodeClimateSeverity
 /**
  * Stable fingerprint used by CI dashboards to deduplicate findings
  * across runs.
  */
 fingerprint: string
-/**
- * File path + start line of the finding.
- */
 location: CodeClimateLocation
 }
 /**
@@ -3935,10 +3823,6 @@ export interface CodeClimateLocation {
  * File path relative to the analysed root.
  */
 path: string
-/**
- * Wrapper carrying the begin line so the schema lines up with
- * CodeClimate's spec.
- */
 lines: CodeClimateLines
 }
 /**
@@ -3969,9 +3853,6 @@ body: string
  * [`GitLabReviewComment`] depending on `meta.provider`.
  */
 comments: ReviewComment[]
-/**
- * Envelope metadata block.
- */
 meta: ReviewEnvelopeMeta
 }
 /**
@@ -3986,11 +3867,6 @@ path: string
  * 1-indexed line number the comment targets.
  */
 line: number
-/**
- * Always the literal string `"RIGHT"`; GitHub review comments target
- * current-state/new-side lines; deletion-side comments are not modeled
- * yet.
- */
 side: GitHubReviewSide
 /**
  * Markdown body of the comment.
@@ -4036,9 +3912,6 @@ start_sha?: (string | null)
  * Merge-request head SHA.
  */
 head_sha?: (string | null)
-/**
- * Always `"text"` today.
- */
 position_type: GitLabReviewPositionType
 /**
  * File path on the base side.
@@ -4057,13 +3930,7 @@ new_line: number
  * `meta` block inside [`ReviewEnvelopeOutput`].
  */
 export interface ReviewEnvelopeMeta {
-/**
- * Envelope schema marker, always `fallow-review-envelope/v1`.
- */
 schema: ReviewEnvelopeSchema
-/**
- * Which provider this envelope is shaped for.
- */
 provider: ReviewProvider
 /**
  * Check conclusion derived from the underlying findings. Emitted only
@@ -4077,13 +3944,7 @@ check_conclusion?: (ReviewCheckConclusion | null)
  * across PR / MR revisions.
  */
 export interface ReviewReconcileOutput {
-/**
- * Envelope schema marker, always `fallow-review-reconcile/v1`.
- */
 schema: ReviewReconcileSchema
-/**
- * Which provider this reconcile pass was for.
- */
 provider: ReviewProvider
 /**
  * PR / MR target identifier supplied to `fallow ci reconcile-review`.

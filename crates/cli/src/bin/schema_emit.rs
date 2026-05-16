@@ -35,11 +35,11 @@ use serde_json::{Map, Value};
 
 use fallow_cli::health_types::{
     ContributorEntry, ContributorIdentifierFormat, CoverageGapSummary, CoverageGaps, CoverageModel,
-    CoverageTier, ExceededThreshold, FileHealthScore, FindingSeverity, HealthFinding, HealthScore,
-    HealthScorePenalties, HealthSummary, HealthTrend, HotspotEntry, HotspotSummary,
-    LargeFunctionEntry, OwnershipMetrics, RecommendationCategory, RefactoringTarget, RiskProfile,
-    RuntimeCoverageReport, TargetThresholds, TrendCount, UntestedExport, UntestedFile, VitalSigns,
-    VitalSignsCounts,
+    CoverageTier, ExceededThreshold, FileHealthScore, FindingSeverity, HealthActionsMeta,
+    HealthFinding, HealthScore, HealthScorePenalties, HealthSummary, HealthTrend, HotspotEntry,
+    HotspotSummary, LargeFunctionEntry, OwnershipMetrics, RecommendationCategory,
+    RefactoringTarget, RiskProfile, RuntimeCoverageReport, TargetThresholds, TrendCount,
+    UntestedExport, UntestedFile, VitalSigns, VitalSignsCounts,
 };
 use fallow_cli::output_envelope::{
     AuditCommand, AuditOutput, CheckGroupedEntry, CheckGroupedOutput, CheckOutput,
@@ -215,6 +215,7 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "CoverageGapSummary",
         "CoverageGaps",
         "FileHealthScore",
+        "HealthActionsMeta",
         "HealthFinding",
         "HealthScore",
         "HealthScorePenalties",
@@ -535,6 +536,7 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<VitalSignsCounts>();
     let _ = generator.subschema_for::<RiskProfile>();
     let _ = generator.subschema_for::<RuntimeCoverageReport>();
+    let _ = generator.subschema_for::<HealthActionsMeta>();
 
     // Envelope and utility shapes (crates/types/src/envelope.rs).
     let _ = generator.subschema_for::<SchemaVersion>();
@@ -823,10 +825,39 @@ fn normalize_schema(value: &mut Value) {
     match value {
         Value::Object(map) => {
             map.remove("$schema");
+            // Strip schemars cosmetic output that the committed schema does not
+            // encode: `default` from `#[serde(default)]`, integer-width formats
+            // and bounds from `u8`/`u32`/`usize`/etc, and per-property example
+            // hints. These survive into the regenerated document otherwise and
+            // would force every consumer to handle schemars-version churn. The
+            // test-side normalizer at `normalize_one` mirrors these strips so
+            // the strict drift gate stays symmetric.
+            map.remove("default");
+            map.remove("examples");
+            map.remove("format");
+            map.remove("minimum");
+            map.remove("maximum");
+            map.remove("exclusiveMinimum");
+            map.remove("exclusiveMaximum");
             if let Some(Value::String(reference)) = map.get_mut("$ref")
                 && let Some(rest) = reference.strip_prefix("#/$defs/")
             {
                 *reference = format!("#/definitions/{rest}");
+            }
+            // Schemars wraps `$ref` in a single-arm `allOf` when the field also
+            // carries a `description` (so the description does not lose its
+            // owner). Collapse to a bare `$ref` alongside the description; the
+            // committed schema uses the flat form and downstream tools handle
+            // both interchangeably.
+            if let Some(Value::Array(all_of)) = map.get("allOf")
+                && all_of.len() == 1
+                && let Some(Value::Object(only)) = all_of.first()
+                && only.len() == 1
+                && only.contains_key("$ref")
+            {
+                let reference = only.get("$ref").cloned().unwrap_or(Value::Null);
+                map.remove("allOf");
+                map.insert("$ref".to_string(), reference);
             }
             for child in map.values_mut() {
                 normalize_schema(child);
@@ -1064,7 +1095,7 @@ mod drift_tests {
         // `HealthOutput` is injected by `inject_health_actions` rather than
         // modelled as a typed `Option<...>` field on the envelope struct).
         // Permit them to differ in either direction without firing the gate.
-        const AUGMENTATION_KEYS: &[&str] = &["actions", "introduced", "actions_meta"];
+        const AUGMENTATION_KEYS: &[&str] = &["actions", "introduced"];
 
         let mut failures: Vec<String> = Vec::new();
         for name in derived_definition_names() {
@@ -1288,15 +1319,12 @@ mod drift_tests {
     /// Strict drift gate: full structural comparison of every in-scope
     /// definition against the committed schema, after canonicalization.
     ///
-    /// Marked `#[ignore]` while the prose-migration and shape-alignment
-    /// follow-up PRs are still outstanding. Run explicitly with:
-    ///     `cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit -- --ignored`
-    /// to surface every cosmetic / structural divergence between the
-    /// derived shape and `docs/output-schema.json`. Once the schema is
-    /// regenerated from Rust as the source of truth, this test moves out
-    /// of `#[ignore]` and becomes the canonical CI gate.
+    /// Runs on every `cargo test` invocation now that the committed schema is
+    /// regenerated from Rust as the source of truth. The canonicalization
+    /// step erases the documented cosmetic differences (doc-comment prose,
+    /// `oneOf` vs `anyOf`, single-arm `allOf` wrappers, schemars integer-
+    /// width hints, `Option<T>` nullable-union forms). Anything else fires.
     #[test]
-    #[ignore = "strict structural gate; tracked by follow-up that regenerates docs/output-schema.json from Rust as the canonical source"]
     fn committed_definitions_match_derived_structurally() {
         let committed = committed_definitions();
         let derived = derived_definitions_for_drift();

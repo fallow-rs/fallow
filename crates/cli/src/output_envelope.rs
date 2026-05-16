@@ -59,6 +59,7 @@ use crate::health_types::{HealthGroup, HealthReport};
 /// runtime over without changing the wire.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(title = "fallow coverage setup --json"))]
 pub struct CoverageSetupOutput {
     /// Standalone coverage setup envelope version (always `"1"`).
     pub schema_version: CoverageSetupSchemaVersion,
@@ -222,6 +223,7 @@ pub struct CoverageSetupSnippet {
 /// drift test enforces the alignment.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(title = "fallow audit --format json"))]
 pub struct AuditOutput {
     /// Schema version for this output format.
     pub schema_version: SchemaVersion,
@@ -290,6 +292,10 @@ pub enum AuditCommand {
 /// drift test enforces the alignment.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(title = "fallow --format json (bare, combined)")
+)]
 pub struct CombinedOutput {
     /// Schema version for this output format.
     pub schema_version: SchemaVersion,
@@ -321,6 +327,7 @@ pub struct CombinedOutput {
 /// drops them.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(title = "fallow dupes --format json"))]
 pub struct DupesOutput {
     /// Schema version for this output format.
     pub schema_version: SchemaVersion,
@@ -365,6 +372,7 @@ pub struct DupesOutput {
 /// JSON layer always emits.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(title = "fallow dead-code --format json"))]
 pub struct CheckOutput {
     /// Schema version for this output format.
     pub schema_version: SchemaVersion,
@@ -408,6 +416,12 @@ pub struct CheckOutput {
 /// `CheckOutput` body, plus per-group `key` / `owners` / `total_issues`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(
+        title = "fallow dead-code --group-by <owner|directory|package|section> --format json"
+    )
+)]
 pub struct CheckGroupedOutput {
     /// Schema version for this output format.
     pub schema_version: SchemaVersion,
@@ -456,15 +470,16 @@ pub struct CheckGroupedEntry {
 /// inside the combined and audit envelopes).
 ///
 /// The body is `HealthReport` flattened into the envelope so every report
-/// field (`findings`, `summary`, `vital_signs`, `hotspots`, ...) lives at the
-/// top level. Grouped runs populate `grouped_by` + `groups` with per-bucket
-/// recomputed metrics. The `actions_meta` breadcrumb is NOT modeled here:
-/// `inject_health_actions` adds it as a post-pass on the `serde_json::Value`
-/// tree, and the drift gate tolerates the gap via its `AUGMENTATION_KEYS`
-/// list because the typed wrapper would force every caller to plumb the
-/// suppression context through, which buys nothing today.
+/// field (`findings`, `summary`, `vital_signs`, `hotspots`, `actions_meta`,
+/// ...) lives at the top level. Grouped runs populate `grouped_by` +
+/// `groups` with per-bucket recomputed metrics. The `actions_meta`
+/// breadcrumb is modeled on `HealthReport` as an `Option<HealthActionsMeta>`
+/// so the schema documents the field; `inject_health_actions` still
+/// populates it post-construction on the `serde_json::Value` tree because
+/// the suppression context lives inside the report builder.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(title = "fallow health --format json"))]
 pub struct HealthOutput {
     /// Schema version for this output format.
     pub schema_version: SchemaVersion,
@@ -500,6 +515,10 @@ pub struct HealthOutput {
 /// fallow JSON-producing command.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(title = "fallow explain <issue-type> --format json")
+)]
 #[serde(deny_unknown_fields)]
 pub struct ExplainOutput {
     /// Canonical rule id, for example `fallow/unused-export`.
@@ -523,6 +542,10 @@ pub struct ExplainOutput {
 /// same shape. The wire form is a bare JSON array, not an object.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(title = "fallow --format codeclimate / gitlab-codequality")
+)]
 #[serde(transparent)]
 pub struct CodeClimateOutput(pub Vec<CodeClimateIssue>);
 
@@ -598,6 +621,10 @@ pub struct CodeClimateLines {
 /// post inline PR / MR review comments.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(title = "fallow --format review-github / review-gitlab")
+)]
 pub struct ReviewEnvelopeOutput {
     /// GitHub review event. Omitted for GitLab.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -760,6 +787,10 @@ pub enum ReviewCheckConclusion {
 /// across PR / MR revisions.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(title = "fallow ci reconcile-review --format json")
+)]
 pub struct ReviewReconcileOutput {
     /// Envelope schema marker, always `fallow-review-reconcile/v1`.
     pub schema: ReviewReconcileSchema,

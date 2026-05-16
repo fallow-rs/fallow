@@ -216,5 +216,6 @@ fn build_group(
         hotspots: group_hotspots,
         large_functions: group_large_functions,
         targets: group_targets,
+        actions_meta: None,
     }
 }

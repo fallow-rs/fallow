@@ -100,23 +100,23 @@ The health and envelope types live on `fallow-cli` (the binary crate) rather tha
 A drift gate (`cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit`) compares the derived shape against the committed `docs/output-schema.json` and fails when:
 - a Rust struct gains a field that is missing from the schema,
 - a Rust struct loses a field that is still listed in the schema,
-- a Rust field is required but the schema has it optional (or vice versa).
+- a Rust field is required but the schema has it optional (or vice versa),
+- any structural divergence on the Rust-owned definitions (full equality after canonicalization erases cosmetic differences: doc-comment prose, `oneOf`/`anyOf` choice, single-arm `allOf` wrappers, schemars integer-width hints, `Option<T>` nullable-union form).
 
-To regenerate the in-scope `definitions` blocks against the Rust source of truth:
+To regenerate `docs/output-schema.json` against the Rust source of truth:
 
 ```bash
-cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit > /tmp/emitted-schema.json
-# then reconcile the matching entries in docs/output-schema.json against /tmp/emitted-schema.json
+cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit > docs/output-schema.json
 ```
 
-A strict structural gate (`#[ignore]`d for now, runs with `-- --ignored`) covers shape-level drift (descriptions, integer formats, nullable union choices). It will land on the default gate once the prose-migration phase syncs descriptions into Rust doc comments.
+Phase 8 closed the prose-and-shape escape hatch: every type in `derived_definition_names()` is regenerated from Rust, with descriptions sourced from `///` doc comments and per-envelope titles from `#[schemars(title = "...")]`. Editing the committed schema by hand on any in-scope definition will fail the strict gate on the next `cargo test`.
 
 ### Layer 2: hand-written sections
 
-Until a follow-up migrates them, these sections of `docs/output-schema.json` stay hand-maintained:
+Two sections of `docs/output-schema.json` stay hand-maintained today:
 
-- Top-level metadata (`$schema`, `title`, `oneOf`)
-- The `committed_property_refs_match_derived_property_refs` drift test catches `$ref`-value drift between derived and committed property shapes (e.g. if a future change repoints `CombinedOutput.dupes` away from `DuplicationReport`). The `#[ignore]`d strict structural gate covers descriptions, integer formats, and nullable-union shape choices; flipping it on is Phase 8's job.
+- Top-level metadata (`$schema`, `title`, `description`, `oneOf`); the `merge_with_committed` step in `crates/cli/src/bin/schema_emit.rs` preserves them verbatim.
+- The `committed_property_refs_match_derived_property_refs` drift test catches `$ref`-value drift between derived and committed property shapes (e.g. if a future change repoints `CombinedOutput.dupes` away from `DuplicationReport`).
 
 If you add a new finding type, envelope, or utility shape, derive `JsonSchema` on the matching Rust struct, register it in `derived_definition_names()`, and the drift gate forces the schema to follow. Adding a new envelope means adding a new file under `crates/cli/src/output_envelope.rs` and adding the type to the top-level `oneOf` in `docs/output-schema.json`.
 

@@ -10,8 +10,8 @@
 use serde::Serialize;
 
 use crate::health_types::{
-    FileHealthScore, HealthFinding, HealthScore, HotspotEntry, LargeFunctionEntry,
-    RefactoringTarget, VitalSigns,
+    FileHealthScore, HealthActionsMeta, HealthFinding, HealthScore, HotspotEntry,
+    LargeFunctionEntry, RefactoringTarget, VitalSigns,
 };
 
 /// A health report scoped to a single group.
@@ -61,6 +61,12 @@ pub struct HealthGroup {
     /// Refactoring targets in files belonging to this group.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<RefactoringTarget>,
+    /// Auditable breadcrumb recording why `suppress-line` action hints
+    /// were omitted from this group's findings. Mirrors the project-level
+    /// `HealthReport.actions_meta`; populated by `inject_health_actions`
+    /// per group when the suppression context applies uniformly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actions_meta: Option<HealthActionsMeta>,
 }
 
 /// Wrapper carrying the resolver mode label alongside the partitioned groups.
