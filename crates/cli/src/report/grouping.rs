@@ -190,14 +190,14 @@ pub fn group_analysis_results(
     }
     for item in &results.unused_exports {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.export.path))
             .or_default()
             .unused_exports
             .push(item.clone());
     }
     for item in &results.unused_types {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.export.path))
             .or_default()
             .unused_types
             .push(item.clone());
@@ -211,14 +211,14 @@ pub fn group_analysis_results(
     }
     for item in &results.unused_enum_members {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.member.path))
             .or_default()
             .unused_enum_members
             .push(item.clone());
     }
     for item in &results.unused_class_members {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.member.path))
             .or_default()
             .unused_class_members
             .push(item.clone());
@@ -430,8 +430,8 @@ mod tests {
         })
     }
 
-    fn unused_export(path: &str, name: &str) -> UnusedExport {
-        UnusedExport {
+    fn unused_export(path: &str, name: &str) -> UnusedExportFinding {
+        UnusedExportFinding::with_actions(UnusedExport {
             path: PathBuf::from(path),
             export_name: name.to_string(),
             is_type_only: false,
@@ -439,7 +439,7 @@ mod tests {
             col: 0,
             span_start: 0,
             is_re_export: false,
-        }
+        })
     }
 
     fn unlisted_dep(name: &str, sites: Vec<ImportSite>) -> UnlistedDependency {
@@ -1076,16 +1076,16 @@ mod tests {
     #[test]
     fn group_unused_enum_members() {
         let mut results = AnalysisResults::default();
-        results
-            .unused_enum_members
-            .push(fallow_core::results::UnusedMember {
+        results.unused_enum_members.push(
+            fallow_core::results::UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: PathBuf::from("/root/src/types.ts"),
                 parent_name: "Status".to_string(),
                 member_name: "Deprecated".to_string(),
                 kind: fallow_core::extract::MemberKind::EnumMember,
                 line: 5,
                 col: 0,
-            });
+            }),
+        );
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
         assert_eq!(groups.len(), 1);
@@ -1096,16 +1096,16 @@ mod tests {
     #[test]
     fn group_unused_class_members() {
         let mut results = AnalysisResults::default();
-        results
-            .unused_class_members
-            .push(fallow_core::results::UnusedMember {
+        results.unused_class_members.push(
+            fallow_core::results::UnusedClassMemberFinding::with_actions(UnusedMember {
                 path: PathBuf::from("/root/lib/service.ts"),
                 parent_name: "UserService".to_string(),
                 member_name: "legacyMethod".to_string(),
                 kind: fallow_core::extract::MemberKind::ClassMethod,
                 line: 42,
                 col: 0,
-            });
+            }),
+        );
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
         assert_eq!(groups.len(), 1);

@@ -9,7 +9,7 @@ fn public_tag_prevents_unused_export_detection() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // @public tagged export should NOT be reported as unused
@@ -46,7 +46,7 @@ fn untagged_unused_export_still_detected() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // trulyUnused has no visibility tag and is never imported

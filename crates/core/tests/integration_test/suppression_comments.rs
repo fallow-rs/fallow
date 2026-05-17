@@ -9,7 +9,7 @@ fn next_line_suppression_hides_unused_export() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // suppressedExport has a fallow-ignore-next-line comment, should NOT appear
@@ -36,8 +36,13 @@ fn file_level_suppression_hides_all_exports() {
         .iter()
         .map(|e| {
             (
-                e.export_name.as_str(),
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
+                e.export.export_name.as_str(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
             )
         })
         .collect();
@@ -66,7 +71,7 @@ fn enum_member_suppression() {
     let unused_enum_member_names: Vec<&str> = results
         .unused_enum_members
         .iter()
-        .map(|m| m.member_name.as_str())
+        .map(|m| m.member.member_name.as_str())
         .collect();
 
     // Inactive has fallow-ignore-next-line, should NOT appear

@@ -113,7 +113,7 @@ fn ignore_exports_wildcard() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -169,7 +169,7 @@ fn ignore_exports_specific() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -193,14 +193,14 @@ fn exports_used_only_in_file_are_reported_by_default() {
         results
             .unused_exports
             .iter()
-            .any(|e| e.export_name == "usedOnlyHere"),
+            .any(|e| e.export.export_name == "usedOnlyHere"),
         "same-file references should not suppress unused exports by default"
     );
     assert!(
         results
             .unused_types
             .iter()
-            .any(|e| e.export_name == "LocallyUsedType"),
+            .any(|e| e.export.export_name == "LocallyUsedType"),
         "same-file references should not suppress unused types by default"
     );
 }
@@ -216,7 +216,7 @@ fn ignore_exports_used_in_file_boolean_suppresses_local_references() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         !unused_export_names.contains(&"usedOnlyHere"),
@@ -230,7 +230,7 @@ fn ignore_exports_used_in_file_boolean_suppresses_local_references() {
     let unused_type_names: Vec<&str> = results
         .unused_types
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         !unused_type_names.contains(&"LocallyUsedType"),
@@ -258,14 +258,14 @@ fn ignore_exports_used_in_file_kind_form_can_target_types_only() {
         results
             .unused_exports
             .iter()
-            .any(|e| e.export_name == "usedOnlyHere"),
+            .any(|e| e.export.export_name == "usedOnlyHere"),
         "kind form should not suppress value exports"
     );
     assert!(
         !results
             .unused_types
             .iter()
-            .any(|e| e.export_name == "LocallyUsedType"),
+            .any(|e| e.export.export_name == "LocallyUsedType"),
         "kind form should suppress type exports referenced in the same file"
     );
 }
@@ -284,7 +284,7 @@ fn ignore_exports_used_in_file_does_not_suppress_export_specifier_self_reference
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(

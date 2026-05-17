@@ -86,11 +86,11 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     // Group exports by file path so we can apply all fixes to a single in-memory copy.
     let mut exports_by_file: FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedExport>> =
         FxHashMap::default();
-    for export in &results.unused_exports {
+    for finding in &results.unused_exports {
         exports_by_file
-            .entry(export.path.clone())
+            .entry(finding.export.path.clone())
             .or_default()
-            .push(export);
+            .push(&finding.export);
     }
 
     let mut had_write_error = exports::apply_export_fixes(
@@ -118,11 +118,11 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     if !results.unused_enum_members.is_empty() {
         let mut enum_members_by_file: FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedMember>> =
             FxHashMap::default();
-        for member in &results.unused_enum_members {
+        for finding in &results.unused_enum_members {
             enum_members_by_file
-                .entry(member.path.clone())
+                .entry(finding.member.path.clone())
                 .or_default()
-                .push(member);
+                .push(&finding.member);
         }
 
         had_write_error |= enum_members::apply_enum_member_fixes(

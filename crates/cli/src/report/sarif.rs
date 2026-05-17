@@ -749,7 +749,7 @@ pub fn build_sarif(
         &mut snippets,
         |e| {
             sarif_export_fields(
-                e,
+                &e.export,
                 root,
                 "fallow/unused-export",
                 severity_to_sarif_level(rules.unused_exports),
@@ -764,7 +764,7 @@ pub fn build_sarif(
         &mut snippets,
         |e| {
             sarif_export_fields(
-                e,
+                &e.export,
                 root,
                 "fallow/unused-type",
                 severity_to_sarif_level(rules.unused_types),
@@ -857,7 +857,7 @@ pub fn build_sarif(
         &mut snippets,
         |m| {
             sarif_member_fields(
-                m,
+                &m.member,
                 root,
                 "fallow/unused-enum-member",
                 severity_to_sarif_level(rules.unused_enum_members),
@@ -871,7 +871,7 @@ pub fn build_sarif(
         &mut snippets,
         |m| {
             sarif_member_fields(
-                m,
+                &m.member,
                 root,
                 "fallow/unused-class-member",
                 severity_to_sarif_level(rules.unused_class_members),
@@ -1652,15 +1652,17 @@ mod tests {
     fn sarif_unused_export_includes_region() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "helperFn".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 4,
-            span_start: 120,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/utils.ts"),
+                export_name: "helperFn".to_string(),
+                is_type_only: false,
+                line: 10,
+                col: 4,
+                span_start: 120,
+                is_re_export: false,
+            }));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
@@ -2103,15 +2105,17 @@ mod tests {
     fn sarif_re_export_has_properties() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/index.ts"),
-            export_name: "reExported".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: true,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/index.ts"),
+                export_name: "reExported".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: true,
+            }));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
@@ -2124,15 +2128,17 @@ mod tests {
     fn sarif_non_re_export_has_no_properties() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "foo".to_string(),
-            is_type_only: false,
-            line: 5,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/utils.ts"),
+                export_name: "foo".to_string(),
+                is_type_only: false,
+                line: 5,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
@@ -2147,15 +2153,17 @@ mod tests {
     fn sarif_type_re_export_message() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_types.push(UnusedExport {
-            path: root.join("src/index.ts"),
-            export_name: "MyType".to_string(),
-            is_type_only: true,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: true,
-        });
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: root.join("src/index.ts"),
+                export_name: "MyType".to_string(),
+                is_type_only: true,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: true,
+            }));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
@@ -2296,16 +2304,16 @@ mod tests {
     fn sarif_enum_member_message_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results
-            .unused_enum_members
-            .push(fallow_core::results::UnusedMember {
+        results.unused_enum_members.push(
+            fallow_core::results::UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: root.join("src/enums.ts"),
                 parent_name: "Color".to_string(),
                 member_name: "Purple".to_string(),
                 kind: fallow_core::extract::MemberKind::EnumMember,
                 line: 5,
                 col: 2,
-            });
+            }),
+        );
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
@@ -2320,16 +2328,16 @@ mod tests {
     fn sarif_class_member_message_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results
-            .unused_class_members
-            .push(fallow_core::results::UnusedMember {
+        results.unused_class_members.push(
+            fallow_core::results::UnusedClassMemberFinding::with_actions(UnusedMember {
                 path: root.join("src/service.ts"),
                 parent_name: "API".to_string(),
                 member_name: "fetch".to_string(),
                 kind: fallow_core::extract::MemberKind::ClassMethod,
                 line: 10,
                 col: 4,
-            });
+            }),
+        );
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];

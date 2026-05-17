@@ -61,8 +61,8 @@ mod tests {
 
     use fallow_core::duplicates::{DuplicationReport, DuplicationStats};
     use fallow_core::results::{
-        AnalysisResults, UnresolvedImport, UnresolvedImportFinding, UnusedExport, UnusedFile,
-        UnusedFileFinding,
+        AnalysisResults, UnresolvedImport, UnresolvedImportFinding, UnusedExport,
+        UnusedExportFinding, UnusedFile, UnusedFileFinding,
     };
 
     fn test_root() -> PathBuf {
@@ -108,24 +108,28 @@ mod tests {
         let root = test_root();
         let mut results = AnalysisResults::default();
         let path = root.join("src/mod.ts");
-        results.unused_exports.push(UnusedExport {
-            path: path.clone(),
-            export_name: "foo".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        results.unused_exports.push(UnusedExport {
-            path: path.clone(),
-            export_name: "bar".to_string(),
-            is_type_only: false,
-            line: 5,
-            col: 0,
-            span_start: 50,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: path.clone(),
+                export_name: "foo".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: path.clone(),
+                export_name: "bar".to_string(),
+                is_type_only: false,
+                line: 5,
+                col: 0,
+                span_start: 50,
+                is_re_export: false,
+            }));
         results
             .unresolved_imports
             .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
@@ -153,15 +157,17 @@ mod tests {
             .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: root.join("src/a.ts"),
             }));
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/b.ts"),
-            export_name: "x".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/b.ts"),
+                export_name: "x".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         results
             .unresolved_imports
             .push(UnresolvedImportFinding::with_actions(UnresolvedImport {

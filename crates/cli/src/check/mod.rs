@@ -725,24 +725,26 @@ mod tests {
             .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: PathBuf::from("/project/src/a.ts"),
             }));
-        r.unused_exports.push(UnusedExport {
-            path: PathBuf::from("/project/src/b.ts"),
-            export_name: "foo".into(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        r.unused_types.push(UnusedExport {
-            path: PathBuf::from("/project/src/c.ts"),
-            export_name: "MyType".into(),
-            is_type_only: true,
-            line: 5,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        r.unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/b.ts"),
+                export_name: "foo".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        r.unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/c.ts"),
+                export_name: "MyType".into(),
+                is_type_only: true,
+                line: 5,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         r.unused_dependencies.push(UnusedDependency {
             package_name: "lodash".into(),
             location: DependencyLocation::Dependencies,
@@ -757,22 +759,24 @@ mod tests {
             line: 5,
             used_in_workspaces: Vec::new(),
         });
-        r.unused_enum_members.push(UnusedMember {
-            path: PathBuf::from("/project/src/d.ts"),
-            parent_name: "Status".into(),
-            member_name: "Pending".into(),
-            kind: MemberKind::EnumMember,
-            line: 3,
-            col: 0,
-        });
-        r.unused_class_members.push(UnusedMember {
-            path: PathBuf::from("/project/src/e.ts"),
-            parent_name: "Service".into(),
-            member_name: "helper".into(),
-            kind: MemberKind::ClassMethod,
-            line: 10,
-            col: 0,
-        });
+        r.unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/d.ts"),
+                parent_name: "Status".into(),
+                member_name: "Pending".into(),
+                kind: MemberKind::EnumMember,
+                line: 3,
+                col: 0,
+            }));
+        r.unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/e.ts"),
+                parent_name: "Service".into(),
+                member_name: "helper".into(),
+                kind: MemberKind::ClassMethod,
+                line: 10,
+                col: 0,
+            }));
         r.unresolved_imports
             .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
                 path: PathBuf::from("/project/src/f.ts"),

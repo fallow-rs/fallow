@@ -49,8 +49,13 @@ fn arrow_wrapped_lazy_imports_credit_default_exports() {
         .iter()
         .map(|e| {
             (
-                e.export_name.as_str(),
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
+                e.export.export_name.as_str(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
             )
         })
         .collect();

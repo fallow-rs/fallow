@@ -14,7 +14,7 @@ fn inheritance_propagates_this_accesses_to_children() {
     let unused_members: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
     // Circle's members should be credited via inheritance propagation

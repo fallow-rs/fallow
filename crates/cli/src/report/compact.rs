@@ -49,11 +49,15 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
         lines.push(format!("unused-file:{}", rel(&file.file.path)));
     }
     for export in &results.unused_exports {
-        lines.push(compact_export(export, "unused-export", "unused-re-export"));
+        lines.push(compact_export(
+            &export.export,
+            "unused-export",
+            "unused-re-export",
+        ));
     }
     for export in &results.unused_types {
         lines.push(compact_export(
-            export,
+            &export.export,
             "unused-type",
             "unused-re-export-type",
         ));
@@ -77,10 +81,10 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
         lines.push(format!("unused-optionaldep:{}", dep.package_name));
     }
     for member in &results.unused_enum_members {
-        lines.push(compact_member(member, "unused-enum-member"));
+        lines.push(compact_member(&member.member, "unused-enum-member"));
     }
     for member in &results.unused_class_members {
-        lines.push(compact_member(member, "unused-class-member"));
+        lines.push(compact_member(&member.member, "unused-class-member"));
     }
     for import in &results.unresolved_imports {
         lines.push(format!(
@@ -477,15 +481,17 @@ mod tests {
     fn compact_unused_export_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "helperFn".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 4,
-            span_start: 120,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/utils.ts"),
+                export_name: "helperFn".to_string(),
+                is_type_only: false,
+                line: 10,
+                col: 4,
+                span_start: 120,
+                is_re_export: false,
+            }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "unused-export:src/utils.ts:10:helperFn");
@@ -573,15 +579,17 @@ mod tests {
     fn compact_unused_type_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_types.push(UnusedExport {
-            path: root.join("src/types.ts"),
-            export_name: "OldType".to_string(),
-            is_type_only: true,
-            line: 5,
-            col: 0,
-            span_start: 60,
-            is_re_export: false,
-        });
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: root.join("src/types.ts"),
+                export_name: "OldType".to_string(),
+                is_type_only: true,
+                line: 5,
+                col: 0,
+                span_start: 60,
+                is_re_export: false,
+            }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "unused-type:src/types.ts:5:OldType");
@@ -623,14 +631,16 @@ mod tests {
     fn compact_unused_enum_member_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_enum_members.push(UnusedMember {
-            path: root.join("src/enums.ts"),
-            parent_name: "Status".to_string(),
-            member_name: "Deprecated".to_string(),
-            kind: MemberKind::EnumMember,
-            line: 8,
-            col: 2,
-        });
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: root.join("src/enums.ts"),
+                parent_name: "Status".to_string(),
+                member_name: "Deprecated".to_string(),
+                kind: MemberKind::EnumMember,
+                line: 8,
+                col: 2,
+            }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(
@@ -643,14 +653,16 @@ mod tests {
     fn compact_unused_class_member_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_class_members.push(UnusedMember {
-            path: root.join("src/service.ts"),
-            parent_name: "UserService".to_string(),
-            member_name: "legacyMethod".to_string(),
-            kind: MemberKind::ClassMethod,
-            line: 42,
-            col: 4,
-        });
+        results
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: root.join("src/service.ts"),
+                parent_name: "UserService".to_string(),
+                member_name: "legacyMethod".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 42,
+                col: 4,
+            }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(
@@ -761,15 +773,17 @@ mod tests {
     fn compact_re_export_tagged_correctly() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/index.ts"),
-            export_name: "reExported".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: true,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/index.ts"),
+                export_name: "reExported".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: true,
+            }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "unused-re-export:src/index.ts:1:reExported");
@@ -779,15 +793,17 @@ mod tests {
     fn compact_type_re_export_tagged_correctly() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_types.push(UnusedExport {
-            path: root.join("src/index.ts"),
-            export_name: "ReExportedType".to_string(),
-            is_type_only: true,
-            line: 3,
-            col: 0,
-            span_start: 0,
-            is_re_export: true,
-        });
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: root.join("src/index.ts"),
+                export_name: "ReExportedType".to_string(),
+                is_type_only: true,
+                line: 3,
+                col: 0,
+                span_start: 0,
+                is_re_export: true,
+            }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(
@@ -928,14 +944,16 @@ mod tests {
             line: 12,
             used_in_workspaces: Vec::new(),
         });
-        results.unused_enum_members.push(UnusedMember {
-            path: root.join("src/enums.ts"),
-            parent_name: "Status".to_string(),
-            member_name: "Deprecated".to_string(),
-            kind: MemberKind::EnumMember,
-            line: 8,
-            col: 2,
-        });
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: root.join("src/enums.ts"),
+                parent_name: "Status".to_string(),
+                member_name: "Deprecated".to_string(),
+                kind: MemberKind::EnumMember,
+                line: 8,
+                col: 2,
+            }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines.len(), 3);

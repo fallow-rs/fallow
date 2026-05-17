@@ -9,7 +9,7 @@ fn lit_custom_element_class_exports_credited_through_decorator_and_define() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // Decorator-registered class.
@@ -41,17 +41,19 @@ fn lit_custom_element_class_exports_credited_through_decorator_and_define() {
     // Anonymous `export default @customElement(...) class extends LitElement {}`
     // has no class identifier and unset local_name; the visitor flips the pending
     // Default export directly during visit_class.
-    let anonymous_default_unused = results
-        .unused_exports
-        .iter()
-        .any(|e| e.path.ends_with("anonymous-default.ts") && e.export_name == "default");
+    let anonymous_default_unused = results.unused_exports.iter().any(|e| {
+        e.export.path.ends_with("anonymous-default.ts") && e.export.export_name == "default"
+    });
     assert!(
         !anonymous_default_unused,
         "anonymous default-exported @customElement class should be credited, unused exports were: {:?}",
         results
             .unused_exports
             .iter()
-            .map(|e| (e.path.to_string_lossy().into_owned(), e.export_name.clone()))
+            .map(|e| (
+                e.export.path.to_string_lossy().into_owned(),
+                e.export.export_name.clone()
+            ))
             .collect::<Vec<_>>()
     );
 }
@@ -65,7 +67,7 @@ fn lit_lifecycle_methods_not_flagged_but_genuinely_unused_methods_are() {
     let unused: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
     // Lit lifecycle on LitElement subclass.

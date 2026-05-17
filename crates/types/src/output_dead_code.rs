@@ -26,7 +26,8 @@ use crate::output::{
     SuppressLineAction, SuppressLineKind,
 };
 use crate::results::{
-    BoundaryViolation, CircularDependency, PrivateTypeLeak, UnresolvedImport, UnusedFile,
+    BoundaryViolation, CircularDependency, PrivateTypeLeak, UnresolvedImport, UnusedExport,
+    UnusedFile, UnusedMember,
 };
 
 /// Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
@@ -274,6 +275,218 @@ impl BoundaryViolationFinding {
         ];
         Self {
             violation,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedExport`] finding consumed under the
+/// `unused_exports` key. Same Rust struct as [`UnusedTypeFinding`], with a
+/// different fix description so consumers can tell value-export from
+/// type-export removal at the action level.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedExportFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub export: UnusedExport,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<bool>,
+}
+
+impl UnusedExportFinding {
+    /// Build the wrapper. When `export.is_re_export` is true, the fix
+    /// action's `note` warns about possible public-API surface; otherwise
+    /// `note` is absent on the fix action.
+    #[must_use]
+    pub fn with_actions(export: UnusedExport) -> Self {
+        let note = if export.is_re_export {
+            Some(
+                "This finding originates from a re-export; verify it is not part of your public API before removing"
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::RemoveExport,
+                auto_fixable: true,
+                description: "Remove the unused export from the public API".to_string(),
+                note,
+                available_in_catalogs: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress with an inline comment above the line".to_string(),
+                comment: "// fallow-ignore-next-line unused-export".to_string(),
+                scope: None,
+            }),
+        ];
+        Self {
+            export,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedExport`] finding consumed under the
+/// `unused_types` key. Wraps the same bare [`UnusedExport`] struct as
+/// [`UnusedExportFinding`] but emits a fix action targeted at type-only
+/// declarations, with the same `is_re_export`-aware note swap.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedTypeFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub export: UnusedExport,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<bool>,
+}
+
+impl UnusedTypeFinding {
+    /// Build the wrapper. `is_re_export` swaps the fix note the same way as
+    /// [`UnusedExportFinding::with_actions`].
+    #[must_use]
+    pub fn with_actions(export: UnusedExport) -> Self {
+        let note = if export.is_re_export {
+            Some(
+                "This finding originates from a re-export; verify it is not part of your public API before removing"
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::RemoveExport,
+                auto_fixable: true,
+                description:
+                    "Remove the `export` (or `export type`) keyword from the type declaration"
+                        .to_string(),
+                note,
+                available_in_catalogs: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress with an inline comment above the line".to_string(),
+                comment: "// fallow-ignore-next-line unused-type".to_string(),
+                scope: None,
+            }),
+        ];
+        Self {
+            export,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedMember`] finding consumed under the
+/// `unused_enum_members` key.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedEnumMemberFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub member: UnusedMember,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<bool>,
+}
+
+impl UnusedEnumMemberFinding {
+    /// Build the wrapper from a raw [`UnusedMember`].
+    #[must_use]
+    pub fn with_actions(member: UnusedMember) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::RemoveEnumMember,
+                auto_fixable: true,
+                description: "Remove this enum member".to_string(),
+                note: None,
+                available_in_catalogs: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress with an inline comment above the line".to_string(),
+                comment: "// fallow-ignore-next-line unused-enum-member".to_string(),
+                scope: None,
+            }),
+        ];
+        Self {
+            member,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedMember`] finding consumed under the
+/// `unused_class_members` key. Same Rust struct as
+/// [`UnusedEnumMemberFinding`]; the fix action and suppress comment carry
+/// the class-member kebab-case identifier instead.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedClassMemberFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub member: UnusedMember,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<bool>,
+}
+
+impl UnusedClassMemberFinding {
+    /// Build the wrapper from a raw [`UnusedMember`]. Class-member fixes
+    /// are not auto-applied (members can be used via dependency injection
+    /// or decorators), so `auto_fixable` is `false` and a context note is
+    /// attached.
+    #[must_use]
+    pub fn with_actions(member: UnusedMember) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::RemoveClassMember,
+                auto_fixable: false,
+                description: "Remove this class member".to_string(),
+                note: Some(
+                    "Class member may be used via dependency injection or decorators".to_string(),
+                ),
+                available_in_catalogs: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress with an inline comment above the line".to_string(),
+                comment: "// fallow-ignore-next-line unused-class-member".to_string(),
+                scope: None,
+            }),
+        ];
+        Self {
+            member,
             actions,
             introduced: None,
         }

@@ -23,8 +23,8 @@ pub fn collect_unused_exports(root: &Path, results: &AnalysisResults) -> Vec<(St
         .iter()
         .map(|export| {
             (
-                normalize_path(root, &export.path),
-                export.export_name.clone(),
+                normalize_path(root, &export.export.path),
+                export.export.export_name.clone(),
             )
         })
         .collect()

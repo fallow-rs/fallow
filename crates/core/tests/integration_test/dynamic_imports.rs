@@ -130,12 +130,13 @@ fn vitest_vi_mock_makes_auto_mock_reachable() {
         .iter()
         .filter_map(|export| {
             let path = export
+                .export
                 .path
                 .strip_prefix(&root)
-                .unwrap_or(&export.path)
+                .unwrap_or(&export.export.path)
                 .to_string_lossy()
                 .replace('\\', "/");
-            (path == "src/services/__mocks__/api.ts").then(|| export.export_name.clone())
+            (path == "src/services/__mocks__/api.ts").then(|| export.export.export_name.clone())
         })
         .collect();
     assert!(
@@ -199,12 +200,13 @@ fn vitest_vi_mock_factory_credits_target_and_skips_auto_mock_synthesis() {
         .iter()
         .filter_map(|export| {
             let path = export
+                .export
                 .path
                 .strip_prefix(&root)
-                .unwrap_or(&export.path)
+                .unwrap_or(&export.export.path)
                 .to_string_lossy()
                 .replace('\\', "/");
-            (path == "src/bar/foo.ts").then(|| export.export_name.clone())
+            (path == "src/bar/foo.ts").then(|| export.export.export_name.clone())
         })
         .collect();
     assert_eq!(

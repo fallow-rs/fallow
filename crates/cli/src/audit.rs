@@ -1343,15 +1343,15 @@ fn dead_code_keys(
     for item in &results.unused_exports {
         keys.insert(format!(
             "unused-export:{}:{}",
-            relative_key_path(&item.path, root),
-            item.export_name
+            relative_key_path(&item.export.path, root),
+            item.export.export_name
         ));
     }
     for item in &results.unused_types {
         keys.insert(format!(
             "unused-type:{}:{}",
-            relative_key_path(&item.path, root),
-            item.export_name
+            relative_key_path(&item.export.path, root),
+            item.export.export_name
         ));
     }
     for item in &results.private_type_leaks {
@@ -1371,10 +1371,10 @@ fn dead_code_keys(
         keys.insert(unused_dependency_key(item, root));
     }
     for item in &results.unused_enum_members {
-        keys.insert(unused_member_key("unused-enum-member", item, root));
+        keys.insert(unused_member_key("unused-enum-member", &item.member, root));
     }
     for item in &results.unused_class_members {
-        keys.insert(unused_member_key("unused-class-member", item, root));
+        keys.insert(unused_member_key("unused-class-member", &item.member, root));
     }
     for item in &results.unresolved_imports {
         keys.insert(format!(
@@ -1490,15 +1490,15 @@ fn retain_introduced_dead_code(
     results.unused_exports.retain(|item| {
         !base.contains(&format!(
             "unused-export:{}:{}",
-            relative_key_path(&item.path, root),
-            item.export_name
+            relative_key_path(&item.export.path, root),
+            item.export.export_name
         ))
     });
     results.unused_types.retain(|item| {
         !base.contains(&format!(
             "unused-type:{}:{}",
-            relative_key_path(&item.path, root),
-            item.export_name
+            relative_key_path(&item.export.path, root),
+            item.export.export_name
         ))
     });
     // The verdict path only needs correct issue counts and severities. For the
@@ -1527,10 +1527,10 @@ fn retain_introduced_dead_code(
         .retain(|item| keep(unused_dependency_key(item, root)));
     results
         .unused_enum_members
-        .retain(|item| keep(unused_member_key("unused-enum-member", item, root)));
+        .retain(|item| keep(unused_member_key("unused-enum-member", &item.member, root)));
     results
         .unused_class_members
-        .retain(|item| keep(unused_member_key("unused-class-member", item, root)));
+        .retain(|item| keep(unused_member_key("unused-class-member", &item.member, root)));
     results.unresolved_imports.retain(|item| {
         keep(format!(
             "unresolved-import:{}:{}",
@@ -1672,8 +1672,8 @@ fn annotate_dead_code_json(
             issue_was_introduced(
                 &format!(
                     "unused-export:{}:{}",
-                    relative_key_path(&item.path, root),
-                    item.export_name
+                    relative_key_path(&item.export.path, root),
+                    item.export.export_name
                 ),
                 base,
             )
@@ -1686,8 +1686,8 @@ fn annotate_dead_code_json(
             issue_was_introduced(
                 &format!(
                     "unused-type:{}:{}",
-                    relative_key_path(&item.path, root),
-                    item.export_name
+                    relative_key_path(&item.export.path, root),
+                    item.export.export_name
                 ),
                 base,
             )
@@ -1736,14 +1736,20 @@ fn annotate_dead_code_json(
         json,
         "unused_enum_members",
         results.unused_enum_members.iter().map(|item| {
-            issue_was_introduced(&unused_member_key("unused-enum-member", item, root), base)
+            issue_was_introduced(
+                &unused_member_key("unused-enum-member", &item.member, root),
+                base,
+            )
         }),
     );
     annotate_issue_array(
         json,
         "unused_class_members",
         results.unused_class_members.iter().map(|item| {
-            issue_was_introduced(&unused_member_key("unused-class-member", item, root), base)
+            issue_was_introduced(
+                &unused_member_key("unused-class-member", &item.member, root),
+                base,
+            )
         }),
     );
     annotate_issue_array(

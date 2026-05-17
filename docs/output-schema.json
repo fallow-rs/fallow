@@ -504,16 +504,16 @@
         "unused_exports": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedExport"
+            "$ref": "#/definitions/UnusedExportFinding"
           },
-          "description": "Exports never imported by other modules."
+          "description": "Exports never imported by other modules. Wrapped in\n[`UnusedExportFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "unused_types": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedExport"
+            "$ref": "#/definitions/UnusedTypeFinding"
           },
-          "description": "Type exports never imported by other modules."
+          "description": "Type exports never imported by other modules. Wrapped in\n[`UnusedTypeFinding`]: the inner [`UnusedExport`] struct is shared\nwith `unused_exports` but the wrapper emits a type-targeted fix\ndescription."
         },
         "private_type_leaks": {
           "type": "array",
@@ -546,16 +546,16 @@
         "unused_enum_members": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedMember"
+            "$ref": "#/definitions/UnusedEnumMemberFinding"
           },
-          "description": "Enum members never accessed."
+          "description": "Enum members never accessed. Wrapped in\n[`UnusedEnumMemberFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "unused_class_members": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedMember"
+            "$ref": "#/definitions/UnusedClassMemberFinding"
           },
-          "description": "Class members never accessed."
+          "description": "Class members never accessed. Wrapped in\n[`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as\n`unused_enum_members`, with a class-targeted fix description and the\n`auto_fixable: false` default to reflect dependency-injection\npatterns."
         },
         "unresolved_imports": {
           "type": "array",
@@ -801,16 +801,16 @@
         "unused_exports": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedExport"
+            "$ref": "#/definitions/UnusedExportFinding"
           },
-          "description": "Exports never imported by other modules."
+          "description": "Exports never imported by other modules. Wrapped in\n[`UnusedExportFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "unused_types": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedExport"
+            "$ref": "#/definitions/UnusedTypeFinding"
           },
-          "description": "Type exports never imported by other modules."
+          "description": "Type exports never imported by other modules. Wrapped in\n[`UnusedTypeFinding`]: the inner [`UnusedExport`] struct is shared\nwith `unused_exports` but the wrapper emits a type-targeted fix\ndescription."
         },
         "private_type_leaks": {
           "type": "array",
@@ -843,16 +843,16 @@
         "unused_enum_members": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedMember"
+            "$ref": "#/definitions/UnusedEnumMemberFinding"
           },
-          "description": "Enum members never accessed."
+          "description": "Enum members never accessed. Wrapped in\n[`UnusedEnumMemberFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "unused_class_members": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedMember"
+            "$ref": "#/definitions/UnusedClassMemberFinding"
           },
-          "description": "Class members never accessed."
+          "description": "Class members never accessed. Wrapped in\n[`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as\n`unused_enum_members`, with a class-targeted fix description and the\n`auto_fixable: false` default to reflect dependency-injection\npatterns."
         },
         "unresolved_imports": {
           "type": "array",
@@ -3663,16 +3663,6 @@
         "is_re_export": {
           "type": "boolean",
           "description": "Whether this finding comes from a barrel/index re-export rather than the source definition."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
@@ -3682,8 +3672,7 @@
         "line",
         "col",
         "span_start",
-        "is_re_export",
-        "actions"
+        "is_re_export"
       ],
       "description": "An export that is never imported by other modules."
     },
@@ -3797,16 +3786,6 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
@@ -3815,8 +3794,7 @@
         "member_name",
         "kind",
         "line",
-        "col",
-        "actions"
+        "col"
       ],
       "description": "An unused enum or class member."
     },
@@ -5267,16 +5245,16 @@
         "unused_exports": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedExport"
+            "$ref": "#/definitions/UnusedExportFinding"
           },
-          "description": "Exports never imported by other modules."
+          "description": "Exports never imported by other modules. Wrapped in\n[`UnusedExportFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "unused_types": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedExport"
+            "$ref": "#/definitions/UnusedTypeFinding"
           },
-          "description": "Type exports never imported by other modules."
+          "description": "Type exports never imported by other modules. Wrapped in\n[`UnusedTypeFinding`]: the inner [`UnusedExport`] struct is shared\nwith `unused_exports` but the wrapper emits a type-targeted fix\ndescription."
         },
         "private_type_leaks": {
           "type": "array",
@@ -5309,16 +5287,16 @@
         "unused_enum_members": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedMember"
+            "$ref": "#/definitions/UnusedEnumMemberFinding"
           },
-          "description": "Enum members never accessed."
+          "description": "Enum members never accessed. Wrapped in\n[`UnusedEnumMemberFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "unused_class_members": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedMember"
+            "$ref": "#/definitions/UnusedClassMemberFinding"
           },
-          "description": "Class members never accessed."
+          "description": "Class members never accessed. Wrapped in\n[`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as\n`unused_enum_members`, with a class-targeted fix description and the\n`auto_fixable: false` default to reflect dependency-injection\npatterns."
         },
         "unresolved_imports": {
           "type": "array",
@@ -7410,6 +7388,228 @@
         "actions"
       ],
       "description": "Wire-shape envelope for a [`BoundaryViolation`] finding. Mirrors\n[`UnusedFileFinding`]: flattens the bare finding and carries a typed\n`actions` array (`refactor-boundary` primary plus `suppress-line`\nsecondary)."
+    },
+    "UnusedExportFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File containing the unused export."
+        },
+        "export_name": {
+          "type": "string",
+          "description": "Name of the unused export."
+        },
+        "is_type_only": {
+          "type": "boolean",
+          "description": "Whether this is a type-only export."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the export."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "span_start": {
+          "type": "integer",
+          "description": "Byte offset into the source file (used by the fix command)."
+        },
+        "is_re_export": {
+          "type": "boolean",
+          "description": "Whether this finding comes from a barrel/index re-export rather than the source definition."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "export_name",
+        "is_type_only",
+        "line",
+        "col",
+        "span_start",
+        "is_re_export",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedExport`] finding consumed under the\n`unused_exports` key. Same Rust struct as [`UnusedTypeFinding`], with a\ndifferent fix description so consumers can tell value-export from\ntype-export removal at the action level."
+    },
+    "UnusedTypeFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File containing the unused export."
+        },
+        "export_name": {
+          "type": "string",
+          "description": "Name of the unused export."
+        },
+        "is_type_only": {
+          "type": "boolean",
+          "description": "Whether this is a type-only export."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the export."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "span_start": {
+          "type": "integer",
+          "description": "Byte offset into the source file (used by the fix command)."
+        },
+        "is_re_export": {
+          "type": "boolean",
+          "description": "Whether this finding comes from a barrel/index re-export rather than the source definition."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "export_name",
+        "is_type_only",
+        "line",
+        "col",
+        "span_start",
+        "is_re_export",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedExport`] finding consumed under the\n`unused_types` key. Wraps the same bare [`UnusedExport`] struct as\n[`UnusedExportFinding`] but emits a fix action targeted at type-only\ndeclarations, with the same `is_re_export`-aware note swap."
+    },
+    "UnusedEnumMemberFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File containing the unused member."
+        },
+        "parent_name": {
+          "type": "string",
+          "description": "Name of the parent enum or class."
+        },
+        "member_name": {
+          "type": "string",
+          "description": "Name of the unused member."
+        },
+        "kind": {
+          "description": "Whether this is an enum member, class method, or class property.",
+          "$ref": "#/definitions/MemberKind"
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "parent_name",
+        "member_name",
+        "kind",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedMember`] finding consumed under the\n`unused_enum_members` key."
+    },
+    "UnusedClassMemberFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File containing the unused member."
+        },
+        "parent_name": {
+          "type": "string",
+          "description": "Name of the parent enum or class."
+        },
+        "member_name": {
+          "type": "string",
+          "description": "Name of the unused member."
+        },
+        "kind": {
+          "description": "Whether this is an enum member, class method, or class property.",
+          "$ref": "#/definitions/MemberKind"
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "parent_name",
+        "member_name",
+        "kind",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedMember`] finding consumed under the\n`unused_class_members` key. Same Rust struct as\n[`UnusedEnumMemberFinding`]; the fix action and suppress comment carry\nthe class-member kebab-case identifier instead."
     }
   }
 }

@@ -69,7 +69,7 @@ fn nx_project_json_marks_nested_main_as_reachable_without_workspace_package_json
     let unused_exports: Vec<String> = results
         .unused_exports
         .iter()
-        .map(|issue| issue.export_name.clone())
+        .map(|issue| issue.export.export_name.clone())
         .collect();
     assert!(
         unused_exports.contains(&"unusedHelper".to_string()),

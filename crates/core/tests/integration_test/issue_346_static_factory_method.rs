@@ -18,7 +18,7 @@ fn static_factory_method_credits_instance_members_across_files() {
     let unused: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
     assert!(

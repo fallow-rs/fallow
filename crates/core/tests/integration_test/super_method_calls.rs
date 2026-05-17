@@ -12,7 +12,7 @@ fn super_method_calls_credit_parent_class_members() {
     let unused: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
     assert!(

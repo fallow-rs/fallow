@@ -9,7 +9,7 @@ fn barrel_exports_resolves_through_barrel() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // fooUnused should be detected as unused (it's not re-exported from barrel)
@@ -30,7 +30,7 @@ fn barrel_unused_re_exports_detected() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // UnusedComponent is re-exported from barrel but never imported by anyone
@@ -55,7 +55,7 @@ fn barrel_unused_type_re_exports_detected() {
     let unused_type_names: Vec<&str> = results
         .unused_types
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // UnusedType is re-exported as type from barrel but never imported
@@ -86,7 +86,7 @@ fn barrel_re_export_propagates_to_source_module() {
         !results
             .unused_exports
             .iter()
-            .any(|e| e.export_name == "UsedComponent"),
+            .any(|e| e.export.export_name == "UsedComponent"),
         "source UsedComponent should not be unused since barrel re-export is consumed"
     );
 }
@@ -102,7 +102,7 @@ fn barrel_exports_detects_unused_re_export_bar() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -130,7 +130,7 @@ fn multi_hop_barrel_used_propagates() {
         !results
             .unused_exports
             .iter()
-            .any(|e| e.export_name == "used"),
+            .any(|e| e.export.export_name == "used"),
         "used should propagate through barrel chain and NOT be flagged"
     );
 }
@@ -144,7 +144,7 @@ fn multi_hop_barrel_unused_detected() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // unused2 is only exported from source.ts and re-exported from barrel2
@@ -166,7 +166,7 @@ fn star_re_export_chain_used_propagates() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // `used` is imported through barrel1 (export *) -> barrel2 (export *) -> source
@@ -185,7 +185,7 @@ fn star_re_export_chain_unused_detected() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // `unused` is exported from source.ts but never imported
@@ -207,7 +207,7 @@ fn multi_level_chain_used_exports_propagate() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // alpha and beta are imported through 3 levels of barrels, should NOT be flagged
@@ -233,7 +233,7 @@ fn multi_level_chain_partially_re_exported_detected() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // gamma is re-exported through barrel-a but nobody imports it
@@ -267,7 +267,7 @@ fn star_selective_usage_used_propagates() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // usedOne and usedTwo are selectively imported through star re-export barrel
@@ -290,7 +290,7 @@ fn star_selective_usage_unused_detected() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // unusedThree and unusedFour are star re-exported but nobody imports them
@@ -316,7 +316,7 @@ fn mixed_named_star_used_propagates() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // namedUsed via named re-export, starUsed via star re-export — both should propagate
@@ -339,7 +339,7 @@ fn mixed_named_star_unused_detected() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // namedUnused is named-re-exported but nobody imports it
@@ -368,7 +368,7 @@ fn alias_chain_used_exports_propagate() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // original is aliased as aliasB then aliasC, consumed by index.ts as aliasC
@@ -393,7 +393,7 @@ fn alias_chain_unused_detected() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // unusedOriginal -> unusedAliasB -> unusedAliasC: aliased but never consumed
@@ -429,14 +429,14 @@ fn circular_re_export_completes_without_infinite_loop() {
         !results
             .unused_exports
             .iter()
-            .any(|e| e.export_name == "fromA" && !e.is_re_export),
+            .any(|e| e.export.export_name == "fromA" && !e.export.is_re_export),
         "original fromA definition should NOT be flagged (imported directly by index.ts)"
     );
     assert!(
         !results
             .unused_exports
             .iter()
-            .any(|e| e.export_name == "fromB" && !e.is_re_export),
+            .any(|e| e.export.export_name == "fromB" && !e.export.is_re_export),
         "original fromB definition should NOT be flagged (imported directly by index.ts)"
     );
 
@@ -446,14 +446,14 @@ fn circular_re_export_completes_without_infinite_loop() {
         results
             .unused_exports
             .iter()
-            .any(|e| e.export_name == "fromB" && e.is_re_export),
+            .any(|e| e.export.export_name == "fromB" && e.export.is_re_export),
         "fromB re-export on module-a should be flagged as unused"
     );
     assert!(
         results
             .unused_exports
             .iter()
-            .any(|e| e.export_name == "fromA" && e.is_re_export),
+            .any(|e| e.export.export_name == "fromA" && e.export.is_re_export),
         "fromA re-export on module-b should be flagged as unused"
     );
 }
@@ -489,7 +489,7 @@ fn barrel_default_reexport_unused_detected() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // Card is re-exported from barrel but never imported by anyone

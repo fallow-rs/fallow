@@ -9,7 +9,7 @@ fn css_module_unused_classes_detected() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // container and title are imported via named imports, should NOT be unused

@@ -85,7 +85,7 @@ fn workspace_project_discovers_workspace_packages() {
     let unused_export_names: Vec<String> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.clone())
+        .map(|e| e.export.export_name.clone())
         .collect();
     assert!(
         unused_export_names.contains(&"unusedDeep".to_string()),
@@ -121,7 +121,7 @@ fn public_packages_suppress_exported_class_and_enum_members() {
     let unused_class_members: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
     assert!(
         !unused_class_members.contains(&"WorkspaceService.externalApiMethod".to_string()),
@@ -131,7 +131,7 @@ fn public_packages_suppress_exported_class_and_enum_members() {
     let unused_enum_members: Vec<String> = results
         .unused_enum_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
     assert!(
         !unused_enum_members.contains(&"PublicStatus.External".to_string()),
@@ -149,7 +149,7 @@ fn non_public_packages_still_report_unused_class_and_enum_members() {
     let unused_class_members: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
     assert!(
         unused_class_members.contains(&"WorkspaceService.externalApiMethod".to_string()),
@@ -159,7 +159,7 @@ fn non_public_packages_still_report_unused_class_and_enum_members() {
     let unused_enum_members: Vec<String> = results
         .unused_enum_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
     assert!(
         unused_enum_members.contains(&"PublicStatus.External".to_string()),
@@ -290,7 +290,7 @@ fn workspace_exports_map_resolves_subpath_imports() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -366,7 +366,7 @@ fn workspace_nested_exports_resolves_dist_to_source() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // unusedComponent is on index.ts which is the root entry point ("." in exports map),
@@ -427,8 +427,8 @@ fn workspace_package_export_star_barrel_chain_marks_leaf_export_used() {
         .map(|e| {
             format!(
                 "{}:{}",
-                e.path.to_string_lossy().replace('\\', "/"),
-                e.export_name
+                e.export.path.to_string_lossy().replace('\\', "/"),
+                e.export.export_name
             )
         })
         .collect();

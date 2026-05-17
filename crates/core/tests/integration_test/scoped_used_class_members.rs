@@ -33,7 +33,7 @@ fn scoped_used_class_members_respect_class_heritage() {
     let unused_members: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
     assert!(
@@ -101,7 +101,7 @@ fn scoped_used_class_members_support_glob_patterns() {
     let unused_members: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
     assert!(

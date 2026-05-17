@@ -1113,10 +1113,20 @@ where
 fn dedup_results(target: &mut AnalysisResults) {
     dedup_by_key_preserving_order(&mut target.unused_files, |f| f.file.path.clone());
     dedup_by_key_preserving_order(&mut target.unused_exports, |e| {
-        (e.path.clone(), e.export_name.clone(), e.line, e.col)
+        (
+            e.export.path.clone(),
+            e.export.export_name.clone(),
+            e.export.line,
+            e.export.col,
+        )
     });
     dedup_by_key_preserving_order(&mut target.unused_types, |e| {
-        (e.path.clone(), e.export_name.clone(), e.line, e.col)
+        (
+            e.export.path.clone(),
+            e.export.export_name.clone(),
+            e.export.line,
+            e.export.col,
+        )
     });
     dedup_by_key_preserving_order(&mut target.private_type_leaks, |e| {
         (
@@ -1137,10 +1147,18 @@ fn dedup_results(target: &mut AnalysisResults) {
         (d.package_name.clone(), d.path.clone(), d.line)
     });
     dedup_by_key_preserving_order(&mut target.unused_enum_members, |m| {
-        (m.path.clone(), m.parent_name.clone(), m.member_name.clone())
+        (
+            m.member.path.clone(),
+            m.member.parent_name.clone(),
+            m.member.member_name.clone(),
+        )
     });
     dedup_by_key_preserving_order(&mut target.unused_class_members, |m| {
-        (m.path.clone(), m.parent_name.clone(), m.member_name.clone())
+        (
+            m.member.path.clone(),
+            m.member.parent_name.clone(),
+            m.member.member_name.clone(),
+        )
     });
     dedup_by_key_preserving_order(&mut target.unresolved_imports, |i| {
         (
@@ -1326,8 +1344,9 @@ mod tests {
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
     use fallow_core::results::{
         BoundaryViolation, BoundaryViolationFinding, CircularDependency, CircularDependencyFinding,
-        ExportUsage, TestOnlyDependency, UnlistedDependency, UnusedDependency, UnusedExport,
-        UnusedFile, UnusedFileFinding, UnusedMember,
+        ExportUsage, TestOnlyDependency, UnlistedDependency, UnusedClassMemberFinding,
+        UnusedDependency, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding, UnusedFile,
+        UnusedFileFinding, UnusedMember, UnusedTypeFinding,
     };
     use serde_json::json;
     use tower::{Service, ServiceExt};
@@ -1559,15 +1578,17 @@ mod tests {
             .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: "/a.ts".into(),
             }));
-        source.unused_exports.push(UnusedExport {
-            path: "/a.ts".into(),
-            export_name: "foo".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        source
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: "/a.ts".into(),
+                export_name: "foo".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         merge_results(&mut target, source);
 
@@ -1603,15 +1624,17 @@ mod tests {
             .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: "/b.ts".into(),
             }));
-        source_b.unused_exports.push(UnusedExport {
-            path: "/b.ts".into(),
-            export_name: "bar".to_string(),
-            is_type_only: false,
-            line: 5,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        source_b
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: "/b.ts".into(),
+                export_name: "bar".to_string(),
+                is_type_only: false,
+                line: 5,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         merge_results(&mut target, source_a);
         merge_results(&mut target, source_b);
@@ -1631,24 +1654,28 @@ mod tests {
             .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: "/f.ts".into(),
             }));
-        source.unused_exports.push(UnusedExport {
-            path: "/f.ts".into(),
-            export_name: "e".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        source.unused_types.push(UnusedExport {
-            path: "/f.ts".into(),
-            export_name: "T".to_string(),
-            is_type_only: true,
-            line: 2,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        source
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: "/f.ts".into(),
+                export_name: "e".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        source
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: "/f.ts".into(),
+                export_name: "T".to_string(),
+                is_type_only: true,
+                line: 2,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         source.unused_dependencies.push(UnusedDependency {
             package_name: "dep".to_string(),
             location: fallow_core::results::DependencyLocation::Dependencies,
@@ -1670,22 +1697,26 @@ mod tests {
             line: 5,
             used_in_workspaces: Vec::new(),
         });
-        source.unused_enum_members.push(UnusedMember {
-            path: "/f.ts".into(),
-            parent_name: "E".to_string(),
-            member_name: "A".to_string(),
-            kind: fallow_core::extract::MemberKind::EnumMember,
-            line: 6,
-            col: 0,
-        });
-        source.unused_class_members.push(UnusedMember {
-            path: "/f.ts".into(),
-            parent_name: "C".to_string(),
-            member_name: "m".to_string(),
-            kind: fallow_core::extract::MemberKind::ClassMethod,
-            line: 7,
-            col: 0,
-        });
+        source
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: "/f.ts".into(),
+                parent_name: "E".to_string(),
+                member_name: "A".to_string(),
+                kind: fallow_core::extract::MemberKind::EnumMember,
+                line: 6,
+                col: 0,
+            }));
+        source
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: "/f.ts".into(),
+                parent_name: "C".to_string(),
+                member_name: "m".to_string(),
+                kind: fallow_core::extract::MemberKind::ClassMethod,
+                line: 7,
+                col: 0,
+            }));
         source.unresolved_imports.push(
             fallow_core::results::UnresolvedImportFinding::with_actions(
                 fallow_core::results::UnresolvedImport {
@@ -1832,34 +1863,40 @@ mod tests {
         // identical. The user explicitly called this out as a regression
         // we must not introduce.
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: "/a.ts".into(),
-            export_name: "helper".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        results.unused_exports.push(UnusedExport {
-            path: "/b.ts".into(),
-            export_name: "helper".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: "/a.ts".into(),
+                export_name: "helper".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: "/b.ts".into(),
+                export_name: "helper".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         // Cross-root duplicate of the first.
-        results.unused_exports.push(UnusedExport {
-            path: "/a.ts".into(),
-            export_name: "helper".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: "/a.ts".into(),
+                export_name: "helper".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         dedup_results(&mut results);
 

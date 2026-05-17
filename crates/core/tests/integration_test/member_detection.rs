@@ -11,7 +11,7 @@ fn enum_class_members_detects_unused_members() {
     let unused_enum_member_names: Vec<&str> = results
         .unused_enum_members
         .iter()
-        .map(|m| m.member_name.as_str())
+        .map(|m| m.member.member_name.as_str())
         .collect();
 
     // Only Status.Active is used; Inactive and Pending should be unused
@@ -27,7 +27,7 @@ fn enum_class_members_detects_unused_members() {
     let unused_class_member_names: Vec<&str> = results
         .unused_class_members
         .iter()
-        .map(|m| m.member_name.as_str())
+        .map(|m| m.member.member_name.as_str())
         .collect();
 
     // unusedMethod is never called
@@ -58,7 +58,7 @@ fn exported_instance_class_members_are_credited_to_class() {
     let unused_class_members: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
     assert!(
@@ -86,7 +86,7 @@ fn cross_package_enum_class_members_credit_re_exported_origin() {
     let unused_enum_member_names: Vec<&str> = results
         .unused_enum_members
         .iter()
-        .map(|m| m.member_name.as_str())
+        .map(|m| m.member.member_name.as_str())
         .collect();
 
     // StatusCode.Active/Inactive/Pending are referenced cross-package via
@@ -135,7 +135,7 @@ fn cross_package_enum_class_members_credit_re_exported_origin() {
     let unused_class_member_names: Vec<&str> = results
         .unused_class_members
         .iter()
-        .map(|m| m.member_name.as_str())
+        .map(|m| m.member.member_name.as_str())
         .collect();
 
     assert!(
@@ -161,7 +161,7 @@ fn injected_dependency_object_credits_class_member_usage() {
     let unused_class_members: Vec<(&str, &str)> = results
         .unused_class_members
         .iter()
-        .map(|m| (m.parent_name.as_str(), m.member_name.as_str()))
+        .map(|m| (m.member.parent_name.as_str(), m.member.member_name.as_str()))
         .collect();
 
     assert!(
@@ -183,7 +183,7 @@ fn playwright_fixture_pom_methods_are_credited_from_tests() {
     let unused_class_members: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
     assert!(
@@ -213,7 +213,7 @@ fn playwright_nested_fixture_pom_methods_are_credited_from_tests() {
     let unused_class_members: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
     assert!(
@@ -330,7 +330,7 @@ fn angular_inject_fields_credit_service_member_usage() {
     let unused_class_members: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
     assert!(
@@ -358,7 +358,7 @@ fn enum_whole_object_uses_no_false_positives() {
     let unused_enum_member_names: Vec<&str> = results
         .unused_enum_members
         .iter()
-        .map(|m| m.member_name.as_str())
+        .map(|m| m.member.member_name.as_str())
         .collect();
 
     // Status used via Object.values — no members should be unused
@@ -417,7 +417,7 @@ fn enum_type_level_usage_no_false_positives() {
     let unused_enum_member_names: Vec<&str> = results
         .unused_enum_members
         .iter()
-        .map(|m| m.member_name.as_str())
+        .map(|m| m.member.member_name.as_str())
         .collect();
 
     // BreakpointString used as mapped type constraint — all members should be used
@@ -478,7 +478,7 @@ fn typed_binding_through_nullable_unions_credits_class_methods() {
     let unused: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
     // `let pending: Aggregate | undefined; pending.rename();` reaches rename

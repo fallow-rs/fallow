@@ -5,8 +5,9 @@ use std::time::Duration;
 use colored::Colorize;
 use fallow_config::{RulesConfig, Severity};
 use fallow_core::results::{
-    AnalysisResults, DuplicateExport, TestOnlyDependency, TypeOnlyDependency, UnusedDependency,
-    UnusedExport, UnusedMember,
+    AnalysisResults, DuplicateExport, TestOnlyDependency, TypeOnlyDependency,
+    UnusedClassMemberFinding, UnusedDependency, UnusedEnumMemberFinding, UnusedExport,
+    UnusedExportFinding, UnusedMember, UnusedTypeFinding,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -202,12 +203,12 @@ pub(in crate::report) fn print_human(
             let suppressed_exports = results
                 .unused_exports
                 .iter()
-                .filter(|e| unused_file_set.contains(e.path.as_path()))
+                .filter(|e| unused_file_set.contains(e.export.path.as_path()))
                 .count();
             let suppressed_types = results
                 .unused_types
                 .iter()
-                .filter(|e| unused_file_set.contains(e.path.as_path()))
+                .filter(|e| unused_file_set.contains(e.export.path.as_path()))
                 .count();
             let summary = build_summary_footer(results, suppressed_exports, suppressed_types);
             eprintln!(
@@ -461,16 +462,16 @@ fn build_unused_code_section(
         .iter()
         .map(|f| f.file.path.as_path())
         .collect();
-    let filtered_exports: Vec<UnusedExport> = results
+    let filtered_exports: Vec<UnusedExportFinding> = results
         .unused_exports
         .iter()
-        .filter(|e| !unused_file_set.contains(e.path.as_path()))
+        .filter(|e| !unused_file_set.contains(e.export.path.as_path()))
         .cloned()
         .collect();
-    let filtered_types: Vec<UnusedExport> = results
+    let filtered_types: Vec<UnusedTypeFinding> = results
         .unused_types
         .iter()
-        .filter(|e| !unused_file_set.contains(e.path.as_path()))
+        .filter(|e| !unused_file_set.contains(e.export.path.as_path()))
         .cloned()
         .collect();
     let suppressed_exports = results.unused_exports.len() - filtered_exports.len();
@@ -512,11 +513,11 @@ fn build_unused_code_section(
         severity_to_level(rules.unused_exports),
         root,
         max_grouped_files,
-        |e| e.path.as_path(),
-        &format_unused_export,
+        |e| e.export.path.as_path(),
+        &|e: &UnusedExportFinding| format_unused_export(&e.export),
     );
     push_suppressed_count_note(lines, suppressed_exports);
-    insert_test_src_split(lines, &filtered_exports, |e| &e.path);
+    insert_test_src_split(lines, &filtered_exports, |e| &e.export.path);
 
     build_human_grouped_section(
         lines,
@@ -525,8 +526,8 @@ fn build_unused_code_section(
         severity_to_level(rules.unused_types),
         root,
         max_grouped_files,
-        |e| e.path.as_path(),
-        &format_unused_export,
+        |e| e.export.path.as_path(),
+        &|e: &UnusedTypeFinding| format_unused_export(&e.export),
     );
     push_suppressed_count_note(lines, suppressed_types);
 
@@ -548,8 +549,8 @@ fn build_unused_code_section(
         severity_to_level(rules.unused_enum_members),
         root,
         max_grouped_files,
-        |m| m.path.as_path(),
-        &format_unused_member,
+        |m| m.member.path.as_path(),
+        &|m: &UnusedEnumMemberFinding| format_unused_member(&m.member),
     );
 
     build_human_grouped_section(
@@ -559,8 +560,8 @@ fn build_unused_code_section(
         severity_to_level(rules.unused_class_members),
         root,
         max_grouped_files,
-        |m| m.path.as_path(),
-        &format_unused_member,
+        |m| m.member.path.as_path(),
+        &|m: &UnusedClassMemberFinding| format_unused_member(&m.member),
     );
 }
 
@@ -1511,19 +1512,19 @@ fn collect_matching_rules(
         check(&f.file.path);
     }
     for e in &results.unused_exports {
-        check(&e.path);
+        check(&e.export.path);
     }
     for e in &results.unused_types {
-        check(&e.path);
+        check(&e.export.path);
     }
     for e in &results.private_type_leaks {
         check(&e.leak.path);
     }
     for m in &results.unused_enum_members {
-        check(&m.path);
+        check(&m.member.path);
     }
     for m in &results.unused_class_members {
-        check(&m.path);
+        check(&m.member.path);
     }
     for u in &results.unresolved_imports {
         check(&u.import.path);
@@ -2037,24 +2038,28 @@ mod tests {
     fn unused_exports_grouped_by_file_with_line_and_name() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "helperFn".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 4,
-            span_start: 120,
-            is_re_export: false,
-        });
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "anotherFn".to_string(),
-            is_type_only: false,
-            line: 25,
-            col: 0,
-            span_start: 300,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/utils.ts"),
+                export_name: "helperFn".to_string(),
+                is_type_only: false,
+                line: 10,
+                col: 4,
+                span_start: 120,
+                is_re_export: false,
+            }));
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/utils.ts"),
+                export_name: "anotherFn".to_string(),
+                is_type_only: false,
+                line: 25,
+                col: 0,
+                span_start: 300,
+                is_re_export: false,
+            }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
@@ -2074,15 +2079,17 @@ mod tests {
     fn re_exports_are_tagged() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/index.ts"),
-            export_name: "reExported".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: true,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/index.ts"),
+                export_name: "reExported".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: true,
+            }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
@@ -2093,15 +2100,17 @@ mod tests {
     fn non_re_exports_have_no_tag() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "helper".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/utils.ts"),
+                export_name: "helper".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
@@ -2114,14 +2123,16 @@ mod tests {
     fn unused_enum_members_show_parent_dot_member() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_enum_members.push(UnusedMember {
-            path: root.join("src/enums.ts"),
-            parent_name: "Color".to_string(),
-            member_name: "Purple".to_string(),
-            kind: MemberKind::EnumMember,
-            line: 5,
-            col: 2,
-        });
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: root.join("src/enums.ts"),
+                parent_name: "Color".to_string(),
+                member_name: "Purple".to_string(),
+                kind: MemberKind::EnumMember,
+                line: 5,
+                col: 2,
+            }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
@@ -2133,14 +2144,16 @@ mod tests {
     fn unused_class_members_show_parent_dot_member() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_class_members.push(UnusedMember {
-            path: root.join("src/service.ts"),
-            parent_name: "ApiService".to_string(),
-            member_name: "disconnect".to_string(),
-            kind: MemberKind::ClassMethod,
-            line: 99,
-            col: 4,
-        });
+        results
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: root.join("src/service.ts"),
+                parent_name: "ApiService".to_string(),
+                member_name: "disconnect".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 99,
+                col: 4,
+            }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
@@ -2550,24 +2563,28 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         // Add exports in non-alphabetical order
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/z-file.ts"),
-            export_name: "zExport".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/a-file.ts"),
-            export_name: "aExport".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/z-file.ts"),
+                export_name: "zExport".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/a-file.ts"),
+                export_name: "aExport".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
@@ -2584,15 +2601,17 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         for i in 0..3 {
-            results.unused_exports.push(UnusedExport {
-                path: root.join("src/utils.ts"),
-                export_name: format!("fn{i}"),
-                is_type_only: false,
-                line: (i + 1) as u32,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-            });
+            results
+                .unused_exports
+                .push(UnusedExportFinding::with_actions(UnusedExport {
+                    path: root.join("src/utils.ts"),
+                    export_name: format!("fn{i}"),
+                    is_type_only: false,
+                    line: (i + 1) as u32,
+                    col: 0,
+                    span_start: 0,
+                    is_re_export: false,
+                }));
         }
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
@@ -2810,26 +2829,26 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         // Add exactly 1 of each pre-pluralized category
-        results
-            .unused_enum_members
-            .push(fallow_core::results::UnusedMember {
+        results.unused_enum_members.push(
+            fallow_core::results::UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: root.join("src/types.ts"),
                 parent_name: "Status".to_string(),
                 member_name: "Unused".to_string(),
                 line: 10,
                 col: 0,
                 kind: MemberKind::EnumMember,
-            });
-        results
-            .unused_class_members
-            .push(fallow_core::results::UnusedMember {
+            }),
+        );
+        results.unused_class_members.push(
+            fallow_core::results::UnusedClassMemberFinding::with_actions(UnusedMember {
                 path: root.join("src/foo.ts"),
                 parent_name: "Foo".to_string(),
                 member_name: "bar".to_string(),
                 line: 5,
                 col: 0,
                 kind: MemberKind::ClassMethod,
-            });
+            }),
+        );
         let footer = build_summary_footer(&results, 0, 0);
         // Pre-pluralized labels should be singularized for count=1
         assert!(
@@ -2894,15 +2913,17 @@ mod tests {
         let mut results = AnalysisResults::default();
         // 15 files with 1 export each
         for i in 0..15 {
-            results.unused_exports.push(UnusedExport {
-                path: root.join(format!("src/file{i:02}.ts")),
-                export_name: format!("fn{i}"),
-                is_type_only: false,
-                line: 1,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-            });
+            results
+                .unused_exports
+                .push(UnusedExportFinding::with_actions(UnusedExport {
+                    path: root.join(format!("src/file{i:02}.ts")),
+                    export_name: format!("fn{i}"),
+                    is_type_only: false,
+                    line: 1,
+                    col: 0,
+                    span_start: 0,
+                    is_re_export: false,
+                }));
         }
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);

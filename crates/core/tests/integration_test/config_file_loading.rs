@@ -40,7 +40,7 @@ fn hidden_dir_non_allowlisted_is_skipped() {
             results
                 .unused_exports
                 .iter()
-                .map(|e| e.path.to_string_lossy().to_string()),
+                .map(|e| e.export.path.to_string_lossy().to_string()),
         )
         .collect();
 
@@ -181,7 +181,7 @@ fn toml_config_loads_and_applies_rules() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(

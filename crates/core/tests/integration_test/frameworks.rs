@@ -46,7 +46,7 @@ fn nextjs_unused_util_export_flagged() {
     let has_unused_export = results
         .unused_exports
         .iter()
-        .any(|e| e.export_name == "unusedUtil");
+        .any(|e| e.export.export_name == "unusedUtil");
     let has_unused_file = results
         .unused_files
         .iter()
@@ -67,7 +67,7 @@ fn nextjs_convention_exports_are_not_flagged() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     for expected_used in [
@@ -103,8 +103,13 @@ fn nextjs_special_file_exports_are_not_flagged() {
         .iter()
         .map(|e| {
             (
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
-                e.export_name.clone(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                e.export.export_name.clone(),
             )
         })
         .collect();
@@ -359,7 +364,7 @@ fn path_aliases_mixed_exports_no_false_positive_unused_files() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_export_names.contains(&"unusedExport"),
@@ -522,8 +527,12 @@ fn tailwind_plugin_directive_marks_plugin_targets_used() {
         .iter()
         .map(|e| {
             (
-                e.path.file_name().and_then(|f| f.to_str()).unwrap_or(""),
-                e.export_name.as_str(),
+                e.export
+                    .path
+                    .file_name()
+                    .and_then(|f| f.to_str())
+                    .unwrap_or(""),
+                e.export.export_name.as_str(),
             )
         })
         .collect();
@@ -602,7 +611,7 @@ fn vite_aliases_from_config_resolve_internal_modules() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_export_names.contains(&"unusedMessage"),
@@ -658,7 +667,7 @@ fn webpack_aliases_from_config_resolve_internal_modules() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_export_names.contains(&"unusedMessage"),
@@ -698,7 +707,7 @@ fn webpack_descriptor_without_context_resolves_relative_entry() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_export_names.contains(&"unusedGreet"),
@@ -742,7 +751,7 @@ fn sveltekit_aliases_from_config_resolve_internal_modules() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_export_names.contains(&"unusedGreeting"),
@@ -794,7 +803,7 @@ fn nuxt_custom_dirs_and_aliases_reduce_false_positives() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_export_names.contains(&"unusedShared"),
@@ -847,7 +856,7 @@ fn nuxt_src_dir_config_reduces_false_positives() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_export_names.contains(&"unusedShared"),
@@ -923,8 +932,13 @@ fn nuxt_runtime_conventions_report_dead_named_exports_without_unused_file_noise(
         .iter()
         .map(|e| {
             (
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
-                e.export_name.clone(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                e.export.export_name.clone(),
             )
         })
         .collect();
@@ -978,8 +992,13 @@ fn nuxt_configured_runtime_paths_reduce_false_positives_and_keep_dead_exports_vi
         .iter()
         .map(|e| {
             (
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
-                e.export_name.clone(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                e.export.export_name.clone(),
             )
         })
         .collect();
@@ -1031,8 +1050,13 @@ fn nuxt_convention_exports_preserve_defaults_but_report_dead_helpers() {
         .iter()
         .map(|e| {
             (
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
-                e.export_name.clone(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                e.export.export_name.clone(),
             )
         })
         .collect();

@@ -9,7 +9,7 @@ fn native_web_component_lifecycle_does_not_require_lit_dependency() {
     let unused_exports: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         !unused_exports.contains(&"NativeElement"),
@@ -19,7 +19,7 @@ fn native_web_component_lifecycle_does_not_require_lit_dependency() {
     let unused_members: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
     assert!(
         !unused_members.contains(&"NativeElement.connectedCallback".to_string()),
@@ -44,7 +44,7 @@ fn custom_element_named_decorator_must_come_from_lit() {
     let unused_exports: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_exports.contains(&"NotLitElement"),

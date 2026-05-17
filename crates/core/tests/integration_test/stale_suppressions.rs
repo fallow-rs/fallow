@@ -144,7 +144,7 @@ fn expected_unused_not_in_unused_exports() {
     let expected_unused_in_results: Vec<_> = results
         .unused_exports
         .iter()
-        .filter(|e| e.path.ends_with("expected-unused.ts"))
+        .filter(|e| e.export.path.ends_with("expected-unused.ts"))
         .collect();
 
     assert!(

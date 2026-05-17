@@ -47,7 +47,7 @@ fn vue_imports_mark_exports_used() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // formatDate is only used from the Vue template via <script setup>
@@ -92,7 +92,12 @@ fn vue_template_event_handlers_mark_class_members_used() {
     let unused_members: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|member| format!("{}.{}", member.parent_name, member.member_name))
+        .map(|member| {
+            format!(
+                "{}.{}",
+                member.member.parent_name, member.member.member_name
+            )
+        })
         .collect();
 
     assert!(
@@ -120,8 +125,13 @@ fn vue_component_tags_mark_component_exports_used() {
         .iter()
         .map(|e| {
             (
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
-                e.export_name.clone(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                e.export.export_name.clone(),
             )
         })
         .collect();
@@ -151,8 +161,13 @@ fn vue_template_edge_cases_mark_exports_used() {
         .iter()
         .map(|e| {
             (
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
-                e.export_name.clone(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                e.export.export_name.clone(),
             )
         })
         .collect();
@@ -198,8 +213,13 @@ fn vue_split_value_type_exports_are_tracked_across_script_setup_usage() {
         .iter()
         .map(|e| {
             (
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
-                e.export_name.clone(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                e.export.export_name.clone(),
             )
         })
         .collect();
@@ -265,7 +285,7 @@ fn svelte_imports_mark_exports_used() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // formatName is only used from the Svelte template via a namespace import
@@ -318,7 +338,12 @@ fn svelte_template_event_handlers_mark_class_members_used() {
     let unused_members: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|member| format!("{}.{}", member.parent_name, member.member_name))
+        .map(|member| {
+            format!(
+                "{}.{}",
+                member.member.parent_name, member.member.member_name
+            )
+        })
         .collect();
 
     assert!(
@@ -351,8 +376,14 @@ fn svelte_type_only_import_keeps_upstream_type_used() {
         .unused_types
         .iter()
         .map(|t| {
-            let file = t.path.file_name().unwrap().to_string_lossy().to_string();
-            (file, t.export_name.as_str())
+            let file = t
+                .export
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+            (file, t.export.export_name.as_str())
         })
         .collect();
 
@@ -452,8 +483,13 @@ fn sveltekit_param_matchers_keep_match_export_alive() {
         .iter()
         .map(|e| {
             (
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
-                e.export_name.clone(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                e.export.export_name.clone(),
             )
         })
         .collect();

@@ -88,7 +88,7 @@ fn jsdoc_referenced_type_not_flagged_unused() {
     let unused_type_names: Vec<&str> = results
         .unused_types
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -109,7 +109,7 @@ fn jsdoc_scanner_does_not_credit_unrelated_types() {
     let unused_type_names: Vec<&str> = results
         .unused_types
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(

@@ -299,19 +299,19 @@ pub fn filter_results_by_changed_files(
         .retain(|f| changed_files.contains(&f.file.path));
     results
         .unused_exports
-        .retain(|e| changed_files.contains(&e.path));
+        .retain(|e| changed_files.contains(&e.export.path));
     results
         .unused_types
-        .retain(|e| changed_files.contains(&e.path));
+        .retain(|e| changed_files.contains(&e.export.path));
     results
         .private_type_leaks
         .retain(|e| changed_files.contains(&e.leak.path));
     results
         .unused_enum_members
-        .retain(|m| changed_files.contains(&m.path));
+        .retain(|m| changed_files.contains(&m.member.path));
     results
         .unused_class_members
-        .retain(|m| changed_files.contains(&m.path));
+        .retain(|m| changed_files.contains(&m.member.path));
     results
         .unresolved_imports
         .retain(|i| changed_files.contains(&i.import.path));
@@ -447,7 +447,7 @@ mod tests {
         BoundaryViolation, CircularDependency, EmptyCatalogGroup, UnusedExport, UnusedFile,
     };
     use fallow_types::output_dead_code::{
-        BoundaryViolationFinding, CircularDependencyFinding, UnusedFileFinding,
+        BoundaryViolationFinding, CircularDependencyFinding, UnusedExportFinding, UnusedFileFinding,
     };
 
     #[test]
@@ -574,15 +574,17 @@ mod tests {
             .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: "/b.ts".into(),
             }));
-        results.unused_exports.push(UnusedExport {
-            path: "/a.ts".into(),
-            export_name: "foo".into(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: "/a.ts".into(),
+                export_name: "foo".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let mut changed: FxHashSet<PathBuf> = FxHashSet::default();
         changed.insert("/a.ts".into());

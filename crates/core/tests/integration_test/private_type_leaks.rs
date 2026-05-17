@@ -45,7 +45,7 @@ fn exported_signature_backing_types_are_not_unused_type_exports() {
     let unused_types: Vec<&str> = results
         .unused_types
         .iter()
-        .map(|export| export.export_name.as_str())
+        .map(|export| export.export.export_name.as_str())
         .collect();
 
     assert!(

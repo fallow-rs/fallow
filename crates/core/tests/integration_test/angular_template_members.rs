@@ -14,7 +14,7 @@ fn angular_external_template_credits_inherited_and_di_injected_members() {
     let unused: Vec<(&str, &str)> = results
         .unused_class_members
         .iter()
-        .map(|m| (m.parent_name.as_str(), m.member_name.as_str()))
+        .map(|m| (m.member.parent_name.as_str(), m.member.member_name.as_str()))
         .collect();
 
     // Pattern 1: inherited members referenced in child's external template
@@ -72,7 +72,7 @@ fn angular_at_if_alias_credits_condition_member() {
     let unused: Vec<(&str, &str)> = results
         .unused_class_members
         .iter()
-        .map(|m| (m.parent_name.as_str(), m.member_name.as_str()))
+        .map(|m| (m.member.parent_name.as_str(), m.member.member_name.as_str()))
         .collect();
 
     // Inline template: `@if (withAlias(); as aliased)` must credit `withAlias`.

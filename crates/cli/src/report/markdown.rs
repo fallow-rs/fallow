@@ -2,7 +2,10 @@ use std::fmt::Write;
 use std::path::Path;
 
 use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::{AnalysisResults, UnusedExport, UnusedMember};
+use fallow_core::results::{
+    AnalysisResults, UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExport,
+    UnusedExportFinding, UnusedMember, UnusedTypeFinding,
+};
 
 use super::grouping::ResultGroup;
 use super::{normalize_uri, plural, relative_path};
@@ -49,8 +52,8 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &results.unused_exports,
         "Unused exports",
         root,
-        |e| e.path.as_path(),
-        format_export,
+        |e| e.export.path.as_path(),
+        |e: &UnusedExportFinding| format_export(&e.export),
     );
 
     // ── Unused types ──
@@ -59,8 +62,8 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &results.unused_types,
         "Unused type exports",
         root,
-        |e| e.path.as_path(),
-        format_export,
+        |e| e.export.path.as_path(),
+        |e: &UnusedTypeFinding| format_export(&e.export),
     );
 
     markdown_grouped_section(
@@ -102,8 +105,8 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &results.unused_enum_members,
         "Unused enum members",
         root,
-        |m| m.path.as_path(),
-        format_member,
+        |m| m.member.path.as_path(),
+        |m: &UnusedEnumMemberFinding| format_member(&m.member),
     );
 
     // ── Unused class members ──
@@ -112,8 +115,8 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &results.unused_class_members,
         "Unused class members",
         root,
-        |m| m.path.as_path(),
-        format_member,
+        |m| m.member.path.as_path(),
+        |m: &UnusedClassMemberFinding| format_member(&m.member),
     );
 
     // ── Unresolved imports ──
@@ -1275,15 +1278,17 @@ mod tests {
     fn markdown_unused_export_grouped_by_file() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "helperFn".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 4,
-            span_start: 120,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/utils.ts"),
+                export_name: "helperFn".to_string(),
+                is_type_only: false,
+                line: 10,
+                col: 4,
+                span_start: 120,
+                is_re_export: false,
+            }));
         let md = build_markdown(&results, &root);
         assert!(md.contains("- `src/utils.ts`"));
         assert!(md.contains(":10 `helperFn`"));
@@ -1293,15 +1298,17 @@ mod tests {
     fn markdown_re_export_tagged() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/index.ts"),
-            export_name: "reExported".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: true,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/index.ts"),
+                export_name: "reExported".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: true,
+            }));
         let md = build_markdown(&results, &root);
         assert!(md.contains("(re-export)"));
     }
@@ -1387,15 +1394,17 @@ mod tests {
     fn markdown_escapes_backticks_in_export_names() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "foo`bar".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/utils.ts"),
+                export_name: "foo`bar".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         let md = build_markdown(&results, &root);
         assert!(md.contains("foo\\`bar"));
         assert!(!md.contains("foo`bar`"));
@@ -1812,33 +1821,39 @@ mod tests {
     fn markdown_exports_grouped_by_file() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "alpha".to_string(),
-            is_type_only: false,
-            line: 5,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "beta".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/other.ts"),
-            export_name: "gamma".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/utils.ts"),
+                export_name: "alpha".to_string(),
+                is_type_only: false,
+                line: 5,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/utils.ts"),
+                export_name: "beta".to_string(),
+                is_type_only: false,
+                line: 10,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/other.ts"),
+                export_name: "gamma".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         let md = build_markdown(&results, &root);
         // File header should appear only once for utils.ts
         let utils_count = md.matches("- `src/utils.ts`").count();

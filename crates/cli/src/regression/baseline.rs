@@ -1128,15 +1128,17 @@ mod tests {
             .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: PathBuf::from("b.ts"),
             }));
-        results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("c.ts"),
-            export_name: "foo".into(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("c.ts"),
+                export_name: "foo".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let opts = make_opts(true, Tolerance::Absolute(0), false, None);
         let config_baseline = fallow_config::RegressionBaseline {

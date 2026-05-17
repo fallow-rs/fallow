@@ -3,7 +3,9 @@ use std::path::Path;
 use fallow_core::extract::MemberKind;
 use fallow_core::results::*;
 use fallow_types::output_dead_code::{
-    BoundaryViolationFinding, CircularDependencyFinding, UnresolvedImportFinding, UnusedFileFinding,
+    BoundaryViolationFinding, CircularDependencyFinding, UnresolvedImportFinding,
+    UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedTypeFinding,
 };
 
 /// Build an `AnalysisResults` populated with one issue of every type.
@@ -16,24 +18,26 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
         .push(UnusedFileFinding::with_actions(UnusedFile {
             path: root.join("src/dead.ts"),
         }));
-    r.unused_exports.push(UnusedExport {
-        path: root.join("src/utils.ts"),
-        export_name: "helperFn".to_string(),
-        is_type_only: false,
-        line: 10,
-        col: 4,
-        span_start: 120,
-        is_re_export: false,
-    });
-    r.unused_types.push(UnusedExport {
-        path: root.join("src/types.ts"),
-        export_name: "OldType".to_string(),
-        is_type_only: true,
-        line: 5,
-        col: 0,
-        span_start: 60,
-        is_re_export: false,
-    });
+    r.unused_exports
+        .push(UnusedExportFinding::with_actions(UnusedExport {
+            path: root.join("src/utils.ts"),
+            export_name: "helperFn".to_string(),
+            is_type_only: false,
+            line: 10,
+            col: 4,
+            span_start: 120,
+            is_re_export: false,
+        }));
+    r.unused_types
+        .push(UnusedTypeFinding::with_actions(UnusedExport {
+            path: root.join("src/types.ts"),
+            export_name: "OldType".to_string(),
+            is_type_only: true,
+            line: 5,
+            col: 0,
+            span_start: 60,
+            is_re_export: false,
+        }));
     r.unused_dependencies.push(UnusedDependency {
         package_name: "lodash".to_string(),
         location: DependencyLocation::Dependencies,
@@ -55,22 +59,24 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
         line: 15,
         used_in_workspaces: Vec::new(),
     });
-    r.unused_enum_members.push(UnusedMember {
-        path: root.join("src/enums.ts"),
-        parent_name: "Status".to_string(),
-        member_name: "Deprecated".to_string(),
-        kind: MemberKind::EnumMember,
-        line: 8,
-        col: 2,
-    });
-    r.unused_class_members.push(UnusedMember {
-        path: root.join("src/service.ts"),
-        parent_name: "UserService".to_string(),
-        member_name: "legacyMethod".to_string(),
-        kind: MemberKind::ClassMethod,
-        line: 42,
-        col: 4,
-    });
+    r.unused_enum_members
+        .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+            path: root.join("src/enums.ts"),
+            parent_name: "Status".to_string(),
+            member_name: "Deprecated".to_string(),
+            kind: MemberKind::EnumMember,
+            line: 8,
+            col: 2,
+        }));
+    r.unused_class_members
+        .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+            path: root.join("src/service.ts"),
+            parent_name: "UserService".to_string(),
+            member_name: "legacyMethod".to_string(),
+            kind: MemberKind::ClassMethod,
+            line: 42,
+            col: 4,
+        }));
     r.unresolved_imports
         .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
             path: root.join("src/app.ts"),

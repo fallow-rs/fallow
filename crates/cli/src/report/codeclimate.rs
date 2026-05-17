@@ -140,18 +140,17 @@ fn push_unused_file_issues(
 /// `direct_label` / `re_export_label` let the same helper produce the right
 /// prose for both `unused-export` (Export / Re-export) and `unused-type`
 /// (Type export / Type re-export) rule ids.
-fn push_unused_export_issues(
+fn push_unused_export_issues<'a, I>(
     issues: &mut Vec<CodeClimateIssue>,
-    exports: &[fallow_core::results::UnusedExport],
+    exports: I,
     root: &Path,
     rule_id: &str,
     direct_label: &str,
     re_export_label: &str,
     severity: Severity,
-) {
-    if exports.is_empty() {
-        return;
-    }
+) where
+    I: IntoIterator<Item = &'a fallow_core::results::UnusedExport>,
+{
     let level = severity_to_codeclimate(severity);
     for export in exports {
         let path = cc_path(&export.path, root);
@@ -275,17 +274,16 @@ fn push_test_only_dep_issues(
 ///
 /// `entity_label` is `"Enum"` or `"Class"` so the rendered description reads
 /// "Enum member ..." or "Class member ..." accordingly.
-fn push_unused_member_issues(
+fn push_unused_member_issues<'a, I>(
     issues: &mut Vec<CodeClimateIssue>,
-    members: &[fallow_core::results::UnusedMember],
+    members: I,
     root: &Path,
     rule_id: &str,
     entity_label: &str,
     severity: Severity,
-) {
-    if members.is_empty() {
-        return;
-    }
+) where
+    I: IntoIterator<Item = &'a fallow_core::results::UnusedMember>,
+{
     let level = severity_to_codeclimate(severity);
     for member in members {
         let path = cc_path(&member.path, root);
@@ -751,7 +749,7 @@ pub fn build_codeclimate(
     push_unused_file_issues(&mut issues, &results.unused_files, root, rules.unused_files);
     push_unused_export_issues(
         &mut issues,
-        &results.unused_exports,
+        results.unused_exports.iter().map(|e| &e.export),
         root,
         "fallow/unused-export",
         "Export",
@@ -760,7 +758,7 @@ pub fn build_codeclimate(
     );
     push_unused_export_issues(
         &mut issues,
-        &results.unused_types,
+        results.unused_types.iter().map(|e| &e.export),
         root,
         "fallow/unused-type",
         "Type export",
@@ -811,7 +809,7 @@ pub fn build_codeclimate(
     );
     push_unused_member_issues(
         &mut issues,
-        &results.unused_enum_members,
+        results.unused_enum_members.iter().map(|m| &m.member),
         root,
         "fallow/unused-enum-member",
         "Enum",
@@ -819,7 +817,7 @@ pub fn build_codeclimate(
     );
     push_unused_member_issues(
         &mut issues,
-        &results.unused_class_members,
+        results.unused_class_members.iter().map(|m| &m.member),
         root,
         "fallow/unused-class-member",
         "Class",
@@ -1380,15 +1378,17 @@ mod tests {
     fn codeclimate_unused_export_has_line_number() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "helperFn".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 4,
-            span_start: 120,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/utils.ts"),
+                export_name: "helperFn".to_string(),
+                is_type_only: false,
+                line: 10,
+                col: 4,
+                span_start: 120,
+                is_re_export: false,
+            }));
         let rules = RulesConfig::default();
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let issue = &output[0];
@@ -1430,15 +1430,17 @@ mod tests {
     fn codeclimate_re_export_label_in_description() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/index.ts"),
-            export_name: "reExported".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: true,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/index.ts"),
+                export_name: "reExported".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: true,
+            }));
         let rules = RulesConfig::default();
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let desc = output[0]["description"].as_str().unwrap();

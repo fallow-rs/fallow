@@ -9,7 +9,7 @@ fn entry_exports_skipped_by_default() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // With default config, entry point exports are skipped
@@ -33,7 +33,7 @@ fn entry_exports_detected_when_include_entry_exports_enabled() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // With include_entry_exports, unreferenced entry exports should be flagged
@@ -68,7 +68,7 @@ fn entry_exports_detected_via_config_file_include_entry_exports() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -98,12 +98,13 @@ fn vitest_config_default_export_is_framework_used_with_include_entry_exports() {
         .map(|export| {
             (
                 export
+                    .export
                     .path
                     .strip_prefix(&config.root)
-                    .unwrap_or(&export.path)
+                    .unwrap_or(&export.export.path)
                     .to_string_lossy()
                     .replace('\\', "/"),
-                export.export_name.clone(),
+                export.export.export_name.clone(),
             )
         })
         .collect();
@@ -131,12 +132,13 @@ fn vite_config_default_export_is_framework_used_with_include_entry_exports() {
         .map(|export| {
             (
                 export
+                    .export
                     .path
                     .strip_prefix(&config.root)
-                    .unwrap_or(&export.path)
+                    .unwrap_or(&export.export.path)
                     .to_string_lossy()
                     .replace('\\', "/"),
-                export.export_name.clone(),
+                export.export.export_name.clone(),
             )
         })
         .collect();
@@ -162,12 +164,13 @@ fn storybook_exports_are_framework_used_with_include_entry_exports() {
         .map(|export| {
             (
                 export
+                    .export
                     .path
                     .strip_prefix(&config.root)
-                    .unwrap_or(&export.path)
+                    .unwrap_or(&export.export.path)
                     .to_string_lossy()
                     .replace('\\', "/"),
-                export.export_name.clone(),
+                export.export.export_name.clone(),
             )
         })
         .collect();

@@ -316,22 +316,10 @@ fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
     match key {
         // `unused_files` is no longer post-pass-injected: the typed
         // `UnusedFileFinding` wrapper carries its `actions` array natively.
-        "unused_exports" => Some(ActionSpec {
-            fix_type: "remove-export",
-            auto_fixable: true,
-            description: "Remove the unused export from the public API",
-            note: None,
-            suppress: SuppressKind::InlineComment,
-            issue_kind: "unused-export",
-        }),
-        "unused_types" => Some(ActionSpec {
-            fix_type: "remove-export",
-            auto_fixable: true,
-            description: "Remove the `export` (or `export type`) keyword from the type declaration",
-            note: None,
-            suppress: SuppressKind::InlineComment,
-            issue_kind: "unused-type",
-        }),
+        // `unused_exports` and `unused_types` are no longer post-pass-injected:
+        // the typed `UnusedExportFinding` / `UnusedTypeFinding` wrappers carry
+        // their `actions` array natively, with the `is_re_export` note swap
+        // applied at wrapper construction.
         // `private_type_leaks` is no longer post-pass-injected: the typed
         // `PrivateTypeLeakFinding` wrapper carries its `actions` array natively.
         "unused_dependencies" => Some(ActionSpec {
@@ -359,22 +347,10 @@ fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
             // No IssueKind variant exists for optional deps — uses config suppress only.
             issue_kind: "unused-dependency",
         }),
-        "unused_enum_members" => Some(ActionSpec {
-            fix_type: "remove-enum-member",
-            auto_fixable: true,
-            description: "Remove this enum member",
-            note: None,
-            suppress: SuppressKind::InlineComment,
-            issue_kind: "unused-enum-member",
-        }),
-        "unused_class_members" => Some(ActionSpec {
-            fix_type: "remove-class-member",
-            auto_fixable: false,
-            description: "Remove this class member",
-            note: Some("Class member may be used via dependency injection or decorators"),
-            suppress: SuppressKind::InlineComment,
-            issue_kind: "unused-class-member",
-        }),
+        // `unused_enum_members` and `unused_class_members` are no longer
+        // post-pass-injected: the typed `UnusedEnumMemberFinding` /
+        // `UnusedClassMemberFinding` wrappers carry their `actions` array
+        // natively.
         // `unresolved_imports` is no longer post-pass-injected: the typed
         // `UnresolvedImportFinding` wrapper carries its `actions` array natively.
         "unlisted_dependencies" => Some(ActionSpec {
@@ -601,17 +577,6 @@ fn build_actions(
     };
     if let Some(note) = spec.note {
         fix_action["note"] = serde_json::json!(note);
-    }
-    // Warn about re-exports that may be part of the public API surface.
-    if (issue_key == "unused_exports" || issue_key == "unused_types")
-        && item
-            .get("is_re_export")
-            .and_then(serde_json::Value::as_bool)
-            == Some(true)
-    {
-        fix_action["note"] = serde_json::json!(
-            "This finding originates from a re-export; verify it is not part of your public API before removing"
-        );
     }
     actions.push(fix_action);
 
@@ -2092,15 +2057,17 @@ mod tests {
     fn json_unused_export_contains_expected_fields() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "helperFn".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 4,
-            span_start: 120,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/utils.ts"),
+                export_name: "helperFn".to_string(),
+                is_type_only: false,
+                line: 10,
+                col: 4,
+                span_start: 120,
+                is_re_export: false,
+            }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2304,15 +2271,17 @@ mod tests {
     fn json_unused_type_contains_expected_fields() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_types.push(UnusedExport {
-            path: root.join("src/types.ts"),
-            export_name: "OldInterface".to_string(),
-            is_type_only: true,
-            line: 20,
-            col: 0,
-            span_start: 300,
-            is_re_export: false,
-        });
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: root.join("src/types.ts"),
+                export_name: "OldInterface".to_string(),
+                is_type_only: true,
+                line: 20,
+                col: 0,
+                span_start: 300,
+                is_re_export: false,
+            }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2405,14 +2374,16 @@ mod tests {
     fn json_unused_enum_member_contains_expected_fields() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_enum_members.push(UnusedMember {
-            path: root.join("src/enums.ts"),
-            parent_name: "Color".to_string(),
-            member_name: "Purple".to_string(),
-            kind: MemberKind::EnumMember,
-            line: 5,
-            col: 2,
-        });
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: root.join("src/enums.ts"),
+                parent_name: "Color".to_string(),
+                member_name: "Purple".to_string(),
+                kind: MemberKind::EnumMember,
+                line: 5,
+                col: 2,
+            }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2427,14 +2398,16 @@ mod tests {
     fn json_unused_class_member_contains_expected_fields() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_class_members.push(UnusedMember {
-            path: root.join("src/api.ts"),
-            parent_name: "ApiClient".to_string(),
-            member_name: "deprecatedFetch".to_string(),
-            kind: MemberKind::ClassMethod,
-            line: 100,
-            col: 4,
-        });
+        results
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: root.join("src/api.ts"),
+                parent_name: "ApiClient".to_string(),
+                member_name: "deprecatedFetch".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 100,
+                col: 4,
+            }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2681,15 +2654,17 @@ mod tests {
     fn json_re_export_flagged_correctly() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/index.ts"),
-            export_name: "reExported".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: true,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/index.ts"),
+                export_name: "reExported".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: true,
+            }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -3044,22 +3019,26 @@ mod tests {
     fn json_unused_member_kind_serialized() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_enum_members.push(UnusedMember {
-            path: root.join("src/enums.ts"),
-            parent_name: "Color".to_string(),
-            member_name: "Red".to_string(),
-            kind: MemberKind::EnumMember,
-            line: 3,
-            col: 2,
-        });
-        results.unused_class_members.push(UnusedMember {
-            path: root.join("src/class.ts"),
-            parent_name: "Foo".to_string(),
-            member_name: "bar".to_string(),
-            kind: MemberKind::ClassMethod,
-            line: 10,
-            col: 4,
-        });
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: root.join("src/enums.ts"),
+                parent_name: "Color".to_string(),
+                member_name: "Red".to_string(),
+                kind: MemberKind::EnumMember,
+                line: 3,
+                col: 2,
+            }));
+        results
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: root.join("src/class.ts"),
+                parent_name: "Foo".to_string(),
+                member_name: "bar".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 10,
+                col: 4,
+            }));
 
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
@@ -3076,15 +3055,17 @@ mod tests {
     fn json_unused_export_has_actions() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "helperFn".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 4,
-            span_start: 120,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/utils.ts"),
+                export_name: "helperFn".to_string(),
+                is_type_only: false,
+                line: 10,
+                col: 4,
+                span_start: 120,
+                is_re_export: false,
+            }));
         let output = build_json(&results, &root, Duration::ZERO).unwrap();
 
         let actions = output["unused_exports"][0]["actions"].as_array().unwrap();
@@ -3107,24 +3088,28 @@ mod tests {
     fn json_same_line_findings_share_multi_kind_suppression_comment() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/api.ts"),
-            export_name: "helperFn".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 4,
-            span_start: 120,
-            is_re_export: false,
-        });
-        results.unused_types.push(UnusedExport {
-            path: root.join("src/api.ts"),
-            export_name: "OldType".to_string(),
-            is_type_only: true,
-            line: 10,
-            col: 0,
-            span_start: 60,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/api.ts"),
+                export_name: "helperFn".to_string(),
+                is_type_only: false,
+                line: 10,
+                col: 4,
+                span_start: 120,
+                is_re_export: false,
+            }));
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: root.join("src/api.ts"),
+                export_name: "OldType".to_string(),
+                is_type_only: true,
+                line: 10,
+                col: 0,
+                span_start: 60,
+                is_re_export: false,
+            }));
         let output = build_json(&results, &root, Duration::ZERO).unwrap();
 
         let export_actions = output["unused_exports"][0]["actions"].as_array().unwrap();

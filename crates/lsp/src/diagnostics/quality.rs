@@ -196,7 +196,10 @@ mod tests {
     use std::path::PathBuf;
 
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
-    use fallow_core::results::{AnalysisResults, DuplicateExport, DuplicateLocation, UnusedExport};
+    use fallow_core::results::{
+        AnalysisResults, DuplicateExport, DuplicateLocation, UnusedExport, UnusedExportFinding,
+        UnusedTypeFinding,
+    };
     use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString, Url};
 
     use crate::diagnostics::build_diagnostics;
@@ -436,39 +439,45 @@ mod tests {
         let mut results = AnalysisResults::default();
 
         // Add one of each issue type to verify all produce code_description
-        results.unused_exports.push(UnusedExport {
-            path: path.clone(),
-            export_name: "e".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        results.unused_types.push(UnusedExport {
-            path: path.clone(),
-            export_name: "T".to_string(),
-            is_type_only: true,
-            line: 2,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: path.clone(),
+                export_name: "e".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: path.clone(),
+                export_name: "T".to_string(),
+                is_type_only: true,
+                line: 2,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         results
             .unused_files
             .push(fallow_core::results::UnusedFileFinding::with_actions(
                 fallow_core::results::UnusedFile { path: path.clone() },
             ));
-        results
-            .unused_enum_members
-            .push(fallow_core::results::UnusedMember {
-                path: path.clone(),
-                parent_name: "E".to_string(),
-                member_name: "A".to_string(),
-                kind: fallow_core::extract::MemberKind::EnumMember,
-                line: 3,
-                col: 0,
-            });
+        results.unused_enum_members.push(
+            fallow_core::results::UnusedEnumMemberFinding::with_actions(
+                fallow_core::results::UnusedMember {
+                    path: path.clone(),
+                    parent_name: "E".to_string(),
+                    member_name: "A".to_string(),
+                    kind: fallow_core::extract::MemberKind::EnumMember,
+                    line: 3,
+                    col: 0,
+                },
+            ),
+        );
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);

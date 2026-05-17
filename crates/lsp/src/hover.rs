@@ -85,9 +85,19 @@ fn check_unused_export(
     file_path: &Path,
     position: Position,
 ) -> Option<Hover> {
+    let unused_exports_iter = results.unused_exports.iter().map(|f| &f.export);
+    let unused_types_iter = results.unused_types.iter().map(|f| &f.export);
     for (exports, kind_label) in [
-        (&results.unused_exports, "Export"),
-        (&results.unused_types, "Type export"),
+        (
+            Box::new(unused_exports_iter)
+                as Box<dyn Iterator<Item = &fallow_core::results::UnusedExport>>,
+            "Export",
+        ),
+        (
+            Box::new(unused_types_iter)
+                as Box<dyn Iterator<Item = &fallow_core::results::UnusedExport>>,
+            "Type export",
+        ),
     ] {
         for export in exports {
             if export.path != file_path {
@@ -223,9 +233,17 @@ fn check_unused_member(
     file_path: &Path,
     position: Position,
 ) -> Option<Hover> {
+    let enum_iter = results.unused_enum_members.iter().map(|f| &f.member);
+    let class_iter = results.unused_class_members.iter().map(|f| &f.member);
     for (members, kind_label) in [
-        (&results.unused_enum_members, "Enum member"),
-        (&results.unused_class_members, "Class member"),
+        (
+            Box::new(enum_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
+            "Enum member",
+        ),
+        (
+            Box::new(class_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
+            "Class member",
+        ),
     ] {
         for member in members {
             if member.path != file_path {
@@ -417,8 +435,9 @@ mod tests {
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
     use fallow_core::extract::MemberKind;
     use fallow_core::results::{
-        ExportUsage, ReferenceLocation, UnresolvedImport, UnresolvedImportFinding, UnusedExport,
-        UnusedFile, UnusedFileFinding, UnusedMember,
+        ExportUsage, ReferenceLocation, UnresolvedImport, UnresolvedImportFinding,
+        UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
+        UnusedFile, UnusedFileFinding, UnusedMember, UnusedTypeFinding,
     };
 
     /// Extract the markdown text from a Hover's contents.
@@ -492,15 +511,17 @@ mod tests {
         let root = test_root();
         let path = root.join("src/utils.ts");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: path.clone(),
-            export_name: "helper".to_string(),
-            is_type_only: false,
-            line: 5,
-            col: 7,
-            span_start: 40,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: path.clone(),
+                export_name: "helper".to_string(),
+                is_type_only: false,
+                line: 5,
+                col: 7,
+                span_start: 40,
+                is_re_export: false,
+            }));
         let duplication = DuplicationReport::default();
         let pos = Position {
             line: 4, // 0-based
@@ -523,15 +544,17 @@ mod tests {
         let root = test_root();
         let path = root.join("src/types.ts");
         let mut results = AnalysisResults::default();
-        results.unused_types.push(UnusedExport {
-            path: path.clone(),
-            export_name: "MyType".to_string(),
-            is_type_only: true,
-            line: 3,
-            col: 0,
-            span_start: 20,
-            is_re_export: false,
-        });
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: path.clone(),
+                export_name: "MyType".to_string(),
+                is_type_only: true,
+                line: 3,
+                col: 0,
+                span_start: 20,
+                is_re_export: false,
+            }));
         let duplication = DuplicationReport::default();
         let pos = Position {
             line: 2, // 0-based
@@ -642,14 +665,16 @@ mod tests {
         let root = test_root();
         let path = root.join("src/enums.ts");
         let mut results = AnalysisResults::default();
-        results.unused_enum_members.push(UnusedMember {
-            path: path.clone(),
-            parent_name: "Color".to_string(),
-            member_name: "Blue".to_string(),
-            kind: MemberKind::EnumMember,
-            line: 4,
-            col: 2,
-        });
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: path.clone(),
+                parent_name: "Color".to_string(),
+                member_name: "Blue".to_string(),
+                kind: MemberKind::EnumMember,
+                line: 4,
+                col: 2,
+            }));
         let duplication = DuplicationReport::default();
         let pos = Position {
             line: 3,
@@ -667,14 +692,16 @@ mod tests {
         let root = test_root();
         let path = root.join("src/service.ts");
         let mut results = AnalysisResults::default();
-        results.unused_class_members.push(UnusedMember {
-            path: path.clone(),
-            parent_name: "UserService".to_string(),
-            member_name: "reset".to_string(),
-            kind: MemberKind::ClassMethod,
-            line: 20,
-            col: 4,
-        });
+        results
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: path.clone(),
+                parent_name: "UserService".to_string(),
+                member_name: "reset".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 20,
+                col: 4,
+            }));
         let duplication = DuplicationReport::default();
         let pos = Position {
             line: 19,
@@ -864,15 +891,17 @@ mod tests {
         let root = test_root();
         let path = root.join("src/utils.ts");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: path.clone(),
-            export_name: "helper".to_string(),
-            is_type_only: false,
-            line: 5,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: path.clone(),
+                export_name: "helper".to_string(),
+                is_type_only: false,
+                line: 5,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         let duplication = DuplicationReport::default();
 
         // Line 10, but export is on line 5 (0-based: 4)
@@ -889,15 +918,17 @@ mod tests {
         let root = test_root();
         let path = root.join("src/utils.ts");
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: path.clone(),
-            export_name: "helper".to_string(),
-            is_type_only: false,
-            line: 5,
-            col: 7,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: path.clone(),
+                export_name: "helper".to_string(),
+                is_type_only: false,
+                line: 5,
+                col: 7,
+                span_start: 0,
+                is_re_export: false,
+            }));
         let duplication = DuplicationReport::default();
 
         // Correct line (0-based: 4), but character is past the export name [7, 13)
@@ -1150,15 +1181,17 @@ mod tests {
         let path = root.join("src/utils.ts");
         let mut results = AnalysisResults::default();
         // export name "abc" at col=7, spans [7, 10)
-        results.unused_exports.push(UnusedExport {
-            path: path.clone(),
-            export_name: "abc".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 7,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: path.clone(),
+                export_name: "abc".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 7,
+                span_start: 0,
+                is_re_export: false,
+            }));
         let duplication = DuplicationReport::default();
 
         // At col (start boundary, inclusive) => should match
@@ -1189,14 +1222,16 @@ mod tests {
         let path = root.join("src/enums.ts");
         let mut results = AnalysisResults::default();
         // member "Red" at col=4, spans [4, 7)
-        results.unused_enum_members.push(UnusedMember {
-            path: path.clone(),
-            parent_name: "Color".to_string(),
-            member_name: "Red".to_string(),
-            kind: MemberKind::EnumMember,
-            line: 3,
-            col: 4,
-        });
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: path.clone(),
+                parent_name: "Color".to_string(),
+                member_name: "Red".to_string(),
+                kind: MemberKind::EnumMember,
+                line: 3,
+                col: 4,
+            }));
         let duplication = DuplicationReport::default();
 
         // Exactly at col => match
@@ -1276,15 +1311,17 @@ mod tests {
         let mut results = AnalysisResults::default();
 
         // Both unused export and used export at the same position
-        results.unused_exports.push(UnusedExport {
-            path: path.clone(),
-            export_name: "foo".to_string(),
-            is_type_only: false,
-            line: 5,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: path.clone(),
+                export_name: "foo".to_string(),
+                is_type_only: false,
+                line: 5,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         results.export_usages.push(ExportUsage {
             path: path.clone(),
             export_name: "foo".to_string(),
@@ -1312,15 +1349,17 @@ mod tests {
         let path_b = root.join("src/b.ts");
 
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: path_a,
-            export_name: "foo".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: path_a,
+                export_name: "foo".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         let duplication = DuplicationReport::default();
 
         // Hover on path_b where there are no issues

@@ -140,16 +140,6 @@ export type AddToConfigValue = (string | IgnoreExportsRule[] | {
 [k: string]: unknown
 })
 /**
- * Audit-mode marker emitted on each finding when `fallow audit --format json`
- * runs with a base ref. `true` means the finding's structural key was not
- * present at the base ref (introduced by the current changeset); `false`
- * means it was inherited.
- * 
- * Outside of audit sub-results the field is omitted, so call sites typically
- * hold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean.
- */
-export type AuditIntroduced = boolean
-/**
  * Where in package.json a dependency is listed.
  * 
  * # Examples
@@ -168,6 +158,16 @@ export type AuditIntroduced = boolean
  * ```
  */
 export type DependencyLocation = ("dependencies" | "devDependencies" | "optionalDependencies")
+/**
+ * Audit-mode marker emitted on each finding when `fallow audit --format json`
+ * runs with a base ref. `true` means the finding's structural key was not
+ * present at the base ref (introduced by the current changeset); `false`
+ * means it was inherited.
+ * 
+ * Outside of audit sub-results the field is omitted, so call sites typically
+ * hold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean.
+ */
+export type AuditIntroduced = boolean
 /**
  * The kind of member.
  * 
@@ -556,13 +556,18 @@ summary: CheckSummary
  */
 unused_files: UnusedFileFinding[]
 /**
- * Exports never imported by other modules.
+ * Exports never imported by other modules. Wrapped in
+ * [`UnusedExportFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-unused_exports: UnusedExport[]
+unused_exports: UnusedExportFinding[]
 /**
- * Type exports never imported by other modules.
+ * Type exports never imported by other modules. Wrapped in
+ * [`UnusedTypeFinding`]: the inner [`UnusedExport`] struct is shared
+ * with `unused_exports` but the wrapper emits a type-targeted fix
+ * description.
  */
-unused_types: UnusedExport[]
+unused_types: UnusedTypeFinding[]
 /**
  * Exported symbols whose public signature references same-file private
  * types. Wrapped in [`PrivateTypeLeakFinding`] so each entry carries a
@@ -582,13 +587,19 @@ unused_dev_dependencies: UnusedDependency[]
  */
 unused_optional_dependencies: UnusedDependency[]
 /**
- * Enum members never accessed.
+ * Enum members never accessed. Wrapped in
+ * [`UnusedEnumMemberFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-unused_enum_members: UnusedMember[]
+unused_enum_members: UnusedEnumMemberFinding[]
 /**
- * Class members never accessed.
+ * Class members never accessed. Wrapped in
+ * [`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as
+ * `unused_enum_members`, with a class-targeted fix description and the
+ * `auto_fixable: false` default to reflect dependency-injection
+ * patterns.
  */
-unused_class_members: UnusedMember[]
+unused_class_members: UnusedClassMemberFinding[]
 /**
  * Import specifiers that could not be resolved. Wrapped in
  * [`UnresolvedImportFinding`] so each entry carries a typed `actions`
@@ -960,9 +971,12 @@ file: string
 exports: string[]
 }
 /**
- * An export that is never imported by other modules.
+ * Wire-shape envelope for an [`UnusedExport`] finding consumed under the
+ * `unused_exports` key. Same Rust struct as [`UnusedTypeFinding`], with a
+ * different fix description so consumers can tell value-export from
+ * type-export removal at the action level.
  */
-export interface UnusedExport {
+export interface UnusedExportFinding {
 /**
  * File containing the unused export.
  */
@@ -992,10 +1006,61 @@ span_start: number
  */
 is_re_export: boolean
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (boolean | null)
+}
+/**
+ * Wire-shape envelope for an [`UnusedExport`] finding consumed under the
+ * `unused_types` key. Wraps the same bare [`UnusedExport`] struct as
+ * [`UnusedExportFinding`] but emits a fix action targeted at type-only
+ * declarations, with the same `is_re_export`-aware note swap.
+ */
+export interface UnusedTypeFinding {
+/**
+ * File containing the unused export.
+ */
+path: string
+/**
+ * Name of the unused export.
+ */
+export_name: string
+/**
+ * Whether this is a type-only export.
+ */
+is_type_only: boolean
+/**
+ * 1-based line number of the export.
+ */
+line: number
+/**
+ * 0-based byte column offset.
+ */
+col: number
+/**
+ * Byte offset into the source file (used by the fix command).
+ */
+span_start: number
+/**
+ * Whether this finding comes from a barrel/index re-export rather than the source definition.
+ */
+is_re_export: boolean
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (boolean | null)
 }
 /**
  * Wire-shape envelope for a [`PrivateTypeLeak`] finding. Mirrors
@@ -1067,9 +1132,10 @@ actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
- * An unused enum or class member.
+ * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
+ * `unused_enum_members` key.
  */
-export interface UnusedMember {
+export interface UnusedEnumMemberFinding {
 /**
  * File containing the unused member.
  */
@@ -1092,10 +1158,54 @@ line: number
  */
 col: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (boolean | null)
+}
+/**
+ * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
+ * `unused_class_members` key. Same Rust struct as
+ * [`UnusedEnumMemberFinding`]; the fix action and suppress comment carry
+ * the class-member kebab-case identifier instead.
+ */
+export interface UnusedClassMemberFinding {
+/**
+ * File containing the unused member.
+ */
+path: string
+/**
+ * Name of the parent enum or class.
+ */
+parent_name: string
+/**
+ * Name of the unused member.
+ */
+member_name: string
+kind: MemberKind
+/**
+ * 1-based line number.
+ */
+line: number
+/**
+ * 0-based byte column offset.
+ */
+col: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (boolean | null)
 }
 /**
  * Wire-shape envelope for an [`UnresolvedImport`] finding. Mirrors
@@ -3619,13 +3729,18 @@ total_issues: number
  */
 unused_files: UnusedFileFinding[]
 /**
- * Exports never imported by other modules.
+ * Exports never imported by other modules. Wrapped in
+ * [`UnusedExportFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-unused_exports: UnusedExport[]
+unused_exports: UnusedExportFinding[]
 /**
- * Type exports never imported by other modules.
+ * Type exports never imported by other modules. Wrapped in
+ * [`UnusedTypeFinding`]: the inner [`UnusedExport`] struct is shared
+ * with `unused_exports` but the wrapper emits a type-targeted fix
+ * description.
  */
-unused_types: UnusedExport[]
+unused_types: UnusedTypeFinding[]
 /**
  * Exported symbols whose public signature references same-file private
  * types. Wrapped in [`PrivateTypeLeakFinding`] so each entry carries a
@@ -3645,13 +3760,19 @@ unused_dev_dependencies: UnusedDependency[]
  */
 unused_optional_dependencies: UnusedDependency[]
 /**
- * Enum members never accessed.
+ * Enum members never accessed. Wrapped in
+ * [`UnusedEnumMemberFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-unused_enum_members: UnusedMember[]
+unused_enum_members: UnusedEnumMemberFinding[]
 /**
- * Class members never accessed.
+ * Class members never accessed. Wrapped in
+ * [`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as
+ * `unused_enum_members`, with a class-targeted fix description and the
+ * `auto_fixable: false` default to reflect dependency-injection
+ * patterns.
  */
-unused_class_members: UnusedMember[]
+unused_class_members: UnusedClassMemberFinding[]
 /**
  * Import specifiers that could not be resolved. Wrapped in
  * [`UnresolvedImportFinding`] so each entry carries a typed `actions`

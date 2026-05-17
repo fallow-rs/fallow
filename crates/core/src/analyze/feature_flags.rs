@@ -67,15 +67,23 @@ pub fn correlate_with_dead_code(flags: &mut [FeatureFlag], results: &AnalysisRes
 
         // Find unused exports in the same file within the guard span
         for export in &results.unused_exports {
-            if export.path == flag.path && export.line >= guard_start && export.line <= guard_end {
-                flag.guarded_dead_exports.push(export.export_name.clone());
+            if export.export.path == flag.path
+                && export.export.line >= guard_start
+                && export.export.line <= guard_end
+            {
+                flag.guarded_dead_exports
+                    .push(export.export.export_name.clone());
             }
         }
 
         // Also check unused type exports
         for export in &results.unused_types {
-            if export.path == flag.path && export.line >= guard_start && export.line <= guard_end {
-                flag.guarded_dead_exports.push(export.export_name.clone());
+            if export.export.path == flag.path
+                && export.export.line >= guard_start
+                && export.export.line <= guard_end
+            {
+                flag.guarded_dead_exports
+                    .push(export.export.export_name.clone());
             }
         }
     }

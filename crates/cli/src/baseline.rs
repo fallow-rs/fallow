@@ -108,6 +108,10 @@ pub struct BaselineData {
 }
 
 impl BaselineData {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match arm per issue type keeps the baseline key map flat and grep-friendly"
+    )]
     pub fn from_results(results: &fallow_core::results::AnalysisResults, root: &Path) -> Self {
         Self {
             unused_files: results
@@ -118,12 +122,24 @@ impl BaselineData {
             unused_exports: results
                 .unused_exports
                 .iter()
-                .map(|e| format!("{}:{}", relative_path(&e.path, root), e.export_name))
+                .map(|e| {
+                    format!(
+                        "{}:{}",
+                        relative_path(&e.export.path, root),
+                        e.export.export_name
+                    )
+                })
                 .collect(),
             unused_types: results
                 .unused_types
                 .iter()
-                .map(|e| format!("{}:{}", relative_path(&e.path, root), e.export_name))
+                .map(|e| {
+                    format!(
+                        "{}:{}",
+                        relative_path(&e.export.path, root),
+                        e.export.export_name
+                    )
+                })
                 .collect(),
             private_type_leaks: results
                 .private_type_leaks
@@ -163,9 +179,9 @@ impl BaselineData {
                 .map(|m| {
                     format!(
                         "{}:{}.{}",
-                        relative_path(&m.path, root),
-                        m.parent_name,
-                        m.member_name
+                        relative_path(&m.member.path, root),
+                        m.member.parent_name,
+                        m.member.member_name
                     )
                 })
                 .collect(),
@@ -175,9 +191,9 @@ impl BaselineData {
                 .map(|m| {
                     format!(
                         "{}:{}.{}",
-                        relative_path(&m.path, root),
-                        m.parent_name,
-                        m.member_name
+                        relative_path(&m.member.path, root),
+                        m.member.parent_name,
+                        m.member.member_name
                     )
                 })
                 .collect(),
@@ -365,11 +381,19 @@ pub fn filter_new_issues(
         .unused_files
         .retain(|f| !baseline_files.contains(relative_path(&f.file.path, root).as_str()));
     results.unused_exports.retain(|e| {
-        let key = format!("{}:{}", relative_path(&e.path, root), e.export_name);
+        let key = format!(
+            "{}:{}",
+            relative_path(&e.export.path, root),
+            e.export.export_name
+        );
         !baseline_exports.contains(key.as_str())
     });
     results.unused_types.retain(|e| {
-        let key = format!("{}:{}", relative_path(&e.path, root), e.export_name);
+        let key = format!(
+            "{}:{}",
+            relative_path(&e.export.path, root),
+            e.export.export_name
+        );
         !baseline_types.contains(key.as_str())
     });
     filter_private_type_leaks(
@@ -414,9 +438,9 @@ pub fn filter_new_issues(
     results.unused_enum_members.retain(|m| {
         let key = format!(
             "{}:{}.{}",
-            relative_path(&m.path, root),
-            m.parent_name,
-            m.member_name
+            relative_path(&m.member.path, root),
+            m.member.parent_name,
+            m.member.member_name
         );
         !baseline_enum_members.contains(key.as_str())
     });
@@ -429,9 +453,9 @@ pub fn filter_new_issues(
     results.unused_class_members.retain(|m| {
         let key = format!(
             "{}:{}.{}",
-            relative_path(&m.path, root),
-            m.parent_name,
-            m.member_name
+            relative_path(&m.member.path, root),
+            m.member.parent_name,
+            m.member.member_name
         );
         !baseline_class_members.contains(key.as_str())
     });
@@ -1082,7 +1106,9 @@ mod tests {
         AnalysisResults, BoundaryViolationFinding, CircularDependencyFinding, DependencyLocation,
         UnusedDependency, UnusedExport, UnusedFile,
     };
-    use fallow_types::output_dead_code::UnusedFileFinding;
+    use fallow_types::output_dead_code::{
+        UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
+    };
     use std::path::PathBuf;
 
     fn make_results() -> AnalysisResults {
@@ -1095,7 +1121,7 @@ mod tests {
                     path: PathBuf::from("src/dead.ts"),
                 }),
             ],
-            unused_exports: vec![UnusedExport {
+            unused_exports: vec![UnusedExportFinding::with_actions(UnusedExport {
                 path: PathBuf::from("src/utils.ts"),
                 export_name: "helperA".to_string(),
                 is_type_only: false,
@@ -1103,8 +1129,8 @@ mod tests {
                 col: 0,
                 span_start: 40,
                 is_re_export: false,
-            }],
-            unused_types: vec![UnusedExport {
+            })],
+            unused_types: vec![UnusedTypeFinding::with_actions(UnusedExport {
                 path: PathBuf::from("src/types.ts"),
                 export_name: "OldType".to_string(),
                 is_type_only: true,
@@ -1112,7 +1138,7 @@ mod tests {
                 col: 0,
                 span_start: 100,
                 is_re_export: false,
-            }],
+            })],
             unused_dependencies: vec![UnusedDependency {
                 package_name: "lodash".to_string(),
                 location: DependencyLocation::Dependencies,
@@ -1392,7 +1418,7 @@ mod tests {
         };
         let results = AnalysisResults {
             unused_exports: vec![
-                UnusedExport {
+                UnusedExportFinding::with_actions(UnusedExport {
                     path: PathBuf::from("src/utils.ts"),
                     export_name: "helperA".to_string(),
                     is_type_only: false,
@@ -1400,8 +1426,8 @@ mod tests {
                     col: 0,
                     span_start: 40,
                     is_re_export: false,
-                },
-                UnusedExport {
+                }),
+                UnusedExportFinding::with_actions(UnusedExport {
                     path: PathBuf::from("src/utils.ts"),
                     export_name: "helperB".to_string(),
                     is_type_only: false,
@@ -1409,13 +1435,13 @@ mod tests {
                     col: 0,
                     span_start: 80,
                     is_re_export: false,
-                },
+                }),
             ],
             ..Default::default()
         };
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
         assert_eq!(filtered.unused_exports.len(), 1);
-        assert_eq!(filtered.unused_exports[0].export_name, "helperB");
+        assert_eq!(filtered.unused_exports[0].export.export_name, "helperB");
     }
 
     // ── DuplicationBaselineData ──────────────────────────────────
@@ -1946,22 +1972,24 @@ mod tests {
             line: 15,
             used_in_workspaces: Vec::new(),
         });
-        r.unused_enum_members.push(UnusedMember {
-            path: PathBuf::from("src/enums.ts"),
-            parent_name: "Status".to_string(),
-            member_name: "Deprecated".to_string(),
-            kind: MemberKind::EnumMember,
-            line: 8,
-            col: 0,
-        });
-        r.unused_class_members.push(UnusedMember {
-            path: PathBuf::from("src/service.ts"),
-            parent_name: "UserService".to_string(),
-            member_name: "legacy".to_string(),
-            kind: MemberKind::ClassMethod,
-            line: 42,
-            col: 0,
-        });
+        r.unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("src/enums.ts"),
+                parent_name: "Status".to_string(),
+                member_name: "Deprecated".to_string(),
+                kind: MemberKind::EnumMember,
+                line: 8,
+                col: 0,
+            }));
+        r.unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("src/service.ts"),
+                parent_name: "UserService".to_string(),
+                member_name: "legacy".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 42,
+                col: 0,
+            }));
         r.unresolved_imports.push(
             fallow_types::output_dead_code::UnresolvedImportFinding::with_actions(
                 fallow_core::results::UnresolvedImport {
@@ -2239,7 +2267,7 @@ mod tests {
             unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
                 path: p("src/old.ts"),
             })],
-            unused_exports: vec![UnusedExport {
+            unused_exports: vec![UnusedExportFinding::with_actions(UnusedExport {
                 path: p("src/utils.ts"),
                 export_name: "helper".to_string(),
                 is_type_only: false,
@@ -2247,7 +2275,7 @@ mod tests {
                 col: 0,
                 span_start: 40,
                 is_re_export: false,
-            }],
+            })],
             unused_dependencies: vec![UnusedDependency {
                 package_name: "lodash-es".to_string(),
                 location: DependencyLocation::Dependencies,
@@ -2264,22 +2292,22 @@ mod tests {
                     is_cross_package: false,
                 },
             )],
-            unused_enum_members: vec![UnusedMember {
+            unused_enum_members: vec![UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: p("src/enums.ts"),
                 parent_name: "Status".to_string(),
                 member_name: "Deprecated".to_string(),
                 kind: MemberKind::EnumMember,
                 line: 8,
                 col: 0,
-            }],
-            unused_class_members: vec![UnusedMember {
+            })],
+            unused_class_members: vec![UnusedClassMemberFinding::with_actions(UnusedMember {
                 path: p("src/service.ts"),
                 parent_name: "UserService".to_string(),
                 member_name: "legacy".to_string(),
                 kind: MemberKind::ClassMethod,
                 line: 42,
                 col: 0,
-            }],
+            })],
             unresolved_imports: vec![UnresolvedImportFinding::with_actions(UnresolvedImport {
                 path: p("src/app.ts"),
                 specifier: "./missing".to_string(),

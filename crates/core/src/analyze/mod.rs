@@ -19,7 +19,8 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use fallow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, PrivateTypeLeakFinding,
-    UnresolvedImportFinding, UnusedFileFinding,
+    UnresolvedImportFinding, UnusedClassMemberFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
 };
 
 use crate::results::{AnalysisResults, CircularDependency};
@@ -297,15 +298,18 @@ pub fn find_dead_code_full(
                             &line_offsets_by_file,
                         );
                         if config.rules.unused_exports != Severity::Off {
-                            results.unused_exports = exports;
+                            results.unused_exports = exports
+                                .into_iter()
+                                .map(UnusedExportFinding::with_actions)
+                                .collect();
                         }
                         if config.rules.unused_types != Severity::Off {
-                            results.unused_types = types;
-                            suppress_signature_backing_types(
-                                &mut results.unused_types,
-                                graph,
-                                modules,
-                            );
+                            let mut typed = types;
+                            suppress_signature_backing_types(&mut typed, graph, modules);
+                            results.unused_types = typed
+                                .into_iter()
+                                .map(UnusedTypeFinding::with_actions)
+                                .collect();
                         }
                         if config.rules.private_type_leaks != Severity::Off {
                             results.private_type_leaks = find_private_type_leaks(
@@ -346,10 +350,16 @@ pub fn find_dead_code_full(
                                     &user_class_members,
                                 );
                                 if config.rules.unused_enum_members != Severity::Off {
-                                    results.unused_enum_members = enum_members;
+                                    results.unused_enum_members = enum_members
+                                        .into_iter()
+                                        .map(UnusedEnumMemberFinding::with_actions)
+                                        .collect();
                                 }
                                 if config.rules.unused_class_members != Severity::Off {
-                                    results.unused_class_members = class_members;
+                                    results.unused_class_members = class_members
+                                        .into_iter()
+                                        .map(UnusedClassMemberFinding::with_actions)
+                                        .collect();
                                 }
                             }
                             results
@@ -531,18 +541,26 @@ pub fn find_dead_code_full(
     // Public packages are workspace packages whose exports are intended for external consumers.
     let public_roots = public_workspace_roots(&config.public_packages, workspaces);
     if !public_roots.is_empty() {
-        results
-            .unused_exports
-            .retain(|e| !public_roots.iter().any(|root| e.path.starts_with(root)));
-        results
-            .unused_types
-            .retain(|e| !public_roots.iter().any(|root| e.path.starts_with(root)));
-        results
-            .unused_enum_members
-            .retain(|e| !public_roots.iter().any(|root| e.path.starts_with(root)));
-        results
-            .unused_class_members
-            .retain(|e| !public_roots.iter().any(|root| e.path.starts_with(root)));
+        results.unused_exports.retain(|e| {
+            !public_roots
+                .iter()
+                .any(|root| e.export.path.starts_with(root))
+        });
+        results.unused_types.retain(|e| {
+            !public_roots
+                .iter()
+                .any(|root| e.export.path.starts_with(root))
+        });
+        results.unused_enum_members.retain(|e| {
+            !public_roots
+                .iter()
+                .any(|root| e.member.path.starts_with(root))
+        });
+        results.unused_class_members.retain(|e| {
+            !public_roots
+                .iter()
+                .any(|root| e.member.path.starts_with(root))
+        });
     }
 
     // Detect stale suppression comments (must run after all detectors)

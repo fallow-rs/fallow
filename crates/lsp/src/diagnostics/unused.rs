@@ -16,15 +16,17 @@ pub fn push_export_diagnostics(
     map: &mut FxHashMap<Url, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
+    let exports_iter = results.unused_exports.iter().map(|f| &f.export);
+    let types_iter = results.unused_types.iter().map(|f| &f.export);
     for (exports, code, anchor, msg_prefix) in [
         (
-            &results.unused_exports,
+            Box::new(exports_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedExport>>,
             "unused-export",
             "unused-exports",
             "Export" as &str,
         ),
         (
-            &results.unused_types,
+            Box::new(types_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedExport>>,
             "unused-type",
             "unused-types",
             "Type export",
@@ -456,15 +458,17 @@ pub fn push_member_diagnostics(
     map: &mut FxHashMap<Url, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
+    let enum_iter = results.unused_enum_members.iter().map(|f| &f.member);
+    let class_iter = results.unused_class_members.iter().map(|f| &f.member);
     for (members, code, anchor, kind_label) in [
         (
-            &results.unused_enum_members,
+            Box::new(enum_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
             "unused-enum-member",
             "unused-enum-members",
             "Enum member" as &str,
         ),
         (
-            &results.unused_class_members,
+            Box::new(class_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
             "unused-class-member",
             "unused-class-members",
             "Class member",
@@ -509,8 +513,9 @@ mod tests {
     use fallow_core::results::{
         AnalysisResults, DependencyLocation, EmptyCatalogGroup, ImportSite, TestOnlyDependency,
         TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport,
-        UnresolvedImportFinding, UnusedCatalogEntry, UnusedDependency, UnusedExport, UnusedFile,
-        UnusedFileFinding, UnusedMember,
+        UnresolvedImportFinding, UnusedCatalogEntry, UnusedClassMemberFinding, UnusedDependency,
+        UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding, UnusedFile, UnusedFileFinding,
+        UnusedMember, UnusedTypeFinding,
     };
     use tower_lsp::lsp_types::{DiagnosticSeverity, DiagnosticTag, NumberOrString, Url};
 
@@ -552,15 +557,17 @@ mod tests {
     fn unused_export_produces_hint_diagnostic() {
         let root = test_root();
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "helper".to_string(),
-            is_type_only: false,
-            line: 5,
-            col: 7,
-            span_start: 40,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/utils.ts"),
+                export_name: "helper".to_string(),
+                is_type_only: false,
+                line: 5,
+                col: 7,
+                span_start: 40,
+                is_re_export: false,
+            }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -589,15 +596,17 @@ mod tests {
     fn unused_type_produces_hint_diagnostic() {
         let root = test_root();
         let mut results = AnalysisResults::default();
-        results.unused_types.push(UnusedExport {
-            path: root.join("src/types.ts"),
-            export_name: "MyType".to_string(),
-            is_type_only: true,
-            line: 10,
-            col: 0,
-            span_start: 100,
-            is_re_export: false,
-        });
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: root.join("src/types.ts"),
+                export_name: "MyType".to_string(),
+                is_type_only: true,
+                line: 10,
+                col: 0,
+                span_start: 100,
+                is_re_export: false,
+            }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -764,14 +773,16 @@ mod tests {
     fn unused_enum_member_produces_hint() {
         let root = test_root();
         let mut results = AnalysisResults::default();
-        results.unused_enum_members.push(UnusedMember {
-            path: root.join("src/enums.ts"),
-            parent_name: "Color".to_string(),
-            member_name: "Blue".to_string(),
-            kind: MemberKind::EnumMember,
-            line: 4,
-            col: 2,
-        });
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: root.join("src/enums.ts"),
+                parent_name: "Color".to_string(),
+                member_name: "Blue".to_string(),
+                kind: MemberKind::EnumMember,
+                line: 4,
+                col: 2,
+            }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -796,14 +807,16 @@ mod tests {
     fn unused_class_member_produces_hint() {
         let root = test_root();
         let mut results = AnalysisResults::default();
-        results.unused_class_members.push(UnusedMember {
-            path: root.join("src/service.ts"),
-            parent_name: "UserService".to_string(),
-            member_name: "reset".to_string(),
-            kind: MemberKind::ClassMethod,
-            line: 20,
-            col: 4,
-        });
+        results
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: root.join("src/service.ts"),
+                parent_name: "UserService".to_string(),
+                member_name: "reset".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 20,
+                col: 4,
+            }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -921,15 +934,17 @@ mod tests {
         let root = test_root();
         // Line 0 in results (unusual) should become 0 in LSP, not underflow
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: root.join("src/edge.ts"),
-            export_name: "x".to_string(),
-            is_type_only: false,
-            line: 0,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/edge.ts"),
+                export_name: "x".to_string(),
+                is_type_only: false,
+                line: 0,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);

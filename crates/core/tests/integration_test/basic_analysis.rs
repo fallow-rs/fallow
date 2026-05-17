@@ -35,7 +35,7 @@ fn basic_project_detects_unused_exports() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -62,7 +62,7 @@ fn basic_project_detects_unused_types() {
     let unused_type_names: Vec<&str> = results
         .unused_types
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -153,7 +153,7 @@ fn namespace_import_makes_all_exports_used() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -179,7 +179,7 @@ fn namespace_import_used_through_object_alias_and_star_barrel() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -205,7 +205,7 @@ fn namespace_import_used_through_object_alias_across_workspace_packages() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -233,7 +233,7 @@ fn namespace_import_used_through_object_alias_across_packages_via_star_barrel() 
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -270,7 +270,7 @@ fn namespace_import_used_through_object_alias_across_multi_hop_barrel_chain() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -310,7 +310,7 @@ fn namespace_re_export_via_named_import_credits_target_members() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // Variant A: accessed members credited, stillUnused stays flagged.
@@ -387,7 +387,7 @@ fn namespace_object_alias_chains_through_namespace_re_export_target() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // Positive case 1 (single hop): `used` must be credited through
@@ -462,7 +462,7 @@ fn namespace_export_members_not_reported_as_unused() {
         results
             .unused_exports
             .iter()
-            .map(|e| e.export_name.as_str())
+            .map(|e| e.export.export_name.as_str())
             .collect::<Vec<_>>()
     );
     assert!(
@@ -471,7 +471,7 @@ fn namespace_export_members_not_reported_as_unused() {
         results
             .unused_types
             .iter()
-            .map(|e| e.export_name.as_str())
+            .map(|e| e.export.export_name.as_str())
             .collect::<Vec<_>>()
     );
     assert!(results.unused_files.is_empty(), "No unused files expected");
@@ -538,8 +538,13 @@ fn default_export_flagged_when_only_named_imported() {
         .iter()
         .map(|e| {
             (
-                e.export_name.as_str(),
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
+                e.export.export_name.as_str(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
             )
         })
         .collect();
@@ -556,7 +561,7 @@ fn default_export_flagged_when_only_named_imported() {
         !results
             .unused_exports
             .iter()
-            .any(|e| e.export_name == "usedNamed"),
+            .any(|e| e.export.export_name == "usedNamed"),
         "usedNamed should NOT be detected as unused"
     );
 }

@@ -17,12 +17,12 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
         results
             .unused_files
             .retain(|f| config.resolve_rules_for_path(&f.file.path).unused_files != Severity::Off);
-        results
-            .unused_exports
-            .retain(|e| config.resolve_rules_for_path(&e.path).unused_exports != Severity::Off);
-        results
-            .unused_types
-            .retain(|e| config.resolve_rules_for_path(&e.path).unused_types != Severity::Off);
+        results.unused_exports.retain(|e| {
+            config.resolve_rules_for_path(&e.export.path).unused_exports != Severity::Off
+        });
+        results.unused_types.retain(|e| {
+            config.resolve_rules_for_path(&e.export.path).unused_types != Severity::Off
+        });
         results.private_type_leaks.retain(|e| {
             config
                 .resolve_rules_for_path(&e.leak.path)
@@ -30,10 +30,16 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
                 != Severity::Off
         });
         results.unused_enum_members.retain(|m| {
-            config.resolve_rules_for_path(&m.path).unused_enum_members != Severity::Off
+            config
+                .resolve_rules_for_path(&m.member.path)
+                .unused_enum_members
+                != Severity::Off
         });
         results.unused_class_members.retain(|m| {
-            config.resolve_rules_for_path(&m.path).unused_class_members != Severity::Off
+            config
+                .resolve_rules_for_path(&m.member.path)
+                .unused_class_members
+                != Severity::Off
         });
         results.unresolved_imports.retain(|i| {
             config
@@ -160,49 +166,44 @@ pub fn has_error_severity_issues(
             let config = config.unwrap();
             results.unused_files.iter().any(|f| {
                 config.resolve_rules_for_path(&f.file.path).unused_files == Severity::Error
-            }) || results
-                .unused_exports
-                .iter()
-                .any(|e| config.resolve_rules_for_path(&e.path).unused_exports == Severity::Error)
-                || results
-                    .unused_types
-                    .iter()
-                    .any(|e| config.resolve_rules_for_path(&e.path).unused_types == Severity::Error)
-                || results.private_type_leaks.iter().any(|e| {
-                    config
-                        .resolve_rules_for_path(&e.leak.path)
-                        .private_type_leaks
-                        == Severity::Error
+            }) || results.unused_exports.iter().any(|e| {
+                config.resolve_rules_for_path(&e.export.path).unused_exports == Severity::Error
+            }) || results.unused_types.iter().any(|e| {
+                config.resolve_rules_for_path(&e.export.path).unused_types == Severity::Error
+            }) || results.private_type_leaks.iter().any(|e| {
+                config
+                    .resolve_rules_for_path(&e.leak.path)
+                    .private_type_leaks
+                    == Severity::Error
+            }) || results.unused_enum_members.iter().any(|m| {
+                config
+                    .resolve_rules_for_path(&m.member.path)
+                    .unused_enum_members
+                    == Severity::Error
+            }) || results.unused_class_members.iter().any(|m| {
+                config
+                    .resolve_rules_for_path(&m.member.path)
+                    .unused_class_members
+                    == Severity::Error
+            }) || results.unresolved_imports.iter().any(|i| {
+                config
+                    .resolve_rules_for_path(&i.import.path)
+                    .unresolved_imports
+                    == Severity::Error
+            }) || results.stale_suppressions.iter().any(|s| {
+                config.resolve_rules_for_path(&s.path).stale_suppressions == Severity::Error
+            }) || results.unresolved_catalog_references.iter().any(|r| {
+                config
+                    .resolve_rules_for_path(&r.path)
+                    .unresolved_catalog_references
+                    == Severity::Error
+            }) || results.empty_catalog_groups.iter().any(|g| {
+                config.resolve_rules_for_path(&g.path).empty_catalog_groups == Severity::Error
+            }) || results.circular_dependencies.iter().any(|c| {
+                c.cycle.files.iter().any(|path| {
+                    config.resolve_rules_for_path(path).circular_dependencies == Severity::Error
                 })
-                || results.unused_enum_members.iter().any(|m| {
-                    config.resolve_rules_for_path(&m.path).unused_enum_members == Severity::Error
-                })
-                || results.unused_class_members.iter().any(|m| {
-                    config.resolve_rules_for_path(&m.path).unused_class_members == Severity::Error
-                })
-                || results.unresolved_imports.iter().any(|i| {
-                    config
-                        .resolve_rules_for_path(&i.import.path)
-                        .unresolved_imports
-                        == Severity::Error
-                })
-                || results.stale_suppressions.iter().any(|s| {
-                    config.resolve_rules_for_path(&s.path).stale_suppressions == Severity::Error
-                })
-                || results.unresolved_catalog_references.iter().any(|r| {
-                    config
-                        .resolve_rules_for_path(&r.path)
-                        .unresolved_catalog_references
-                        == Severity::Error
-                })
-                || results.empty_catalog_groups.iter().any(|g| {
-                    config.resolve_rules_for_path(&g.path).empty_catalog_groups == Severity::Error
-                })
-                || results.circular_dependencies.iter().any(|c| {
-                    c.cycle.files.iter().any(|path| {
-                        config.resolve_rules_for_path(path).circular_dependencies == Severity::Error
-                    })
-                })
+            })
         } else {
             (rules.unused_files == Severity::Error && !results.unused_files.is_empty())
                 || (rules.unused_exports == Severity::Error && !results.unused_exports.is_empty())
@@ -342,24 +343,26 @@ mod tests {
             .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: PathBuf::from("/project/src/a.ts"),
             }));
-        r.unused_exports.push(UnusedExport {
-            path: PathBuf::from("/project/src/b.ts"),
-            export_name: "foo".into(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        r.unused_types.push(UnusedExport {
-            path: PathBuf::from("/project/src/c.ts"),
-            export_name: "MyType".into(),
-            is_type_only: true,
-            line: 5,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        r.unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/b.ts"),
+                export_name: "foo".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        r.unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/c.ts"),
+                export_name: "MyType".into(),
+                is_type_only: true,
+                line: 5,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         r.unused_dependencies.push(UnusedDependency {
             package_name: "lodash".into(),
             location: DependencyLocation::Dependencies,
@@ -374,22 +377,24 @@ mod tests {
             line: 5,
             used_in_workspaces: Vec::new(),
         });
-        r.unused_enum_members.push(UnusedMember {
-            path: PathBuf::from("/project/src/d.ts"),
-            parent_name: "Status".into(),
-            member_name: "Pending".into(),
-            kind: MemberKind::EnumMember,
-            line: 3,
-            col: 0,
-        });
-        r.unused_class_members.push(UnusedMember {
-            path: PathBuf::from("/project/src/e.ts"),
-            parent_name: "Service".into(),
-            member_name: "helper".into(),
-            kind: MemberKind::ClassMethod,
-            line: 10,
-            col: 0,
-        });
+        r.unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/d.ts"),
+                parent_name: "Status".into(),
+                member_name: "Pending".into(),
+                kind: MemberKind::EnumMember,
+                line: 3,
+                col: 0,
+            }));
+        r.unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("/project/src/e.ts"),
+                parent_name: "Service".into(),
+                member_name: "helper".into(),
+                kind: MemberKind::ClassMethod,
+                line: 10,
+                col: 0,
+            }));
         r.unresolved_imports
             .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
                 path: PathBuf::from("/project/src/f.ts"),
@@ -818,31 +823,35 @@ mod tests {
     fn apply_rules_with_override_filters_matching_files() {
         let mut results = AnalysisResults::default();
         // Test file export — should be removed by override
-        results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("/project/src/utils.test.ts"),
-            export_name: "testHelper".into(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/utils.test.ts"),
+                export_name: "testHelper".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         // Non-test file export — should be preserved
-        results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("/project/src/utils.ts"),
-            export_name: "realExport".into(),
-            is_type_only: false,
-            line: 5,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/utils.ts"),
+                export_name: "realExport".into(),
+                is_type_only: false,
+                line: 5,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let config = config_with_test_override();
         apply_rules(&mut results, &config);
 
         assert_eq!(results.unused_exports.len(), 1);
-        assert_eq!(results.unused_exports[0].export_name, "realExport");
+        assert_eq!(results.unused_exports[0].export.export_name, "realExport");
     }
 
     #[test]
@@ -893,15 +902,17 @@ mod tests {
     fn has_error_with_override_per_file_resolution() {
         let mut results = AnalysisResults::default();
         // Only a test file has unused exports — override turns that off
-        results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("/project/src/utils.test.ts"),
-            export_name: "testHelper".into(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/utils.test.ts"),
+                export_name: "testHelper".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let config = config_with_test_override();
         let rules = &config.rules;
@@ -917,15 +928,17 @@ mod tests {
     fn has_error_with_override_non_matching_file_still_error() {
         let mut results = AnalysisResults::default();
         // Non-test file — override doesn't match, base rules (Error) apply
-        results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("/project/src/utils.ts"),
-            export_name: "realExport".into(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/utils.ts"),
+                export_name: "realExport".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let config = config_with_test_override();
         let rules = &config.rules;

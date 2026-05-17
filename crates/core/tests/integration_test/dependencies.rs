@@ -317,7 +317,7 @@ fn subpath_imports_resolve_correctly() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
     assert!(
         unused_export_names.contains(&"unused"),

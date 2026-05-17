@@ -347,7 +347,8 @@ fn build_index_from_analysis(
         .collect();
     let mut unused_export_names: FxHashMap<PathBuf, FxHashSet<String>> = FxHashMap::default();
     let mut unused_export_lines: FxHashMap<PathBuf, FxHashSet<u32>> = FxHashMap::default();
-    for export in &analysis_output.results.unused_exports {
+    for finding in &analysis_output.results.unused_exports {
+        let export = &finding.export;
         unused_export_names
             .entry(export.path.clone())
             .or_default()

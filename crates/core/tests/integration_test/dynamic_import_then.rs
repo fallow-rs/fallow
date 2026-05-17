@@ -57,8 +57,13 @@ fn then_callback_credits_accessed_exports() {
         .iter()
         .map(|e| {
             (
-                e.export_name.as_str(),
-                e.path.file_name().unwrap().to_string_lossy().to_string(),
+                e.export.export_name.as_str(),
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
             )
         })
         .collect();

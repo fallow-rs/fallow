@@ -91,7 +91,7 @@ fn workspace_cross_import_detects_unused_export() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // unusedCoreExport is not imported by the web package

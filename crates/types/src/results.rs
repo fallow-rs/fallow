@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::extract::MemberKind;
 use crate::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, PrivateTypeLeakFinding,
-    UnresolvedImportFinding, UnusedFileFinding,
+    UnresolvedImportFinding, UnusedClassMemberFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::IssueKind;
@@ -54,10 +55,15 @@ pub struct AnalysisResults {
     /// [`UnusedFileFinding`] so each entry carries a typed `actions` array
     /// natively, replacing the pre-2.76 post-pass injection.
     pub unused_files: Vec<UnusedFileFinding>,
-    /// Exports never imported by other modules.
-    pub unused_exports: Vec<UnusedExport>,
-    /// Type exports never imported by other modules.
-    pub unused_types: Vec<UnusedExport>,
+    /// Exports never imported by other modules. Wrapped in
+    /// [`UnusedExportFinding`] so each entry carries a typed `actions`
+    /// array natively.
+    pub unused_exports: Vec<UnusedExportFinding>,
+    /// Type exports never imported by other modules. Wrapped in
+    /// [`UnusedTypeFinding`]: the inner [`UnusedExport`] struct is shared
+    /// with `unused_exports` but the wrapper emits a type-targeted fix
+    /// description.
+    pub unused_types: Vec<UnusedTypeFinding>,
     /// Exported symbols whose public signature references same-file private
     /// types. Wrapped in [`PrivateTypeLeakFinding`] so each entry carries a
     /// typed `actions` array natively.
@@ -68,10 +74,16 @@ pub struct AnalysisResults {
     pub unused_dev_dependencies: Vec<UnusedDependency>,
     /// Optional dependencies listed in package.json but never imported.
     pub unused_optional_dependencies: Vec<UnusedDependency>,
-    /// Enum members never accessed.
-    pub unused_enum_members: Vec<UnusedMember>,
-    /// Class members never accessed.
-    pub unused_class_members: Vec<UnusedMember>,
+    /// Enum members never accessed. Wrapped in
+    /// [`UnusedEnumMemberFinding`] so each entry carries a typed `actions`
+    /// array natively.
+    pub unused_enum_members: Vec<UnusedEnumMemberFinding>,
+    /// Class members never accessed. Wrapped in
+    /// [`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as
+    /// `unused_enum_members`, with a class-targeted fix description and the
+    /// `auto_fixable: false` default to reflect dependency-injection
+    /// patterns.
+    pub unused_class_members: Vec<UnusedClassMemberFinding>,
     /// Import specifiers that could not be resolved. Wrapped in
     /// [`UnresolvedImportFinding`] so each entry carries a typed `actions`
     /// array natively.
@@ -224,17 +236,19 @@ impl AnalysisResults {
             .sort_by(|a, b| a.file.path.cmp(&b.file.path));
 
         self.unused_exports.sort_by(|a, b| {
-            a.path
-                .cmp(&b.path)
-                .then(a.line.cmp(&b.line))
-                .then(a.export_name.cmp(&b.export_name))
+            a.export
+                .path
+                .cmp(&b.export.path)
+                .then(a.export.line.cmp(&b.export.line))
+                .then(a.export.export_name.cmp(&b.export.export_name))
         });
 
         self.unused_types.sort_by(|a, b| {
-            a.path
-                .cmp(&b.path)
-                .then(a.line.cmp(&b.line))
-                .then(a.export_name.cmp(&b.export_name))
+            a.export
+                .path
+                .cmp(&b.export.path)
+                .then(a.export.line.cmp(&b.export.line))
+                .then(a.export.export_name.cmp(&b.export.export_name))
         });
 
         self.private_type_leaks.sort_by(|a, b| {
@@ -268,19 +282,21 @@ impl AnalysisResults {
         });
 
         self.unused_enum_members.sort_by(|a, b| {
-            a.path
-                .cmp(&b.path)
-                .then(a.line.cmp(&b.line))
-                .then(a.parent_name.cmp(&b.parent_name))
-                .then(a.member_name.cmp(&b.member_name))
+            a.member
+                .path
+                .cmp(&b.member.path)
+                .then(a.member.line.cmp(&b.member.line))
+                .then(a.member.parent_name.cmp(&b.member.parent_name))
+                .then(a.member.member_name.cmp(&b.member.member_name))
         });
 
         self.unused_class_members.sort_by(|a, b| {
-            a.path
-                .cmp(&b.path)
-                .then(a.line.cmp(&b.line))
-                .then(a.parent_name.cmp(&b.parent_name))
-                .then(a.member_name.cmp(&b.member_name))
+            a.member
+                .path
+                .cmp(&b.member.path)
+                .then(a.member.line.cmp(&b.member.line))
+                .then(a.member.parent_name.cmp(&b.member.parent_name))
+                .then(a.member.member_name.cmp(&b.member.member_name))
         });
 
         self.unresolved_imports.sort_by(|a, b| {
@@ -1114,7 +1130,8 @@ mod tests {
     use super::*;
     use crate::output_dead_code::{
         BoundaryViolationFinding, CircularDependencyFinding, UnresolvedImportFinding,
-        UnusedFileFinding,
+        UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+        UnusedTypeFinding,
     };
 
     #[test]
@@ -1139,15 +1156,17 @@ mod tests {
     #[test]
     fn results_with_unused_export() {
         let mut results = AnalysisResults::default();
-        results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("test.ts"),
-            export_name: "foo".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("test.ts"),
+                export_name: "foo".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         assert_eq!(results.total_issues(), 1);
         assert!(results.has_issues());
     }
@@ -1160,24 +1179,28 @@ mod tests {
             .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: PathBuf::from("a.ts"),
             }));
-        results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("b.ts"),
-            export_name: "x".to_string(),
-            is_type_only: false,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
-        results.unused_types.push(UnusedExport {
-            path: PathBuf::from("c.ts"),
-            export_name: "T".to_string(),
-            is_type_only: true,
-            line: 1,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("b.ts"),
+                export_name: "x".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: PathBuf::from("c.ts"),
+                export_name: "T".to_string(),
+                is_type_only: true,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
         results.unused_dependencies.push(UnusedDependency {
             package_name: "dep".to_string(),
             location: DependencyLocation::Dependencies,
@@ -1192,22 +1215,26 @@ mod tests {
             line: 5,
             used_in_workspaces: Vec::new(),
         });
-        results.unused_enum_members.push(UnusedMember {
-            path: PathBuf::from("d.ts"),
-            parent_name: "E".to_string(),
-            member_name: "A".to_string(),
-            kind: MemberKind::EnumMember,
-            line: 1,
-            col: 0,
-        });
-        results.unused_class_members.push(UnusedMember {
-            path: PathBuf::from("e.ts"),
-            parent_name: "C".to_string(),
-            member_name: "m".to_string(),
-            kind: MemberKind::ClassMethod,
-            line: 1,
-            col: 0,
-        });
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("d.ts"),
+                parent_name: "E".to_string(),
+                member_name: "A".to_string(),
+                kind: MemberKind::EnumMember,
+                line: 1,
+                col: 0,
+            }));
+        results
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from("e.ts"),
+                parent_name: "C".to_string(),
+                member_name: "m".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 1,
+                col: 0,
+            }));
         results
             .unresolved_imports
             .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
@@ -1412,14 +1439,16 @@ mod tests {
     #[test]
     fn sort_unused_exports_by_path_line_name() {
         let mut r = AnalysisResults::default();
-        let mk = |path: &str, line: u32, name: &str| UnusedExport {
-            path: PathBuf::from(path),
-            export_name: name.to_string(),
-            is_type_only: false,
-            line,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
+        let mk = |path: &str, line: u32, name: &str| {
+            UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from(path),
+                export_name: name.to_string(),
+                is_type_only: false,
+                line,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            })
         };
         r.unused_exports.push(mk("b.ts", 5, "beta"));
         r.unused_exports.push(mk("a.ts", 10, "zeta"));
@@ -1429,7 +1458,14 @@ mod tests {
         let keys: Vec<_> = r
             .unused_exports
             .iter()
-            .map(|e| format!("{}:{}:{}", e.path.to_string_lossy(), e.line, e.export_name))
+            .map(|e| {
+                format!(
+                    "{}:{}:{}",
+                    e.export.path.to_string_lossy(),
+                    e.export.line,
+                    e.export.export_name
+                )
+            })
             .collect();
         assert_eq!(
             keys,
@@ -1447,20 +1483,22 @@ mod tests {
     #[test]
     fn sort_unused_types_by_path_line_name() {
         let mut r = AnalysisResults::default();
-        let mk = |path: &str, line: u32, name: &str| UnusedExport {
-            path: PathBuf::from(path),
-            export_name: name.to_string(),
-            is_type_only: true,
-            line,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
+        let mk = |path: &str, line: u32, name: &str| {
+            UnusedTypeFinding::with_actions(UnusedExport {
+                path: PathBuf::from(path),
+                export_name: name.to_string(),
+                is_type_only: true,
+                line,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            })
         };
         r.unused_types.push(mk("z.ts", 1, "Z"));
         r.unused_types.push(mk("a.ts", 1, "A"));
         r.sort();
-        assert_eq!(r.unused_types[0].path, PathBuf::from("a.ts"));
-        assert_eq!(r.unused_types[1].path, PathBuf::from("z.ts"));
+        assert_eq!(r.unused_types[0].export.path, PathBuf::from("a.ts"));
+        assert_eq!(r.unused_types[1].export.path, PathBuf::from("z.ts"));
     }
 
     // ── sort: unused_dependencies by path, line, name ───────────
@@ -1540,13 +1578,15 @@ mod tests {
     #[test]
     fn sort_unused_enum_members_by_path_line_parent_member() {
         let mut r = AnalysisResults::default();
-        let mk = |path: &str, line: u32, parent: &str, member: &str| UnusedMember {
-            path: PathBuf::from(path),
-            parent_name: parent.to_string(),
-            member_name: member.to_string(),
-            kind: MemberKind::EnumMember,
-            line,
-            col: 0,
+        let mk = |path: &str, line: u32, parent: &str, member: &str| {
+            UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from(path),
+                parent_name: parent.to_string(),
+                member_name: member.to_string(),
+                kind: MemberKind::EnumMember,
+                line,
+                col: 0,
+            })
         };
         r.unused_enum_members.push(mk("a.ts", 5, "Status", "Z"));
         r.unused_enum_members.push(mk("a.ts", 5, "Status", "A"));
@@ -1555,7 +1595,7 @@ mod tests {
         let keys: Vec<_> = r
             .unused_enum_members
             .iter()
-            .map(|m| format!("{}:{}", m.parent_name, m.member_name))
+            .map(|m| format!("{}:{}", m.member.parent_name, m.member.member_name))
             .collect();
         assert_eq!(keys, vec!["Direction:Up", "Status:A", "Status:Z"]);
     }
@@ -1565,19 +1605,21 @@ mod tests {
     #[test]
     fn sort_unused_class_members() {
         let mut r = AnalysisResults::default();
-        let mk = |path: &str, line: u32, parent: &str, member: &str| UnusedMember {
-            path: PathBuf::from(path),
-            parent_name: parent.to_string(),
-            member_name: member.to_string(),
-            kind: MemberKind::ClassMethod,
-            line,
-            col: 0,
+        let mk = |path: &str, line: u32, parent: &str, member: &str| {
+            UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from(path),
+                parent_name: parent.to_string(),
+                member_name: member.to_string(),
+                kind: MemberKind::ClassMethod,
+                line,
+                col: 0,
+            })
         };
         r.unused_class_members.push(mk("b.ts", 1, "Foo", "z"));
         r.unused_class_members.push(mk("a.ts", 1, "Bar", "a"));
         r.sort();
-        assert_eq!(r.unused_class_members[0].path, PathBuf::from("a.ts"));
-        assert_eq!(r.unused_class_members[1].path, PathBuf::from("b.ts"));
+        assert_eq!(r.unused_class_members[0].member.path, PathBuf::from("a.ts"));
+        assert_eq!(r.unused_class_members[1].member.path, PathBuf::from("b.ts"));
     }
 
     // ── sort: unresolved_imports by path, line, col, specifier ──

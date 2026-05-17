@@ -104,14 +104,14 @@ fn find_overlapping_unused_export(
 ) -> Option<CombinedFinding> {
     // Check unused exports
     for export in &dead_code.unused_exports {
-        if export.path == instance.file
-            && (export.line as usize) >= instance.start_line
-            && (export.line as usize) <= instance.end_line
+        if export.export.path == instance.file
+            && (export.export.line as usize) >= instance.start_line
+            && (export.export.line as usize) <= instance.end_line
         {
             return Some(CombinedFinding {
                 clone_instance: instance.clone(),
                 dead_code_kind: DeadCodeKind::UnusedExport {
-                    export_name: export.export_name.clone(),
+                    export_name: export.export.export_name.clone(),
                 },
                 group_index,
             });
@@ -120,14 +120,14 @@ fn find_overlapping_unused_export(
 
     // Check unused types
     for type_export in &dead_code.unused_types {
-        if type_export.path == instance.file
-            && (type_export.line as usize) >= instance.start_line
-            && (type_export.line as usize) <= instance.end_line
+        if type_export.export.path == instance.file
+            && (type_export.export.line as usize) >= instance.start_line
+            && (type_export.export.line as usize) <= instance.end_line
         {
             return Some(CombinedFinding {
                 clone_instance: instance.clone(),
                 dead_code_kind: DeadCodeKind::UnusedType {
-                    type_name: type_export.export_name.clone(),
+                    type_name: type_export.export.export_name.clone(),
                 },
                 group_index,
             });
@@ -166,7 +166,9 @@ mod tests {
     use super::*;
     use crate::duplicates::CloneGroup;
     use crate::results::{UnusedExport, UnusedFile};
-    use fallow_types::output_dead_code::UnusedFileFinding;
+    use fallow_types::output_dead_code::{
+        UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
+    };
 
     fn make_instance(file: &str, start: usize, end: usize) -> CloneInstance {
         CloneInstance {
@@ -274,15 +276,17 @@ mod tests {
             },
         };
         let mut dead_code = AnalysisResults::default();
-        dead_code.unused_exports.push(UnusedExport {
-            path: PathBuf::from("src/a.ts"),
-            export_name: "processData".to_string(),
-            is_type_only: false,
-            line: 5,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        dead_code
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("src/a.ts"),
+                export_name: "processData".to_string(),
+                is_type_only: false,
+                line: 5,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let result = cross_reference(&duplication, &dead_code);
         assert!(result.has_findings());
@@ -317,15 +321,17 @@ mod tests {
         };
         let mut dead_code = AnalysisResults::default();
         // Unused export on a different line range
-        dead_code.unused_exports.push(UnusedExport {
-            path: PathBuf::from("src/a.ts"),
-            export_name: "other".to_string(),
-            is_type_only: false,
-            line: 20, // outside clone range 5-15
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        dead_code
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("src/a.ts"),
+                export_name: "other".to_string(),
+                is_type_only: false,
+                line: 20, // outside clone range 5-15
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let result = cross_reference(&duplication, &dead_code);
         assert!(!result.has_findings());
@@ -402,15 +408,17 @@ mod tests {
             .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: PathBuf::from("src/a.ts"),
             }));
-        dead_code.unused_exports.push(UnusedExport {
-            path: PathBuf::from("src/a.ts"),
-            export_name: "foo".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        dead_code
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("src/a.ts"),
+                export_name: "foo".to_string(),
+                is_type_only: false,
+                line: 10,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let result = cross_reference(&duplication, &dead_code);
         // Only 1 finding for src/a.ts (the unused file), not 2
@@ -446,15 +454,17 @@ mod tests {
             },
         };
         let mut dead_code = AnalysisResults::default();
-        dead_code.unused_types.push(UnusedExport {
-            path: PathBuf::from("src/types.ts"),
-            export_name: "OldInterface".to_string(),
-            is_type_only: true,
-            line: 10,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        dead_code
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: PathBuf::from("src/types.ts"),
+                export_name: "OldInterface".to_string(),
+                is_type_only: true,
+                line: 10,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let result = cross_reference(&duplication, &dead_code);
         assert!(result.has_findings());
@@ -514,15 +524,17 @@ mod tests {
             .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: PathBuf::from("src/a.ts"),
             }));
-        dead_code.unused_exports.push(UnusedExport {
-            path: PathBuf::from("src/c.ts"),
-            export_name: "helper".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        dead_code
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("src/c.ts"),
+                export_name: "helper".to_string(),
+                is_type_only: false,
+                line: 10,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let result = cross_reference(&duplication, &dead_code);
         assert_eq!(result.total(), 2);
@@ -549,15 +561,17 @@ mod tests {
             stats: crate::duplicates::types::DuplicationStats::default(),
         };
         let mut dead_code = AnalysisResults::default();
-        dead_code.unused_exports.push(UnusedExport {
-            path: PathBuf::from("src/a.ts"),
-            export_name: "fn".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        dead_code
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("src/a.ts"),
+                export_name: "fn".to_string(),
+                is_type_only: false,
+                line: 10,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let result = cross_reference(&duplication, &dead_code);
         assert!(!result.has_findings());
@@ -576,15 +590,17 @@ mod tests {
             stats: crate::duplicates::types::DuplicationStats::default(),
         };
         let mut dead_code = AnalysisResults::default();
-        dead_code.unused_exports.push(UnusedExport {
-            path: PathBuf::from("src/x.ts"), // different file
-            export_name: "fn".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 0,
-            span_start: 0,
-            is_re_export: false,
-        });
+        dead_code
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("src/x.ts"), // different file
+                export_name: "fn".to_string(),
+                is_type_only: false,
+                line: 10,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
 
         let result = cross_reference(&duplication, &dead_code);
         assert!(!result.has_findings());

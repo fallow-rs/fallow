@@ -1626,7 +1626,12 @@ fn interface_member_usage_does_not_flag_implementer_members() {
     let unused_members: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|member| format!("{}.{}", member.parent_name, member.member_name))
+        .map(|member| {
+            format!(
+                "{}.{}",
+                member.member.parent_name, member.member.member_name
+            )
+        })
         .collect();
 
     assert!(

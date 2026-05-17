@@ -131,7 +131,7 @@ fn external_plugin_used_exports_respected() {
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
-        .map(|e| e.export_name.as_str())
+        .map(|e| e.export.export_name.as_str())
         .collect();
 
     // `default` and `loader` exports are marked as used by the plugin
