@@ -81,7 +81,7 @@ const OPTIONS = {
 };
 
 /**
- * Strip `title` from the schema root AND every definition before generation.
+ * Strip `title` (and the root `$id`) from the schema before generation.
  * jstt prefers `title` over the definition key (or the explicit name argument
  * passed to `compile`) when naming generated types: documentary titles like
  * "fallow dead-code --format json" otherwise become mangled names like
@@ -89,11 +89,22 @@ const OPTIONS = {
  * title "Fallow JSON Output Schemas" otherwise becomes `FallowJSONOutputSchemas`
  * regardless of the second argument to `compile`.
  *
- * We keep `description` (used as JSDoc) and only drop `title` (TS naming).
+ * `$id` has the same problem: when the root carries
+ * `https://raw.githubusercontent.com/.../output-schema.json`, jstt mangles it
+ * into `HttpsRawGithubusercontentComFallowRsFallowMainDocsOutputSchemaJson`.
+ * The published schema needs `$id` for consumer SHA-pinning, but the TS
+ * generation does not, so strip it here. `$comment` is documentary and ignored
+ * by jstt; left in place.
+ *
+ * We keep `description` (used as JSDoc) and only drop `title` plus the root
+ * `$id` (TS naming).
  */
 function stripTitles(schema) {
   if ("title" in schema) {
     delete schema.title;
+  }
+  if ("$id" in schema) {
+    delete schema.$id;
   }
   if (schema.definitions) {
     for (const def of Object.values(schema.definitions)) {

@@ -21,6 +21,35 @@ These interfaces are covered by semver — breaking changes only happen in major
 - **Issue object fields**: all fields documented in `docs/output-schema.json`
 - **Schema version**: the `schema_version` field follows its own versioning (independent of the tool version). The schema version is bumped when the JSON output structure changes.
 
+#### Pinning the output JSON Schema
+
+The committed `docs/output-schema.json` carries a stable top-level `$id`:
+
+```
+https://raw.githubusercontent.com/fallow-rs/fallow/main/docs/output-schema.json
+```
+
+To pin a specific revision, replace `main` with a release tag (for example `v2.75.0`) or a commit SHA in your own vendored copy of the URL. Pinning to a tag is stable across rebases; pinning to `main` tracks the latest committed schema.
+
+ajv and other JSON Schema validators do NOT fetch `$id` over the network by default. The URL functions as a deduplication key when registering multiple schemas in one process (`ajv.addSchema` keys by `$id` when present) and as a base URI for `$ref` resolution. Vendoring the schema body into your own toolchain is supported; you may rewrite `$id` to your own scope if your pipeline registers multiple revisions in parallel.
+
+Minimal ajv strict setup:
+
+```ts
+import Ajv from "ajv";
+import schema from "./docs/output-schema.json"; // or your pinned copy
+
+const ajv = new Ajv({ strict: true, allErrors: true });
+const validate = ajv.compile(schema);
+
+if (!validate(fallowOutput)) {
+  console.error(validate.errors);
+  process.exit(1);
+}
+```
+
+For TypeScript types generated from the schema, see `npm/fallow/types/output-contract.d.ts` (mirrored to `editors/vscode/src/generated/output-contract.d.ts`). Both are regenerated from `docs/output-schema.json` via `cd editors/vscode && pnpm run codegen:types`.
+
 ### CLI interface
 
 - **Subcommands**: `dead-code` (legacy alias: `check`), `dupes`, `health`, `audit`, `explain`, `fix`, `watch`, `init`, `hooks`, `setup-hooks`, `migrate`, `list`, `schema`, `config-schema`, `plugin-schema`, `config`, `coverage`, `license`, `ci`

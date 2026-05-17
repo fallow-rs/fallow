@@ -1,5 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/fallow-rs/fallow/main/docs/output-schema.json",
+  "$comment": "Stable identifier for this schema document. To SHA-pin a specific revision, replace `main` with a release tag (for example `v2.75.0`) or commit SHA in your own copy of the URL. ajv and other JSON Schema validators do not fetch `$id` over the network by default; the URL functions as a deduplication key for `addSchema` and as a base URI for `$ref` resolution. See `docs/backwards-compatibility.md` for the full pinning contract.",
   "title": "Fallow JSON Output Schemas",
   "description": "Schemas for the JSON output of fallow commands. Bare `fallow --format json` produces a combined envelope with `check`, `dupes`, and `health` keys. Individual commands (`fallow dead-code --format json`, `fallow health --format json`, `fallow dupes --format json`, `fallow audit --format json`, `fallow explain <issue-type> --format json`, `fallow coverage setup --json`, `fallow list --boundaries --format json`) produce their own top-level structure.",
   "oneOf": [
