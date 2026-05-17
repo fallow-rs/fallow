@@ -1,0 +1,118 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: redact_version(&json_str)
+---
+{
+  "schema_version": 6,
+  "version": "[VERSION]",
+  "elapsed_ms": 0,
+  "findings": [
+    {
+      "path": "src/complex.ts",
+      "name": "processData",
+      "line": 42,
+      "col": 0,
+      "cyclomatic": 25,
+      "cognitive": 30,
+      "line_count": 120,
+      "param_count": 0,
+      "exceeded": "both",
+      "severity": "high",
+      "actions": [
+        {
+          "type": "refactor-function",
+          "auto_fixable": false,
+          "description": "Refactor `processData` to reduce complexity (extract helper functions, simplify branching)",
+          "note": "Consider splitting into smaller functions with single responsibilities"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the function declaration",
+          "comment": "// fallow-ignore-next-line complexity",
+          "placement": "above-function-declaration"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "files_analyzed": 50,
+    "functions_analyzed": 200,
+    "functions_above_threshold": 1,
+    "max_cyclomatic_threshold": 20,
+    "max_cognitive_threshold": 15,
+    "max_crap_threshold": 30.0,
+    "severity_critical_count": 0,
+    "severity_high_count": 1,
+    "severity_moderate_count": 0
+  },
+  "coverage_gaps": {
+    "summary": {
+      "runtime_files": 8,
+      "covered_files": 5,
+      "file_coverage_pct": 62.5,
+      "untested_files": 2,
+      "untested_exports": 1
+    },
+    "files": [
+      {
+        "path": "src/untested-one.ts",
+        "value_export_count": 3,
+        "actions": [
+          {
+            "type": "add-tests",
+            "auto_fixable": false,
+            "description": "Add test coverage for `src/untested-one.ts`",
+            "note": "No test dependency path reaches this runtime file"
+          },
+          {
+            "type": "suppress-file",
+            "auto_fixable": false,
+            "description": "Suppress coverage gap reporting for `src/untested-one.ts`",
+            "comment": "// fallow-ignore-file coverage-gaps"
+          }
+        ]
+      },
+      {
+        "path": "src/untested-two.ts",
+        "value_export_count": 1,
+        "actions": [
+          {
+            "type": "add-tests",
+            "auto_fixable": false,
+            "description": "Add test coverage for `src/untested-two.ts`",
+            "note": "No test dependency path reaches this runtime file"
+          },
+          {
+            "type": "suppress-file",
+            "auto_fixable": false,
+            "description": "Suppress coverage gap reporting for `src/untested-two.ts`",
+            "comment": "// fallow-ignore-file coverage-gaps"
+          }
+        ]
+      }
+    ],
+    "exports": [
+      {
+        "path": "src/partial.ts",
+        "export_name": "helper",
+        "line": 12,
+        "col": 7,
+        "actions": [
+          {
+            "type": "add-test-import",
+            "auto_fixable": false,
+            "description": "Import and test `helper` from `src/partial.ts`",
+            "note": "This export is runtime-reachable but no test-reachable module references it"
+          },
+          {
+            "type": "suppress-file",
+            "auto_fixable": false,
+            "description": "Suppress coverage gap reporting for `src/partial.ts`",
+            "comment": "// fallow-ignore-file coverage-gaps"
+          }
+        ]
+      }
+    ]
+  }
+}
