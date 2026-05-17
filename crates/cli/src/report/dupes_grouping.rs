@@ -58,26 +58,34 @@ pub fn largest_owner(group: &CloneGroup, root: &Path, resolver: &OwnershipResolv
 
 /// A clone instance plus its per-instance owner key (for inline JSON / SARIF
 /// rendering).
+///
+/// Each instance carries its own `owner` field alongside the standard
+/// `CloneInstance` shape (file / start_line / end_line / start_col / end_col /
+/// fragment), so consumers can attribute instances to resolver keys without
+/// re-resolving paths.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AttributedInstance {
     /// The original clone instance.
     #[serde(flatten)]
     pub instance: CloneInstance,
-    /// Group key for this specific instance (owner / directory / package / section).
+    /// Resolver key for this specific instance (per-instance, not the
+    /// group-level largest-owner).
     pub owner: String,
 }
 
-/// A clone group annotated with its largest owner and per-instance owners.
+/// A clone group annotated with its largest-owner attribution and per-instance
+/// owner keys.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AttributedCloneGroup {
-    /// The largest-owner attribution for the whole group (most instances,
-    /// alphabetical tiebreak).
+    /// Largest-owner attribution: the resolver key with the most instances in
+    /// this clone group. Ties broken alphabetically (smallest key wins).
     pub primary_owner: String,
-    /// Token count, copied from the source group.
     pub token_count: usize,
-    /// Line count per instance.
     pub line_count: usize,
-    /// Per-instance attribution.
+    /// Each instance carries its own `owner` field alongside the standard
+    /// CloneInstance shape.
     pub instances: Vec<AttributedInstance>,
 }
 
@@ -101,16 +109,20 @@ impl AttributedCloneGroup {
     }
 }
 
-/// A single grouped duplication bucket.
+/// A single grouped duplication bucket. Per-group `stats` are dedup-aware and
+/// computed over the FULL group BEFORE any `--top` truncation.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DuplicationGroup {
-    /// Group label (owner / directory / package / section).
+    /// Group label (owner / directory / package / section). `(unowned)` for
+    /// files with no CODEOWNERS rule, `(no section)` for pre-section rules in
+    /// section mode.
     pub key: String,
-    /// Per-group dedup-aware stats computed over the FULL group (pre-truncate).
     pub stats: DuplicationStats,
-    /// Clone groups attributed to this owner (largest-owner rule).
+    /// Clone groups attributed to this owner. Each group's `primary_owner` is
+    /// its largest-owner key; per-instance `owner` lets consumers see
+    /// cross-bucket fan-out without re-resolving paths.
     pub clone_groups: Vec<AttributedCloneGroup>,
-    /// Clone families restricted to this group's clone groups.
     pub clone_families: Vec<CloneFamily>,
 }
 
