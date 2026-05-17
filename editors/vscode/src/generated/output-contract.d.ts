@@ -3885,15 +3885,101 @@ total_issues?: (number | null)
  * attributed to its largest-owner key (most instances; alphabetical
  * tiebreak). Sort: most clone groups first, then alphabetical, with
  * `(unowned)` pinned last.
+ * 
+ * Runtime emission still goes through a `serde_json::Value` post-pass in
+ * `crates/cli/src/report/json.rs::build_grouped_duplication_json` so the
+ * per-group `actions` augmentation can run on every `AttributedCloneGroup`
+ * and `CloneFamily`; the typed field here is the schema source of truth
+ * so validators and generated TS consumers can reach the typed shape.
  */
-groups?: {
-[k: string]: unknown
-}
+groups?: (DuplicationGroup[] | null)
 /**
  * `_meta` block with metric / rule definitions, emitted when `--explain`
  * is passed (always present in MCP responses).
  */
 _meta?: (Meta | null)
+}
+/**
+ * A single grouped duplication bucket. Per-group `stats` are dedup-aware and
+ * computed over the FULL group BEFORE any `--top` truncation.
+ */
+export interface DuplicationGroup {
+/**
+ * Group label (owner / directory / package / section). `(unowned)` for
+ * files with no CODEOWNERS rule, `(no section)` for pre-section rules in
+ * section mode.
+ */
+key: string
+stats: DuplicationStats
+/**
+ * Clone groups attributed to this owner. Each group's `primary_owner` is
+ * its largest-owner key; per-instance `owner` lets consumers see
+ * cross-bucket fan-out without re-resolving paths.
+ */
+clone_groups: AttributedCloneGroup[]
+clone_families: CloneFamily[]
+}
+/**
+ * A clone group annotated with its largest-owner attribution and per-instance
+ * owner keys.
+ */
+export interface AttributedCloneGroup {
+/**
+ * Largest-owner attribution: the resolver key with the most instances in
+ * this clone group. Ties broken alphabetically (smallest key wins).
+ */
+primary_owner: string
+token_count: number
+line_count: number
+/**
+ * Each instance carries its own `owner` field alongside the standard
+ * CloneInstance shape.
+ */
+instances: AttributedInstance[]
+/**
+ * Suggested actions to resolve this issue.
+ */
+actions: CloneGroupAction[]
+}
+/**
+ * A clone instance plus its per-instance owner key (for inline JSON / SARIF
+ * rendering).
+ * 
+ * Each instance carries its own `owner` field alongside the standard
+ * `CloneInstance` shape (file / start_line / end_line / start_col / end_col /
+ * fragment), so consumers can attribute instances to resolver keys without
+ * re-resolving paths.
+ */
+export interface AttributedInstance {
+/**
+ * Path to the file containing this clone instance.
+ */
+file: string
+/**
+ * 1-based start line of the clone.
+ */
+start_line: number
+/**
+ * 1-based end line of the clone.
+ */
+end_line: number
+/**
+ * 0-based start column.
+ */
+start_col: number
+/**
+ * 0-based end column.
+ */
+end_col: number
+/**
+ * The actual source code fragment.
+ */
+fragment: string
+/**
+ * Resolver key for this specific instance (per-instance, not the
+ * group-level largest-owner).
+ */
+owner: string
 }
 /**
  * Envelope emitted by `fallow audit --format json`. Combines dead code,

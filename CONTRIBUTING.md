@@ -113,10 +113,12 @@ Phase 8 closed the prose-and-shape escape hatch: every type in `derived_definiti
 
 ### Layer 2: hand-written sections
 
-Two sections of `docs/output-schema.json` stay hand-maintained today:
+The following surfaces of `docs/output-schema.json` stay hand-maintained today:
 
-- Top-level metadata (`$schema`, `title`, `description`, `oneOf`); the `merge_with_committed` step in `crates/cli/src/bin/schema_emit.rs` preserves them verbatim.
-- The `committed_property_refs_match_derived_property_refs` drift test catches `$ref`-value drift between derived and committed property shapes (e.g. if a future change repoints `CombinedOutput.dupes` away from `DuplicationReport`).
+- **Top-level metadata** (`$schema`, `$id`, `$comment`, `title`, `description`, `oneOf`); the `merge_with_committed` step in `crates/cli/src/bin/schema_emit.rs` preserves them verbatim. `$id` is the canonical raw GitHub URL and is used by consumers to SHA-pin a schema revision (see `docs/backwards-compatibility.md`).
+- **Definitions in `HAND_MAINTAINED_ALLOW_LIST`** inside `drift_tests` in `crates/cli/src/bin/schema_emit.rs`: today this is `CloneFamilyAction`, `CloneGroupAction`, and `CoverageAnalyzeOutput`. Each entry carries a reason linking it to the meta-issue ladder rung that retires it. The strict drift gate's orphan check fires on any other hand-maintained definition, so the allow-list is the canonical record of what stays hand-written and why.
+
+The `committed_property_refs_match_derived_property_refs` drift test catches `$ref`-value drift between derived and committed property shapes (e.g. if a future change repoints `CombinedOutput.dupes` away from `DuplicationReport`); this is a check, not a hand-maintained section.
 
 If you add a new finding type, envelope, or utility shape, derive `JsonSchema` on the matching Rust struct, register it in `derived_definition_names()`, and the drift gate forces the schema to follow. Adding a new envelope means adding a new file under `crates/cli/src/output_envelope.rs` and adding the type to the top-level `oneOf` in `docs/output-schema.json`.
 

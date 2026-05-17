@@ -45,6 +45,7 @@ use serde::Serialize;
 
 use crate::audit::{AuditAttribution, AuditSummary, AuditVerdict};
 use crate::health_types::{HealthGroup, HealthReport};
+use crate::report::dupes_grouping::DuplicationGroup;
 
 /// Envelope emitted by `fallow coverage setup --json`. Deterministic
 /// agent-readable runtime coverage setup instructions. In workspaces,
@@ -367,8 +368,14 @@ pub struct DupesOutput {
     /// attributed to its largest-owner key (most instances; alphabetical
     /// tiebreak). Sort: most clone groups first, then alphabetical, with
     /// `(unowned)` pinned last.
+    ///
+    /// Runtime emission still goes through a `serde_json::Value` post-pass in
+    /// `crates/cli/src/report/json.rs::build_grouped_duplication_json` so the
+    /// per-group `actions` augmentation can run on every `AttributedCloneGroup`
+    /// and `CloneFamily`; the typed field here is the schema source of truth
+    /// so validators and generated TS consumers can reach the typed shape.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub groups: Option<serde_json::Value>,
+    pub groups: Option<Vec<DuplicationGroup>>,
     /// `_meta` block with metric / rule definitions, emitted when `--explain`
     /// is passed (always present in MCP responses).
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]

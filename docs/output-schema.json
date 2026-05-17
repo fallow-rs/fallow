@@ -2044,7 +2044,14 @@
           "description": "Total clone groups across all buckets when `--group-by` is active.\nMirrors the grouped check / health envelopes which expose\n`total_issues` so MCP and CI consumers can read the same key across\ncommands."
         },
         "groups": {
-          "description": "Per-group buckets when `--group-by` is active. Each clone group is\nattributed to its largest-owner key (most instances; alphabetical\ntiebreak). Sort: most clone groups first, then alphabetical, with\n`(unowned)` pinned last."
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/DuplicationGroup"
+          },
+          "description": "Per-group buckets when `--group-by` is active. Each clone group is\nattributed to its largest-owner key (most instances; alphabetical\ntiebreak). Sort: most clone groups first, then alphabetical, with\n`(unowned)` pinned last.\n\nRuntime emission still goes through a `serde_json::Value` post-pass in\n`crates/cli/src/report/json.rs::build_grouped_duplication_json` so the\nper-group `actions` augmentation can run on every `AttributedCloneGroup`\nand `CloneFamily`; the typed field here is the schema source of truth\nso validators and generated TS consumers can reach the typed shape."
         },
         "_meta": {
           "anyOf": [
