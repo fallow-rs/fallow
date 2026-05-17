@@ -1111,7 +1111,7 @@ where
 /// are deterministic per (path, position) so plain key-based dedup is
 /// sufficient.
 fn dedup_results(target: &mut AnalysisResults) {
-    dedup_by_key_preserving_order(&mut target.unused_files, |f| f.path.clone());
+    dedup_by_key_preserving_order(&mut target.unused_files, |f| f.file.path.clone());
     dedup_by_key_preserving_order(&mut target.unused_exports, |e| {
         (e.path.clone(), e.export_name.clone(), e.line, e.col)
     });
@@ -1120,11 +1120,11 @@ fn dedup_results(target: &mut AnalysisResults) {
     });
     dedup_by_key_preserving_order(&mut target.private_type_leaks, |e| {
         (
-            e.path.clone(),
-            e.export_name.clone(),
-            e.type_name.clone(),
-            e.line,
-            e.col,
+            e.leak.path.clone(),
+            e.leak.export_name.clone(),
+            e.leak.type_name.clone(),
+            e.leak.line,
+            e.leak.col,
         )
     });
     dedup_by_key_preserving_order(&mut target.unused_dependencies, |d| {
@@ -1143,7 +1143,12 @@ fn dedup_results(target: &mut AnalysisResults) {
         (m.path.clone(), m.parent_name.clone(), m.member_name.clone())
     });
     dedup_by_key_preserving_order(&mut target.unresolved_imports, |i| {
-        (i.path.clone(), i.specifier.clone(), i.line, i.col)
+        (
+            i.import.path.clone(),
+            i.import.specifier.clone(),
+            i.import.line,
+            i.import.col,
+        )
     });
     dedup_by_key_preserving_order(&mut target.duplicate_exports, |d| {
         // `locations` is a Vec<DuplicateLocation>; sort the paths so two
@@ -1164,17 +1169,17 @@ fn dedup_results(target: &mut AnalysisResults) {
         (d.package_name.clone(), d.path.clone(), d.line)
     });
     dedup_by_key_preserving_order(&mut target.circular_dependencies, |c| {
-        let mut files: Vec<_> = c.files.clone();
+        let mut files: Vec<_> = c.cycle.files.clone();
         files.sort();
-        (files, c.length)
+        (files, c.cycle.length)
     });
     dedup_by_key_preserving_order(&mut target.boundary_violations, |v| {
         (
-            v.from_path.clone(),
-            v.to_path.clone(),
-            v.import_specifier.clone(),
-            v.line,
-            v.col,
+            v.violation.from_path.clone(),
+            v.violation.to_path.clone(),
+            v.violation.import_specifier.clone(),
+            v.violation.line,
+            v.violation.col,
         )
     });
     dedup_by_key_preserving_order(&mut target.export_usages, |u| {
@@ -1320,8 +1325,9 @@ mod tests {
 
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
     use fallow_core::results::{
-        BoundaryViolation, CircularDependency, ExportUsage, TestOnlyDependency, UnlistedDependency,
-        UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
+        BoundaryViolation, BoundaryViolationFinding, CircularDependency, CircularDependencyFinding,
+        ExportUsage, TestOnlyDependency, UnlistedDependency, UnusedDependency, UnusedExport,
+        UnusedFile, UnusedFileFinding, UnusedMember,
     };
     use serde_json::json;
     use tower::{Service, ServiceExt};
@@ -1548,9 +1554,11 @@ mod tests {
     fn merge_results_into_empty_target() {
         let mut target = AnalysisResults::default();
         let mut source = AnalysisResults::default();
-        source.unused_files.push(UnusedFile {
-            path: "/a.ts".into(),
-        });
+        source
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: "/a.ts".into(),
+            }));
         source.unused_exports.push(UnusedExport {
             path: "/a.ts".into(),
             export_name: "foo".to_string(),
@@ -1572,23 +1580,29 @@ mod tests {
         let mut target = AnalysisResults::default();
 
         let mut source_a = AnalysisResults::default();
-        source_a.unused_files.push(UnusedFile {
-            path: "/a.ts".into(),
-        });
         source_a
-            .unresolved_imports
-            .push(fallow_core::results::UnresolvedImport {
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: "/a.ts".into(),
-                specifier: "./missing".to_string(),
-                line: 1,
-                col: 0,
-                specifier_col: 10,
-            });
+            }));
+        source_a.unresolved_imports.push(
+            fallow_core::results::UnresolvedImportFinding::with_actions(
+                fallow_core::results::UnresolvedImport {
+                    path: "/a.ts".into(),
+                    specifier: "./missing".to_string(),
+                    line: 1,
+                    col: 0,
+                    specifier_col: 10,
+                },
+            ),
+        );
 
         let mut source_b = AnalysisResults::default();
-        source_b.unused_files.push(UnusedFile {
-            path: "/b.ts".into(),
-        });
+        source_b
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: "/b.ts".into(),
+            }));
         source_b.unused_exports.push(UnusedExport {
             path: "/b.ts".into(),
             export_name: "bar".to_string(),
@@ -1612,9 +1626,11 @@ mod tests {
         let mut target = AnalysisResults::default();
         let mut source = AnalysisResults::default();
 
-        source.unused_files.push(UnusedFile {
-            path: "/f.ts".into(),
-        });
+        source
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: "/f.ts".into(),
+            }));
         source.unused_exports.push(UnusedExport {
             path: "/f.ts".into(),
             export_name: "e".to_string(),
@@ -1670,15 +1686,17 @@ mod tests {
             line: 7,
             col: 0,
         });
-        source
-            .unresolved_imports
-            .push(fallow_core::results::UnresolvedImport {
-                path: "/f.ts".into(),
-                specifier: "./gone".to_string(),
-                line: 8,
-                col: 0,
-                specifier_col: 10,
-            });
+        source.unresolved_imports.push(
+            fallow_core::results::UnresolvedImportFinding::with_actions(
+                fallow_core::results::UnresolvedImport {
+                    path: "/f.ts".into(),
+                    specifier: "./gone".to_string(),
+                    line: 8,
+                    col: 0,
+                    specifier_col: 10,
+                },
+            ),
+        );
         source.unlisted_dependencies.push(UnlistedDependency {
             package_name: "unlisted".to_string(),
             imported_from: vec![],
@@ -1696,27 +1714,33 @@ mod tests {
                 path: "/pkg.json".into(),
                 line: 9,
             });
-        source.circular_dependencies.push(CircularDependency {
-            files: vec!["/a.ts".into(), "/b.ts".into()],
-            length: 2,
-            line: 10,
-            col: 0,
-            is_cross_package: false,
-        });
+        source
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec!["/a.ts".into(), "/b.ts".into()],
+                    length: 2,
+                    line: 10,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
         source.test_only_dependencies.push(TestOnlyDependency {
             package_name: "test-only".to_string(),
             path: "/pkg.json".into(),
             line: 11,
         });
-        source.boundary_violations.push(BoundaryViolation {
-            from_path: "/a.ts".into(),
-            to_path: "/b.ts".into(),
-            from_zone: "ui".to_string(),
-            to_zone: "data".to_string(),
-            import_specifier: "../data/db".to_string(),
-            line: 12,
-            col: 0,
-        });
+        source
+            .boundary_violations
+            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: "/a.ts".into(),
+                to_path: "/b.ts".into(),
+                from_zone: "ui".to_string(),
+                to_zone: "data".to_string(),
+                import_specifier: "../data/db".to_string(),
+                line: 12,
+                col: 0,
+            }));
         source.export_usages.push(ExportUsage {
             path: "/f.ts".into(),
             export_name: "used".to_string(),
@@ -1749,9 +1773,11 @@ mod tests {
     #[test]
     fn merge_results_with_empty_source() {
         let mut target = AnalysisResults::default();
-        target.unused_files.push(UnusedFile {
-            path: "/a.ts".into(),
-        });
+        target
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: "/a.ts".into(),
+            }));
 
         let source = AnalysisResults::default();
         merge_results(&mut target, source);
@@ -1777,16 +1803,22 @@ mod tests {
     fn dedup_results_collapses_cross_root_unused_files() {
         let mut results = AnalysisResults::default();
         // Workspace-root pass and sub-package pass both walked the same file.
-        results.unused_files.push(UnusedFile {
-            path: "/repo/apps/web/src/foo.ts".into(),
-        });
-        results.unused_files.push(UnusedFile {
-            path: "/repo/apps/web/src/foo.ts".into(),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: "/repo/apps/web/src/foo.ts".into(),
+            }));
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: "/repo/apps/web/src/foo.ts".into(),
+            }));
         // A genuinely distinct unused file.
-        results.unused_files.push(UnusedFile {
-            path: "/repo/apps/api/src/bar.ts".into(),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: "/repo/apps/api/src/bar.ts".into(),
+            }));
 
         dedup_results(&mut results);
 
@@ -1837,28 +1869,28 @@ mod tests {
     #[test]
     fn dedup_results_keeps_distinct_circular_dependencies() {
         let mut results = AnalysisResults::default();
-        let cycle_ab = CircularDependency {
+        let cycle_ab = CircularDependencyFinding::with_actions(CircularDependency {
             files: vec!["/a.ts".into(), "/b.ts".into()],
             length: 2,
             line: 1,
             col: 0,
             is_cross_package: false,
-        };
-        let cycle_cd = CircularDependency {
+        });
+        let cycle_cd = CircularDependencyFinding::with_actions(CircularDependency {
             files: vec!["/c.ts".into(), "/d.ts".into()],
             length: 2,
             line: 5,
             col: 0,
             is_cross_package: false,
-        };
+        });
         // Same cycle observed by two roots, with files in different orders.
-        let cycle_ab_reversed = CircularDependency {
+        let cycle_ab_reversed = CircularDependencyFinding::with_actions(CircularDependency {
             files: vec!["/b.ts".into(), "/a.ts".into()],
             length: 2,
             line: 1,
             col: 0,
             is_cross_package: false,
-        };
+        });
         results
             .circular_dependencies
             .extend([cycle_ab, cycle_cd, cycle_ab_reversed]);

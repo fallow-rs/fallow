@@ -343,7 +343,7 @@ fn build_index_from_analysis(
         .results
         .unused_files
         .iter()
-        .map(|file| file.path.clone())
+        .map(|file| file.file.path.clone())
         .collect();
     let mut unused_export_names: FxHashMap<PathBuf, FxHashSet<String>> = FxHashMap::default();
     let mut unused_export_lines: FxHashMap<PathBuf, FxHashSet<u32>> = FxHashMap::default();

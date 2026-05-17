@@ -18,7 +18,14 @@ fn unused_file_names(results: &fallow_core::results::AnalysisResults) -> Vec<Str
     results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect()
 }
 

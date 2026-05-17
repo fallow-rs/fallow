@@ -26,15 +26,16 @@ bitcode = { workspace = true }
 # fallow-core, fallow-cli, fallow-napi) do not pay the schemars compile cost
 # unless they explicitly opt in (only the schema-emit binary needs it).
 schemars = { workspace = true, optional = true }
-# `serde_json` is needed by the `output` module's free-form rule-object payload
-# (`AddToConfigValue::RuleObject`). It only ships under the `schema` feature.
-serde_json = { workspace = true, optional = true }
+# `serde_json` carries the free-form rule-object payload on
+# `AddToConfigValue::RuleObject` in the `output` module. The module is no
+# longer feature-gated (typed action wrappers in `output_dead_code` use
+# `IssueAction` at runtime), so `serde_json` ships unconditionally.
+serde_json = { workspace = true }
 
 [features]
-# Adds `#[derive(schemars::JsonSchema)]` to result and extract types and pulls
-# in the `output` module so the JSON output schema can be regenerated from the
-# Rust source of truth.
-schema = ["dep:schemars", "dep:serde_json"]
+# Adds `#[derive(schemars::JsonSchema)]` to result and extract types so the
+# JSON output schema can be regenerated from the Rust source of truth.
+schema = ["dep:schemars"]
 
 [dev-dependencies]
 serde_json = { workspace = true }

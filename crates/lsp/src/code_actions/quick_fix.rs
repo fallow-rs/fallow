@@ -588,7 +588,7 @@ pub fn build_delete_file_actions(
     let mut actions = Vec::new();
 
     for file in &results.unused_files {
-        if file.path != file_path {
+        if file.file.path != file_path {
             continue;
         }
 
@@ -636,7 +636,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_core::results::{UnusedExport, UnusedFile};
+    use fallow_core::results::{UnusedExport, UnusedFile, UnusedFileFinding};
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -1079,7 +1079,9 @@ mod tests {
         let uri_b = Url::from_file_path(&file_b).unwrap();
 
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: file_a });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile { path: file_a }));
 
         let actions = build_delete_file_actions(&results, &file_b, &uri_b, &make_range(0, 10));
         assert!(actions.is_empty());
@@ -1092,7 +1094,11 @@ mod tests {
         let uri = Url::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: file.clone() });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: file.clone(),
+            }));
 
         // Cursor starts at line 1, but diagnostic is at line 0
         let actions = build_delete_file_actions(&results, &file, &uri, &make_range(1, 5));
@@ -1106,7 +1112,11 @@ mod tests {
         let uri = Url::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: file.clone() });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: file.clone(),
+            }));
 
         let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 0));
 
@@ -1124,7 +1134,11 @@ mod tests {
         let uri = Url::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: file.clone() });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: file.clone(),
+            }));
 
         let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 0));
         let ca = unwrap_code_action(&actions[0]);
@@ -1155,7 +1169,11 @@ mod tests {
         let uri = Url::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: file.clone() });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: file.clone(),
+            }));
 
         let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 0));
         let ca = unwrap_code_action(&actions[0]);
@@ -1182,7 +1200,11 @@ mod tests {
         let uri = Url::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: file.clone() });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: file.clone(),
+            }));
 
         // Cursor from line 0 to line 50 — should still trigger because start.line == 0
         let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 50));
@@ -1197,8 +1219,16 @@ mod tests {
 
         let mut results = AnalysisResults::default();
         // Unlikely in practice, but tests that the loop iterates all entries
-        results.unused_files.push(UnusedFile { path: file.clone() });
-        results.unused_files.push(UnusedFile { path: file.clone() });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: file.clone(),
+            }));
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: file.clone(),
+            }));
 
         let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 0));
         assert_eq!(actions.len(), 2);
@@ -1215,7 +1245,11 @@ mod tests {
         let uri = Url::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: file.clone() });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: file.clone(),
+            }));
         results
             .unused_exports
             .push(make_unused_export(&file, "helper", 1, 16));

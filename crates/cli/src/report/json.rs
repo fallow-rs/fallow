@@ -291,8 +291,6 @@ enum SuppressKind {
     InlineComment,
     /// `# fallow-ignore-next-line <type>` on the line before (YAML / shell).
     YamlComment,
-    /// `// fallow-ignore-file <type>` at the top of the file.
-    FileComment,
     /// Add to `ignoreDependencies` in fallow config.
     ConfigIgnoreDep,
     /// Add to `ignoreCatalogReferences` in fallow config (with optional
@@ -314,22 +312,10 @@ struct ActionSpec {
 }
 
 /// Map an issue array key to its action specification.
-#[expect(
-    clippy::too_many_lines,
-    reason = "one match arm per issue type keeps the action spec table flat and grep-friendly"
-)]
 fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
     match key {
-        "unused_files" => Some(ActionSpec {
-            fix_type: "delete-file",
-            auto_fixable: false,
-            description: "Delete this file",
-            note: Some(
-                "File deletion may remove runtime functionality not visible to static analysis",
-            ),
-            suppress: SuppressKind::FileComment,
-            issue_kind: "unused-file",
-        }),
+        // `unused_files` is no longer post-pass-injected: the typed
+        // `UnusedFileFinding` wrapper carries its `actions` array natively.
         "unused_exports" => Some(ActionSpec {
             fix_type: "remove-export",
             auto_fixable: true,
@@ -346,14 +332,8 @@ fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
             suppress: SuppressKind::InlineComment,
             issue_kind: "unused-type",
         }),
-        "private_type_leaks" => Some(ActionSpec {
-            fix_type: "export-type",
-            auto_fixable: false,
-            description: "Export the referenced private type by name",
-            note: Some("Keep the type exported while it is part of a public signature"),
-            suppress: SuppressKind::InlineComment,
-            issue_kind: "private-type-leak",
-        }),
+        // `private_type_leaks` is no longer post-pass-injected: the typed
+        // `PrivateTypeLeakFinding` wrapper carries its `actions` array natively.
         "unused_dependencies" => Some(ActionSpec {
             fix_type: "remove-dependency",
             auto_fixable: true,
@@ -395,14 +375,8 @@ fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
             suppress: SuppressKind::InlineComment,
             issue_kind: "unused-class-member",
         }),
-        "unresolved_imports" => Some(ActionSpec {
-            fix_type: "resolve-import",
-            auto_fixable: false,
-            description: "Fix the import specifier or install the missing module",
-            note: Some("Verify the module path and check tsconfig paths configuration"),
-            suppress: SuppressKind::InlineComment,
-            issue_kind: "unresolved-import",
-        }),
+        // `unresolved_imports` is no longer post-pass-injected: the typed
+        // `UnresolvedImportFinding` wrapper carries its `actions` array natively.
         "unlisted_dependencies" => Some(ActionSpec {
             fix_type: "install-dependency",
             auto_fixable: false,
@@ -439,26 +413,10 @@ fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
             suppress: SuppressKind::ConfigIgnoreDep,
             issue_kind: "test-only-dependency",
         }),
-        "circular_dependencies" => Some(ActionSpec {
-            fix_type: "refactor-cycle",
-            auto_fixable: false,
-            description: "Extract shared logic into a separate module to break the cycle",
-            note: Some(
-                "Circular imports can cause initialization issues and make code harder to reason about",
-            ),
-            suppress: SuppressKind::InlineComment,
-            issue_kind: "circular-dependency",
-        }),
-        "boundary_violations" => Some(ActionSpec {
-            fix_type: "refactor-boundary",
-            auto_fixable: false,
-            description: "Move the import through an allowed zone or restructure the dependency",
-            note: Some(
-                "This import crosses an architecture boundary that is not permitted by the configured rules",
-            ),
-            suppress: SuppressKind::InlineComment,
-            issue_kind: "boundary-violation",
-        }),
+        // `circular_dependencies` and `boundary_violations` are no longer
+        // post-pass-injected: the typed `CircularDependencyFinding` /
+        // `BoundaryViolationFinding` wrappers carry their `actions` arrays
+        // natively.
         "unused_catalog_entries" => Some(ActionSpec {
             fix_type: "remove-catalog-entry",
             auto_fixable: false,
@@ -576,10 +534,6 @@ fn build_unresolved_catalog_reference_primary_action(
 }
 
 /// Build the `actions` array for a single issue item.
-#[expect(
-    clippy::too_many_lines,
-    reason = "One match arm per SuppressKind; the line count grows with new issue types and the structure is clearer than extracting per-arm helpers."
-)]
 fn build_actions(
     item: &serde_json::Value,
     issue_key: &str,
@@ -682,14 +636,6 @@ fn build_actions(
                 "auto_fixable": false,
                 "description": "Suppress with a YAML comment above the line",
                 "comment": format!("# fallow-ignore-next-line {}", spec.issue_kind),
-            }));
-        }
-        SuppressKind::FileComment => {
-            actions.push(serde_json::json!({
-                "type": "suppress-file",
-                "auto_fixable": false,
-                "description": "Suppress with a file-level comment at the top of the file",
-                "comment": format!("// fallow-ignore-file {}", spec.issue_kind),
             }));
         }
         SuppressKind::ConfigIgnoreDep => {
@@ -2229,9 +2175,11 @@ mod tests {
     fn json_paths_are_relative_to_root() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/deep/nested/file.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/deep/nested/file.ts"),
+            }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2297,13 +2245,17 @@ mod tests {
     fn json_strips_root_from_circular_dependency_files() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-            length: 2,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2318,9 +2270,11 @@ mod tests {
     fn json_path_outside_root_not_stripped() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("/other/project/src/file.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("/other/project/src/file.ts"),
+            }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2334,9 +2288,11 @@ mod tests {
     fn json_unused_file_contains_path() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/orphan.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/orphan.ts"),
+            }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2492,13 +2448,15 @@ mod tests {
     fn json_unresolved_import_contains_expected_fields() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unresolved_imports.push(UnresolvedImport {
-            path: root.join("src/app.ts"),
-            specifier: "@acme/missing-pkg".to_string(),
-            line: 7,
-            col: 0,
-            specifier_col: 0,
-        });
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: root.join("src/app.ts"),
+                specifier: "@acme/missing-pkg".to_string(),
+                line: 7,
+                col: 0,
+                specifier_col: 0,
+            }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2692,17 +2650,21 @@ mod tests {
     fn json_circular_dependency_contains_expected_fields() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![
-                root.join("src/a.ts"),
-                root.join("src/b.ts"),
-                root.join("src/c.ts"),
-            ],
-            length: 3,
-            line: 5,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![
+                        root.join("src/a.ts"),
+                        root.join("src/b.ts"),
+                        root.join("src/c.ts"),
+                    ],
+                    length: 3,
+                    line: 5,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2797,15 +2759,21 @@ mod tests {
     fn json_multiple_unused_files() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/a.ts"),
-        });
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/b.ts"),
-        });
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/c.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/a.ts"),
+            }));
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/b.ts"),
+            }));
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/c.ts"),
+            }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -3220,9 +3188,11 @@ mod tests {
     fn json_unused_file_has_file_suppress_and_note() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/dead.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/dead.ts"),
+            }));
         let output = build_json(&results, &root, Duration::ZERO).unwrap();
 
         let actions = output["unused_files"][0]["actions"].as_array().unwrap();

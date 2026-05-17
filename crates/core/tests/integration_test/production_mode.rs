@@ -44,7 +44,14 @@ fn production_mode_excludes_test_files() {
     let all_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // Test files should not appear at all (not even as unused) since
@@ -106,7 +113,14 @@ fn production_mode_does_not_exclude_nested_config_files() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     assert!(
@@ -128,7 +142,14 @@ fn non_production_mode_includes_test_files() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // In non-production mode, test-only.ts should be detected as unused
@@ -148,7 +169,7 @@ fn production_mode_still_parses_vite_config_aliases() {
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|u| u.specifier.as_str())
+        .map(|u| u.import.specifier.as_str())
         .collect();
 
     assert!(
@@ -166,7 +187,7 @@ fn production_mode_resolves_solution_style_tsconfig_paths() {
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|u| u.specifier.as_str())
+        .map(|u| u.import.specifier.as_str())
         .collect();
 
     assert!(
@@ -177,7 +198,14 @@ fn production_mode_resolves_solution_style_tsconfig_paths() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     assert!(
@@ -214,7 +242,14 @@ fn analyze_project_honors_per_analysis_dead_code_production() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     assert!(

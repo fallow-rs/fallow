@@ -183,7 +183,7 @@ pub fn group_analysis_results(
     // ── File-scoped issue types ─────────────────────────────────
     for item in &results.unused_files {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.file.path))
             .or_default()
             .unused_files
             .push(item.clone());
@@ -204,7 +204,7 @@ pub fn group_analysis_results(
     }
     for item in &results.private_type_leaks {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.leak.path))
             .or_default()
             .private_type_leaks
             .push(item.clone());
@@ -225,7 +225,7 @@ pub fn group_analysis_results(
     }
     for item in &results.unresolved_imports {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.import.path))
             .or_default()
             .unresolved_imports
             .push(item.clone());
@@ -293,6 +293,7 @@ pub fn group_analysis_results(
     }
     for item in &results.circular_dependencies {
         let key = item
+            .cycle
             .files
             .first()
             .map_or_else(|| UNOWNED_LABEL.to_string(), |f| key_for(f));
@@ -304,7 +305,7 @@ pub fn group_analysis_results(
     }
     for item in &results.boundary_violations {
         groups
-            .entry(key_for(&item.from_path))
+            .entry(key_for(&item.violation.from_path))
             .or_default()
             .boundary_violations
             .push(item.clone());
@@ -423,10 +424,10 @@ mod tests {
         PathBuf::from("/root")
     }
 
-    fn unused_file(path: &str) -> UnusedFile {
-        UnusedFile {
+    fn unused_file(path: &str) -> UnusedFileFinding {
+        UnusedFileFinding::with_actions(UnusedFile {
             path: PathBuf::from(path),
-        }
+        })
     }
 
     fn unused_export(path: &str, name: &str) -> UnusedExport {
@@ -675,15 +676,17 @@ mod tests {
     #[test]
     fn boundary_violations_grouped_by_from_path() {
         let mut results = AnalysisResults::default();
-        results.boundary_violations.push(BoundaryViolation {
-            from_path: PathBuf::from("/root/src/bad.ts"),
-            to_path: PathBuf::from("/root/lib/secret.ts"),
-            from_zone: "src".to_string(),
-            to_zone: "lib".to_string(),
-            import_specifier: "../lib/secret".to_string(),
-            line: 1,
-            col: 0,
-        });
+        results
+            .boundary_violations
+            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: PathBuf::from("/root/src/bad.ts"),
+                to_path: PathBuf::from("/root/lib/secret.ts"),
+                from_zone: "src".to_string(),
+                to_zone: "lib".to_string(),
+                import_specifier: "../lib/secret".to_string(),
+                line: 1,
+                col: 0,
+            }));
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
 
@@ -697,13 +700,17 @@ mod tests {
     #[test]
     fn circular_dep_empty_files_goes_to_unowned() {
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![],
-            length: 0,
-            line: 0,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![],
+                    length: 0,
+                    line: 0,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
 
@@ -714,16 +721,20 @@ mod tests {
     #[test]
     fn circular_dep_uses_first_file() {
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![
-                PathBuf::from("/root/src/a.ts"),
-                PathBuf::from("/root/lib/b.ts"),
-            ],
-            length: 2,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![
+                        PathBuf::from("/root/src/a.ts"),
+                        PathBuf::from("/root/lib/b.ts"),
+                    ],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
 
@@ -1105,15 +1116,17 @@ mod tests {
     #[test]
     fn group_unresolved_imports() {
         let mut results = AnalysisResults::default();
-        results
-            .unresolved_imports
-            .push(fallow_core::results::UnresolvedImport {
-                path: PathBuf::from("/root/src/app.ts"),
-                specifier: "./missing".to_string(),
-                line: 1,
-                col: 0,
-                specifier_col: 0,
-            });
+        results.unresolved_imports.push(
+            fallow_types::output_dead_code::UnresolvedImportFinding::with_actions(
+                fallow_core::results::UnresolvedImport {
+                    path: PathBuf::from("/root/src/app.ts"),
+                    specifier: "./missing".to_string(),
+                    line: 1,
+                    col: 0,
+                    specifier_col: 0,
+                },
+            ),
+        );
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
         assert_eq!(groups.len(), 1);

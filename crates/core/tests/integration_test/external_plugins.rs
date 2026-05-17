@@ -46,7 +46,14 @@ fn external_plugin_entry_points_discovered() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // home.ts is a route file — external plugin marks src/routes/**/*.{ts,tsx} as entry points
@@ -193,7 +200,14 @@ fn external_plugin_config_patterns_always_used() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // my-framework.config.ts is matched by config_patterns, should be always-used

@@ -11,7 +11,14 @@ fn html_entry_makes_referenced_script_reachable() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // entry.ts is referenced by index.html <script src>, so it should NOT be unused
@@ -36,7 +43,14 @@ fn html_entry_makes_referenced_stylesheet_reachable() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // global.css is referenced by index.html <link rel="stylesheet">, so it should NOT be unused
@@ -73,7 +87,14 @@ fn html_files_not_reported_as_unused() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // HTML files should never appear in unused-file output
@@ -95,8 +116,8 @@ fn html_entry_no_unresolved_imports() {
     let html_unresolved: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .filter(|u| u.path.to_string_lossy().ends_with(".html"))
-        .map(|u| u.specifier.as_str())
+        .filter(|u| u.import.path.to_string_lossy().ends_with(".html"))
+        .map(|u| u.import.specifier.as_str())
         .collect();
     assert!(
         html_unresolved.is_empty(),
@@ -115,7 +136,14 @@ fn html_root_relative_script_is_reachable() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // entry.ts is referenced by index.html via root-relative <script src="/src/entry.ts">
@@ -140,7 +168,14 @@ fn html_root_relative_stylesheet_is_reachable() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     assert!(
@@ -158,8 +193,8 @@ fn html_root_relative_no_unresolved_imports() {
     let html_unresolved: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .filter(|u| u.path.to_string_lossy().ends_with(".html"))
-        .map(|u| u.specifier.as_str())
+        .filter(|u| u.import.path.to_string_lossy().ends_with(".html"))
+        .map(|u| u.import.specifier.as_str())
         .collect();
     assert!(
         html_unresolved.is_empty(),
@@ -178,7 +213,14 @@ fn html_workspace_root_relative_script_is_reachable() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // main.ts is referenced by site/index.html via root-relative <script src="/src/main.ts">
@@ -204,7 +246,14 @@ fn html_workspace_root_relative_stylesheet_is_reachable() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     assert!(
@@ -222,8 +271,8 @@ fn html_workspace_root_relative_no_unresolved_imports() {
     let html_unresolved: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .filter(|u| u.path.to_string_lossy().ends_with(".html"))
-        .map(|u| u.specifier.as_str())
+        .filter(|u| u.import.path.to_string_lossy().ends_with(".html"))
+        .map(|u| u.import.specifier.as_str())
         .collect();
     assert!(
         html_unresolved.is_empty(),

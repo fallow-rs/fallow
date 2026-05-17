@@ -58,8 +58,11 @@ pub fn cross_reference(
     dead_code: &AnalysisResults,
 ) -> CrossReferenceResult {
     // Build lookup sets for fast checking
-    let unused_files: FxHashSet<&PathBuf> =
-        dead_code.unused_files.iter().map(|f| &f.path).collect();
+    let unused_files: FxHashSet<&PathBuf> = dead_code
+        .unused_files
+        .iter()
+        .map(|f| &f.file.path)
+        .collect();
 
     let mut combined_findings = Vec::new();
     let mut clones_in_unused_files = 0usize;
@@ -163,6 +166,7 @@ mod tests {
     use super::*;
     use crate::duplicates::CloneGroup;
     use crate::results::{UnusedExport, UnusedFile};
+    use fallow_types::output_dead_code::UnusedFileFinding;
 
     fn make_instance(file: &str, start: usize, end: usize) -> CloneInstance {
         CloneInstance {
@@ -232,9 +236,11 @@ mod tests {
             },
         };
         let mut dead_code = AnalysisResults::default();
-        dead_code.unused_files.push(UnusedFile {
-            path: PathBuf::from("src/a.ts"),
-        });
+        dead_code
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("src/a.ts"),
+            }));
 
         let result = cross_reference(&duplication, &dead_code);
         assert!(result.has_findings());
@@ -354,9 +360,11 @@ mod tests {
             },
         };
         let mut dead_code = AnalysisResults::default();
-        dead_code.unused_files.push(UnusedFile {
-            path: PathBuf::from("src/c.ts"),
-        });
+        dead_code
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("src/c.ts"),
+            }));
 
         let result = cross_reference(&duplication, &dead_code);
         let affected = result.affected_group_indices();
@@ -389,9 +397,11 @@ mod tests {
             },
         };
         let mut dead_code = AnalysisResults::default();
-        dead_code.unused_files.push(UnusedFile {
-            path: PathBuf::from("src/a.ts"),
-        });
+        dead_code
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("src/a.ts"),
+            }));
         dead_code.unused_exports.push(UnusedExport {
             path: PathBuf::from("src/a.ts"),
             export_name: "foo".to_string(),
@@ -499,9 +509,11 @@ mod tests {
             },
         };
         let mut dead_code = AnalysisResults::default();
-        dead_code.unused_files.push(UnusedFile {
-            path: PathBuf::from("src/a.ts"),
-        });
+        dead_code
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("src/a.ts"),
+            }));
         dead_code.unused_exports.push(UnusedExport {
             path: PathBuf::from("src/c.ts"),
             export_name: "helper".to_string(),

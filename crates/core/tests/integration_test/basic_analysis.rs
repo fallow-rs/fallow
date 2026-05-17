@@ -10,7 +10,14 @@ fn basic_project_detects_unused_files() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     assert!(
@@ -117,7 +124,14 @@ fn cjs_project_detects_orphan() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     assert!(
@@ -421,7 +435,7 @@ fn namespace_object_alias_chains_through_namespace_re_export_target() {
     let unused_file_paths: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.display().to_string())
+        .map(|f| f.file.path.display().to_string())
         .collect();
     for required in ["leaf.ts", "barrel.ts", "deeper-barrel.ts", "deeper-leaf.ts"] {
         assert!(
@@ -495,7 +509,14 @@ fn default_export_flagged_when_not_imported() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     assert!(
@@ -551,7 +572,14 @@ fn side_effect_import_makes_file_reachable() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // setup.ts is imported via side-effect import, so it should be reachable
@@ -599,7 +627,7 @@ fn circular_import_does_not_crash() {
         !results.circular_dependencies.is_empty(),
         "should detect circular dependency between a.ts and b.ts"
     );
-    assert_eq!(results.circular_dependencies[0].length, 2);
+    assert_eq!(results.circular_dependencies[0].cycle.length, 2);
 }
 
 #[test]

@@ -10,7 +10,7 @@ fn scss_partial_files_resolved_via_underscore_convention() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .filter_map(|f| f.path.file_name())
+        .filter_map(|f| f.file.path.file_name())
         .filter_map(|n| n.to_str())
         .map(ToString::to_string)
         .collect();
@@ -27,7 +27,7 @@ fn scss_partial_files_resolved_via_underscore_convention() {
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|u| u.specifier.as_str())
+        .map(|u| u.import.specifier.as_str())
         .collect();
     assert!(
         !unresolved_specs.iter().any(|s| s.contains("variables")),
@@ -73,7 +73,7 @@ fn angular_style_preprocessor_include_paths_resolve_bare_scss_imports() {
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|u| u.specifier.as_str())
+        .map(|u| u.import.specifier.as_str())
         .collect();
 
     assert!(
@@ -89,7 +89,7 @@ fn angular_style_preprocessor_include_paths_resolve_bare_scss_imports() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .filter_map(|f| f.path.file_name())
+        .filter_map(|f| f.file.path.file_name())
         .filter_map(|n| n.to_str())
         .map(ToString::to_string)
         .collect();
@@ -117,7 +117,7 @@ fn scss_bare_specifiers_resolve_from_node_modules() {
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|u| u.specifier.as_str())
+        .map(|u| u.import.specifier.as_str())
         .collect();
 
     assert!(
@@ -216,6 +216,7 @@ fn scss_bare_import_does_not_collide_with_sibling_tsx() {
             .circular_dependencies
             .iter()
             .map(|c| c
+                .cycle
                 .files
                 .iter()
                 .map(|p| p.display().to_string())
@@ -226,7 +227,7 @@ fn scss_bare_import_does_not_collide_with_sibling_tsx() {
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|u| u.specifier.as_str())
+        .map(|u| u.import.specifier.as_str())
         .collect();
     assert!(
         unresolved_specs.is_empty(),
@@ -236,7 +237,7 @@ fn scss_bare_import_does_not_collide_with_sibling_tsx() {
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .filter_map(|f| f.path.file_name())
+        .filter_map(|f| f.file.path.file_name())
         .filter_map(|n| n.to_str())
         .map(ToString::to_string)
         .collect();

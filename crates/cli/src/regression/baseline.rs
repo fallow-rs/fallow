@@ -986,12 +986,16 @@ mod tests {
     #[test]
     fn compare_exceeded_with_config_baseline() {
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("a.ts"),
-        });
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("b.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("a.ts"),
+            }));
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("b.ts"),
+            }));
         let opts = make_opts(true, Tolerance::Absolute(0), false, None);
         let config_baseline = fallow_config::RegressionBaseline {
             total_issues: 0,
@@ -1014,9 +1018,11 @@ mod tests {
     #[test]
     fn compare_pass_within_tolerance() {
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("a.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("a.ts"),
+            }));
         let opts = make_opts(true, Tolerance::Absolute(5), false, None);
         let config_baseline = fallow_config::RegressionBaseline {
             total_issues: 0,
@@ -1112,12 +1118,16 @@ mod tests {
     #[test]
     fn compare_exceeded_includes_type_deltas() {
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("a.ts"),
-        });
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("b.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("a.ts"),
+            }));
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("b.ts"),
+            }));
         results.unused_exports.push(UnusedExport {
             path: PathBuf::from("c.ts"),
             export_name: "foo".into(),
@@ -1148,9 +1158,11 @@ mod tests {
     fn compare_with_percentage_tolerance() {
         let mut results = AnalysisResults::default();
         // Add 1 issue
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("a.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("a.ts"),
+            }));
 
         let opts = make_opts(true, Tolerance::Percentage(50.0), false, None);
         // baseline=10, 50% of 10 = 5, delta=1-10=-9 (improvement, should pass)

@@ -2,6 +2,9 @@ use std::path::Path;
 
 use fallow_core::extract::MemberKind;
 use fallow_core::results::*;
+use fallow_types::output_dead_code::{
+    BoundaryViolationFinding, CircularDependencyFinding, UnresolvedImportFinding, UnusedFileFinding,
+};
 
 /// Build an `AnalysisResults` populated with one issue of every type.
 ///
@@ -9,9 +12,10 @@ use fallow_core::results::*;
 pub fn sample_results(root: &Path) -> AnalysisResults {
     let mut r = AnalysisResults::default();
 
-    r.unused_files.push(UnusedFile {
-        path: root.join("src/dead.ts"),
-    });
+    r.unused_files
+        .push(UnusedFileFinding::with_actions(UnusedFile {
+            path: root.join("src/dead.ts"),
+        }));
     r.unused_exports.push(UnusedExport {
         path: root.join("src/utils.ts"),
         export_name: "helperFn".to_string(),
@@ -67,13 +71,14 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
         line: 42,
         col: 4,
     });
-    r.unresolved_imports.push(UnresolvedImport {
-        path: root.join("src/app.ts"),
-        specifier: "./missing-module".to_string(),
-        line: 3,
-        col: 0,
-        specifier_col: 0,
-    });
+    r.unresolved_imports
+        .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+            path: root.join("src/app.ts"),
+            specifier: "./missing-module".to_string(),
+            line: 3,
+            col: 0,
+            specifier_col: 0,
+        }));
     r.unlisted_dependencies.push(UnlistedDependency {
         package_name: "chalk".to_string(),
         imported_from: vec![ImportSite {
@@ -107,22 +112,26 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
         path: root.join("package.json"),
         line: 12,
     });
-    r.circular_dependencies.push(CircularDependency {
-        files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-        length: 2,
-        line: 3,
-        col: 0,
-        is_cross_package: false,
-    });
-    r.boundary_violations.push(BoundaryViolation {
-        from_path: root.join("src/ui/Button.tsx"),
-        to_path: root.join("src/db/query.ts"),
-        from_zone: "ui".to_string(),
-        to_zone: "db".to_string(),
-        import_specifier: "src/db/query.ts".to_string(),
-        line: 2,
-        col: 0,
-    });
+    r.circular_dependencies
+        .push(CircularDependencyFinding::with_actions(
+            CircularDependency {
+                files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                length: 2,
+                line: 3,
+                col: 0,
+                is_cross_package: false,
+            },
+        ));
+    r.boundary_violations
+        .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+            from_path: root.join("src/ui/Button.tsx"),
+            to_path: root.join("src/db/query.ts"),
+            from_zone: "ui".to_string(),
+            to_zone: "db".to_string(),
+            import_specifier: "src/db/query.ts".to_string(),
+            line: 2,
+            col: 0,
+        }));
     r.stale_suppressions.push(StaleSuppression {
         path: root.join("src/utils.ts"),
         line: 5,

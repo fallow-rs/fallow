@@ -60,7 +60,10 @@ mod tests {
     use std::path::PathBuf;
 
     use fallow_core::duplicates::{DuplicationReport, DuplicationStats};
-    use fallow_core::results::{AnalysisResults, UnresolvedImport, UnusedExport, UnusedFile};
+    use fallow_core::results::{
+        AnalysisResults, UnresolvedImport, UnresolvedImportFinding, UnusedExport, UnusedFile,
+        UnusedFileFinding,
+    };
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -123,13 +126,15 @@ mod tests {
             span_start: 50,
             is_re_export: false,
         });
-        results.unresolved_imports.push(UnresolvedImport {
-            path: path.clone(),
-            specifier: "./gone".to_string(),
-            line: 10,
-            col: 0,
-            specifier_col: 0,
-        });
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: path.clone(),
+                specifier: "./gone".to_string(),
+                line: 10,
+                col: 0,
+                specifier_col: 0,
+            }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -143,9 +148,11 @@ mod tests {
     fn all_diagnostics_have_fallow_source() {
         let root = test_root();
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/a.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/a.ts"),
+            }));
         results.unused_exports.push(UnusedExport {
             path: root.join("src/b.ts"),
             export_name: "x".to_string(),
@@ -155,13 +162,15 @@ mod tests {
             span_start: 0,
             is_re_export: false,
         });
-        results.unresolved_imports.push(UnresolvedImport {
-            path: root.join("src/c.ts"),
-            specifier: "./nope".to_string(),
-            line: 1,
-            col: 0,
-            specifier_col: 0,
-        });
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: root.join("src/c.ts"),
+                specifier: "./nope".to_string(),
+                line: 1,
+                col: 0,
+                specifier_col: 0,
+            }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);

@@ -16,7 +16,7 @@ fn hidden_dir_allowlist_includes_storybook() {
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.to_string_lossy().to_string())
+        .map(|f| f.file.path.to_string_lossy().to_string())
         .collect();
 
     assert!(
@@ -35,7 +35,7 @@ fn hidden_dir_non_allowlisted_is_skipped() {
     let all_paths: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.to_string_lossy().to_string())
+        .map(|f| f.file.path.to_string_lossy().to_string())
         .chain(
             results
                 .unused_exports
@@ -64,7 +64,7 @@ fn astro_files_parsed_and_analyzed() {
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.to_string_lossy().to_string())
+        .map(|f| f.file.path.to_string_lossy().to_string())
         .collect();
 
     assert!(
@@ -86,7 +86,7 @@ fn mdx_unused_file_detected() {
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.to_string_lossy().to_string())
+        .map(|f| f.file.path.to_string_lossy().to_string())
         .collect();
 
     assert!(
@@ -169,7 +169,7 @@ fn toml_config_loads_and_applies_rules() {
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.to_string_lossy().replace('\\', "/"))
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
 
     assert!(

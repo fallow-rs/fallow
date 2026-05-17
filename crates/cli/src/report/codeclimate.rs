@@ -3,7 +3,7 @@ use std::process::ExitCode;
 
 use fallow_config::{RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::{AnalysisResults, PrivateTypeLeak};
+use fallow_core::results::AnalysisResults;
 
 use super::ci::fingerprint;
 use super::grouping::{self, OwnershipResolver};
@@ -112,7 +112,7 @@ fn push_dep_cc_issues(
 
 fn push_unused_file_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    files: &[fallow_core::results::UnusedFile],
+    files: &[fallow_types::output_dead_code::UnusedFileFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -120,8 +120,8 @@ fn push_unused_file_issues(
         return;
     }
     let level = severity_to_codeclimate(severity);
-    for file in files {
-        let path = cc_path(&file.path, root);
+    for entry in files {
+        let path = cc_path(&entry.file.path, root);
         let fp = fingerprint_hash(&["fallow/unused-file", &path]);
         issues.push(cc_issue(
             "fallow/unused-file",
@@ -179,7 +179,7 @@ fn push_unused_export_issues(
 
 fn push_private_type_leak_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    leaks: &[PrivateTypeLeak],
+    leaks: &[fallow_types::output_dead_code::PrivateTypeLeakFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -187,7 +187,8 @@ fn push_private_type_leak_issues(
         return;
     }
     let level = severity_to_codeclimate(severity);
-    for leak in leaks {
+    for entry in leaks {
+        let leak = &entry.leak;
         let path = cc_path(&leak.path, root);
         let line_str = leak.line.to_string();
         let fp = fingerprint_hash(&[
@@ -313,7 +314,7 @@ fn push_unused_member_issues(
 
 fn push_unresolved_import_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    imports: &[fallow_core::results::UnresolvedImport],
+    imports: &[fallow_types::output_dead_code::UnresolvedImportFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -321,7 +322,8 @@ fn push_unresolved_import_issues(
         return;
     }
     let level = severity_to_codeclimate(severity);
-    for import in imports {
+    for entry in imports {
+        let import = &entry.import;
         let path = cc_path(&import.path, root);
         let line_str = import.line.to_string();
         let fp = fingerprint_hash(&[
@@ -413,7 +415,7 @@ fn push_duplicate_export_issues(
 
 fn push_circular_dep_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    cycles: &[fallow_core::results::CircularDependency],
+    cycles: &[fallow_types::output_dead_code::CircularDependencyFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -421,7 +423,8 @@ fn push_circular_dep_issues(
         return;
     }
     let level = severity_to_codeclimate(severity);
-    for cycle in cycles {
+    for entry in cycles {
+        let cycle = &entry.cycle;
         let Some(first) = cycle.files.first() else {
             continue;
         };
@@ -456,7 +459,7 @@ fn push_circular_dep_issues(
 
 fn push_boundary_violation_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    violations: &[fallow_core::results::BoundaryViolation],
+    violations: &[fallow_types::output_dead_code::BoundaryViolationFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -464,7 +467,8 @@ fn push_boundary_violation_issues(
         return;
     }
     let level = severity_to_codeclimate(severity);
-    for v in violations {
+    for entry in violations {
+        let v = &entry.violation;
         let path = cc_path(&v.from_path, root);
         let to = cc_path(&v.to_path, root);
         let fp = fingerprint_hash(&["fallow/boundary-violation", &path, &to]);
@@ -1328,9 +1332,11 @@ mod tests {
     fn codeclimate_issue_has_required_fields() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/dead.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/dead.ts"),
+            }));
         let rules = RulesConfig::default();
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let issue = &output.as_array().unwrap()[0];
@@ -1350,9 +1356,11 @@ mod tests {
     fn codeclimate_unused_file_severity_follows_rules() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/dead.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/dead.ts"),
+            }));
 
         // Error severity -> major
         let rules = RulesConfig::default();
@@ -1391,9 +1399,11 @@ mod tests {
     fn codeclimate_unused_file_line_defaults_to_1() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/dead.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/dead.ts"),
+            }));
         let rules = RulesConfig::default();
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let issue = &output[0];
@@ -1404,9 +1414,11 @@ mod tests {
     fn codeclimate_paths_are_relative() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/deep/nested/file.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/deep/nested/file.ts"),
+            }));
         let rules = RulesConfig::default();
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let path = output[0]["location"]["path"].as_str().unwrap();
@@ -1494,13 +1506,17 @@ mod tests {
     fn codeclimate_circular_dep_emits_chain_in_description() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-            length: 2,
-            line: 3,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                    length: 2,
+                    line: 3,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
         let rules = RulesConfig::default();
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let desc = output[0]["description"].as_str().unwrap();

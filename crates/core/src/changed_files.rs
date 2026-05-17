@@ -296,7 +296,7 @@ pub fn filter_results_by_changed_files(
 ) {
     results
         .unused_files
-        .retain(|f| changed_files.contains(&f.path));
+        .retain(|f| changed_files.contains(&f.file.path));
     results
         .unused_exports
         .retain(|e| changed_files.contains(&e.path));
@@ -305,7 +305,7 @@ pub fn filter_results_by_changed_files(
         .retain(|e| changed_files.contains(&e.path));
     results
         .private_type_leaks
-        .retain(|e| changed_files.contains(&e.path));
+        .retain(|e| changed_files.contains(&e.leak.path));
     results
         .unused_enum_members
         .retain(|m| changed_files.contains(&m.path));
@@ -314,7 +314,7 @@ pub fn filter_results_by_changed_files(
         .retain(|m| changed_files.contains(&m.path));
     results
         .unresolved_imports
-        .retain(|i| changed_files.contains(&i.path));
+        .retain(|i| changed_files.contains(&i.import.path));
 
     // Unlisted deps: keep only if any importing file is changed
     results.unlisted_dependencies.retain(|d| {
@@ -333,12 +333,12 @@ pub fn filter_results_by_changed_files(
     // Circular deps: keep cycles where at least one file is changed
     results
         .circular_dependencies
-        .retain(|c| c.files.iter().any(|f| changed_files.contains(f)));
+        .retain(|c| c.cycle.files.iter().any(|f| changed_files.contains(f)));
 
     // Boundary violations: keep if the importing file changed
     results
         .boundary_violations
-        .retain(|v| changed_files.contains(&v.from_path));
+        .retain(|v| changed_files.contains(&v.violation.from_path));
 
     // Stale suppressions: keep if the file changed
     results
@@ -445,6 +445,9 @@ mod tests {
     use crate::duplicates::{CloneGroup, CloneInstance};
     use crate::results::{
         BoundaryViolation, CircularDependency, EmptyCatalogGroup, UnusedExport, UnusedFile,
+    };
+    use fallow_types::output_dead_code::{
+        BoundaryViolationFinding, CircularDependencyFinding, UnusedFileFinding,
     };
 
     #[test]
@@ -561,12 +564,16 @@ mod tests {
     #[test]
     fn filter_results_keeps_only_changed_files() {
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: "/a.ts".into(),
-        });
-        results.unused_files.push(UnusedFile {
-            path: "/b.ts".into(),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: "/a.ts".into(),
+            }));
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: "/b.ts".into(),
+            }));
         results.unused_exports.push(UnusedExport {
             path: "/a.ts".into(),
             export_name: "foo".into(),
@@ -583,7 +590,7 @@ mod tests {
         filter_results_by_changed_files(&mut results, &changed);
 
         assert_eq!(results.unused_files.len(), 1);
-        assert_eq!(results.unused_files[0].path, PathBuf::from("/a.ts"));
+        assert_eq!(results.unused_files[0].file.path, PathBuf::from("/a.ts"));
         assert_eq!(results.unused_exports.len(), 1);
     }
 
@@ -610,13 +617,17 @@ mod tests {
     #[test]
     fn filter_results_keeps_circular_dep_when_any_file_changed() {
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec!["/a.ts".into(), "/b.ts".into()],
-            length: 2,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec!["/a.ts".into(), "/b.ts".into()],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
 
         let mut changed: FxHashSet<PathBuf> = FxHashSet::default();
         changed.insert("/b.ts".into());
@@ -628,13 +639,17 @@ mod tests {
     #[test]
     fn filter_results_drops_circular_dep_when_no_file_changed() {
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec!["/a.ts".into(), "/b.ts".into()],
-            length: 2,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec!["/a.ts".into(), "/b.ts".into()],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
 
         let changed: FxHashSet<PathBuf> = FxHashSet::default();
         filter_results_by_changed_files(&mut results, &changed);
@@ -644,15 +659,17 @@ mod tests {
     #[test]
     fn filter_results_drops_boundary_violation_when_importer_unchanged() {
         let mut results = AnalysisResults::default();
-        results.boundary_violations.push(BoundaryViolation {
-            from_path: "/a.ts".into(),
-            to_path: "/b.ts".into(),
-            from_zone: "ui".into(),
-            to_zone: "data".into(),
-            import_specifier: "../data/db".into(),
-            line: 1,
-            col: 0,
-        });
+        results
+            .boundary_violations
+            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: "/a.ts".into(),
+                to_path: "/b.ts".into(),
+                from_zone: "ui".into(),
+                to_zone: "data".into(),
+                import_specifier: "../data/db".into(),
+                line: 1,
+                col: 0,
+            }));
 
         let mut changed: FxHashSet<PathBuf> = FxHashSet::default();
         // only the imported file changed, not the importer

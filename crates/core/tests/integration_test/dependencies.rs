@@ -83,7 +83,7 @@ fn unresolved_imports_detected() {
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|u| u.specifier.as_str())
+        .map(|u| u.import.specifier.as_str())
         .collect();
 
     assert!(
@@ -298,7 +298,7 @@ fn subpath_imports_resolve_correctly() {
         results
             .unresolved_imports
             .iter()
-            .map(|u| u.specifier.as_str())
+            .map(|u| u.import.specifier.as_str())
             .collect::<Vec<_>>()
     );
 

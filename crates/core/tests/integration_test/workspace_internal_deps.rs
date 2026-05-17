@@ -65,7 +65,7 @@ fn custom_plugin_enabled_by_workspace_dependency_affects_analysis() {
     let unused_file_paths: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
 
     assert!(

@@ -74,6 +74,10 @@ use fallow_types::output::{
     IgnoreExportsRule, IssueAction, SuppressFileAction, SuppressFileKind, SuppressLineAction,
     SuppressLineKind, SuppressLineScope,
 };
+use fallow_types::output_dead_code::{
+    BoundaryViolationFinding, CircularDependencyFinding, PrivateTypeLeakFinding,
+    UnresolvedImportFinding, UnusedFileFinding,
+};
 use fallow_types::output_health::{
     HealthFindingAction, HealthFindingActionType, HotspotAction, HotspotActionHeuristic,
     HotspotActionType, RefactoringTargetAction, RefactoringTargetActionType, UntestedExportAction,
@@ -355,22 +359,24 @@ fn finding_definition_names() -> &'static [&'static str] {
     // today, and the committed schema matches that.
     &[
         // Dead-code findings (actions[] -> IssueAction, with `introduced`)
-        "BoundaryViolation",
-        "CircularDependency",
+        // `BoundaryViolation`, `CircularDependency`, `PrivateTypeLeak`,
+        // `UnresolvedImport`, `UnusedFile` have been migrated to typed
+        // `*Finding` envelope wrappers in
+        // `crates/types/src/output_dead_code.rs` and are no longer
+        // post-pass-injected; the wrappers carry the typed `actions` array
+        // and the optional `introduced` audit breadcrumb natively via
+        // schemars.
         "DuplicateExport",
         "EmptyCatalogGroup",
         "MisconfiguredDependencyOverride",
-        "PrivateTypeLeak",
         "TestOnlyDependency",
         "TypeOnlyDependency",
         "UnlistedDependency",
         "UnresolvedCatalogReference",
-        "UnresolvedImport",
         "UnusedCatalogEntry",
         "UnusedDependency",
         "UnusedDependencyOverride",
         "UnusedExport",
-        "UnusedFile",
         "UnusedMember",
         // Health findings (actions[] -> per-finding action wrapper).
         // `introduced` attaches per `finding_augmentation` below: HealthFinding
@@ -539,6 +545,16 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<AddToConfigKind>();
     let _ = generator.subschema_for::<AddToConfigValue>();
     let _ = generator.subschema_for::<IgnoreExportsRule>();
+
+    // Typed dead-code finding wrappers from
+    // `crates/types/src/output_dead_code.rs`. Each wraps a bare finding via
+    // `#[serde(flatten)]` and carries a typed `actions` array natively,
+    // retiring the per-finding `augment_finding_definition` graft.
+    let _ = generator.subschema_for::<UnusedFileFinding>();
+    let _ = generator.subschema_for::<PrivateTypeLeakFinding>();
+    let _ = generator.subschema_for::<UnresolvedImportFinding>();
+    let _ = generator.subschema_for::<CircularDependencyFinding>();
+    let _ = generator.subschema_for::<BoundaryViolationFinding>();
 
     // Health output subtree (crates/cli/src/health_types/).
     let _ = generator.subschema_for::<HealthSummary>();

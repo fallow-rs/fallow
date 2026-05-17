@@ -56,7 +56,14 @@ fn workspace_project_discovers_workspace_packages() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     assert!(
@@ -92,7 +99,7 @@ fn workspace_project_discovers_workspace_packages() {
         results
             .unresolved_imports
             .iter()
-            .map(|i| &i.specifier)
+            .map(|i| &i.import.specifier)
             .collect::<Vec<_>>()
     );
 
@@ -242,7 +249,14 @@ fn workspace_exports_map_resolves_subpath_imports() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // orphan.ts is not exported via exports map and not imported — should be unused
@@ -297,7 +311,7 @@ fn workspace_exports_map_resolves_subpath_imports() {
         results
             .unresolved_imports
             .iter()
-            .map(|i| &i.specifier)
+            .map(|i| &i.import.specifier)
             .collect::<Vec<_>>()
     );
 }
@@ -321,7 +335,8 @@ fn workspace_nested_exports_resolves_dist_to_source() {
         .unused_files
         .iter()
         .map(|f| {
-            f.path
+            f.file
+                .path
                 .to_string_lossy()
                 .replace('\\', "/")
                 .rsplit('/')
@@ -394,7 +409,7 @@ fn workspace_nested_exports_resolves_dist_to_source() {
         results
             .unresolved_imports
             .iter()
-            .map(|i| &i.specifier)
+            .map(|i| &i.import.specifier)
             .collect::<Vec<_>>()
     );
 }
@@ -430,7 +445,7 @@ fn workspace_package_export_star_barrel_chain_marks_leaf_export_used() {
         results
             .unresolved_imports
             .iter()
-            .map(|i| &i.specifier)
+            .map(|i| &i.import.specifier)
             .collect::<Vec<_>>()
     );
 }
@@ -468,7 +483,14 @@ fn tsconfig_references_analysis_detects_unused() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // unused.ts in core and orphan.ts in ui should be detected as unused
@@ -500,7 +522,8 @@ fn shallow_nested_package_scripts_become_entry_points_without_workspace_config()
         .unused_files
         .iter()
         .map(|f| {
-            f.path
+            f.file
+                .path
                 .to_string_lossy()
                 .replace('\\', "/")
                 .rsplit('/')

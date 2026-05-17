@@ -14,10 +14,11 @@ pub fn push_circular_dep_diagnostics(
     results: &AnalysisResults,
 ) {
     for cycle in &results.circular_dependencies {
-        if let Some(first_file) = cycle.files.first()
+        if let Some(first_file) = cycle.cycle.files.first()
             && let Ok(uri) = Url::from_file_path(first_file)
         {
             let chain: Vec<String> = cycle
+                .cycle
                 .files
                 .iter()
                 .map(|f| {
@@ -28,10 +29,11 @@ pub fn push_circular_dep_diagnostics(
                 })
                 .collect();
             let message = format!("Circular dependency: {}", chain.join(" \u{2192} "));
-            let line = cycle.line.saturating_sub(1);
+            let line = cycle.cycle.line.saturating_sub(1);
 
             // Related info: link to each file in the cycle chain
             let related_info: Vec<DiagnosticRelatedInformation> = cycle
+                .cycle
                 .files
                 .iter()
                 .skip(1) // skip the first file (it's the diagnostic location)
@@ -56,7 +58,7 @@ pub fn push_circular_dep_diagnostics(
                 range: Range {
                     start: Position {
                         line,
-                        character: cycle.col,
+                        character: cycle.cycle.col,
                     },
                     end: Position {
                         line,
@@ -84,35 +86,37 @@ pub fn push_boundary_violation_diagnostics(
     results: &AnalysisResults,
 ) {
     for v in &results.boundary_violations {
-        let Ok(uri) = Url::from_file_path(&v.from_path) else {
+        let Ok(uri) = Url::from_file_path(&v.violation.from_path) else {
             continue;
         };
-        let line = v.line.saturating_sub(1);
-        let to_name = v.to_path.file_name().map_or_else(
-            || v.to_path.display().to_string(),
+        let line = v.violation.line.saturating_sub(1);
+        let to_name = v.violation.to_path.file_name().map_or_else(
+            || v.violation.to_path.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
         let message = format!(
             "Boundary violation: import of {} (zone '{}') is not allowed from zone '{}'",
-            to_name, v.to_zone, v.from_zone,
+            to_name, v.violation.to_zone, v.violation.from_zone,
         );
 
         // Related info: link to the target file
-        let related_info = Url::from_file_path(&v.to_path).ok().map(|target_uri| {
-            vec![DiagnosticRelatedInformation {
-                location: Location {
-                    uri: target_uri,
-                    range: FIRST_LINE_RANGE,
-                },
-                message: format!("Target file in zone '{}'", v.to_zone),
-            }]
-        });
+        let related_info = Url::from_file_path(&v.violation.to_path)
+            .ok()
+            .map(|target_uri| {
+                vec![DiagnosticRelatedInformation {
+                    location: Location {
+                        uri: target_uri,
+                        range: FIRST_LINE_RANGE,
+                    },
+                    message: format!("Target file in zone '{}'", v.violation.to_zone),
+                }]
+            });
 
         map.entry(uri).or_default().push(Diagnostic {
             range: Range {
                 start: Position {
                     line,
-                    character: v.col,
+                    character: v.violation.col,
                 },
                 end: Position {
                     line,
@@ -135,7 +139,10 @@ mod tests {
     use std::path::PathBuf;
 
     use fallow_core::duplicates::{DuplicationReport, DuplicationStats};
-    use fallow_core::results::{AnalysisResults, BoundaryViolation, CircularDependency};
+    use fallow_core::results::{
+        AnalysisResults, BoundaryViolation, BoundaryViolationFinding, CircularDependency,
+        CircularDependencyFinding,
+    };
     use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString, Url};
 
     use crate::diagnostics::build_diagnostics;
@@ -176,13 +183,17 @@ mod tests {
         let file_c = root.join("src/c.ts");
 
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![file_a.clone(), file_b.clone(), file_c.clone()],
-            length: 3,
-            line: 2,
-            col: 20,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![file_a.clone(), file_b.clone(), file_c.clone()],
+                    length: 3,
+                    line: 2,
+                    col: 20,
+                    is_cross_package: false,
+                },
+            ));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -227,13 +238,17 @@ mod tests {
         let file_a = root.join("src/self.ts");
 
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![file_a.clone()],
-            length: 1,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![file_a.clone()],
+                    length: 1,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -248,13 +263,17 @@ mod tests {
     fn circular_dependency_with_empty_files_produces_no_diagnostic() {
         let root = test_root();
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![],
-            length: 0,
-            line: 0,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![],
+                    length: 0,
+                    line: 0,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -268,15 +287,17 @@ mod tests {
         let to_file = root.join("src/core/secret.ts");
 
         let mut results = AnalysisResults::default();
-        results.boundary_violations.push(BoundaryViolation {
-            from_path: from_file.clone(),
-            to_path: to_file,
-            from_zone: "feature".to_string(),
-            to_zone: "core".to_string(),
-            import_specifier: "../core/secret".to_string(),
-            line: 3,
-            col: 10,
-        });
+        results
+            .boundary_violations
+            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: from_file.clone(),
+                to_path: to_file,
+                from_zone: "feature".to_string(),
+                to_zone: "core".to_string(),
+                import_specifier: "../core/secret".to_string(),
+                line: 3,
+                col: 10,
+            }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -309,15 +330,17 @@ mod tests {
         let to_file = root.join("src/infra/db.ts");
 
         let mut results = AnalysisResults::default();
-        results.boundary_violations.push(BoundaryViolation {
-            from_path: from_file.clone(),
-            to_path: to_file,
-            from_zone: "ui".to_string(),
-            to_zone: "infra".to_string(),
-            import_specifier: "../infra/db".to_string(),
-            line: 1,
-            col: 0,
-        });
+        results
+            .boundary_violations
+            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: from_file.clone(),
+                to_path: to_file,
+                from_zone: "ui".to_string(),
+                to_zone: "infra".to_string(),
+                import_specifier: "../infra/db".to_string(),
+                line: 1,
+                col: 0,
+            }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -335,15 +358,17 @@ mod tests {
         let to_file = root.join("src/domain/entity.ts");
 
         let mut results = AnalysisResults::default();
-        results.boundary_violations.push(BoundaryViolation {
-            from_path: from_file.clone(),
-            to_path: to_file.clone(),
-            from_zone: "app".to_string(),
-            to_zone: "domain".to_string(),
-            import_specifier: "../domain/entity".to_string(),
-            line: 5,
-            col: 0,
-        });
+        results
+            .boundary_violations
+            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: from_file.clone(),
+                to_path: to_file.clone(),
+                from_zone: "app".to_string(),
+                to_zone: "domain".to_string(),
+                import_specifier: "../domain/entity".to_string(),
+                line: 5,
+                col: 0,
+            }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -367,24 +392,28 @@ mod tests {
         let to_file_b = root.join("src/infra/cache.ts");
 
         let mut results = AnalysisResults::default();
-        results.boundary_violations.push(BoundaryViolation {
-            from_path: from_file.clone(),
-            to_path: to_file_a,
-            from_zone: "feature".to_string(),
-            to_zone: "core".to_string(),
-            import_specifier: "../core/auth".to_string(),
-            line: 1,
-            col: 0,
-        });
-        results.boundary_violations.push(BoundaryViolation {
-            from_path: from_file.clone(),
-            to_path: to_file_b,
-            from_zone: "feature".to_string(),
-            to_zone: "infra".to_string(),
-            import_specifier: "../infra/cache".to_string(),
-            line: 2,
-            col: 0,
-        });
+        results
+            .boundary_violations
+            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: from_file.clone(),
+                to_path: to_file_a,
+                from_zone: "feature".to_string(),
+                to_zone: "core".to_string(),
+                import_specifier: "../core/auth".to_string(),
+                line: 1,
+                col: 0,
+            }));
+        results
+            .boundary_violations
+            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: from_file.clone(),
+                to_path: to_file_b,
+                from_zone: "feature".to_string(),
+                to_zone: "infra".to_string(),
+                import_specifier: "../infra/cache".to_string(),
+                line: 2,
+                col: 0,
+            }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);

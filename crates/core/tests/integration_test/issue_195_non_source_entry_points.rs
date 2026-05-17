@@ -14,7 +14,8 @@ fn unused_file_names(results: &fallow_types::results::AnalysisResults) -> Vec<St
         .unused_files
         .iter()
         .map(|f| {
-            f.path
+            f.file
+                .path
                 .to_string_lossy()
                 .replace('\\', "/")
                 .rsplit('/')
@@ -29,7 +30,7 @@ fn unused_file_paths(results: &fallow_types::results::AnalysisResults) -> Vec<St
     results
         .unused_files
         .iter()
-        .map(|f| f.path.to_string_lossy().replace('\\', "/"))
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
         .collect()
 }
 
@@ -229,7 +230,7 @@ export const name = "App";
         !results
             .unresolved_imports
             .iter()
-            .any(|import| import.specifier.contains("bootstrap")),
+            .any(|import| import.import.specifier.contains("bootstrap")),
         "bootstrap Sass import should resolve through node_modules, got unresolved: {:?}",
         results.unresolved_imports
     );

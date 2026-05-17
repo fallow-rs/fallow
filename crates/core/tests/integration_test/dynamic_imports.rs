@@ -11,7 +11,14 @@ fn dynamic_import_makes_module_reachable() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // lazy.ts is dynamically imported, so it should be reachable
@@ -36,7 +43,14 @@ fn dynamic_import_literal_edges_match_static_imports() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     assert!(
@@ -51,7 +65,7 @@ fn dynamic_import_literal_edges_match_static_imports() {
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|import| import.specifier.as_str())
+        .map(|import| import.import.specifier.as_str())
         .collect();
     assert!(
         unresolved_specs.contains(&"./missing"),
@@ -89,9 +103,10 @@ fn vitest_vi_mock_makes_auto_mock_reachable() {
         .unused_files
         .iter()
         .map(|f| {
-            f.path
+            f.file
+                .path
                 .strip_prefix(&root)
-                .unwrap_or(&f.path)
+                .unwrap_or(&f.file.path)
                 .to_string_lossy()
                 .replace('\\', "/")
         })
@@ -152,9 +167,10 @@ fn vitest_vi_mock_factory_credits_target_and_skips_auto_mock_synthesis() {
         .unused_files
         .iter()
         .map(|f| {
-            f.path
+            f.file
+                .path
                 .strip_prefix(&root)
-                .unwrap_or(&f.path)
+                .unwrap_or(&f.file.path)
                 .to_string_lossy()
                 .replace('\\', "/")
         })
@@ -168,7 +184,7 @@ fn vitest_vi_mock_factory_credits_target_and_skips_auto_mock_synthesis() {
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|imp| imp.specifier.as_str())
+        .map(|imp| imp.import.specifier.as_str())
         .collect();
     assert!(
         !unresolved_specifiers
@@ -218,7 +234,7 @@ fn vitest_vi_mock_without_sibling_does_not_surface_unresolved_import() {
     let unresolved: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|imp| imp.specifier.as_str())
+        .map(|imp| imp.import.specifier.as_str())
         .collect();
     assert!(
         unresolved.is_empty(),
@@ -231,9 +247,10 @@ fn vitest_vi_mock_without_sibling_does_not_surface_unresolved_import() {
         .unused_files
         .iter()
         .map(|f| {
-            f.path
+            f.file
+                .path
                 .strip_prefix(&root)
-                .unwrap_or(&f.path)
+                .unwrap_or(&f.file.path)
                 .to_string_lossy()
                 .replace('\\', "/")
         })
@@ -259,7 +276,14 @@ fn dynamic_import_pattern_makes_files_reachable() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // Locale files should be reachable via template literal pattern
@@ -306,7 +330,14 @@ fn vite_glob_makes_files_reachable() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // Components matched by import.meta.glob('./components/*.ts') should be reachable
@@ -337,7 +368,14 @@ fn webpack_context_makes_files_reachable() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // Icons matched by require.context('./icons', false) should be reachable

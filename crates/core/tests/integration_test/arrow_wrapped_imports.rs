@@ -9,7 +9,14 @@ fn arrow_wrapped_lazy_imports_make_modules_reachable() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // Foo.tsx is imported via React.lazy(() => import('./Foo'))

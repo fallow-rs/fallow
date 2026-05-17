@@ -9,7 +9,7 @@ fn css_modules_exports_tracked() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .filter_map(|f| f.path.file_name())
+        .filter_map(|f| f.file.path.file_name())
         .filter_map(|n| n.to_str())
         .map(ToString::to_string)
         .collect();

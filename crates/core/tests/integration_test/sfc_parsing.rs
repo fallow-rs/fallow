@@ -11,7 +11,14 @@ fn vue_project_discovers_vue_files() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // App.vue is imported by main.ts, should NOT be unused
@@ -222,7 +229,14 @@ fn svelte_project_discovers_svelte_files() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // App.svelte is imported by main.ts, should NOT be unused
@@ -390,7 +404,7 @@ fn sveltekit_generated_types_not_unresolved() {
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|u| u.specifier.as_str())
+        .map(|u| u.import.specifier.as_str())
         .collect();
 
     // ./$types and ./$types.js are SvelteKit generated route types — must not be flagged.
@@ -417,7 +431,7 @@ fn sveltekit_workspace_types_not_unresolved() {
     let unresolved_specs: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|u| u.specifier.as_str())
+        .map(|u| u.import.specifier.as_str())
         .collect();
 
     // ./$types in a workspace SvelteKit project must not be flagged as unresolved

@@ -990,7 +990,7 @@ pub(super) fn compute_file_scores(
     let circular_files: rustc_hash::FxHashSet<std::path::PathBuf> = results
         .circular_dependencies
         .iter()
-        .flat_map(|c| c.files.iter().cloned())
+        .flat_map(|c| c.cycle.files.iter().cloned())
         .collect();
 
     let mut top_complex_fns: rustc_hash::FxHashMap<std::path::PathBuf, Vec<(String, u32, u16)>> =
@@ -1018,9 +1018,14 @@ pub(super) fn compute_file_scores(
     let mut cycle_members: rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>> =
         rustc_hash::FxHashMap::default();
     for cycle in &results.circular_dependencies {
-        for file in &cycle.files {
-            let others: Vec<std::path::PathBuf> =
-                cycle.files.iter().filter(|f| *f != file).cloned().collect();
+        for file in &cycle.cycle.files {
+            let others: Vec<std::path::PathBuf> = cycle
+                .cycle
+                .files
+                .iter()
+                .filter(|f| *f != file)
+                .cloned()
+                .collect();
             cycle_members
                 .entry(file.clone())
                 .or_default()
@@ -1052,7 +1057,7 @@ pub(super) fn compute_file_scores(
     let unused_files: rustc_hash::FxHashSet<&std::path::Path> = results
         .unused_files
         .iter()
-        .map(|f| f.path.as_path())
+        .map(|f| f.file.path.as_path())
         .collect();
 
     let unused_exports_by_path = count_unused_exports_by_path(&results.unused_exports);
@@ -1268,14 +1273,14 @@ pub(super) fn compute_file_scores(
         unused_file_paths: results
             .unused_files
             .iter()
-            .map(|f| f.path.clone())
+            .map(|f| f.file.path.clone())
             .collect(),
         unused_export_paths,
         unused_dep_package_paths,
         circular_dep_groups: results
             .circular_dependencies
             .iter()
-            .map(|c| c.files.clone())
+            .map(|c| c.cycle.files.clone())
             .collect(),
         module_export_counts,
     };
@@ -2345,11 +2350,13 @@ mod tests {
         file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
 
         let mut results = fallow_types::results::AnalysisResults::default();
-        results
-            .unused_files
-            .push(fallow_types::results::UnusedFile {
-                path: path_a.clone(),
-            });
+        results.unused_files.push(
+            fallow_types::output_dead_code::UnusedFileFinding::with_actions(
+                fallow_types::results::UnusedFile {
+                    path: path_a.clone(),
+                },
+            ),
+        );
 
         let output = fallow_core::AnalysisOutput {
             results,
@@ -2546,15 +2553,17 @@ mod tests {
         file_paths.insert(fallow_core::discover::FileId(1), &files[1].path);
 
         let mut results = fallow_types::results::AnalysisResults::default();
-        results
-            .circular_dependencies
-            .push(fallow_types::results::CircularDependency {
-                files: vec![path_a.clone(), path_b.clone()],
-                length: 2,
-                line: 1,
-                col: 0,
-                is_cross_package: false,
-            });
+        results.circular_dependencies.push(
+            fallow_types::output_dead_code::CircularDependencyFinding::with_actions(
+                fallow_types::results::CircularDependency {
+                    files: vec![path_a.clone(), path_b.clone()],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ),
+        );
 
         let output = fallow_core::AnalysisOutput {
             results,

@@ -18,17 +18,26 @@ pub mod envelope;
 pub mod extract;
 /// JSON-output augmentation types: `IssueAction` enum + variants.
 /// Schema-side counterpart of the augmentations the JSON layer adds to each
-/// finding. Gated on the `schema` cargo feature so the (rare) consumers of
-/// the typed output contract opt in explicitly; the JSON emission path will
-/// adopt these types in a follow-up.
-#[cfg(feature = "schema")]
+/// dead-code finding. The structs are always compiled (typed dead-code
+/// wrappers in [`output_dead_code`] consume them at runtime); the
+/// `schemars::JsonSchema` derive is gated per-struct on the `schema`
+/// feature.
 pub mod output;
+/// Typed envelope wrappers for the simple 1:1 dead-code findings
+/// (`UnusedFile`, `PrivateTypeLeak`, `UnresolvedImport`, `CircularDependency`,
+/// `BoundaryViolation`). Each wrapper flattens the bare finding via
+/// `#[serde(flatten)]` and carries a typed `actions` array populated at
+/// construction time, replacing the per-finding post-pass injection that
+/// previously grafted `actions[]` and `introduced` onto the schema. The
+/// `introduced` field is set by the audit pass via JSON map insertion and
+/// is `None` when serialized directly from Rust. The `schemars::JsonSchema`
+/// derive is gated per-struct on the `schema` feature.
+pub mod output_dead_code;
 /// Per-action types attached to health findings, hotspots, refactoring
 /// targets, and coverage-gap entries. Separated from the generic
-/// `IssueAction` tree in the `output` module (gated on the `schema`
-/// feature) so the health-specific variants live in a dedicated module.
-/// The structs are always compiled (the JSON emission layer constructs
-/// them through typed wrappers such as
+/// `IssueAction` tree in the `output` module so the health-specific
+/// variants live in a dedicated module. The structs are always compiled
+/// (the JSON emission layer constructs them through typed wrappers such as
 /// [`output_health::UntestedFileAction`]); the `schemars::JsonSchema`
 /// derive is gated per-struct on the `schema` feature.
 pub mod output_health;

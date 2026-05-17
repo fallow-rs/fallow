@@ -741,7 +741,7 @@ pub fn build_sarif(
         &mut sarif_results,
         &results.unused_files,
         &mut snippets,
-        |f| sarif_unused_file_fields(f, root, severity_to_sarif_level(rules.unused_files)),
+        |f| sarif_unused_file_fields(&f.file, root, severity_to_sarif_level(rules.unused_files)),
     );
     push_sarif_results(
         &mut sarif_results,
@@ -779,7 +779,7 @@ pub fn build_sarif(
         &mut snippets,
         |e| {
             sarif_private_type_leak_fields(
-                e,
+                &e.leak,
                 root,
                 severity_to_sarif_level(rules.private_type_leaks),
             )
@@ -885,7 +885,7 @@ pub fn build_sarif(
         &mut snippets,
         |i| {
             sarif_unresolved_import_fields(
-                i,
+                &i.import,
                 root,
                 severity_to_sarif_level(rules.unresolved_imports),
             )
@@ -915,7 +915,7 @@ pub fn build_sarif(
         &mut snippets,
         |c| {
             sarif_circular_dep_fields(
-                c,
+                &c.cycle,
                 root,
                 severity_to_sarif_level(rules.circular_dependencies),
             )
@@ -927,7 +927,7 @@ pub fn build_sarif(
         &mut snippets,
         |v| {
             sarif_boundary_violation_fields(
-                v,
+                &v.violation,
                 root,
                 severity_to_sarif_level(rules.boundary_violation),
             )
@@ -1628,9 +1628,11 @@ mod tests {
     fn sarif_unused_file_result() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/dead.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/dead.ts"),
+            }));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entries = sarif["runs"][0]["results"].as_array().unwrap();
@@ -1674,13 +1676,15 @@ mod tests {
     fn sarif_unresolved_import_is_error_level() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unresolved_imports.push(UnresolvedImport {
-            path: root.join("src/app.ts"),
-            specifier: "./missing".to_string(),
-            line: 1,
-            col: 0,
-            specifier_col: 0,
-        });
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: root.join("src/app.ts"),
+                specifier: "./missing".to_string(),
+                line: 1,
+                col: 0,
+                specifier_col: 0,
+            }));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
@@ -2224,13 +2228,17 @@ mod tests {
     fn sarif_circular_dep_line_zero_skips_region() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-            length: 2,
-            line: 0,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                    length: 2,
+                    line: 0,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
@@ -2242,13 +2250,17 @@ mod tests {
     fn sarif_circular_dep_line_nonzero_has_region() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-            length: 2,
-            line: 5,
-            col: 2,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                    length: 2,
+                    line: 5,
+                    col: 2,
+                    is_cross_package: false,
+                },
+            ));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
@@ -2612,9 +2624,11 @@ mod tests {
     fn sarif_warn_severity_produces_warning_level() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/dead.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/dead.ts"),
+            }));
 
         let rules = RulesConfig {
             unused_files: Severity::Warn,
@@ -2632,9 +2646,11 @@ mod tests {
     fn sarif_unused_file_has_no_region() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/dead.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/dead.ts"),
+            }));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];

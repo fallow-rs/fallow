@@ -57,17 +57,17 @@ pub fn push_export_diagnostics(
     }
 
     for leak in &results.private_type_leaks {
-        if let Ok(uri) = Url::from_file_path(&leak.path) {
-            let line = leak.line.saturating_sub(1);
+        if let Ok(uri) = Url::from_file_path(&leak.leak.path) {
+            let line = leak.leak.line.saturating_sub(1);
             map.entry(uri).or_default().push(Diagnostic {
                 range: Range {
                     start: Position {
                         line,
-                        character: leak.col,
+                        character: leak.leak.col,
                     },
                     end: Position {
                         line,
-                        character: leak.col + leak.type_name.len() as u32,
+                        character: leak.leak.col + leak.leak.type_name.len() as u32,
                     },
                 },
                 severity: Some(DiagnosticSeverity::WARNING),
@@ -76,7 +76,7 @@ pub fn push_export_diagnostics(
                 code_description: doc_link("private-type-leaks"),
                 message: format!(
                     "Export '{}' references private type '{}'",
-                    leak.export_name, leak.type_name
+                    leak.leak.export_name, leak.leak.type_name
                 ),
                 ..Default::default()
             });
@@ -86,7 +86,7 @@ pub fn push_export_diagnostics(
 
 pub fn push_file_diagnostics(map: &mut FxHashMap<Url, Vec<Diagnostic>>, results: &AnalysisResults) {
     for file in &results.unused_files {
-        if let Ok(uri) = Url::from_file_path(&file.path) {
+        if let Ok(uri) = Url::from_file_path(&file.file.path) {
             map.entry(uri).or_default().push(Diagnostic {
                 range: FIRST_LINE_RANGE,
                 severity: Some(DiagnosticSeverity::WARNING),
@@ -110,25 +110,27 @@ pub fn push_import_diagnostics(
     results: &AnalysisResults,
 ) {
     for import in &results.unresolved_imports {
-        if let Ok(uri) = Url::from_file_path(&import.path) {
-            let line = import.line.saturating_sub(1);
+        if let Ok(uri) = Url::from_file_path(&import.import.path) {
+            let line = import.import.line.saturating_sub(1);
             map.entry(uri).or_default().push(Diagnostic {
                 range: Range {
                     start: Position {
                         line,
-                        character: import.specifier_col,
+                        character: import.import.specifier_col,
                     },
                     end: Position {
                         line,
                         // +2 accounts for the surrounding quotes on the string literal
-                        character: import.specifier_col + import.specifier.len() as u32 + 2,
+                        character: import.import.specifier_col
+                            + import.import.specifier.len() as u32
+                            + 2,
                     },
                 },
                 severity: Some(DiagnosticSeverity::ERROR),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unresolved-import".to_string())),
                 code_description: doc_link("unresolved-imports"),
-                message: format!("Cannot find module '{}'", import.specifier),
+                message: format!("Cannot find module '{}'", import.import.specifier),
                 ..Default::default()
             });
         }
@@ -507,7 +509,8 @@ mod tests {
     use fallow_core::results::{
         AnalysisResults, DependencyLocation, EmptyCatalogGroup, ImportSite, TestOnlyDependency,
         TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport,
-        UnusedCatalogEntry, UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
+        UnresolvedImportFinding, UnusedCatalogEntry, UnusedDependency, UnusedExport, UnusedFile,
+        UnusedFileFinding, UnusedMember,
     };
     use tower_lsp::lsp_types::{DiagnosticSeverity, DiagnosticTag, NumberOrString, Url};
 
@@ -616,9 +619,11 @@ mod tests {
     fn unused_file_produces_warning_at_zero_range() {
         let root = test_root();
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/dead.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/dead.ts"),
+            }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -647,13 +652,15 @@ mod tests {
         let mut results = AnalysisResults::default();
         // import { foo } from './missing-module'
         //                     ^--- specifier_col = 20 (quote position)
-        results.unresolved_imports.push(UnresolvedImport {
-            path: root.join("src/app.ts"),
-            specifier: "./missing-module".to_string(),
-            line: 3,
-            col: 0,
-            specifier_col: 20,
-        });
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: root.join("src/app.ts"),
+                specifier: "./missing-module".to_string(),
+                line: 3,
+                col: 0,
+                specifier_col: 20,
+            }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);

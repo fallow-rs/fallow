@@ -15,7 +15,7 @@ fn exported_signatures_report_same_file_private_types() {
     let leaks: Vec<(&str, &str)> = results
         .private_type_leaks
         .iter()
-        .map(|leak| (leak.export_name.as_str(), leak.type_name.as_str()))
+        .map(|leak| (leak.leak.export_name.as_str(), leak.leak.type_name.as_str()))
         .collect();
 
     assert!(
@@ -68,8 +68,8 @@ fn storybook_story_files_are_skipped() {
     let storybook_leaks: Vec<&str> = results
         .private_type_leaks
         .iter()
-        .filter(|leak| leak.path.ends_with("Component.stories.ts"))
-        .map(|leak| leak.export_name.as_str())
+        .filter(|leak| leak.leak.path.ends_with("Component.stories.ts"))
+        .map(|leak| leak.leak.export_name.as_str())
         .collect();
 
     assert!(
@@ -101,12 +101,13 @@ fn route_convention_files_are_skipped() {
             .private_type_leaks
             .iter()
             .filter(|leak| {
-                leak.path
+                leak.leak
+                    .path
                     .to_string_lossy()
                     .replace('\\', "/")
                     .contains(relative)
             })
-            .map(|leak| leak.export_name.as_str())
+            .map(|leak| leak.leak.export_name.as_str())
             .collect();
         assert!(
             leaks.is_empty(),
@@ -121,12 +122,13 @@ fn route_convention_files_are_skipped() {
         .private_type_leaks
         .iter()
         .filter(|leak| {
-            leak.path
+            leak.leak
+                .path
                 .to_string_lossy()
                 .replace('\\', "/")
                 .ends_with("src/index.ts")
         })
-        .map(|leak| leak.export_name.as_str())
+        .map(|leak| leak.leak.export_name.as_str())
         .collect();
     assert!(
         index_leaks.contains(&"Component"),
@@ -141,12 +143,13 @@ fn route_convention_files_are_skipped() {
         .private_type_leaks
         .iter()
         .filter(|leak| {
-            leak.path
+            leak.leak
+                .path
                 .to_string_lossy()
                 .replace('\\', "/")
                 .ends_with("app/routes/utils/format.ts")
         })
-        .map(|leak| leak.export_name.as_str())
+        .map(|leak| leak.leak.export_name.as_str())
         .collect();
     assert!(
         helper_leaks.contains(&"formatDate"),

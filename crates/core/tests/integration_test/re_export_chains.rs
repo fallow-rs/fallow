@@ -59,7 +59,7 @@ fn three_level_star_chain_no_unused_files() {
         results
             .unused_files
             .iter()
-            .map(|f| &f.path)
+            .map(|f| &f.file.path)
             .collect::<Vec<_>>()
     );
 }

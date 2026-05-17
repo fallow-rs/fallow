@@ -102,28 +102,30 @@ fn detects_boundary_violation() {
         results
             .boundary_violations
             .iter()
-            .map(|v| format!("{} -> {}", v.from_zone, v.to_zone))
+            .map(|v| format!("{} -> {}", v.violation.from_zone, v.violation.to_zone))
             .collect::<Vec<_>>()
     );
 
     let v = &results.boundary_violations[0];
-    assert_eq!(v.from_zone, "ui");
-    assert_eq!(v.to_zone, "db");
+    assert_eq!(v.violation.from_zone, "ui");
+    assert_eq!(v.violation.to_zone, "db");
     assert!(
-        v.from_path
+        v.violation
+            .from_path
             .to_string_lossy()
             .replace('\\', "/")
             .ends_with("src/ui/App.ts"),
         "from_path should end with src/ui/App.ts, got: {}",
-        v.from_path.display()
+        v.violation.from_path.display()
     );
     assert!(
-        v.to_path
+        v.violation
+            .to_path
             .to_string_lossy()
             .replace('\\', "/")
             .ends_with("src/db/query.ts"),
         "to_path should end with src/db/query.ts, got: {}",
-        v.to_path.display()
+        v.violation.to_path.display()
     );
 }
 
@@ -264,17 +266,17 @@ fn preset_detects_boundary_violation() {
             .iter()
             .map(|v| format!(
                 "{} ({}) -> {} ({})",
-                v.from_zone,
-                v.from_path.display(),
-                v.to_zone,
-                v.to_path.display()
+                v.violation.from_zone,
+                v.violation.from_path.display(),
+                v.violation.to_zone,
+                v.violation.to_path.display()
             ))
             .collect::<Vec<_>>()
     );
 
     let v = &results.boundary_violations[0];
-    assert_eq!(v.from_zone, "adapters");
-    assert_eq!(v.to_zone, "domain");
+    assert_eq!(v.violation.from_zone, "adapters");
+    assert_eq!(v.violation.to_zone, "domain");
 }
 
 #[test]
@@ -357,32 +359,34 @@ fn root_field_classifies_per_subtree() {
             .iter()
             .map(|v| format!(
                 "{} ({}) -> {} ({})",
-                v.from_zone,
-                v.from_path.display(),
-                v.to_zone,
-                v.to_path.display()
+                v.violation.from_zone,
+                v.violation.from_path.display(),
+                v.violation.to_zone,
+                v.violation.to_path.display()
             ))
             .collect::<Vec<_>>()
     );
 
     let v = &results.boundary_violations[0];
-    assert_eq!(v.from_zone, "ui");
-    assert_eq!(v.to_zone, "domain");
+    assert_eq!(v.violation.from_zone, "ui");
+    assert_eq!(v.violation.to_zone, "domain");
     assert!(
-        v.from_path
+        v.violation
+            .from_path
             .to_string_lossy()
             .replace('\\', "/")
             .ends_with("packages/app/src/login.tsx"),
         "from_path should end with packages/app/src/login.tsx, got: {}",
-        v.from_path.display()
+        v.violation.from_path.display()
     );
     assert!(
-        v.to_path
+        v.violation
+            .to_path
             .to_string_lossy()
             .replace('\\', "/")
             .ends_with("packages/core/src/order.ts"),
         "to_path should end with packages/core/src/order.ts, got: {}",
-        v.to_path.display()
+        v.violation.to_path.display()
     );
 }
 
@@ -514,8 +518,8 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         "with root, the cross-package import is now a cross-zone violation"
     );
     let v = &scoped_results.boundary_violations[0];
-    assert_eq!(v.from_zone, "ui");
-    assert_eq!(v.to_zone, "domain");
+    assert_eq!(v.violation.from_zone, "ui");
+    assert_eq!(v.violation.to_zone, "domain");
 }
 
 #[test]
@@ -566,28 +570,30 @@ fn auto_discover_isolates_child_boundary_zones() {
         results
             .boundary_violations
             .iter()
-            .map(|v| format!("{} -> {}", v.from_zone, v.to_zone))
+            .map(|v| format!("{} -> {}", v.violation.from_zone, v.violation.to_zone))
             .collect::<Vec<_>>()
     );
 
     let v = &results.boundary_violations[0];
-    assert_eq!(v.from_zone, "features/auth");
-    assert_eq!(v.to_zone, "features/billing");
+    assert_eq!(v.violation.from_zone, "features/auth");
+    assert_eq!(v.violation.to_zone, "features/billing");
     assert!(
-        v.from_path
+        v.violation
+            .from_path
             .to_string_lossy()
             .replace('\\', "/")
             .ends_with("src/features/auth/login.ts"),
         "from_path should end with src/features/auth/login.ts, got: {}",
-        v.from_path.display()
+        v.violation.from_path.display()
     );
     assert!(
-        v.to_path
+        v.violation
+            .to_path
             .to_string_lossy()
             .replace('\\', "/")
             .ends_with("src/features/billing/invoice.ts"),
         "to_path should end with src/features/billing/invoice.ts, got: {}",
-        v.to_path.display()
+        v.violation.to_path.display()
     );
 }
 
@@ -646,32 +652,34 @@ fn bulletproof_preset_detects_violation() {
             .iter()
             .map(|v| format!(
                 "{} ({}) -> {} ({})",
-                v.from_zone,
-                v.from_path.display(),
-                v.to_zone,
-                v.to_path.display()
+                v.violation.from_zone,
+                v.violation.from_path.display(),
+                v.violation.to_zone,
+                v.violation.to_path.display()
             ))
             .collect::<Vec<_>>()
     );
 
     let v = &results.boundary_violations[0];
-    assert_eq!(v.from_zone, "features/auth");
-    assert_eq!(v.to_zone, "app");
+    assert_eq!(v.violation.from_zone, "features/auth");
+    assert_eq!(v.violation.to_zone, "app");
     assert!(
-        v.from_path
+        v.violation
+            .from_path
             .to_string_lossy()
             .replace('\\', "/")
             .ends_with("src/features/auth/login.ts"),
         "from_path should end with src/features/auth/login.ts, got: {}",
-        v.from_path.display()
+        v.violation.from_path.display()
     );
     assert!(
-        v.to_path
+        v.violation
+            .to_path
             .to_string_lossy()
             .replace('\\', "/")
             .ends_with("src/app/page.ts"),
         "to_path should end with src/app/page.ts, got: {}",
-        v.to_path.display()
+        v.violation.to_path.display()
     );
 }
 
@@ -741,10 +749,10 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
             .iter()
             .map(|v| format!(
                 "{} ({}) -> {} ({})",
-                v.from_zone,
-                v.from_path.display(),
-                v.to_zone,
-                v.to_path.display()
+                v.violation.from_zone,
+                v.violation.from_path.display(),
+                v.violation.to_zone,
+                v.violation.to_path.display()
             ))
             .collect::<Vec<_>>()
     );

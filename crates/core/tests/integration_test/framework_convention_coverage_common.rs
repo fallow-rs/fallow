@@ -13,7 +13,7 @@ pub fn collect_unused_files(root: &Path, results: &AnalysisResults) -> Vec<Strin
     results
         .unused_files
         .iter()
-        .map(|file| normalize_path(root, &file.path))
+        .map(|file| normalize_path(root, &file.file.path))
         .collect()
 }
 

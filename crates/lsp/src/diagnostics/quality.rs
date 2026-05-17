@@ -456,7 +456,9 @@ mod tests {
         });
         results
             .unused_files
-            .push(fallow_core::results::UnusedFile { path: path.clone() });
+            .push(fallow_core::results::UnusedFileFinding::with_actions(
+                fallow_core::results::UnusedFile { path: path.clone() },
+            ));
         results
             .unused_enum_members
             .push(fallow_core::results::UnusedMember {

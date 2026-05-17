@@ -42,7 +42,7 @@ fn custom_location_config_file_itself_is_not_unused() {
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.to_string_lossy().replace('\\', "/"))
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files

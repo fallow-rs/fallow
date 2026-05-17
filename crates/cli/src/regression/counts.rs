@@ -242,9 +242,11 @@ mod tests {
     #[test]
     fn check_counts_from_results() {
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("a.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("a.ts"),
+            }));
         results.unused_exports.push(UnusedExport {
             path: PathBuf::from("b.ts"),
             export_name: "foo".into(),

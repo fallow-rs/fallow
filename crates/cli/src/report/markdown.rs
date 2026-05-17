@@ -2,7 +2,7 @@ use std::fmt::Write;
 use std::path::Path;
 
 use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::{AnalysisResults, PrivateTypeLeak, UnusedExport, UnusedMember};
+use fallow_core::results::{AnalysisResults, UnusedExport, UnusedMember};
 
 use super::grouping::ResultGroup;
 use super::{normalize_uri, plural, relative_path};
@@ -40,7 +40,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
 
     // ── Unused files ──
     markdown_section(&mut out, &results.unused_files, "Unused files", |file| {
-        vec![format!("- `{}`", rel(&file.path))]
+        vec![format!("- `{}`", rel(&file.file.path))]
     });
 
     // ── Unused exports ──
@@ -68,7 +68,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &results.private_type_leaks,
         "Private type leaks",
         root,
-        |e| e.path.as_path(),
+        |e| e.leak.path.as_path(),
         format_private_type_leak,
     );
 
@@ -122,8 +122,14 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &results.unresolved_imports,
         "Unresolved imports",
         root,
-        |i| i.path.as_path(),
-        |i| format!(":{} `{}`", i.line, escape_backticks(&i.specifier)),
+        |i| i.import.path.as_path(),
+        |i| {
+            format!(
+                ":{} `{}`",
+                i.import.line,
+                escape_backticks(&i.import.specifier)
+            )
+        },
     );
 
     // ── Unlisted dependencies ──
@@ -175,12 +181,12 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &results.circular_dependencies,
         "Circular dependencies",
         |cycle| {
-            let chain: Vec<String> = cycle.files.iter().map(|p| rel(p)).collect();
+            let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
             let mut display_chain = chain.clone();
             if let Some(first) = chain.first() {
                 display_chain.push(first.clone());
             }
-            let cross_pkg_tag = if cycle.is_cross_package {
+            let cross_pkg_tag = if cycle.cycle.is_cross_package {
                 " *(cross-package)*"
             } else {
                 ""
@@ -205,11 +211,11 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         |v| {
             vec![format!(
                 "- `{}`:{}  \u{2192} `{}` ({} \u{2192} {})",
-                rel(&v.from_path),
-                v.line,
-                rel(&v.to_path),
-                v.from_zone,
-                v.to_zone,
+                rel(&v.violation.from_path),
+                v.violation.line,
+                rel(&v.violation.to_path),
+                v.violation.from_zone,
+                v.violation.to_zone,
             )]
         },
     );
@@ -387,7 +393,10 @@ fn format_export(e: &UnusedExport) -> String {
     format!(":{} `{}`{re}", e.line, escape_backticks(&e.export_name))
 }
 
-fn format_private_type_leak(e: &PrivateTypeLeak) -> String {
+fn format_private_type_leak(
+    entry: &fallow_types::output_dead_code::PrivateTypeLeakFinding,
+) -> String {
+    let e = &entry.leak;
     format!(
         ":{} `{}` references private type `{}`",
         e.line,
@@ -1253,9 +1262,11 @@ mod tests {
     fn markdown_unused_file_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/dead.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/dead.ts"),
+            }));
         let md = build_markdown(&results, &root);
         assert!(md.contains("- `src/dead.ts`"));
     }
@@ -1314,13 +1325,17 @@ mod tests {
     fn markdown_circular_dep_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-            length: 2,
-            line: 3,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                    length: 2,
+                    line: 3,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
         let md = build_markdown(&results, &root);
         assert!(md.contains("`src/a.ts`"));
         assert!(md.contains("`src/b.ts`"));
@@ -1331,9 +1346,11 @@ mod tests {
     fn markdown_strips_root_prefix() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("/project/src/deep/nested/file.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("/project/src/deep/nested/file.ts"),
+            }));
         let md = build_markdown(&results, &root);
         assert!(md.contains("`src/deep/nested/file.ts`"));
         assert!(!md.contains("/project/"));
@@ -1343,9 +1360,11 @@ mod tests {
     fn markdown_single_issue_no_plural() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/dead.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/dead.ts"),
+            }));
         let md = build_markdown(&results, &root);
         assert!(md.starts_with("## Fallow: 1 issue found\n"));
     }
@@ -1835,12 +1854,16 @@ mod tests {
     fn markdown_multiple_issues_plural() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/a.ts"),
-        });
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/b.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/a.ts"),
+            }));
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/b.ts"),
+            }));
         let md = build_markdown(&results, &root);
         assert!(md.starts_with("## Fallow: 2 issues found\n"));
     }
@@ -2142,13 +2165,15 @@ mod tests {
     fn markdown_unresolved_import_grouped_by_file() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unresolved_imports.push(UnresolvedImport {
-            path: root.join("src/app.ts"),
-            specifier: "./missing".to_string(),
-            line: 3,
-            col: 0,
-            specifier_col: 0,
-        });
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: root.join("src/app.ts"),
+                specifier: "./missing".to_string(),
+                line: 3,
+                col: 0,
+                specifier_col: 0,
+            }));
         let md = build_markdown(&results, &root);
         assert!(md.contains("### Unresolved imports (1)"));
         assert!(md.contains("- `src/app.ts`"));

@@ -824,7 +824,7 @@ fn build_static_signal_index(
     let mut index = StaticSignalIndex::default();
 
     for file in &analysis_output.results.unused_files {
-        index.unused_files.insert(file.path.clone());
+        index.unused_files.insert(file.file.path.clone());
     }
     for export in &analysis_output.results.unused_exports {
         index

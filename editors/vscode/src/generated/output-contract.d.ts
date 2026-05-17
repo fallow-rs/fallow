@@ -550,9 +550,11 @@ total_issues: number
 entry_points?: (EntryPoints | null)
 summary: CheckSummary
 /**
- * Files not reachable from any entry point.
+ * Files not reachable from any entry point. Wrapped in
+ * [`UnusedFileFinding`] so each entry carries a typed `actions` array
+ * natively, replacing the pre-2.76 post-pass injection.
  */
-unused_files: UnusedFile[]
+unused_files: UnusedFileFinding[]
 /**
  * Exports never imported by other modules.
  */
@@ -562,9 +564,11 @@ unused_exports: UnusedExport[]
  */
 unused_types: UnusedExport[]
 /**
- * Exported symbols whose public signature references same-file private types.
+ * Exported symbols whose public signature references same-file private
+ * types. Wrapped in [`PrivateTypeLeakFinding`] so each entry carries a
+ * typed `actions` array natively.
  */
-private_type_leaks: PrivateTypeLeak[]
+private_type_leaks: PrivateTypeLeakFinding[]
 /**
  * Dependencies listed in package.json but never imported.
  */
@@ -586,9 +590,11 @@ unused_enum_members: UnusedMember[]
  */
 unused_class_members: UnusedMember[]
 /**
- * Import specifiers that could not be resolved.
+ * Import specifiers that could not be resolved. Wrapped in
+ * [`UnresolvedImportFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-unresolved_imports: UnresolvedImport[]
+unresolved_imports: UnresolvedImportFinding[]
 /**
  * Dependencies used in code but not listed in package.json.
  */
@@ -607,13 +613,17 @@ type_only_dependencies: TypeOnlyDependency[]
  */
 test_only_dependencies?: TestOnlyDependency[]
 /**
- * Circular dependency chains detected in the module graph.
+ * Circular dependency chains detected in the module graph. Wrapped in
+ * [`CircularDependencyFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-circular_dependencies: CircularDependency[]
+circular_dependencies: CircularDependencyFinding[]
 /**
- * Imports that cross architecture boundary rules.
+ * Imports that cross architecture boundary rules. Wrapped in
+ * [`BoundaryViolationFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-boundary_violations?: BoundaryViolation[]
+boundary_violations?: BoundaryViolationFinding[]
 /**
  * Suppression comments or JSDoc tags that no longer match any issue.
  */
@@ -786,18 +796,26 @@ unused_dependency_overrides: number
 misconfigured_dependency_overrides: number
 }
 /**
- * A file that is not reachable from any entry point.
+ * Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
+ * flattens in via `#[serde(flatten)]`, with a typed `actions` array
+ * populated at construction time and the audit-pass `introduced` flag
+ * attached as an optional sibling.
  */
-export interface UnusedFile {
+export interface UnusedFileFinding {
 /**
  * Absolute path to the unused file.
  */
 path: string
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps: a `delete-file` primary and a `suppress-file`
+ * secondary. Always emitted (possibly empty for forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base. `None` when serialized directly from Rust.
+ */
+introduced?: (boolean | null)
 }
 /**
  * A code-change fix. `type` is one of the kebab-case identifiers in
@@ -980,9 +998,11 @@ actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
- * A public export signature that references a same-file private type.
+ * Wire-shape envelope for a [`PrivateTypeLeak`] finding. Mirrors
+ * [`UnusedFileFinding`]: flattens the bare finding and carries a typed
+ * `actions` array (`export-type` primary plus `suppress-line` secondary).
  */
-export interface PrivateTypeLeak {
+export interface PrivateTypeLeakFinding {
 /**
  * File containing the exported symbol.
  */
@@ -1008,10 +1028,15 @@ col: number
  */
 span_start: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (boolean | null)
 }
 /**
  * A dependency that is listed in package.json but never imported.
@@ -1073,9 +1098,12 @@ actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
- * An import that could not be resolved.
+ * Wire-shape envelope for an [`UnresolvedImport`] finding. Mirrors
+ * [`UnusedFileFinding`]: flattens the bare finding and carries a typed
+ * `actions` array (`resolve-import` primary plus `suppress-line`
+ * secondary).
  */
-export interface UnresolvedImport {
+export interface UnresolvedImportFinding {
 /**
  * File containing the unresolved import.
  */
@@ -1098,10 +1126,15 @@ col: number
  */
 specifier_col: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (boolean | null)
 }
 /**
  * A dependency used in code but not listed in package.json.
@@ -1223,18 +1256,12 @@ actions: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
- * A circular dependency chain detected in the module graph.
- * 
- * The `line` and `col` fields carry `#[serde(default)]` so callers reading
- * historical baseline JSON without these fields can still deserialize the
- * struct, but the JSON output layer always emits them (u32 always
- * serializes, never via `skip_serializing_if`). The schemars derive sees
- * the serde defaults and marks both fields optional in the generated
- * schema; the explicit `extend("required" = ...)` override here keeps the
- * schema's `required` array honest about what the JSON output actually
- * contains.
+ * Wire-shape envelope for a [`CircularDependency`] finding. Mirrors
+ * [`UnusedFileFinding`]: flattens the bare finding and carries a typed
+ * `actions` array (`refactor-cycle` primary plus `suppress-line`
+ * secondary).
  */
-export interface CircularDependency {
+export interface CircularDependencyFinding {
 /**
  * Files forming the cycle, in import order.
  */
@@ -1256,15 +1283,23 @@ col: number
  */
 is_cross_package?: boolean
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (boolean | null)
 }
 /**
- * An import that crosses an architecture boundary rule.
+ * Wire-shape envelope for a [`BoundaryViolation`] finding. Mirrors
+ * [`UnusedFileFinding`]: flattens the bare finding and carries a typed
+ * `actions` array (`refactor-boundary` primary plus `suppress-line`
+ * secondary).
  */
-export interface BoundaryViolation {
+export interface BoundaryViolationFinding {
 /**
  * The file making the disallowed import.
  */
@@ -1294,10 +1329,15 @@ line: number
  */
 col: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (boolean | null)
 }
 /**
  * A suppression comment or JSDoc tag that no longer matches any issue.
@@ -3573,9 +3613,11 @@ owners?: (string[] | null)
  */
 total_issues: number
 /**
- * Files not reachable from any entry point.
+ * Files not reachable from any entry point. Wrapped in
+ * [`UnusedFileFinding`] so each entry carries a typed `actions` array
+ * natively, replacing the pre-2.76 post-pass injection.
  */
-unused_files: UnusedFile[]
+unused_files: UnusedFileFinding[]
 /**
  * Exports never imported by other modules.
  */
@@ -3585,9 +3627,11 @@ unused_exports: UnusedExport[]
  */
 unused_types: UnusedExport[]
 /**
- * Exported symbols whose public signature references same-file private types.
+ * Exported symbols whose public signature references same-file private
+ * types. Wrapped in [`PrivateTypeLeakFinding`] so each entry carries a
+ * typed `actions` array natively.
  */
-private_type_leaks: PrivateTypeLeak[]
+private_type_leaks: PrivateTypeLeakFinding[]
 /**
  * Dependencies listed in package.json but never imported.
  */
@@ -3609,9 +3653,11 @@ unused_enum_members: UnusedMember[]
  */
 unused_class_members: UnusedMember[]
 /**
- * Import specifiers that could not be resolved.
+ * Import specifiers that could not be resolved. Wrapped in
+ * [`UnresolvedImportFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-unresolved_imports: UnresolvedImport[]
+unresolved_imports: UnresolvedImportFinding[]
 /**
  * Dependencies used in code but not listed in package.json.
  */
@@ -3630,13 +3676,17 @@ type_only_dependencies: TypeOnlyDependency[]
  */
 test_only_dependencies?: TestOnlyDependency[]
 /**
- * Circular dependency chains detected in the module graph.
+ * Circular dependency chains detected in the module graph. Wrapped in
+ * [`CircularDependencyFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-circular_dependencies: CircularDependency[]
+circular_dependencies: CircularDependencyFinding[]
 /**
- * Imports that cross architecture boundary rules.
+ * Imports that cross architecture boundary rules. Wrapped in
+ * [`BoundaryViolationFinding`] so each entry carries a typed `actions`
+ * array natively.
  */
-boundary_violations?: BoundaryViolation[]
+boundary_violations?: BoundaryViolationFinding[]
 /**
  * Suppression comments or JSDoc tags that no longer match any issue.
  */

@@ -471,7 +471,7 @@ fn circular_re_export_no_unused_files() {
         results
             .unused_files
             .iter()
-            .map(|f| &f.path)
+            .map(|f| &f.file.path)
             .collect::<Vec<_>>()
     );
 }
@@ -515,7 +515,7 @@ fn barrel_default_reexport_no_unused_files() {
     let unused_file_paths: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.to_string_lossy().replace('\\', "/"))
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
 
     assert!(

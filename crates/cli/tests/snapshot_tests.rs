@@ -26,9 +26,10 @@ use fallow_core::results::*;
 fn sample_results(root: &Path) -> AnalysisResults {
     let mut r = AnalysisResults::default();
 
-    r.unused_files.push(UnusedFile {
-        path: root.join("src/dead.ts"),
-    });
+    r.unused_files
+        .push(UnusedFileFinding::with_actions(UnusedFile {
+            path: root.join("src/dead.ts"),
+        }));
     r.unused_exports.push(UnusedExport {
         path: root.join("src/utils.ts"),
         export_name: "helperFn".to_string(),
@@ -77,13 +78,14 @@ fn sample_results(root: &Path) -> AnalysisResults {
         line: 42,
         col: 4,
     });
-    r.unresolved_imports.push(UnresolvedImport {
-        path: root.join("src/app.ts"),
-        specifier: "./missing-module".to_string(),
-        line: 3,
-        col: 0,
-        specifier_col: 0,
-    });
+    r.unresolved_imports
+        .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+            path: root.join("src/app.ts"),
+            specifier: "./missing-module".to_string(),
+            line: 3,
+            col: 0,
+            specifier_col: 0,
+        }));
     r.unlisted_dependencies.push(UnlistedDependency {
         package_name: "chalk".to_string(),
         imported_from: vec![ImportSite {
@@ -124,13 +126,16 @@ fn sample_results(root: &Path) -> AnalysisResults {
         path: root.join("package.json"),
         line: 12,
     });
-    r.circular_dependencies.push(CircularDependency {
-        files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-        length: 2,
-        line: 3,
-        col: 0,
-        is_cross_package: false,
-    });
+    r.circular_dependencies
+        .push(CircularDependencyFinding::with_actions(
+            CircularDependency {
+                files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                length: 2,
+                line: 3,
+                col: 0,
+                is_cross_package: false,
+            },
+        ));
     r.unused_catalog_entries
         .push(fallow_core::results::UnusedCatalogEntry {
             entry_name: "is-even".to_string(),
@@ -281,12 +286,16 @@ fn compact_empty_results_snapshot() {
 fn compact_unused_files_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_files.push(UnusedFile {
-        path: root.join("src/dead.ts"),
-    });
-    results.unused_files.push(UnusedFile {
-        path: root.join("src/orphan.ts"),
-    });
+    results
+        .unused_files
+        .push(UnusedFileFinding::with_actions(UnusedFile {
+            path: root.join("src/dead.ts"),
+        }));
+    results
+        .unused_files
+        .push(UnusedFileFinding::with_actions(UnusedFile {
+            path: root.join("src/orphan.ts"),
+        }));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_unused_files_only", lines.join("\n"));
 }
@@ -390,20 +399,24 @@ fn compact_unused_optional_deps_only_snapshot() {
 fn compact_unresolved_imports_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unresolved_imports.push(UnresolvedImport {
-        path: root.join("src/app.ts"),
-        specifier: "./missing-module".to_string(),
-        line: 3,
-        col: 0,
-        specifier_col: 0,
-    });
-    results.unresolved_imports.push(UnresolvedImport {
-        path: root.join("src/app.ts"),
-        specifier: "@org/nonexistent".to_string(),
-        line: 4,
-        col: 0,
-        specifier_col: 0,
-    });
+    results
+        .unresolved_imports
+        .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+            path: root.join("src/app.ts"),
+            specifier: "./missing-module".to_string(),
+            line: 3,
+            col: 0,
+            specifier_col: 0,
+        }));
+    results
+        .unresolved_imports
+        .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+            path: root.join("src/app.ts"),
+            specifier: "@org/nonexistent".to_string(),
+            line: 4,
+            col: 0,
+            specifier_col: 0,
+        }));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_unresolved_imports_only", lines.join("\n"));
 }
@@ -629,9 +642,11 @@ fn redact_version(json_str: &str) -> String {
 fn json_unused_files_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_files.push(UnusedFile {
-        path: root.join("src/dead.ts"),
-    });
+    results
+        .unused_files
+        .push(UnusedFileFinding::with_actions(UnusedFile {
+            path: root.join("src/dead.ts"),
+        }));
     let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_files_only", redact_version(&json_str));
@@ -693,13 +708,15 @@ fn json_unused_deps_only_snapshot() {
 fn json_unresolved_imports_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unresolved_imports.push(UnresolvedImport {
-        path: root.join("src/app.ts"),
-        specifier: "./missing-module".to_string(),
-        line: 3,
-        col: 0,
-        specifier_col: 0,
-    });
+    results
+        .unresolved_imports
+        .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+            path: root.join("src/app.ts"),
+            specifier: "./missing-module".to_string(),
+            line: 3,
+            col: 0,
+            specifier_col: 0,
+        }));
     let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unresolved_imports_only", redact_version(&json_str));
@@ -798,9 +815,11 @@ fn redact_sarif_version(json_str: &str) -> String {
 fn sarif_unused_files_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_files.push(UnusedFile {
-        path: root.join("src/dead.ts"),
-    });
+    results
+        .unused_files
+        .push(UnusedFileFinding::with_actions(UnusedFile {
+            path: root.join("src/dead.ts"),
+        }));
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
     insta::assert_snapshot!("sarif_unused_files_only", redact_sarif_version(&json_str));
@@ -862,13 +881,15 @@ fn sarif_unused_deps_only_snapshot() {
 fn sarif_unresolved_imports_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unresolved_imports.push(UnresolvedImport {
-        path: root.join("src/app.ts"),
-        specifier: "./missing-module".to_string(),
-        line: 3,
-        col: 0,
-        specifier_col: 0,
-    });
+    results
+        .unresolved_imports
+        .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+            path: root.join("src/app.ts"),
+            specifier: "./missing-module".to_string(),
+            line: 3,
+            col: 0,
+            specifier_col: 0,
+        }));
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
     insta::assert_snapshot!(
@@ -1126,9 +1147,11 @@ fn codeclimate_empty_results_snapshot() {
 fn codeclimate_unused_files_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_files.push(UnusedFile {
-        path: root.join("src/dead.ts"),
-    });
+    results
+        .unused_files
+        .push(UnusedFileFinding::with_actions(UnusedFile {
+            path: root.join("src/dead.ts"),
+        }));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
@@ -1194,13 +1217,15 @@ fn codeclimate_unused_deps_only_snapshot() {
 fn codeclimate_unresolved_imports_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unresolved_imports.push(UnresolvedImport {
-        path: root.join("src/index.ts"),
-        specifier: "./missing".to_string(),
-        line: 3,
-        col: 0,
-        specifier_col: 0,
-    });
+    results
+        .unresolved_imports
+        .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+            path: root.join("src/index.ts"),
+            specifier: "./missing".to_string(),
+            line: 3,
+            col: 0,
+            specifier_col: 0,
+        }));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
@@ -1393,13 +1418,17 @@ fn codeclimate_unused_optional_deps_only_snapshot() {
 fn codeclimate_circular_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.circular_dependencies.push(CircularDependency {
-        files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-        length: 2,
-        line: 3,
-        col: 0,
-        is_cross_package: false,
-    });
+    results
+        .circular_dependencies
+        .push(CircularDependencyFinding::with_actions(
+            CircularDependency {
+                files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                length: 2,
+                line: 3,
+                col: 0,
+                is_cross_package: false,
+            },
+        ));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
@@ -1518,13 +1547,17 @@ fn review_gitlab_envelope_snapshot() {
 fn json_circular_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.circular_dependencies.push(CircularDependency {
-        files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-        length: 2,
-        line: 3,
-        col: 0,
-        is_cross_package: false,
-    });
+    results
+        .circular_dependencies
+        .push(CircularDependencyFinding::with_actions(
+            CircularDependency {
+                files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                length: 2,
+                line: 3,
+                col: 0,
+                is_cross_package: false,
+            },
+        ));
     let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_circular_deps_only", redact_version(&json_str));
@@ -1534,13 +1567,17 @@ fn json_circular_deps_only_snapshot() {
 fn sarif_circular_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.circular_dependencies.push(CircularDependency {
-        files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-        length: 2,
-        line: 3,
-        col: 0,
-        is_cross_package: false,
-    });
+    results
+        .circular_dependencies
+        .push(CircularDependencyFinding::with_actions(
+            CircularDependency {
+                files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                length: 2,
+                line: 3,
+                col: 0,
+                is_cross_package: false,
+            },
+        ));
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
     insta::assert_snapshot!("sarif_circular_deps_only", redact_sarif_version(&json_str));
@@ -1550,13 +1587,17 @@ fn sarif_circular_deps_only_snapshot() {
 fn compact_circular_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.circular_dependencies.push(CircularDependency {
-        files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-        length: 2,
-        line: 3,
-        col: 0,
-        is_cross_package: false,
-    });
+    results
+        .circular_dependencies
+        .push(CircularDependencyFinding::with_actions(
+            CircularDependency {
+                files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                length: 2,
+                line: 3,
+                col: 0,
+                is_cross_package: false,
+            },
+        ));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_circular_deps_only", lines.join("\n"));
 }
@@ -1714,9 +1755,11 @@ fn markdown_empty_results_snapshot() {
 fn markdown_single_unused_file_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_files.push(UnusedFile {
-        path: root.join("src/dead.ts"),
-    });
+    results
+        .unused_files
+        .push(UnusedFileFinding::with_actions(UnusedFile {
+            path: root.join("src/dead.ts"),
+        }));
     let output = build_markdown(&results, &root);
     insta::assert_snapshot!("markdown_single_unused_file", output);
 }
@@ -1783,13 +1826,15 @@ fn markdown_unused_deps_only_snapshot() {
 fn markdown_unresolved_imports_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unresolved_imports.push(UnresolvedImport {
-        path: root.join("src/app.ts"),
-        specifier: "./missing-module".to_string(),
-        line: 3,
-        col: 0,
-        specifier_col: 0,
-    });
+    results
+        .unresolved_imports
+        .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+            path: root.join("src/app.ts"),
+            specifier: "./missing-module".to_string(),
+            line: 3,
+            col: 0,
+            specifier_col: 0,
+        }));
     let output = build_markdown(&results, &root);
     insta::assert_snapshot!("markdown_unresolved_imports_only", output);
 }
@@ -1869,13 +1914,17 @@ fn markdown_duplicate_exports_only_snapshot() {
 fn markdown_circular_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.circular_dependencies.push(CircularDependency {
-        files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-        length: 2,
-        line: 3,
-        col: 0,
-        is_cross_package: false,
-    });
+    results
+        .circular_dependencies
+        .push(CircularDependencyFinding::with_actions(
+            CircularDependency {
+                files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                length: 2,
+                line: 3,
+                col: 0,
+                is_cross_package: false,
+            },
+        ));
     let output = build_markdown(&results, &root);
     insta::assert_snapshot!("markdown_circular_deps_only", output);
 }

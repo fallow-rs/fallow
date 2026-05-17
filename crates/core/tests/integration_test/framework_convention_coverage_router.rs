@@ -13,12 +13,13 @@ fn assert_bundle_boundary_modules_are_traversed(
         .map(|import| {
             (
                 import
+                    .import
                     .path
                     .strip_prefix(root)
-                    .unwrap_or(&import.path)
+                    .unwrap_or(&import.import.path)
                     .to_string_lossy()
                     .replace('\\', "/"),
-                import.specifier.clone(),
+                import.import.specifier.clone(),
             )
         })
         .collect();

@@ -9,7 +9,14 @@ fn graphql_hash_imports_keep_documents_reachable() {
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|file| {
+            file.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     assert!(

@@ -59,7 +59,7 @@ fn eslint_relative_extends_config_is_not_reported_unused() {
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files
@@ -99,7 +99,7 @@ fn type_only_bidirectional_import_not_reported_as_cycle() {
         results
             .circular_dependencies
             .iter()
-            .map(|cd| &cd.files)
+            .map(|cd| &cd.cycle.files)
             .collect::<Vec<_>>()
     );
 }
@@ -115,7 +115,14 @@ fn type_only_cycle_still_detects_unused_exports() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
     assert!(
         !unused_file_names.contains(&"user.ts".to_string()),
@@ -199,7 +206,7 @@ fn broken_tsconfig_extends_does_not_poison_sibling_resolution() {
         results
             .unresolved_imports
             .iter()
-            .map(|u| (u.path.display().to_string(), &u.specifier))
+            .map(|u| (u.import.path.display().to_string(), &u.import.specifier))
             .collect::<Vec<_>>()
     );
 }
@@ -218,7 +225,7 @@ fn broken_tsconfig_path_alias_is_not_misclassified_as_unlisted_dependency() {
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|import| import.specifier.as_str())
+        .map(|import| import.import.specifier.as_str())
         .collect();
 
     assert!(
@@ -242,7 +249,7 @@ fn wildcard_tsconfig_paths_do_not_misclassify_bare_imports() {
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|import| import.specifier.as_str())
+        .map(|import| import.import.specifier.as_str())
         .collect();
     assert!(
         !unresolved_specifiers.contains(&"node:url"),
@@ -275,7 +282,7 @@ fn wildcard_tsconfig_paths_do_not_misclassify_bare_imports() {
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files.iter().any(|path| path == "src/helpers.ts"),
@@ -364,7 +371,7 @@ export const app = Button;
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|import| import.specifier.as_str())
+        .map(|import| import.import.specifier.as_str())
         .collect();
     assert!(
         !unresolved_specifiers.contains(&"@/components/Button"),
@@ -374,7 +381,7 @@ export const app = Button;
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files
@@ -445,7 +452,7 @@ export const app = Button;
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files
@@ -515,7 +522,7 @@ export const app = Screen;
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files
@@ -582,7 +589,7 @@ export const app = Button;
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files
@@ -675,7 +682,7 @@ export const app = [env, feature, nested, theme, api, shared].join("-");
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     for expected_used in [
         "src/env.ts",
@@ -754,7 +761,7 @@ export const app = [staticValue, requiredValue].join("-");
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     for expected_used in [
         "src/lib/static.ts",
@@ -831,7 +838,7 @@ export const app = value;
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files
@@ -952,7 +959,7 @@ export const app = Button;
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files
@@ -1031,7 +1038,7 @@ export const app = theme;
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files.iter().any(|path| path == "shared/theme.ts"),
@@ -1123,7 +1130,7 @@ export const app = message;
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files
@@ -1207,7 +1214,7 @@ export const app = child + base;
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|import| import.specifier.as_str())
+        .map(|import| import.import.specifier.as_str())
         .collect();
     assert!(
         !unresolved_specifiers.contains(&"@child/value"),
@@ -1216,7 +1223,7 @@ export const app = child + base;
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files
@@ -1292,7 +1299,7 @@ export const view = generated;
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files
@@ -1364,7 +1371,7 @@ export const app = value;
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files.iter().any(|path| path == "shared/value.ts"),
@@ -1433,7 +1440,7 @@ export const app = value;
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files.iter().any(|path| path == "src/lib/value.ts"),
@@ -1502,7 +1509,7 @@ export const app = pkg;
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files
@@ -1562,7 +1569,7 @@ export const view = generated;
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_files
@@ -1581,7 +1588,7 @@ fn glimmer_typescript_imports_use_tsconfig_path_aliases() {
     let unused_file_paths: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.path.to_string_lossy().to_string())
+        .map(|file| file.file.path.to_string_lossy().to_string())
         .collect();
 
     assert!(
@@ -1603,7 +1610,7 @@ fn glimmer_typescript_imports_use_tsconfig_path_aliases() {
         results
             .unresolved_imports
             .iter()
-            .map(|import| &import.specifier)
+            .map(|import| &import.import.specifier)
             .collect::<Vec<_>>()
     );
 }
@@ -1681,7 +1688,7 @@ export default defineConfig({
     let unused: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.to_string_lossy().replace('\\', "/"))
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused.iter().any(|p| p.ends_with("prisma.config.ts")),
@@ -1980,7 +1987,7 @@ model User {
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.to_string_lossy().replace('\\', "/"))
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
     assert!(
         !unused_dev.contains(&"prisma-json-types-generator".to_owned()),

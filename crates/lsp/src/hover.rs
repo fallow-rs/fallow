@@ -56,7 +56,10 @@ pub fn build_hover(
 
 /// Check if the file is in the unused files list.
 fn check_unused_file(results: &AnalysisResults, file_path: &Path) -> Option<Hover> {
-    let is_unused = results.unused_files.iter().any(|f| f.path == file_path);
+    let is_unused = results
+        .unused_files
+        .iter()
+        .any(|f| f.file.path == file_path);
     if !is_unused {
         return None;
     }
@@ -275,23 +278,23 @@ fn check_unresolved_import(
     position: Position,
 ) -> Option<Hover> {
     for import in &results.unresolved_imports {
-        if import.path != file_path {
+        if import.import.path != file_path {
             continue;
         }
-        let import_line = import.line.saturating_sub(1);
+        let import_line = import.import.line.saturating_sub(1);
         if import_line != position.line {
             continue;
         }
         // Range covers the source string literal including quotes (+2)
-        let end_col = import.specifier_col + import.specifier.len() as u32 + 2;
-        if position.character < import.specifier_col || position.character >= end_col {
+        let end_col = import.import.specifier_col + import.import.specifier.len() as u32 + 2;
+        if position.character < import.import.specifier_col || position.character >= end_col {
             continue;
         }
 
         let value = format!(
             "**fallow**: Cannot resolve import `{}`. The module may be missing, misspelled, \
              or not installed.",
-            import.specifier
+            import.import.specifier
         );
 
         return Some(Hover {
@@ -302,7 +305,7 @@ fn check_unresolved_import(
             range: Some(Range {
                 start: Position {
                     line: import_line,
-                    character: import.specifier_col,
+                    character: import.import.specifier_col,
                 },
                 end: Position {
                     line: import_line,
@@ -414,7 +417,8 @@ mod tests {
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
     use fallow_core::extract::MemberKind;
     use fallow_core::results::{
-        ExportUsage, ReferenceLocation, UnresolvedImport, UnusedExport, UnusedFile, UnusedMember,
+        ExportUsage, ReferenceLocation, UnresolvedImport, UnresolvedImportFinding, UnusedExport,
+        UnusedFile, UnusedFileFinding, UnusedMember,
     };
 
     /// Extract the markdown text from a Hover's contents.
@@ -462,7 +466,11 @@ mod tests {
         let root = test_root();
         let path = root.join("src/dead.ts");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: path.clone() });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: path.clone(),
+            }));
         let duplication = DuplicationReport::default();
         let pos = Position {
             line: 10,
@@ -684,13 +692,15 @@ mod tests {
         let root = test_root();
         let path = root.join("src/app.ts");
         let mut results = AnalysisResults::default();
-        results.unresolved_imports.push(UnresolvedImport {
-            path: path.clone(),
-            specifier: "./missing-module".to_string(),
-            line: 3,
-            col: 0,
-            specifier_col: 20,
-        });
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: path.clone(),
+                specifier: "./missing-module".to_string(),
+                line: 3,
+                col: 0,
+                specifier_col: 20,
+            }));
         let duplication = DuplicationReport::default();
         let pos = Position {
             line: 2,
@@ -823,7 +833,11 @@ mod tests {
         let root = test_root();
         let path = root.join("src/dead.ts");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: path.clone() });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: path.clone(),
+            }));
         results.export_usages.push(ExportUsage {
             path: path.clone(),
             export_name: "foo".to_string(),
@@ -1090,13 +1104,15 @@ mod tests {
         let path = root.join("src/app.ts");
         let mut results = AnalysisResults::default();
         // specifier "./mod" is 5 chars, specifier_col=10, range covers [10, 17) (5 + 2 quotes)
-        results.unresolved_imports.push(UnresolvedImport {
-            path: path.clone(),
-            specifier: "./mod".to_string(),
-            line: 1,
-            col: 0,
-            specifier_col: 10,
-        });
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: path.clone(),
+                specifier: "./mod".to_string(),
+                line: 1,
+                col: 0,
+                specifier_col: 10,
+            }));
         let duplication = DuplicationReport::default();
 
         // At specifier_col (start boundary) => should match

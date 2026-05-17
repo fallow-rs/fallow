@@ -26,7 +26,7 @@ fn workspace_cross_import_resolves() {
         results
             .unresolved_imports
             .iter()
-            .map(|i| &i.specifier)
+            .map(|i| &i.import.specifier)
             .collect::<Vec<_>>()
     );
 }
@@ -53,7 +53,14 @@ fn workspace_cross_import_detects_orphan() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     assert!(
@@ -126,7 +133,14 @@ fn workspace_self_reference_resolves_secondary_entry_points() {
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
 
     // None of the ui-kit secondary entry point files should be reported.
@@ -134,7 +148,8 @@ fn workspace_self_reference_resolves_secondary_entry_points() {
     for secondary in ["button", "modal", "tabs", "internal/base"] {
         assert!(
             !results.unused_files.iter().any(|f| {
-                f.path
+                f.file
+                    .path
                     .to_string_lossy()
                     .replace('\\', "/")
                     .contains(&format!("ui-kit/{secondary}/index.ts"))
@@ -148,7 +163,7 @@ fn workspace_self_reference_resolves_secondary_entry_points() {
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
         .iter()
-        .map(|i| i.specifier.as_str())
+        .map(|i| i.import.specifier.as_str())
         .collect();
     assert!(
         !unresolved_specifiers

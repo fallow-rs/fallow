@@ -46,7 +46,7 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
     let mut lines = Vec::new();
 
     for file in &results.unused_files {
-        lines.push(format!("unused-file:{}", rel(&file.path)));
+        lines.push(format!("unused-file:{}", rel(&file.file.path)));
     }
     for export in &results.unused_exports {
         lines.push(compact_export(export, "unused-export", "unused-re-export"));
@@ -61,10 +61,10 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
     for leak in &results.private_type_leaks {
         lines.push(format!(
             "private-type-leak:{}:{}:{}->{}",
-            rel(&leak.path),
-            leak.line,
-            leak.export_name,
-            leak.type_name
+            rel(&leak.leak.path),
+            leak.leak.line,
+            leak.leak.export_name,
+            leak.leak.type_name
         ));
     }
     for dep in &results.unused_dependencies {
@@ -85,9 +85,9 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
     for import in &results.unresolved_imports {
         lines.push(format!(
             "unresolved-import:{}:{}:{}",
-            rel(&import.path),
-            import.line,
-            import.specifier
+            rel(&import.import.path),
+            import.import.line,
+            import.import.specifier
         ));
     }
     for dep in &results.unlisted_dependencies {
@@ -103,13 +103,13 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
         lines.push(format!("test-only-dep:{}", dep.package_name));
     }
     for cycle in &results.circular_dependencies {
-        let chain: Vec<String> = cycle.files.iter().map(|p| rel(p)).collect();
+        let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
         let mut display_chain = chain.clone();
         if let Some(first) = chain.first() {
             display_chain.push(first.clone());
         }
         let first_file = chain.first().map_or_else(String::new, Clone::clone);
-        let cross_pkg_tag = if cycle.is_cross_package {
+        let cross_pkg_tag = if cycle.cycle.is_cross_package {
             " (cross-package)"
         } else {
             ""
@@ -117,7 +117,7 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
         lines.push(format!(
             "circular-dependency:{}:{}:{}{}",
             first_file,
-            cycle.line,
+            cycle.cycle.line,
             display_chain.join(" \u{2192} "),
             cross_pkg_tag
         ));
@@ -125,12 +125,12 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
     for v in &results.boundary_violations {
         lines.push(format!(
             "boundary-violation:{}:{}:{} -> {} ({} -> {})",
-            rel(&v.from_path),
-            v.line,
-            rel(&v.from_path),
-            rel(&v.to_path),
-            v.from_zone,
-            v.to_zone,
+            rel(&v.violation.from_path),
+            v.violation.line,
+            rel(&v.violation.from_path),
+            rel(&v.violation.to_path),
+            v.violation.from_zone,
+            v.violation.to_zone,
         ));
     }
     for s in &results.stale_suppressions {
@@ -462,9 +462,11 @@ mod tests {
     fn compact_unused_file_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/dead.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/dead.ts"),
+            }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines.len(), 1);
@@ -661,13 +663,15 @@ mod tests {
     fn compact_unresolved_import_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unresolved_imports.push(UnresolvedImport {
-            path: root.join("src/app.ts"),
-            specifier: "./missing-module".to_string(),
-            line: 3,
-            col: 0,
-            specifier_col: 0,
-        });
+        results
+            .unresolved_imports
+            .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
+                path: root.join("src/app.ts"),
+                specifier: "./missing-module".to_string(),
+                line: 3,
+                col: 0,
+                specifier_col: 0,
+            }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "unresolved-import:src/app.ts:3:./missing-module");
@@ -741,9 +745,11 @@ mod tests {
     fn compact_strips_root_prefix_from_paths() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("/project/src/deep/nested/file.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("/project/src/deep/nested/file.ts"),
+            }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "unused-file:src/deep/nested/file.ts");
@@ -814,13 +820,17 @@ mod tests {
     fn compact_circular_dependency_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-            length: 2,
-            line: 3,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                    length: 2,
+                    line: 3,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines.len(), 1);
@@ -835,17 +845,21 @@ mod tests {
     fn compact_circular_dependency_closes_cycle() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.circular_dependencies.push(CircularDependency {
-            files: vec![
-                root.join("src/a.ts"),
-                root.join("src/b.ts"),
-                root.join("src/c.ts"),
-            ],
-            length: 3,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![
+                        root.join("src/a.ts"),
+                        root.join("src/b.ts"),
+                        root.join("src/c.ts"),
+                    ],
+                    length: 3,
+                    line: 1,
+                    col: 0,
+                    is_cross_package: false,
+                },
+            ));
 
         let lines = build_compact_lines(&results, &root);
         // Chain: a -> b -> c -> a
@@ -877,12 +891,16 @@ mod tests {
     fn compact_multiple_unused_files() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/a.ts"),
-        });
-        results.unused_files.push(UnusedFile {
-            path: root.join("src/b.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/a.ts"),
+            }));
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/b.ts"),
+            }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines.len(), 2);
@@ -932,9 +950,11 @@ mod tests {
     fn compact_path_outside_root_preserved() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: PathBuf::from("/other/place/file.ts"),
-        });
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("/other/place/file.ts"),
+            }));
 
         let lines = build_compact_lines(&results, &root);
         assert!(lines[0].contains("/other/place/file.ts"));
