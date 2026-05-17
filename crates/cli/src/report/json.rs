@@ -147,46 +147,6 @@ pub(super) fn print_grouped_json(
     reason = "used through report module re-export by combined.rs, audit.rs, flags.rs"
 )]
 pub(crate) const SCHEMA_VERSION: u32 = 6;
-const RUNTIME_COVERAGE_SCHEMA_VERSION: &str = "1";
-
-fn inject_runtime_coverage_schema_version(output: &mut serde_json::Value) {
-    let serde_json::Value::Object(map) = output else {
-        return;
-    };
-
-    if let Some(report) = map.get_mut("runtime_coverage") {
-        inject_runtime_coverage_report_schema_version(report);
-    }
-
-    if let Some(serde_json::Value::Array(groups)) = map.get_mut("groups") {
-        for group in groups {
-            if let Some(report) = group
-                .as_object_mut()
-                .and_then(|group| group.get_mut("runtime_coverage"))
-            {
-                inject_runtime_coverage_report_schema_version(report);
-            }
-        }
-    }
-}
-
-fn inject_runtime_coverage_report_schema_version(report: &mut serde_json::Value) {
-    let serde_json::Value::Object(report_map) = report else {
-        return;
-    };
-
-    let mut ordered = serde_json::Map::new();
-    ordered.insert(
-        "schema_version".to_string(),
-        serde_json::json!(RUNTIME_COVERAGE_SCHEMA_VERSION),
-    );
-    for (key, value) in std::mem::take(report_map) {
-        if key != "schema_version" {
-            ordered.insert(key, value);
-        }
-    }
-    *report_map = ordered;
-}
 
 /// Build the JSON output value for analysis results.
 ///
@@ -1771,7 +1731,6 @@ pub fn build_health_json(
     let mut output = serde_json::to_value(&envelope)?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
-    inject_runtime_coverage_schema_version(&mut output);
     inject_health_actions(&mut output, action_opts);
     if explain {
         insert_meta(&mut output, explain::health_meta());
@@ -1844,7 +1803,6 @@ pub fn build_grouped_health_json(
     };
     let mut output = serde_json::to_value(&envelope)?;
     strip_root_prefix(&mut output, &root_prefix);
-    inject_runtime_coverage_schema_version(&mut output);
     inject_health_actions(&mut output, action_opts);
 
     let group_values: Vec<serde_json::Value> = grouping
@@ -1853,7 +1811,6 @@ pub fn build_grouped_health_json(
         .map(|g| {
             let mut value = serde_json::to_value(g)?;
             strip_root_prefix(&mut value, &root_prefix);
-            inject_runtime_coverage_schema_version(&mut value);
             inject_health_actions(&mut value, action_opts);
             Ok(value)
         })
@@ -2058,7 +2015,8 @@ mod tests {
         RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageDataSource,
         RuntimeCoverageEvidence, RuntimeCoverageFinding, RuntimeCoverageHotPath,
         RuntimeCoverageMessage, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
-        RuntimeCoverageSummary, RuntimeCoverageVerdict, RuntimeCoverageWatermark,
+        RuntimeCoverageSchemaVersion, RuntimeCoverageSummary, RuntimeCoverageVerdict,
+        RuntimeCoverageWatermark,
     };
     use crate::report::test_helpers::sample_results;
     use fallow_core::extract::MemberKind;
@@ -2111,6 +2069,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
             runtime_coverage: Some(RuntimeCoverageReport {
+                schema_version: RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
                 signals: Vec::new(),
                 summary: RuntimeCoverageSummary {
@@ -2186,7 +2145,6 @@ mod tests {
         };
         let mut output = serde_json::to_value(&envelope).expect("should serialize health envelope");
         strip_root_prefix(&mut output, "/project/");
-        inject_runtime_coverage_schema_version(&mut output);
         inject_health_actions(&mut output, HealthActionOptions::default());
 
         assert_eq!(

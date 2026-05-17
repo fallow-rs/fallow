@@ -1938,6 +1938,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.runtime_coverage = Some(crate::health_types::RuntimeCoverageReport {
+            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
             verdict: crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected,
             signals: Vec::new(),
             summary: crate::health_types::RuntimeCoverageSummary {
@@ -2002,6 +2003,7 @@ mod tests {
         quality: Option<crate::health_types::RuntimeCoverageCaptureQuality>,
     ) -> crate::health_types::RuntimeCoverageReport {
         crate::health_types::RuntimeCoverageReport {
+            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
             verdict: crate::health_types::RuntimeCoverageReportVerdict::Clean,
             signals: Vec::new(),
             summary: crate::health_types::RuntimeCoverageSummary {

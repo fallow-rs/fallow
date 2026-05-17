@@ -19,8 +19,8 @@ use crate::health_types::{
     RuntimeCoverageAction, RuntimeCoverageCaptureQuality, RuntimeCoverageConfidence,
     RuntimeCoverageDataSource, RuntimeCoverageEvidence, RuntimeCoverageFinding,
     RuntimeCoverageHotPath, RuntimeCoverageMessage, RuntimeCoverageReport,
-    RuntimeCoverageReportVerdict, RuntimeCoverageRiskBand, RuntimeCoverageSummary,
-    RuntimeCoverageVerdict,
+    RuntimeCoverageReportVerdict, RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion,
+    RuntimeCoverageSummary, RuntimeCoverageVerdict,
 };
 
 const RUNTIME_COVERAGE_SCHEMA_VERSION: &str = "1";
@@ -491,6 +491,7 @@ fn merge_cloud_snapshot(
     let warnings = cloud_warnings(snapshot, unmatched_cloud_functions);
 
     RuntimeCoverageReport {
+        schema_version: RuntimeCoverageSchemaVersion::V1,
         verdict: if findings.is_empty() {
             RuntimeCoverageReportVerdict::Clean
         } else {
@@ -966,14 +967,13 @@ fn print_runtime_json(
     elapsed: std::time::Duration,
     explain: bool,
 ) -> ExitCode {
-    let mut runtime = match serde_json::to_value(report) {
+    let runtime = match serde_json::to_value(report) {
         Ok(value) => value,
         Err(err) => {
             eprintln!("Error: failed to serialize runtime coverage report: {err}");
             return ExitCode::from(2);
         }
     };
-    inject_runtime_schema(&mut runtime);
     let mut output = serde_json::json!({
         "schema_version": RUNTIME_COVERAGE_SCHEMA_VERSION,
         "version": env!("CARGO_PKG_VERSION"),
@@ -984,23 +984,6 @@ fn print_runtime_json(
         map.insert("_meta".to_owned(), crate::explain::coverage_analyze_meta());
     }
     crate::report::emit_json(&output, "runtime coverage JSON")
-}
-
-fn inject_runtime_schema(value: &mut serde_json::Value) {
-    let serde_json::Value::Object(map) = value else {
-        return;
-    };
-    let mut ordered = serde_json::Map::new();
-    ordered.insert(
-        "schema_version".to_owned(),
-        serde_json::json!(RUNTIME_COVERAGE_SCHEMA_VERSION),
-    );
-    for (key, value) in std::mem::take(map) {
-        if key != "schema_version" {
-            ordered.insert(key, value);
-        }
-    }
-    *map = ordered;
 }
 
 const HUMAN_DEFAULT_DISPLAY_LIMIT: usize = 10;
@@ -1327,6 +1310,7 @@ mod tests {
     #[test]
     fn top_limit_truncates_all_runtime_arrays() {
         let mut report = RuntimeCoverageReport {
+            schema_version: RuntimeCoverageSchemaVersion::V1,
             verdict: RuntimeCoverageReportVerdict::Clean,
             signals: Vec::new(),
             summary: RuntimeCoverageSummary::default(),

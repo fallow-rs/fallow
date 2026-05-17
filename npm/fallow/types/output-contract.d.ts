@@ -296,6 +296,12 @@ export type HotspotActionType = ("refactor-file" | "add-tests" | "low-bus-factor
  */
 export type HotspotActionHeuristic = "directory-deepest"
 /**
+ * Runtime coverage JSON contract version. This is scoped to the
+ * `runtime_coverage` block and is independent of the top-level fallow
+ * JSON `schema_version`.
+ */
+export type RuntimeCoverageSchemaVersion = "1"
+/**
  * Top-level verdict for the whole runtime-coverage report. Mirrors
  * `fallow_cov_protocol::ReportVerdict`. The verdict is the SINGLE most
  * actionable finding; for the full set of findings see
@@ -2862,6 +2868,7 @@ shallow_clone: boolean
  * analysis.
  */
 export interface RuntimeCoverageReport {
+schema_version: RuntimeCoverageSchemaVersion
 verdict: RuntimeCoverageReportVerdict
 /**
  * All signals captured by post-processing. Independent of `verdict`,
@@ -2900,10 +2907,6 @@ watermark?: (RuntimeCoverageWatermark | null)
  * Non-fatal merge or coverage diagnostics. Omitted when empty.
  */
 warnings?: RuntimeCoverageMessage[]
-/**
- * Runtime coverage JSON contract version. This is scoped to the runtime_coverage block and is independent of the top-level fallow JSON schema_version.
- */
-schema_version: "1"
 }
 /**
  * Summary block mirroring `fallow_cov_protocol::Summary` (0.3 shape).

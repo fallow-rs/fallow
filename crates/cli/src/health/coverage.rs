@@ -30,8 +30,8 @@ use crate::health_types::{
     RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageDataSource,
     RuntimeCoverageEvidence, RuntimeCoverageFinding, RuntimeCoverageHotPath,
     RuntimeCoverageMessage, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
-    RuntimeCoverageRiskBand, RuntimeCoverageSummary, RuntimeCoverageVerdict,
-    RuntimeCoverageWatermark,
+    RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion, RuntimeCoverageSummary,
+    RuntimeCoverageVerdict, RuntimeCoverageWatermark,
 };
 use crate::license::verifying_key;
 
@@ -1790,6 +1790,7 @@ fn convert_response(
     };
 
     RuntimeCoverageReport {
+        schema_version: RuntimeCoverageSchemaVersion::V1,
         verdict: map_report_verdict(&response.verdict),
         signals: Vec::new(),
         summary: RuntimeCoverageSummary {

@@ -1979,6 +1979,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
 fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
     let mut report = sample_health_report(root);
     report.runtime_coverage = Some(RuntimeCoverageReport {
+        schema_version: RuntimeCoverageSchemaVersion::V1,
         verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
         signals: Vec::new(),
         summary: RuntimeCoverageSummary {

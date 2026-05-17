@@ -440,7 +440,8 @@ mod tests {
     use crate::health_types::{
         RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
         RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageReport,
-        RuntimeCoverageReportVerdict, RuntimeCoverageSummary, RuntimeCoverageVerdict,
+        RuntimeCoverageReportVerdict, RuntimeCoverageSchemaVersion, RuntimeCoverageSummary,
+        RuntimeCoverageVerdict,
     };
     use crate::report::test_helpers::sample_results;
     use fallow_core::extract::MemberKind;
@@ -491,6 +492,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
             runtime_coverage: Some(RuntimeCoverageReport {
+                schema_version: RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
                 signals: Vec::new(),
                 summary: RuntimeCoverageSummary {

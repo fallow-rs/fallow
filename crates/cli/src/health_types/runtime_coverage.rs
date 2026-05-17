@@ -1,6 +1,18 @@
 use std::fmt;
 use std::path::PathBuf;
 
+/// Runtime coverage JSON contract version. This is scoped to the
+/// `runtime_coverage` block and is independent of the top-level fallow
+/// JSON `schema_version`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum RuntimeCoverageSchemaVersion {
+    /// First release of the runtime coverage block contract.
+    #[default]
+    #[serde(rename = "1")]
+    V1,
+}
+
 /// Top-level verdict for the whole runtime-coverage report. Mirrors
 /// `fallow_cov_protocol::ReportVerdict`. The verdict is the SINGLE most
 /// actionable finding; for the full set of findings see
@@ -451,6 +463,10 @@ pub struct RuntimeCoverageImportanceEntry {
 /// fetches runtime facts explicitly and merges them locally with AST/static
 /// analysis.
 pub struct RuntimeCoverageReport {
+    /// Runtime coverage JSON contract version. This is scoped to the
+    /// `runtime_coverage` block and is independent of the top-level fallow
+    /// JSON `schema_version`.
+    pub schema_version: RuntimeCoverageSchemaVersion,
     /// Single most actionable runtime-coverage signal under the current
     /// context. In PR-review context (CLI saw `--diff-file` or
     /// `--changed-since`) the verdict is `hot-path-touched` whenever a hot

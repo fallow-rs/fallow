@@ -712,9 +712,6 @@ fn merge_with_committed(derived: &Map<String, Value>) -> Result<Value, String> {
         if finding_names.contains(name) {
             augment_finding_definition(&mut value, finding_augmentation(name))?;
         }
-        if *name == "RuntimeCoverageReport" {
-            augment_runtime_coverage_report(&mut value)?;
-        }
         definitions.insert((*name).to_string(), value);
     }
 
@@ -800,62 +797,6 @@ fn augment_finding_definition(
         && !arr.iter().any(|v| v.as_str() == Some("actions"))
     {
         arr.push(Value::String("actions".to_string()));
-    }
-
-    Ok(())
-}
-
-/// Add the runtime-coverage `schema_version` envelope marker to the derived
-/// `RuntimeCoverageReport` schema.
-///
-/// The CLI injects `runtime_coverage.schema_version: "1"` into every JSON
-/// output that carries a runtime coverage block (see
-/// `crates/cli/src/report/json.rs::inject_runtime_coverage_report_schema_version`).
-/// The Rust source struct does not carry a matching field today, so the
-/// derived schema would otherwise miss it and the drift gate would fire.
-/// Graft the property + `required` entry on derivation so the public
-/// contract stays in lock-step with the wire.
-///
-/// MAINTENANCE: the `enum: ["1"]` constraint is tightly coupled to
-/// `RUNTIME_COVERAGE_SCHEMA_VERSION` in
-/// `crates/cli/src/report/json.rs`. Bumping that constant requires
-/// updating the enum list here in the same PR; otherwise the drift gate
-/// stays green while the emitted document quietly disagrees with the
-/// wire.
-///
-/// Idempotent: if a future PR adds a typed `schema_version` field to
-/// `RuntimeCoverageReport`, schemars derives the property natively and the
-/// augmentation step skips.
-fn augment_runtime_coverage_report(value: &mut Value) -> Result<(), String> {
-    let object = value
-        .as_object_mut()
-        .ok_or_else(|| "RuntimeCoverageReport definition is not a JSON object".to_string())?;
-
-    let properties = object
-        .entry("properties")
-        .or_insert_with(|| Value::Object(Map::new()));
-    let properties = properties
-        .as_object_mut()
-        .ok_or_else(|| "RuntimeCoverageReport `properties` is not a JSON object".to_string())?;
-
-    if !properties.contains_key("schema_version") {
-        properties.insert(
-            "schema_version".to_string(),
-            serde_json::json!({
-                "type": "string",
-                "enum": ["1"],
-                "description": "Runtime coverage JSON contract version. This is scoped to the runtime_coverage block and is independent of the top-level fallow JSON schema_version."
-            }),
-        );
-    }
-
-    let required = object
-        .entry("required")
-        .or_insert_with(|| Value::Array(Vec::new()));
-    if let Value::Array(arr) = required
-        && !arr.iter().any(|v| v.as_str() == Some("schema_version"))
-    {
-        arr.push(Value::String("schema_version".to_string()));
     }
 
     Ok(())
@@ -971,8 +912,7 @@ mod drift_tests {
     //!
     //! `derived_definition_names()` survives as the allow-list for the
     //! post-derivation augmentation (`actions` / `introduced` graft on
-    //! findings, `schema_version` graft on `RuntimeCoverageReport`); the
-    //! drift tests below iterate the full derived map.
+    //! findings); the drift tests below iterate the full derived map.
     //!
     //! Real drift fires loudly: a renamed Rust field, a new struct field, or
     //! a type change shows up as a property/required/type mismatch on the
@@ -1092,8 +1032,7 @@ mod drift_tests {
     /// Build the full set of derived definitions for drift comparison: every
     /// key schemars emits, normalized; augmented only for entries in
     /// `derived_definition_names()` (the post-pass `actions`/`introduced` graft
-    /// applies to findings, and the `schema_version` graft applies to
-    /// `RuntimeCoverageReport`). Transitive helpers (e.g., `AnalysisResults`,
+    /// applies to findings). Transitive helpers (e.g., `AnalysisResults`,
     /// `MemberKind`, `FixActionType`, every kebab-case enum) are included
     /// without augmentation so the strict gate covers every committed
     /// definition, not just the explicit allow-list.
@@ -1107,15 +1046,9 @@ mod drift_tests {
         for (name, raw_value) in &raw {
             let mut value = raw_value.clone();
             normalize_schema(&mut value);
-            if in_scope.contains(name.as_str()) {
-                if finding_names.contains(name.as_str()) {
-                    augment_finding_definition(&mut value, finding_augmentation(name))
-                        .expect("augment_finding_definition must not fail");
-                }
-                if name == "RuntimeCoverageReport" {
-                    augment_runtime_coverage_report(&mut value)
-                        .expect("augment_runtime_coverage_report must not fail");
-                }
+            if in_scope.contains(name.as_str()) && finding_names.contains(name.as_str()) {
+                augment_finding_definition(&mut value, finding_augmentation(name))
+                    .expect("augment_finding_definition must not fail");
             }
             out.insert(name.clone(), value);
         }
