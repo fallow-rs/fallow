@@ -89,8 +89,8 @@ pub struct AnalysisResults {
     /// no package entries. The top-level catalog: map is not reported.
     #[serde(default)]
     pub empty_catalog_groups: Vec<EmptyCatalogGroup>,
-    /// Workspace package.json references to catalogs (catalog: or
-    /// catalog:<name>) that do not declare the consumed package. pnpm install
+    /// Workspace package.json references to catalogs (`catalog:` or
+    /// `catalog:<name>`) that do not declare the consumed package. pnpm install
     /// will error until the named catalog grows to include the package or the
     /// reference is switched / removed.
     #[serde(default)]

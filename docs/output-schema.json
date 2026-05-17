@@ -630,7 +630,7 @@
           "items": {
             "$ref": "#/definitions/UnresolvedCatalogReference"
           },
-          "description": "Workspace package.json references to catalogs (catalog: or\ncatalog:<name>) that do not declare the consumed package. pnpm install\nwill error until the named catalog grows to include the package or the\nreference is switched / removed."
+          "description": "Workspace package.json references to catalogs (`catalog:` or\n`catalog:<name>`) that do not declare the consumed package. pnpm install\nwill error until the named catalog grows to include the package or the\nreference is switched / removed."
         },
         "unused_dependency_overrides": {
           "type": "array",
@@ -927,7 +927,7 @@
           "items": {
             "$ref": "#/definitions/UnresolvedCatalogReference"
           },
-          "description": "Workspace package.json references to catalogs (catalog: or\ncatalog:<name>) that do not declare the consumed package. pnpm install\nwill error until the named catalog grows to include the package or the\nreference is switched / removed."
+          "description": "Workspace package.json references to catalogs (`catalog:` or\n`catalog:<name>`) that do not declare the consumed package. pnpm install\nwill error until the named catalog grows to include the package or the\nreference is switched / removed."
         },
         "unused_dependency_overrides": {
           "type": "array",
@@ -1601,7 +1601,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Stable content-hash ID of the form `fallow:prod:<hash>`, where <hash> is\nthe first 8 hex characters of SHA-256(file + function + line + 'prod')."
+          "description": "Stable content-hash ID of the form `fallow:prod:<hash>`, where `<hash>`\nis the first 8 hex characters of SHA-256(file + function + line + 'prod')."
         },
         "path": {
           "type": "string",
@@ -2275,7 +2275,7 @@
         },
         "name": {
           "type": "string",
-          "description": "Function name, \"<anonymous>\" for unnamed functions/arrows, or\n\"<template>\" for synthetic Angular template findings."
+          "description": "Function name, `\"<anonymous>\"` for unnamed functions/arrows, or\n`\"<template>\"` for synthetic Angular template findings."
         },
         "line": {
           "type": "integer",
@@ -2369,7 +2369,7 @@
         },
         "name": {
           "type": "string",
-          "description": "Function name, or \"<anonymous>\" for unnamed functions/arrows."
+          "description": "Function name, or `\"<anonymous>\"` for unnamed functions/arrows."
         },
         "line": {
           "type": "integer",
@@ -5489,7 +5489,7 @@
           "items": {
             "$ref": "#/definitions/UnresolvedCatalogReference"
           },
-          "description": "Workspace package.json references to catalogs (catalog: or\ncatalog:<name>) that do not declare the consumed package. pnpm install\nwill error until the named catalog grows to include the package or the\nreference is switched / removed."
+          "description": "Workspace package.json references to catalogs (`catalog:` or\n`catalog:<name>`) that do not declare the consumed package. pnpm install\nwill error until the named catalog grows to include the package or the\nreference is switched / removed."
         },
         "unused_dependency_overrides": {
           "type": "array",

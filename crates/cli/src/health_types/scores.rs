@@ -205,8 +205,8 @@ impl CoverageTier {
 pub struct HealthFinding {
     /// Absolute file path.
     pub path: std::path::PathBuf,
-    /// Function name, "<anonymous>" for unnamed functions/arrows, or
-    /// "<template>" for synthetic Angular template findings.
+    /// Function name, `"<anonymous>"` for unnamed functions/arrows, or
+    /// `"<template>"` for synthetic Angular template findings.
     pub name: String,
     /// 1-based line number.
     pub line: u32,
@@ -399,7 +399,7 @@ pub fn compute_finding_severity(
 pub struct LargeFunctionEntry {
     /// Absolute file path.
     pub path: std::path::PathBuf,
-    /// Function name, or "<anonymous>" for unnamed functions/arrows.
+    /// Function name, or `"<anonymous>"` for unnamed functions/arrows.
     pub name: String,
     /// 1-based line number.
     pub line: u32,

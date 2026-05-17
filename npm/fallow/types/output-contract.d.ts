@@ -571,8 +571,8 @@ unused_catalog_entries?: UnusedCatalogEntry[]
  */
 empty_catalog_groups?: EmptyCatalogGroup[]
 /**
- * Workspace package.json references to catalogs (catalog: or
- * catalog:<name>) that do not declare the consumed package. pnpm install
+ * Workspace package.json references to catalogs (`catalog:` or
+ * `catalog:<name>`) that do not declare the consumed package. pnpm install
  * will error until the named catalog grows to include the package or the
  * reference is switched / removed.
  */
@@ -1920,8 +1920,8 @@ export interface HealthFinding {
  */
 path: string
 /**
- * Function name, "<anonymous>" for unnamed functions/arrows, or
- * "<template>" for synthetic Angular template findings.
+ * Function name, `"<anonymous>"` for unnamed functions/arrows, or
+ * `"<template>"` for synthetic Angular template findings.
  */
 name: string
 /**
@@ -2922,8 +2922,8 @@ untracked_ratio_percent: number
 }
 export interface RuntimeCoverageFinding {
 /**
- * Stable content-hash ID of the form `fallow:prod:<hash>`, where <hash> is
- * the first 8 hex characters of SHA-256(file + function + line + 'prod').
+ * Stable content-hash ID of the form `fallow:prod:<hash>`, where `<hash>`
+ * is the first 8 hex characters of SHA-256(file + function + line + 'prod').
  */
 id: string
 /**
@@ -3130,7 +3130,7 @@ export interface LargeFunctionEntry {
  */
 path: string
 /**
- * Function name, or "<anonymous>" for unnamed functions/arrows.
+ * Function name, or `"<anonymous>"` for unnamed functions/arrows.
  */
 name: string
 /**
@@ -3567,8 +3567,8 @@ unused_catalog_entries?: UnusedCatalogEntry[]
  */
 empty_catalog_groups?: EmptyCatalogGroup[]
 /**
- * Workspace package.json references to catalogs (catalog: or
- * catalog:<name>) that do not declare the consumed package. pnpm install
+ * Workspace package.json references to catalogs (`catalog:` or
+ * `catalog:<name>`) that do not declare the consumed package. pnpm install
  * will error until the named catalog grows to include the package or the
  * reference is switched / removed.
  */

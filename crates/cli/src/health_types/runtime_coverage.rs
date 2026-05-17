@@ -316,8 +316,8 @@ pub struct RuntimeCoverageMessage {
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageFinding {
-    /// Stable content-hash ID of the form `fallow:prod:<hash>`, where <hash> is
-    /// the first 8 hex characters of SHA-256(file + function + line + 'prod').
+    /// Stable content-hash ID of the form `fallow:prod:<hash>`, where `<hash>`
+    /// is the first 8 hex characters of SHA-256(file + function + line + 'prod').
     pub id: String,
     /// File path relative to the project root.
     pub path: PathBuf,
