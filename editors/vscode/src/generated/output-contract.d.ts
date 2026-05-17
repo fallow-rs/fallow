@@ -140,6 +140,16 @@ export type AddToConfigValue = (string | IgnoreExportsRule[] | {
 [k: string]: unknown
 })
 /**
+ * Audit-mode marker emitted on each finding when `fallow audit --format json`
+ * runs with a base ref. `true` means the finding's structural key was not
+ * present at the base ref (introduced by the current changeset); `false`
+ * means it was inherited.
+ * 
+ * Outside of audit sub-results the field is omitted, so call sites typically
+ * hold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean.
+ */
+export type AuditIntroduced = boolean
+/**
  * Where in package.json a dependency is listed.
  * 
  * # Examples
@@ -158,16 +168,6 @@ export type AddToConfigValue = (string | IgnoreExportsRule[] | {
  * ```
  */
 export type DependencyLocation = ("dependencies" | "devDependencies" | "optionalDependencies")
-/**
- * Audit-mode marker emitted on each finding when `fallow audit --format json`
- * runs with a base ref. `true` means the finding's structural key was not
- * present at the base ref (introduced by the current changeset); `false`
- * means it was inherited.
- * 
- * Outside of audit sub-results the field is omitted, so call sites typically
- * hold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean.
- */
-export type AuditIntroduced = boolean
 /**
  * The kind of member.
  * 
@@ -826,7 +826,7 @@ actions: IssueAction[]
  * Set by the audit pass when this finding is introduced relative to
  * the merge-base. `None` when serialized directly from Rust.
  */
-introduced?: (boolean | null)
+introduced?: (AuditIntroduced | null)
 }
 /**
  * A code-change fix. `type` is one of the kebab-case identifiers in
@@ -1014,7 +1014,7 @@ actions: IssueAction[]
  * Set by the audit pass when this finding is introduced relative to
  * the merge-base.
  */
-introduced?: (boolean | null)
+introduced?: (AuditIntroduced | null)
 }
 /**
  * Wire-shape envelope for an [`UnusedExport`] finding consumed under the
@@ -1060,7 +1060,7 @@ actions: IssueAction[]
  * Set by the audit pass when this finding is introduced relative to
  * the merge-base.
  */
-introduced?: (boolean | null)
+introduced?: (AuditIntroduced | null)
 }
 /**
  * Wire-shape envelope for a [`PrivateTypeLeak`] finding. Mirrors
@@ -1101,7 +1101,7 @@ actions: IssueAction[]
  * Set by the audit pass when this finding is introduced relative to
  * the merge-base.
  */
-introduced?: (boolean | null)
+introduced?: (AuditIntroduced | null)
 }
 /**
  * A dependency that is listed in package.json but never imported.
@@ -1166,7 +1166,7 @@ actions: IssueAction[]
  * Set by the audit pass when this finding is introduced relative to
  * the merge-base.
  */
-introduced?: (boolean | null)
+introduced?: (AuditIntroduced | null)
 }
 /**
  * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
@@ -1205,7 +1205,7 @@ actions: IssueAction[]
  * Set by the audit pass when this finding is introduced relative to
  * the merge-base.
  */
-introduced?: (boolean | null)
+introduced?: (AuditIntroduced | null)
 }
 /**
  * Wire-shape envelope for an [`UnresolvedImport`] finding. Mirrors
@@ -1244,7 +1244,7 @@ actions: IssueAction[]
  * Set by the audit pass when this finding is introduced relative to
  * the merge-base.
  */
-introduced?: (boolean | null)
+introduced?: (AuditIntroduced | null)
 }
 /**
  * A dependency used in code but not listed in package.json.
@@ -1401,7 +1401,7 @@ actions: IssueAction[]
  * Set by the audit pass when this finding is introduced relative to
  * the merge-base.
  */
-introduced?: (boolean | null)
+introduced?: (AuditIntroduced | null)
 }
 /**
  * Wire-shape envelope for a [`BoundaryViolation`] finding. Mirrors
@@ -1447,7 +1447,7 @@ actions: IssueAction[]
  * Set by the audit pass when this finding is introduced relative to
  * the merge-base.
  */
-introduced?: (boolean | null)
+introduced?: (AuditIntroduced | null)
 }
 /**
  * A suppression comment or JSDoc tag that no longer matches any issue.

@@ -12,15 +12,24 @@
 //! `None` when serialized directly from Rust and is set by the audit pass
 //! only when the issue was introduced relative to the merge-base.
 //!
-//! All five wrappers ship with `IssueAction` arrays today; they pay the
+//! All nine wrappers ship with `IssueAction` arrays today; they pay the
 //! `serde_json` dependency cost because `IssueAction` transitively
 //! references `AddToConfigValue::RuleObject(serde_json::Map<...>)`. The
 //! variants the wrappers actually emit (`Fix`, `SuppressLine`,
 //! `SuppressFile`) are small, but reusing the existing enum keeps the
 //! wire-shape contract identical to the legacy post-pass.
+//!
+//! `introduced` is typed as `Option<AuditIntroduced>` (transparent newtype
+//! over `bool`) so the regenerated schema renders the field via
+//! `$ref: #/definitions/AuditIntroduced`, matching the reference the prior
+//! post-pass augmentation graft used. The audit pass continues to inject a
+//! bare bool via `map.insert("introduced", ...)`; serde reads it back into
+//! `AuditIntroduced` transparently. The field stays absent at the wire when
+//! `None` (`skip_serializing_if`).
 
 use serde::Serialize;
 
+use crate::envelope::AuditIntroduced;
 use crate::output::{
     FixAction, FixActionType, IssueAction, SuppressFileAction, SuppressFileKind,
     SuppressLineAction, SuppressLineKind,
@@ -46,7 +55,7 @@ pub struct UnusedFileFinding {
     /// Set by the audit pass when this finding is introduced relative to
     /// the merge-base. `None` when serialized directly from Rust.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub introduced: Option<bool>,
+    pub introduced: Option<AuditIntroduced>,
 }
 
 impl UnusedFileFinding {
@@ -97,7 +106,7 @@ pub struct PrivateTypeLeakFinding {
     /// Set by the audit pass when this finding is introduced relative to
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub introduced: Option<bool>,
+    pub introduced: Option<AuditIntroduced>,
 }
 
 impl PrivateTypeLeakFinding {
@@ -146,7 +155,7 @@ pub struct UnresolvedImportFinding {
     /// Set by the audit pass when this finding is introduced relative to
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub introduced: Option<bool>,
+    pub introduced: Option<AuditIntroduced>,
 }
 
 impl UnresolvedImportFinding {
@@ -195,7 +204,7 @@ pub struct CircularDependencyFinding {
     /// Set by the audit pass when this finding is introduced relative to
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub introduced: Option<bool>,
+    pub introduced: Option<AuditIntroduced>,
 }
 
 impl CircularDependencyFinding {
@@ -246,7 +255,7 @@ pub struct BoundaryViolationFinding {
     /// Set by the audit pass when this finding is introduced relative to
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub introduced: Option<bool>,
+    pub introduced: Option<AuditIntroduced>,
 }
 
 impl BoundaryViolationFinding {
@@ -297,7 +306,7 @@ pub struct UnusedExportFinding {
     /// Set by the audit pass when this finding is introduced relative to
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub introduced: Option<bool>,
+    pub introduced: Option<AuditIntroduced>,
 }
 
 impl UnusedExportFinding {
@@ -354,7 +363,7 @@ pub struct UnusedTypeFinding {
     /// Set by the audit pass when this finding is introduced relative to
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub introduced: Option<bool>,
+    pub introduced: Option<AuditIntroduced>,
 }
 
 impl UnusedTypeFinding {
@@ -410,7 +419,7 @@ pub struct UnusedEnumMemberFinding {
     /// Set by the audit pass when this finding is introduced relative to
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub introduced: Option<bool>,
+    pub introduced: Option<AuditIntroduced>,
 }
 
 impl UnusedEnumMemberFinding {
@@ -457,7 +466,7 @@ pub struct UnusedClassMemberFinding {
     /// Set by the audit pass when this finding is introduced relative to
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub introduced: Option<bool>,
+    pub introduced: Option<AuditIntroduced>,
 }
 
 impl UnusedClassMemberFinding {

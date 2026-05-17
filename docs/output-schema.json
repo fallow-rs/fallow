@@ -7167,9 +7167,13 @@
           "description": "Suggested next steps: a `delete-file` primary and a `suppress-file`\nsecondary. Always emitted (possibly empty for forward-compat)."
         },
         "introduced": {
-          "type": [
-            "boolean",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base. `None` when serialized directly from Rust."
         }
@@ -7215,9 +7219,13 @@
           "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
         },
         "introduced": {
-          "type": [
-            "boolean",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
         }
@@ -7264,9 +7272,13 @@
           "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
         },
         "introduced": {
-          "type": [
-            "boolean",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
         }
@@ -7315,9 +7327,13 @@
           "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
         },
         "introduced": {
-          "type": [
-            "boolean",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
         }
@@ -7370,9 +7386,13 @@
           "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
         },
         "introduced": {
-          "type": [
-            "boolean",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
         }
@@ -7428,9 +7448,13 @@
           "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
         },
         "introduced": {
-          "type": [
-            "boolean",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
         }
@@ -7486,9 +7510,13 @@
           "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
         },
         "introduced": {
-          "type": [
-            "boolean",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
         }
@@ -7540,9 +7568,13 @@
           "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
         },
         "introduced": {
-          "type": [
-            "boolean",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
         }
@@ -7593,9 +7625,13 @@
           "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
         },
         "introduced": {
-          "type": [
-            "boolean",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
         }
