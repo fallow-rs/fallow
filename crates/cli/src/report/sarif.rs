@@ -1313,11 +1313,11 @@ pub fn build_health_sarif(
 
     if let Some(ref gaps) = report.coverage_gaps {
         for item in &gaps.files {
-            let uri = relative_uri(&item.path, root);
+            let uri = relative_uri(&item.file.path, root);
             let message = format!(
                 "File is runtime-reachable but has no test dependency path ({} value export{})",
-                item.value_export_count,
-                if item.value_export_count == 1 {
+                item.file.value_export_count,
+                if item.file.value_export_count == 1 {
                     ""
                 } else {
                     "s"
@@ -1333,18 +1333,18 @@ pub fn build_health_sarif(
         }
 
         for item in &gaps.exports {
-            let uri = relative_uri(&item.path, root);
+            let uri = relative_uri(&item.export.path, root);
             let message = format!(
                 "Export '{}' is runtime-reachable but never referenced by test-reachable modules",
-                item.export_name
+                item.export.export_name
             );
-            let source_snippet = snippets.line(&item.path, item.line);
+            let source_snippet = snippets.line(&item.export.path, item.export.line);
             sarif_results.push(sarif_result_with_snippet(
                 "fallow/untested-export",
                 "warning",
                 &message,
                 &uri,
-                Some((item.line, item.col + 1)),
+                Some((item.export.line, item.export.col + 1)),
                 source_snippet.as_deref(),
             ));
         }
@@ -2538,16 +2538,22 @@ mod tests {
                     untested_files: 1,
                     untested_exports: 1,
                 },
-                files: vec![UntestedFile {
-                    path: root.join("src/app.ts"),
-                    value_export_count: 2,
-                }],
-                exports: vec![UntestedExport {
-                    path: root.join("src/app.ts"),
-                    export_name: "loader".into(),
-                    line: 12,
-                    col: 4,
-                }],
+                files: vec![UntestedFileFinding::with_actions(
+                    UntestedFile {
+                        path: root.join("src/app.ts"),
+                        value_export_count: 2,
+                    },
+                    &root,
+                )],
+                exports: vec![UntestedExportFinding::with_actions(
+                    UntestedExport {
+                        path: root.join("src/app.ts"),
+                        export_name: "loader".into(),
+                        line: 12,
+                        col: 4,
+                    },
+                    &root,
+                )],
             }),
             ..Default::default()
         };

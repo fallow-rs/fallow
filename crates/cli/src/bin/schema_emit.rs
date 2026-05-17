@@ -39,7 +39,8 @@ use fallow_cli::health_types::{
     HealthFinding, HealthScore, HealthScorePenalties, HealthSummary, HealthTrend, HotspotEntry,
     HotspotSummary, LargeFunctionEntry, OwnershipMetrics, RecommendationCategory,
     RefactoringTarget, RiskProfile, RuntimeCoverageReport, TargetThresholds, TrendCount,
-    UntestedExport, UntestedFile, VitalSigns, VitalSignsCounts,
+    UntestedExport, UntestedExportFinding, UntestedFile, UntestedFileFinding, VitalSigns,
+    VitalSignsCounts,
 };
 use fallow_cli::output_envelope::{
     AuditCommand, AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
@@ -236,7 +237,9 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "TargetThresholds",
         "TrendCount",
         "UntestedExport",
+        "UntestedExportFinding",
         "UntestedFile",
+        "UntestedFileFinding",
         "VitalSigns",
         "VitalSignsCounts",
         // crates/types/src/output_health.rs - per-finding action wrappers
@@ -377,14 +380,12 @@ fn finding_definition_names() -> &'static [&'static str] {
         "HotspotEntry",
         "RefactoringTarget",
         // Coverage-gap items (`coverage_gaps.files[]` and
-        // `coverage_gaps.exports[]`). `inject_health_actions` walks both
-        // arrays and appends an `actions` field to every item, but the
-        // Rust source structs do not carry the field, so the schema
-        // augmentation pass grafts it on per `finding_augmentation`.
-        // Neither flows through `fallow audit`, so `introduced` is
-        // omitted.
-        "UntestedExport",
-        "UntestedFile",
+        // `coverage_gaps.exports[]`) have been migrated to typed
+        // `UntestedFileFinding` / `UntestedExportFinding` envelope
+        // wrappers in `crates/cli/src/health_types/coverage.rs`, so the
+        // bare `UntestedFile` / `UntestedExport` definitions are no
+        // longer augmented; their wrappers carry the typed `actions`
+        // array natively via schemars.
         // Duplication findings (`clone_groups[]` and `clone_families[]`).
         // `inject_dupes_actions` in `crates/cli/src/report/json.rs` walks
         // both arrays and appends an `actions` field to every item; the
@@ -439,14 +440,6 @@ fn finding_augmentation(name: &str) -> FindingAugmentation {
         },
         "RefactoringTarget" => FindingAugmentation {
             actions_item_ref: "#/definitions/RefactoringTargetAction",
-            include_introduced: false,
-        },
-        "UntestedFile" => FindingAugmentation {
-            actions_item_ref: "#/definitions/UntestedFileAction",
-            include_introduced: false,
-        },
-        "UntestedExport" => FindingAugmentation {
-            actions_item_ref: "#/definitions/UntestedExportAction",
             include_introduced: false,
         },
         "CloneFamily" => FindingAugmentation {
@@ -569,7 +562,9 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<CoverageGaps>();
     let _ = generator.subschema_for::<CoverageGapSummary>();
     let _ = generator.subschema_for::<UntestedFile>();
+    let _ = generator.subschema_for::<UntestedFileFinding>();
     let _ = generator.subschema_for::<UntestedExport>();
+    let _ = generator.subschema_for::<UntestedExportFinding>();
     let _ = generator.subschema_for::<HealthScore>();
     let _ = generator.subschema_for::<HealthScorePenalties>();
     let _ = generator.subschema_for::<VitalSigns>();

@@ -287,17 +287,19 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
             gaps.summary.untested_exports,
         );
         for item in &gaps.files {
-            let relative = normalize_uri(&relative_path(&item.path, root).display().to_string());
+            let relative =
+                normalize_uri(&relative_path(&item.file.path, root).display().to_string());
             println!(
                 "untested-file:{}:value_exports={}",
-                relative, item.value_export_count,
+                relative, item.file.value_export_count,
             );
         }
         for item in &gaps.exports {
-            let relative = normalize_uri(&relative_path(&item.path, root).display().to_string());
+            let relative =
+                normalize_uri(&relative_path(&item.export.path, root).display().to_string());
             println!(
                 "untested-export:{}:{}:{}",
-                relative, item.line, item.export_name,
+                relative, item.export.line, item.export.export_name,
             );
         }
     }

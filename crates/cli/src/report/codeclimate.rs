@@ -1078,11 +1078,11 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
 
     if let Some(ref gaps) = report.coverage_gaps {
         for item in &gaps.files {
-            let path = cc_path(&item.path, root);
+            let path = cc_path(&item.file.path, root);
             let description = format!(
                 "File is runtime-reachable but has no test dependency path ({} value export{})",
-                item.value_export_count,
-                if item.value_export_count == 1 {
+                item.file.value_export_count,
+                if item.file.value_export_count == 1 {
                     ""
                 } else {
                     "s"
@@ -1101,17 +1101,17 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
         }
 
         for item in &gaps.exports {
-            let path = cc_path(&item.path, root);
+            let path = cc_path(&item.export.path, root);
             let description = format!(
                 "Export '{}' is runtime-reachable but never referenced by test-reachable modules",
-                item.export_name
+                item.export.export_name
             );
-            let line_str = item.line.to_string();
+            let line_str = item.export.line.to_string();
             let fp = fingerprint_hash(&[
                 "fallow/untested-export",
                 &path,
                 &line_str,
-                &item.export_name,
+                &item.export.export_name,
             ]);
             issues.push(cc_issue(
                 "fallow/untested-export",
@@ -1119,7 +1119,7 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
                 CodeClimateSeverity::Minor,
                 "Coverage",
                 &path,
-                Some(item.line),
+                Some(item.export.line),
                 &fp,
             ));
         }
@@ -1691,16 +1691,22 @@ mod tests {
                     untested_files: 1,
                     untested_exports: 1,
                 },
-                files: vec![UntestedFile {
-                    path: root.join("src/app.ts"),
-                    value_export_count: 2,
-                }],
-                exports: vec![UntestedExport {
-                    path: root.join("src/app.ts"),
-                    export_name: "loader".into(),
-                    line: 12,
-                    col: 4,
-                }],
+                files: vec![UntestedFileFinding::with_actions(
+                    UntestedFile {
+                        path: root.join("src/app.ts"),
+                        value_export_count: 2,
+                    },
+                    &root,
+                )],
+                exports: vec![UntestedExportFinding::with_actions(
+                    UntestedExport {
+                        path: root.join("src/app.ts"),
+                        export_name: "loader".into(),
+                        line: 12,
+                        col: 4,
+                    },
+                    &root,
+                )],
             }),
             ..Default::default()
         };

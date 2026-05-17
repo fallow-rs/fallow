@@ -1191,6 +1191,7 @@ fn compute_filtered_file_scores(
         changed_files,
         analysis_output,
         istanbul_coverage,
+        &config.root,
     ) {
         Ok(mut output) => {
             if let Some(ws) = ws_roots {
@@ -1296,10 +1297,16 @@ fn filter_coverage_gaps(
     runtime_paths
         .retain(|path| path_in_health_scope(path, config, changed_files, ws_roots, ignore_set));
     coverage_gaps.files.retain(|item| {
-        path_in_health_scope(&item.path, config, changed_files, ws_roots, ignore_set)
+        path_in_health_scope(&item.file.path, config, changed_files, ws_roots, ignore_set)
     });
     coverage_gaps.exports.retain(|item| {
-        path_in_health_scope(&item.path, config, changed_files, ws_roots, ignore_set)
+        path_in_health_scope(
+            &item.export.path,
+            config,
+            changed_files,
+            ws_roots,
+            ignore_set,
+        )
     });
 
     runtime_paths.sort();

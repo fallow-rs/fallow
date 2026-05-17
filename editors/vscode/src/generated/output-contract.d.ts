@@ -287,6 +287,10 @@ export type UntestedExportActionType = ("add-test-import" | "suppress-file")
  */
 export type ChurnTrend = ("accelerating" | "stable" | "cooling")
 /**
+ * Format discriminator for [`ContributorEntry::identifier`].
+ */
+export type ContributorIdentifierFormat = ("raw" | "handle" | "hash")
+/**
  * Discriminant for [`HotspotAction::kind`].
  */
 export type HotspotActionType = ("refactor-file" | "add-tests" | "low-bus-factor" | "unowned-hotspot" | "ownership-drift")
@@ -2500,13 +2504,15 @@ crap_above_threshold: number
 export interface CoverageGaps {
 summary: CoverageGapSummary
 /**
- * Runtime files with no test dependency path.
+ * Runtime files with no test dependency path. Each entry carries its
+ * own `actions` array via [`UntestedFileFinding`].
  */
-files?: UntestedFile[]
+files?: UntestedFileFinding[]
 /**
- * Runtime exports with no test-reachable reference chain.
+ * Runtime exports with no test-reachable reference chain. Each entry
+ * carries its own `actions` array via [`UntestedExportFinding`].
  */
-exports?: UntestedExport[]
+exports?: UntestedExportFinding[]
 }
 /**
  * Aggregate coverage-gap counters for the current analysis scope.
@@ -2534,9 +2540,14 @@ untested_files: number
 untested_exports: number
 }
 /**
- * Runtime code that no test dependency path reaches.
+ * Wire-shape envelope for an [`UntestedFile`] finding. Carries the bare
+ * [`UntestedFile`] flattened in plus a typed `actions` array. The action
+ * vec is computed at construction time using a project-root-relative path
+ * so descriptions match `strip_root_prefix`'s post-pass output on the inner
+ * `path` field. Schemars derives the merged shape natively; this retires
+ * the `augment_finding_definition` graft for `UntestedFile`.
  */
-export interface UntestedFile {
+export interface UntestedFileFinding {
 /**
  * Absolute file path.
  */
@@ -2546,7 +2557,8 @@ path: string
  */
 value_export_count: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps: an `add-tests` primary and a `suppress-file`
+ * secondary. Always emitted (possibly empty for forward-compat).
  */
 actions: UntestedFileAction[]
 }
@@ -2585,9 +2597,11 @@ note?: (string | null)
 comment?: (string | null)
 }
 /**
- * Runtime export that no test-reachable module references.
+ * Wire-shape envelope for an [`UntestedExport`] finding. Same pattern as
+ * [`UntestedFileFinding`]: flattens the bare finding and carries a typed
+ * `actions` array computed at construction time.
  */
-export interface UntestedExport {
+export interface UntestedExportFinding {
 /**
  * Absolute file path.
  */
@@ -2605,7 +2619,8 @@ line: number
  */
 col: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps: an `add-test-import` primary and a
+ * `suppress-file` secondary.
  */
 actions: UntestedExportAction[]
 }
@@ -2782,10 +2797,7 @@ export interface ContributorEntry {
  * (e.g. `mailto:`) would be wrong.
  */
 identifier: string
-/**
- * Total commits by this contributor in the analysis window.
- */
-commits: number
+format: ContributorIdentifierFormat
 /**
  * Recency-weighted share of total weighted commits (0..1, three decimals).
  */
@@ -2794,6 +2806,10 @@ share: number
  * Days since this contributor last touched the file.
  */
 stale_days: number
+/**
+ * Total commits by this contributor in the analysis window.
+ */
+commits: number
 }
 /**
  * Suggested action attached to a [`HotspotEntry`].
@@ -3318,7 +3334,7 @@ cognitive: number
  * declaration site), so a per-line placement hint would have no
  * referent. Consumers that want the placement metadata should follow
  * the target's `evidence.complex_functions` back to the matching
- * [`HealthFinding`] and read placement from THAT action instead.
+ * `HealthFinding` and read placement from THAT action instead.
  * 
  * [`RefactoringTarget`]: ../../fallow-cli/src/health_types/targets.rs
  */
@@ -4111,11 +4127,10 @@ docs: string
  * `members` carries one entry per detected runtime package; `runtime_targets`
  * is the union of all member targets.
  * 
- * The runtime path in `crates/cli/src/coverage/mod.rs::build_setup_json`
- * still constructs the wire shape via `serde_json::json!` macros (one per
- * member, snippet, and file-to-edit). The typed struct here serves as the
- * schema source of truth via the drift gate; a follow-up can swap the
- * runtime over without changing the wire.
+ * Constructed at runtime by
+ * `crates/cli/src/coverage/mod.rs::build_setup_envelope`; the wire is
+ * `serde_json::to_value(&envelope)`. The drift gate keeps this struct
+ * aligned with `docs/output-schema.json`.
  */
 export interface CoverageSetupOutput {
 schema_version: CoverageSetupSchemaVersion

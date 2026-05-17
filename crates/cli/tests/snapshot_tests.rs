@@ -2250,21 +2250,30 @@ fn health_report_with_coverage_gaps(root: &Path) -> HealthReport {
             untested_exports: 1,
         },
         files: vec![
-            UntestedFile {
-                path: root.join("src/untested-one.ts"),
-                value_export_count: 3,
-            },
-            UntestedFile {
-                path: root.join("src/untested-two.ts"),
-                value_export_count: 1,
-            },
+            UntestedFileFinding::with_actions(
+                UntestedFile {
+                    path: root.join("src/untested-one.ts"),
+                    value_export_count: 3,
+                },
+                root,
+            ),
+            UntestedFileFinding::with_actions(
+                UntestedFile {
+                    path: root.join("src/untested-two.ts"),
+                    value_export_count: 1,
+                },
+                root,
+            ),
         ],
-        exports: vec![UntestedExport {
-            path: root.join("src/partial.ts"),
-            export_name: "helper".to_string(),
-            line: 12,
-            col: 7,
-        }],
+        exports: vec![UntestedExportFinding::with_actions(
+            UntestedExport {
+                path: root.join("src/partial.ts"),
+                export_name: "helper".to_string(),
+                line: 12,
+                col: 7,
+            },
+            root,
+        )],
     });
     report
 }

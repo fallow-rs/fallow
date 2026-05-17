@@ -23,12 +23,14 @@ pub mod extract;
 /// adopt these types in a follow-up.
 #[cfg(feature = "schema")]
 pub mod output;
-/// Schema-side wrappers for the per-action types attached to health findings,
-/// hotspots, and refactoring targets. Separated from [`output`] so the
-/// generic `IssueAction` tree stays focused while the health-specific
-/// variants (with their own `type` discriminant enums) live in a dedicated
-/// module. Gated on the `schema` cargo feature.
-#[cfg(feature = "schema")]
+/// Per-action types attached to health findings, hotspots, refactoring
+/// targets, and coverage-gap entries. Separated from the generic
+/// `IssueAction` tree in the `output` module (gated on the `schema`
+/// feature) so the health-specific variants live in a dedicated module.
+/// The structs are always compiled (the JSON emission layer constructs
+/// them through typed wrappers such as
+/// [`output_health::UntestedFileAction`]); the `schemars::JsonSchema`
+/// derive is gated per-struct on the `schema` feature.
 pub mod output_health;
 /// Analysis result types: unused files, exports, dependencies, and members.
 pub mod results;

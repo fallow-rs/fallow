@@ -809,12 +809,13 @@ fn compute_coverage_gaps(
         &fallow_core::extract::ModuleInfo,
     >,
     unused_exports: &rustc_hash::FxHashSet<(&std::path::Path, String)>,
+    root: &std::path::Path,
 ) -> CoverageGapData {
     let mut runtime_files = 0usize;
     let mut covered_files = 0usize;
     let mut runtime_paths = Vec::new();
-    let mut files = Vec::new();
-    let mut exports = Vec::new();
+    let mut files: Vec<crate::health_types::UntestedFile> = Vec::new();
+    let mut exports: Vec<crate::health_types::UntestedExport> = Vec::new();
 
     for node in &graph.modules {
         if !node.is_runtime_reachable() {
@@ -901,16 +902,27 @@ fn compute_coverage_gaps(
             .then_with(|| a.line.cmp(&b.line))
     });
 
+    let untested_file_count = files.len();
+    let untested_export_count = exports.len();
+    let wrapped_files: Vec<crate::health_types::UntestedFileFinding> = files
+        .into_iter()
+        .map(|file| crate::health_types::UntestedFileFinding::with_actions(file, root))
+        .collect();
+    let wrapped_exports: Vec<crate::health_types::UntestedExportFinding> = exports
+        .into_iter()
+        .map(|export| crate::health_types::UntestedExportFinding::with_actions(export, root))
+        .collect();
+
     CoverageGapData {
         report: CoverageGaps {
             summary: build_coverage_summary(
                 runtime_files,
                 covered_files,
-                files.len(),
-                exports.len(),
+                untested_file_count,
+                untested_export_count,
             ),
-            files,
-            exports,
+            files: wrapped_files,
+            exports: wrapped_exports,
         },
         runtime_paths,
     }
@@ -969,6 +981,7 @@ pub(super) fn compute_file_scores(
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
     analysis_output: fallow_core::AnalysisOutput,
     istanbul_coverage: Option<&IstanbulCoverage>,
+    root: &std::path::Path,
 ) -> Result<FileScoreOutput, String> {
     let graph = analysis_output.graph.ok_or("graph not available")?;
     let results = &analysis_output.results;
@@ -1054,7 +1067,7 @@ pub(super) fn compute_file_scores(
         .iter()
         .map(|export| (export.path.as_path(), export.export_name.clone()))
         .collect();
-    let coverage = compute_coverage_gaps(&graph, file_paths, &module_by_id, &unused_exports);
+    let coverage = compute_coverage_gaps(&graph, file_paths, &module_by_id, &unused_exports, root);
 
     let mut scores = Vec::with_capacity(graph.modules.len());
     let mut istanbul_matched = 0usize;
@@ -1919,7 +1932,15 @@ mod tests {
             script_used_packages: rustc_hash::FxHashSet::default(),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
+        let result = compute_file_scores(
+            &modules,
+            &file_paths,
+            None,
+            output,
+            None,
+            std::path::Path::new("/project"),
+        )
+        .unwrap();
         assert!(result.scores.is_empty());
         assert!(result.circular_files.is_empty());
         assert!(result.top_complex_fns.is_empty());
@@ -1942,7 +1963,14 @@ mod tests {
             script_used_packages: rustc_hash::FxHashSet::default(),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output, None);
+        let result = compute_file_scores(
+            &modules,
+            &file_paths,
+            None,
+            output,
+            None,
+            std::path::Path::new("/project"),
+        );
         assert!(result.is_err());
         match result {
             Err(msg) => assert_eq!(msg, "graph not available"),
@@ -2006,7 +2034,15 @@ mod tests {
             script_used_packages: rustc_hash::FxHashSet::default(),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
+        let result = compute_file_scores(
+            &modules,
+            &file_paths,
+            None,
+            output,
+            None,
+            std::path::Path::new("/project"),
+        )
+        .unwrap();
         assert_eq!(result.scores.len(), 1);
 
         let score = &result.scores[0];
@@ -2058,7 +2094,15 @@ mod tests {
             script_used_packages: rustc_hash::FxHashSet::default(),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
+        let result = compute_file_scores(
+            &modules,
+            &file_paths,
+            None,
+            output,
+            None,
+            std::path::Path::new("/project"),
+        )
+        .unwrap();
         // Barrel files (function_count == 0) are excluded
         assert!(result.scores.is_empty());
     }
@@ -2145,8 +2189,15 @@ mod tests {
             script_used_packages: rustc_hash::FxHashSet::default(),
         };
 
-        let result =
-            compute_file_scores(&modules, &file_paths, Some(&changed), output, None).unwrap();
+        let result = compute_file_scores(
+            &modules,
+            &file_paths,
+            Some(&changed),
+            output,
+            None,
+            std::path::Path::new("/project"),
+        )
+        .unwrap();
         // Only path_b should remain
         assert_eq!(result.scores.len(), 1);
         assert_eq!(result.scores[0].path, path_b_check);
@@ -2230,7 +2281,15 @@ mod tests {
             script_used_packages: rustc_hash::FxHashSet::default(),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
+        let result = compute_file_scores(
+            &modules,
+            &file_paths,
+            None,
+            output,
+            None,
+            std::path::Path::new("/project"),
+        )
+        .unwrap();
         assert_eq!(result.scores.len(), 2);
         // Sorted ascending: worst (lowest MI) first
         assert!(result.scores[0].maintainability_index <= result.scores[1].maintainability_index);
@@ -2301,7 +2360,15 @@ mod tests {
             script_used_packages: rustc_hash::FxHashSet::default(),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
+        let result = compute_file_scores(
+            &modules,
+            &file_paths,
+            None,
+            output,
+            None,
+            std::path::Path::new("/project"),
+        )
+        .unwrap();
         // Unused file should have dead_code_ratio = 1.0
         assert_eq!(result.scores.len(), 1);
         assert!((result.scores[0].dead_code_ratio - 1.0).abs() < f64::EPSILON);
@@ -2389,7 +2456,15 @@ mod tests {
             script_used_packages: rustc_hash::FxHashSet::default(),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
+        let result = compute_file_scores(
+            &modules,
+            &file_paths,
+            None,
+            output,
+            None,
+            std::path::Path::new("/project"),
+        )
+        .unwrap();
         assert!(result.top_complex_fns.contains_key(&path_a));
         let top = &result.top_complex_fns[&path_a];
         // Truncated to 3, sorted by cognitive descending
@@ -2490,7 +2565,15 @@ mod tests {
             script_used_packages: rustc_hash::FxHashSet::default(),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
+        let result = compute_file_scores(
+            &modules,
+            &file_paths,
+            None,
+            output,
+            None,
+            std::path::Path::new("/project"),
+        )
+        .unwrap();
         // Both files should appear in circular_files
         assert!(result.circular_files.contains(&path_a));
         assert!(result.circular_files.contains(&path_b));
@@ -2628,7 +2711,15 @@ mod tests {
             script_used_packages: rustc_hash::FxHashSet::default(),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
+        let result = compute_file_scores(
+            &modules,
+            &file_paths,
+            None,
+            output,
+            None,
+            std::path::Path::new("/project"),
+        )
+        .unwrap();
         assert_eq!(result.analysis_counts.total_exports, 2);
         // dead_exports = unused_exports + unused_types = 1 + 1 = 2
         assert_eq!(result.analysis_counts.dead_exports, 2);
@@ -2761,7 +2852,15 @@ mod tests {
             script_used_packages: rustc_hash::FxHashSet::default(),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
+        let result = compute_file_scores(
+            &modules,
+            &file_paths,
+            None,
+            output,
+            None,
+            std::path::Path::new("/project"),
+        )
+        .unwrap();
         // total_exports = 3 (from graph, including synthesized re-export)
         // Before the fix this was 2 (from extraction modules), causing 150% dead exports
         assert_eq!(result.analysis_counts.total_exports, 3);
@@ -2813,7 +2912,15 @@ mod tests {
             script_used_packages: rustc_hash::FxHashSet::default(),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
+        let result = compute_file_scores(
+            &modules,
+            &file_paths,
+            None,
+            output,
+            None,
+            std::path::Path::new("/project"),
+        )
+        .unwrap();
         assert!(result.scores.is_empty());
     }
 
@@ -2864,7 +2971,15 @@ mod tests {
             script_used_packages: rustc_hash::FxHashSet::default(),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
+        let result = compute_file_scores(
+            &modules,
+            &file_paths,
+            None,
+            output,
+            None,
+            std::path::Path::new("/project"),
+        )
+        .unwrap();
         let mi = result.scores[0].maintainability_index;
         // MI should be rounded to 1 decimal place
         let rounded = (mi * 10.0).round() / 10.0;
@@ -2950,7 +3065,15 @@ mod tests {
             script_used_packages: rustc_hash::FxHashSet::default(),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
+        let result = compute_file_scores(
+            &modules,
+            &file_paths,
+            None,
+            output,
+            None,
+            std::path::Path::new("/project"),
+        )
+        .unwrap();
         // value_export_counts should track only non-type-only exports
         assert_eq!(result.value_export_counts[&path_a], 2);
     }
@@ -3002,7 +3125,15 @@ mod tests {
             script_used_packages: rustc_hash::FxHashSet::default(),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
+        let result = compute_file_scores(
+            &modules,
+            &file_paths,
+            None,
+            output,
+            None,
+            std::path::Path::new("/project"),
+        )
+        .unwrap();
         // Top function has cognitive=0, so it should not be included
         assert!(!result.top_complex_fns.contains_key(&path_a));
     }

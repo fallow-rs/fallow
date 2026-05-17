@@ -1,16 +1,15 @@
-//! Schema-side counterparts of the `actions` array attached to each health
-//! finding by the JSON output layer
-//! (`crates/cli/src/report/json.rs::inject_health_actions`).
+//! Per-action types attached to each health finding by the JSON output
+//! layer.
 //!
-//! The runtime emission path still builds these objects via
-//! `serde_json::json!` macros; the typed wrappers here exist so that
-//! `JsonSchema` can derive the per-action shape from a single Rust source
-//! of truth. Whenever the runtime emitter changes (new action variant,
-//! new optional field, renamed property), update the matching type in this
-//! module FIRST so the drift gate flags the divergence before review.
+//! These types are the typed wire shape for the `actions[]` array on health
+//! findings, hotspots, refactoring targets, and coverage-gap entries. The
+//! JSON emission path constructs them through typed wrappers (for example
+//! `UntestedFileFinding` in `crates/cli/src/health_types/coverage.rs`) and
+//! serializes them via serde; the schemars derive renders the matching
+//! per-action shape in `docs/output-schema.json`.
 //!
-//! Gated by the `schema` cargo feature on `fallow-types`. Non-schema builds
-//! never compile this module, keeping the runtime payload zero-cost.
+//! Whenever a new action variant or optional field is added, update the
+//! matching type here so the drift gate flags the divergence before review.
 
 use serde::Serialize;
 
@@ -199,7 +198,7 @@ pub enum HotspotActionHeuristic {
 /// declaration site), so a per-line placement hint would have no
 /// referent. Consumers that want the placement metadata should follow
 /// the target's `evidence.complex_functions` back to the matching
-/// [`HealthFinding`] and read placement from THAT action instead.
+/// `HealthFinding` and read placement from THAT action instead.
 ///
 /// [`RefactoringTarget`]: ../../fallow-cli/src/health_types/targets.rs
 #[derive(Debug, Clone, Serialize)]

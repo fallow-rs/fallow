@@ -1111,25 +1111,11 @@ pub(crate) fn inject_health_actions(output: &mut serde_json::Value, opts: Health
         }
     }
 
-    // Coverage gaps: untested files and exports
-    if let Some(gaps) = map.get_mut("coverage_gaps").and_then(|v| v.as_object_mut()) {
-        if let Some(files) = gaps.get_mut("files").and_then(|v| v.as_array_mut()) {
-            for item in files {
-                let actions = build_untested_file_actions(item);
-                if let serde_json::Value::Object(obj) = item {
-                    obj.insert("actions".to_string(), actions);
-                }
-            }
-        }
-        if let Some(exports) = gaps.get_mut("exports").and_then(|v| v.as_array_mut()) {
-            for item in exports {
-                let actions = build_untested_export_actions(item);
-                if let serde_json::Value::Object(obj) = item {
-                    obj.insert("actions".to_string(), actions);
-                }
-            }
-        }
-    }
+    // Coverage gaps (untested files / exports) are now serialized through
+    // typed `UntestedFileFinding` / `UntestedExportFinding` envelope wrappers
+    // built by `compute_coverage_gaps` in `crates/cli/src/health/scoring.rs`.
+    // No post-pass injection needed; the typed `actions` field flows through
+    // serde natively.
 
     // Runtime coverage actions are emitted by the sidecar and serialized
     // directly via serde (see `RuntimeCoverageAction` in
@@ -1516,56 +1502,6 @@ fn build_refactoring_target_actions(item: &serde_json::Value) -> serde_json::Val
     }
 
     serde_json::Value::Array(actions)
-}
-
-/// Build the `actions` array for an untested file.
-fn build_untested_file_actions(item: &serde_json::Value) -> serde_json::Value {
-    let path = item
-        .get("path")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("file");
-
-    serde_json::Value::Array(vec![
-        serde_json::json!({
-            "type": "add-tests",
-            "auto_fixable": false,
-            "description": format!("Add test coverage for `{path}`"),
-            "note": "No test dependency path reaches this runtime file",
-        }),
-        serde_json::json!({
-            "type": "suppress-file",
-            "auto_fixable": false,
-            "description": format!("Suppress coverage gap reporting for `{path}`"),
-            "comment": "// fallow-ignore-file coverage-gaps",
-        }),
-    ])
-}
-
-/// Build the `actions` array for an untested export.
-fn build_untested_export_actions(item: &serde_json::Value) -> serde_json::Value {
-    let path = item
-        .get("path")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("file");
-    let export_name = item
-        .get("export_name")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("export");
-
-    serde_json::Value::Array(vec![
-        serde_json::json!({
-            "type": "add-test-import",
-            "auto_fixable": false,
-            "description": format!("Import and test `{export_name}` from `{path}`"),
-            "note": "This export is runtime-reachable but no test-reachable module references it",
-        }),
-        serde_json::json!({
-            "type": "suppress-file",
-            "auto_fixable": false,
-            "description": format!("Suppress coverage gap reporting for `{path}`"),
-            "comment": "// fallow-ignore-file coverage-gaps",
-        }),
-    ])
 }
 
 // ── Duplication action injection ────────────────────────────────

@@ -978,17 +978,17 @@ fn write_coverage_gaps_section(
         out.push_str("#### Files\n");
         for item in &gaps.files {
             let file_str = escape_backticks(&normalize_uri(
-                &relative_path(&item.path, root).display().to_string(),
+                &relative_path(&item.file.path, root).display().to_string(),
             ));
             let _ = writeln!(
                 out,
                 "- `{file_str}` ({count} value export{})",
-                if item.value_export_count == 1 {
+                if item.file.value_export_count == 1 {
                     ""
                 } else {
                     "s"
                 },
-                count = item.value_export_count,
+                count = item.file.value_export_count,
             );
         }
         out.push('\n');
@@ -998,9 +998,13 @@ fn write_coverage_gaps_section(
         out.push_str("#### Exports\n");
         for item in &gaps.exports {
             let file_str = escape_backticks(&normalize_uri(
-                &relative_path(&item.path, root).display().to_string(),
+                &relative_path(&item.export.path, root).display().to_string(),
             ));
-            let _ = writeln!(out, "- `{file_str}`:{} `{}`", item.line, item.export_name);
+            let _ = writeln!(
+                out,
+                "- `{file_str}`:{} `{}`",
+                item.export.line, item.export.export_name
+            );
         }
     }
 }
@@ -1706,16 +1710,22 @@ mod tests {
                     untested_files: 1,
                     untested_exports: 1,
                 },
-                files: vec![UntestedFile {
-                    path: root.join("src/app.ts"),
-                    value_export_count: 2,
-                }],
-                exports: vec![UntestedExport {
-                    path: root.join("src/app.ts"),
-                    export_name: "loader".into(),
-                    line: 12,
-                    col: 4,
-                }],
+                files: vec![UntestedFileFinding::with_actions(
+                    UntestedFile {
+                        path: root.join("src/app.ts"),
+                        value_export_count: 2,
+                    },
+                    &root,
+                )],
+                exports: vec![UntestedExportFinding::with_actions(
+                    UntestedExport {
+                        path: root.join("src/app.ts"),
+                        export_name: "loader".into(),
+                        line: 12,
+                        col: 4,
+                    },
+                    &root,
+                )],
             }),
             ..Default::default()
         };
