@@ -48,7 +48,8 @@ fn missing_workspace_package_dependency_is_unlisted_for_importing_workspace() {
         .find(|dep| dep.dep.package_name == "@repo/tool")
         .expect("@repo/tool should be reported as unlisted");
     assert!(
-        tool.dep.imported_from
+        tool.dep
+            .imported_from
             .iter()
             .any(|site| site.path.ends_with("packages/app/src/index.ts")),
         "@repo/tool should point at the importing app file, found: {:?}",

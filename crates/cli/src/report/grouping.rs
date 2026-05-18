@@ -271,7 +271,8 @@ pub fn group_analysis_results(
     // ── Multi-location types (use first location) ───────────────
     for item in &results.unlisted_dependencies {
         let key = item
-            .dep.imported_from
+            .dep
+            .imported_from
             .first()
             .map_or_else(|| UNOWNED_LABEL.to_string(), |site| key_for(&site.path));
         groups
@@ -1028,13 +1029,17 @@ mod tests {
     #[test]
     fn group_unused_optional_deps() {
         let mut results = AnalysisResults::default();
-        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-            package_name: "fsevents".to_string(),
-            location: fallow_core::results::DependencyLocation::OptionalDependencies,
-            path: PathBuf::from("/root/package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_optional_dependencies
+            .push(UnusedOptionalDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "fsevents".to_string(),
+                    location: fallow_core::results::DependencyLocation::OptionalDependencies,
+                    path: PathBuf::from("/root/package.json"),
+                    line: 5,
+                    used_in_workspaces: Vec::new(),
+                },
+            ));
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
         assert_eq!(groups.len(), 1);
@@ -1044,13 +1049,13 @@ mod tests {
     #[test]
     fn group_type_only_deps() {
         let mut results = AnalysisResults::default();
-        results
-            .type_only_dependencies
-            .push(fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
+        results.type_only_dependencies.push(
+            fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
                 package_name: "zod".to_string(),
                 path: PathBuf::from("/root/package.json"),
                 line: 8,
-            }));
+            }),
+        );
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
         assert_eq!(groups.len(), 1);
@@ -1060,13 +1065,13 @@ mod tests {
     #[test]
     fn group_test_only_deps() {
         let mut results = AnalysisResults::default();
-        results
-            .test_only_dependencies
-            .push(fallow_core::results::TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
+        results.test_only_dependencies.push(
+            fallow_core::results::TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
                 package_name: "vitest".to_string(),
                 path: PathBuf::from("/root/package.json"),
                 line: 10,
-            }));
+            }),
+        );
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
         assert_eq!(groups.len(), 1);

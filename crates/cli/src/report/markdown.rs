@@ -80,7 +80,14 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &mut out,
         &results.unused_dependencies,
         "Unused dependencies",
-        |dep| format_dependency(&dep.dep.package_name, &dep.dep.path, &dep.dep.used_in_workspaces, root),
+        |dep| {
+            format_dependency(
+                &dep.dep.package_name,
+                &dep.dep.path,
+                &dep.dep.used_in_workspaces,
+                root,
+            )
+        },
     );
 
     // ── Unused devDependencies ──
@@ -88,7 +95,14 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &mut out,
         &results.unused_dev_dependencies,
         "Unused devDependencies",
-        |dep| format_dependency(&dep.dep.package_name, &dep.dep.path, &dep.dep.used_in_workspaces, root),
+        |dep| {
+            format_dependency(
+                &dep.dep.package_name,
+                &dep.dep.path,
+                &dep.dep.used_in_workspaces,
+                root,
+            )
+        },
     );
 
     // ── Unused optionalDependencies ──
@@ -96,7 +110,14 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &mut out,
         &results.unused_optional_dependencies,
         "Unused optionalDependencies",
-        |dep| format_dependency(&dep.dep.package_name, &dep.dep.path, &dep.dep.used_in_workspaces, root),
+        |dep| {
+            format_dependency(
+                &dep.dep.package_name,
+                &dep.dep.path,
+                &dep.dep.used_in_workspaces,
+                root,
+            )
+        },
     );
 
     // ── Unused enum members ──
@@ -1317,13 +1338,15 @@ mod tests {
     fn markdown_unused_dep_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "lodash".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: root.join("package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
         let md = build_markdown(&results, &root);
         assert!(md.contains("- `lodash`"));
     }
@@ -1380,11 +1403,15 @@ mod tests {
     fn markdown_type_only_dep_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-            package_name: "zod".to_string(),
-            path: root.join("package.json"),
-            line: 8,
-        }));
+        results
+            .type_only_dependencies
+            .push(TypeOnlyDependencyFinding::with_actions(
+                TypeOnlyDependency {
+                    package_name: "zod".to_string(),
+                    path: root.join("package.json"),
+                    line: 8,
+                },
+            ));
         let md = build_markdown(&results, &root);
         assert!(md.contains("### Type-only dependencies"));
         assert!(md.contains("- `zod`"));
@@ -1414,13 +1441,15 @@ mod tests {
     fn markdown_escapes_backticks_in_package_names() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "pkg`name".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: root.join("package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "pkg`name".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
         let md = build_markdown(&results, &root);
         assert!(md.contains("pkg\\`name"));
     }
@@ -1771,13 +1800,15 @@ mod tests {
     fn markdown_dep_in_workspace_shows_package_label() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "lodash".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: root.join("packages/core/package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("packages/core/package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
         let md = build_markdown(&results, &root);
         // Non-root package.json should show the label
         assert!(md.contains("(packages/core/package.json)"));
@@ -1787,13 +1818,15 @@ mod tests {
     fn markdown_dep_at_root_no_extra_label() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "lodash".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: root.join("package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
         let md = build_markdown(&results, &root);
         assert!(md.contains("- `lodash`"));
         assert!(!md.contains("(package.json)"));
@@ -1803,13 +1836,15 @@ mod tests {
     fn markdown_root_dep_with_cross_workspace_context_uses_context_label() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "lodash-es".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: root.join("package.json"),
-            line: 5,
-            used_in_workspaces: vec![root.join("packages/consumer")],
-        }));
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash-es".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("package.json"),
+                line: 5,
+                used_in_workspaces: vec![root.join("packages/consumer")],
+            }));
         let md = build_markdown(&results, &root);
         assert!(md.contains("- `lodash-es` (imported in packages/consumer)"));
         assert!(!md.contains("(package.json; imported in packages/consumer)"));
@@ -2201,13 +2236,17 @@ mod tests {
     fn markdown_unused_optional_dep() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-            package_name: "fsevents".to_string(),
-            location: DependencyLocation::OptionalDependencies,
-            path: root.join("package.json"),
-            line: 12,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_optional_dependencies
+            .push(UnusedOptionalDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "fsevents".to_string(),
+                    location: DependencyLocation::OptionalDependencies,
+                    path: root.join("package.json"),
+                    line: 12,
+                    used_in_workspaces: Vec::new(),
+                },
+            ));
         let md = build_markdown(&results, &root);
         assert!(md.contains("### Unused optionalDependencies (1)"));
         assert!(md.contains("- `fsevents`"));

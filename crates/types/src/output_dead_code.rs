@@ -663,11 +663,8 @@ impl UnusedOptionalDependencyFinding {
     /// Build the wrapper.
     #[must_use]
     pub fn with_actions(dep: UnusedDependency) -> Self {
-        let actions = build_unused_dependency_actions(
-            &dep,
-            "optionalDependencies",
-            "unused-dependency",
-        );
+        let actions =
+            build_unused_dependency_actions(&dep, "optionalDependencies", "unused-dependency");
         Self {
             dep,
             actions,

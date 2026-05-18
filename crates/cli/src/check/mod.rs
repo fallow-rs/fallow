@@ -745,20 +745,22 @@ mod tests {
                 span_start: 0,
                 is_re_export: false,
             }));
-        r.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "lodash".into(),
-            location: DependencyLocation::Dependencies,
-            path: PathBuf::from("/project/package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
-        r.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-            package_name: "jest".into(),
-            location: DependencyLocation::DevDependencies,
-            path: PathBuf::from("/project/package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
+        r.unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash".into(),
+                location: DependencyLocation::Dependencies,
+                path: PathBuf::from("/project/package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
+        r.unused_dev_dependencies
+            .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+                package_name: "jest".into(),
+                location: DependencyLocation::DevDependencies,
+                path: PathBuf::from("/project/package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
         r.unused_enum_members
             .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: PathBuf::from("/project/src/d.ts"),
@@ -785,14 +787,17 @@ mod tests {
                 col: 0,
                 specifier_col: 0,
             }));
-        r.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-            package_name: "chalk".into(),
-            imported_from: vec![ImportSite {
-                path: PathBuf::from("/project/src/g.ts"),
-                line: 1,
-                col: 0,
-            }],
-        }));
+        r.unlisted_dependencies
+            .push(UnlistedDependencyFinding::with_actions(
+                UnlistedDependency {
+                    package_name: "chalk".into(),
+                    imported_from: vec![ImportSite {
+                        path: PathBuf::from("/project/src/g.ts"),
+                        line: 1,
+                        col: 0,
+                    }],
+                },
+            ));
         r.duplicate_exports.push(DuplicateExport {
             export_name: "helper".into(),
             locations: vec![
@@ -1083,20 +1088,24 @@ mod tests {
     #[test]
     fn apply_unused_deps_clears_optional_and_type_only() {
         let mut results = make_results();
-        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-            package_name: "fsevents".into(),
-            location: DependencyLocation::OptionalDependencies,
-            path: PathBuf::from("/project/package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
         results
-            .type_only_dependencies
-            .push(fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
+            .unused_optional_dependencies
+            .push(UnusedOptionalDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "fsevents".into(),
+                    location: DependencyLocation::OptionalDependencies,
+                    path: PathBuf::from("/project/package.json"),
+                    line: 5,
+                    used_in_workspaces: Vec::new(),
+                },
+            ));
+        results.type_only_dependencies.push(
+            fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
                 package_name: "zod".into(),
                 path: PathBuf::from("/project/package.json"),
                 line: 8,
-            }));
+            }),
+        );
 
         let mut f = no_filters();
         f.unused_exports = true; // Only keep unused exports

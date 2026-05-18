@@ -1220,20 +1220,24 @@ mod tests {
                 span_start: 0,
                 is_re_export: false,
             }));
-        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "dep".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: PathBuf::from("package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
-        results.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-            package_name: "dev".to_string(),
-            location: DependencyLocation::DevDependencies,
-            path: PathBuf::from("package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "dep".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: PathBuf::from("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
+        results
+            .unused_dev_dependencies
+            .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+                package_name: "dev".to_string(),
+                location: DependencyLocation::DevDependencies,
+                path: PathBuf::from("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
         results
             .unused_enum_members
             .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
@@ -1263,14 +1267,18 @@ mod tests {
                 col: 0,
                 specifier_col: 0,
             }));
-        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-            package_name: "unlisted".to_string(),
-            imported_from: vec![ImportSite {
-                path: PathBuf::from("g.ts"),
-                line: 1,
-                col: 0,
-            }],
-        }));
+        results
+            .unlisted_dependencies
+            .push(UnlistedDependencyFinding::with_actions(
+                UnlistedDependency {
+                    package_name: "unlisted".to_string(),
+                    imported_from: vec![ImportSite {
+                        path: PathBuf::from("g.ts"),
+                        line: 1,
+                        col: 0,
+                    }],
+                },
+            ));
         results.duplicate_exports.push(DuplicateExport {
             export_name: "dup".to_string(),
             locations: vec![
@@ -1286,23 +1294,35 @@ mod tests {
                 },
             ],
         });
-        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-            package_name: "optional".to_string(),
-            location: DependencyLocation::OptionalDependencies,
-            path: PathBuf::from("package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
-        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-            package_name: "type-only".to_string(),
-            path: PathBuf::from("package.json"),
-            line: 8,
-        }));
-        results.test_only_dependencies.push(TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
-            package_name: "test-only".to_string(),
-            path: PathBuf::from("package.json"),
-            line: 9,
-        }));
+        results
+            .unused_optional_dependencies
+            .push(UnusedOptionalDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "optional".to_string(),
+                    location: DependencyLocation::OptionalDependencies,
+                    path: PathBuf::from("package.json"),
+                    line: 5,
+                    used_in_workspaces: Vec::new(),
+                },
+            ));
+        results
+            .type_only_dependencies
+            .push(TypeOnlyDependencyFinding::with_actions(
+                TypeOnlyDependency {
+                    package_name: "type-only".to_string(),
+                    path: PathBuf::from("package.json"),
+                    line: 8,
+                },
+            ));
+        results
+            .test_only_dependencies
+            .push(TestOnlyDependencyFinding::with_actions(
+                TestOnlyDependency {
+                    package_name: "test-only".to_string(),
+                    path: PathBuf::from("package.json"),
+                    line: 9,
+                },
+            ));
         results
             .circular_dependencies
             .push(CircularDependencyFinding::with_actions(
@@ -1551,20 +1571,22 @@ mod tests {
     #[test]
     fn sort_unused_dev_dependencies() {
         let mut r = AnalysisResults::default();
-        r.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-            package_name: "vitest".to_string(),
-            location: DependencyLocation::DevDependencies,
-            path: PathBuf::from("package.json"),
-            line: 10,
-            used_in_workspaces: Vec::new(),
-        }));
-        r.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-            package_name: "jest".to_string(),
-            location: DependencyLocation::DevDependencies,
-            path: PathBuf::from("package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
+        r.unused_dev_dependencies
+            .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+                package_name: "vitest".to_string(),
+                location: DependencyLocation::DevDependencies,
+                path: PathBuf::from("package.json"),
+                line: 10,
+                used_in_workspaces: Vec::new(),
+            }));
+        r.unused_dev_dependencies
+            .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+                package_name: "jest".to_string(),
+                location: DependencyLocation::DevDependencies,
+                path: PathBuf::from("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
         r.sort();
         assert_eq!(r.unused_dev_dependencies[0].dep.package_name, "jest");
         assert_eq!(r.unused_dev_dependencies[1].dep.package_name, "vitest");
@@ -1575,20 +1597,26 @@ mod tests {
     #[test]
     fn sort_unused_optional_dependencies() {
         let mut r = AnalysisResults::default();
-        r.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-            package_name: "zod".to_string(),
-            location: DependencyLocation::OptionalDependencies,
-            path: PathBuf::from("package.json"),
-            line: 3,
-            used_in_workspaces: Vec::new(),
-        }));
-        r.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-            package_name: "ajv".to_string(),
-            location: DependencyLocation::OptionalDependencies,
-            path: PathBuf::from("package.json"),
-            line: 2,
-            used_in_workspaces: Vec::new(),
-        }));
+        r.unused_optional_dependencies
+            .push(UnusedOptionalDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "zod".to_string(),
+                    location: DependencyLocation::OptionalDependencies,
+                    path: PathBuf::from("package.json"),
+                    line: 3,
+                    used_in_workspaces: Vec::new(),
+                },
+            ));
+        r.unused_optional_dependencies
+            .push(UnusedOptionalDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "ajv".to_string(),
+                    location: DependencyLocation::OptionalDependencies,
+                    path: PathBuf::from("package.json"),
+                    line: 2,
+                    used_in_workspaces: Vec::new(),
+                },
+            ));
         r.sort();
         assert_eq!(r.unused_optional_dependencies[0].dep.package_name, "ajv");
         assert_eq!(r.unused_optional_dependencies[1].dep.package_name, "zod");
@@ -1674,29 +1702,35 @@ mod tests {
     #[test]
     fn sort_unlisted_dependencies_by_name_and_inner_sites() {
         let mut r = AnalysisResults::default();
-        r.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-            package_name: "zod".to_string(),
-            imported_from: vec![
-                ImportSite {
-                    path: PathBuf::from("b.ts"),
-                    line: 10,
-                    col: 0,
+        r.unlisted_dependencies
+            .push(UnlistedDependencyFinding::with_actions(
+                UnlistedDependency {
+                    package_name: "zod".to_string(),
+                    imported_from: vec![
+                        ImportSite {
+                            path: PathBuf::from("b.ts"),
+                            line: 10,
+                            col: 0,
+                        },
+                        ImportSite {
+                            path: PathBuf::from("a.ts"),
+                            line: 1,
+                            col: 0,
+                        },
+                    ],
                 },
-                ImportSite {
-                    path: PathBuf::from("a.ts"),
-                    line: 1,
-                    col: 0,
+            ));
+        r.unlisted_dependencies
+            .push(UnlistedDependencyFinding::with_actions(
+                UnlistedDependency {
+                    package_name: "axios".to_string(),
+                    imported_from: vec![ImportSite {
+                        path: PathBuf::from("c.ts"),
+                        line: 1,
+                        col: 0,
+                    }],
                 },
-            ],
-        }));
-        r.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-            package_name: "axios".to_string(),
-            imported_from: vec![ImportSite {
-                path: PathBuf::from("c.ts"),
-                line: 1,
-                col: 0,
-            }],
-        }));
+            ));
         r.sort();
 
         // Outer sort: by package_name
@@ -1705,7 +1739,8 @@ mod tests {
 
         // Inner sort: imported_from sorted by path, then line
         let zod_sites: Vec<_> = r.unlisted_dependencies[1]
-            .dep.imported_from
+            .dep
+            .imported_from
             .iter()
             .map(|s| s.path.to_string_lossy().to_string())
             .collect();
@@ -1760,16 +1795,22 @@ mod tests {
     #[test]
     fn sort_type_only_dependencies() {
         let mut r = AnalysisResults::default();
-        r.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-            package_name: "zod".to_string(),
-            path: PathBuf::from("package.json"),
-            line: 10,
-        }));
-        r.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-            package_name: "ajv".to_string(),
-            path: PathBuf::from("package.json"),
-            line: 5,
-        }));
+        r.type_only_dependencies
+            .push(TypeOnlyDependencyFinding::with_actions(
+                TypeOnlyDependency {
+                    package_name: "zod".to_string(),
+                    path: PathBuf::from("package.json"),
+                    line: 10,
+                },
+            ));
+        r.type_only_dependencies
+            .push(TypeOnlyDependencyFinding::with_actions(
+                TypeOnlyDependency {
+                    package_name: "ajv".to_string(),
+                    path: PathBuf::from("package.json"),
+                    line: 5,
+                },
+            ));
         r.sort();
         assert_eq!(r.type_only_dependencies[0].dep.package_name, "ajv");
         assert_eq!(r.type_only_dependencies[1].dep.package_name, "zod");
@@ -1780,16 +1821,22 @@ mod tests {
     #[test]
     fn sort_test_only_dependencies() {
         let mut r = AnalysisResults::default();
-        r.test_only_dependencies.push(TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
-            package_name: "vitest".to_string(),
-            path: PathBuf::from("package.json"),
-            line: 15,
-        }));
-        r.test_only_dependencies.push(TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
-            package_name: "jest".to_string(),
-            path: PathBuf::from("package.json"),
-            line: 10,
-        }));
+        r.test_only_dependencies
+            .push(TestOnlyDependencyFinding::with_actions(
+                TestOnlyDependency {
+                    package_name: "vitest".to_string(),
+                    path: PathBuf::from("package.json"),
+                    line: 15,
+                },
+            ));
+        r.test_only_dependencies
+            .push(TestOnlyDependencyFinding::with_actions(
+                TestOnlyDependency {
+                    package_name: "jest".to_string(),
+                    path: PathBuf::from("package.json"),
+                    line: 10,
+                },
+            ));
         r.sort();
         assert_eq!(r.test_only_dependencies[0].dep.package_name, "jest");
         assert_eq!(r.test_only_dependencies[1].dep.package_name, "vitest");

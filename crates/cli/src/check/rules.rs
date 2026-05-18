@@ -363,20 +363,22 @@ mod tests {
                 span_start: 0,
                 is_re_export: false,
             }));
-        r.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "lodash".into(),
-            location: DependencyLocation::Dependencies,
-            path: PathBuf::from("/project/package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
-        r.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-            package_name: "jest".into(),
-            location: DependencyLocation::DevDependencies,
-            path: PathBuf::from("/project/package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
+        r.unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash".into(),
+                location: DependencyLocation::Dependencies,
+                path: PathBuf::from("/project/package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
+        r.unused_dev_dependencies
+            .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+                package_name: "jest".into(),
+                location: DependencyLocation::DevDependencies,
+                path: PathBuf::from("/project/package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
         r.unused_enum_members
             .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: PathBuf::from("/project/src/d.ts"),
@@ -403,14 +405,17 @@ mod tests {
                 col: 0,
                 specifier_col: 0,
             }));
-        r.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-            package_name: "chalk".into(),
-            imported_from: vec![ImportSite {
-                path: PathBuf::from("/project/src/g.ts"),
-                line: 1,
-                col: 0,
-            }],
-        }));
+        r.unlisted_dependencies
+            .push(UnlistedDependencyFinding::with_actions(
+                UnlistedDependency {
+                    package_name: "chalk".into(),
+                    imported_from: vec![ImportSite {
+                        path: PathBuf::from("/project/src/g.ts"),
+                        line: 1,
+                        col: 0,
+                    }],
+                },
+            ));
         r.duplicate_exports.push(DuplicateExport {
             export_name: "helper".into(),
             locations: vec![
@@ -1149,13 +1154,17 @@ mod tests {
     #[test]
     fn has_error_optional_deps_warn_by_default() {
         let mut results = AnalysisResults::default();
-        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-            package_name: "optional-pkg".into(),
-            location: DependencyLocation::OptionalDependencies,
-            path: PathBuf::from("/project/package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_optional_dependencies
+            .push(UnusedOptionalDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "optional-pkg".into(),
+                    location: DependencyLocation::OptionalDependencies,
+                    path: PathBuf::from("/project/package.json"),
+                    line: 5,
+                    used_in_workspaces: Vec::new(),
+                },
+            ));
         let rules = RulesConfig::default();
         // unused_optional_dependencies defaults to Warn, so no error
         assert!(!has_error_severity_issues(&results, &rules, None));
@@ -1164,13 +1173,17 @@ mod tests {
     #[test]
     fn has_error_optional_deps_detected_when_error() {
         let mut results = AnalysisResults::default();
-        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-            package_name: "optional-pkg".into(),
-            location: DependencyLocation::OptionalDependencies,
-            path: PathBuf::from("/project/package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_optional_dependencies
+            .push(UnusedOptionalDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "optional-pkg".into(),
+                    location: DependencyLocation::OptionalDependencies,
+                    path: PathBuf::from("/project/package.json"),
+                    line: 5,
+                    used_in_workspaces: Vec::new(),
+                },
+            ));
         let rules = RulesConfig {
             unused_optional_dependencies: Severity::Error,
             ..RulesConfig::default()
@@ -1181,11 +1194,15 @@ mod tests {
     #[test]
     fn has_error_type_only_deps_warn_by_default() {
         let mut results = AnalysisResults::default();
-        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-            package_name: "zod".into(),
-            path: PathBuf::from("/project/package.json"),
-            line: 8,
-        }));
+        results
+            .type_only_dependencies
+            .push(TypeOnlyDependencyFinding::with_actions(
+                TypeOnlyDependency {
+                    package_name: "zod".into(),
+                    path: PathBuf::from("/project/package.json"),
+                    line: 8,
+                },
+            ));
         let rules = RulesConfig::default();
         // type_only_dependencies defaults to Warn, not Error
         assert!(!has_error_severity_issues(&results, &rules, None));
@@ -1194,11 +1211,15 @@ mod tests {
     #[test]
     fn has_error_type_only_deps_detected_when_error() {
         let mut results = AnalysisResults::default();
-        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-            package_name: "zod".into(),
-            path: PathBuf::from("/project/package.json"),
-            line: 8,
-        }));
+        results
+            .type_only_dependencies
+            .push(TypeOnlyDependencyFinding::with_actions(
+                TypeOnlyDependency {
+                    package_name: "zod".into(),
+                    path: PathBuf::from("/project/package.json"),
+                    line: 8,
+                },
+            ));
         let rules = RulesConfig {
             type_only_dependencies: Severity::Error,
             ..RulesConfig::default()

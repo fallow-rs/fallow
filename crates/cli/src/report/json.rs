@@ -2095,14 +2095,18 @@ mod tests {
     fn json_strips_root_from_nested_locations() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-            package_name: "chalk".to_string(),
-            imported_from: vec![ImportSite {
-                path: root.join("src/cli.ts"),
-                line: 2,
-                col: 0,
-            }],
-        }));
+        results
+            .unlisted_dependencies
+            .push(UnlistedDependencyFinding::with_actions(
+                UnlistedDependency {
+                    package_name: "chalk".to_string(),
+                    imported_from: vec![ImportSite {
+                        path: root.join("src/cli.ts"),
+                        line: 2,
+                        col: 0,
+                    }],
+                },
+            ));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2232,13 +2236,15 @@ mod tests {
     fn json_unused_dependency_contains_expected_fields() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "axios".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: root.join("package.json"),
-            line: 10,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "axios".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("package.json"),
+                line: 10,
+                used_in_workspaces: Vec::new(),
+            }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2252,13 +2258,15 @@ mod tests {
     fn json_unused_dependency_includes_cross_workspace_context() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "lodash-es".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: root.join("packages/shared/package.json"),
-            line: 6,
-            used_in_workspaces: vec![root.join("packages/consumer")],
-        }));
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash-es".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("packages/shared/package.json"),
+                line: 6,
+                used_in_workspaces: vec![root.join("packages/consumer")],
+            }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2273,13 +2281,15 @@ mod tests {
     fn json_unused_dev_dependency_contains_expected_fields() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-            package_name: "vitest".to_string(),
-            location: DependencyLocation::DevDependencies,
-            path: root.join("package.json"),
-            line: 15,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_dev_dependencies
+            .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+                package_name: "vitest".to_string(),
+                location: DependencyLocation::DevDependencies,
+                path: root.join("package.json"),
+                line: 15,
+                used_in_workspaces: Vec::new(),
+            }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2291,13 +2301,17 @@ mod tests {
     fn json_unused_optional_dependency_contains_expected_fields() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-            package_name: "fsevents".to_string(),
-            location: DependencyLocation::OptionalDependencies,
-            path: root.join("package.json"),
-            line: 12,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_optional_dependencies
+            .push(UnusedOptionalDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "fsevents".to_string(),
+                    location: DependencyLocation::OptionalDependencies,
+                    path: root.join("package.json"),
+                    line: 12,
+                    used_in_workspaces: Vec::new(),
+                },
+            ));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2379,21 +2393,25 @@ mod tests {
     fn json_unlisted_dependency_contains_import_sites() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-            package_name: "dotenv".to_string(),
-            imported_from: vec![
-                ImportSite {
-                    path: root.join("src/config.ts"),
-                    line: 1,
-                    col: 0,
+        results
+            .unlisted_dependencies
+            .push(UnlistedDependencyFinding::with_actions(
+                UnlistedDependency {
+                    package_name: "dotenv".to_string(),
+                    imported_from: vec![
+                        ImportSite {
+                            path: root.join("src/config.ts"),
+                            line: 1,
+                            col: 0,
+                        },
+                        ImportSite {
+                            path: root.join("src/server.ts"),
+                            line: 3,
+                            col: 0,
+                        },
+                    ],
                 },
-                ImportSite {
-                    path: root.join("src/server.ts"),
-                    line: 3,
-                    col: 0,
-                },
-            ],
-        }));
+            ));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2542,11 +2560,15 @@ mod tests {
     fn json_type_only_dependency_contains_expected_fields() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-            package_name: "zod".to_string(),
-            path: root.join("package.json"),
-            line: 8,
-        }));
+        results
+            .type_only_dependencies
+            .push(TypeOnlyDependencyFinding::with_actions(
+                TypeOnlyDependency {
+                    package_name: "zod".to_string(),
+                    path: root.join("package.json"),
+                    line: 8,
+                },
+            ));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -3128,13 +3150,15 @@ mod tests {
     fn json_unused_dependency_has_config_suppress_with_package_name() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "lodash".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: root.join("package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
         let output = build_json(&results, &root, Duration::ZERO).unwrap();
 
         let actions = output["unused_dependencies"][0]["actions"]
@@ -3153,13 +3177,15 @@ mod tests {
     fn json_cross_workspace_dependency_is_not_auto_fixable() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "lodash-es".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: root.join("packages/shared/package.json"),
-            line: 5,
-            used_in_workspaces: vec![root.join("packages/consumer")],
-        }));
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash-es".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("packages/shared/package.json"),
+                line: 5,
+                used_in_workspaces: vec![root.join("packages/consumer")],
+            }));
         let output = build_json(&results, &root, Duration::ZERO).unwrap();
 
         let actions = output["unused_dependencies"][0]["actions"]

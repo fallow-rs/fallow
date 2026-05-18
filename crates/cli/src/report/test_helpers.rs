@@ -40,27 +40,32 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             span_start: 60,
             is_re_export: false,
         }));
-    r.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-        package_name: "lodash".to_string(),
-        location: DependencyLocation::Dependencies,
-        path: root.join("package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
-    r.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-        package_name: "jest".to_string(),
-        location: DependencyLocation::DevDependencies,
-        path: root.join("package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
-    r.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-        package_name: "fsevents".to_string(),
-        location: DependencyLocation::OptionalDependencies,
-        path: root.join("package.json"),
-        line: 15,
-        used_in_workspaces: Vec::new(),
-    }));
+    r.unused_dependencies
+        .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
+    r.unused_dev_dependencies
+        .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+            package_name: "jest".to_string(),
+            location: DependencyLocation::DevDependencies,
+            path: root.join("package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
+    r.unused_optional_dependencies
+        .push(UnusedOptionalDependencyFinding::with_actions(
+            UnusedDependency {
+                package_name: "fsevents".to_string(),
+                location: DependencyLocation::OptionalDependencies,
+                path: root.join("package.json"),
+                line: 15,
+                used_in_workspaces: Vec::new(),
+            },
+        ));
     r.unused_enum_members
         .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
             path: root.join("src/enums.ts"),
@@ -87,14 +92,17 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             col: 0,
             specifier_col: 0,
         }));
-    r.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-        package_name: "chalk".to_string(),
-        imported_from: vec![ImportSite {
-            path: root.join("src/cli.ts"),
-            line: 2,
-            col: 0,
-        }],
-    }));
+    r.unlisted_dependencies
+        .push(UnlistedDependencyFinding::with_actions(
+            UnlistedDependency {
+                package_name: "chalk".to_string(),
+                imported_from: vec![ImportSite {
+                    path: root.join("src/cli.ts"),
+                    line: 2,
+                    col: 0,
+                }],
+            },
+        ));
     r.duplicate_exports.push(DuplicateExport {
         export_name: "Config".to_string(),
         locations: vec![
@@ -110,16 +118,22 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             },
         ],
     });
-    r.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-        package_name: "zod".to_string(),
-        path: root.join("package.json"),
-        line: 8,
-    }));
-    r.test_only_dependencies.push(TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
-        package_name: "msw".to_string(),
-        path: root.join("package.json"),
-        line: 12,
-    }));
+    r.type_only_dependencies
+        .push(TypeOnlyDependencyFinding::with_actions(
+            TypeOnlyDependency {
+                package_name: "zod".to_string(),
+                path: root.join("package.json"),
+                line: 8,
+            },
+        ));
+    r.test_only_dependencies
+        .push(TestOnlyDependencyFinding::with_actions(
+            TestOnlyDependency {
+                package_name: "msw".to_string(),
+                path: root.join("package.json"),
+                line: 12,
+            },
+        ));
     r.circular_dependencies
         .push(CircularDependencyFinding::with_actions(
             CircularDependency {

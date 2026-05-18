@@ -599,13 +599,15 @@ mod tests {
     fn compact_unused_dep_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "lodash".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: root.join("package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "unused-dep:lodash");
@@ -615,13 +617,15 @@ mod tests {
     fn compact_unused_devdep_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-            package_name: "jest".to_string(),
-            location: DependencyLocation::DevDependencies,
-            path: root.join("package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_dev_dependencies
+            .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+                package_name: "jest".to_string(),
+                location: DependencyLocation::DevDependencies,
+                path: root.join("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "unused-devdep:jest");
@@ -693,10 +697,14 @@ mod tests {
     fn compact_unlisted_dep_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-            package_name: "chalk".to_string(),
-            imported_from: vec![],
-        }));
+        results
+            .unlisted_dependencies
+            .push(UnlistedDependencyFinding::with_actions(
+                UnlistedDependency {
+                    package_name: "chalk".to_string(),
+                    imported_from: vec![],
+                },
+            ));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "unlisted-dep:chalk");
@@ -818,13 +826,17 @@ mod tests {
     fn compact_unused_optional_dep_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-            package_name: "fsevents".to_string(),
-            location: DependencyLocation::OptionalDependencies,
-            path: root.join("package.json"),
-            line: 12,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_optional_dependencies
+            .push(UnusedOptionalDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "fsevents".to_string(),
+                    location: DependencyLocation::OptionalDependencies,
+                    path: root.join("package.json"),
+                    line: 12,
+                    used_in_workspaces: Vec::new(),
+                },
+            ));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "unused-optionaldep:fsevents");
@@ -891,11 +903,15 @@ mod tests {
     fn compact_type_only_dep_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-            package_name: "zod".to_string(),
-            path: root.join("package.json"),
-            line: 8,
-        }));
+        results
+            .type_only_dependencies
+            .push(TypeOnlyDependencyFinding::with_actions(
+                TypeOnlyDependency {
+                    package_name: "zod".to_string(),
+                    path: root.join("package.json"),
+                    line: 8,
+                },
+            ));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "type-only-dep:zod");
@@ -930,20 +946,26 @@ mod tests {
     fn compact_ordering_optional_dep_between_devdep_and_enum() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-            package_name: "jest".to_string(),
-            location: DependencyLocation::DevDependencies,
-            path: root.join("package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
-        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-            package_name: "fsevents".to_string(),
-            location: DependencyLocation::OptionalDependencies,
-            path: root.join("package.json"),
-            line: 12,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_dev_dependencies
+            .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+                package_name: "jest".to_string(),
+                location: DependencyLocation::DevDependencies,
+                path: root.join("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
+        results
+            .unused_optional_dependencies
+            .push(UnusedOptionalDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "fsevents".to_string(),
+                    location: DependencyLocation::OptionalDependencies,
+                    path: root.join("package.json"),
+                    line: 12,
+                    used_in_workspaces: Vec::new(),
+                },
+            ));
         results
             .unused_enum_members
             .push(UnusedEnumMemberFinding::with_actions(UnusedMember {

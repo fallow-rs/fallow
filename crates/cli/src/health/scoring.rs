@@ -1261,7 +1261,12 @@ pub(super) fn compute_file_scores(
     unused_export_paths.extend(results.unused_exports.iter().map(|e| e.export.path.clone()));
     unused_export_paths.extend(results.unused_types.iter().map(|e| e.export.path.clone()));
     let mut unused_dep_package_paths: Vec<std::path::PathBuf> = Vec::with_capacity(unused_deps);
-    unused_dep_package_paths.extend(results.unused_dependencies.iter().map(|d| d.dep.path.clone()));
+    unused_dep_package_paths.extend(
+        results
+            .unused_dependencies
+            .iter()
+            .map(|d| d.dep.path.clone()),
+    );
     unused_dep_package_paths.extend(
         results
             .unused_dev_dependencies

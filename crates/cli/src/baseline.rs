@@ -1968,13 +1968,16 @@ mod tests {
                     is_cross_package: false,
                 },
             ));
-        r.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-            package_name: "fsevents".to_string(),
-            location: DependencyLocation::OptionalDependencies,
-            path: PathBuf::from("package.json"),
-            line: 15,
-            used_in_workspaces: Vec::new(),
-        }));
+        r.unused_optional_dependencies
+            .push(UnusedOptionalDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "fsevents".to_string(),
+                    location: DependencyLocation::OptionalDependencies,
+                    path: PathBuf::from("package.json"),
+                    line: 15,
+                    used_in_workspaces: Vec::new(),
+                },
+            ));
         r.unused_enum_members
             .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: PathBuf::from("src/enums.ts"),
@@ -2004,11 +2007,12 @@ mod tests {
                 },
             ),
         );
-        r.unlisted_dependencies
-            .push(fallow_core::results::UnlistedDependencyFinding::with_actions(UnlistedDependency {
+        r.unlisted_dependencies.push(
+            fallow_core::results::UnlistedDependencyFinding::with_actions(UnlistedDependency {
                 package_name: "chalk".to_string(),
                 imported_from: vec![],
-            }));
+            }),
+        );
         r.duplicate_exports
             .push(fallow_core::results::DuplicateExport {
                 export_name: "Config".to_string(),
@@ -2025,18 +2029,20 @@ mod tests {
                     },
                 ],
             });
-        r.type_only_dependencies
-            .push(fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
+        r.type_only_dependencies.push(
+            fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
                 package_name: "zod".to_string(),
                 path: PathBuf::from("package.json"),
                 line: 8,
-            }));
-        r.test_only_dependencies
-            .push(fallow_core::results::TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
+            }),
+        );
+        r.test_only_dependencies.push(
+            fallow_core::results::TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
                 package_name: "vitest".to_string(),
                 path: PathBuf::from("package.json"),
                 line: 10,
-            }));
+            }),
+        );
         r.boundary_violations.push(
             fallow_types::output_dead_code::BoundaryViolationFinding::with_actions(
                 fallow_core::results::BoundaryViolation {

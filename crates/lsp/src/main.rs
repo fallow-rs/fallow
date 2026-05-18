@@ -1239,7 +1239,10 @@ fn dedup_results(target: &mut AnalysisResults) {
             merged
                 .entry(dep.dep.package_name.clone())
                 .and_modify(|existing| {
-                    existing.dep.imported_from.extend(dep.dep.imported_from.clone());
+                    existing
+                        .dep
+                        .imported_from
+                        .extend(dep.dep.imported_from.clone());
                 })
                 .or_insert(dep);
         }
@@ -1678,27 +1681,35 @@ mod tests {
                 span_start: 0,
                 is_re_export: false,
             }));
-        source.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "dep".to_string(),
-            location: fallow_core::results::DependencyLocation::Dependencies,
-            path: "/pkg.json".into(),
-            line: 3,
-            used_in_workspaces: Vec::new(),
-        }));
-        source.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-            package_name: "dev-dep".to_string(),
-            location: fallow_core::results::DependencyLocation::DevDependencies,
-            path: "/pkg.json".into(),
-            line: 4,
-            used_in_workspaces: Vec::new(),
-        }));
-        source.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-            package_name: "opt-dep".to_string(),
-            location: fallow_core::results::DependencyLocation::OptionalDependencies,
-            path: "/pkg.json".into(),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
+        source
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "dep".to_string(),
+                location: fallow_core::results::DependencyLocation::Dependencies,
+                path: "/pkg.json".into(),
+                line: 3,
+                used_in_workspaces: Vec::new(),
+            }));
+        source
+            .unused_dev_dependencies
+            .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+                package_name: "dev-dep".to_string(),
+                location: fallow_core::results::DependencyLocation::DevDependencies,
+                path: "/pkg.json".into(),
+                line: 4,
+                used_in_workspaces: Vec::new(),
+            }));
+        source
+            .unused_optional_dependencies
+            .push(UnusedOptionalDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "opt-dep".to_string(),
+                    location: fallow_core::results::DependencyLocation::OptionalDependencies,
+                    path: "/pkg.json".into(),
+                    line: 5,
+                    used_in_workspaces: Vec::new(),
+                },
+            ));
         source
             .unused_enum_members
             .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
@@ -1730,23 +1741,27 @@ mod tests {
                 },
             ),
         );
-        source.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-            package_name: "unlisted".to_string(),
-            imported_from: vec![],
-        }));
+        source
+            .unlisted_dependencies
+            .push(UnlistedDependencyFinding::with_actions(
+                UnlistedDependency {
+                    package_name: "unlisted".to_string(),
+                    imported_from: vec![],
+                },
+            ));
         source
             .duplicate_exports
             .push(fallow_core::results::DuplicateExport {
                 export_name: "dup".to_string(),
                 locations: vec![],
             });
-        source
-            .type_only_dependencies
-            .push(fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
+        source.type_only_dependencies.push(
+            fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
                 package_name: "type-only".to_string(),
                 path: "/pkg.json".into(),
                 line: 9,
-            }));
+            }),
+        );
         source
             .circular_dependencies
             .push(CircularDependencyFinding::with_actions(
@@ -1758,11 +1773,15 @@ mod tests {
                     is_cross_package: false,
                 },
             ));
-        source.test_only_dependencies.push(TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
-            package_name: "test-only".to_string(),
-            path: "/pkg.json".into(),
-            line: 11,
-        }));
+        source
+            .test_only_dependencies
+            .push(TestOnlyDependencyFinding::with_actions(
+                TestOnlyDependency {
+                    package_name: "test-only".to_string(),
+                    path: "/pkg.json".into(),
+                    line: 11,
+                },
+            ));
         source
             .boundary_violations
             .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
@@ -1949,29 +1968,37 @@ mod tests {
         // entries in the Problems panel; with merging, they get one with
         // the union of import sites.
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-            package_name: "lodash".to_string(),
-            imported_from: vec![
-                fallow_core::results::ImportSite {
-                    path: "/repo/packages/a/x.ts".into(),
-                    line: 1,
-                    col: 0,
+        results
+            .unlisted_dependencies
+            .push(UnlistedDependencyFinding::with_actions(
+                UnlistedDependency {
+                    package_name: "lodash".to_string(),
+                    imported_from: vec![
+                        fallow_core::results::ImportSite {
+                            path: "/repo/packages/a/x.ts".into(),
+                            line: 1,
+                            col: 0,
+                        },
+                        fallow_core::results::ImportSite {
+                            path: "/repo/packages/b/y.ts".into(),
+                            line: 2,
+                            col: 0,
+                        },
+                    ],
                 },
-                fallow_core::results::ImportSite {
-                    path: "/repo/packages/b/y.ts".into(),
-                    line: 2,
-                    col: 0,
+            ));
+        results
+            .unlisted_dependencies
+            .push(UnlistedDependencyFinding::with_actions(
+                UnlistedDependency {
+                    package_name: "lodash".to_string(),
+                    imported_from: vec![fallow_core::results::ImportSite {
+                        path: "/repo/packages/a/x.ts".into(),
+                        line: 1,
+                        col: 0,
+                    }],
                 },
-            ],
-        }));
-        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-            package_name: "lodash".to_string(),
-            imported_from: vec![fallow_core::results::ImportSite {
-                path: "/repo/packages/a/x.ts".into(),
-                line: 1,
-                col: 0,
-            }],
-        }));
+            ));
 
         dedup_results(&mut results);
 
@@ -2101,22 +2128,26 @@ mod tests {
         let mut results = AnalysisResults::default();
         // Same package.json analyzed twice.
         for _ in 0..2 {
-            results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
+            results
+                .unused_dependencies
+                .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                    package_name: "lodash".to_string(),
+                    location: fallow_core::results::DependencyLocation::Dependencies,
+                    path: "/repo/package.json".into(),
+                    line: 5,
+                    used_in_workspaces: Vec::new(),
+                }));
+        }
+        // Genuinely distinct: different package.json (sub-package).
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".to_string(),
                 location: fallow_core::results::DependencyLocation::Dependencies,
-                path: "/repo/package.json".into(),
+                path: "/repo/packages/web/package.json".into(),
                 line: 5,
                 used_in_workspaces: Vec::new(),
             }));
-        }
-        // Genuinely distinct: different package.json (sub-package).
-        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "lodash".to_string(),
-            location: fallow_core::results::DependencyLocation::Dependencies,
-            path: "/repo/packages/web/package.json".into(),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-        }));
 
         dedup_results(&mut results);
 

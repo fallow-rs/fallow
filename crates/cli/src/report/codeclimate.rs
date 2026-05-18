@@ -1453,21 +1453,25 @@ mod tests {
     fn codeclimate_unlisted_dep_one_issue_per_import_site() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-            package_name: "chalk".to_string(),
-            imported_from: vec![
-                ImportSite {
-                    path: root.join("src/a.ts"),
-                    line: 1,
-                    col: 0,
+        results
+            .unlisted_dependencies
+            .push(UnlistedDependencyFinding::with_actions(
+                UnlistedDependency {
+                    package_name: "chalk".to_string(),
+                    imported_from: vec![
+                        ImportSite {
+                            path: root.join("src/a.ts"),
+                            line: 1,
+                            col: 0,
+                        },
+                        ImportSite {
+                            path: root.join("src/b.ts"),
+                            line: 5,
+                            col: 0,
+                        },
+                    ],
                 },
-                ImportSite {
-                    path: root.join("src/b.ts"),
-                    line: 5,
-                    col: 0,
-                },
-            ],
-        }));
+            ));
         let rules = RulesConfig::default();
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let arr = output.as_array().unwrap();
@@ -1575,11 +1579,15 @@ mod tests {
     fn codeclimate_type_only_dep_has_correct_check_name() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-            package_name: "zod".to_string(),
-            path: root.join("package.json"),
-            line: 8,
-        }));
+        results
+            .type_only_dependencies
+            .push(TypeOnlyDependencyFinding::with_actions(
+                TypeOnlyDependency {
+                    package_name: "zod".to_string(),
+                    path: root.join("package.json"),
+                    line: 8,
+                },
+            ));
         let rules = RulesConfig::default();
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/type-only-dependency");
@@ -1592,13 +1600,15 @@ mod tests {
     fn codeclimate_dep_with_zero_line_omits_line_number() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "lodash".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: root.join("package.json"),
-            line: 0,
-            used_in_workspaces: Vec::new(),
-        }));
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("package.json"),
+                line: 0,
+                used_in_workspaces: Vec::new(),
+            }));
         let rules = RulesConfig::default();
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         // Line 0 -> begin defaults to 1

@@ -1367,12 +1367,7 @@ fn dead_code_keys(
         .iter()
         .map(|f| &f.dep)
         .chain(results.unused_dev_dependencies.iter().map(|f| &f.dep))
-        .chain(
-            results
-                .unused_optional_dependencies
-                .iter()
-                .map(|f| &f.dep),
-        )
+        .chain(results.unused_optional_dependencies.iter().map(|f| &f.dep))
     {
         keys.insert(unused_dependency_key(item, root));
     }

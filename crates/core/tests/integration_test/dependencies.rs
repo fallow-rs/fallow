@@ -374,7 +374,8 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
         .unused_dependencies
         .iter()
         .filter(|d| {
-            d.dep.path
+            d.dep
+                .path
                 .components()
                 .any(|c| matches!(c, std::path::Component::Normal(s) if s == "dist"))
         })
