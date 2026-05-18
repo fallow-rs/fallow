@@ -22,11 +22,6 @@ const IGNORE_EXPORTS_VALUE_SCHEMA: &str =
     "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreExports";
 
 /// JSON Pointer fragment URL describing the shape of the `value` field on an
-/// `ignoreDependencies` `add-to-config` action. Points at the array item schema
-/// (a single string) since the action's `value` is one entry to append.
-const IGNORE_DEPENDENCIES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items";
-
-/// JSON Pointer fragment URL describing the shape of the `value` field on an
 /// `ignoreCatalogReferences` `add-to-config` action: one `{ package, catalog?,
 /// consumer? }` entry to append.
 const IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreCatalogReferences/items";
@@ -291,8 +286,6 @@ enum SuppressKind {
     InlineComment,
     /// `# fallow-ignore-next-line <type>` on the line before (YAML / shell).
     YamlComment,
-    /// Add to `ignoreDependencies` in fallow config.
-    ConfigIgnoreDep,
     /// Add to `ignoreCatalogReferences` in fallow config (with optional
     /// catalog + consumer scope).
     AddToConfigIgnoreCatalogReferences,
@@ -322,45 +315,23 @@ fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
         // applied at wrapper construction.
         // `private_type_leaks` is no longer post-pass-injected: the typed
         // `PrivateTypeLeakFinding` wrapper carries its `actions` array natively.
-        "unused_dependencies" => Some(ActionSpec {
-            fix_type: "remove-dependency",
-            auto_fixable: true,
-            description: "Remove from dependencies in package.json",
-            note: None,
-            suppress: SuppressKind::ConfigIgnoreDep,
-            issue_kind: "unused-dependency",
-        }),
-        "unused_dev_dependencies" => Some(ActionSpec {
-            fix_type: "remove-dependency",
-            auto_fixable: true,
-            description: "Remove from devDependencies in package.json",
-            note: None,
-            suppress: SuppressKind::ConfigIgnoreDep,
-            issue_kind: "unused-dev-dependency",
-        }),
-        "unused_optional_dependencies" => Some(ActionSpec {
-            fix_type: "remove-dependency",
-            auto_fixable: true,
-            description: "Remove from optionalDependencies in package.json",
-            note: None,
-            suppress: SuppressKind::ConfigIgnoreDep,
-            // No IssueKind variant exists for optional deps — uses config suppress only.
-            issue_kind: "unused-dependency",
-        }),
+        // `unused_dependencies` / `unused_dev_dependencies` /
+        // `unused_optional_dependencies` are no longer post-pass-injected:
+        // the typed `UnusedDependencyFinding` / `UnusedDevDependencyFinding` /
+        // `UnusedOptionalDependencyFinding` wrappers carry their `actions`
+        // array natively, with the cross-workspace `move-dependency` swap
+        // applied at wrapper construction.
         // `unused_enum_members` and `unused_class_members` are no longer
         // post-pass-injected: the typed `UnusedEnumMemberFinding` /
         // `UnusedClassMemberFinding` wrappers carry their `actions` array
         // natively.
         // `unresolved_imports` is no longer post-pass-injected: the typed
         // `UnresolvedImportFinding` wrapper carries its `actions` array natively.
-        "unlisted_dependencies" => Some(ActionSpec {
-            fix_type: "install-dependency",
-            auto_fixable: false,
-            description: "Add this package to dependencies in package.json",
-            note: Some("Verify this package should be a direct dependency before adding"),
-            suppress: SuppressKind::ConfigIgnoreDep,
-            issue_kind: "unlisted-dependency",
-        }),
+        // `unlisted_dependencies` / `type_only_dependencies` /
+        // `test_only_dependencies` are no longer post-pass-injected: the
+        // typed `UnlistedDependencyFinding` / `TypeOnlyDependencyFinding` /
+        // `TestOnlyDependencyFinding` wrappers carry their `actions` array
+        // natively.
         "duplicate_exports" => Some(ActionSpec {
             fix_type: "remove-duplicate",
             auto_fixable: false,
@@ -368,26 +339,6 @@ fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
             note: Some(NAMESPACE_BARREL_HINT),
             suppress: SuppressKind::InlineComment,
             issue_kind: "duplicate-export",
-        }),
-        "type_only_dependencies" => Some(ActionSpec {
-            fix_type: "move-to-dev",
-            auto_fixable: false,
-            description: "Move to devDependencies (only type imports are used)",
-            note: Some(
-                "Type imports are erased at runtime so this dependency is not needed in production",
-            ),
-            suppress: SuppressKind::ConfigIgnoreDep,
-            issue_kind: "type-only-dependency",
-        }),
-        "test_only_dependencies" => Some(ActionSpec {
-            fix_type: "move-to-dev",
-            auto_fixable: false,
-            description: "Move to devDependencies (only test files import this)",
-            note: Some(
-                "Only test files import this package so it does not need to be a production dependency",
-            ),
-            suppress: SuppressKind::ConfigIgnoreDep,
-            issue_kind: "test-only-dependency",
         }),
         // `circular_dependencies` and `boundary_violations` are no longer
         // post-pass-injected: the typed `CircularDependencyFinding` /
@@ -601,21 +552,6 @@ fn build_actions(
                 "auto_fixable": false,
                 "description": "Suppress with a YAML comment above the line",
                 "comment": format!("# fallow-ignore-next-line {}", spec.issue_kind),
-            }));
-        }
-        SuppressKind::ConfigIgnoreDep => {
-            // Extract the package name from the item for a concrete suggestion.
-            let pkg = item
-                .get("package_name")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("package-name");
-            actions.push(serde_json::json!({
-                "type": "add-to-config",
-                "auto_fixable": false,
-                "description": format!("Add \"{pkg}\" to ignoreDependencies in fallow config"),
-                "config_key": "ignoreDependencies",
-                "value": pkg,
-                "value_schema": IGNORE_DEPENDENCIES_VALUE_SCHEMA,
             }));
         }
         SuppressKind::AddToConfigIgnoreCatalogReferences => {
@@ -2159,14 +2095,14 @@ mod tests {
     fn json_strips_root_from_nested_locations() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependency {
+        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
             package_name: "chalk".to_string(),
             imported_from: vec![ImportSite {
                 path: root.join("src/cli.ts"),
                 line: 2,
                 col: 0,
             }],
-        });
+        }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2296,13 +2232,13 @@ mod tests {
     fn json_unused_dependency_contains_expected_fields() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "axios".to_string(),
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 10,
             used_in_workspaces: Vec::new(),
-        });
+        }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2316,13 +2252,13 @@ mod tests {
     fn json_unused_dependency_includes_cross_workspace_context() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "lodash-es".to_string(),
             location: DependencyLocation::Dependencies,
             path: root.join("packages/shared/package.json"),
             line: 6,
             used_in_workspaces: vec![root.join("packages/consumer")],
-        });
+        }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2337,13 +2273,13 @@ mod tests {
     fn json_unused_dev_dependency_contains_expected_fields() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dev_dependencies.push(UnusedDependency {
+        results.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
             package_name: "vitest".to_string(),
             location: DependencyLocation::DevDependencies,
             path: root.join("package.json"),
             line: 15,
             used_in_workspaces: Vec::new(),
-        });
+        }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2355,13 +2291,13 @@ mod tests {
     fn json_unused_optional_dependency_contains_expected_fields() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_optional_dependencies.push(UnusedDependency {
+        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
             package_name: "fsevents".to_string(),
             location: DependencyLocation::OptionalDependencies,
             path: root.join("package.json"),
             line: 12,
             used_in_workspaces: Vec::new(),
-        });
+        }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2443,7 +2379,7 @@ mod tests {
     fn json_unlisted_dependency_contains_import_sites() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependency {
+        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
             package_name: "dotenv".to_string(),
             imported_from: vec![
                 ImportSite {
@@ -2457,7 +2393,7 @@ mod tests {
                     col: 0,
                 },
             ],
-        });
+        }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2606,11 +2542,11 @@ mod tests {
     fn json_type_only_dependency_contains_expected_fields() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.type_only_dependencies.push(TypeOnlyDependency {
+        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
             package_name: "zod".to_string(),
             path: root.join("package.json"),
             line: 8,
-        });
+        }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -3192,13 +3128,13 @@ mod tests {
     fn json_unused_dependency_has_config_suppress_with_package_name() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "lodash".to_string(),
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
+        }));
         let output = build_json(&results, &root, Duration::ZERO).unwrap();
 
         let actions = output["unused_dependencies"][0]["actions"]
@@ -3217,13 +3153,13 @@ mod tests {
     fn json_cross_workspace_dependency_is_not_auto_fixable() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "lodash-es".to_string(),
             location: DependencyLocation::Dependencies,
             path: root.join("packages/shared/package.json"),
             line: 5,
             used_in_workspaces: vec![root.join("packages/consumer")],
-        });
+        }));
         let output = build_json(&results, &root, Duration::ZERO).unwrap();
 
         let actions = output["unused_dependencies"][0]["actions"]

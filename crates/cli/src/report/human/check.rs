@@ -5,9 +5,10 @@ use std::time::Duration;
 use colored::Colorize;
 use fallow_config::{RulesConfig, Severity};
 use fallow_core::results::{
-    AnalysisResults, DuplicateExport, TestOnlyDependency, TypeOnlyDependency,
-    UnusedClassMemberFinding, UnusedDependency, UnusedEnumMemberFinding, UnusedExport,
-    UnusedExportFinding, UnusedMember, UnusedTypeFinding,
+    AnalysisResults, DuplicateExport, TestOnlyDependency, TestOnlyDependencyFinding,
+    TypeOnlyDependency, TypeOnlyDependencyFinding, UnusedClassMemberFinding, UnusedDependency,
+    UnusedDependencyFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExport,
+    UnusedExportFinding, UnusedMember, UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -418,6 +419,60 @@ impl NamedPkgDep for TestOnlyDependency {
     }
 }
 
+impl NamedPkgDep for UnusedDependencyFinding {
+    fn pkg_name(&self) -> &str {
+        &self.dep.package_name
+    }
+    fn pkg_path(&self) -> &Path {
+        &self.dep.path
+    }
+    fn used_in_workspaces(&self) -> &[PathBuf] {
+        &self.dep.used_in_workspaces
+    }
+}
+
+impl NamedPkgDep for UnusedDevDependencyFinding {
+    fn pkg_name(&self) -> &str {
+        &self.dep.package_name
+    }
+    fn pkg_path(&self) -> &Path {
+        &self.dep.path
+    }
+    fn used_in_workspaces(&self) -> &[PathBuf] {
+        &self.dep.used_in_workspaces
+    }
+}
+
+impl NamedPkgDep for UnusedOptionalDependencyFinding {
+    fn pkg_name(&self) -> &str {
+        &self.dep.package_name
+    }
+    fn pkg_path(&self) -> &Path {
+        &self.dep.path
+    }
+    fn used_in_workspaces(&self) -> &[PathBuf] {
+        &self.dep.used_in_workspaces
+    }
+}
+
+impl NamedPkgDep for TypeOnlyDependencyFinding {
+    fn pkg_name(&self) -> &str {
+        &self.dep.package_name
+    }
+    fn pkg_path(&self) -> &Path {
+        &self.dep.path
+    }
+}
+
+impl NamedPkgDep for TestOnlyDependencyFinding {
+    fn pkg_name(&self) -> &str {
+        &self.dep.package_name
+    }
+    fn pkg_path(&self) -> &Path {
+        &self.dep.path
+    }
+}
+
 fn push_human_pkg_dep_section<T: NamedPkgDep>(
     lines: &mut Vec<String>,
     items: &[T],
@@ -641,7 +696,7 @@ fn build_dependencies_section(
         severity_to_level(rules.unlisted_dependencies),
         max_items,
         total_issues,
-        |dep| vec![format!("  {}", dep.package_name.bold())],
+        |dep| vec![format!("  {}", dep.dep.package_name.bold())],
     );
     push_human_pkg_dep_section(
         lines,
@@ -2167,13 +2222,13 @@ mod tests {
     fn unused_deps_at_root_show_package_name_only() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "lodash".to_string(),
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
+        }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
@@ -2186,13 +2241,13 @@ mod tests {
     fn unused_deps_in_workspace_show_workspace_path() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "axios".to_string(),
             location: DependencyLocation::Dependencies,
             path: root.join("packages/web/package.json"),
             line: 8,
             used_in_workspaces: Vec::new(),
-        });
+        }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
@@ -2204,13 +2259,13 @@ mod tests {
     fn unused_deps_show_cross_workspace_context() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "lodash-es".to_string(),
             location: DependencyLocation::Dependencies,
             path: root.join("packages/shared/package.json"),
             line: 8,
             used_in_workspaces: vec![root.join("packages/consumer")],
-        });
+        }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
@@ -2222,13 +2277,13 @@ mod tests {
     fn unused_root_dep_with_cross_workspace_context_uses_context_label() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "lodash-es".to_string(),
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 8,
             used_in_workspaces: vec![root.join("packages/consumer")],
-        });
+        }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
@@ -2700,13 +2755,13 @@ mod tests {
             .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: root.join("src/a.ts"),
             }));
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "pkg".to_string(),
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 1,
             used_in_workspaces: Vec::new(),
-        });
+        }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         // Category headers + issue sections each add an empty line separator.
@@ -2724,11 +2779,11 @@ mod tests {
     fn type_only_deps_section_title_includes_suggestion() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.type_only_dependencies.push(TypeOnlyDependency {
+        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
             package_name: "zod".to_string(),
             path: root.join("package.json"),
             line: 8,
-        });
+        }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
@@ -2741,11 +2796,11 @@ mod tests {
     fn warn_severity_produces_header_with_bullet() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.type_only_dependencies.push(TypeOnlyDependency {
+        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
             package_name: "zod".to_string(),
             path: root.join("package.json"),
             line: 8,
-        });
+        }));
         // type_only_dependencies defaults to Warn
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
@@ -2762,10 +2817,10 @@ mod tests {
     fn unlisted_deps_show_package_name() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependency {
+        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
             package_name: "@scope/unknown-pkg".to_string(),
             imported_from: vec![],
-        });
+        }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);

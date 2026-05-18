@@ -93,7 +93,7 @@ export default defineConfig({
         !results
             .unused_dependencies
             .iter()
-            .any(|dep| dep.package_name == "bootstrap"),
+            .any(|dep| dep.dep.package_name == "bootstrap"),
         "bootstrap is referenced from vite additionalData and should be marked used"
     );
 }
@@ -138,7 +138,7 @@ export default defineConfig({
         !results
             .unused_dependencies
             .iter()
-            .any(|dep| dep.package_name == "bootstrap"),
+            .any(|dep| dep.dep.package_name == "bootstrap"),
         "bare bootstrap import from vite additionalData should be marked used"
     );
 }
@@ -223,7 +223,7 @@ export const name = "App";
         !results
             .unused_dependencies
             .iter()
-            .any(|dep| dep.package_name == "bootstrap"),
+            .any(|dep| dep.dep.package_name == "bootstrap"),
         "bootstrap is referenced from App.vue <style lang=\"scss\"> and should be marked used"
     );
     assert!(

@@ -13,7 +13,7 @@ fn vitest_mocks_specifiers_not_flagged_as_unlisted_dep() {
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
 
     assert!(
@@ -37,7 +37,7 @@ fn vitest_mocks_scoped_specifiers_not_flagged_in_workspace_monorepo() {
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
 
     for specifier in &[
@@ -63,7 +63,7 @@ fn unlisted_dependencies_detected() {
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
 
     assert!(
@@ -103,7 +103,7 @@ fn unused_dev_dependency_detected() {
     let unused_dev_dep_names: Vec<&str> = results
         .unused_dev_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
 
     assert!(
@@ -123,7 +123,7 @@ fn unused_optional_dependency_detected() {
     let unused_optional_dep_names: Vec<&str> = results
         .unused_optional_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
 
     assert!(
@@ -141,16 +141,16 @@ fn unused_workspace_dependency_reports_other_workspace_usage() {
     let dep = results
         .unused_dependencies
         .iter()
-        .find(|dep| dep.package_name == "lodash-es")
+        .find(|dep| dep.dep.package_name == "lodash-es")
         .expect("lodash-es should be unused in the shared workspace");
 
     assert!(
-        dep.path.ends_with("packages/shared/package.json"),
+        dep.dep.path.ends_with("packages/shared/package.json"),
         "finding should point at the workspace that declares lodash-es, got {}",
-        dep.path.display()
+        dep.dep.path.display()
     );
     assert_eq!(
-        dep.used_in_workspaces,
+        dep.dep.used_in_workspaces,
         vec![root.join("packages/consumer")],
         "unused dependency should identify the sibling workspace importing it"
     );
@@ -158,19 +158,19 @@ fn unused_workspace_dependency_reports_other_workspace_usage() {
     let unlisted = results
         .unlisted_dependencies
         .iter()
-        .find(|dep| dep.package_name == "lodash-es")
+        .find(|dep| dep.dep.package_name == "lodash-es")
         .expect("lodash-es should be unlisted in the consumer workspace");
     assert_eq!(
-        unlisted.imported_from.len(),
+        unlisted.dep.imported_from.len(),
         1,
         "lodash-es should have one unlisted import site"
     );
     assert!(
-        unlisted.imported_from[0]
+        unlisted.dep.imported_from[0]
             .path
             .ends_with("packages/consumer/src/index.ts"),
         "finding should point at the importing consumer file, got {}",
-        unlisted.imported_from[0].path.display()
+        unlisted.dep.imported_from[0].path.display()
     );
 }
 
@@ -211,7 +211,7 @@ fn peer_dependency_of_used_installed_package_is_not_unused() {
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
 
     assert!(
@@ -270,7 +270,7 @@ fn peer_dependency_of_parent_installed_package_is_not_unused() {
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
 
     assert!(
@@ -309,7 +309,7 @@ fn subpath_imports_resolve_correctly() {
         results
             .unlisted_dependencies
             .iter()
-            .map(|d| d.package_name.as_str())
+            .map(|d| d.dep.package_name.as_str())
             .collect::<Vec<_>>()
     );
 
@@ -374,11 +374,11 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
         .unused_dependencies
         .iter()
         .filter(|d| {
-            d.path
+            d.dep.path
                 .components()
                 .any(|c| matches!(c, std::path::Component::Normal(s) if s == "dist"))
         })
-        .map(|d| format!("{} -> {}", d.package_name, d.path.display()))
+        .map(|d| format!("{} -> {}", d.dep.package_name, d.dep.path.display()))
         .collect();
     assert!(
         dist_findings.is_empty(),
@@ -391,7 +391,7 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
     let reported: Vec<&str> = results
         .unused_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
     assert!(
         reported.contains(&"is-odd"),

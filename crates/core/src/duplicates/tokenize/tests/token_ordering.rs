@@ -468,7 +468,7 @@ fn exact_token_sequence_for_let_string_assignment() {
 fn exact_token_sequence_for_return_statement() {
     let tokens = tokenize("function f() { return null; }");
     let kinds: Vec<&TokenKind> = tokens.iter().map(|t| &t.kind).collect();
-    // function, f, (, ), {, return, null, ;, }
+    // function, f, (, ), {return, null, ;, }
     assert!(matches!(
         kinds[0],
         TokenKind::Keyword(KeywordType::Function)

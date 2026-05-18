@@ -9,7 +9,7 @@ fn workspace_package_dependencies_are_checked_like_external_dependencies() {
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
-        .map(|dep| dep.package_name.as_str())
+        .map(|dep| dep.dep.package_name.as_str())
         .collect();
 
     assert!(
@@ -35,7 +35,7 @@ fn missing_workspace_package_dependency_is_unlisted_for_importing_workspace() {
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
         .iter()
-        .map(|dep| dep.package_name.as_str())
+        .map(|dep| dep.dep.package_name.as_str())
         .collect();
 
     assert!(
@@ -45,14 +45,14 @@ fn missing_workspace_package_dependency_is_unlisted_for_importing_workspace() {
     let tool = results
         .unlisted_dependencies
         .iter()
-        .find(|dep| dep.package_name == "@repo/tool")
+        .find(|dep| dep.dep.package_name == "@repo/tool")
         .expect("@repo/tool should be reported as unlisted");
     assert!(
-        tool.imported_from
+        tool.dep.imported_from
             .iter()
             .any(|site| site.path.ends_with("packages/app/src/index.ts")),
         "@repo/tool should point at the importing app file, found: {:?}",
-        tool.imported_from
+        tool.dep.imported_from
     );
 }
 

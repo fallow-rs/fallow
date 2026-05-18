@@ -9,7 +9,7 @@ fn test_only_dependency_detected() {
     let test_only_names: Vec<&str> = results
         .test_only_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
 
     // test-utils-lib is in dependencies but only imported by a test file

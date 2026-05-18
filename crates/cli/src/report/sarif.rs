@@ -5,8 +5,8 @@ use fallow_config::{RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{
     AnalysisResults, BoundaryViolation, CircularDependency, DuplicateExport, PrivateTypeLeak,
-    StaleSuppression, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency, UnresolvedImport,
-    UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
+    StaleSuppression, TestOnlyDependency, TypeOnlyDependency, UnlistedDependencyFinding,
+    UnresolvedImport, UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
 };
 use rustc_hash::FxHashMap;
 
@@ -554,12 +554,13 @@ fn sarif_empty_catalog_group_fields(
 /// fit `push_sarif_results`. Keep the nested-loop shape in its own helper.
 fn push_sarif_unlisted_deps(
     sarif_results: &mut Vec<serde_json::Value>,
-    deps: &[UnlistedDependency],
+    deps: &[UnlistedDependencyFinding],
     root: &Path,
     level: &'static str,
     snippets: &mut SourceSnippetCache,
 ) {
-    for dep in deps {
+    for entry in deps {
+        let dep = &entry.dep;
         for site in &dep.imported_from {
             let uri = relative_uri(&site.path, root);
             let source_snippet = snippets.line(&site.path, site.line);
@@ -791,7 +792,7 @@ pub fn build_sarif(
         &mut snippets,
         |d| {
             sarif_dep_fields(
-                d,
+                &d.dep,
                 root,
                 "fallow/unused-dependency",
                 severity_to_sarif_level(rules.unused_dependencies),
@@ -805,7 +806,7 @@ pub fn build_sarif(
         &mut snippets,
         |d| {
             sarif_dep_fields(
-                d,
+                &d.dep,
                 root,
                 "fallow/unused-dev-dependency",
                 severity_to_sarif_level(rules.unused_dev_dependencies),
@@ -819,7 +820,7 @@ pub fn build_sarif(
         &mut snippets,
         |d| {
             sarif_dep_fields(
-                d,
+                &d.dep,
                 root,
                 "fallow/unused-optional-dependency",
                 severity_to_sarif_level(rules.unused_optional_dependencies),
@@ -833,7 +834,7 @@ pub fn build_sarif(
         &mut snippets,
         |d| {
             sarif_type_only_dep_fields(
-                d,
+                &d.dep,
                 root,
                 severity_to_sarif_level(rules.type_only_dependencies),
             )
@@ -845,7 +846,7 @@ pub fn build_sarif(
         &mut snippets,
         |d| {
             sarif_test_only_dep_fields(
-                d,
+                &d.dep,
                 root,
                 severity_to_sarif_level(rules.test_only_dependencies),
             )
@@ -1698,14 +1699,14 @@ mod tests {
     fn sarif_unlisted_dependency_points_to_import_site() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependency {
+        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
             package_name: "chalk".to_string(),
             imported_from: vec![ImportSite {
                 path: root.join("src/cli.ts"),
                 line: 3,
                 col: 0,
             }],
-        });
+        }));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
@@ -1724,20 +1725,20 @@ mod tests {
     fn sarif_dependency_issues_point_to_package_json() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "lodash".to_string(),
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
-        results.unused_dev_dependencies.push(UnusedDependency {
+        }));
+        results.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
             package_name: "jest".to_string(),
             location: DependencyLocation::DevDependencies,
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
+        }));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entries = sarif["runs"][0]["results"].as_array().unwrap();
@@ -2179,13 +2180,13 @@ mod tests {
     fn sarif_dependency_line_zero_skips_region() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "lodash".to_string(),
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 0,
             used_in_workspaces: Vec::new(),
-        });
+        }));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
@@ -2197,13 +2198,13 @@ mod tests {
     fn sarif_dependency_line_nonzero_has_region() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "lodash".to_string(),
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 7,
             used_in_workspaces: Vec::new(),
-        });
+        }));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
@@ -2218,11 +2219,11 @@ mod tests {
     fn sarif_type_only_dep_line_zero_skips_region() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.type_only_dependencies.push(TypeOnlyDependency {
+        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
             package_name: "zod".to_string(),
             path: root.join("package.json"),
             line: 0,
-        });
+        }));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
@@ -2283,13 +2284,13 @@ mod tests {
     fn sarif_unused_optional_dependency_result() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_optional_dependencies.push(UnusedDependency {
+        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
             package_name: "fsevents".to_string(),
             location: DependencyLocation::OptionalDependencies,
             path: root.join("package.json"),
             line: 12,
             used_in_workspaces: Vec::new(),
-        });
+        }));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entry = &sarif["runs"][0]["results"][0];
@@ -2672,7 +2673,7 @@ mod tests {
     fn sarif_unlisted_dep_multiple_import_sites() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependency {
+        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
             package_name: "dotenv".to_string(),
             imported_from: vec![
                 ImportSite {
@@ -2686,7 +2687,7 @@ mod tests {
                     col: 0,
                 },
             ],
-        });
+        }));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entries = sarif["runs"][0]["results"].as_array().unwrap();
@@ -2708,10 +2709,10 @@ mod tests {
     fn sarif_unlisted_dep_no_import_sites() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependency {
+        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
             package_name: "phantom".to_string(),
             imported_from: vec![],
-        });
+        }));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entries = sarif["runs"][0]["results"].as_array().unwrap();

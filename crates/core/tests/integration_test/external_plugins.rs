@@ -160,7 +160,7 @@ fn external_plugin_tooling_dependencies_not_flagged() {
     let unused_dev_dep_names: Vec<&str> = results
         .unused_dev_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
 
     // my-framework-cli is listed as tooling dependency in the external plugin

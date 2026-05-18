@@ -68,17 +68,16 @@ fn cc_issue(
 }
 
 /// Push CodeClimate issues for unused dependencies with a shared structure.
-fn push_dep_cc_issues(
+fn push_dep_cc_issues<'a, I>(
     issues: &mut Vec<CodeClimateIssue>,
-    deps: &[fallow_core::results::UnusedDependency],
+    deps: I,
     root: &Path,
     rule_id: &str,
     location_label: &str,
     severity: Severity,
-) {
-    if deps.is_empty() {
-        return;
-    }
+) where
+    I: IntoIterator<Item = &'a fallow_core::results::UnusedDependency>,
+{
     let level = severity_to_codeclimate(severity);
     for dep in deps {
         let path = cc_path(&dep.path, root);
@@ -214,7 +213,7 @@ fn push_private_type_leak_issues(
 
 fn push_type_only_dep_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    deps: &[fallow_core::results::TypeOnlyDependency],
+    deps: &[fallow_core::results::TypeOnlyDependencyFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -222,7 +221,8 @@ fn push_type_only_dep_issues(
         return;
     }
     let level = severity_to_codeclimate(severity);
-    for dep in deps {
+    for entry in deps {
+        let dep = &entry.dep;
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
         let fp = fingerprint_hash(&["fallow/type-only-dependency", &dep.package_name]);
@@ -243,7 +243,7 @@ fn push_type_only_dep_issues(
 
 fn push_test_only_dep_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    deps: &[fallow_core::results::TestOnlyDependency],
+    deps: &[fallow_core::results::TestOnlyDependencyFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -251,7 +251,8 @@ fn push_test_only_dep_issues(
         return;
     }
     let level = severity_to_codeclimate(severity);
-    for dep in deps {
+    for entry in deps {
+        let dep = &entry.dep;
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
         let fp = fingerprint_hash(&["fallow/test-only-dependency", &dep.package_name]);
@@ -344,7 +345,7 @@ fn push_unresolved_import_issues(
 
 fn push_unlisted_dep_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    deps: &[fallow_core::results::UnlistedDependency],
+    deps: &[fallow_core::results::UnlistedDependencyFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -352,7 +353,8 @@ fn push_unlisted_dep_issues(
         return;
     }
     let level = severity_to_codeclimate(severity);
-    for dep in deps {
+    for entry in deps {
+        let dep = &entry.dep;
         for site in &dep.imported_from {
             let path = cc_path(&site.path, root);
             let line_str = site.line.to_string();
@@ -773,7 +775,7 @@ pub fn build_codeclimate(
     );
     push_dep_cc_issues(
         &mut issues,
-        &results.unused_dependencies,
+        results.unused_dependencies.iter().map(|f| &f.dep),
         root,
         "fallow/unused-dependency",
         "dependencies",
@@ -781,7 +783,7 @@ pub fn build_codeclimate(
     );
     push_dep_cc_issues(
         &mut issues,
-        &results.unused_dev_dependencies,
+        results.unused_dev_dependencies.iter().map(|f| &f.dep),
         root,
         "fallow/unused-dev-dependency",
         "devDependencies",
@@ -789,7 +791,7 @@ pub fn build_codeclimate(
     );
     push_dep_cc_issues(
         &mut issues,
-        &results.unused_optional_dependencies,
+        results.unused_optional_dependencies.iter().map(|f| &f.dep),
         root,
         "fallow/unused-optional-dependency",
         "optionalDependencies",
@@ -1451,7 +1453,7 @@ mod tests {
     fn codeclimate_unlisted_dep_one_issue_per_import_site() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependency {
+        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
             package_name: "chalk".to_string(),
             imported_from: vec![
                 ImportSite {
@@ -1465,7 +1467,7 @@ mod tests {
                     col: 0,
                 },
             ],
-        });
+        }));
         let rules = RulesConfig::default();
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let arr = output.as_array().unwrap();
@@ -1573,11 +1575,11 @@ mod tests {
     fn codeclimate_type_only_dep_has_correct_check_name() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.type_only_dependencies.push(TypeOnlyDependency {
+        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
             package_name: "zod".to_string(),
             path: root.join("package.json"),
             line: 8,
-        });
+        }));
         let rules = RulesConfig::default();
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/type-only-dependency");
@@ -1590,13 +1592,13 @@ mod tests {
     fn codeclimate_dep_with_zero_line_omits_line_number() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "lodash".to_string(),
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 0,
             used_in_workspaces: Vec::new(),
-        });
+        }));
         let rules = RulesConfig::default();
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         // Line 0 -> begin defaults to 1

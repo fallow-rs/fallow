@@ -72,13 +72,13 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
         ));
     }
     for dep in &results.unused_dependencies {
-        lines.push(format!("unused-dep:{}", dep.package_name));
+        lines.push(format!("unused-dep:{}", dep.dep.package_name));
     }
     for dep in &results.unused_dev_dependencies {
-        lines.push(format!("unused-devdep:{}", dep.package_name));
+        lines.push(format!("unused-devdep:{}", dep.dep.package_name));
     }
     for dep in &results.unused_optional_dependencies {
-        lines.push(format!("unused-optionaldep:{}", dep.package_name));
+        lines.push(format!("unused-optionaldep:{}", dep.dep.package_name));
     }
     for member in &results.unused_enum_members {
         lines.push(compact_member(&member.member, "unused-enum-member"));
@@ -95,16 +95,16 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
         ));
     }
     for dep in &results.unlisted_dependencies {
-        lines.push(format!("unlisted-dep:{}", dep.package_name));
+        lines.push(format!("unlisted-dep:{}", dep.dep.package_name));
     }
     for dup in &results.duplicate_exports {
         lines.push(format!("duplicate-export:{}", dup.export_name));
     }
     for dep in &results.type_only_dependencies {
-        lines.push(format!("type-only-dep:{}", dep.package_name));
+        lines.push(format!("type-only-dep:{}", dep.dep.package_name));
     }
     for dep in &results.test_only_dependencies {
-        lines.push(format!("test-only-dep:{}", dep.package_name));
+        lines.push(format!("test-only-dep:{}", dep.dep.package_name));
     }
     for cycle in &results.circular_dependencies {
         let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
@@ -599,13 +599,13 @@ mod tests {
     fn compact_unused_dep_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "lodash".to_string(),
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
+        }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "unused-dep:lodash");
@@ -615,13 +615,13 @@ mod tests {
     fn compact_unused_devdep_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dev_dependencies.push(UnusedDependency {
+        results.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
             package_name: "jest".to_string(),
             location: DependencyLocation::DevDependencies,
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
+        }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "unused-devdep:jest");
@@ -693,10 +693,10 @@ mod tests {
     fn compact_unlisted_dep_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependency {
+        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
             package_name: "chalk".to_string(),
             imported_from: vec![],
-        });
+        }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "unlisted-dep:chalk");
@@ -818,13 +818,13 @@ mod tests {
     fn compact_unused_optional_dep_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_optional_dependencies.push(UnusedDependency {
+        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
             package_name: "fsevents".to_string(),
             location: DependencyLocation::OptionalDependencies,
             path: root.join("package.json"),
             line: 12,
             used_in_workspaces: Vec::new(),
-        });
+        }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "unused-optionaldep:fsevents");
@@ -891,11 +891,11 @@ mod tests {
     fn compact_type_only_dep_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.type_only_dependencies.push(TypeOnlyDependency {
+        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
             package_name: "zod".to_string(),
             path: root.join("package.json"),
             line: 8,
-        });
+        }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "type-only-dep:zod");
@@ -930,20 +930,20 @@ mod tests {
     fn compact_ordering_optional_dep_between_devdep_and_enum() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.unused_dev_dependencies.push(UnusedDependency {
+        results.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
             package_name: "jest".to_string(),
             location: DependencyLocation::DevDependencies,
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
-        results.unused_optional_dependencies.push(UnusedDependency {
+        }));
+        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
             package_name: "fsevents".to_string(),
             location: DependencyLocation::OptionalDependencies,
             path: root.join("package.json"),
             line: 12,
             used_in_workspaces: Vec::new(),
-        });
+        }));
         results
             .unused_enum_members
             .push(UnusedEnumMemberFinding::with_actions(UnusedMember {

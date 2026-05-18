@@ -19,8 +19,10 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use fallow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, PrivateTypeLeakFinding,
-    UnresolvedImportFinding, UnusedClassMemberFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
+    TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
+    UnresolvedImportFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 
 use crate::results::{AnalysisResults, CircularDependency};
@@ -379,13 +381,22 @@ pub fn find_dead_code_full(
                                         workspaces,
                                     );
                                     if config.rules.unused_dependencies != Severity::Off {
-                                        results.unused_dependencies = deps;
+                                        results.unused_dependencies = deps
+                                            .into_iter()
+                                            .map(UnusedDependencyFinding::with_actions)
+                                            .collect();
                                     }
                                     if config.rules.unused_dev_dependencies != Severity::Off {
-                                        results.unused_dev_dependencies = dev_deps;
+                                        results.unused_dev_dependencies = dev_deps
+                                            .into_iter()
+                                            .map(UnusedDevDependencyFinding::with_actions)
+                                            .collect();
                                     }
                                     if config.rules.unused_optional_dependencies != Severity::Off {
-                                        results.unused_optional_dependencies = optional_deps;
+                                        results.unused_optional_dependencies = optional_deps
+                                            .into_iter()
+                                            .map(UnusedOptionalDependencyFinding::with_actions)
+                                            .collect();
                                     }
                                 }
 
@@ -398,14 +409,20 @@ pub fn find_dead_code_full(
                                         plugin_result,
                                         resolved_modules,
                                         &line_offsets_by_file,
-                                    );
+                                    )
+                                    .into_iter()
+                                    .map(UnlistedDependencyFinding::with_actions)
+                                    .collect();
                                 }
 
                                 // In production mode, detect dependencies that are only used via
                                 // type-only imports.
                                 if config.production {
                                     results.type_only_dependencies =
-                                        find_type_only_dependencies(graph, pkg, config, workspaces);
+                                        find_type_only_dependencies(graph, pkg, config, workspaces)
+                                            .into_iter()
+                                            .map(TypeOnlyDependencyFinding::with_actions)
+                                            .collect();
                                 }
 
                                 // In non-production mode, detect production deps only imported by
@@ -414,7 +431,10 @@ pub fn find_dead_code_full(
                                     && config.rules.test_only_dependencies != Severity::Off
                                 {
                                     results.test_only_dependencies =
-                                        find_test_only_dependencies(graph, pkg, config, workspaces);
+                                        find_test_only_dependencies(graph, pkg, config, workspaces)
+                                            .into_iter()
+                                            .map(TestOnlyDependencyFinding::with_actions)
+                                            .collect();
                                 }
                             }
                             results

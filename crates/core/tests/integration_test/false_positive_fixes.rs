@@ -71,7 +71,7 @@ fn eslint_relative_extends_config_is_not_reported_unused() {
     let unused_dev_dependencies: Vec<&str> = results
         .unused_dev_dependencies
         .iter()
-        .map(|dep| dep.package_name.as_str())
+        .map(|dep| dep.dep.package_name.as_str())
         .collect();
     assert!(
         !unused_dev_dependencies.contains(&"@typescript-eslint/parser"),
@@ -220,7 +220,7 @@ fn broken_tsconfig_path_alias_is_not_misclassified_as_unlisted_dependency() {
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
         .iter()
-        .map(|dep| dep.package_name.as_str())
+        .map(|dep| dep.dep.package_name.as_str())
         .collect();
     let unresolved_specifiers: Vec<&str> = results
         .unresolved_imports
@@ -292,7 +292,7 @@ fn wildcard_tsconfig_paths_do_not_misclassify_bare_imports() {
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
         .iter()
-        .map(|dep| dep.package_name.as_str())
+        .map(|dep| dep.dep.package_name.as_str())
         .collect();
     assert!(
         !unlisted_names.contains(&"node:url"),
@@ -892,7 +892,7 @@ export const app = date;
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
         .iter()
-        .map(|dep| dep.package_name.as_str())
+        .map(|dep| dep.dep.package_name.as_str())
         .collect();
     assert!(
         !unlisted_names.contains(&"utils"),
@@ -1776,7 +1776,7 @@ generator json {
     let unused_dev: Vec<String> = results
         .unused_dev_dependencies
         .iter()
-        .map(|d| d.package_name.clone())
+        .map(|d| d.dep.package_name.clone())
         .collect();
     assert!(
         !unused_dev.contains(&"prisma-json-types-generator".to_owned()),
@@ -1852,12 +1852,12 @@ model User {
     let unused_dev: Vec<String> = results
         .unused_dev_dependencies
         .iter()
-        .map(|d| d.package_name.clone())
+        .map(|d| d.dep.package_name.clone())
         .collect();
     let unused_prod: Vec<String> = results
         .unused_dependencies
         .iter()
-        .map(|d| d.package_name.clone())
+        .map(|d| d.dep.package_name.clone())
         .collect();
     assert!(
         !unused_dev.contains(&"prisma-json-types-generator".to_owned())
@@ -1924,7 +1924,7 @@ generator erd {
     let unused_dev: Vec<String> = results
         .unused_dev_dependencies
         .iter()
-        .map(|d| d.package_name.clone())
+        .map(|d| d.dep.package_name.clone())
         .collect();
     assert!(
         !unused_dev.contains(&"prisma-erd-generator".to_owned()),
@@ -1987,7 +1987,7 @@ model User {
     let unused_dev: Vec<String> = results
         .unused_dev_dependencies
         .iter()
-        .map(|d| d.package_name.clone())
+        .map(|d| d.dep.package_name.clone())
         .collect();
     let unused_files: Vec<String> = results
         .unused_files
@@ -2063,7 +2063,7 @@ model User {
     let unused_dev: Vec<String> = results
         .unused_dev_dependencies
         .iter()
-        .map(|d| d.package_name.clone())
+        .map(|d| d.dep.package_name.clone())
         .collect();
     assert!(
         unused_dev.contains(&"prisma-erd-generator".to_owned()),
@@ -2113,7 +2113,7 @@ fn node_module_register_loader_is_credited_as_used_dependency() {
     let unused_dev: Vec<&str> = results
         .unused_dev_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
     assert!(
         !unused_dev.contains(&"@swc-node/register"),

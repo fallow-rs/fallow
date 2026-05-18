@@ -76,8 +76,10 @@ use fallow_types::output::{
 };
 use fallow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, PrivateTypeLeakFinding,
-    UnresolvedImportFinding, UnusedClassMemberFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
+    TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
+    UnresolvedImportFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 use fallow_types::output_health::{
     HealthFindingAction, HealthFindingActionType, HotspotAction, HotspotActionHeuristic,
@@ -361,23 +363,21 @@ fn finding_definition_names() -> &'static [&'static str] {
     &[
         // Dead-code findings (actions[] -> IssueAction, with `introduced`)
         // `BoundaryViolation`, `CircularDependency`, `PrivateTypeLeak`,
-        // `UnresolvedImport`, `UnusedFile`, `UnusedExport`, `UnusedMember`
-        // have been migrated to typed `*Finding` envelope wrappers in
-        // `crates/types/src/output_dead_code.rs` and are no longer
-        // post-pass-injected; the wrappers carry the typed `actions` array
-        // and the optional `introduced` audit breadcrumb natively via
-        // schemars. `UnusedExport` and `UnusedMember` each back two
-        // wrappers (one per issue-key view) so the schema documents the
-        // per-key fix description / suppress comment.
+        // `UnresolvedImport`, `UnusedFile`, `UnusedExport`, `UnusedMember`,
+        // `UnusedDependency`, `UnlistedDependency`, `TypeOnlyDependency`,
+        // and `TestOnlyDependency` have been migrated to typed `*Finding`
+        // envelope wrappers in `crates/types/src/output_dead_code.rs` and
+        // are no longer post-pass-injected; the wrappers carry the typed
+        // `actions` array and the optional `introduced` audit breadcrumb
+        // natively via schemars. `UnusedExport`, `UnusedMember`, and
+        // `UnusedDependency` each back multiple wrappers (one per
+        // issue-key view) so the schema documents the per-key fix
+        // description / suppress comment.
         "DuplicateExport",
         "EmptyCatalogGroup",
         "MisconfiguredDependencyOverride",
-        "TestOnlyDependency",
-        "TypeOnlyDependency",
-        "UnlistedDependency",
         "UnresolvedCatalogReference",
         "UnusedCatalogEntry",
-        "UnusedDependency",
         "UnusedDependencyOverride",
         // Health findings (actions[] -> per-finding action wrapper).
         // `introduced` attaches per `finding_augmentation` below: HealthFinding
@@ -560,6 +560,12 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<UnusedTypeFinding>();
     let _ = generator.subschema_for::<UnusedEnumMemberFinding>();
     let _ = generator.subschema_for::<UnusedClassMemberFinding>();
+    let _ = generator.subschema_for::<UnusedDependencyFinding>();
+    let _ = generator.subschema_for::<UnusedDevDependencyFinding>();
+    let _ = generator.subschema_for::<UnusedOptionalDependencyFinding>();
+    let _ = generator.subschema_for::<UnlistedDependencyFinding>();
+    let _ = generator.subschema_for::<TypeOnlyDependencyFinding>();
+    let _ = generator.subschema_for::<TestOnlyDependencyFinding>();
 
     // Health output subtree (crates/cli/src/health_types/).
     let _ = generator.subschema_for::<HealthSummary>();

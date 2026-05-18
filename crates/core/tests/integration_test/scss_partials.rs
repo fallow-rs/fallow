@@ -42,7 +42,7 @@ fn scss_partial_files_resolved_via_underscore_convention() {
     let unlisted: Vec<&str> = results
         .unlisted_dependencies
         .iter()
-        .map(|u| u.package_name.as_str())
+        .map(|u| u.dep.package_name.as_str())
         .collect();
     assert!(
         !unlisted.contains(&"variables"),
@@ -151,7 +151,7 @@ fn scss_bare_specifiers_resolve_from_node_modules() {
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
     assert!(
         !unused_dep_names.contains(&"bootstrap"),
@@ -177,7 +177,7 @@ fn external_package_scss_subpaths_credit_nested_style_dependencies() {
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
 
     assert!(

@@ -568,17 +568,25 @@ unused_types: UnusedTypeFinding[]
  */
 private_type_leaks: PrivateTypeLeakFinding[]
 /**
- * Dependencies listed in package.json but never imported.
+ * Dependencies listed in package.json but never imported. Wrapped in
+ * [`UnusedDependencyFinding`] so each entry carries a typed `actions`
+ * array natively. The fix action swaps from `remove-dependency` to
+ * `move-dependency` when `used_in_workspaces` is non-empty.
  */
-unused_dependencies: UnusedDependency[]
+unused_dependencies: UnusedDependencyFinding[]
 /**
- * Dev dependencies listed in package.json but never imported.
+ * Dev dependencies listed in package.json but never imported. Wrapped
+ * in [`UnusedDevDependencyFinding`]: same bare struct as
+ * `unused_dependencies` with a `devDependencies`-targeted fix
+ * description.
  */
-unused_dev_dependencies: UnusedDependency[]
+unused_dev_dependencies: UnusedDevDependencyFinding[]
 /**
  * Optional dependencies listed in package.json but never imported.
+ * Wrapped in [`UnusedOptionalDependencyFinding`] with an
+ * `optionalDependencies`-targeted fix description.
  */
-unused_optional_dependencies: UnusedDependency[]
+unused_optional_dependencies: UnusedOptionalDependencyFinding[]
 /**
  * Enum members never accessed. Wrapped in
  * [`UnusedEnumMemberFinding`] so each entry carries a typed `actions`
@@ -600,22 +608,25 @@ unused_class_members: UnusedClassMemberFinding[]
  */
 unresolved_imports: UnresolvedImportFinding[]
 /**
- * Dependencies used in code but not listed in package.json.
+ * Dependencies used in code but not listed in package.json. Wrapped in
+ * [`UnlistedDependencyFinding`].
  */
-unlisted_dependencies: UnlistedDependency[]
+unlisted_dependencies: UnlistedDependencyFinding[]
 /**
  * Exports with the same name across multiple modules.
  */
 duplicate_exports: DuplicateExport[]
 /**
- * Production dependencies only used via type-only imports (could be devDependencies).
- * Only populated in production mode.
+ * Production dependencies only used via type-only imports (could be
+ * devDependencies). Only populated in production mode. Wrapped in
+ * [`TypeOnlyDependencyFinding`].
  */
-type_only_dependencies: TypeOnlyDependency[]
+type_only_dependencies: TypeOnlyDependencyFinding[]
 /**
- * Production dependencies only imported by test files (could be devDependencies).
+ * Production dependencies only imported by test files (could be
+ * devDependencies). Wrapped in [`TestOnlyDependencyFinding`].
  */
-test_only_dependencies?: TestOnlyDependency[]
+test_only_dependencies?: TestOnlyDependencyFinding[]
 /**
  * Circular dependency chains detected in the module graph. Wrapped in
  * [`CircularDependencyFinding`] so each entry carries a typed `actions`
@@ -1097,9 +1108,13 @@ actions: IssueAction[]
 introduced?: (AuditIntroduced | null)
 }
 /**
- * A dependency that is listed in package.json but never imported.
+ * Wire-shape envelope for an [`UnusedDependency`] finding consumed under
+ * the `unused_dependencies` key (production deps). Flattens the bare
+ * finding; the typed `actions` array carries either a `remove-dependency`
+ * or `move-dependency` primary depending on
+ * `inner.used_in_workspaces`.
  */
-export interface UnusedDependency {
+export interface UnusedDependencyFinding {
 /**
  * Package name, including internal workspace package names.
  */
@@ -1119,10 +1134,89 @@ line: number
  */
 used_in_workspaces?: string[]
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for an [`UnusedDependency`] finding consumed under
+ * the `unused_dev_dependencies` key. Same bare struct as
+ * [`UnusedDependencyFinding`]; the fix description points at
+ * `devDependencies` and the suppress comment uses
+ * `unused-dev-dependency`.
+ */
+export interface UnusedDevDependencyFinding {
+/**
+ * Package name, including internal workspace package names.
+ */
+package_name: string
+location: DependencyLocation
+/**
+ * Path to the package.json where this dependency is listed.
+ * For root deps this is `<root>/package.json`, for workspace deps it is `<ws>/package.json`.
+ */
+path: string
+/**
+ * 1-based line number of the dependency entry in package.json.
+ */
+line: number
+/**
+ * Workspace roots that import this package even though the declaring workspace does not.
+ */
+used_in_workspaces?: string[]
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for an [`UnusedDependency`] finding consumed under
+ * the `unused_optional_dependencies` key. Same bare struct as
+ * [`UnusedDependencyFinding`]; the fix description points at
+ * `optionalDependencies`. Reuses the `unused-dependency` suppress
+ * `IssueKind` because there is no dedicated variant for optional deps.
+ */
+export interface UnusedOptionalDependencyFinding {
+/**
+ * Package name, including internal workspace package names.
+ */
+package_name: string
+location: DependencyLocation
+/**
+ * Path to the package.json where this dependency is listed.
+ * For root deps this is `<root>/package.json`, for workspace deps it is `<ws>/package.json`.
+ */
+path: string
+/**
+ * 1-based line number of the dependency entry in package.json.
+ */
+line: number
+/**
+ * Workspace roots that import this package even though the declaring workspace does not.
+ */
+used_in_workspaces?: string[]
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
  * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
@@ -1240,9 +1334,11 @@ actions: IssueAction[]
 introduced?: (AuditIntroduced | null)
 }
 /**
- * A dependency used in code but not listed in package.json.
+ * Wire-shape envelope for an [`UnlistedDependency`] finding. Carries an
+ * `install-dependency` primary (non-auto-fixable) plus the standard
+ * `ignoreDependencies` config suppress.
  */
-export interface UnlistedDependency {
+export interface UnlistedDependencyFinding {
 /**
  * Package name, including internal workspace package names, that is
  * imported but not listed in package.json.
@@ -1253,10 +1349,15 @@ package_name: string
  */
 imported_from: ImportSite[]
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
  * A location where an import occurs.
@@ -1311,11 +1412,11 @@ line: number
 col: number
 }
 /**
- * A production dependency that is only used via type-only imports.
- * In production builds, type imports are erased, so this dependency
- * is not needed at runtime and could be moved to devDependencies.
+ * Wire-shape envelope for a [`TypeOnlyDependency`] finding. Carries a
+ * `move-to-dev` primary plus the standard `ignoreDependencies` config
+ * suppress.
  */
-export interface TypeOnlyDependency {
+export interface TypeOnlyDependencyFinding {
 /**
  * Production dependency that is only used via type-only imports.
  */
@@ -1329,16 +1430,22 @@ path: string
  */
 line: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
- * A production dependency that is only imported by test files.
- * Since it is never used in production code, it could be moved to devDependencies.
+ * Wire-shape envelope for a [`TestOnlyDependency`] finding. Carries a
+ * `move-to-dev` primary (different prose than [`TypeOnlyDependencyFinding`])
+ * plus the standard `ignoreDependencies` config suppress.
  */
-export interface TestOnlyDependency {
+export interface TestOnlyDependencyFinding {
 /**
  * Production dependency that is only imported by test files — consider
  * moving to devDependencies.
@@ -1353,10 +1460,15 @@ path: string
  */
 line: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
  * Wire-shape envelope for a [`CircularDependency`] finding. Mirrors
@@ -3741,17 +3853,25 @@ unused_types: UnusedTypeFinding[]
  */
 private_type_leaks: PrivateTypeLeakFinding[]
 /**
- * Dependencies listed in package.json but never imported.
+ * Dependencies listed in package.json but never imported. Wrapped in
+ * [`UnusedDependencyFinding`] so each entry carries a typed `actions`
+ * array natively. The fix action swaps from `remove-dependency` to
+ * `move-dependency` when `used_in_workspaces` is non-empty.
  */
-unused_dependencies: UnusedDependency[]
+unused_dependencies: UnusedDependencyFinding[]
 /**
- * Dev dependencies listed in package.json but never imported.
+ * Dev dependencies listed in package.json but never imported. Wrapped
+ * in [`UnusedDevDependencyFinding`]: same bare struct as
+ * `unused_dependencies` with a `devDependencies`-targeted fix
+ * description.
  */
-unused_dev_dependencies: UnusedDependency[]
+unused_dev_dependencies: UnusedDevDependencyFinding[]
 /**
  * Optional dependencies listed in package.json but never imported.
+ * Wrapped in [`UnusedOptionalDependencyFinding`] with an
+ * `optionalDependencies`-targeted fix description.
  */
-unused_optional_dependencies: UnusedDependency[]
+unused_optional_dependencies: UnusedOptionalDependencyFinding[]
 /**
  * Enum members never accessed. Wrapped in
  * [`UnusedEnumMemberFinding`] so each entry carries a typed `actions`
@@ -3773,22 +3893,25 @@ unused_class_members: UnusedClassMemberFinding[]
  */
 unresolved_imports: UnresolvedImportFinding[]
 /**
- * Dependencies used in code but not listed in package.json.
+ * Dependencies used in code but not listed in package.json. Wrapped in
+ * [`UnlistedDependencyFinding`].
  */
-unlisted_dependencies: UnlistedDependency[]
+unlisted_dependencies: UnlistedDependencyFinding[]
 /**
  * Exports with the same name across multiple modules.
  */
 duplicate_exports: DuplicateExport[]
 /**
- * Production dependencies only used via type-only imports (could be devDependencies).
- * Only populated in production mode.
+ * Production dependencies only used via type-only imports (could be
+ * devDependencies). Only populated in production mode. Wrapped in
+ * [`TypeOnlyDependencyFinding`].
  */
-type_only_dependencies: TypeOnlyDependency[]
+type_only_dependencies: TypeOnlyDependencyFinding[]
 /**
- * Production dependencies only imported by test files (could be devDependencies).
+ * Production dependencies only imported by test files (could be
+ * devDependencies). Wrapped in [`TestOnlyDependencyFinding`].
  */
-test_only_dependencies?: TestOnlyDependency[]
+test_only_dependencies?: TestOnlyDependencyFinding[]
 /**
  * Circular dependency chains detected in the module graph. Wrapped in
  * [`CircularDependencyFinding`] so each entry carries a typed `actions`

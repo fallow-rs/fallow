@@ -175,7 +175,7 @@ fn workspace_self_reference_resolves_secondary_entry_points() {
     let unlisted_package_names: Vec<&str> = results
         .unlisted_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
     assert!(
         !unlisted_package_names.contains(&"@repro/ui-kit"),

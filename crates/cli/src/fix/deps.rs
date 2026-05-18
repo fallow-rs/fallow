@@ -26,13 +26,13 @@ pub(super) fn apply_dependency_fixes(
     // Group all unused deps by their package.json path so we can batch edits per file
     let mut deps_by_pkg: FxHashMap<&Path, Vec<(&str, &str)>> = FxHashMap::default();
     for dep in &results.unused_dependencies {
-        queue_dependency_removal(&mut deps_by_pkg, dep, "dependencies");
+        queue_dependency_removal(&mut deps_by_pkg, &dep.dep, "dependencies");
     }
     for dep in &results.unused_dev_dependencies {
-        queue_dependency_removal(&mut deps_by_pkg, dep, "devDependencies");
+        queue_dependency_removal(&mut deps_by_pkg, &dep.dep, "devDependencies");
     }
     for dep in &results.unused_optional_dependencies {
-        queue_dependency_removal(&mut deps_by_pkg, dep, "optionalDependencies");
+        queue_dependency_removal(&mut deps_by_pkg, &dep.dep, "optionalDependencies");
     }
 
     let _ = root; // root was previously used to construct the path; now deps carry their own path
@@ -124,13 +124,13 @@ mod tests {
         let mut results = fallow_core::results::AnalysisResults::default();
         results
             .unused_dependencies
-            .push(fallow_core::results::UnusedDependency {
+            .push(fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
                 location: fallow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 5,
                 used_in_workspaces: Vec::new(),
-            });
+            }));
 
         let mut fixes = Vec::new();
         apply_dependency_fixes(root, &results, OutputFormat::Json, true, &mut fixes);
@@ -156,13 +156,13 @@ mod tests {
         let mut results = fallow_core::results::AnalysisResults::default();
         results
             .unused_dependencies
-            .push(fallow_core::results::UnusedDependency {
+            .push(fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
                 location: fallow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 5,
                 used_in_workspaces: Vec::new(),
-            });
+            }));
 
         let mut fixes = Vec::new();
         let had_error =
@@ -191,13 +191,13 @@ mod tests {
         let mut results = fallow_core::results::AnalysisResults::default();
         results
             .unused_dependencies
-            .push(fallow_core::results::UnusedDependency {
+            .push(fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash-es".into(),
                 location: fallow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 5,
                 used_in_workspaces: vec![root.join("packages/consumer")],
-            });
+            }));
 
         let mut fixes = Vec::new();
         let had_error =
@@ -238,13 +238,13 @@ mod tests {
         let mut results = fallow_core::results::AnalysisResults::default();
         results
             .unused_dev_dependencies
-            .push(fallow_core::results::UnusedDependency {
+            .push(fallow_core::results::UnusedDevDependencyFinding::with_actions(UnusedDependency {
                 package_name: "jest".into(),
                 location: fallow_core::results::DependencyLocation::DevDependencies,
                 path: pkg_path.clone(),
                 line: 3,
                 used_in_workspaces: Vec::new(),
-            });
+            }));
 
         let mut fixes = Vec::new();
         let had_error =
@@ -275,13 +275,13 @@ mod tests {
         let mut results = fallow_core::results::AnalysisResults::default();
         results
             .unused_optional_dependencies
-            .push(fallow_core::results::UnusedDependency {
+            .push(fallow_core::results::UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
                 package_name: "sharp".into(),
                 location: fallow_core::results::DependencyLocation::OptionalDependencies,
                 path: pkg_path.clone(),
                 line: 3,
                 used_in_workspaces: Vec::new(),
-            });
+            }));
 
         let mut fixes = Vec::new();
         let had_error =
@@ -309,22 +309,22 @@ mod tests {
         let mut results = fallow_core::results::AnalysisResults::default();
         results
             .unused_dependencies
-            .push(fallow_core::results::UnusedDependency {
+            .push(fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
                 location: fallow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 3,
                 used_in_workspaces: Vec::new(),
-            });
+            }));
         results
             .unused_dev_dependencies
-            .push(fallow_core::results::UnusedDependency {
+            .push(fallow_core::results::UnusedDevDependencyFinding::with_actions(UnusedDependency {
                 package_name: "jest".into(),
                 location: fallow_core::results::DependencyLocation::DevDependencies,
                 path: pkg_path.clone(),
                 line: 5,
                 used_in_workspaces: Vec::new(),
-            });
+            }));
 
         let mut fixes = Vec::new();
         let had_error =
@@ -350,13 +350,13 @@ mod tests {
         let mut results = fallow_core::results::AnalysisResults::default();
         results
             .unused_dependencies
-            .push(fallow_core::results::UnusedDependency {
+            .push(fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
                 location: fallow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 3,
                 used_in_workspaces: Vec::new(),
-            });
+            }));
 
         let mut fixes = Vec::new();
         let had_error =
@@ -380,13 +380,13 @@ mod tests {
         let mut results = fallow_core::results::AnalysisResults::default();
         results
             .unused_dependencies
-            .push(fallow_core::results::UnusedDependency {
+            .push(fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "nonexistent".into(),
                 location: fallow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path,
                 line: 3,
                 used_in_workspaces: Vec::new(),
-            });
+            }));
 
         let mut fixes = Vec::new();
         let had_error =
@@ -408,13 +408,13 @@ mod tests {
         let mut results = fallow_core::results::AnalysisResults::default();
         results
             .unused_dependencies
-            .push(fallow_core::results::UnusedDependency {
+            .push(fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
                 location: fallow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 3,
                 used_in_workspaces: Vec::new(),
-            });
+            }));
 
         let mut fixes = Vec::new();
         apply_dependency_fixes(root, &results, OutputFormat::Human, true, &mut fixes);
@@ -435,13 +435,13 @@ mod tests {
         let mut results = fallow_core::results::AnalysisResults::default();
         results
             .unused_dependencies
-            .push(fallow_core::results::UnusedDependency {
+            .push(fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
                 location: fallow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path,
                 line: 3,
                 used_in_workspaces: Vec::new(),
-            });
+            }));
 
         let mut fixes = Vec::new();
         let had_error =
@@ -461,13 +461,13 @@ mod tests {
         let mut results = fallow_core::results::AnalysisResults::default();
         results
             .unused_dependencies
-            .push(fallow_core::results::UnusedDependency {
+            .push(fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
                 location: fallow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path,
                 line: 3,
                 used_in_workspaces: Vec::new(),
-            });
+            }));
 
         let mut fixes = Vec::new();
         let had_error =
@@ -488,13 +488,13 @@ mod tests {
         let mut results = fallow_core::results::AnalysisResults::default();
         results
             .unused_dependencies
-            .push(fallow_core::results::UnusedDependency {
+            .push(fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
                 location: fallow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path,
                 line: 3,
                 used_in_workspaces: Vec::new(),
-            });
+            }));
 
         let mut fixes = Vec::new();
         let had_error =
@@ -519,13 +519,13 @@ mod tests {
         let mut results = fallow_core::results::AnalysisResults::default();
         results
             .unused_dependencies
-            .push(fallow_core::results::UnusedDependency {
+            .push(fallow_core::results::UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".into(),
                 location: fallow_core::results::DependencyLocation::Dependencies,
                 path: pkg_path.clone(),
                 line: 3,
                 used_in_workspaces: Vec::new(),
-            });
+            }));
 
         let mut fixes = Vec::new();
         apply_dependency_fixes(root, &results, OutputFormat::Human, false, &mut fixes);

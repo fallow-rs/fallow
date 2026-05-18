@@ -44,24 +44,24 @@ pub fn filter_to_workspaces(
     // Dependency issues: scope to matching workspaces' package.json files
     results
         .unused_dependencies
-        .retain(|d| in_pkg_jsons(&d.path));
+        .retain(|d| in_pkg_jsons(&d.dep.path));
     results
         .unused_dev_dependencies
-        .retain(|d| in_pkg_jsons(&d.path));
+        .retain(|d| in_pkg_jsons(&d.dep.path));
     results
         .unused_optional_dependencies
-        .retain(|d| in_pkg_jsons(&d.path));
+        .retain(|d| in_pkg_jsons(&d.dep.path));
     results
         .type_only_dependencies
-        .retain(|d| in_pkg_jsons(&d.path));
+        .retain(|d| in_pkg_jsons(&d.dep.path));
     results
         .test_only_dependencies
-        .retain(|d| in_pkg_jsons(&d.path));
+        .retain(|d| in_pkg_jsons(&d.dep.path));
 
     // Unlisted deps: keep only if any importing file is in a matched workspace
     results
         .unlisted_dependencies
-        .retain(|d| d.imported_from.iter().any(|s| any_under(&s.path)));
+        .retain(|d| d.dep.imported_from.iter().any(|s| any_under(&s.path)));
 
     // Duplicate exports: filter locations to workspace, drop groups with < 2
     for dup in &mut results.duplicate_exports {
@@ -433,62 +433,62 @@ mod tests {
     #[test]
     fn filter_to_workspace_scopes_dependencies_to_ws_package_json() {
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "lodash".into(),
             location: DependencyLocation::Dependencies,
             path: PathBuf::from("/project/package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
-        results.unused_dependencies.push(UnusedDependency {
+        }));
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "react".into(),
             location: DependencyLocation::Dependencies,
             path: PathBuf::from("/project/packages/ui/package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
-        results.unused_dev_dependencies.push(UnusedDependency {
+        }));
+        results.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
             package_name: "vitest".into(),
             location: DependencyLocation::DevDependencies,
             path: PathBuf::from("/project/packages/ui/package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
+        }));
 
         let ws_root = PathBuf::from("/project/packages/ui");
         filter_to_workspace(&mut results, &ws_root);
 
         assert_eq!(results.unused_dependencies.len(), 1);
-        assert_eq!(results.unused_dependencies[0].package_name, "react");
+        assert_eq!(results.unused_dependencies[0].dep.package_name, "react");
         assert_eq!(results.unused_dev_dependencies.len(), 1);
-        assert_eq!(results.unused_dev_dependencies[0].package_name, "vitest");
+        assert_eq!(results.unused_dev_dependencies[0].dep.package_name, "vitest");
     }
 
     #[test]
     fn filter_to_workspace_scopes_unlisted_deps_by_importer() {
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependency {
+        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
             package_name: "chalk".into(),
             imported_from: vec![ImportSite {
                 path: PathBuf::from("/project/packages/ui/src/a.ts"),
                 line: 1,
                 col: 0,
             }],
-        });
-        results.unlisted_dependencies.push(UnlistedDependency {
+        }));
+        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
             package_name: "debug".into(),
             imported_from: vec![ImportSite {
                 path: PathBuf::from("/project/packages/api/src/b.ts"),
                 line: 1,
                 col: 0,
             }],
-        });
+        }));
 
         let ws_root = PathBuf::from("/project/packages/ui");
         filter_to_workspace(&mut results, &ws_root);
 
         assert_eq!(results.unlisted_dependencies.len(), 1);
-        assert_eq!(results.unlisted_dependencies[0].package_name, "chalk");
+        assert_eq!(results.unlisted_dependencies[0].dep.package_name, "chalk");
     }
 
     #[test]
@@ -583,22 +583,22 @@ mod tests {
     #[test]
     fn filter_to_workspace_scopes_type_only_dependencies() {
         let mut results = AnalysisResults::default();
-        results.type_only_dependencies.push(TypeOnlyDependency {
+        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
             package_name: "zod".into(),
             path: PathBuf::from("/project/packages/ui/package.json"),
             line: 8,
-        });
-        results.type_only_dependencies.push(TypeOnlyDependency {
+        }));
+        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
             package_name: "yup".into(),
             path: PathBuf::from("/project/package.json"),
             line: 8,
-        });
+        }));
 
         let ws_root = PathBuf::from("/project/packages/ui");
         filter_to_workspace(&mut results, &ws_root);
 
         assert_eq!(results.type_only_dependencies.len(), 1);
-        assert_eq!(results.type_only_dependencies[0].package_name, "zod");
+        assert_eq!(results.type_only_dependencies[0].dep.package_name, "zod");
     }
 
     #[test]
@@ -675,20 +675,20 @@ mod tests {
     #[test]
     fn filter_changed_files_preserves_unused_deps() {
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "lodash".into(),
             location: DependencyLocation::Dependencies,
             path: PathBuf::from("/project/package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
-        results.unused_dev_dependencies.push(UnusedDependency {
+        }));
+        results.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
             package_name: "jest".into(),
             location: DependencyLocation::DevDependencies,
             path: PathBuf::from("/project/package.json"),
             line: 10,
             used_in_workspaces: Vec::new(),
-        });
+        }));
 
         let changed = rustc_hash::FxHashSet::default(); // empty set
 
@@ -817,14 +817,14 @@ mod tests {
     #[test]
     fn filter_changed_files_keeps_unlisted_dep_if_importer_changed() {
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependency {
+        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
             package_name: "chalk".into(),
             imported_from: vec![ImportSite {
                 path: PathBuf::from("/project/src/a.ts"),
                 line: 1,
                 col: 0,
             }],
-        });
+        }));
 
         let mut changed = rustc_hash::FxHashSet::default();
         changed.insert(PathBuf::from("/project/src/a.ts"));
@@ -837,14 +837,14 @@ mod tests {
     #[test]
     fn filter_changed_files_removes_unlisted_dep_if_no_importer_changed() {
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependency {
+        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
             package_name: "chalk".into(),
             imported_from: vec![ImportSite {
                 path: PathBuf::from("/project/src/a.ts"),
                 line: 1,
                 col: 0,
             }],
-        });
+        }));
 
         let mut changed = rustc_hash::FxHashSet::default();
         changed.insert(PathBuf::from("/project/src/b.ts"));
@@ -859,27 +859,27 @@ mod tests {
     #[test]
     fn filter_to_workspace_scopes_optional_dependencies() {
         let mut results = AnalysisResults::default();
-        results.unused_optional_dependencies.push(UnusedDependency {
+        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
             package_name: "fsevents".into(),
             location: DependencyLocation::OptionalDependencies,
             path: PathBuf::from("/project/packages/ui/package.json"),
             line: 3,
             used_in_workspaces: Vec::new(),
-        });
-        results.unused_optional_dependencies.push(UnusedDependency {
+        }));
+        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
             package_name: "esbuild".into(),
             location: DependencyLocation::OptionalDependencies,
             path: PathBuf::from("/project/package.json"),
             line: 7,
             used_in_workspaces: Vec::new(),
-        });
+        }));
 
         let ws_root = PathBuf::from("/project/packages/ui");
         filter_to_workspace(&mut results, &ws_root);
 
         assert_eq!(results.unused_optional_dependencies.len(), 1);
         assert_eq!(
-            results.unused_optional_dependencies[0].package_name,
+            results.unused_optional_dependencies[0].dep.package_name,
             "fsevents"
         );
     }
@@ -887,22 +887,22 @@ mod tests {
     #[test]
     fn filter_to_workspace_scopes_test_only_dependencies() {
         let mut results = AnalysisResults::default();
-        results.test_only_dependencies.push(TestOnlyDependency {
+        results.test_only_dependencies.push(TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
             package_name: "msw".into(),
             path: PathBuf::from("/project/packages/ui/package.json"),
             line: 4,
-        });
-        results.test_only_dependencies.push(TestOnlyDependency {
+        }));
+        results.test_only_dependencies.push(TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
             package_name: "nock".into(),
             path: PathBuf::from("/project/packages/api/package.json"),
             line: 6,
-        });
+        }));
 
         let ws_root = PathBuf::from("/project/packages/ui");
         filter_to_workspace(&mut results, &ws_root);
 
         assert_eq!(results.test_only_dependencies.len(), 1);
-        assert_eq!(results.test_only_dependencies[0].package_name, "msw");
+        assert_eq!(results.test_only_dependencies[0].dep.package_name, "msw");
     }
 
     #[test]
@@ -1115,23 +1115,23 @@ mod tests {
     #[test]
     fn filter_changed_files_preserves_optional_and_type_only_and_test_only_deps() {
         let mut results = AnalysisResults::default();
-        results.unused_optional_dependencies.push(UnusedDependency {
+        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
             package_name: "fsevents".into(),
             location: DependencyLocation::OptionalDependencies,
             path: PathBuf::from("/project/package.json"),
             line: 3,
             used_in_workspaces: Vec::new(),
-        });
-        results.type_only_dependencies.push(TypeOnlyDependency {
+        }));
+        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
             package_name: "zod".into(),
             path: PathBuf::from("/project/package.json"),
             line: 8,
-        });
-        results.test_only_dependencies.push(TestOnlyDependency {
+        }));
+        results.test_only_dependencies.push(TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
             package_name: "msw".into(),
             path: PathBuf::from("/project/package.json"),
             line: 12,
-        });
+        }));
 
         let changed = rustc_hash::FxHashSet::default();
 
@@ -1258,7 +1258,7 @@ mod tests {
     #[test]
     fn filter_changed_files_unlisted_dep_with_multiple_importers_keeps_if_any_changed() {
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependency {
+        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
             package_name: "chalk".into(),
             imported_from: vec![
                 ImportSite {
@@ -1272,7 +1272,7 @@ mod tests {
                     col: 0,
                 },
             ],
-        });
+        }));
 
         let mut changed = rustc_hash::FxHashSet::default();
         changed.insert(PathBuf::from("/project/src/b.ts"));
@@ -1455,27 +1455,27 @@ mod tests {
     #[test]
     fn filter_to_workspaces_scopes_deps_to_matched_package_jsons() {
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "lodash".into(),
             location: DependencyLocation::Dependencies,
             path: PathBuf::from("/project/packages/ui/package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
-        results.unused_dependencies.push(UnusedDependency {
+        }));
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "react".into(),
             location: DependencyLocation::Dependencies,
             path: PathBuf::from("/project/packages/api/package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
-        results.unused_dependencies.push(UnusedDependency {
+        }));
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "axios".into(),
             location: DependencyLocation::Dependencies,
             path: PathBuf::from("/project/packages/legacy/package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
+        }));
 
         let roots = [
             PathBuf::from("/project/packages/ui"),
@@ -1487,7 +1487,7 @@ mod tests {
         let names: Vec<&str> = results
             .unused_dependencies
             .iter()
-            .map(|d| d.package_name.as_ref())
+            .map(|d| d.dep.package_name.as_ref())
             .collect();
         assert!(names.contains(&"lodash"));
         assert!(names.contains(&"react"));

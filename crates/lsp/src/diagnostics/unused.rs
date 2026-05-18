@@ -146,26 +146,29 @@ pub fn push_dep_diagnostics(
     root: &std::path::Path,
 ) {
     // Unused deps: dependencies, devDependencies, optionalDependencies
-    for (deps, code, anchor, msg_prefix) in [
+    type DepIter<'a> =
+        Box<dyn Iterator<Item = &'a fallow_core::results::UnusedDependency> + 'a>;
+    let groups: [(DepIter<'_>, &str, &str, &str); 3] = [
         (
-            &results.unused_dependencies,
+            Box::new(results.unused_dependencies.iter().map(|f| &f.dep)),
             "unused-dependency",
             "unused-dependencies",
-            "Unused dependency" as &str,
+            "Unused dependency",
         ),
         (
-            &results.unused_dev_dependencies,
+            Box::new(results.unused_dev_dependencies.iter().map(|f| &f.dep)),
             "unused-dev-dependency",
             "unused-devdependencies",
             "Unused devDependency",
         ),
         (
-            &results.unused_optional_dependencies,
+            Box::new(results.unused_optional_dependencies.iter().map(|f| &f.dep)),
             "unused-optional-dependency",
             "unused-optionaldependencies",
             "Unused optionalDependency",
         ),
-    ] {
+    ];
+    for (deps, code, anchor, msg_prefix) in groups {
         for dep in deps {
             if let Ok(dep_uri) = Url::from_file_path(&dep.path) {
                 let line = dep.line.saturating_sub(1);
@@ -199,7 +202,7 @@ pub fn push_dep_diagnostics(
                 code_description: doc_link("unlisted-dependencies"),
                 message: format!(
                     "Unlisted dependency: {} (used but not in package.json)",
-                    dep.package_name
+                    dep.dep.package_name
                 ),
                 ..Default::default()
             });
@@ -208,8 +211,8 @@ pub fn push_dep_diagnostics(
 
     // Type-only dependencies: could be moved to devDependencies
     for dep in &results.type_only_dependencies {
-        if let Ok(dep_uri) = Url::from_file_path(&dep.path) {
-            let line = dep.line.saturating_sub(1);
+        if let Ok(dep_uri) = Url::from_file_path(&dep.dep.path) {
+            let line = dep.dep.line.saturating_sub(1);
             map.entry(dep_uri).or_default().push(Diagnostic {
                 range: Range {
                     start: Position { line, character: 0 },
@@ -224,7 +227,7 @@ pub fn push_dep_diagnostics(
                 code_description: doc_link("type-only-dependencies"),
                 message: format!(
                     "Type-only dependency: {} (only used via type imports, could be a devDependency)",
-                    dep.package_name
+                    dep.dep.package_name
                 ),
                 ..Default::default()
             });
@@ -233,8 +236,8 @@ pub fn push_dep_diagnostics(
 
     // Test-only dependencies: could be moved to devDependencies
     for dep in &results.test_only_dependencies {
-        if let Ok(dep_uri) = Url::from_file_path(&dep.path) {
-            let line = dep.line.saturating_sub(1);
+        if let Ok(dep_uri) = Url::from_file_path(&dep.dep.path) {
+            let line = dep.dep.line.saturating_sub(1);
             map.entry(dep_uri).or_default().push(Diagnostic {
                 range: Range {
                     start: Position { line, character: 0 },
@@ -249,7 +252,7 @@ pub fn push_dep_diagnostics(
                 code_description: doc_link("test-only-dependencies"),
                 message: format!(
                     "Production dependency '{}' is only imported by test files; consider moving to devDependencies",
-                    dep.package_name
+                    dep.dep.package_name
                 ),
                 ..Default::default()
             });
@@ -510,13 +513,7 @@ mod tests {
 
     use fallow_core::duplicates::{DuplicationReport, DuplicationStats};
     use fallow_core::extract::MemberKind;
-    use fallow_core::results::{
-        AnalysisResults, DependencyLocation, EmptyCatalogGroup, ImportSite, TestOnlyDependency,
-        TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport,
-        UnresolvedImportFinding, UnusedCatalogEntry, UnusedClassMemberFinding, UnusedDependency,
-        UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding, UnusedFile, UnusedFileFinding,
-        UnusedMember, UnusedTypeFinding,
-    };
+    use fallow_core::results::{AnalysisResults, DependencyLocation, EmptyCatalogGroup, ImportSite, TestOnlyDependency, TestOnlyDependencyFinding, TypeOnlyDependency, TypeOnlyDependencyFinding, UnlistedDependency, UnlistedDependencyFinding, UnresolvedCatalogReference, UnresolvedImport, UnresolvedImportFinding, UnusedCatalogEntry, UnusedClassMemberFinding, UnusedDependency, UnusedDependencyFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding, UnusedFile, UnusedFileFinding, UnusedMember, UnusedOptionalDependencyFinding, UnusedTypeFinding};
     use tower_lsp::lsp_types::{DiagnosticSeverity, DiagnosticTag, NumberOrString, Url};
 
     use crate::diagnostics::{FIRST_LINE_RANGE, build_diagnostics};
@@ -694,13 +691,13 @@ mod tests {
     fn unused_dependency_produces_warning_at_package_json() {
         let root = test_root();
         let mut results = AnalysisResults::default();
-        results.unused_dependencies.push(UnusedDependency {
+        results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "lodash".to_string(),
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
+        }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -719,13 +716,13 @@ mod tests {
     fn unused_dev_dependency_produces_warning() {
         let root = test_root();
         let mut results = AnalysisResults::default();
-        results.unused_dev_dependencies.push(UnusedDependency {
+        results.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
             package_name: "prettier".to_string(),
             location: DependencyLocation::DevDependencies,
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
+        }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -743,14 +740,14 @@ mod tests {
     fn unlisted_dependency_uses_root_package_json() {
         let root = test_root();
         let mut results = AnalysisResults::default();
-        results.unlisted_dependencies.push(UnlistedDependency {
+        results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
             package_name: "chalk".to_string(),
             imported_from: vec![ImportSite {
                 path: root.join("src/cli.ts"),
                 line: 2,
                 col: 0,
             }],
-        });
+        }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -838,13 +835,13 @@ mod tests {
     fn unused_optional_dependency_produces_warning() {
         let root = test_root();
         let mut results = AnalysisResults::default();
-        results.unused_optional_dependencies.push(UnusedDependency {
+        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
             package_name: "fsevents".to_string(),
             location: DependencyLocation::OptionalDependencies,
             path: root.join("package.json"),
             line: 12,
             used_in_workspaces: Vec::new(),
-        });
+        }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -871,11 +868,11 @@ mod tests {
     fn type_only_dependency_produces_information_diagnostic() {
         let root = test_root();
         let mut results = AnalysisResults::default();
-        results.type_only_dependencies.push(TypeOnlyDependency {
+        results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
             package_name: "@types/react".to_string(),
             path: root.join("package.json"),
             line: 8,
-        });
+        }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -902,11 +899,11 @@ mod tests {
     fn test_only_dependency_produces_information_diagnostic() {
         let root = test_root();
         let mut results = AnalysisResults::default();
-        results.test_only_dependencies.push(TestOnlyDependency {
+        results.test_only_dependencies.push(TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
             package_name: "test-utils-lib".to_string(),
             path: root.join("package.json"),
             line: 5,
-        });
+        }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);

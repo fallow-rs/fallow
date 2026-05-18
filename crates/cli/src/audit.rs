@@ -1365,8 +1365,14 @@ fn dead_code_keys(
     for item in results
         .unused_dependencies
         .iter()
-        .chain(results.unused_dev_dependencies.iter())
-        .chain(results.unused_optional_dependencies.iter())
+        .map(|f| &f.dep)
+        .chain(results.unused_dev_dependencies.iter().map(|f| &f.dep))
+        .chain(
+            results
+                .unused_optional_dependencies
+                .iter()
+                .map(|f| &f.dep),
+        )
     {
         keys.insert(unused_dependency_key(item, root));
     }
@@ -1383,7 +1389,7 @@ fn dead_code_keys(
             item.import.specifier
         ));
     }
-    for item in &results.unlisted_dependencies {
+    for item in results.unlisted_dependencies.iter().map(|f| &f.dep) {
         keys.insert(unlisted_dependency_key(item, root));
     }
     for item in &results.duplicate_exports {
@@ -1403,15 +1409,15 @@ fn dead_code_keys(
     for item in &results.type_only_dependencies {
         keys.insert(format!(
             "type-only-dependency:{}:{}",
-            relative_key_path(&item.path, root),
-            item.package_name
+            relative_key_path(&item.dep.path, root),
+            item.dep.package_name
         ));
     }
     for item in &results.test_only_dependencies {
         keys.insert(format!(
             "test-only-dependency:{}:{}",
-            relative_key_path(&item.path, root),
-            item.package_name
+            relative_key_path(&item.dep.path, root),
+            item.dep.package_name
         ));
     }
     for item in &results.circular_dependencies {
@@ -1518,13 +1524,13 @@ fn retain_introduced_dead_code(
     });
     results
         .unused_dependencies
-        .retain(|item| keep(unused_dependency_key(item, root)));
+        .retain(|item| keep(unused_dependency_key(&item.dep, root)));
     results
         .unused_dev_dependencies
-        .retain(|item| keep(unused_dependency_key(item, root)));
+        .retain(|item| keep(unused_dependency_key(&item.dep, root)));
     results
         .unused_optional_dependencies
-        .retain(|item| keep(unused_dependency_key(item, root)));
+        .retain(|item| keep(unused_dependency_key(&item.dep, root)));
     results
         .unused_enum_members
         .retain(|item| keep(unused_member_key("unused-enum-member", &item.member, root)));
@@ -1540,7 +1546,7 @@ fn retain_introduced_dead_code(
     });
     results
         .unlisted_dependencies
-        .retain(|item| keep(unlisted_dependency_key(item, root)));
+        .retain(|item| keep(unlisted_dependency_key(&item.dep, root)));
     results.duplicate_exports.retain(|item| {
         let mut locations: Vec<String> = item
             .locations
@@ -1558,15 +1564,15 @@ fn retain_introduced_dead_code(
     results.type_only_dependencies.retain(|item| {
         keep(format!(
             "type-only-dependency:{}:{}",
-            relative_key_path(&item.path, root),
-            item.package_name
+            relative_key_path(&item.dep.path, root),
+            item.dep.package_name
         ))
     });
     results.test_only_dependencies.retain(|item| {
         keep(format!(
             "test-only-dependency:{}:{}",
-            relative_key_path(&item.path, root),
-            item.package_name
+            relative_key_path(&item.dep.path, root),
+            item.dep.package_name
         ))
     });
     results.circular_dependencies.retain(|item| {
@@ -1714,7 +1720,7 @@ fn annotate_dead_code_json(
         results
             .unused_dependencies
             .iter()
-            .map(|item| issue_was_introduced(&unused_dependency_key(item, root), base)),
+            .map(|item| issue_was_introduced(&unused_dependency_key(&item.dep, root), base)),
     );
     annotate_issue_array(
         json,
@@ -1722,7 +1728,7 @@ fn annotate_dead_code_json(
         results
             .unused_dev_dependencies
             .iter()
-            .map(|item| issue_was_introduced(&unused_dependency_key(item, root), base)),
+            .map(|item| issue_was_introduced(&unused_dependency_key(&item.dep, root), base)),
     );
     annotate_issue_array(
         json,
@@ -1730,7 +1736,7 @@ fn annotate_dead_code_json(
         results
             .unused_optional_dependencies
             .iter()
-            .map(|item| issue_was_introduced(&unused_dependency_key(item, root), base)),
+            .map(|item| issue_was_introduced(&unused_dependency_key(&item.dep, root), base)),
     );
     annotate_issue_array(
         json,
@@ -1772,7 +1778,7 @@ fn annotate_dead_code_json(
         results
             .unlisted_dependencies
             .iter()
-            .map(|item| issue_was_introduced(&unlisted_dependency_key(item, root), base)),
+            .map(|item| issue_was_introduced(&unlisted_dependency_key(&item.dep, root), base)),
     );
     annotate_issue_array(
         json,
@@ -1802,8 +1808,8 @@ fn annotate_dead_code_json(
             issue_was_introduced(
                 &format!(
                     "type-only-dependency:{}:{}",
-                    relative_key_path(&item.path, root),
-                    item.package_name
+                    relative_key_path(&item.dep.path, root),
+                    item.dep.package_name
                 ),
                 base,
             )
@@ -1816,8 +1822,8 @@ fn annotate_dead_code_json(
             issue_was_introduced(
                 &format!(
                     "test-only-dependency:{}:{}",
-                    relative_key_path(&item.path, root),
-                    item.package_name
+                    relative_key_path(&item.dep.path, root),
+                    item.dep.package_name
                 ),
                 base,
             )

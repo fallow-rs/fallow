@@ -347,7 +347,7 @@ fn ignore_dependencies_config() {
         !results
             .unused_dependencies
             .iter()
-            .any(|d| d.package_name == "unused-dep"),
+            .any(|d| d.dep.package_name == "unused-dep"),
         "unused-dep should be ignored"
     );
 }

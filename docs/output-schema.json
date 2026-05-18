@@ -344,7 +344,7 @@
         "warnings"
       ],
       "title": "fallow coverage setup --json",
-      "description": "Envelope emitted by `fallow coverage setup --json`. Deterministic\nagent-readable runtime coverage setup instructions. In workspaces,\n`members` carries one entry per detected runtime package; `runtime_targets`\nis the union of all member targets.\n\nConstructed at runtime by\n`crates/cli/src/coverage/mod.rs::build_setup_envelope`; the wire is\n`serde_json::to_value(&envelope)`. The drift gate keeps this struct\naligned with `docs/output-schema.json`."
+      "description": "Envelope emitted by `fallow coverage setup --json`. Deterministic\nagent-readable runtime coverage setup instructions. In workspaces,\n`members` carries one entry per detected runtime package; `runtime_targets`\nis the union of all member targets.\n\nThe runtime path in `crates/cli/src/coverage/mod.rs::build_setup_json`\nstill constructs the wire shape via `serde_json::json!` macros (one per\nmember, snippet, and file-to-edit). The typed struct here serves as the\nschema source of truth via the drift gate; a follow-up can swap the\nruntime over without changing the wire."
     },
     "CoverageSetupMember": {
       "type": "object",
@@ -525,23 +525,23 @@
         "unused_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedDependencyFinding"
           },
-          "description": "Dependencies listed in package.json but never imported."
+          "description": "Dependencies listed in package.json but never imported. Wrapped in\n[`UnusedDependencyFinding`] so each entry carries a typed `actions`\narray natively. The fix action swaps from `remove-dependency` to\n`move-dependency` when `used_in_workspaces` is non-empty."
         },
         "unused_dev_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedDevDependencyFinding"
           },
-          "description": "Dev dependencies listed in package.json but never imported."
+          "description": "Dev dependencies listed in package.json but never imported. Wrapped\nin [`UnusedDevDependencyFinding`]: same bare struct as\n`unused_dependencies` with a `devDependencies`-targeted fix\ndescription."
         },
         "unused_optional_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedOptionalDependencyFinding"
           },
-          "description": "Optional dependencies listed in package.json but never imported."
+          "description": "Optional dependencies listed in package.json but never imported.\nWrapped in [`UnusedOptionalDependencyFinding`] with an\n`optionalDependencies`-targeted fix description."
         },
         "unused_enum_members": {
           "type": "array",
@@ -567,9 +567,9 @@
         "unlisted_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnlistedDependency"
+            "$ref": "#/definitions/UnlistedDependencyFinding"
           },
-          "description": "Dependencies used in code but not listed in package.json."
+          "description": "Dependencies used in code but not listed in package.json. Wrapped in\n[`UnlistedDependencyFinding`]."
         },
         "duplicate_exports": {
           "type": "array",
@@ -581,16 +581,16 @@
         "type_only_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/TypeOnlyDependency"
+            "$ref": "#/definitions/TypeOnlyDependencyFinding"
           },
-          "description": "Production dependencies only used via type-only imports (could be devDependencies).\nOnly populated in production mode."
+          "description": "Production dependencies only used via type-only imports (could be\ndevDependencies). Only populated in production mode. Wrapped in\n[`TypeOnlyDependencyFinding`]."
         },
         "test_only_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/TestOnlyDependency"
+            "$ref": "#/definitions/TestOnlyDependencyFinding"
           },
-          "description": "Production dependencies only imported by test files (could be devDependencies)."
+          "description": "Production dependencies only imported by test files (could be\ndevDependencies). Wrapped in [`TestOnlyDependencyFinding`]."
         },
         "circular_dependencies": {
           "type": "array",
@@ -822,23 +822,23 @@
         "unused_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedDependencyFinding"
           },
-          "description": "Dependencies listed in package.json but never imported."
+          "description": "Dependencies listed in package.json but never imported. Wrapped in\n[`UnusedDependencyFinding`] so each entry carries a typed `actions`\narray natively. The fix action swaps from `remove-dependency` to\n`move-dependency` when `used_in_workspaces` is non-empty."
         },
         "unused_dev_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedDevDependencyFinding"
           },
-          "description": "Dev dependencies listed in package.json but never imported."
+          "description": "Dev dependencies listed in package.json but never imported. Wrapped\nin [`UnusedDevDependencyFinding`]: same bare struct as\n`unused_dependencies` with a `devDependencies`-targeted fix\ndescription."
         },
         "unused_optional_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedOptionalDependencyFinding"
           },
-          "description": "Optional dependencies listed in package.json but never imported."
+          "description": "Optional dependencies listed in package.json but never imported.\nWrapped in [`UnusedOptionalDependencyFinding`] with an\n`optionalDependencies`-targeted fix description."
         },
         "unused_enum_members": {
           "type": "array",
@@ -864,9 +864,9 @@
         "unlisted_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnlistedDependency"
+            "$ref": "#/definitions/UnlistedDependencyFinding"
           },
-          "description": "Dependencies used in code but not listed in package.json."
+          "description": "Dependencies used in code but not listed in package.json. Wrapped in\n[`UnlistedDependencyFinding`]."
         },
         "duplicate_exports": {
           "type": "array",
@@ -878,16 +878,16 @@
         "type_only_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/TypeOnlyDependency"
+            "$ref": "#/definitions/TypeOnlyDependencyFinding"
           },
-          "description": "Production dependencies only used via type-only imports (could be devDependencies).\nOnly populated in production mode."
+          "description": "Production dependencies only used via type-only imports (could be\ndevDependencies). Only populated in production mode. Wrapped in\n[`TypeOnlyDependencyFinding`]."
         },
         "test_only_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/TestOnlyDependency"
+            "$ref": "#/definitions/TestOnlyDependencyFinding"
           },
-          "description": "Production dependencies only imported by test files (could be devDependencies)."
+          "description": "Production dependencies only imported by test files (could be\ndevDependencies). Wrapped in [`TestOnlyDependencyFinding`]."
         },
         "circular_dependencies": {
           "type": "array",
@@ -2579,9 +2579,9 @@
           "type": "string",
           "description": "Display string per the configured email mode: raw email\n(`alice@example.com`), local-part handle (`alice`), or stable hash\npseudonym (`xxh3:<16hex>`). The format depends on `format`.\n\nRenamed from `email` because in `handle` and `hash` modes the value\nis no longer an email address; consumers tempted to use it as one\n(e.g. `mailto:`) would be wrong."
         },
-        "format": {
-          "description": "Format of [`identifier`](Self::identifier): `raw`, `handle`, or `hash`.\nLets type-aware consumers branch without re-parsing the string.",
-          "$ref": "#/definitions/ContributorIdentifierFormat"
+        "commits": {
+          "type": "integer",
+          "description": "Total commits by this contributor in the analysis window."
         },
         "share": {
           "type": "number",
@@ -2590,10 +2590,6 @@
         "stale_days": {
           "type": "integer",
           "description": "Days since this contributor last touched the file."
-        },
-        "commits": {
-          "type": "integer",
-          "description": "Total commits by this contributor in the analysis window."
         }
       },
       "required": [
@@ -3275,11 +3271,11 @@
           "$ref": "#/definitions/SuppressFileAction"
         },
         {
-          "description": "Add the offending finding to the fallow config (e.g.\n`ignoreDependencies: [\"lodash\"]`). Auto-fixable for the array-shaped\n`ignoreExports` variant when `fallow fix` can safely apply the\naction (config file exists, or no config exists and the working\ndirectory is not inside a monorepo subpackage); manual otherwise.",
+          "description": "Add the offending finding to the fallow config (e.g.\n`ignoreDependencies: [\"lodash\"]`). Auto-fixable for the array-shaped\n`ignoreExports` variant when a config file exists; manual otherwise.",
           "$ref": "#/definitions/AddToConfigAction"
         }
       ],
-      "description": "A suggested action attached to a finding in the JSON output. Each finding\ncarries an `actions` array; consumers (agents, IDE clients, CI bots) can\ndispatch on the `type` discriminant to choose the right remediation.\n\nThe discriminator is `type` (snake_case `type` field), the payload uses the\nmatching kebab-case identifier per variant.\n\n## `auto_fixable` is per-finding, not per action type\n\nEvery action variant carries an `auto_fixable: bool` field. The value is\nevaluated PER FINDING, not per action type: the same action type may\nappear with `auto_fixable: true` on one finding and `auto_fixable: false`\non another, depending on per-instance guards in the `fallow fix` applier.\nAgents that filter on `auto_fixable: true` must branch on the bool of\neach individual finding's action, not on the action `type` alone.\n\nCurrent per-instance flips:\n\n- `remove-catalog-entry` (`unused-catalog-entries`): `true` only when the\n  finding's `hardcoded_consumers` array is empty. When a workspace\n  package still pins a hardcoded version of the same package, `fallow fix`\n  skips the entry to avoid breaking `pnpm install`, and the action is\n  emitted with `auto_fixable: false`.\n- `remove-dependency` vs `move-dependency` (dependency findings): when the\n  finding's `used_in_workspaces` array is non-empty, the primary action\n  flips to `move-dependency` with `auto_fixable: false` (`fallow fix` will\n  not remove a dependency that another workspace imports). On findings\n  without cross-workspace consumers the action stays `remove-dependency`\n  with `auto_fixable: true`.\n- `add-to-config` for `ignoreExports` (`duplicate-exports`): `true` when\n  `fallow fix` can safely apply the action without further user setup.\n  That is: a fallow config file exists on disk, OR no config exists AND\n  the working directory is NOT inside a monorepo subpackage (in which\n  case the applier creates `.fallowrc.json` from `fallow init`'s\n  framework-aware scaffolding and layers the new rules on top).\n  `false` inside a monorepo subpackage with no workspace-root config\n  (the applier refuses to fragment per-package configs across the\n  monorepo and points at the workspace root instead).\n- `update-catalog-reference` (`unresolved-catalog-references`): always\n  `false` today (the catalog-switching applier is not wired in yet); the\n  field is non-singleton so that future enablement does not require a\n  schema change.\n\nAll `suppress-line` and `suppress-file` actions are uniformly\n`auto_fixable: false`. The field is non-singleton on the wire so that a\nfuture auto-applier (e.g. an LLM-driven suppression writer) can promote\nindividual variants without a schema bump."
+      "description": "A suggested action attached to a finding in the JSON output. Each finding\ncarries an `actions` array; consumers (agents, IDE clients, CI bots) can\ndispatch on the `type` discriminant to choose the right remediation.\n\nThe discriminator is `type` (snake_case `type` field), the payload uses the\nmatching kebab-case identifier per variant."
     },
     "FixAction": {
       "type": "object",
@@ -3290,7 +3286,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether `fallow fix` can apply this fix automatically. Evaluated PER\nFINDING, not per action type: the same `type` may carry\n`auto_fixable: true` on one finding and `auto_fixable: false` on\nanother when per-instance guards in the applier discriminate (e.g.\n`remove-catalog-entry` flips on `hardcoded_consumers`, the primary\ndependency action flips between `remove-dependency` /\n`move-dependency` on `used_in_workspaces`). Filter on this bool of\neach individual action, not on `type`. See the [`IssueAction`]\nenum-level docs for the full list of per-instance flips."
+          "description": "Whether `fallow fix` can apply this fix automatically."
         },
         "description": {
           "type": "string",
@@ -3397,7 +3393,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "True when `fallow fix` can apply this config action automatically.\nEvaluated PER FINDING, not per action type: `ignoreExports`\nduplicate-export actions are auto-fixable when `fallow fix` can\nsafely write the rule, which today means EITHER a fallow config\nfile already exists OR no config exists and the working directory\nis NOT inside a monorepo subpackage (in which case the applier\ncreates `.fallowrc.json` from `fallow init`'s framework-aware\nscaffolding). The action is `false` inside a monorepo subpackage\nwith no workspace-root config because the applier refuses to\nfragment per-package configs across the monorepo. Older scalar\nconfig-ignore actions (e.g. `ignoreDependencies` on dependency\nfindings) are always manual today. Filter on this bool of each\nindividual action, not on the `type` alone. See the [`IssueAction`]\nenum-level docs for the full list of per-instance flips."
+          "description": "True when `fallow fix` can apply this config action automatically for\nthe current action type. `ignoreExports` duplicate-export actions are\nauto-fixable when a config file exists; older scalar config-ignore\nactions remain manual."
         },
         "description": {
           "type": "string",
@@ -3743,24 +3739,13 @@
             "type": "string"
           },
           "description": "Workspace roots that import this package even though the declaring workspace does not."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
         "package_name",
         "location",
         "path",
-        "line",
-        "actions"
+        "line"
       ],
       "description": "A dependency that is listed in package.json but never imported."
     },
@@ -3848,22 +3833,11 @@
             "$ref": "#/definitions/ImportSite"
           },
           "description": "Import sites where this unlisted dependency is used (file path, line, column)."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
         "package_name",
-        "imported_from",
-        "actions"
+        "imported_from"
       ],
       "description": "A dependency used in code but not listed in package.json."
     },
@@ -3959,23 +3933,12 @@
         "line": {
           "type": "integer",
           "description": "1-based line number of the dependency entry in package.json."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
         "package_name",
         "path",
-        "line",
-        "actions"
+        "line"
       ],
       "description": "A production dependency that is only used via type-only imports.\nIn production builds, type imports are erased, so this dependency\nis not needed at runtime and could be moved to devDependencies."
     },
@@ -3993,23 +3956,12 @@
         "line": {
           "type": "integer",
           "description": "1-based line number of the dependency entry in package.json."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
         "package_name",
         "path",
-        "line",
-        "actions"
+        "line"
       ],
       "description": "A production dependency that is only imported by test files.\nSince it is never used in production code, it could be moved to devDependencies."
     },
@@ -5270,23 +5222,23 @@
         "unused_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedDependencyFinding"
           },
-          "description": "Dependencies listed in package.json but never imported."
+          "description": "Dependencies listed in package.json but never imported. Wrapped in\n[`UnusedDependencyFinding`] so each entry carries a typed `actions`\narray natively. The fix action swaps from `remove-dependency` to\n`move-dependency` when `used_in_workspaces` is non-empty."
         },
         "unused_dev_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedDevDependencyFinding"
           },
-          "description": "Dev dependencies listed in package.json but never imported."
+          "description": "Dev dependencies listed in package.json but never imported. Wrapped\nin [`UnusedDevDependencyFinding`]: same bare struct as\n`unused_dependencies` with a `devDependencies`-targeted fix\ndescription."
         },
         "unused_optional_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedOptionalDependencyFinding"
           },
-          "description": "Optional dependencies listed in package.json but never imported."
+          "description": "Optional dependencies listed in package.json but never imported.\nWrapped in [`UnusedOptionalDependencyFinding`] with an\n`optionalDependencies`-targeted fix description."
         },
         "unused_enum_members": {
           "type": "array",
@@ -5312,9 +5264,9 @@
         "unlisted_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnlistedDependency"
+            "$ref": "#/definitions/UnlistedDependencyFinding"
           },
-          "description": "Dependencies used in code but not listed in package.json."
+          "description": "Dependencies used in code but not listed in package.json. Wrapped in\n[`UnlistedDependencyFinding`]."
         },
         "duplicate_exports": {
           "type": "array",
@@ -5326,16 +5278,16 @@
         "type_only_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/TypeOnlyDependency"
+            "$ref": "#/definitions/TypeOnlyDependencyFinding"
           },
-          "description": "Production dependencies only used via type-only imports (could be devDependencies).\nOnly populated in production mode."
+          "description": "Production dependencies only used via type-only imports (could be\ndevDependencies). Only populated in production mode. Wrapped in\n[`TypeOnlyDependencyFinding`]."
         },
         "test_only_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/TestOnlyDependency"
+            "$ref": "#/definitions/TestOnlyDependencyFinding"
           },
-          "description": "Production dependencies only imported by test files (could be devDependencies)."
+          "description": "Production dependencies only imported by test files (could be\ndevDependencies). Wrapped in [`TestOnlyDependencyFinding`]."
         },
         "circular_dependencies": {
           "type": "array",
@@ -6743,7 +6695,7 @@
         {
           "type": "string",
           "const": "info",
-          "description": "Informational. Reserved for future severity mappings; not produced\nby the current runtime path (which only emits Minor / Major /\nCritical via `severity_to_codeclimate` and the health / runtime-\ncoverage match arms)."
+          "description": "Informational."
         },
         {
           "type": "string",
@@ -6763,7 +6715,7 @@
         {
           "type": "string",
           "const": "blocker",
-          "description": "Blocker (highest severity). Reserved for future severity\nmappings; not produced by the current runtime path."
+          "description": "Blocker (highest severity)."
         }
       ],
       "description": "CodeClimate severity scale."
@@ -7651,328 +7603,291 @@
       ],
       "description": "Wire-shape envelope for an [`UnusedMember`] finding consumed under the\n`unused_class_members` key. Same Rust struct as\n[`UnusedEnumMemberFinding`]; the fix action and suppress comment carry\nthe class-member kebab-case identifier instead."
     },
-    "BoundariesListLogicalGroup": {
+    "UnusedDependencyFinding": {
       "type": "object",
       "properties": {
-        "name": {
+        "package_name": {
           "type": "string",
-          "description": "Logical parent zone name as authored by the user."
+          "description": "Package name, including internal workspace package names."
         },
-        "children": {
+        "location": {
+          "description": "Whether this is in `dependencies`, `devDependencies`, or `optionalDependencies`.",
+          "$ref": "#/definitions/DependencyLocation"
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to the package.json where this dependency is listed.\nFor root deps this is `<root>/package.json`, for workspace deps it is `<ws>/package.json`."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the dependency entry in package.json."
+        },
+        "used_in_workspaces": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Discovered child zone names in stable directory-sorted order."
+          "description": "Workspace roots that import this package even though the declaring workspace does not."
         },
-        "auto_discover": {
+        "actions": {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/definitions/IssueAction"
           },
-          "description": "Verbatim `autoDiscover` strings from the user's config (not\nnormalized) so round-trip tooling can match byte-for-byte."
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
         },
-        "status": {
-          "description": "Why [`Self::children`] is what it is.",
-          "$ref": "#/definitions/LogicalGroupStatus"
-        },
-        "source_zone_index": {
-          "type": "integer",
-          "description": "Position of the parent zone in the user's pre-expansion `zones[]`."
-        },
-        "file_count": {
-          "type": "integer",
-          "description": "Sum of `file_count` across [`Self::children`] plus the fallback\nzone's `file_count` when present."
-        },
-        "authored_rule": {
+        "introduced": {
           "anyOf": [
             {
-              "$ref": "#/definitions/AuthoredRule"
+              "$ref": "#/definitions/AuditIntroduced"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Pre-expansion rule keyed on the parent name, when the user wrote\none."
-        },
-        "fallback_zone": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "When the parent zone also carried explicit `patterns`, it stayed in\n[`BoundariesListing::zones`] as a fallback classifier; this is its\nname. Equal to [`Self::name`] when present."
-        },
-        "merged_from": {
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "type": "integer"
-          },
-          "description": "Parent zone indices merged into this group when the user declared\nthe same parent name multiple times."
-        },
-        "original_zone_root": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "Echo of the parent zone's `root` (subtree scope) as the user wrote\nit. `None` when the parent had no `root` field."
-        },
-        "child_source_indices": {
-          "type": "array",
-          "items": {
-            "type": "integer"
-          },
-          "description": "Parallel to [`Self::children`]: for child at index `i`, the index\ninto [`Self::auto_discover`] of the path that produced it. Empty\nwhen only one path was authored (every child trivially maps to\nindex 0). `serde(default)` keeps the schema's `required` array in\nstep with the runtime's `skip_serializing_if` behavior."
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
         }
       },
       "required": [
-        "name",
-        "children",
-        "auto_discover",
-        "status",
-        "source_zone_index",
-        "file_count"
+        "package_name",
+        "location",
+        "path",
+        "line",
+        "actions"
       ],
-      "description": "A pre-expansion `autoDiscover` logical group surfaced for observability\n(issue #373). Captured during `expand_auto_discover` so consumers can\nsee the user-authored parent name and grouping intent after expansion\nwould otherwise flatten it out of [`BoundariesListing::zones`]."
+      "description": "Wire-shape envelope for an [`UnusedDependency`] finding consumed under\nthe `unused_dependencies` key (production deps). Flattens the bare\nfinding; the typed `actions` array carries either a `remove-dependency`\nor `move-dependency` primary depending on\n`inner.used_in_workspaces`."
     },
-    "BoundariesListRule": {
+    "UnusedDevDependencyFinding": {
       "type": "object",
       "properties": {
-        "from": {
+        "package_name": {
           "type": "string",
-          "description": "Source zone the rule applies to."
+          "description": "Package name, including internal workspace package names."
         },
-        "allow": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Target zones [`Self::from`] is allowed to import from. Self-imports\nare always allowed implicitly."
-        }
-      },
-      "required": [
-        "from",
-        "allow"
-      ],
-      "description": "A boundary import rule, expanded to operate on concrete child zone\nnames after `autoDiscover` flattening. The user's pre-expansion rule\n(keyed on the logical parent name, if any) is preserved on the\ncorresponding [`BoundariesListLogicalGroup::authored_rule`]."
-    },
-    "BoundariesListZone": {
-      "type": "object",
-      "properties": {
-        "name": {
+        "location": {
+          "description": "Whether this is in `dependencies`, `devDependencies`, or `optionalDependencies`.",
+          "$ref": "#/definitions/DependencyLocation"
+        },
+        "path": {
           "type": "string",
-          "description": "Zone identifier as referenced in rules (e.g. `app`, `features/auth`)."
+          "description": "Path to the package.json where this dependency is listed.\nFor root deps this is `<root>/package.json`, for workspace deps it is `<ws>/package.json`."
         },
-        "patterns": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Compiled glob patterns. Children of an `autoDiscover` parent each\ncarry a single pattern like `src/features/auth/**`."
-        },
-        "file_count": {
+        "line": {
           "type": "integer",
-          "description": "Number of discovered files classified into this zone."
-        }
-      },
-      "required": [
-        "name",
-        "patterns",
-        "file_count"
-      ],
-      "description": "A boundary zone after preset and `autoDiscover` expansion. Each entry\nclassifies files into a single zone via glob patterns."
-    },
-    "BoundariesListing": {
-      "type": "object",
-      "properties": {
-        "configured": {
-          "type": "boolean",
-          "description": "`false` when the project has no `boundaries` configured; `true`\notherwise. When `false` every array below is empty and every count\nis `0` (parity is enforced so consumers can read the counts without\nfirst branching on this flag)."
+          "description": "1-based line number of the dependency entry in package.json."
         },
-        "zone_count": {
-          "type": "integer",
-          "description": "Length of [`Self::zones`]; emitted alongside the array for parity\nwith `rule_count` / `logical_group_count`."
-        },
-        "zones": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/BoundariesListZone"
-          },
-          "description": "Boundary zones after preset and `autoDiscover` expansion."
-        },
-        "rule_count": {
-          "type": "integer",
-          "description": "Length of [`Self::rules`]."
-        },
-        "rules": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/BoundariesListRule"
-          },
-          "description": "Boundary import rules, each `from -> allow[]`."
-        },
-        "logical_group_count": {
-          "type": "integer",
-          "description": "Length of [`Self::logical_groups`]. Always present (issue #373)."
-        },
-        "logical_groups": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/BoundariesListLogicalGroup"
-          },
-          "description": "Pre-expansion `autoDiscover` groups carrying the user-authored parent\nname and grouping intent (issue #373)."
-        }
-      },
-      "required": [
-        "configured",
-        "zone_count",
-        "zones",
-        "rule_count",
-        "rules",
-        "logical_group_count",
-        "logical_groups"
-      ],
-      "description": "`boundaries` block carried by [`ListBoundariesOutput`]."
-    },
-    "ListBoundariesOutput": {
-      "type": "object",
-      "properties": {
-        "boundaries": {
-          "description": "The boundaries section. The list command can also emit `files`,\n`plugins`, `entry_points` siblings under additional flags; those\nshapes are not part of this envelope today.",
-          "$ref": "#/definitions/BoundariesListing"
-        }
-      },
-      "required": [
-        "boundaries"
-      ],
-      "title": "fallow list --boundaries --format json",
-      "description": "Envelope emitted by `fallow list --boundaries --format json`. Surfaces\nthe architecture boundary zones, rules, and (issue #373) the user's\npre-expansion `autoDiscover` logical groups so consumers can render\ngrouping intent that `expand_auto_discover` would otherwise flatten out\nof `zones[]`."
-    },
-    "AuthoredRule": {
-      "type": "object",
-      "properties": {
-        "allow": {
+        "used_in_workspaces": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Pre-expansion `allow` list as the user wrote it."
+          "description": "Workspace roots that import this package even though the declaring workspace does not."
         },
-        "allow_type_only": {
+        "actions": {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/definitions/IssueAction"
           },
-          "description": "Pre-expansion `allowTypeOnly` list as the user wrote it. Omitted\nfrom JSON output when empty; `serde(default)` keeps the derived\nschema in lock-step (schemars 1 marks any field with a\n`serde(default)` attribute as non-required)."
-        }
-      },
-      "required": [
-        "allow"
-      ],
-      "description": "Pre-expansion `from`-rule preserved on a [`LogicalGroup`]. Surfaces the\nuser's original intent (`{ from: \"features\", allow: [\"shared\"] }`) even\nafter `expand_auto_discover` rewrote it into per-child rules\n(`features/auth -> shared`, `features/billing -> shared`)."
-    },
-    "LogicalGroup": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string",
-          "description": "Logical parent zone name as authored by the user (e.g. `\"features\"`)."
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
         },
-        "children": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Discovered child zone names in stable directory-sorted order\n(e.g. `[\"features/auth\", \"features/billing\"]`). Empty when the parent\ndirectory was empty or unreadable; `status` discriminates the two."
-        },
-        "auto_discover": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "The exact `autoDiscover` strings the user wrote, preserved verbatim\n(no normalization). Round-trip tooling depends on byte-exact match\nagainst the user's config source."
-        },
-        "authored_rule": {
+        "introduced": {
           "anyOf": [
             {
-              "$ref": "#/definitions/AuthoredRule"
+              "$ref": "#/definitions/AuditIntroduced"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Pre-expansion rule keyed on this parent zone name, captured before\n`expand_auto_discover` rewrote it into per-child rules. `None` when\nthe user wrote no rule for the parent (the children are then\nunrestricted unless a per-child rule exists)."
-        },
-        "fallback_zone": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "When the parent zone also carried explicit `patterns`, it stayed in\n`zones[]` after expansion as a fallback classifier. This is its name\n(always equal to [`Self::name`]). `None` when the parent had no\npatterns and was dropped from `zones[]` entirely. Lets consumers wire\nthe logical-group entry to its zone twin without name-matching\nheuristics."
-        },
-        "source_zone_index": {
-          "type": "integer",
-          "description": "Position of the parent zone in the user's pre-expansion `zones[]`\narray. Enables byte-accurate config patches by agent tooling without\nre-parsing the user's config source."
-        },
-        "status": {
-          "description": "Why [`Self::children`] is what it is.",
-          "$ref": "#/definitions/LogicalGroupStatus"
-        },
-        "merged_from": {
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "type": "integer"
-          },
-          "description": "Parent zone indices whose declarations were merged into this group\nbecause they shared a name (`{ name: \"features\", autoDiscover: [...] }`\ndeclared twice). `None` on the common case (single declaration);\n`Some([i, j, ...])` when at least two declarations were merged. The\nFIRST entry equals [`Self::source_zone_index`]; subsequent entries are\nthe positions of the additional declarations in user-declaration order.\nSurfaced in JSON so consumers (config-edit agents, config-hygiene\ndashboards) can detect duplicates that `tracing::warn!` would otherwise\nhide from `--format json` consumption."
-        },
-        "original_zone_root": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "The parent zone's `root` (subtree scope) as the user authored it,\nechoed onto the logical group so monorepo-aware tooling can tell\nwhether `root` was set on the parent (and inherited by every\ndiscovered child) or set per-child. `None` when the parent had no\n`root` field. The string is verbatim from the user's config (not\nthe post-`normalize_zone_root` form) for byte-exact round-trip."
-        },
-        "child_source_indices": {
-          "type": "array",
-          "items": {
-            "type": "integer"
-          },
-          "description": "For each entry in [`Self::children`], the index into\n[`Self::auto_discover`] of the path that produced it (or the FIRST\npath that produced it when multiple `autoDiscover` entries each yield\nthe same child name). Empty when only one `autoDiscover` path was\nauthored (every child trivially maps to index 0); populated only when\nthe parent has two or more `autoDiscover` entries so consumers can\nattribute children to specific source directories. The length equals\n`children.len()` when populated.\n\n`#[serde(default)]` pairs with `skip_serializing_if` so the JSON\nruntime omits this field on the common single-path case AND the\nderived schema marks it optional (schemars 1 promotes any field with a\n`serde(default)` attribute out of `required`)."
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
         }
       },
       "required": [
-        "name",
-        "children",
-        "auto_discover",
-        "source_zone_index",
-        "status"
+        "package_name",
+        "location",
+        "path",
+        "line",
+        "actions"
       ],
-      "description": "A user-declared zone that fanned out into one or more child zones via\n`autoDiscover`. Surfaced verbatim through `fallow list --boundaries\n--format json` so consumers (config UIs, Sankey renderers, agent-driven\nconfig tooling, dashboards) can reconstruct the original grouping intent\nafter expansion has flattened the parent name out of `zones[]`."
+      "description": "Wire-shape envelope for an [`UnusedDependency`] finding consumed under\nthe `unused_dev_dependencies` key. Same bare struct as\n[`UnusedDependencyFinding`]; the fix description points at\n`devDependencies` and the suppress comment uses\n`unused-dev-dependency`."
     },
-    "LogicalGroupStatus": {
-      "oneOf": [
-        {
+    "UnusedOptionalDependencyFinding": {
+      "type": "object",
+      "properties": {
+        "package_name": {
           "type": "string",
-          "const": "ok",
-          "description": "At least one child zone was discovered."
+          "description": "Package name, including internal workspace package names."
         },
-        {
-          "type": "string",
-          "const": "empty",
-          "description": "Every `autoDiscover` path resolved to a readable directory, but\nnone contained child directories."
+        "location": {
+          "description": "Whether this is in `dependencies`, `devDependencies`, or `optionalDependencies`.",
+          "$ref": "#/definitions/DependencyLocation"
         },
-        {
+        "path": {
           "type": "string",
-          "const": "invalid_path",
-          "description": "At least one `autoDiscover` path was malformed (contained `..`,\nabsolute) or did not resolve to a readable directory, and zero\nchildren were discovered across all paths. When a mix of invalid and\nvalid paths produces children, status is [`Self::Ok`] instead."
+          "description": "Path to the package.json where this dependency is listed.\nFor root deps this is `<root>/package.json`, for workspace deps it is `<ws>/package.json`."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the dependency entry in package.json."
+        },
+        "used_in_workspaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Workspace roots that import this package even though the declaring workspace does not."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
         }
+      },
+      "required": [
+        "package_name",
+        "location",
+        "path",
+        "line",
+        "actions"
       ],
-      "description": "Discovery outcome for a [`LogicalGroup`]. Discriminates \"no children\" into\n\"the directory exists and is empty\" versus \"at least one `autoDiscover`\npath was invalid or unreadable\", so consumers can render an actionable\nhint instead of \"0 children, mystery\"."
+      "description": "Wire-shape envelope for an [`UnusedDependency`] finding consumed under\nthe `unused_optional_dependencies` key. Same bare struct as\n[`UnusedDependencyFinding`]; the fix description points at\n`optionalDependencies`. Reuses the `unused-dependency` suppress\n`IssueKind` because there is no dedicated variant for optional deps."
+    },
+    "UnlistedDependencyFinding": {
+      "type": "object",
+      "properties": {
+        "package_name": {
+          "type": "string",
+          "description": "Package name, including internal workspace package names, that is\nimported but not listed in package.json."
+        },
+        "imported_from": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ImportSite"
+          },
+          "description": "Import sites where this unlisted dependency is used (file path, line, column)."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "package_name",
+        "imported_from",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnlistedDependency`] finding. Carries an\n`install-dependency` primary (non-auto-fixable) plus the standard\n`ignoreDependencies` config suppress."
+    },
+    "TypeOnlyDependencyFinding": {
+      "type": "object",
+      "properties": {
+        "package_name": {
+          "type": "string",
+          "description": "Production dependency that is only used via type-only imports."
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to the package.json where the dependency is listed."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the dependency entry in package.json."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "package_name",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`TypeOnlyDependency`] finding. Carries a\n`move-to-dev` primary plus the standard `ignoreDependencies` config\nsuppress."
+    },
+    "TestOnlyDependencyFinding": {
+      "type": "object",
+      "properties": {
+        "package_name": {
+          "type": "string",
+          "description": "Production dependency that is only imported by test files — consider\nmoving to devDependencies."
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to the package.json where the dependency is listed."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the dependency entry in package.json."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "package_name",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`TestOnlyDependency`] finding. Carries a\n`move-to-dev` primary (different prose than [`TypeOnlyDependencyFinding`])\nplus the standard `ignoreDependencies` config suppress."
     }
   }
 }

@@ -44,7 +44,7 @@ fn type_only_import_detected_in_production_mode() {
     let type_only_names: Vec<&str> = results
         .type_only_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
 
     // zod is only imported via `import type`, so it should be type-only
@@ -73,7 +73,7 @@ fn type_only_deps_not_reported_outside_production_mode() {
         results
             .type_only_dependencies
             .iter()
-            .map(|d| d.package_name.as_str())
+            .map(|d| d.dep.package_name.as_str())
             .collect::<Vec<_>>()
     );
 }

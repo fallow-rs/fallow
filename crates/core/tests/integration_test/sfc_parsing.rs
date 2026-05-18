@@ -412,7 +412,7 @@ fn sveltekit_virtual_modules_not_unlisted() {
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
 
     // $app and $env are SvelteKit virtual modules — must not be flagged as unlisted

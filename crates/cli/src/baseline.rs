@@ -156,12 +156,12 @@ impl BaselineData {
             unused_dependencies: results
                 .unused_dependencies
                 .iter()
-                .map(|d| package_json_dependency_key(&d.package_name, &d.path, root))
+                .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
                 .collect(),
             unused_dev_dependencies: results
                 .unused_dev_dependencies
                 .iter()
-                .map(|d| package_json_dependency_key(&d.package_name, &d.path, root))
+                .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
                 .collect(),
             circular_dependencies: results
                 .circular_dependencies
@@ -171,7 +171,7 @@ impl BaselineData {
             unused_optional_dependencies: results
                 .unused_optional_dependencies
                 .iter()
-                .map(|d| package_json_dependency_key(&d.package_name, &d.path, root))
+                .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
                 .collect(),
             unused_enum_members: results
                 .unused_enum_members
@@ -211,7 +211,7 @@ impl BaselineData {
             unlisted_dependencies: results
                 .unlisted_dependencies
                 .iter()
-                .map(|d| d.package_name.clone())
+                .map(|d| d.dep.package_name.clone())
                 .collect(),
             duplicate_exports: results
                 .duplicate_exports
@@ -221,12 +221,12 @@ impl BaselineData {
             type_only_dependencies: results
                 .type_only_dependencies
                 .iter()
-                .map(|d| package_json_dependency_key(&d.package_name, &d.path, root))
+                .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
                 .collect(),
             test_only_dependencies: results
                 .test_only_dependencies
                 .iter()
-                .map(|d| package_json_dependency_key(&d.package_name, &d.path, root))
+                .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
                 .collect(),
             boundary_violations: results
                 .boundary_violations
@@ -402,12 +402,12 @@ pub fn filter_new_issues(
         root,
     );
     results.unused_dependencies.retain(|d| {
-        let key = package_json_dependency_key(&d.package_name, &d.path, root);
-        !baseline_contains_dependency(&baseline_deps, &d.package_name, key.as_str())
+        let key = package_json_dependency_key(&d.dep.package_name, &d.dep.path, root);
+        !baseline_contains_dependency(&baseline_deps, &d.dep.package_name, key.as_str())
     });
     results.unused_dev_dependencies.retain(|d| {
-        let key = package_json_dependency_key(&d.package_name, &d.path, root);
-        !baseline_contains_dependency(&baseline_dev_deps, &d.package_name, key.as_str())
+        let key = package_json_dependency_key(&d.dep.package_name, &d.dep.path, root);
+        !baseline_contains_dependency(&baseline_dev_deps, &d.dep.package_name, key.as_str())
     });
 
     let baseline_circular: FxHashSet<&str> = baseline
@@ -426,8 +426,8 @@ pub fn filter_new_issues(
         .map(String::as_str)
         .collect();
     results.unused_optional_dependencies.retain(|d| {
-        let key = package_json_dependency_key(&d.package_name, &d.path, root);
-        !baseline_contains_dependency(&baseline_optional_deps, &d.package_name, key.as_str())
+        let key = package_json_dependency_key(&d.dep.package_name, &d.dep.path, root);
+        !baseline_contains_dependency(&baseline_optional_deps, &d.dep.package_name, key.as_str())
     });
 
     let baseline_enum_members: FxHashSet<&str> = baseline
@@ -481,7 +481,7 @@ pub fn filter_new_issues(
         .collect();
     results
         .unlisted_dependencies
-        .retain(|d| !baseline_unlisted.contains(d.package_name.as_str()));
+        .retain(|d| !baseline_unlisted.contains(d.dep.package_name.as_str()));
 
     let baseline_dup_exports: FxHashSet<&str> = baseline
         .duplicate_exports
@@ -499,8 +499,8 @@ pub fn filter_new_issues(
         .map(String::as_str)
         .collect();
     results.type_only_dependencies.retain(|d| {
-        let key = package_json_dependency_key(&d.package_name, &d.path, root);
-        !baseline_contains_dependency(&baseline_type_only, &d.package_name, key.as_str())
+        let key = package_json_dependency_key(&d.dep.package_name, &d.dep.path, root);
+        !baseline_contains_dependency(&baseline_type_only, &d.dep.package_name, key.as_str())
     });
 
     let baseline_test_only: FxHashSet<&str> = baseline
@@ -509,8 +509,8 @@ pub fn filter_new_issues(
         .map(String::as_str)
         .collect();
     results.test_only_dependencies.retain(|d| {
-        let key = package_json_dependency_key(&d.package_name, &d.path, root);
-        !baseline_contains_dependency(&baseline_test_only, &d.package_name, key.as_str())
+        let key = package_json_dependency_key(&d.dep.package_name, &d.dep.path, root);
+        !baseline_contains_dependency(&baseline_test_only, &d.dep.package_name, key.as_str())
     });
 
     let baseline_boundary: FxHashSet<&str> = baseline
@@ -1104,7 +1104,8 @@ mod tests {
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
     use fallow_core::results::{
         AnalysisResults, BoundaryViolationFinding, CircularDependencyFinding, DependencyLocation,
-        UnusedDependency, UnusedExport, UnusedFile,
+        UnusedDependency, UnusedDependencyFinding, UnusedDevDependencyFinding, UnusedExport,
+        UnusedFile,
     };
     use fallow_types::output_dead_code::{
         UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
@@ -1139,20 +1140,22 @@ mod tests {
                 span_start: 100,
                 is_re_export: false,
             })],
-            unused_dependencies: vec![UnusedDependency {
+            unused_dependencies: vec![UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".to_string(),
                 location: DependencyLocation::Dependencies,
                 path: PathBuf::from("package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
-            }],
-            unused_dev_dependencies: vec![UnusedDependency {
-                package_name: "jest".to_string(),
-                location: DependencyLocation::DevDependencies,
-                path: PathBuf::from("package.json"),
-                line: 5,
-                used_in_workspaces: Vec::new(),
-            }],
+            })],
+            unused_dev_dependencies: vec![UnusedDevDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "jest".to_string(),
+                    location: DependencyLocation::DevDependencies,
+                    path: PathBuf::from("package.json"),
+                    line: 5,
+                    used_in_workspaces: Vec::new(),
+                },
+            )],
             ..Default::default()
         }
     }
@@ -1177,20 +1180,20 @@ mod tests {
         let root = Path::new("/repo");
         let results = AnalysisResults {
             unused_dependencies: vec![
-                UnusedDependency {
+                UnusedDependencyFinding::with_actions(UnusedDependency {
                     package_name: "lodash-es".to_string(),
                     location: DependencyLocation::Dependencies,
                     path: PathBuf::from("/repo/packages/app-a/package.json"),
                     line: 5,
                     used_in_workspaces: Vec::new(),
-                },
-                UnusedDependency {
+                }),
+                UnusedDependencyFinding::with_actions(UnusedDependency {
                     package_name: "lodash-es".to_string(),
                     location: DependencyLocation::Dependencies,
                     path: PathBuf::from("/repo/packages/app-b/package.json"),
                     line: 5,
                     used_in_workspaces: Vec::new(),
-                },
+                }),
             ],
             ..Default::default()
         };
@@ -1211,20 +1214,20 @@ mod tests {
         let root = Path::new("/repo");
         let results = AnalysisResults {
             unused_dependencies: vec![
-                UnusedDependency {
+                UnusedDependencyFinding::with_actions(UnusedDependency {
                     package_name: "lodash-es".to_string(),
                     location: DependencyLocation::Dependencies,
                     path: PathBuf::from("/repo/packages/app-a/package.json"),
                     line: 5,
                     used_in_workspaces: Vec::new(),
-                },
-                UnusedDependency {
+                }),
+                UnusedDependencyFinding::with_actions(UnusedDependency {
                     package_name: "lodash-es".to_string(),
                     location: DependencyLocation::Dependencies,
                     path: PathBuf::from("/repo/packages/app-b/package.json"),
                     line: 5,
                     used_in_workspaces: Vec::new(),
-                },
+                }),
             ],
             ..Default::default()
         };
@@ -1237,7 +1240,7 @@ mod tests {
 
         assert_eq!(filtered.unused_dependencies.len(), 1);
         assert_eq!(
-            filtered.unused_dependencies[0].path,
+            filtered.unused_dependencies[0].dep.path,
             PathBuf::from("/repo/packages/app-b/package.json")
         );
     }
@@ -1246,13 +1249,13 @@ mod tests {
     fn dependency_baseline_filter_supports_legacy_package_only_keys() {
         let root = Path::new("/repo");
         let results = AnalysisResults {
-            unused_dependencies: vec![UnusedDependency {
+            unused_dependencies: vec![UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash-es".to_string(),
                 location: DependencyLocation::Dependencies,
                 path: PathBuf::from("/repo/packages/app/package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
-            }],
+            })],
             ..Default::default()
         };
         let baseline = BaselineData {
@@ -1965,13 +1968,13 @@ mod tests {
                     is_cross_package: false,
                 },
             ));
-        r.unused_optional_dependencies.push(UnusedDependency {
+        r.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
             package_name: "fsevents".to_string(),
             location: DependencyLocation::OptionalDependencies,
             path: PathBuf::from("package.json"),
             line: 15,
             used_in_workspaces: Vec::new(),
-        });
+        }));
         r.unused_enum_members
             .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: PathBuf::from("src/enums.ts"),
@@ -2002,10 +2005,10 @@ mod tests {
             ),
         );
         r.unlisted_dependencies
-            .push(fallow_core::results::UnlistedDependency {
+            .push(fallow_core::results::UnlistedDependencyFinding::with_actions(UnlistedDependency {
                 package_name: "chalk".to_string(),
                 imported_from: vec![],
-            });
+            }));
         r.duplicate_exports
             .push(fallow_core::results::DuplicateExport {
                 export_name: "Config".to_string(),
@@ -2023,17 +2026,17 @@ mod tests {
                 ],
             });
         r.type_only_dependencies
-            .push(fallow_core::results::TypeOnlyDependency {
+            .push(fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
                 package_name: "zod".to_string(),
                 path: PathBuf::from("package.json"),
                 line: 8,
-            });
+            }));
         r.test_only_dependencies
-            .push(fallow_core::results::TestOnlyDependency {
+            .push(fallow_core::results::TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
                 package_name: "vitest".to_string(),
                 path: PathBuf::from("package.json"),
                 line: 10,
-            });
+            }));
         r.boundary_violations.push(
             fallow_types::output_dead_code::BoundaryViolationFinding::with_actions(
                 fallow_core::results::BoundaryViolation {
@@ -2276,13 +2279,13 @@ mod tests {
                 span_start: 40,
                 is_re_export: false,
             })],
-            unused_dependencies: vec![UnusedDependency {
+            unused_dependencies: vec![UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash-es".to_string(),
                 location: DependencyLocation::Dependencies,
                 path: p("packages/app/package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
-            }],
+            })],
             circular_dependencies: vec![CircularDependencyFinding::with_actions(
                 CircularDependency {
                     files: vec![p("src/a.ts"), p("src/b.ts")],

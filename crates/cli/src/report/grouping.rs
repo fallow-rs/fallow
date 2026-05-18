@@ -234,35 +234,35 @@ pub fn group_analysis_results(
     // ── Dependency-scoped (use package.json path) ───────────────
     for item in &results.unused_dependencies {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.dep.path))
             .or_default()
             .unused_dependencies
             .push(item.clone());
     }
     for item in &results.unused_dev_dependencies {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.dep.path))
             .or_default()
             .unused_dev_dependencies
             .push(item.clone());
     }
     for item in &results.unused_optional_dependencies {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.dep.path))
             .or_default()
             .unused_optional_dependencies
             .push(item.clone());
     }
     for item in &results.type_only_dependencies {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.dep.path))
             .or_default()
             .type_only_dependencies
             .push(item.clone());
     }
     for item in &results.test_only_dependencies {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.dep.path))
             .or_default()
             .test_only_dependencies
             .push(item.clone());
@@ -271,7 +271,7 @@ pub fn group_analysis_results(
     // ── Multi-location types (use first location) ───────────────
     for item in &results.unlisted_dependencies {
         let key = item
-            .imported_from
+            .dep.imported_from
             .first()
             .map_or_else(|| UNOWNED_LABEL.to_string(), |site| key_for(&site.path));
         groups
@@ -442,11 +442,11 @@ mod tests {
         })
     }
 
-    fn unlisted_dep(name: &str, sites: Vec<ImportSite>) -> UnlistedDependency {
-        UnlistedDependency {
+    fn unlisted_dep(name: &str, sites: Vec<ImportSite>) -> UnlistedDependencyFinding {
+        UnlistedDependencyFinding::with_actions(UnlistedDependency {
             package_name: name.to_string(),
             imported_from: sites,
-        }
+        })
     }
 
     fn import_site(path: &str) -> ImportSite {
@@ -1028,13 +1028,13 @@ mod tests {
     #[test]
     fn group_unused_optional_deps() {
         let mut results = AnalysisResults::default();
-        results.unused_optional_dependencies.push(UnusedDependency {
+        results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
             package_name: "fsevents".to_string(),
             location: fallow_core::results::DependencyLocation::OptionalDependencies,
             path: PathBuf::from("/root/package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
-        });
+        }));
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
         assert_eq!(groups.len(), 1);
@@ -1046,11 +1046,11 @@ mod tests {
         let mut results = AnalysisResults::default();
         results
             .type_only_dependencies
-            .push(fallow_core::results::TypeOnlyDependency {
+            .push(fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
                 package_name: "zod".to_string(),
                 path: PathBuf::from("/root/package.json"),
                 line: 8,
-            });
+            }));
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
         assert_eq!(groups.len(), 1);
@@ -1062,11 +1062,11 @@ mod tests {
         let mut results = AnalysisResults::default();
         results
             .test_only_dependencies
-            .push(fallow_core::results::TestOnlyDependency {
+            .push(fallow_core::results::TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
                 package_name: "vitest".to_string(),
                 path: PathBuf::from("/root/package.json"),
                 line: 10,
-            });
+            }));
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
         assert_eq!(groups.len(), 1);

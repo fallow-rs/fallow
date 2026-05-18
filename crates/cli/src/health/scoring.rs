@@ -1261,18 +1261,18 @@ pub(super) fn compute_file_scores(
     unused_export_paths.extend(results.unused_exports.iter().map(|e| e.export.path.clone()));
     unused_export_paths.extend(results.unused_types.iter().map(|e| e.export.path.clone()));
     let mut unused_dep_package_paths: Vec<std::path::PathBuf> = Vec::with_capacity(unused_deps);
-    unused_dep_package_paths.extend(results.unused_dependencies.iter().map(|d| d.path.clone()));
+    unused_dep_package_paths.extend(results.unused_dependencies.iter().map(|d| d.dep.path.clone()));
     unused_dep_package_paths.extend(
         results
             .unused_dev_dependencies
             .iter()
-            .map(|d| d.path.clone()),
+            .map(|d| d.dep.path.clone()),
     );
     unused_dep_package_paths.extend(
         results
             .unused_optional_dependencies
             .iter()
-            .map(|d| d.path.clone()),
+            .map(|d| d.dep.path.clone()),
     );
     let analysis_snapshot = AnalysisCountsSnapshot {
         unused_file_paths: results
@@ -2718,15 +2718,17 @@ mod tests {
                 },
             ),
         );
-        results
-            .unused_dependencies
-            .push(fallow_types::results::UnusedDependency {
-                package_name: "lodash".into(),
-                location: fallow_types::results::DependencyLocation::Dependencies,
-                path: std::path::PathBuf::from("/package.json"),
-                line: 1,
-                used_in_workspaces: Vec::new(),
-            });
+        results.unused_dependencies.push(
+            fallow_types::output_dead_code::UnusedDependencyFinding::with_actions(
+                fallow_types::results::UnusedDependency {
+                    package_name: "lodash".into(),
+                    location: fallow_types::results::DependencyLocation::Dependencies,
+                    path: std::path::PathBuf::from("/package.json"),
+                    line: 1,
+                    used_in_workspaces: Vec::new(),
+                },
+            ),
+        );
 
         let output = fallow_core::AnalysisOutput {
             results,

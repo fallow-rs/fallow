@@ -159,7 +159,7 @@ fn nextjs_config_referenced_dependencies_are_not_flagged_unused() {
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
 
     assert!(
@@ -314,7 +314,7 @@ fn path_alias_not_flagged_as_unlisted() {
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
 
     // @/utils is a path alias, not an npm package, so it should NOT be flagged
@@ -396,7 +396,7 @@ fn css_apply_marks_tailwind_as_used() {
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
     assert!(
         !unused_dep_names.contains(&"tailwindcss"),
@@ -457,7 +457,7 @@ fn css_package_subpath_imports_resolve_from_node_modules() {
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
     assert!(
         !unused_dep_names.contains(&"tailwindcss"),
@@ -491,7 +491,7 @@ fn tailwind_plugin_directive_marks_plugin_targets_used() {
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
     assert!(
         !unused_dep_names.contains(&"@tailwindcss/typography"),
@@ -563,7 +563,7 @@ fn pandacss_config_is_not_flagged_unused() {
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
     assert!(
         !unused_dep_names.contains(&"@pandacss/dev"),
@@ -628,7 +628,7 @@ fn webpack_aliases_from_config_resolve_internal_modules() {
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
         .iter()
-        .map(|u| u.package_name.as_str())
+        .map(|u| u.dep.package_name.as_str())
         .collect();
     assert!(
         !unlisted_names.contains(&"@components/Button"),

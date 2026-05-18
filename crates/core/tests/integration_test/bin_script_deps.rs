@@ -9,7 +9,7 @@ fn divergent_binary_name_not_flagged_as_unused() {
     let unused_dev_dep_names: Vec<&str> = results
         .unused_dev_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
 
     // @arethetypeswrong/cli provides binary "attw" used in the "lint" script.

@@ -31,12 +31,12 @@ use serde::Serialize;
 
 use crate::envelope::AuditIntroduced;
 use crate::output::{
-    FixAction, FixActionType, IssueAction, SuppressFileAction, SuppressFileKind,
-    SuppressLineAction, SuppressLineKind,
+    AddToConfigAction, AddToConfigKind, AddToConfigValue, FixAction, FixActionType, IssueAction,
+    SuppressFileAction, SuppressFileKind, SuppressLineAction, SuppressLineKind,
 };
 use crate::results::{
-    BoundaryViolation, CircularDependency, PrivateTypeLeak, UnresolvedImport, UnusedExport,
-    UnusedFile, UnusedMember,
+    BoundaryViolation, CircularDependency, PrivateTypeLeak, TestOnlyDependency, TypeOnlyDependency,
+    UnlistedDependency, UnresolvedImport, UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
 };
 
 /// Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
@@ -496,6 +496,308 @@ impl UnusedClassMemberFinding {
         ];
         Self {
             member,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Build the `IssueAction` vec for the three `unused_dependencies`,
+/// `unused_dev_dependencies`, `unused_optional_dependencies` views over the
+/// same bare [`UnusedDependency`] struct. Each wrapper differs only in the
+/// `package_json_location` string (`"dependencies"` / `"devDependencies"` /
+/// `"optionalDependencies"`) baked into the fix-action description and in
+/// the `suppress_issue_kind` used by the inline-suppress comment. All three
+/// share the cross-workspace swap (when `dep.used_in_workspaces` is
+/// non-empty the primary fix flips from `remove-dependency` to
+/// `move-dependency` because the dep is imported by ANOTHER workspace and
+/// `fallow fix` cannot safely remove it).
+fn build_unused_dependency_actions(
+    dep: &UnusedDependency,
+    package_json_location: &str,
+    suppress_issue_kind: &str,
+) -> Vec<IssueAction> {
+    let mut actions = Vec::with_capacity(2);
+    let cross_workspace = !dep.used_in_workspaces.is_empty();
+    actions.push(if cross_workspace {
+        IssueAction::Fix(FixAction {
+            kind: FixActionType::MoveDependency,
+            auto_fixable: false,
+            description: "Move this dependency to the workspace package.json that imports it"
+                .to_string(),
+            note: Some(
+                "fallow fix will not remove dependencies that are imported by another workspace"
+                    .to_string(),
+            ),
+            available_in_catalogs: None,
+        })
+    } else {
+        IssueAction::Fix(FixAction {
+            kind: FixActionType::RemoveDependency,
+            auto_fixable: true,
+            description: format!("Remove from {package_json_location} in package.json"),
+            note: None,
+            available_in_catalogs: None,
+        })
+    });
+    actions.push(build_ignore_dependencies_suppress_action(
+        &dep.package_name,
+        suppress_issue_kind,
+    ));
+    actions
+}
+
+/// Build the standard `add-to-config` `ignoreDependencies` suppress action
+/// for any finding whose primary key is a package name. Used by the four
+/// dependency-family wrappers (unused / unlisted / type-only / test-only).
+/// The `_suppress_issue_kind` argument is currently unused; the pre-2.76
+/// `inject_actions` post-pass also did not embed the issue kind in this
+/// shape (no inline `// fallow-ignore-next-line ...` comment because the
+/// finding is anchored at a package.json line, not at a source-file line).
+fn build_ignore_dependencies_suppress_action(
+    package_name: &str,
+    _suppress_issue_kind: &str,
+) -> IssueAction {
+    IssueAction::AddToConfig(AddToConfigAction {
+        kind: AddToConfigKind::AddToConfig,
+        auto_fixable: false,
+        description: format!("Add \"{package_name}\" to ignoreDependencies in fallow config"),
+        config_key: "ignoreDependencies".to_string(),
+        value: AddToConfigValue::Scalar(package_name.to_string()),
+        value_schema: Some(
+            "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+                .to_string(),
+        ),
+    })
+}
+
+/// Wire-shape envelope for an [`UnusedDependency`] finding consumed under
+/// the `unused_dependencies` key (production deps). Flattens the bare
+/// finding; the typed `actions` array carries either a `remove-dependency`
+/// or `move-dependency` primary depending on
+/// `inner.used_in_workspaces`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedDependencyFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub dep: UnusedDependency,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedDependencyFinding {
+    /// Build the wrapper. Switches the primary fix from `remove-dependency`
+    /// to `move-dependency` when the dep is imported by another workspace.
+    #[must_use]
+    pub fn with_actions(dep: UnusedDependency) -> Self {
+        let actions = build_unused_dependency_actions(&dep, "dependencies", "unused-dependency");
+        Self {
+            dep,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedDependency`] finding consumed under
+/// the `unused_dev_dependencies` key. Same bare struct as
+/// [`UnusedDependencyFinding`]; the fix description points at
+/// `devDependencies` and the suppress comment uses
+/// `unused-dev-dependency`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedDevDependencyFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub dep: UnusedDependency,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedDevDependencyFinding {
+    /// Build the wrapper.
+    #[must_use]
+    pub fn with_actions(dep: UnusedDependency) -> Self {
+        let actions =
+            build_unused_dependency_actions(&dep, "devDependencies", "unused-dev-dependency");
+        Self {
+            dep,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedDependency`] finding consumed under
+/// the `unused_optional_dependencies` key. Same bare struct as
+/// [`UnusedDependencyFinding`]; the fix description points at
+/// `optionalDependencies`. Reuses the `unused-dependency` suppress
+/// `IssueKind` because there is no dedicated variant for optional deps.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedOptionalDependencyFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub dep: UnusedDependency,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedOptionalDependencyFinding {
+    /// Build the wrapper.
+    #[must_use]
+    pub fn with_actions(dep: UnusedDependency) -> Self {
+        let actions = build_unused_dependency_actions(
+            &dep,
+            "optionalDependencies",
+            "unused-dependency",
+        );
+        Self {
+            dep,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnlistedDependency`] finding. Carries an
+/// `install-dependency` primary (non-auto-fixable) plus the standard
+/// `ignoreDependencies` config suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnlistedDependencyFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub dep: UnlistedDependency,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnlistedDependencyFinding {
+    /// Build the wrapper.
+    #[must_use]
+    pub fn with_actions(dep: UnlistedDependency) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::InstallDependency,
+                auto_fixable: false,
+                description: "Add this package to dependencies in package.json".to_string(),
+                note: Some(
+                    "Verify this package should be a direct dependency before adding".to_string(),
+                ),
+                available_in_catalogs: None,
+            }),
+            build_ignore_dependencies_suppress_action(&dep.package_name, "unlisted-dependency"),
+        ];
+        Self {
+            dep,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`TypeOnlyDependency`] finding. Carries a
+/// `move-to-dev` primary plus the standard `ignoreDependencies` config
+/// suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TypeOnlyDependencyFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub dep: TypeOnlyDependency,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl TypeOnlyDependencyFinding {
+    /// Build the wrapper.
+    #[must_use]
+    pub fn with_actions(dep: TypeOnlyDependency) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::MoveToDev,
+                auto_fixable: false,
+                description: "Move to devDependencies (only type imports are used)".to_string(),
+                note: Some(
+                    "Type imports are erased at runtime so this dependency is not needed in production"
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+            }),
+            build_ignore_dependencies_suppress_action(&dep.package_name, "type-only-dependency"),
+        ];
+        Self {
+            dep,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`TestOnlyDependency`] finding. Carries a
+/// `move-to-dev` primary (different prose than [`TypeOnlyDependencyFinding`])
+/// plus the standard `ignoreDependencies` config suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TestOnlyDependencyFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub dep: TestOnlyDependency,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl TestOnlyDependencyFinding {
+    /// Build the wrapper.
+    #[must_use]
+    pub fn with_actions(dep: TestOnlyDependency) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::MoveToDev,
+                auto_fixable: false,
+                description: "Move to devDependencies (only test files import this)".to_string(),
+                note: Some(
+                    "Only test files import this package so it does not need to be a production dependency"
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+            }),
+            build_ignore_dependencies_suppress_action(&dep.package_name, "test-only-dependency"),
+        ];
+        Self {
+            dep,
             actions,
             introduced: None,
         }

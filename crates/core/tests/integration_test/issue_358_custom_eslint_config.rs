@@ -19,7 +19,7 @@ fn imports_in_custom_location_eslint_config_credit_their_packages() {
     let unused_deps: Vec<&str> = results
         .unused_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
     assert!(
         !unused_deps.contains(&"@eslint/js"),

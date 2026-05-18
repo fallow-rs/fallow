@@ -318,7 +318,8 @@ pub fn filter_results_by_changed_files(
 
     // Unlisted deps: keep only if any importing file is changed
     results.unlisted_dependencies.retain(|d| {
-        d.imported_from
+        d.dep
+            .imported_from
             .iter()
             .any(|s| changed_files.contains(&s.path))
     });
@@ -599,15 +600,17 @@ mod tests {
     #[test]
     fn filter_results_preserves_dependency_level_issues() {
         let mut results = AnalysisResults::default();
-        results
-            .unused_dependencies
-            .push(crate::results::UnusedDependency {
-                package_name: "lodash".into(),
-                location: crate::results::DependencyLocation::Dependencies,
-                path: "/pkg.json".into(),
-                line: 3,
-                used_in_workspaces: Vec::new(),
-            });
+        results.unused_dependencies.push(
+            fallow_types::output_dead_code::UnusedDependencyFinding::with_actions(
+                crate::results::UnusedDependency {
+                    package_name: "lodash".into(),
+                    location: crate::results::DependencyLocation::Dependencies,
+                    path: "/pkg.json".into(),
+                    line: 3,
+                    used_in_workspaces: Vec::new(),
+                },
+            ),
+        );
 
         let changed: FxHashSet<PathBuf> = FxHashSet::default();
         filter_results_by_changed_files(&mut results, &changed);

@@ -36,7 +36,7 @@ fn assert_bundle_boundary_modules_are_traversed(
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
-        .map(|dep| dep.package_name.as_str())
+        .map(|dep| dep.dep.package_name.as_str())
         .collect();
     for dep in ["@prisma/client", "browser-analytics"] {
         assert!(

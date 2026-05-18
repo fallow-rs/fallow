@@ -89,7 +89,7 @@ fn basic_project_detects_unused_dependencies() {
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
-        .map(|d| d.package_name.as_str())
+        .map(|d| d.dep.package_name.as_str())
         .collect();
 
     assert!(

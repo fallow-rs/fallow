@@ -75,7 +75,7 @@ fn dynamic_import_literal_edges_match_static_imports() {
     let unlisted_names: Vec<&str> = results
         .unlisted_dependencies
         .iter()
-        .map(|dep| dep.package_name.as_str())
+        .map(|dep| dep.dep.package_name.as_str())
         .collect();
     assert!(
         !unlisted_names.contains(&"@some/package"),
@@ -85,7 +85,7 @@ fn dynamic_import_literal_edges_match_static_imports() {
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
         .iter()
-        .map(|dep| dep.package_name.as_str())
+        .map(|dep| dep.dep.package_name.as_str())
         .collect();
     assert!(
         !unused_dep_names.contains(&"@some/package"),
