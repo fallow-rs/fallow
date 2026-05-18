@@ -190,6 +190,43 @@ function stripTrailingWhitespace(contents) {
   return contents.replace(/[ \t]+$/gm, "");
 }
 
+/**
+ * Append aliases for schema definitions that json-schema-to-typescript
+ * dedupes because their property set is fully subsumed by a parent type
+ * via `#[serde(flatten)]`. Even with `unreachableDefinitions: true`, jstt
+ * suppresses the interface when every property is already inlined on the
+ * flattening parent.
+ *
+ * Today this affects `ComplexityViolation`, which is flattened into
+ * `HealthFinding`. The schema still ships both definitions for JSON-schema
+ * consumers (OpenAPI validators, doc-driven tooling); this alias exposes
+ * the same shape to TypeScript consumers without forcing them to use the
+ * wrapper. Adding entries here is a strict superset of what jstt emits:
+ * if the consuming codebase already has the alias defined organically
+ * (because a future PR materialises the inner under a different name), the
+ * alias becomes a no-op duplicate that the compiler resolves transparently.
+ *
+ * Future serde(flatten) wrappers in the same migration ladder
+ * (`HotspotFinding`, `RefactoringTargetFinding` in PR B3) will need the
+ * matching aliases added here too.
+ */
+function appendDedupedFlattenAliases(contents) {
+  return (
+    contents +
+    "\n/**\n" +
+    " * Inner complexity-violation payload, flattened into `HealthFinding`\n" +
+    " * on the wire via `#[serde(flatten)]`. Exposed here because\n" +
+    " * json-schema-to-typescript dedupes definitions whose property set is\n" +
+    " * fully subsumed by a flattening parent; the schema definition exists\n" +
+    " * in `docs/output-schema.json` but the TS interface is suppressed.\n" +
+    " * Consumers that need to type just the inner payload should use this\n" +
+    " * alias; consumers that need the full envelope (with `actions` and\n" +
+    " * optional `introduced`) should use `HealthFinding` directly.\n" +
+    " */\n" +
+    'export type ComplexityViolation = Omit<HealthFinding, "actions" | "introduced">;\n'
+  );
+}
+
 async function generate() {
   const raw = await readFile(SCHEMA_PATH, "utf8");
   const parsed = JSON.parse(raw);
@@ -199,7 +236,9 @@ async function generate() {
   // top-level union type.
   const raw_ts = await compile(parsed, "FallowJsonOutput", OPTIONS);
   const version = await readRustSchemaVersion();
-  return stripTrailingWhitespace(pinSchemaVersion(raw_ts, version));
+  return appendDedupedFlattenAliases(
+    stripTrailingWhitespace(pinSchemaVersion(raw_ts, version)),
+  );
 }
 
 async function writeAll(contents) {

@@ -5196,3 +5196,15 @@ elapsed_ms: number
 runtime_coverage: RuntimeCoverageReport
 _meta?: Meta
 }
+
+/**
+ * Inner complexity-violation payload, flattened into `HealthFinding`
+ * on the wire via `#[serde(flatten)]`. Exposed here because
+ * json-schema-to-typescript dedupes definitions whose property set is
+ * fully subsumed by a flattening parent; the schema definition exists
+ * in `docs/output-schema.json` but the TS interface is suppressed.
+ * Consumers that need to type just the inner payload should use this
+ * alias; consumers that need the full envelope (with `actions` and
+ * optional `introduced`) should use `HealthFinding` directly.
+ */
+export type ComplexityViolation = Omit<HealthFinding, "actions" | "introduced">;
