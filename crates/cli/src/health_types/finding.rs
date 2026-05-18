@@ -303,7 +303,8 @@ pub fn build_health_finding_actions(
 
     if !ctx.opts.omit_suppress_line {
         if is_template
-            && Path::new(violation.path.as_path())
+            && violation
+                .path
                 .extension()
                 .is_some_and(|ext| ext.eq_ignore_ascii_case("html"))
         {
