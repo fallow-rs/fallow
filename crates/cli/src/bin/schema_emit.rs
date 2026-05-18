@@ -476,7 +476,7 @@ fn finding_augmentation(name: &str) -> FindingAugmentation {
 /// Registering each type as a subschema (rather than a root schema) collects
 /// every transitively-referenced definition into a single map keyed by the
 /// Rust type name, which we then merge into the schema's `definitions`.
-#[expect(
+#[allow(
     clippy::too_many_lines,
     reason = "this function is fundamentally a registration list: one `subschema_for::<T>()` call per type in the public output contract. Splitting by module obscures the registration set; the linear list is the cleanest representation."
 )]
@@ -833,18 +833,22 @@ fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
         Value::String(
             "Schemas for the JSON output of fallow commands. To identify which \
              envelope you have, check for the unique top-level field: \
-             `summary.total_issues` (check), `report` (health), `groups` \
-             (dupes), `boundaries` (list --boundaries), `command: \"audit\"` \
-             (audit), `body` plus `comments` (review-github / review-gitlab), \
+             `summary.total_issues` (check), `health_score` (health), \
+             `clone_groups` (dupes), `boundaries` (list --boundaries), \
+             `command: \"audit\"` (audit), `body` plus `comments` \
+             (review-github / review-gitlab), \
              `schema: \"fallow-review-reconcile/v1\"` (ci reconcile-review), \
              `framework_detected` plus `members` (coverage setup), `id` plus \
              `how_to_fix` (explain), `check`+`dupes`+`health` keys together \
-             (bare combined invocation). Every object-shaped envelope is a \
-             variant of `FallowOutput`; `CodeClimateOutput` is a bare JSON \
-             array (per the Code Climate / GitLab Code Quality spec) and \
-             stays a sibling root branch; `CoverageAnalyzeOutput` is still \
-             hand-maintained pending the typed migration in issue #384 \
-             item 3."
+             (bare combined invocation). `HealthOutput` and `DupesOutput` \
+             flatten their body (`HealthReport`/`DuplicationReport`) into \
+             top-level fields, so the discriminator field is from the body \
+             shape itself, not a wrapper key. Every object-shaped envelope \
+             is a variant of `FallowOutput`; `CodeClimateOutput` is a bare \
+             JSON array (per the Code Climate / GitLab Code Quality spec) \
+             and stays a sibling root branch; `CoverageAnalyzeOutput` is \
+             still hand-maintained pending the typed migration in issue \
+             #384 item 3."
                 .to_string(),
         ),
     );
@@ -1539,6 +1543,15 @@ mod drift_tests {
             (
                 "CoverageAnalyzeOutput",
                 "retired by #384 item 3 (typed envelope builders)",
+            ),
+            // Schemars-emitted singleton helper that `merge_with_committed`
+            // copies into the committed schema even though no in-scope type
+            // currently references it via `$ref`. Pending #384 item 1 follow-up
+            // (drop the helper from schemars output once the suppress-action
+            // `auto_fixable: bool` field stops emitting a separate named type).
+            (
+                "SuppressAutoFixable",
+                "retired by #384 item 1 follow-up (schemars singleton cleanup)",
             ),
         ];
         let allow_list: rustc_hash::FxHashSet<&'static str> = HAND_MAINTAINED_ALLOW_LIST

@@ -1049,10 +1049,14 @@ pub struct BoundariesListLogicalGroup {
 /// previously hand-maintained block.
 ///
 /// `#[serde(untagged)]` preserves wire compatibility: consumers see exactly
-/// the same top-level keys today (`schema_version`, `version`, `results`,
-/// `summary`, etc.). The schema's `oneOf` lets agents narrow by trying
+/// the same top-level keys today (`schema_version`, `version`, plus the
+/// per-envelope shape). The schema's `oneOf` lets agents narrow by trying
 /// variants in order; field sets differ enough that the first matching
-/// variant is the correct one in practice.
+/// variant is the correct one in practice. Note that [`HealthOutput`] and
+/// [`DupesOutput`] flatten their inner body (`HealthReport` /
+/// `DuplicationReport`) into top-level fields, so the actual
+/// discriminators are nested-body keys such as `health_score` (health) and
+/// `clone_groups` (dupes), NOT `report` or `groups`.
 ///
 /// Variant order is **most-specific first**. Schemars 1 preserves
 /// declaration order in the emitted `oneOf`, and validators that enforce
@@ -1087,6 +1091,10 @@ pub struct BoundariesListLogicalGroup {
     schemars(title = "fallow --format json (typed root)")
 )]
 #[serde(untagged)]
+#[allow(
+    dead_code,
+    reason = "consumed at schema-emit time only; runtime code uses the per-variant envelope structs directly"
+)]
 pub enum FallowOutput {
     /// `fallow audit --format json`. Required `command: "audit"` singleton
     /// plus `verdict` and `summary`.

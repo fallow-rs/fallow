@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Fallow JSON Output Schemas",
-  "description": "Schemas for the JSON output of fallow commands. To identify which envelope you have, check for the unique top-level field: `summary.total_issues` (check), `report` (health), `groups` (dupes), `boundaries` (list --boundaries), `command: \"audit\"` (audit), `body` plus `comments` (review-github / review-gitlab), `schema: \"fallow-review-reconcile/v1\"` (ci reconcile-review), `framework_detected` plus `members` (coverage setup), `id` plus `how_to_fix` (explain), `check`+`dupes`+`health` keys together (bare combined invocation). Every object-shaped envelope is a variant of `FallowOutput`; `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch; `CoverageAnalyzeOutput` is still hand-maintained pending the typed migration in issue #384 item 3.",
+  "description": "Schemas for the JSON output of fallow commands. To identify which envelope you have, check for the unique top-level field: `summary.total_issues` (check), `health_score` (health), `clone_groups` (dupes), `boundaries` (list --boundaries), `command: \"audit\"` (audit), `body` plus `comments` (review-github / review-gitlab), `schema: \"fallow-review-reconcile/v1\"` (ci reconcile-review), `framework_detected` plus `members` (coverage setup), `id` plus `how_to_fix` (explain), `check`+`dupes`+`health` keys together (bare combined invocation). `HealthOutput` and `DupesOutput` flatten their body (`HealthReport`/`DuplicationReport`) into top-level fields, so the discriminator field is from the body shape itself, not a wrapper key. Every object-shaped envelope is a variant of `FallowOutput`; `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch; `CoverageAnalyzeOutput` is still hand-maintained pending the typed migration in issue #384 item 3.",
   "oneOf": [
     {
       "$ref": "#/definitions/FallowOutput"
@@ -318,7 +318,7 @@
         "warnings"
       ],
       "title": "fallow coverage setup --json",
-      "description": "Envelope emitted by `fallow coverage setup --json`. Deterministic\nagent-readable runtime coverage setup instructions. In workspaces,\n`members` carries one entry per detected runtime package; `runtime_targets`\nis the union of all member targets.\n\nThe runtime path in `crates/cli/src/coverage/mod.rs::build_setup_json`\nstill constructs the wire shape via `serde_json::json!` macros (one per\nmember, snippet, and file-to-edit). The typed struct here serves as the\nschema source of truth via the drift gate; a follow-up can swap the\nruntime over without changing the wire."
+      "description": "Envelope emitted by `fallow coverage setup --json`. Deterministic\nagent-readable runtime coverage setup instructions. In workspaces,\n`members` carries one entry per detected runtime package; `runtime_targets`\nis the union of all member targets.\n\nConstructed at runtime by\n`crates/cli/src/coverage/mod.rs::build_setup_envelope`; the wire is\n`serde_json::to_value(&envelope)`. The drift gate keeps this struct\naligned with `docs/output-schema.json`."
     },
     "CoverageSetupMember": {
       "type": "object",
@@ -471,79 +471,79 @@
         "unused_files": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedFile"
+            "$ref": "#/definitions/UnusedFileFinding"
           },
-          "description": "Files not reachable from any entry point."
+          "description": "Files not reachable from any entry point. Wrapped in\n[`UnusedFileFinding`] so each entry carries a typed `actions` array\nnatively, replacing the pre-2.76 post-pass injection."
         },
         "unused_exports": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedExport"
+            "$ref": "#/definitions/UnusedExportFinding"
           },
-          "description": "Exports never imported by other modules."
+          "description": "Exports never imported by other modules. Wrapped in\n[`UnusedExportFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "unused_types": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedExport"
+            "$ref": "#/definitions/UnusedTypeFinding"
           },
-          "description": "Type exports never imported by other modules."
+          "description": "Type exports never imported by other modules. Wrapped in\n[`UnusedTypeFinding`]: the inner [`UnusedExport`] struct is shared\nwith `unused_exports` but the wrapper emits a type-targeted fix\ndescription."
         },
         "private_type_leaks": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/PrivateTypeLeak"
+            "$ref": "#/definitions/PrivateTypeLeakFinding"
           },
-          "description": "Exported symbols whose public signature references same-file private types."
+          "description": "Exported symbols whose public signature references same-file private\ntypes. Wrapped in [`PrivateTypeLeakFinding`] so each entry carries a\ntyped `actions` array natively."
         },
         "unused_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedDependencyFinding"
           },
-          "description": "Dependencies listed in package.json but never imported."
+          "description": "Dependencies listed in package.json but never imported. Wrapped in\n[`UnusedDependencyFinding`] so each entry carries a typed `actions`\narray natively. The fix action swaps from `remove-dependency` to\n`move-dependency` when `used_in_workspaces` is non-empty."
         },
         "unused_dev_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedDevDependencyFinding"
           },
-          "description": "Dev dependencies listed in package.json but never imported."
+          "description": "Dev dependencies listed in package.json but never imported. Wrapped\nin [`UnusedDevDependencyFinding`]: same bare struct as\n`unused_dependencies` with a `devDependencies`-targeted fix\ndescription."
         },
         "unused_optional_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedOptionalDependencyFinding"
           },
-          "description": "Optional dependencies listed in package.json but never imported."
+          "description": "Optional dependencies listed in package.json but never imported.\nWrapped in [`UnusedOptionalDependencyFinding`] with an\n`optionalDependencies`-targeted fix description."
         },
         "unused_enum_members": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedMember"
+            "$ref": "#/definitions/UnusedEnumMemberFinding"
           },
-          "description": "Enum members never accessed."
+          "description": "Enum members never accessed. Wrapped in\n[`UnusedEnumMemberFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "unused_class_members": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedMember"
+            "$ref": "#/definitions/UnusedClassMemberFinding"
           },
-          "description": "Class members never accessed."
+          "description": "Class members never accessed. Wrapped in\n[`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as\n`unused_enum_members`, with a class-targeted fix description and the\n`auto_fixable: false` default to reflect dependency-injection\npatterns."
         },
         "unresolved_imports": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnresolvedImport"
+            "$ref": "#/definitions/UnresolvedImportFinding"
           },
-          "description": "Import specifiers that could not be resolved."
+          "description": "Import specifiers that could not be resolved. Wrapped in\n[`UnresolvedImportFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "unlisted_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnlistedDependency"
+            "$ref": "#/definitions/UnlistedDependencyFinding"
           },
-          "description": "Dependencies used in code but not listed in package.json."
+          "description": "Dependencies used in code but not listed in package.json. Wrapped in\n[`UnlistedDependencyFinding`]."
         },
         "duplicate_exports": {
           "type": "array",
@@ -555,30 +555,30 @@
         "type_only_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/TypeOnlyDependency"
+            "$ref": "#/definitions/TypeOnlyDependencyFinding"
           },
-          "description": "Production dependencies only used via type-only imports (could be devDependencies).\nOnly populated in production mode."
+          "description": "Production dependencies only used via type-only imports (could be\ndevDependencies). Only populated in production mode. Wrapped in\n[`TypeOnlyDependencyFinding`]."
         },
         "test_only_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/TestOnlyDependency"
+            "$ref": "#/definitions/TestOnlyDependencyFinding"
           },
-          "description": "Production dependencies only imported by test files (could be devDependencies)."
+          "description": "Production dependencies only imported by test files (could be\ndevDependencies). Wrapped in [`TestOnlyDependencyFinding`]."
         },
         "circular_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/CircularDependency"
+            "$ref": "#/definitions/CircularDependencyFinding"
           },
-          "description": "Circular dependency chains detected in the module graph."
+          "description": "Circular dependency chains detected in the module graph. Wrapped in\n[`CircularDependencyFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "boundary_violations": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/BoundaryViolation"
+            "$ref": "#/definitions/BoundaryViolationFinding"
           },
-          "description": "Imports that cross architecture boundary rules."
+          "description": "Imports that cross architecture boundary rules. Wrapped in\n[`BoundaryViolationFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "stale_suppressions": {
           "type": "array",
@@ -768,79 +768,79 @@
         "unused_files": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedFile"
+            "$ref": "#/definitions/UnusedFileFinding"
           },
-          "description": "Files not reachable from any entry point."
+          "description": "Files not reachable from any entry point. Wrapped in\n[`UnusedFileFinding`] so each entry carries a typed `actions` array\nnatively, replacing the pre-2.76 post-pass injection."
         },
         "unused_exports": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedExport"
+            "$ref": "#/definitions/UnusedExportFinding"
           },
-          "description": "Exports never imported by other modules."
+          "description": "Exports never imported by other modules. Wrapped in\n[`UnusedExportFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "unused_types": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedExport"
+            "$ref": "#/definitions/UnusedTypeFinding"
           },
-          "description": "Type exports never imported by other modules."
+          "description": "Type exports never imported by other modules. Wrapped in\n[`UnusedTypeFinding`]: the inner [`UnusedExport`] struct is shared\nwith `unused_exports` but the wrapper emits a type-targeted fix\ndescription."
         },
         "private_type_leaks": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/PrivateTypeLeak"
+            "$ref": "#/definitions/PrivateTypeLeakFinding"
           },
-          "description": "Exported symbols whose public signature references same-file private types."
+          "description": "Exported symbols whose public signature references same-file private\ntypes. Wrapped in [`PrivateTypeLeakFinding`] so each entry carries a\ntyped `actions` array natively."
         },
         "unused_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedDependencyFinding"
           },
-          "description": "Dependencies listed in package.json but never imported."
+          "description": "Dependencies listed in package.json but never imported. Wrapped in\n[`UnusedDependencyFinding`] so each entry carries a typed `actions`\narray natively. The fix action swaps from `remove-dependency` to\n`move-dependency` when `used_in_workspaces` is non-empty."
         },
         "unused_dev_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedDevDependencyFinding"
           },
-          "description": "Dev dependencies listed in package.json but never imported."
+          "description": "Dev dependencies listed in package.json but never imported. Wrapped\nin [`UnusedDevDependencyFinding`]: same bare struct as\n`unused_dependencies` with a `devDependencies`-targeted fix\ndescription."
         },
         "unused_optional_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedOptionalDependencyFinding"
           },
-          "description": "Optional dependencies listed in package.json but never imported."
+          "description": "Optional dependencies listed in package.json but never imported.\nWrapped in [`UnusedOptionalDependencyFinding`] with an\n`optionalDependencies`-targeted fix description."
         },
         "unused_enum_members": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedMember"
+            "$ref": "#/definitions/UnusedEnumMemberFinding"
           },
-          "description": "Enum members never accessed."
+          "description": "Enum members never accessed. Wrapped in\n[`UnusedEnumMemberFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "unused_class_members": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedMember"
+            "$ref": "#/definitions/UnusedClassMemberFinding"
           },
-          "description": "Class members never accessed."
+          "description": "Class members never accessed. Wrapped in\n[`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as\n`unused_enum_members`, with a class-targeted fix description and the\n`auto_fixable: false` default to reflect dependency-injection\npatterns."
         },
         "unresolved_imports": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnresolvedImport"
+            "$ref": "#/definitions/UnresolvedImportFinding"
           },
-          "description": "Import specifiers that could not be resolved."
+          "description": "Import specifiers that could not be resolved. Wrapped in\n[`UnresolvedImportFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "unlisted_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnlistedDependency"
+            "$ref": "#/definitions/UnlistedDependencyFinding"
           },
-          "description": "Dependencies used in code but not listed in package.json."
+          "description": "Dependencies used in code but not listed in package.json. Wrapped in\n[`UnlistedDependencyFinding`]."
         },
         "duplicate_exports": {
           "type": "array",
@@ -852,30 +852,30 @@
         "type_only_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/TypeOnlyDependency"
+            "$ref": "#/definitions/TypeOnlyDependencyFinding"
           },
-          "description": "Production dependencies only used via type-only imports (could be devDependencies).\nOnly populated in production mode."
+          "description": "Production dependencies only used via type-only imports (could be\ndevDependencies). Only populated in production mode. Wrapped in\n[`TypeOnlyDependencyFinding`]."
         },
         "test_only_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/TestOnlyDependency"
+            "$ref": "#/definitions/TestOnlyDependencyFinding"
           },
-          "description": "Production dependencies only imported by test files (could be devDependencies)."
+          "description": "Production dependencies only imported by test files (could be\ndevDependencies). Wrapped in [`TestOnlyDependencyFinding`]."
         },
         "circular_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/CircularDependency"
+            "$ref": "#/definitions/CircularDependencyFinding"
           },
-          "description": "Circular dependency chains detected in the module graph."
+          "description": "Circular dependency chains detected in the module graph. Wrapped in\n[`CircularDependencyFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "boundary_violations": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/BoundaryViolation"
+            "$ref": "#/definitions/BoundaryViolationFinding"
           },
-          "description": "Imports that cross architecture boundary rules."
+          "description": "Imports that cross architecture boundary rules. Wrapped in\n[`BoundaryViolationFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "stale_suppressions": {
           "type": "array",
@@ -1229,6 +1229,10 @@
     "RuntimeCoverageReport": {
       "type": "object",
       "properties": {
+        "schema_version": {
+          "description": "Runtime coverage JSON contract version. This is scoped to the\n`runtime_coverage` block and is independent of the top-level fallow\nJSON `schema_version`.",
+          "$ref": "#/definitions/RuntimeCoverageSchemaVersion"
+        },
         "verdict": {
           "description": "Single most actionable runtime-coverage signal under the current\ncontext. In PR-review context (CLI saw `--diff-file` or\n`--changed-since`) the verdict is `hot-path-touched` whenever a hot\nfunction was touched, regardless of cold-code findings; in standalone\nanalysis `cold-code-detected` remains primary. For the full set of\nfindings the report carries, see `signals`.",
           "$ref": "#/definitions/RuntimeCoverageReportVerdict"
@@ -1289,21 +1293,14 @@
             "$ref": "#/definitions/RuntimeCoverageMessage"
           },
           "description": "Non-fatal merge or coverage diagnostics. Omitted when empty."
-        },
-        "schema_version": {
-          "type": "string",
-          "enum": [
-            "1"
-          ],
-          "description": "Runtime coverage JSON contract version. This is scoped to the runtime_coverage block and is independent of the top-level fallow JSON schema_version."
         }
       },
       "required": [
+        "schema_version",
         "verdict",
         "summary",
         "blast_radius",
-        "importance",
-        "schema_version"
+        "importance"
       ],
       "description": "Runtime coverage findings merged into the health report or emitted by\n`fallow coverage analyze`. Present in health output when --runtime-coverage\nis used. Shape mirrors the runtime coverage JSON contract; cloud mode\nfetches runtime facts explicitly and merges them locally with AST/static\nanalysis."
     },
@@ -2015,7 +2012,14 @@
           "description": "Total clone groups across all buckets when `--group-by` is active.\nMirrors the grouped check / health envelopes which expose\n`total_issues` so MCP and CI consumers can read the same key across\ncommands."
         },
         "groups": {
-          "description": "Per-group buckets when `--group-by` is active. Each clone group is\nattributed to its largest-owner key (most instances; alphabetical\ntiebreak). Sort: most clone groups first, then alphabetical, with\n`(unowned)` pinned last."
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/DuplicationGroup"
+          },
+          "description": "Per-group buckets when `--group-by` is active. Each clone group is\nattributed to its largest-owner key (most instances; alphabetical\ntiebreak). Sort: most clone groups first, then alphabetical, with\n`(unowned)` pinned last.\n\nRuntime emission still goes through a `serde_json::Value` post-pass in\n`crates/cli/src/report/json.rs::build_grouped_duplication_json` so the\nper-group `actions` augmentation can run on every `AttributedCloneGroup`\nand `CloneFamily`; the typed field here is the schema source of truth\nso validators and generated TS consumers can reach the typed shape."
         },
         "_meta": {
           "anyOf": [
@@ -2042,27 +2046,20 @@
     },
     "DuplicationGroup": {
       "type": "object",
-      "description": "A single grouped duplication bucket. Per-group `stats` are dedup-aware and computed over the FULL group BEFORE any `--top` truncation.",
-      "required": [
-        "key",
-        "stats",
-        "clone_groups",
-        "clone_families"
-      ],
       "properties": {
         "key": {
           "type": "string",
-          "description": "Group label (owner / directory / package / section). `(unowned)` for files with no CODEOWNERS rule, `(no section)` for pre-section rules in section mode."
+          "description": "Group label (owner / directory / package / section). `(unowned)` for\nfiles with no CODEOWNERS rule, `(no section)` for pre-section rules in\nsection mode."
         },
         "stats": {
           "$ref": "#/definitions/DuplicationStats"
         },
         "clone_groups": {
           "type": "array",
-          "description": "Clone groups attributed to this owner. Each group's `primary_owner` is its largest-owner key; per-instance `owner` lets consumers see cross-bucket fan-out without re-resolving paths.",
           "items": {
             "$ref": "#/definitions/AttributedCloneGroup"
-          }
+          },
+          "description": "Clone groups attributed to this owner. Each group's `primary_owner` is\nits largest-owner key; per-instance `owner` lets consumers see\ncross-bucket fan-out without re-resolving paths."
         },
         "clone_families": {
           "type": "array",
@@ -2070,21 +2067,21 @@
             "$ref": "#/definitions/CloneFamily"
           }
         }
-      }
+      },
+      "required": [
+        "key",
+        "stats",
+        "clone_groups",
+        "clone_families"
+      ],
+      "description": "A single grouped duplication bucket. Per-group `stats` are dedup-aware and\ncomputed over the FULL group BEFORE any `--top` truncation."
     },
     "AttributedCloneGroup": {
       "type": "object",
-      "description": "A clone group annotated with its largest-owner attribution and per-instance owner keys.",
-      "required": [
-        "primary_owner",
-        "token_count",
-        "line_count",
-        "instances"
-      ],
       "properties": {
         "primary_owner": {
           "type": "string",
-          "description": "Largest-owner attribution: the resolver key with the most instances in this clone group. Ties broken alphabetically (smallest key wins)."
+          "description": "Largest-owner attribution: the resolver key with the most instances in\nthis clone group. Ties broken alphabetically (smallest key wins)."
         },
         "token_count": {
           "type": "integer"
@@ -2094,49 +2091,27 @@
         },
         "instances": {
           "type": "array",
-          "description": "Each instance carries its own `owner` field alongside the standard CloneInstance shape.",
           "items": {
-            "type": "object",
-            "required": [
-              "file",
-              "start_line",
-              "end_line",
-              "start_col",
-              "end_col",
-              "fragment",
-              "owner"
-            ],
-            "properties": {
-              "file": {
-                "type": "string"
-              },
-              "start_line": {
-                "type": "integer"
-              },
-              "end_line": {
-                "type": "integer"
-              },
-              "start_col": {
-                "type": "integer"
-              },
-              "end_col": {
-                "type": "integer"
-              },
-              "fragment": {
-                "type": "string"
-              },
-              "owner": {
-                "type": "string",
-                "description": "Resolver key for this specific instance (per-instance, not the group-level largest-owner)."
-              }
-            }
-          }
+            "$ref": "#/definitions/AttributedInstance"
+          },
+          "description": "Each instance carries its own `owner` field alongside the standard\nCloneInstance shape."
         },
         "actions": {
           "type": "array",
-          "description": "Suggested actions for this clone group (extract-shared, suppress-line, etc.)."
+          "items": {
+            "$ref": "#/definitions/CloneGroupAction"
+          },
+          "description": "Suggested actions to resolve this issue."
         }
-      }
+      },
+      "required": [
+        "primary_owner",
+        "token_count",
+        "line_count",
+        "instances",
+        "actions"
+      ],
+      "description": "A clone group annotated with its largest-owner attribution and per-instance\nowner keys."
     },
     "SchemaVersion": {
       "type": "integer",
@@ -2578,9 +2553,9 @@
           "type": "string",
           "description": "Display string per the configured email mode: raw email\n(`alice@example.com`), local-part handle (`alice`), or stable hash\npseudonym (`xxh3:<16hex>`). The format depends on `format`.\n\nRenamed from `email` because in `handle` and `hash` modes the value\nis no longer an email address; consumers tempted to use it as one\n(e.g. `mailto:`) would be wrong."
         },
-        "commits": {
-          "type": "integer",
-          "description": "Total commits by this contributor in the analysis window."
+        "format": {
+          "description": "Format of [`identifier`](Self::identifier): `raw`, `handle`, or `hash`.\nLets type-aware consumers branch without re-parsing the string.",
+          "$ref": "#/definitions/ContributorIdentifierFormat"
         },
         "share": {
           "type": "number",
@@ -2589,6 +2564,10 @@
         "stale_days": {
           "type": "integer",
           "description": "Days since this contributor last touched the file."
+        },
+        "commits": {
+          "type": "integer",
+          "description": "Total commits by this contributor in the analysis window."
         }
       },
       "required": [
@@ -2788,16 +2767,16 @@
         "files": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UntestedFile"
+            "$ref": "#/definitions/UntestedFileFinding"
           },
-          "description": "Runtime files with no test dependency path."
+          "description": "Runtime files with no test dependency path. Each entry carries its\nown `actions` array via [`UntestedFileFinding`]."
         },
         "exports": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UntestedExport"
+            "$ref": "#/definitions/UntestedExportFinding"
           },
-          "description": "Runtime exports with no test-reachable reference chain."
+          "description": "Runtime exports with no test-reachable reference chain. Each entry\ncarries its own `actions` array via [`UntestedExportFinding`]."
         }
       },
       "required": [
@@ -2848,19 +2827,11 @@
         "value_export_count": {
           "type": "integer",
           "description": "Number of value exports declared by the file."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/UntestedFileAction"
-          },
-          "description": "Suggested actions to resolve this issue."
         }
       },
       "required": [
         "path",
-        "value_export_count",
-        "actions"
+        "value_export_count"
       ],
       "description": "Runtime code that no test dependency path reaches."
     },
@@ -2882,21 +2853,13 @@
         "col": {
           "type": "integer",
           "description": "0-based source column."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/UntestedExportAction"
-          },
-          "description": "Suggested actions to resolve this issue."
         }
       },
       "required": [
         "path",
         "export_name",
         "line",
-        "col",
-        "actions"
+        "col"
       ],
       "description": "Runtime export that no test-reachable module references."
     },
@@ -3286,11 +3249,11 @@
           "$ref": "#/definitions/SuppressFileAction"
         },
         {
-          "description": "Add the offending finding to the fallow config (e.g.\n`ignoreDependencies: [\"lodash\"]`). Auto-fixable for the array-shaped\n`ignoreExports` variant when a config file exists; manual otherwise.",
+          "description": "Add the offending finding to the fallow config (e.g.\n`ignoreDependencies: [\"lodash\"]`). Auto-fixable for the array-shaped\n`ignoreExports` variant when `fallow fix` can safely apply the\naction (config file exists, or no config exists and the working\ndirectory is not inside a monorepo subpackage); manual otherwise.",
           "$ref": "#/definitions/AddToConfigAction"
         }
       ],
-      "description": "A suggested action attached to a finding in the JSON output. Each finding\ncarries an `actions` array; consumers (agents, IDE clients, CI bots) can\ndispatch on the `type` discriminant to choose the right remediation.\n\nThe discriminator is `type` (snake_case `type` field), the payload uses the\nmatching kebab-case identifier per variant."
+      "description": "A suggested action attached to a finding in the JSON output. Each finding\ncarries an `actions` array; consumers (agents, IDE clients, CI bots) can\ndispatch on the `type` discriminant to choose the right remediation.\n\nThe discriminator is `type` (snake_case `type` field), the payload uses the\nmatching kebab-case identifier per variant.\n\n## `auto_fixable` is per-finding, not per action type\n\nEvery action variant carries an `auto_fixable: bool` field. The value is\nevaluated PER FINDING, not per action type: the same action type may\nappear with `auto_fixable: true` on one finding and `auto_fixable: false`\non another, depending on per-instance guards in the `fallow fix` applier.\nAgents that filter on `auto_fixable: true` must branch on the bool of\neach individual finding's action, not on the action `type` alone.\n\nCurrent per-instance flips:\n\n- `remove-catalog-entry` (`unused-catalog-entries`): `true` only when the\n  finding's `hardcoded_consumers` array is empty. When a workspace\n  package still pins a hardcoded version of the same package, `fallow fix`\n  skips the entry to avoid breaking `pnpm install`, and the action is\n  emitted with `auto_fixable: false`.\n- `remove-dependency` vs `move-dependency` (dependency findings): when the\n  finding's `used_in_workspaces` array is non-empty, the primary action\n  flips to `move-dependency` with `auto_fixable: false` (`fallow fix` will\n  not remove a dependency that another workspace imports). On findings\n  without cross-workspace consumers the action stays `remove-dependency`\n  with `auto_fixable: true`.\n- `add-to-config` for `ignoreExports` (`duplicate-exports`): `true` when\n  `fallow fix` can safely apply the action without further user setup.\n  That is: a fallow config file exists on disk, OR no config exists AND\n  the working directory is NOT inside a monorepo subpackage (in which\n  case the applier creates `.fallowrc.json` from `fallow init`'s\n  framework-aware scaffolding and layers the new rules on top).\n  `false` inside a monorepo subpackage with no workspace-root config\n  (the applier refuses to fragment per-package configs across the\n  monorepo and points at the workspace root instead).\n- `update-catalog-reference` (`unresolved-catalog-references`): always\n  `false` today (the catalog-switching applier is not wired in yet); the\n  field is non-singleton so that future enablement does not require a\n  schema change.\n\nAll `suppress-line` and `suppress-file` actions are uniformly\n`auto_fixable: false`. The field is non-singleton on the wire so that a\nfuture auto-applier (e.g. an LLM-driven suppression writer) can promote\nindividual variants without a schema bump."
     },
     "FixAction": {
       "type": "object",
@@ -3301,7 +3264,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether `fallow fix` can apply this fix automatically."
+          "description": "Whether `fallow fix` can apply this fix automatically. Evaluated PER\nFINDING, not per action type: the same `type` may carry\n`auto_fixable: true` on one finding and `auto_fixable: false` on\nanother when per-instance guards in the applier discriminate (e.g.\n`remove-catalog-entry` flips on `hardcoded_consumers`, the primary\ndependency action flips between `remove-dependency` /\n`move-dependency` on `used_in_workspaces`). Filter on this bool of\neach individual action, not on `type`. See the [`IssueAction`]\nenum-level docs for the full list of per-instance flips."
         },
         "description": {
           "type": "string",
@@ -3408,7 +3371,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "True when `fallow fix` can apply this config action automatically for\nthe current action type. `ignoreExports` duplicate-export actions are\nauto-fixable when a config file exists; older scalar config-ignore\nactions remain manual."
+          "description": "True when `fallow fix` can apply this config action automatically.\nEvaluated PER FINDING, not per action type: `ignoreExports`\nduplicate-export actions are auto-fixable when `fallow fix` can\nsafely write the rule, which today means EITHER a fallow config\nfile already exists OR no config exists and the working directory\nis NOT inside a monorepo subpackage (in which case the applier\ncreates `.fallowrc.json` from `fallow init`'s framework-aware\nscaffolding). The action is `false` inside a monorepo subpackage\nwith no workspace-root config because the applier refuses to\nfragment per-package configs across the monorepo. Older scalar\nconfig-ignore actions (e.g. `ignoreDependencies` on dependency\nfindings) are always manual today. Filter on this bool of each\nindividual action, not on the `type` alone. See the [`IssueAction`]\nenum-level docs for the full list of per-instance flips."
         },
         "description": {
           "type": "string",
@@ -3566,7 +3529,7 @@
         "auto_fixable",
         "description"
       ],
-      "description": "Suggested action attached to a [`RefactoringTarget`].\n\nThe list always begins with `apply-refactoring`. A trailing\n`suppress-line` is appended only when the target carries `evidence`\nlinking to specific functions (e.g., `extract_complex_functions`,\n`add_test_coverage`).\n\nUnlike [`HealthFindingAction`], the `suppress-line` variant emitted\nhere does NOT carry a `placement` field: the parent\n[`RefactoringTarget`] points at a file (not a specific function\ndeclaration site), so a per-line placement hint would have no\nreferent. Consumers that want the placement metadata should follow\nthe target's `evidence.complex_functions` back to the matching\n[`HealthFinding`] and read placement from THAT action instead.\n\n[`RefactoringTarget`]: ../../fallow-cli/src/health_types/targets.rs"
+      "description": "Suggested action attached to a [`RefactoringTarget`].\n\nThe list always begins with `apply-refactoring`. A trailing\n`suppress-line` is appended only when the target carries `evidence`\nlinking to specific functions (e.g., `extract_complex_functions`,\n`add_test_coverage`).\n\nUnlike [`HealthFindingAction`], the `suppress-line` variant emitted\nhere does NOT carry a `placement` field: the parent\n[`RefactoringTarget`] points at a file (not a specific function\ndeclaration site), so a per-line placement hint would have no\nreferent. Consumers that want the placement metadata should follow\nthe target's `evidence.complex_functions` back to the matching\n`HealthFinding` and read placement from THAT action instead.\n\n[`RefactoringTarget`]: ../../fallow-cli/src/health_types/targets.rs"
     },
     "CloneFamilyAction": {
       "description": "A suggested action for a clone family.",
@@ -3641,21 +3604,10 @@
         "path": {
           "type": "string",
           "description": "Absolute path to the unused file."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
-        "path",
-        "actions"
+        "path"
       ],
       "description": "A file that is not reachable from any entry point."
     },
@@ -3689,16 +3641,6 @@
         "is_re_export": {
           "type": "boolean",
           "description": "Whether this finding comes from a barrel/index re-export rather than the source definition."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
@@ -3708,8 +3650,7 @@
         "line",
         "col",
         "span_start",
-        "is_re_export",
-        "actions"
+        "is_re_export"
       ],
       "description": "An export that is never imported by other modules."
     },
@@ -3739,16 +3680,6 @@
         "span_start": {
           "type": "integer",
           "description": "Byte offset of the type reference."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
@@ -3757,8 +3688,7 @@
         "type_name",
         "line",
         "col",
-        "span_start",
-        "actions"
+        "span_start"
       ],
       "description": "A public export signature that references a same-file private type."
     },
@@ -3787,24 +3717,13 @@
             "type": "string"
           },
           "description": "Workspace roots that import this package even though the declaring workspace does not."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
         "package_name",
         "location",
         "path",
-        "line",
-        "actions"
+        "line"
       ],
       "description": "A dependency that is listed in package.json but never imported."
     },
@@ -3834,16 +3753,6 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
@@ -3852,8 +3761,7 @@
         "member_name",
         "kind",
         "line",
-        "col",
-        "actions"
+        "col"
       ],
       "description": "An unused enum or class member."
     },
@@ -3879,16 +3787,6 @@
         "specifier_col": {
           "type": "integer",
           "description": "0-based byte column offset of the source string literal (the specifier in quotes).\nUsed by the LSP to underline just the specifier, not the entire import line."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
@@ -3896,8 +3794,7 @@
         "specifier",
         "line",
         "col",
-        "specifier_col",
-        "actions"
+        "specifier_col"
       ],
       "description": "An import that could not be resolved."
     },
@@ -3914,22 +3811,11 @@
             "$ref": "#/definitions/ImportSite"
           },
           "description": "Import sites where this unlisted dependency is used (file path, line, column)."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
         "package_name",
-        "imported_from",
-        "actions"
+        "imported_from"
       ],
       "description": "A dependency used in code but not listed in package.json."
     },
@@ -4025,23 +3911,12 @@
         "line": {
           "type": "integer",
           "description": "1-based line number of the dependency entry in package.json."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
         "package_name",
         "path",
-        "line",
-        "actions"
+        "line"
       ],
       "description": "A production dependency that is only used via type-only imports.\nIn production builds, type imports are erased, so this dependency\nis not needed at runtime and could be moved to devDependencies."
     },
@@ -4059,23 +3934,12 @@
         "line": {
           "type": "integer",
           "description": "1-based line number of the dependency entry in package.json."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
         "package_name",
         "path",
-        "line",
-        "actions"
+        "line"
       ],
       "description": "A production dependency that is only imported by test files.\nSince it is never used in production code, it could be moved to devDependencies."
     },
@@ -4104,24 +3968,13 @@
         "is_cross_package": {
           "type": "boolean",
           "description": "Whether this cycle crosses workspace package boundaries."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
         "files",
         "length",
         "line",
-        "col",
-        "actions"
+        "col"
       ],
       "description": "A circular dependency chain detected in the module graph.\n\nThe `line` and `col` fields carry `#[serde(default)]` so callers reading\nhistorical baseline JSON without these fields can still deserialize the\nstruct, but the JSON output layer always emits them (u32 always\nserializes, never via `skip_serializing_if`). The schemars derive sees\nthe serde defaults and marks both fields optional in the generated\nschema; the explicit `extend(\"required\" = ...)` override here keeps the\nschema's `required` array honest about what the JSON output actually\ncontains."
     },
@@ -4155,16 +4008,6 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset of the import statement."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
@@ -4174,8 +4017,7 @@
         "to_zone",
         "import_specifier",
         "line",
-        "col",
-        "actions"
+        "col"
       ],
       "description": "An import that crosses an architecture boundary rule."
     },
@@ -5330,79 +5172,79 @@
         "unused_files": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedFile"
+            "$ref": "#/definitions/UnusedFileFinding"
           },
-          "description": "Files not reachable from any entry point."
+          "description": "Files not reachable from any entry point. Wrapped in\n[`UnusedFileFinding`] so each entry carries a typed `actions` array\nnatively, replacing the pre-2.76 post-pass injection."
         },
         "unused_exports": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedExport"
+            "$ref": "#/definitions/UnusedExportFinding"
           },
-          "description": "Exports never imported by other modules."
+          "description": "Exports never imported by other modules. Wrapped in\n[`UnusedExportFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "unused_types": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedExport"
+            "$ref": "#/definitions/UnusedTypeFinding"
           },
-          "description": "Type exports never imported by other modules."
+          "description": "Type exports never imported by other modules. Wrapped in\n[`UnusedTypeFinding`]: the inner [`UnusedExport`] struct is shared\nwith `unused_exports` but the wrapper emits a type-targeted fix\ndescription."
         },
         "private_type_leaks": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/PrivateTypeLeak"
+            "$ref": "#/definitions/PrivateTypeLeakFinding"
           },
-          "description": "Exported symbols whose public signature references same-file private types."
+          "description": "Exported symbols whose public signature references same-file private\ntypes. Wrapped in [`PrivateTypeLeakFinding`] so each entry carries a\ntyped `actions` array natively."
         },
         "unused_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedDependencyFinding"
           },
-          "description": "Dependencies listed in package.json but never imported."
+          "description": "Dependencies listed in package.json but never imported. Wrapped in\n[`UnusedDependencyFinding`] so each entry carries a typed `actions`\narray natively. The fix action swaps from `remove-dependency` to\n`move-dependency` when `used_in_workspaces` is non-empty."
         },
         "unused_dev_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedDevDependencyFinding"
           },
-          "description": "Dev dependencies listed in package.json but never imported."
+          "description": "Dev dependencies listed in package.json but never imported. Wrapped\nin [`UnusedDevDependencyFinding`]: same bare struct as\n`unused_dependencies` with a `devDependencies`-targeted fix\ndescription."
         },
         "unused_optional_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependency"
+            "$ref": "#/definitions/UnusedOptionalDependencyFinding"
           },
-          "description": "Optional dependencies listed in package.json but never imported."
+          "description": "Optional dependencies listed in package.json but never imported.\nWrapped in [`UnusedOptionalDependencyFinding`] with an\n`optionalDependencies`-targeted fix description."
         },
         "unused_enum_members": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedMember"
+            "$ref": "#/definitions/UnusedEnumMemberFinding"
           },
-          "description": "Enum members never accessed."
+          "description": "Enum members never accessed. Wrapped in\n[`UnusedEnumMemberFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "unused_class_members": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedMember"
+            "$ref": "#/definitions/UnusedClassMemberFinding"
           },
-          "description": "Class members never accessed."
+          "description": "Class members never accessed. Wrapped in\n[`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as\n`unused_enum_members`, with a class-targeted fix description and the\n`auto_fixable: false` default to reflect dependency-injection\npatterns."
         },
         "unresolved_imports": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnresolvedImport"
+            "$ref": "#/definitions/UnresolvedImportFinding"
           },
-          "description": "Import specifiers that could not be resolved."
+          "description": "Import specifiers that could not be resolved. Wrapped in\n[`UnresolvedImportFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "unlisted_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnlistedDependency"
+            "$ref": "#/definitions/UnlistedDependencyFinding"
           },
-          "description": "Dependencies used in code but not listed in package.json."
+          "description": "Dependencies used in code but not listed in package.json. Wrapped in\n[`UnlistedDependencyFinding`]."
         },
         "duplicate_exports": {
           "type": "array",
@@ -5414,30 +5256,30 @@
         "type_only_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/TypeOnlyDependency"
+            "$ref": "#/definitions/TypeOnlyDependencyFinding"
           },
-          "description": "Production dependencies only used via type-only imports (could be devDependencies).\nOnly populated in production mode."
+          "description": "Production dependencies only used via type-only imports (could be\ndevDependencies). Only populated in production mode. Wrapped in\n[`TypeOnlyDependencyFinding`]."
         },
         "test_only_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/TestOnlyDependency"
+            "$ref": "#/definitions/TestOnlyDependencyFinding"
           },
-          "description": "Production dependencies only imported by test files (could be devDependencies)."
+          "description": "Production dependencies only imported by test files (could be\ndevDependencies). Wrapped in [`TestOnlyDependencyFinding`]."
         },
         "circular_dependencies": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/CircularDependency"
+            "$ref": "#/definitions/CircularDependencyFinding"
           },
-          "description": "Circular dependency chains detected in the module graph."
+          "description": "Circular dependency chains detected in the module graph. Wrapped in\n[`CircularDependencyFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "boundary_violations": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/BoundaryViolation"
+            "$ref": "#/definitions/BoundaryViolationFinding"
           },
-          "description": "Imports that cross architecture boundary rules."
+          "description": "Imports that cross architecture boundary rules. Wrapped in\n[`BoundaryViolationFinding`] so each entry carries a typed `actions`\narray natively."
         },
         "stale_suppressions": {
           "type": "array",
@@ -5498,7 +5340,7 @@
         "type_only_dependencies",
         "circular_dependencies"
       ],
-      "description": "Complete analysis results.\n\n# Examples\n\n```\nuse fallow_types::results::{AnalysisResults, UnusedFile};\nuse std::path::PathBuf;\n\nlet mut results = AnalysisResults::default();\nassert_eq!(results.total_issues(), 0);\nassert!(!results.has_issues());\n\nresults.unused_files.push(UnusedFile {\n    path: PathBuf::from(\"src/dead.ts\"),\n});\nassert_eq!(results.total_issues(), 1);\nassert!(results.has_issues());\n```"
+      "description": "Complete analysis results.\n\n# Examples\n\n```\nuse fallow_types::output_dead_code::UnusedFileFinding;\nuse fallow_types::results::{AnalysisResults, UnusedFile};\nuse std::path::PathBuf;\n\nlet mut results = AnalysisResults::default();\nassert_eq!(results.total_issues(), 0);\nassert!(!results.has_issues());\n\nresults\n    .unused_files\n    .push(UnusedFileFinding::with_actions(UnusedFile {\n        path: PathBuf::from(\"src/dead.ts\"),\n    }));\nassert_eq!(results.total_issues(), 1);\nassert!(results.has_issues());\n```"
     },
     "DependencyLocation": {
       "oneOf": [
@@ -6841,7 +6683,7 @@
         {
           "type": "string",
           "const": "info",
-          "description": "Informational."
+          "description": "Informational. Reserved for future severity mappings; not produced\nby the current runtime path (which only emits Minor / Major /\nCritical via `severity_to_codeclimate` and the health / runtime-\ncoverage match arms)."
         },
         {
           "type": "string",
@@ -6861,7 +6703,7 @@
         {
           "type": "string",
           "const": "blocker",
-          "description": "Blocker (highest severity)."
+          "description": "Blocker (highest severity). Reserved for future severity\nmappings; not produced by the current runtime path."
         }
       ],
       "description": "CodeClimate severity scale."
@@ -7510,7 +7352,903 @@
         }
       ],
       "title": "fallow --format json (typed root)",
-      "description": "Typed root of every fallow `--format json` envelope shape that\nserializes as a JSON object. The schema derived from this enum drives\nthe document-root `oneOf` in `docs/output-schema.json`, replacing the\npreviously hand-maintained block.\n\n`#[serde(untagged)]` preserves wire compatibility: consumers see exactly\nthe same top-level keys today (`schema_version`, `version`, `results`,\n`summary`, etc.). The schema's `oneOf` lets agents narrow by trying\nvariants in order; field sets differ enough that the first matching\nvariant is the correct one in practice.\n\nVariant order is **most-specific first**. Schemars 1 preserves\ndeclaration order in the emitted `oneOf`, and validators that enforce\nstrict `oneOf` (and any future migration that adds `Deserialize`) will\ntry branches top-to-bottom. The required-field sets shrink as we move\ndown the list, with [`CombinedOutput`] last because its three required\nfields (`schema_version`, `version`, `elapsed_ms`) are a strict subset\nof every other variant's required set; placing it earlier would let a\n`CheckOutput` payload silently match `CombinedOutput` first.\n\nTwo envelopes are intentionally NOT in this enum:\n- `CodeClimateOutput` serializes as a bare JSON array\n  (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality\n  spec; `#[serde(tag = ...)]` cannot internally tag a non-object\n  variant and wrapping the array would break the spec. The root schema\n  carries it as a sibling `oneOf` branch alongside `FallowOutput`.\n- `CoverageAnalyzeOutput` (`fallow coverage analyze --format json`)\n  does not yet have a Rust struct; it lives on the\n  `HAND_MAINTAINED_ROOT_ENVELOPES` constant in `schema_emit.rs`\n  pending typed migration. The root schema preserves it as a sibling\n  `oneOf` branch so the documented union stays complete until the\n  migration lands.\n\nA future major release plans to switch this to\n`#[serde(tag = \"kind\")]` for true O(1) discriminability on AI / agent\nconsumers, paired with a one-cycle `--legacy-envelope` opt-out flag.\nTracked under issue #384."
+      "description": "Typed root of every fallow `--format json` envelope shape that\nserializes as a JSON object. The schema derived from this enum drives\nthe document-root `oneOf` in `docs/output-schema.json`, replacing the\npreviously hand-maintained block.\n\n`#[serde(untagged)]` preserves wire compatibility: consumers see exactly\nthe same top-level keys today (`schema_version`, `version`, plus the\nper-envelope shape). The schema's `oneOf` lets agents narrow by trying\nvariants in order; field sets differ enough that the first matching\nvariant is the correct one in practice. Note that [`HealthOutput`] and\n[`DupesOutput`] flatten their inner body (`HealthReport` /\n`DuplicationReport`) into top-level fields, so the actual\ndiscriminators are nested-body keys such as `health_score` (health) and\n`clone_groups` (dupes), NOT `report` or `groups`.\n\nVariant order is **most-specific first**. Schemars 1 preserves\ndeclaration order in the emitted `oneOf`, and validators that enforce\nstrict `oneOf` (and any future migration that adds `Deserialize`) will\ntry branches top-to-bottom. The required-field sets shrink as we move\ndown the list, with [`CombinedOutput`] last because its three required\nfields (`schema_version`, `version`, `elapsed_ms`) are a strict subset\nof every other variant's required set; placing it earlier would let a\n`CheckOutput` payload silently match `CombinedOutput` first.\n\nTwo envelopes are intentionally NOT in this enum:\n- `CodeClimateOutput` serializes as a bare JSON array\n  (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality\n  spec; `#[serde(tag = ...)]` cannot internally tag a non-object\n  variant and wrapping the array would break the spec. The root schema\n  carries it as a sibling `oneOf` branch alongside `FallowOutput`.\n- `CoverageAnalyzeOutput` (`fallow coverage analyze --format json`)\n  does not yet have a Rust struct; it lives on the\n  `HAND_MAINTAINED_ROOT_ENVELOPES` constant in `schema_emit.rs`\n  pending typed migration. The root schema preserves it as a sibling\n  `oneOf` branch so the documented union stays complete until the\n  migration lands.\n\nA future major release plans to switch this to\n`#[serde(tag = \"kind\")]` for true O(1) discriminability on AI / agent\nconsumers, paired with a one-cycle `--legacy-envelope` opt-out flag.\nTracked under issue #384."
+    },
+    "UntestedExportFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute file path."
+        },
+        "export_name": {
+          "type": "string",
+          "description": "Export name."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based source line."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based source column."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UntestedExportAction"
+          },
+          "description": "Suggested next steps: an `add-test-import` primary and a\n`suppress-file` secondary."
+        }
+      },
+      "required": [
+        "path",
+        "export_name",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UntestedExport`] finding. Same pattern as\n[`UntestedFileFinding`]: flattens the bare finding and carries a typed\n`actions` array computed at construction time."
+    },
+    "UntestedFileFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute file path."
+        },
+        "value_export_count": {
+          "type": "integer",
+          "description": "Number of value exports declared by the file."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UntestedFileAction"
+          },
+          "description": "Suggested next steps: an `add-tests` primary and a `suppress-file`\nsecondary. Always emitted (possibly empty for forward-compat)."
+        }
+      },
+      "required": [
+        "path",
+        "value_export_count",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UntestedFile`] finding. Carries the bare\n[`UntestedFile`] flattened in plus a typed `actions` array. The action\nvec is computed at construction time using a project-root-relative path\nso descriptions match `strip_root_prefix`'s post-pass output on the inner\n`path` field. Schemars derives the merged shape natively; this retires\nthe `augment_finding_definition` graft for `UntestedFile`."
+    },
+    "AttributedInstance": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Path to the file containing this clone instance."
+        },
+        "start_line": {
+          "type": "integer",
+          "description": "1-based start line of the clone."
+        },
+        "end_line": {
+          "type": "integer",
+          "description": "1-based end line of the clone."
+        },
+        "start_col": {
+          "type": "integer",
+          "description": "0-based start column."
+        },
+        "end_col": {
+          "type": "integer",
+          "description": "0-based end column."
+        },
+        "fragment": {
+          "type": "string",
+          "description": "The actual source code fragment."
+        },
+        "owner": {
+          "type": "string",
+          "description": "Resolver key for this specific instance (per-instance, not the\ngroup-level largest-owner)."
+        }
+      },
+      "required": [
+        "file",
+        "start_line",
+        "end_line",
+        "start_col",
+        "end_col",
+        "fragment",
+        "owner"
+      ],
+      "description": "A clone instance plus its per-instance owner key (for inline JSON / SARIF\nrendering).\n\nEach instance carries its own `owner` field alongside the standard\n`CloneInstance` shape (file / start_line / end_line / start_col / end_col /\nfragment), so consumers can attribute instances to resolver keys without\nre-resolving paths."
+    },
+    "UnusedFileFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to the unused file."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps: a `delete-file` primary and a `suppress-file`\nsecondary. Always emitted (possibly empty for forward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base. `None` when serialized directly from Rust."
+        }
+      },
+      "required": [
+        "path",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedFile`] finding. The bare finding\nflattens in via `#[serde(flatten)]`, with a typed `actions` array\npopulated at construction time and the audit-pass `introduced` flag\nattached as an optional sibling."
+    },
+    "UnusedExportFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File containing the unused export."
+        },
+        "export_name": {
+          "type": "string",
+          "description": "Name of the unused export."
+        },
+        "is_type_only": {
+          "type": "boolean",
+          "description": "Whether this is a type-only export."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the export."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "span_start": {
+          "type": "integer",
+          "description": "Byte offset into the source file (used by the fix command)."
+        },
+        "is_re_export": {
+          "type": "boolean",
+          "description": "Whether this finding comes from a barrel/index re-export rather than the source definition."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "export_name",
+        "is_type_only",
+        "line",
+        "col",
+        "span_start",
+        "is_re_export",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedExport`] finding consumed under the\n`unused_exports` key. Same Rust struct as [`UnusedTypeFinding`], with a\ndifferent fix description so consumers can tell value-export from\ntype-export removal at the action level."
+    },
+    "UnusedTypeFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File containing the unused export."
+        },
+        "export_name": {
+          "type": "string",
+          "description": "Name of the unused export."
+        },
+        "is_type_only": {
+          "type": "boolean",
+          "description": "Whether this is a type-only export."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the export."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "span_start": {
+          "type": "integer",
+          "description": "Byte offset into the source file (used by the fix command)."
+        },
+        "is_re_export": {
+          "type": "boolean",
+          "description": "Whether this finding comes from a barrel/index re-export rather than the source definition."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "export_name",
+        "is_type_only",
+        "line",
+        "col",
+        "span_start",
+        "is_re_export",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedExport`] finding consumed under the\n`unused_types` key. Wraps the same bare [`UnusedExport`] struct as\n[`UnusedExportFinding`] but emits a fix action targeted at type-only\ndeclarations, with the same `is_re_export`-aware note swap."
+    },
+    "PrivateTypeLeakFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File containing the exported symbol."
+        },
+        "export_name": {
+          "type": "string",
+          "description": "Export whose public signature leaks the private type."
+        },
+        "type_name": {
+          "type": "string",
+          "description": "Private type referenced by the public signature."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the leaking type reference."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "span_start": {
+          "type": "integer",
+          "description": "Byte offset of the type reference."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "export_name",
+        "type_name",
+        "line",
+        "col",
+        "span_start",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`PrivateTypeLeak`] finding. Mirrors\n[`UnusedFileFinding`]: flattens the bare finding and carries a typed\n`actions` array (`export-type` primary plus `suppress-line` secondary)."
+    },
+    "UnusedDependencyFinding": {
+      "type": "object",
+      "properties": {
+        "package_name": {
+          "type": "string",
+          "description": "Package name, including internal workspace package names."
+        },
+        "location": {
+          "description": "Whether this is in `dependencies`, `devDependencies`, or `optionalDependencies`.",
+          "$ref": "#/definitions/DependencyLocation"
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to the package.json where this dependency is listed.\nFor root deps this is `<root>/package.json`, for workspace deps it is `<ws>/package.json`."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the dependency entry in package.json."
+        },
+        "used_in_workspaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Workspace roots that import this package even though the declaring workspace does not."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "package_name",
+        "location",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedDependency`] finding consumed under\nthe `unused_dependencies` key (production deps). Flattens the bare\nfinding; the typed `actions` array carries either a `remove-dependency`\nor `move-dependency` primary depending on\n`inner.used_in_workspaces`."
+    },
+    "UnusedDevDependencyFinding": {
+      "type": "object",
+      "properties": {
+        "package_name": {
+          "type": "string",
+          "description": "Package name, including internal workspace package names."
+        },
+        "location": {
+          "description": "Whether this is in `dependencies`, `devDependencies`, or `optionalDependencies`.",
+          "$ref": "#/definitions/DependencyLocation"
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to the package.json where this dependency is listed.\nFor root deps this is `<root>/package.json`, for workspace deps it is `<ws>/package.json`."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the dependency entry in package.json."
+        },
+        "used_in_workspaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Workspace roots that import this package even though the declaring workspace does not."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "package_name",
+        "location",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedDependency`] finding consumed under\nthe `unused_dev_dependencies` key. Same bare struct as\n[`UnusedDependencyFinding`]; the fix description points at\n`devDependencies` and the suppress comment uses\n`unused-dev-dependency`."
+    },
+    "UnusedOptionalDependencyFinding": {
+      "type": "object",
+      "properties": {
+        "package_name": {
+          "type": "string",
+          "description": "Package name, including internal workspace package names."
+        },
+        "location": {
+          "description": "Whether this is in `dependencies`, `devDependencies`, or `optionalDependencies`.",
+          "$ref": "#/definitions/DependencyLocation"
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to the package.json where this dependency is listed.\nFor root deps this is `<root>/package.json`, for workspace deps it is `<ws>/package.json`."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the dependency entry in package.json."
+        },
+        "used_in_workspaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Workspace roots that import this package even though the declaring workspace does not."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "package_name",
+        "location",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedDependency`] finding consumed under\nthe `unused_optional_dependencies` key. Same bare struct as\n[`UnusedDependencyFinding`]; the fix description points at\n`optionalDependencies`. Reuses the `unused-dependency` suppress\n`IssueKind` because there is no dedicated variant for optional deps."
+    },
+    "UnusedEnumMemberFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File containing the unused member."
+        },
+        "parent_name": {
+          "type": "string",
+          "description": "Name of the parent enum or class."
+        },
+        "member_name": {
+          "type": "string",
+          "description": "Name of the unused member."
+        },
+        "kind": {
+          "description": "Whether this is an enum member, class method, or class property.",
+          "$ref": "#/definitions/MemberKind"
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "parent_name",
+        "member_name",
+        "kind",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedMember`] finding consumed under the\n`unused_enum_members` key."
+    },
+    "UnusedClassMemberFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File containing the unused member."
+        },
+        "parent_name": {
+          "type": "string",
+          "description": "Name of the parent enum or class."
+        },
+        "member_name": {
+          "type": "string",
+          "description": "Name of the unused member."
+        },
+        "kind": {
+          "description": "Whether this is an enum member, class method, or class property.",
+          "$ref": "#/definitions/MemberKind"
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "parent_name",
+        "member_name",
+        "kind",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedMember`] finding consumed under the\n`unused_class_members` key. Same Rust struct as\n[`UnusedEnumMemberFinding`]; the fix action and suppress comment carry\nthe class-member kebab-case identifier instead."
+    },
+    "UnresolvedImportFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File containing the unresolved import."
+        },
+        "specifier": {
+          "type": "string",
+          "description": "The import specifier that could not be resolved."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the import statement."
+        },
+        "specifier_col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the source string literal (the specifier in quotes).\nUsed by the LSP to underline just the specifier, not the entire import line."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "path",
+        "specifier",
+        "line",
+        "col",
+        "specifier_col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnresolvedImport`] finding. Mirrors\n[`UnusedFileFinding`]: flattens the bare finding and carries a typed\n`actions` array (`resolve-import` primary plus `suppress-line`\nsecondary)."
+    },
+    "UnlistedDependencyFinding": {
+      "type": "object",
+      "properties": {
+        "package_name": {
+          "type": "string",
+          "description": "Package name, including internal workspace package names, that is\nimported but not listed in package.json."
+        },
+        "imported_from": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ImportSite"
+          },
+          "description": "Import sites where this unlisted dependency is used (file path, line, column)."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "package_name",
+        "imported_from",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnlistedDependency`] finding. Carries an\n`install-dependency` primary (non-auto-fixable) plus the standard\n`ignoreDependencies` config suppress."
+    },
+    "TypeOnlyDependencyFinding": {
+      "type": "object",
+      "properties": {
+        "package_name": {
+          "type": "string",
+          "description": "Production dependency that is only used via type-only imports."
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to the package.json where the dependency is listed."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the dependency entry in package.json."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "package_name",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`TypeOnlyDependency`] finding. Carries a\n`move-to-dev` primary plus the standard `ignoreDependencies` config\nsuppress."
+    },
+    "TestOnlyDependencyFinding": {
+      "type": "object",
+      "properties": {
+        "package_name": {
+          "type": "string",
+          "description": "Production dependency that is only imported by test files — consider\nmoving to devDependencies."
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to the package.json where the dependency is listed."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the dependency entry in package.json."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "package_name",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`TestOnlyDependency`] finding. Carries a\n`move-to-dev` primary (different prose than [`TypeOnlyDependencyFinding`])\nplus the standard `ignoreDependencies` config suppress."
+    },
+    "CircularDependencyFinding": {
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Files forming the cycle, in import order."
+        },
+        "length": {
+          "type": "integer",
+          "description": "Number of files in the cycle."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the import that starts the cycle (in the first file)."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the import that starts the cycle."
+        },
+        "is_cross_package": {
+          "type": "boolean",
+          "description": "Whether this cycle crosses workspace package boundaries."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "files",
+        "length",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`CircularDependency`] finding. Mirrors\n[`UnusedFileFinding`]: flattens the bare finding and carries a typed\n`actions` array (`refactor-cycle` primary plus `suppress-line`\nsecondary)."
+    },
+    "BoundaryViolationFinding": {
+      "type": "object",
+      "properties": {
+        "from_path": {
+          "type": "string",
+          "description": "The file making the disallowed import."
+        },
+        "to_path": {
+          "type": "string",
+          "description": "The file being imported that violates the boundary."
+        },
+        "from_zone": {
+          "type": "string",
+          "description": "The zone the importing file belongs to."
+        },
+        "to_zone": {
+          "type": "string",
+          "description": "The zone the imported file belongs to."
+        },
+        "import_specifier": {
+          "type": "string",
+          "description": "The raw import specifier from the source file."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the import statement in the source file."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the import statement."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "from_path",
+        "to_path",
+        "from_zone",
+        "to_zone",
+        "import_specifier",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`BoundaryViolation`] finding. Mirrors\n[`UnusedFileFinding`]: flattens the bare finding and carries a typed\n`actions` array (`refactor-boundary` primary plus `suppress-line`\nsecondary)."
+    },
+    "RuntimeCoverageSchemaVersion": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "1",
+          "description": "First release of the runtime coverage block contract."
+        }
+      ],
+      "description": "Runtime coverage JSON contract version. This is scoped to the\n`runtime_coverage` block and is independent of the top-level fallow\nJSON `schema_version`."
     }
   }
 }
