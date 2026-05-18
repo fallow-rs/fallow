@@ -50,20 +50,22 @@ fn sample_results(root: &Path) -> AnalysisResults {
             span_start: 60,
             is_re_export: false,
         }));
-    r.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-        package_name: "lodash".to_string(),
-        location: DependencyLocation::Dependencies,
-        path: root.join("package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
-    r.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-        package_name: "jest".to_string(),
-        location: DependencyLocation::DevDependencies,
-        path: root.join("package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
+    r.unused_dependencies
+        .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
+    r.unused_dev_dependencies
+        .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+            package_name: "jest".to_string(),
+            location: DependencyLocation::DevDependencies,
+            path: root.join("package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
     r.unused_enum_members
         .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
             path: root.join("src/enums.ts"),
@@ -90,14 +92,17 @@ fn sample_results(root: &Path) -> AnalysisResults {
             col: 0,
             specifier_col: 0,
         }));
-    r.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-        package_name: "chalk".to_string(),
-        imported_from: vec![ImportSite {
-            path: root.join("src/cli.ts"),
-            line: 2,
-            col: 0,
-        }],
-    }));
+    r.unlisted_dependencies
+        .push(UnlistedDependencyFinding::with_actions(
+            UnlistedDependency {
+                package_name: "chalk".to_string(),
+                imported_from: vec![ImportSite {
+                    path: root.join("src/cli.ts"),
+                    line: 2,
+                    col: 0,
+                }],
+            },
+        ));
     r.duplicate_exports.push(DuplicateExport {
         export_name: "Config".to_string(),
         locations: vec![
@@ -113,23 +118,32 @@ fn sample_results(root: &Path) -> AnalysisResults {
             },
         ],
     });
-    r.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-        package_name: "fsevents".to_string(),
-        location: DependencyLocation::OptionalDependencies,
-        path: root.join("package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
-    r.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-        package_name: "zod".to_string(),
-        path: root.join("package.json"),
-        line: 8,
-    }));
-    r.test_only_dependencies.push(TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
-        package_name: "msw".to_string(),
-        path: root.join("package.json"),
-        line: 12,
-    }));
+    r.unused_optional_dependencies
+        .push(UnusedOptionalDependencyFinding::with_actions(
+            UnusedDependency {
+                package_name: "fsevents".to_string(),
+                location: DependencyLocation::OptionalDependencies,
+                path: root.join("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            },
+        ));
+    r.type_only_dependencies
+        .push(TypeOnlyDependencyFinding::with_actions(
+            TypeOnlyDependency {
+                package_name: "zod".to_string(),
+                path: root.join("package.json"),
+                line: 8,
+            },
+        ));
+    r.test_only_dependencies
+        .push(TestOnlyDependencyFinding::with_actions(
+            TestOnlyDependency {
+                package_name: "msw".to_string(),
+                path: root.join("package.json"),
+                line: 12,
+            },
+        ));
     r.circular_dependencies
         .push(CircularDependencyFinding::with_actions(
             CircularDependency {
@@ -357,20 +371,24 @@ fn compact_unused_types_only_snapshot() {
 fn compact_unused_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-        package_name: "lodash".to_string(),
-        location: DependencyLocation::Dependencies,
-        path: root.join("package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
-    results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-        package_name: "moment".to_string(),
-        location: DependencyLocation::Dependencies,
-        path: root.join("package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_dependencies
+        .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
+    results
+        .unused_dependencies
+        .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: "moment".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_unused_deps_only", lines.join("\n"));
 }
@@ -379,13 +397,15 @@ fn compact_unused_deps_only_snapshot() {
 fn compact_unused_dev_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-        package_name: "jest".to_string(),
-        location: DependencyLocation::DevDependencies,
-        path: root.join("package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_dev_dependencies
+        .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+            package_name: "jest".to_string(),
+            location: DependencyLocation::DevDependencies,
+            path: root.join("package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_unused_dev_deps_only", lines.join("\n"));
 }
@@ -394,13 +414,17 @@ fn compact_unused_dev_deps_only_snapshot() {
 fn compact_unused_optional_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-        package_name: "fsevents".to_string(),
-        location: DependencyLocation::OptionalDependencies,
-        path: root.join("package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_optional_dependencies
+        .push(UnusedOptionalDependencyFinding::with_actions(
+            UnusedDependency {
+                package_name: "fsevents".to_string(),
+                location: DependencyLocation::OptionalDependencies,
+                path: root.join("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            },
+        ));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_unused_optional_deps_only", lines.join("\n"));
 }
@@ -435,14 +459,18 @@ fn compact_unresolved_imports_only_snapshot() {
 fn compact_unlisted_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-        package_name: "chalk".to_string(),
-        imported_from: vec![ImportSite {
-            path: root.join("src/cli.ts"),
-            line: 2,
-            col: 0,
-        }],
-    }));
+    results
+        .unlisted_dependencies
+        .push(UnlistedDependencyFinding::with_actions(
+            UnlistedDependency {
+                package_name: "chalk".to_string(),
+                imported_from: vec![ImportSite {
+                    path: root.join("src/cli.ts"),
+                    line: 2,
+                    col: 0,
+                }],
+            },
+        ));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_unlisted_deps_only", lines.join("\n"));
 }
@@ -629,16 +657,24 @@ fn sarif_mixed_severity_snapshot() {
 fn json_type_only_deps_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-        package_name: "zod".to_string(),
-        path: root.join("package.json"),
-        line: 8,
-    }));
-    results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-        package_name: "@types/react".to_string(),
-        path: root.join("package.json"),
-        line: 8,
-    }));
+    results
+        .type_only_dependencies
+        .push(TypeOnlyDependencyFinding::with_actions(
+            TypeOnlyDependency {
+                package_name: "zod".to_string(),
+                path: root.join("package.json"),
+                line: 8,
+            },
+        ));
+    results
+        .type_only_dependencies
+        .push(TypeOnlyDependencyFinding::with_actions(
+            TypeOnlyDependency {
+                package_name: "@types/react".to_string(),
+                path: root.join("package.json"),
+                line: 8,
+            },
+        ));
     let elapsed = Duration::from_millis(10);
     let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
@@ -718,13 +754,15 @@ fn json_unused_types_only_snapshot() {
 fn json_unused_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-        package_name: "lodash".to_string(),
-        location: DependencyLocation::Dependencies,
-        path: root.join("package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_dependencies
+        .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
     let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_deps_only", redact_version(&json_str));
@@ -752,14 +790,18 @@ fn json_unresolved_imports_only_snapshot() {
 fn json_unlisted_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-        package_name: "chalk".to_string(),
-        imported_from: vec![ImportSite {
-            path: root.join("src/cli.ts"),
-            line: 2,
-            col: 0,
-        }],
-    }));
+    results
+        .unlisted_dependencies
+        .push(UnlistedDependencyFinding::with_actions(
+            UnlistedDependency {
+                package_name: "chalk".to_string(),
+                imported_from: vec![ImportSite {
+                    path: root.join("src/cli.ts"),
+                    line: 2,
+                    col: 0,
+                }],
+            },
+        ));
     let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unlisted_deps_only", redact_version(&json_str));
@@ -899,13 +941,15 @@ fn sarif_unused_types_only_snapshot() {
 fn sarif_unused_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-        package_name: "lodash".to_string(),
-        location: DependencyLocation::Dependencies,
-        path: root.join("package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_dependencies
+        .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
     insta::assert_snapshot!("sarif_unused_deps_only", redact_sarif_version(&json_str));
@@ -936,14 +980,18 @@ fn sarif_unresolved_imports_only_snapshot() {
 fn sarif_unlisted_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-        package_name: "chalk".to_string(),
-        imported_from: vec![ImportSite {
-            path: root.join("src/cli.ts"),
-            line: 2,
-            col: 0,
-        }],
-    }));
+    results
+        .unlisted_dependencies
+        .push(UnlistedDependencyFinding::with_actions(
+            UnlistedDependency {
+                package_name: "chalk".to_string(),
+                imported_from: vec![ImportSite {
+                    path: root.join("src/cli.ts"),
+                    line: 2,
+                    col: 0,
+                }],
+            },
+        ));
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
     insta::assert_snapshot!("sarif_unlisted_deps_only", redact_sarif_version(&json_str));
@@ -1135,20 +1183,24 @@ fn compact_multiple_exports_same_file_snapshot() {
 fn json_workspace_dep_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-        package_name: "lodash".to_string(),
-        location: DependencyLocation::Dependencies,
-        path: root.join("packages/ui/package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
-    results.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-        package_name: "jest".to_string(),
-        location: DependencyLocation::DevDependencies,
-        path: root.join("packages/ui/package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_dependencies
+        .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("packages/ui/package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
+    results
+        .unused_dev_dependencies
+        .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+            package_name: "jest".to_string(),
+            location: DependencyLocation::DevDependencies,
+            path: root.join("packages/ui/package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
     let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_workspace_deps", redact_version(&json_str));
@@ -1158,13 +1210,15 @@ fn json_workspace_dep_snapshot() {
 fn sarif_workspace_dep_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-        package_name: "lodash".to_string(),
-        location: DependencyLocation::Dependencies,
-        path: root.join("packages/ui/package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_dependencies
+        .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("packages/ui/package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
     let rules = RulesConfig::default();
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -1256,13 +1310,15 @@ fn codeclimate_unused_types_only_snapshot() {
 fn codeclimate_unused_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-        package_name: "lodash".to_string(),
-        location: DependencyLocation::Dependencies,
-        path: root.join("package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_dependencies
+        .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
@@ -1292,14 +1348,18 @@ fn codeclimate_unresolved_imports_only_snapshot() {
 fn codeclimate_unlisted_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-        package_name: "chalk".to_string(),
-        imported_from: vec![ImportSite {
-            path: root.join("src/logger.ts"),
-            line: 1,
-            col: 0,
-        }],
-    }));
+    results
+        .unlisted_dependencies
+        .push(UnlistedDependencyFinding::with_actions(
+            UnlistedDependency {
+                package_name: "chalk".to_string(),
+                imported_from: vec![ImportSite {
+                    path: root.join("src/logger.ts"),
+                    line: 1,
+                    col: 0,
+                }],
+            },
+        ));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
@@ -1431,11 +1491,15 @@ fn codeclimate_mixed_severity_snapshot() {
 fn codeclimate_type_only_deps_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-        package_name: "zod".to_string(),
-        path: root.join("package.json"),
-        line: 8,
-    }));
+    results
+        .type_only_dependencies
+        .push(TypeOnlyDependencyFinding::with_actions(
+            TypeOnlyDependency {
+                package_name: "zod".to_string(),
+                path: root.join("package.json"),
+                line: 8,
+            },
+        ));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
@@ -1446,13 +1510,15 @@ fn codeclimate_type_only_deps_snapshot() {
 fn codeclimate_unused_dev_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-        package_name: "jest".to_string(),
-        location: DependencyLocation::DevDependencies,
-        path: root.join("package.json"),
-        line: 12,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_dev_dependencies
+        .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+            package_name: "jest".to_string(),
+            location: DependencyLocation::DevDependencies,
+            path: root.join("package.json"),
+            line: 12,
+            used_in_workspaces: Vec::new(),
+        }));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
@@ -1463,13 +1529,17 @@ fn codeclimate_unused_dev_deps_only_snapshot() {
 fn codeclimate_unused_optional_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-        package_name: "fsevents".to_string(),
-        location: DependencyLocation::OptionalDependencies,
-        path: root.join("package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_optional_dependencies
+        .push(UnusedOptionalDependencyFinding::with_actions(
+            UnusedDependency {
+                package_name: "fsevents".to_string(),
+                location: DependencyLocation::OptionalDependencies,
+                path: root.join("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            },
+        ));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
@@ -1544,13 +1614,15 @@ fn codeclimate_multiple_exports_same_file_snapshot() {
 fn codeclimate_workspace_dep_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-        package_name: "lodash".to_string(),
-        location: DependencyLocation::Dependencies,
-        path: root.join("packages/ui/package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_dependencies
+        .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("packages/ui/package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
@@ -1676,11 +1748,15 @@ fn compact_circular_deps_only_snapshot() {
 fn sarif_type_only_deps_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-        package_name: "zod".to_string(),
-        path: root.join("package.json"),
-        line: 8,
-    }));
+    results
+        .type_only_dependencies
+        .push(TypeOnlyDependencyFinding::with_actions(
+            TypeOnlyDependency {
+                package_name: "zod".to_string(),
+                path: root.join("package.json"),
+                line: 8,
+            },
+        ));
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
     insta::assert_snapshot!("sarif_type_only_deps", redact_sarif_version(&json_str));
@@ -1690,11 +1766,15 @@ fn sarif_type_only_deps_snapshot() {
 fn compact_type_only_deps_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-        package_name: "zod".to_string(),
-        path: root.join("package.json"),
-        line: 8,
-    }));
+    results
+        .type_only_dependencies
+        .push(TypeOnlyDependencyFinding::with_actions(
+            TypeOnlyDependency {
+                package_name: "zod".to_string(),
+                path: root.join("package.json"),
+                line: 8,
+            },
+        ));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_type_only_deps", lines.join("\n"));
 }
@@ -1705,13 +1785,15 @@ fn compact_type_only_deps_snapshot() {
 fn json_unused_dev_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-        package_name: "jest".to_string(),
-        location: DependencyLocation::DevDependencies,
-        path: root.join("package.json"),
-        line: 12,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_dev_dependencies
+        .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+            package_name: "jest".to_string(),
+            location: DependencyLocation::DevDependencies,
+            path: root.join("package.json"),
+            line: 12,
+            used_in_workspaces: Vec::new(),
+        }));
     let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_dev_deps_only", redact_version(&json_str));
@@ -1721,13 +1803,15 @@ fn json_unused_dev_deps_only_snapshot() {
 fn sarif_unused_dev_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_dev_dependencies.push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-        package_name: "jest".to_string(),
-        location: DependencyLocation::DevDependencies,
-        path: root.join("package.json"),
-        line: 12,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_dev_dependencies
+        .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
+            package_name: "jest".to_string(),
+            location: DependencyLocation::DevDependencies,
+            path: root.join("package.json"),
+            line: 12,
+            used_in_workspaces: Vec::new(),
+        }));
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
     insta::assert_snapshot!(
@@ -1740,13 +1824,17 @@ fn sarif_unused_dev_deps_only_snapshot() {
 fn json_unused_optional_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-        package_name: "fsevents".to_string(),
-        location: DependencyLocation::OptionalDependencies,
-        path: root.join("package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_optional_dependencies
+        .push(UnusedOptionalDependencyFinding::with_actions(
+            UnusedDependency {
+                package_name: "fsevents".to_string(),
+                location: DependencyLocation::OptionalDependencies,
+                path: root.join("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            },
+        ));
     let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_optional_deps_only", redact_version(&json_str));
@@ -1756,13 +1844,17 @@ fn json_unused_optional_deps_only_snapshot() {
 fn sarif_unused_optional_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_optional_dependencies.push(UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-        package_name: "fsevents".to_string(),
-        location: DependencyLocation::OptionalDependencies,
-        path: root.join("package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_optional_dependencies
+        .push(UnusedOptionalDependencyFinding::with_actions(
+            UnusedDependency {
+                package_name: "fsevents".to_string(),
+                location: DependencyLocation::OptionalDependencies,
+                path: root.join("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            },
+        ));
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
     insta::assert_snapshot!(
@@ -1777,13 +1869,15 @@ fn sarif_unused_optional_deps_only_snapshot() {
 fn compact_workspace_dep_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-        package_name: "lodash".to_string(),
-        location: DependencyLocation::Dependencies,
-        path: root.join("packages/ui/package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_dependencies
+        .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("packages/ui/package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_workspace_deps", lines.join("\n"));
 }
@@ -1885,13 +1979,15 @@ fn markdown_unused_types_only_snapshot() {
 fn markdown_unused_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-        package_name: "lodash".to_string(),
-        location: DependencyLocation::Dependencies,
-        path: root.join("package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_dependencies
+        .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
     let output = build_markdown(&results, &root);
     insta::assert_snapshot!("markdown_unused_deps_only", output);
 }
@@ -1917,14 +2013,18 @@ fn markdown_unresolved_imports_only_snapshot() {
 fn markdown_unlisted_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unlisted_dependencies.push(UnlistedDependencyFinding::with_actions(UnlistedDependency {
-        package_name: "chalk".to_string(),
-        imported_from: vec![ImportSite {
-            path: root.join("src/cli.ts"),
-            line: 2,
-            col: 0,
-        }],
-    }));
+    results
+        .unlisted_dependencies
+        .push(UnlistedDependencyFinding::with_actions(
+            UnlistedDependency {
+                package_name: "chalk".to_string(),
+                imported_from: vec![ImportSite {
+                    path: root.join("src/cli.ts"),
+                    line: 2,
+                    col: 0,
+                }],
+            },
+        ));
     let output = build_markdown(&results, &root);
     insta::assert_snapshot!("markdown_unlisted_deps_only", output);
 }
@@ -2011,11 +2111,15 @@ fn markdown_circular_deps_only_snapshot() {
 fn markdown_type_only_deps_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.type_only_dependencies.push(TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-        package_name: "zod".to_string(),
-        path: root.join("package.json"),
-        line: 8,
-    }));
+    results
+        .type_only_dependencies
+        .push(TypeOnlyDependencyFinding::with_actions(
+            TypeOnlyDependency {
+                package_name: "zod".to_string(),
+                path: root.join("package.json"),
+                line: 8,
+            },
+        ));
     let output = build_markdown(&results, &root);
     insta::assert_snapshot!("markdown_type_only_deps_only", output);
 }
@@ -2043,13 +2147,15 @@ fn markdown_re_export_variant_snapshot() {
 fn markdown_workspace_dep_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.unused_dependencies.push(UnusedDependencyFinding::with_actions(UnusedDependency {
-        package_name: "lodash".to_string(),
-        location: DependencyLocation::Dependencies,
-        path: root.join("packages/ui/package.json"),
-        line: 5,
-        used_in_workspaces: Vec::new(),
-    }));
+    results
+        .unused_dependencies
+        .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("packages/ui/package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }));
     let output = build_markdown(&results, &root);
     insta::assert_snapshot!("markdown_workspace_deps", output);
 }

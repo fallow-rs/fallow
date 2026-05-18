@@ -40,17 +40,19 @@ export type {
   StaleSuppression,
   SuppressFileAction,
   SuppressLineAction,
-  TestOnlyDependency,
-  TypeOnlyDependency,
-  UnlistedDependency,
+  TestOnlyDependencyFinding,
+  TypeOnlyDependencyFinding,
+  UnlistedDependencyFinding,
   UnresolvedImportFinding,
   UnusedCatalogEntry,
   UnusedClassMemberFinding,
-  UnusedDependency,
+  UnusedDependencyFinding,
   UnusedDependencyOverride,
+  UnusedDevDependencyFinding,
   UnusedEnumMemberFinding,
   UnusedExportFinding,
   UnusedFileFinding,
+  UnusedOptionalDependencyFinding,
   UnusedTypeFinding,
   MisconfiguredDependencyOverride,
 } from "./generated/output-contract.js";
@@ -63,16 +65,29 @@ import type {
   BoundaryViolationFinding,
   CircularDependencyFinding,
   PrivateTypeLeakFinding,
+  TestOnlyDependencyFinding,
+  TypeOnlyDependencyFinding,
+  UnlistedDependencyFinding,
   UnresolvedImportFinding,
   UnusedClassMemberFinding,
+  UnusedDependencyFinding,
+  UnusedDevDependencyFinding,
   UnusedEnumMemberFinding,
   UnusedExportFinding,
   UnusedFileFinding,
+  UnusedOptionalDependencyFinding,
 } from "./generated/output-contract.js";
 export type BoundaryViolation = BoundaryViolationFinding;
 export type CircularDependency = CircularDependencyFinding;
 export type PrivateTypeLeak = PrivateTypeLeakFinding;
+export type TestOnlyDependency = TestOnlyDependencyFinding;
+export type TypeOnlyDependency = TypeOnlyDependencyFinding;
+export type UnlistedDependency = UnlistedDependencyFinding;
 export type UnresolvedImport = UnresolvedImportFinding;
+export type UnusedDependency =
+  | UnusedDependencyFinding
+  | UnusedDevDependencyFinding
+  | UnusedOptionalDependencyFinding;
 export type UnusedExport = UnusedExportFinding;
 export type UnusedFile = UnusedFileFinding;
 export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding;

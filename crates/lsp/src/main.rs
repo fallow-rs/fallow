@@ -1649,89 +1649,97 @@ mod tests {
         assert_eq!(target.unresolved_imports.len(), 1);
     }
 
-    #[test]
-    fn merge_results_covers_all_fields() {
-        let mut target = AnalysisResults::default();
-        let mut source = AnalysisResults::default();
+    fn merge_test_unused_export(
+        path: &str,
+        export_name: &str,
+        is_type_only: bool,
+        line: u32,
+    ) -> UnusedExport {
+        UnusedExport {
+            path: path.into(),
+            export_name: export_name.to_string(),
+            is_type_only,
+            line,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        }
+    }
 
-        source
-            .unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
+    fn merge_test_unused_dependency(
+        package_name: &str,
+        location: fallow_core::results::DependencyLocation,
+        line: u32,
+    ) -> UnusedDependency {
+        UnusedDependency {
+            package_name: package_name.to_string(),
+            location,
+            path: "/pkg.json".into(),
+            line,
+            used_in_workspaces: Vec::new(),
+        }
+    }
+
+    fn merge_test_unused_member(
+        parent_name: &str,
+        member_name: &str,
+        kind: fallow_core::extract::MemberKind,
+        line: u32,
+    ) -> UnusedMember {
+        UnusedMember {
+            path: "/f.ts".into(),
+            parent_name: parent_name.to_string(),
+            member_name: member_name.to_string(),
+            kind,
+            line,
+            col: 0,
+        }
+    }
+
+    fn merge_test_source_with_all_fields() -> AnalysisResults {
+        AnalysisResults {
+            unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
                 path: "/f.ts".into(),
-            }));
-        source
-            .unused_exports
-            .push(UnusedExportFinding::with_actions(UnusedExport {
-                path: "/f.ts".into(),
-                export_name: "e".to_string(),
-                is_type_only: false,
-                line: 1,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-            }));
-        source
-            .unused_types
-            .push(UnusedTypeFinding::with_actions(UnusedExport {
-                path: "/f.ts".into(),
-                export_name: "T".to_string(),
-                is_type_only: true,
-                line: 2,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-            }));
-        source
-            .unused_dependencies
-            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
-                package_name: "dep".to_string(),
-                location: fallow_core::results::DependencyLocation::Dependencies,
-                path: "/pkg.json".into(),
-                line: 3,
-                used_in_workspaces: Vec::new(),
-            }));
-        source
-            .unused_dev_dependencies
-            .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-                package_name: "dev-dep".to_string(),
-                location: fallow_core::results::DependencyLocation::DevDependencies,
-                path: "/pkg.json".into(),
-                line: 4,
-                used_in_workspaces: Vec::new(),
-            }));
-        source
-            .unused_optional_dependencies
-            .push(UnusedOptionalDependencyFinding::with_actions(
-                UnusedDependency {
-                    package_name: "opt-dep".to_string(),
-                    location: fallow_core::results::DependencyLocation::OptionalDependencies,
-                    path: "/pkg.json".into(),
-                    line: 5,
-                    used_in_workspaces: Vec::new(),
-                },
-            ));
-        source
-            .unused_enum_members
-            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
-                path: "/f.ts".into(),
-                parent_name: "E".to_string(),
-                member_name: "A".to_string(),
-                kind: fallow_core::extract::MemberKind::EnumMember,
-                line: 6,
-                col: 0,
-            }));
-        source
-            .unused_class_members
-            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
-                path: "/f.ts".into(),
-                parent_name: "C".to_string(),
-                member_name: "m".to_string(),
-                kind: fallow_core::extract::MemberKind::ClassMethod,
-                line: 7,
-                col: 0,
-            }));
-        source.unresolved_imports.push(
-            fallow_core::results::UnresolvedImportFinding::with_actions(
+            })],
+            unused_exports: vec![UnusedExportFinding::with_actions(merge_test_unused_export(
+                "/f.ts", "e", false, 1,
+            ))],
+            unused_types: vec![UnusedTypeFinding::with_actions(merge_test_unused_export(
+                "/f.ts", "T", true, 2,
+            ))],
+            unused_dependencies: vec![UnusedDependencyFinding::with_actions(
+                merge_test_unused_dependency(
+                    "dep",
+                    fallow_core::results::DependencyLocation::Dependencies,
+                    3,
+                ),
+            )],
+            unused_dev_dependencies: vec![UnusedDevDependencyFinding::with_actions(
+                merge_test_unused_dependency(
+                    "dev-dep",
+                    fallow_core::results::DependencyLocation::DevDependencies,
+                    4,
+                ),
+            )],
+            unused_optional_dependencies: vec![UnusedOptionalDependencyFinding::with_actions(
+                merge_test_unused_dependency(
+                    "opt-dep",
+                    fallow_core::results::DependencyLocation::OptionalDependencies,
+                    5,
+                ),
+            )],
+            unused_enum_members: vec![UnusedEnumMemberFinding::with_actions(
+                merge_test_unused_member("E", "A", fallow_core::extract::MemberKind::EnumMember, 6),
+            )],
+            unused_class_members: vec![UnusedClassMemberFinding::with_actions(
+                merge_test_unused_member(
+                    "C",
+                    "m",
+                    fallow_core::extract::MemberKind::ClassMethod,
+                    7,
+                ),
+            )],
+            unresolved_imports: vec![fallow_core::results::UnresolvedImportFinding::with_actions(
                 fallow_core::results::UnresolvedImport {
                     path: "/f.ts".into(),
                     specifier: "./gone".to_string(),
@@ -1739,32 +1747,25 @@ mod tests {
                     col: 0,
                     specifier_col: 10,
                 },
-            ),
-        );
-        source
-            .unlisted_dependencies
-            .push(UnlistedDependencyFinding::with_actions(
+            )],
+            unlisted_dependencies: vec![UnlistedDependencyFinding::with_actions(
                 UnlistedDependency {
                     package_name: "unlisted".to_string(),
                     imported_from: vec![],
                 },
-            ));
-        source
-            .duplicate_exports
-            .push(fallow_core::results::DuplicateExport {
+            )],
+            duplicate_exports: vec![fallow_core::results::DuplicateExport {
                 export_name: "dup".to_string(),
                 locations: vec![],
-            });
-        source.type_only_dependencies.push(
-            fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-                package_name: "type-only".to_string(),
-                path: "/pkg.json".into(),
-                line: 9,
-            }),
-        );
-        source
-            .circular_dependencies
-            .push(CircularDependencyFinding::with_actions(
+            }],
+            type_only_dependencies: vec![
+                fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
+                    package_name: "type-only".to_string(),
+                    path: "/pkg.json".into(),
+                    line: 9,
+                }),
+            ],
+            circular_dependencies: vec![CircularDependencyFinding::with_actions(
                 CircularDependency {
                     files: vec!["/a.ts".into(), "/b.ts".into()],
                     length: 2,
@@ -1772,19 +1773,15 @@ mod tests {
                     col: 0,
                     is_cross_package: false,
                 },
-            ));
-        source
-            .test_only_dependencies
-            .push(TestOnlyDependencyFinding::with_actions(
+            )],
+            test_only_dependencies: vec![TestOnlyDependencyFinding::with_actions(
                 TestOnlyDependency {
                     package_name: "test-only".to_string(),
                     path: "/pkg.json".into(),
                     line: 11,
                 },
-            ));
-        source
-            .boundary_violations
-            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+            )],
+            boundary_violations: vec![BoundaryViolationFinding::with_actions(BoundaryViolation {
                 from_path: "/a.ts".into(),
                 to_path: "/b.ts".into(),
                 from_zone: "ui".to_string(),
@@ -1792,15 +1789,23 @@ mod tests {
                 import_specifier: "../data/db".to_string(),
                 line: 12,
                 col: 0,
-            }));
-        source.export_usages.push(ExportUsage {
-            path: "/f.ts".into(),
-            export_name: "used".to_string(),
-            line: 13,
-            col: 0,
-            reference_count: 3,
-            reference_locations: vec![],
-        });
+            })],
+            export_usages: vec![ExportUsage {
+                path: "/f.ts".into(),
+                export_name: "used".to_string(),
+                line: 13,
+                col: 0,
+                reference_count: 3,
+                reference_locations: vec![],
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn merge_results_covers_all_fields() {
+        let mut target = AnalysisResults::default();
+        let source = merge_test_source_with_all_fields();
 
         merge_results(&mut target, source);
 

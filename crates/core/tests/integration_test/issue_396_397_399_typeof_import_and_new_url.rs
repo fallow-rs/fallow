@@ -25,7 +25,8 @@ fn unused_file_names(results: &fallow_types::results::AnalysisResults) -> Vec<St
         .unused_files
         .iter()
         .map(|f| {
-            f.path
+            f.file
+                .path
                 .to_string_lossy()
                 .replace('\\', "/")
                 .rsplit('/')
@@ -40,7 +41,7 @@ fn unresolved_specifiers(results: &fallow_types::results::AnalysisResults) -> Ve
     results
         .unresolved_imports
         .iter()
-        .map(|u| u.specifier.clone())
+        .map(|u| u.import.specifier.clone())
         .collect()
 }
 
