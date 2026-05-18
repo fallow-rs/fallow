@@ -942,7 +942,14 @@ fn build_duplicate_exports_ignore_rules(
 ) -> Option<Vec<IgnoreExportsRule>> {
     let mut entries: Vec<IgnoreExportsRule> = Vec::with_capacity(export.locations.len());
     for loc in &export.locations {
-        let path = loc.path.to_string_lossy().to_string();
+        // Normalize separators to forward slashes so pasting the action value
+        // into `.fallowrc.json` produces a portable rule. On Windows
+        // `to_string_lossy` preserves backslashes, which the old
+        // `inject_actions` post-pass implicitly normalized because it read
+        // the path AFTER `strip_root_prefix` had already run through
+        // `normalize_uri`; the typed wrapper builds the value before
+        // serialization, so the normalization has to be explicit here.
+        let path = loc.path.to_string_lossy().replace('\\', "/");
         if path.is_empty() {
             continue;
         }
@@ -1092,7 +1099,11 @@ impl UnresolvedCatalogReferenceFinding {
     /// the struct.
     #[must_use]
     pub fn with_actions(reference: UnresolvedCatalogReference) -> Self {
-        let consumer_path = reference.path.to_string_lossy().to_string();
+        // Normalize separators to forward slashes so the
+        // `ignoreCatalogReferences.consumer` action value is portable when
+        // pasted into a Windows-authored config. See
+        // `build_duplicate_exports_ignore_rules` for the same pattern.
+        let consumer_path = reference.path.to_string_lossy().replace('\\', "/");
         let primary = if reference.available_in_catalogs.is_empty() {
             IssueAction::Fix(FixAction {
                 kind: FixActionType::AddCatalogEntry,
