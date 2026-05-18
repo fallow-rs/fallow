@@ -1042,3 +1042,62 @@ pub struct BoundariesListLogicalGroup {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub child_source_indices: Vec<usize>,
 }
+
+/// Typed root of every fallow `--format json` envelope shape that
+/// serializes as a JSON object. The schema derived from this enum drives
+/// the document-root `oneOf` in `docs/output-schema.json`, replacing the
+/// previously hand-maintained block.
+///
+/// `#[serde(untagged)]` preserves wire compatibility: consumers see exactly
+/// the same top-level keys today (`schema_version`, `version`, `results`,
+/// `summary`, etc.). The schema's `oneOf` lets agents narrow by trying
+/// variants in order; field sets differ enough that the first matching
+/// variant is the correct one in practice.
+///
+/// Two envelopes are intentionally NOT in this enum:
+/// - `CodeClimateOutput` serializes as a bare JSON array
+///   (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality
+///   spec; `#[serde(tag = ...)]` cannot internally tag a non-object
+///   variant and wrapping the array would break the spec. The root schema
+///   carries it as a sibling `oneOf` branch alongside `FallowOutput`.
+/// - `CoverageAnalyzeOutput` (`fallow coverage analyze --format json`)
+///   does not yet have a Rust struct; it lives on the
+///   `HAND_MAINTAINED_ALLOW_LIST` in `schema_emit.rs` pending typed
+///   migration. The root schema preserves it as a sibling `oneOf` branch
+///   so the documented union stays complete until the migration lands.
+///
+/// A future major release plans to switch this to
+/// `#[serde(tag = "kind")]` for true O(1) discriminability on AI / agent
+/// consumers, paired with a one-cycle `--legacy-envelope` opt-out flag.
+/// Tracked under issue #384.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(title = "fallow --format json (typed root)")
+)]
+#[serde(untagged)]
+pub enum FallowOutput {
+    /// Bare `fallow --format json` (combined dead-code + dupes + health).
+    Combined(CombinedOutput),
+    /// `fallow check --format json` / `fallow dead-code --format json`.
+    Check(CheckOutput),
+    /// `fallow check --format json --group-by <mode>`.
+    CheckGrouped(CheckGroupedOutput),
+    /// `fallow health --format json`.
+    Health(HealthOutput),
+    /// `fallow dupes --format json`.
+    Dupes(DupesOutput),
+    /// `fallow audit --format json`.
+    Audit(AuditOutput),
+    /// `fallow explain <issue-type> --format json`.
+    Explain(ExplainOutput),
+    /// `fallow coverage setup --json`.
+    CoverageSetup(CoverageSetupOutput),
+    /// `fallow --format review-github` / `--format review-gitlab`.
+    ReviewEnvelope(ReviewEnvelopeOutput),
+    /// `fallow ci reconcile-review --format json`.
+    ReviewReconcile(ReviewReconcileOutput),
+    /// `fallow list --boundaries --format json`.
+    ListBoundaries(ListBoundariesOutput),
+}

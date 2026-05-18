@@ -115,12 +115,15 @@ Phase 8 closed the prose-and-shape escape hatch: every type in `derived_definiti
 
 The following surfaces of `docs/output-schema.json` stay hand-maintained today:
 
-- **Top-level metadata** (`$schema`, `$id`, `$comment`, `title`, `description`, `oneOf`); the `merge_with_committed` step in `crates/cli/src/bin/schema_emit.rs` preserves them verbatim. `$id` is the canonical raw GitHub URL and is used by consumers to SHA-pin a schema revision (see `docs/backwards-compatibility.md`).
+- **Top-level metadata** (`$schema`, `$id`, `$comment`, `title`); the `merge_with_committed` step in `crates/cli/src/bin/schema_emit.rs` preserves them verbatim. `$id` is the canonical raw GitHub URL and is used by consumers to SHA-pin a schema revision (see `docs/backwards-compatibility.md`). `description` is now overwritten by `rewrite_document_root_one_of` to keep it in sync with the typed root.
 - **Definitions in `HAND_MAINTAINED_ALLOW_LIST`** inside `drift_tests` in `crates/cli/src/bin/schema_emit.rs`: today this is `CloneFamilyAction`, `CloneGroupAction`, and `CoverageAnalyzeOutput`. Each entry carries a reason linking it to the meta-issue ladder rung that retires it. The strict drift gate's orphan check fires on any other hand-maintained definition, so the allow-list is the canonical record of what stays hand-written and why.
+- **`CoverageAnalyzeOutput`** is also listed in `HAND_MAINTAINED_ROOT_ENVELOPES` so it remains reachable from the document root; the `hand_maintained_root_envelopes_appear_in_root_one_of` drift test fires if the entry is silently dropped from the root `oneOf`.
 
 The `committed_property_refs_match_derived_property_refs` drift test catches `$ref`-value drift between derived and committed property shapes (e.g. if a future change repoints `CombinedOutput.dupes` away from `DuplicationReport`); this is a check, not a hand-maintained section.
 
-If you add a new finding type, envelope, or utility shape, derive `JsonSchema` on the matching Rust struct, register it in `derived_definition_names()`, and the drift gate forces the schema to follow. Adding a new envelope means adding a new file under `crates/cli/src/output_envelope.rs` and adding the type to the top-level `oneOf` in `docs/output-schema.json`.
+The document-root `oneOf` is now derived from Rust as of #384 item 6: the typed `FallowOutput` enum (in `crates/cli/src/output_envelope.rs`) wraps every object-shaped envelope and emits the root union via `rewrite_document_root_one_of`. Editing the root `oneOf` by hand will be reverted on the next regeneration. The root union is `[FallowOutput, CodeClimateOutput, ...HAND_MAINTAINED_ROOT_ENVELOPES]`: `CodeClimateOutput` is a sibling branch because it serializes as a bare JSON array (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality spec and cannot be a variant of an enum that needs to internally tag in a future major.
+
+If you add a new finding type or utility shape, derive `JsonSchema` on the matching Rust struct, register it in `derived_definition_names()`, and the drift gate forces the schema to follow. **Adding a new top-level envelope** also requires adding a new variant to `FallowOutput` in `crates/cli/src/output_envelope.rs` so the document root keeps documenting every wire shape.
 
 ### After editing the schema
 

@@ -49,7 +49,7 @@ use fallow_cli::output_envelope::{
     CodeClimateSeverity, CombinedOutput, CoverageSetupFileToEdit, CoverageSetupFramework,
     CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
     CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion, CoverageSetupSnippet, DupesOutput,
-    ExplainOutput, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
+    ExplainOutput, FallowOutput, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
     GitLabReviewPosition, GitLabReviewPositionType, GroupByMode, HealthOutput,
     ListBoundariesOutput, ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent,
     ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewProvider,
@@ -318,6 +318,12 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "HealthOutput",
         "ReviewEnvelopeOutput",
         "ReviewReconcileOutput",
+        // crates/cli/src/output_envelope.rs - typed document root that
+        // wraps the 11 object-shaped envelopes via `#[serde(untagged)]`.
+        // Drives the schema's document-root `oneOf` (see
+        // `rewrite_document_root_one_of` in `merge_with_committed`); the
+        // committed schema's root therefore becomes a derived artifact.
+        "FallowOutput",
         // crates/cli/src/output_envelope.rs - list --boundaries envelope
         // and building blocks (issue #373).
         "BoundariesListLogicalGroup",
@@ -617,7 +623,41 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<MetaMetric>();
     let _ = generator.subschema_for::<MetaRule>();
 
-    // Per-command envelope structs (crates/cli/src/output_envelope.rs).
+    register_per_command_envelope_definitions(&mut generator);
+
+    // Typed document root. Must be registered AFTER every variant struct so
+    // schemars resolves each variant against the already-registered
+    // definition rather than inlining.
+    let _ = generator.subschema_for::<FallowOutput>();
+
+    register_list_boundaries_definitions(&mut generator);
+
+    // Per-finding action wrapper types (crates/types/src/output_health.rs).
+    let _ = generator.subschema_for::<HealthFindingAction>();
+    let _ = generator.subschema_for::<HealthFindingActionType>();
+    let _ = generator.subschema_for::<HotspotAction>();
+    let _ = generator.subschema_for::<HotspotActionType>();
+    let _ = generator.subschema_for::<HotspotActionHeuristic>();
+    let _ = generator.subschema_for::<RefactoringTargetAction>();
+    let _ = generator.subschema_for::<RefactoringTargetActionType>();
+    let _ = generator.subschema_for::<UntestedFileAction>();
+    let _ = generator.subschema_for::<UntestedFileActionType>();
+    let _ = generator.subschema_for::<UntestedExportAction>();
+    let _ = generator.subschema_for::<UntestedExportActionType>();
+
+    // `apply_transforms = true` runs any registered schema transforms (e.g.
+    // inline-subschemas) before returning, matching what `into_root_schema_for`
+    // would have produced. We do not register custom transforms, so this is a
+    // no-op today; passing `true` keeps the output stable if a future settings
+    // change adds one.
+    generator.take_definitions(true)
+}
+
+/// Register per-command envelope structs from `crates/cli/src/output_envelope.rs`.
+/// Extracted from [`derived_definitions`] to keep the orchestrator under the
+/// SIG unit-size threshold (the per-envelope list grew past the 150-line cap
+/// when `FallowOutput` was added in #384 item 6).
+fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<AuditOutput>();
     let _ = generator.subschema_for::<AuditCommand>();
     let _ = generator.subschema_for::<CoverageSetupOutput>();
@@ -658,28 +698,6 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<ReviewCheckConclusion>();
     let _ = generator.subschema_for::<ReviewReconcileOutput>();
     let _ = generator.subschema_for::<ReviewReconcileSchema>();
-
-    register_list_boundaries_definitions(&mut generator);
-
-    // Per-finding action wrapper types (crates/types/src/output_health.rs).
-    let _ = generator.subschema_for::<HealthFindingAction>();
-    let _ = generator.subschema_for::<HealthFindingActionType>();
-    let _ = generator.subschema_for::<HotspotAction>();
-    let _ = generator.subschema_for::<HotspotActionType>();
-    let _ = generator.subschema_for::<HotspotActionHeuristic>();
-    let _ = generator.subschema_for::<RefactoringTargetAction>();
-    let _ = generator.subschema_for::<RefactoringTargetActionType>();
-    let _ = generator.subschema_for::<UntestedFileAction>();
-    let _ = generator.subschema_for::<UntestedFileActionType>();
-    let _ = generator.subschema_for::<UntestedExportAction>();
-    let _ = generator.subschema_for::<UntestedExportActionType>();
-
-    // `apply_transforms = true` runs any registered schema transforms (e.g.
-    // inline-subschemas) before returning, matching what `into_root_schema_for`
-    // would have produced. We do not register custom transforms, so this is a
-    // no-op today; passing `true` keeps the output stable if a future settings
-    // change adds one.
-    generator.take_definitions(true)
 }
 
 /// Register the `fallow list --boundaries --format json` envelope and its
@@ -760,7 +778,74 @@ fn merge_with_committed(derived: &Map<String, Value>) -> Result<Value, String> {
         definitions.insert(name.clone(), value);
     }
 
+    rewrite_document_root_one_of(&mut document)?;
+
     Ok(document)
+}
+
+/// Hand-maintained root-level envelope definitions that are NOT yet typed
+/// via Rust + schemars but DO appear as top-level `--format json` outputs.
+/// Each entry is referenced from the document-root `oneOf` so the typed
+/// surface (`FallowOutput`) plus the bare-array CodeClimate spec plus these
+/// hand-maintained envelopes together document every shape fallow can emit.
+///
+/// Entries here MUST also appear as a `$ref` from the document-root `oneOf`
+/// (the drift test `hand_maintained_root_envelopes_appear_in_root_one_of`
+/// asserts this). Removing an entry means the migration has landed and the
+/// envelope is now a variant of `FallowOutput`; in that case the
+/// corresponding `definitions[<name>]` block must also be removed (or
+/// remain only as a transitive helper) so the test
+/// `every_registered_name_resolves_to_a_derived_schema` still passes.
+const HAND_MAINTAINED_ROOT_ENVELOPES: &[&str] = &[
+    // `fallow coverage analyze --format json`. Pending #384 item 3c
+    // (typed CoverageAnalyzeOutput); the hand-maintained definition lives
+    // in `docs/output-schema.json` until then.
+    "CoverageAnalyzeOutput",
+];
+
+/// Drive the document-root `oneOf` from the typed `FallowOutput` enum plus
+/// the two non-object branches (`CodeClimateOutput`, hand-maintained
+/// envelopes). Replaces the previously hand-maintained block.
+///
+/// Also rewrites the root `description` to point readers at the discriminator
+/// rules (untagged + unique-field-presence) rather than the per-command
+/// enumeration the old prose carried.
+fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
+    let root = document
+        .as_object_mut()
+        .ok_or_else(|| "schema document root is not a JSON object".to_string())?;
+
+    let mut one_of: Vec<Value> = Vec::with_capacity(2 + HAND_MAINTAINED_ROOT_ENVELOPES.len());
+    one_of.push(serde_json::json!({ "$ref": "#/definitions/FallowOutput" }));
+    // CodeClimateOutput serializes as `Vec<CodeClimateIssue>` via
+    // `#[serde(transparent)]`. `#[serde(tag = ...)]` cannot internally tag
+    // a non-object variant and wrapping the array would break the Code
+    // Climate / GitLab Code Quality spec, so it stays as a sibling root
+    // branch outside `FallowOutput`.
+    one_of.push(serde_json::json!({ "$ref": "#/definitions/CodeClimateOutput" }));
+    for name in HAND_MAINTAINED_ROOT_ENVELOPES {
+        one_of.push(serde_json::json!({ "$ref": format!("#/definitions/{name}") }));
+    }
+    root.insert("oneOf".to_string(), Value::Array(one_of));
+
+    root.insert(
+        "description".to_string(),
+        Value::String(
+            "Schemas for the JSON output of fallow commands. Every \
+             object-shaped envelope is a variant of `FallowOutput` (untagged: \
+             the wire shape is unchanged, consumers narrow by unique field \
+             presence; e.g. `summary.total_issues` for check, `report` for \
+             health, `groups` for dupes, `check`+`dupes`+`health` keys for the \
+             bare combined invocation, `boundaries` for list --boundaries). \
+             `CodeClimateOutput` is a bare JSON array per the Code Climate / \
+             GitLab Code Quality spec and stays a sibling root branch. \
+             `CoverageAnalyzeOutput` is still hand-maintained pending the \
+             typed migration in issue #384 item 3."
+                .to_string(),
+        ),
+    );
+
+    Ok(())
 }
 
 /// Add the `actions` array and optional `introduced` flag to a derived
@@ -1557,6 +1642,82 @@ mod drift_tests {
         assert!(
             !regular.contains_key("format"),
             "schemars `format` keyword inside a property's schema is still stripped"
+        );
+    }
+
+    /// Every entry in `HAND_MAINTAINED_ROOT_ENVELOPES` MUST appear as a
+    /// `$ref` in the document-root `oneOf`. Without this gate, a future
+    /// migration that types `CoverageAnalyzeOutput` and removes its
+    /// `definitions` entry could silently drop it from the documented
+    /// union if the implementer forgot to add the variant to
+    /// `FallowOutput`. The drift test fires so the regression surfaces
+    /// at `cargo test` time rather than at downstream-consumer time.
+    #[test]
+    fn hand_maintained_root_envelopes_appear_in_root_one_of() {
+        let document: Value = serde_json::from_str(COMMITTED_SCHEMA)
+            .expect("committed docs/output-schema.json must parse");
+        let one_of = document
+            .get("oneOf")
+            .and_then(Value::as_array)
+            .expect("committed schema must carry a root-level `oneOf`");
+
+        let mut refs: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+        for entry in one_of {
+            if let Some(reference) = entry.get("$ref").and_then(Value::as_str)
+                && let Some(name) = reference.strip_prefix("#/definitions/")
+            {
+                refs.insert(name.to_string());
+            }
+        }
+
+        for name in HAND_MAINTAINED_ROOT_ENVELOPES {
+            assert!(
+                refs.contains(*name),
+                "hand-maintained root envelope `{name}` is registered in \
+                 `HAND_MAINTAINED_ROOT_ENVELOPES` but is not referenced from \
+                 the document-root `oneOf`. Either (a) re-add the entry to \
+                 the rewritten `oneOf` in `rewrite_document_root_one_of`, \
+                 or (b) remove it from `HAND_MAINTAINED_ROOT_ENVELOPES` \
+                 because the migration to a typed `FallowOutput` variant \
+                 has landed. Root `oneOf` refs today: {:?}",
+                refs.iter().collect::<Vec<_>>(),
+            );
+        }
+    }
+
+    /// The document-root `oneOf` MUST always reference `FallowOutput` as
+    /// its first entry plus the bare-array `CodeClimateOutput` branch.
+    /// Catches accidental removal of either reference by a future
+    /// `rewrite_document_root_one_of` edit.
+    #[test]
+    fn root_one_of_carries_fallow_output_and_codeclimate() {
+        let document: Value = serde_json::from_str(COMMITTED_SCHEMA)
+            .expect("committed docs/output-schema.json must parse");
+        let one_of = document
+            .get("oneOf")
+            .and_then(Value::as_array)
+            .expect("committed schema must carry a root-level `oneOf`");
+
+        let mut refs: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+        for entry in one_of {
+            if let Some(reference) = entry.get("$ref").and_then(Value::as_str)
+                && let Some(name) = reference.strip_prefix("#/definitions/")
+            {
+                refs.insert(name.to_string());
+            }
+        }
+
+        assert!(
+            refs.contains("FallowOutput"),
+            "document-root `oneOf` must reference `#/definitions/FallowOutput`; \
+             found refs: {:?}",
+            refs.iter().collect::<Vec<_>>(),
+        );
+        assert!(
+            refs.contains("CodeClimateOutput"),
+            "document-root `oneOf` must reference `#/definitions/CodeClimateOutput` \
+             as a sibling root branch (the bare-array spec form); found refs: {:?}",
+            refs.iter().collect::<Vec<_>>(),
         );
     }
 }

@@ -20,6 +20,7 @@ These interfaces are covered by semver — breaking changes only happen in major
 - **Issue type arrays**: `unused_files`, `unused_exports`, `unused_types`, `private_type_leaks`, `unused_dependencies`, `unused_dev_dependencies`, `unused_enum_members`, `unused_class_members`, `unresolved_imports`, `unlisted_dependencies`, `duplicate_exports`, `type_only_dependencies`, `circular_dependencies`, `boundary_violations`
 - **Issue object fields**: all fields documented in `docs/output-schema.json`
 - **Schema version**: the `schema_version` field follows its own versioning (independent of the tool version). The schema version is bumped when the JSON output structure changes.
+- **Document-root structure**: every object-shaped `--format json` envelope is a variant of the typed `FallowOutput` enum in the regenerated schema, with `#[serde(untagged)]` so the wire shape is unchanged. Consumers narrow by unique field presence (`summary.total_issues` for check, `report` for health, `groups` for dupes, `check`+`dupes`+`health` keys for combined, `boundaries` for list --boundaries). `CodeClimateOutput` stays as a sibling root branch because its bare-array form per the Code Climate / GitLab Code Quality spec cannot be a variant. A future major release plans to switch `FallowOutput` to `#[serde(tag = "kind")]` for true O(1) discrimination, paired with a one-cycle `--legacy-envelope` opt-out flag so existing consumers can migrate.
 
 #### Pinning the output JSON Schema
 
