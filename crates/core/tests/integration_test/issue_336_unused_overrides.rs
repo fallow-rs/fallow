@@ -45,7 +45,7 @@ fn detects_unused_overrides_across_both_sources() {
     let actual: FxHashSet<(&str, DependencyOverrideSource)> = results
         .unused_dependency_overrides
         .iter()
-        .map(|f| (f.target_package.as_str(), f.source))
+        .map(|f| (f.entry.target_package.as_str(), f.entry.source))
         .collect();
 
     let mut expected: FxHashSet<(&str, DependencyOverrideSource)> = FxHashSet::default();
@@ -70,7 +70,7 @@ fn parent_chain_with_declared_parent_is_used() {
     let any_react_dom = results
         .unused_dependency_overrides
         .iter()
-        .any(|f| f.target_package == "react-dom");
+        .any(|f| f.entry.target_package == "react-dom");
     assert!(
         !any_react_dom,
         "react>react-dom should be USED (parent `react` is declared); flagged: {:?}",
@@ -87,7 +87,7 @@ fn target_with_version_selector_is_resolved() {
     let any_types_react = results
         .unused_dependency_overrides
         .iter()
-        .any(|f| f.target_package == "@types/react");
+        .any(|f| f.entry.target_package == "@types/react");
     assert!(
         !any_types_react,
         "@types/react@<18 should resolve target=@types/react which IS declared; flagged: {:?}",
@@ -139,7 +139,7 @@ snapshots:
     let actual: FxHashSet<&str> = results
         .unused_dependency_overrides
         .iter()
-        .map(|finding| finding.target_package.as_str())
+        .map(|finding| finding.entry.target_package.as_str())
         .collect();
 
     assert_eq!(
@@ -159,7 +159,7 @@ fn detects_misconfigured_overrides() {
     let actual: FxHashSet<(String, DependencyOverrideMisconfigReason)> = results
         .misconfigured_dependency_overrides
         .iter()
-        .map(|f| (f.raw_key.clone(), f.reason))
+        .map(|f| (f.entry.raw_key.clone(), f.entry.reason))
         .collect();
 
     let mut expected: FxHashSet<(String, DependencyOverrideMisconfigReason)> = FxHashSet::default();
@@ -191,7 +191,7 @@ fn ignore_rule_suppresses_unused_override() {
     let any_lodash = results
         .unused_dependency_overrides
         .iter()
-        .any(|f| f.target_package == "lodash");
+        .any(|f| f.entry.target_package == "lodash");
     assert!(
         !any_lodash,
         "lodash should be suppressed by the ignoreDependencyOverrides rule; flagged: {:?}",
@@ -214,7 +214,7 @@ fn ignore_rule_scoped_by_source_only_affects_matching_source() {
     let any_lodash = results
         .unused_dependency_overrides
         .iter()
-        .any(|f| f.target_package == "lodash");
+        .any(|f| f.entry.target_package == "lodash");
     assert!(
         any_lodash,
         "lodash override is in YAML; suppression scoped to package.json must not match; got {:?}",
@@ -274,9 +274,9 @@ fn unused_overrides_carry_transitive_hint_on_every_shape() {
     assert_eq!(results.unused_dependency_overrides.len(), 2);
     for finding in &results.unused_dependency_overrides {
         assert!(
-            finding.hint.is_some(),
+            finding.entry.hint.is_some(),
             "every unused override (bare-target or parent-chain) should carry the transitive hint; missing on {:?}",
-            finding.raw_key
+            finding.entry.raw_key
         );
     }
 }

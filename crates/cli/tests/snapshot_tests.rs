@@ -103,21 +103,22 @@ fn sample_results(root: &Path) -> AnalysisResults {
                 }],
             },
         ));
-    r.duplicate_exports.push(DuplicateExport {
-        export_name: "Config".to_string(),
-        locations: vec![
-            DuplicateLocation {
-                path: root.join("src/config.ts"),
-                line: 15,
-                col: 0,
-            },
-            DuplicateLocation {
-                path: root.join("src/types.ts"),
-                line: 30,
-                col: 0,
-            },
-        ],
-    });
+    r.duplicate_exports
+        .push(DuplicateExportFinding::with_actions(DuplicateExport {
+            export_name: "Config".to_string(),
+            locations: vec![
+                DuplicateLocation {
+                    path: root.join("src/config.ts"),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: root.join("src/types.ts"),
+                    line: 30,
+                    col: 0,
+                },
+            ],
+        }));
     r.unused_optional_dependencies
         .push(UnusedOptionalDependencyFinding::with_actions(
             UnusedDependency {
@@ -154,62 +155,78 @@ fn sample_results(root: &Path) -> AnalysisResults {
                 is_cross_package: false,
             },
         ));
-    r.unused_catalog_entries
-        .push(fallow_core::results::UnusedCatalogEntry {
-            entry_name: "is-even".to_string(),
-            catalog_name: "default".to_string(),
-            path: PathBuf::from("pnpm-workspace.yaml"),
-            line: 6,
-            hardcoded_consumers: vec![],
-        });
-    r.unused_catalog_entries
-        .push(fallow_core::results::UnusedCatalogEntry {
-            entry_name: "old-thing".to_string(),
-            catalog_name: "legacy".to_string(),
-            path: PathBuf::from("pnpm-workspace.yaml"),
-            line: 12,
-            hardcoded_consumers: vec![PathBuf::from("apps/web/package.json")],
-        });
-    r.empty_catalog_groups
-        .push(fallow_core::results::EmptyCatalogGroup {
-            catalog_name: "react17".to_string(),
-            path: PathBuf::from("pnpm-workspace.yaml"),
-            line: 10,
-        });
-    r.unresolved_catalog_references
-        .push(fallow_core::results::UnresolvedCatalogReference {
-            entry_name: "old-react".to_string(),
-            catalog_name: "react17".to_string(),
-            path: root.join("packages/app/package.json"),
-            line: 14,
-            available_in_catalogs: vec!["react18".to_string()],
-        });
+    r.unused_catalog_entries.push(
+        fallow_core::results::UnusedCatalogEntryFinding::with_actions(
+            fallow_core::results::UnusedCatalogEntry {
+                entry_name: "is-even".to_string(),
+                catalog_name: "default".to_string(),
+                path: PathBuf::from("pnpm-workspace.yaml"),
+                line: 6,
+                hardcoded_consumers: vec![],
+            },
+        ),
+    );
+    r.unused_catalog_entries.push(
+        fallow_core::results::UnusedCatalogEntryFinding::with_actions(
+            fallow_core::results::UnusedCatalogEntry {
+                entry_name: "old-thing".to_string(),
+                catalog_name: "legacy".to_string(),
+                path: PathBuf::from("pnpm-workspace.yaml"),
+                line: 12,
+                hardcoded_consumers: vec![PathBuf::from("apps/web/package.json")],
+            },
+        ),
+    );
+    r.empty_catalog_groups.push(
+        fallow_core::results::EmptyCatalogGroupFinding::with_actions(
+            fallow_core::results::EmptyCatalogGroup {
+                catalog_name: "react17".to_string(),
+                path: PathBuf::from("pnpm-workspace.yaml"),
+                line: 10,
+            },
+        ),
+    );
+    r.unresolved_catalog_references.push(
+        fallow_core::results::UnresolvedCatalogReferenceFinding::with_actions(
+            fallow_core::results::UnresolvedCatalogReference {
+                entry_name: "old-react".to_string(),
+                catalog_name: "react17".to_string(),
+                path: root.join("packages/app/package.json"),
+                line: 14,
+                available_in_catalogs: vec!["react18".to_string()],
+            },
+        ),
+    );
     r.unused_dependency_overrides.push(
-        fallow_core::results::UnusedDependencyOverride {
-            raw_key: "axios".to_string(),
-            target_package: "axios".to_string(),
-            parent_package: None,
-            version_constraint: None,
-            version_range: "^1.6.0".to_string(),
-            source: fallow_core::results::DependencyOverrideSource::PnpmWorkspaceYaml,
-            path: root.join("pnpm-workspace.yaml"),
-            line: 9,
-            hint: Some(
-                "may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth"
-                    .to_string(),
-            ),
-        },
+        fallow_core::results::UnusedDependencyOverrideFinding::with_actions(
+            fallow_core::results::UnusedDependencyOverride {
+                raw_key: "axios".to_string(),
+                target_package: "axios".to_string(),
+                parent_package: None,
+                version_constraint: None,
+                version_range: "^1.6.0".to_string(),
+                source: fallow_core::results::DependencyOverrideSource::PnpmWorkspaceYaml,
+                path: root.join("pnpm-workspace.yaml"),
+                line: 9,
+                hint: Some(
+                    "may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth"
+                        .to_string(),
+                ),
+            },
+        ),
     );
     r.misconfigured_dependency_overrides.push(
-        fallow_core::results::MisconfiguredDependencyOverride {
-            raw_key: "@types/react@<<18".to_string(),
-            target_package: None,
-            raw_value: "18.0.0".to_string(),
-            reason: fallow_core::results::DependencyOverrideMisconfigReason::UnparsableKey,
-            source: fallow_core::results::DependencyOverrideSource::PnpmPackageJson,
-            path: root.join("package.json"),
-            line: 3,
-        },
+        fallow_core::results::MisconfiguredDependencyOverrideFinding::with_actions(
+            fallow_core::results::MisconfiguredDependencyOverride {
+                raw_key: "@types/react@<<18".to_string(),
+                target_package: None,
+                raw_value: "18.0.0".to_string(),
+                reason: fallow_core::results::DependencyOverrideMisconfigReason::UnparsableKey,
+                source: fallow_core::results::DependencyOverrideSource::PnpmPackageJson,
+                path: root.join("package.json"),
+                line: 3,
+            },
+        ),
     );
 
     r
@@ -515,21 +532,23 @@ fn compact_unused_class_members_only_snapshot() {
 fn compact_duplicate_exports_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.duplicate_exports.push(DuplicateExport {
-        export_name: "Config".to_string(),
-        locations: vec![
-            DuplicateLocation {
-                path: root.join("src/config.ts"),
-                line: 15,
-                col: 0,
-            },
-            DuplicateLocation {
-                path: root.join("src/types.ts"),
-                line: 30,
-                col: 0,
-            },
-        ],
-    });
+    results
+        .duplicate_exports
+        .push(DuplicateExportFinding::with_actions(DuplicateExport {
+            export_name: "Config".to_string(),
+            locations: vec![
+                DuplicateLocation {
+                    path: root.join("src/config.ts"),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: root.join("src/types.ts"),
+                    line: 30,
+                    col: 0,
+                },
+            ],
+        }));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_duplicate_exports_only", lines.join("\n"));
 }
@@ -849,21 +868,23 @@ fn json_unused_class_members_only_snapshot() {
 fn json_duplicate_exports_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.duplicate_exports.push(DuplicateExport {
-        export_name: "Config".to_string(),
-        locations: vec![
-            DuplicateLocation {
-                path: root.join("src/config.ts"),
-                line: 15,
-                col: 0,
-            },
-            DuplicateLocation {
-                path: root.join("src/types.ts"),
-                line: 30,
-                col: 0,
-            },
-        ],
-    });
+    results
+        .duplicate_exports
+        .push(DuplicateExportFinding::with_actions(DuplicateExport {
+            export_name: "Config".to_string(),
+            locations: vec![
+                DuplicateLocation {
+                    path: root.join("src/config.ts"),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: root.join("src/types.ts"),
+                    line: 30,
+                    col: 0,
+                },
+            ],
+        }));
     let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_duplicate_exports_only", redact_version(&json_str));
@@ -1045,21 +1066,23 @@ fn sarif_unused_class_members_only_snapshot() {
 fn sarif_duplicate_exports_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.duplicate_exports.push(DuplicateExport {
-        export_name: "Config".to_string(),
-        locations: vec![
-            DuplicateLocation {
-                path: root.join("src/config.ts"),
-                line: 15,
-                col: 0,
-            },
-            DuplicateLocation {
-                path: root.join("src/types.ts"),
-                line: 30,
-                col: 0,
-            },
-        ],
-    });
+    results
+        .duplicate_exports
+        .push(DuplicateExportFinding::with_actions(DuplicateExport {
+            export_name: "Config".to_string(),
+            locations: vec![
+                DuplicateLocation {
+                    path: root.join("src/config.ts"),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: root.join("src/types.ts"),
+                    line: 30,
+                    col: 0,
+                },
+            ],
+        }));
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
     insta::assert_snapshot!(
@@ -1410,21 +1433,23 @@ fn codeclimate_unused_class_members_only_snapshot() {
 fn codeclimate_duplicate_exports_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.duplicate_exports.push(DuplicateExport {
-        export_name: "Config".to_string(),
-        locations: vec![
-            DuplicateLocation {
-                path: root.join("src/config.ts"),
-                line: 15,
-                col: 0,
-            },
-            DuplicateLocation {
-                path: root.join("src/types.ts"),
-                line: 30,
-                col: 0,
-            },
-        ],
-    });
+    results
+        .duplicate_exports
+        .push(DuplicateExportFinding::with_actions(DuplicateExport {
+            export_name: "Config".to_string(),
+            locations: vec![
+                DuplicateLocation {
+                    path: root.join("src/config.ts"),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: root.join("src/types.ts"),
+                    line: 30,
+                    col: 0,
+                },
+            ],
+        }));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
@@ -2069,21 +2094,23 @@ fn markdown_unused_class_members_only_snapshot() {
 fn markdown_duplicate_exports_only_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
-    results.duplicate_exports.push(DuplicateExport {
-        export_name: "Config".to_string(),
-        locations: vec![
-            DuplicateLocation {
-                path: root.join("src/config.ts"),
-                line: 15,
-                col: 0,
-            },
-            DuplicateLocation {
-                path: root.join("src/types.ts"),
-                line: 30,
-                col: 0,
-            },
-        ],
-    });
+    results
+        .duplicate_exports
+        .push(DuplicateExportFinding::with_actions(DuplicateExport {
+            export_name: "Config".to_string(),
+            locations: vec![
+                DuplicateLocation {
+                    path: root.join("src/config.ts"),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: root.join("src/types.ts"),
+                    line: 30,
+                    col: 0,
+                },
+            ],
+        }));
     let output = build_markdown(&results, &root);
     insta::assert_snapshot!("markdown_duplicate_exports_only", output);
 }

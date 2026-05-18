@@ -55,9 +55,9 @@ fn detects_unresolved_named_and_default_catalog_references() {
         .iter()
         .map(|r| {
             (
-                r.catalog_name.as_str(),
-                r.entry_name.as_str(),
-                strip(&r.path),
+                r.reference.catalog_name.as_str(),
+                r.reference.entry_name.as_str(),
+                strip(&r.reference.path),
             )
         })
         .collect();
@@ -91,7 +91,7 @@ fn detects_unresolved_named_and_default_catalog_references() {
             !results
                 .unresolved_catalog_references
                 .iter()
-                .any(|r| r.catalog_name == cat && r.entry_name == pkg),
+                .any(|r| r.reference.catalog_name == cat && r.reference.entry_name == pkg),
             "valid reference (catalog={cat}, pkg={pkg}) must not be flagged",
         );
     }
@@ -106,34 +106,41 @@ fn unresolved_findings_carry_line_numbers_and_available_alternatives() {
     let old_react = results
         .unresolved_catalog_references
         .iter()
-        .find(|r| r.entry_name == "old-react")
+        .find(|r| r.reference.entry_name == "old-react")
         .expect("old-react finding must be present");
     // Line 7 in packages/app/package.json (1-based).
-    assert_eq!(old_react.line, 7, "old-react line, got {}", old_react.line);
+    assert_eq!(
+        old_react.reference.line, 7,
+        "old-react line, got {}",
+        old_react.reference.line
+    );
     // react18 declares old-react, so it should appear in the alternatives.
     assert!(
-        old_react.available_in_catalogs.contains(&"react18".into()),
+        old_react
+            .reference
+            .available_in_catalogs
+            .contains(&"react18".into()),
         "old-react.available_in_catalogs missing react18, got {:?}",
-        old_react.available_in_catalogs,
+        old_react.reference.available_in_catalogs,
     );
 
     let missing_pkg = results
         .unresolved_catalog_references
         .iter()
-        .find(|r| r.entry_name == "missing-pkg")
+        .find(|r| r.reference.entry_name == "missing-pkg")
         .expect("missing-pkg finding must be present");
     assert!(
-        missing_pkg.available_in_catalogs.is_empty(),
+        missing_pkg.reference.available_in_catalogs.is_empty(),
         "missing-pkg has no other catalog declaring it; available_in_catalogs must be empty",
     );
 
     let future_dep = results
         .unresolved_catalog_references
         .iter()
-        .find(|r| r.entry_name == "future-dep")
+        .find(|r| r.reference.entry_name == "future-dep")
         .expect("future-dep finding must be present");
     assert!(
-        future_dep.available_in_catalogs.is_empty(),
+        future_dep.reference.available_in_catalogs.is_empty(),
         "future-dep references a catalog that does not exist; no alternatives expected",
     );
 }
@@ -156,14 +163,14 @@ fn ignore_catalog_references_filters_by_package_and_catalog_and_consumer() {
         !results
             .unresolved_catalog_references
             .iter()
-            .any(|r| r.entry_name == "future-dep"),
+            .any(|r| r.reference.entry_name == "future-dep"),
         "future-dep must be suppressed by ignoreCatalogReferences",
     );
     assert!(
         results
             .unresolved_catalog_references
             .iter()
-            .any(|r| r.entry_name == "old-react"),
+            .any(|r| r.reference.entry_name == "old-react"),
         "unrelated finding old-react must NOT be suppressed",
     );
 
@@ -179,7 +186,7 @@ fn ignore_catalog_references_filters_by_package_and_catalog_and_consumer() {
         !results
             .unresolved_catalog_references
             .iter()
-            .any(|r| r.entry_name == "old-react"),
+            .any(|r| r.reference.entry_name == "old-react"),
         "consumer glob must match against packages/**/package.json",
     );
 }

@@ -7,7 +7,6 @@ use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 use fallow_types::envelope::{CheckSummary, ElapsedMs, EntryPoints, SchemaVersion, ToolVersion};
 
-use super::shared::NAMESPACE_BARREL_HINT;
 use super::{emit_json, normalize_uri};
 use crate::explain;
 use crate::output_envelope::{
@@ -15,21 +14,21 @@ use crate::output_envelope::{
 };
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
 
-/// JSON Pointer fragment URL describing the shape of the `value` field on an
-/// `ignoreExports` `add-to-config` action. Agents can fetch and validate the
-/// snippet before writing into a user's config.
-const IGNORE_EXPORTS_VALUE_SCHEMA: &str =
-    "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreExports";
-
-/// JSON Pointer fragment URL describing the shape of the `value` field on an
-/// `ignoreCatalogReferences` `add-to-config` action: one `{ package, catalog?,
-/// consumer? }` entry to append.
-const IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreCatalogReferences/items";
-
-/// JSON Pointer fragment URL describing the shape of the `value` field on an
-/// `ignoreDependencyOverrides` `add-to-config` action: one `{ package, source? }`
-/// entry to append.
-const IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencyOverrides/items";
+/// Flip the position-0 `add-to-config` `auto_fixable` flag on every
+/// `duplicate_exports` finding when the fix-applier is ready to write into
+/// the user's config. Mirrors the per-instance flips for
+/// `unused_catalog_entries` (handled inside `with_actions`) and the legacy
+/// `inject_actions` post-pass that emitted `auto_fixable: config_fixable`
+/// at JSON-build time. No-op when `config_fixable` is `false`, since the
+/// wrapper already constructs with the conservative default.
+fn apply_config_fixable_to_duplicate_exports(results: &mut AnalysisResults, config_fixable: bool) {
+    if !config_fixable {
+        return;
+    }
+    for finding in &mut results.duplicate_exports {
+        finding.set_config_fixable(true);
+    }
+}
 
 pub(super) fn print_json(
     results: &AnalysisResults,
@@ -87,11 +86,15 @@ pub(super) fn print_grouped_json(
 ) -> ExitCode {
     let entries: Vec<CheckGroupedEntry> = groups
         .iter()
-        .map(|group| CheckGroupedEntry {
-            key: group.key.clone(),
-            owners: group.owners.clone(),
-            total_issues: group.results.total_issues(),
-            results: group.results.clone(),
+        .map(|group| {
+            let mut results = group.results.clone();
+            apply_config_fixable_to_duplicate_exports(&mut results, config_fixable);
+            CheckGroupedEntry {
+                key: group.key.clone(),
+                owners: group.owners.clone(),
+                total_issues: results.total_issues(),
+                results,
+            }
         })
         .collect();
 
@@ -114,13 +117,15 @@ pub(super) fn print_grouped_json(
     };
 
     let root_prefix = format!("{}/", root.display());
-    // Strip and inject per group separately so each `groups[]` entry carries
-    // its own action arrays (`inject_actions` and the suppression harmonizer
-    // only walk the top-level map).
+    // Strip per group separately. `duplicate_exports` per-instance
+    // `config_fixable` was layered into each group's `AnalysisResults`
+    // above, so the typed `actions` array on every finding already carries
+    // the correct `auto_fixable` bool. Only the suppression harmonizer
+    // still walks the per-group JSON tree to dedupe `// fallow-ignore-next-line`
+    // anchors across same-path+line findings.
     if let Some(arr) = output.get_mut("groups").and_then(|v| v.as_array_mut()) {
         for entry in arr {
             strip_root_prefix(entry, &root_prefix);
-            inject_actions(entry, config_fixable);
             harmonize_multi_kind_suppress_line_actions(entry);
         }
     }
@@ -178,24 +183,29 @@ pub fn build_json_with_config_fixable(
     elapsed: Duration,
     config_fixable: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
+    let mut owned_results = results.clone();
+    apply_config_fixable_to_duplicate_exports(&mut owned_results, config_fixable);
     let envelope = CheckOutput {
         schema_version: SchemaVersion(SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
-        total_issues: results.total_issues(),
-        entry_points: results.entry_point_summary.as_ref().map(|ep| EntryPoints {
-            total: ep.total,
-            // Replace spaces with underscores so downstream dashboards can
-            // drill into individual sources by stable keys (e.g.
-            // `package.json`, `next.js`, `config_entry`).
-            sources: ep
-                .by_source
-                .iter()
-                .map(|(k, v)| (k.replace(' ', "_"), *v))
-                .collect(),
-        }),
-        summary: build_check_summary(results),
-        results: results.clone(),
+        total_issues: owned_results.total_issues(),
+        entry_points: owned_results
+            .entry_point_summary
+            .as_ref()
+            .map(|ep| EntryPoints {
+                total: ep.total,
+                // Replace spaces with underscores so downstream dashboards can
+                // drill into individual sources by stable keys (e.g.
+                // `package.json`, `next.js`, `config_entry`).
+                sources: ep
+                    .by_source
+                    .iter()
+                    .map(|(k, v)| (k.replace(' ', "_"), *v))
+                    .collect(),
+            }),
+        summary: build_check_summary(&owned_results),
+        results: owned_results,
         baseline_deltas: None,
         baseline: None,
         regression: None,
@@ -204,11 +214,10 @@ pub fn build_json_with_config_fixable(
 
     let mut output = serde_json::to_value(&envelope)?;
     let root_prefix = format!("{}/", root.display());
-    // strip_root_prefix must run before inject_actions so that injected
-    // action fields (static strings and package names) are not processed
-    // by the path stripper.
+    // strip_root_prefix runs on the already-serialized envelope where the
+    // typed `actions` arrays are already in place; the stripper skips
+    // non-path string values via the prefix check.
     strip_root_prefix(&mut output, &root_prefix);
-    inject_actions(&mut output, config_fixable);
     harmonize_multi_kind_suppress_line_actions(&mut output);
     Ok(output)
 }
@@ -275,407 +284,6 @@ pub fn strip_root_prefix(value: &mut serde_json::Value, prefix: &str) {
             }
         }
         _ => {}
-    }
-}
-
-// ── Fix action injection ────────────────────────────────────────
-
-/// Suppress mechanism for an issue type.
-enum SuppressKind {
-    /// `// fallow-ignore-next-line <type>` on the line before.
-    InlineComment,
-    /// `# fallow-ignore-next-line <type>` on the line before (YAML / shell).
-    YamlComment,
-    /// Add to `ignoreCatalogReferences` in fallow config (with optional
-    /// catalog + consumer scope).
-    AddToConfigIgnoreCatalogReferences,
-    /// Add to `ignoreDependencyOverrides` in fallow config (with optional
-    /// source scope).
-    AddToConfigIgnoreDependencyOverrides,
-}
-
-/// Specification for actions to inject per issue type.
-struct ActionSpec {
-    fix_type: &'static str,
-    auto_fixable: bool,
-    description: &'static str,
-    note: Option<&'static str>,
-    suppress: SuppressKind,
-    issue_kind: &'static str,
-}
-
-/// Map an issue array key to its action specification.
-fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
-    match key {
-        // `unused_files` is no longer post-pass-injected: the typed
-        // `UnusedFileFinding` wrapper carries its `actions` array natively.
-        // `unused_exports` and `unused_types` are no longer post-pass-injected:
-        // the typed `UnusedExportFinding` / `UnusedTypeFinding` wrappers carry
-        // their `actions` array natively, with the `is_re_export` note swap
-        // applied at wrapper construction.
-        // `private_type_leaks` is no longer post-pass-injected: the typed
-        // `PrivateTypeLeakFinding` wrapper carries its `actions` array natively.
-        // `unused_dependencies` / `unused_dev_dependencies` /
-        // `unused_optional_dependencies` are no longer post-pass-injected:
-        // the typed `UnusedDependencyFinding` / `UnusedDevDependencyFinding` /
-        // `UnusedOptionalDependencyFinding` wrappers carry their `actions`
-        // array natively, with the cross-workspace `move-dependency` swap
-        // applied at wrapper construction.
-        // `unused_enum_members` and `unused_class_members` are no longer
-        // post-pass-injected: the typed `UnusedEnumMemberFinding` /
-        // `UnusedClassMemberFinding` wrappers carry their `actions` array
-        // natively.
-        // `unresolved_imports` is no longer post-pass-injected: the typed
-        // `UnresolvedImportFinding` wrapper carries its `actions` array natively.
-        // `unlisted_dependencies` / `type_only_dependencies` /
-        // `test_only_dependencies` are no longer post-pass-injected: the
-        // typed `UnlistedDependencyFinding` / `TypeOnlyDependencyFinding` /
-        // `TestOnlyDependencyFinding` wrappers carry their `actions` array
-        // natively.
-        "duplicate_exports" => Some(ActionSpec {
-            fix_type: "remove-duplicate",
-            auto_fixable: false,
-            description: "Keep one canonical export location and remove the others",
-            note: Some(NAMESPACE_BARREL_HINT),
-            suppress: SuppressKind::InlineComment,
-            issue_kind: "duplicate-export",
-        }),
-        // `circular_dependencies` and `boundary_violations` are no longer
-        // post-pass-injected: the typed `CircularDependencyFinding` /
-        // `BoundaryViolationFinding` wrappers carry their `actions` arrays
-        // natively.
-        "unused_catalog_entries" => Some(ActionSpec {
-            fix_type: "remove-catalog-entry",
-            auto_fixable: false,
-            description: "Remove the entry from pnpm-workspace.yaml",
-            note: Some(
-                "If any consumer declares the same package with a hardcoded version, switch the consumer to `catalog:` before removing",
-            ),
-            suppress: SuppressKind::YamlComment,
-            issue_kind: "unused-catalog-entry",
-        }),
-        "empty_catalog_groups" => Some(ActionSpec {
-            fix_type: "remove-empty-catalog-group",
-            auto_fixable: true,
-            description: "Remove the empty named catalog group from pnpm-workspace.yaml",
-            note: Some(
-                "Only named groups under `catalogs:` are flagged; the top-level `catalog:` hook is intentionally ignored",
-            ),
-            suppress: SuppressKind::YamlComment,
-            issue_kind: "empty-catalog-group",
-        }),
-        // The primary fix for unresolved-catalog-references is computed in
-        // build_actions because it discriminates on `available_in_catalogs`.
-        // This entry serves as the fallback / suppression spec only.
-        "unresolved_catalog_references" => Some(ActionSpec {
-            fix_type: "remove-catalog-reference",
-            auto_fixable: false,
-            description: "Remove the catalog reference and pin a hardcoded version in package.json",
-            note: Some(
-                "Use only when neither another catalog declares the package nor the named catalog should grow to include it",
-            ),
-            suppress: SuppressKind::AddToConfigIgnoreCatalogReferences,
-            issue_kind: "unresolved-catalog-reference",
-        }),
-        "unused_dependency_overrides" => Some(ActionSpec {
-            fix_type: "remove-dependency-override",
-            auto_fixable: false,
-            description: "Remove the override entry from pnpm-workspace.yaml or pnpm.overrides",
-            note: Some(
-                "Conservative static check; verify against `pnpm install --frozen-lockfile` before removing in case the override targets a transitive dependency (CVE-fix pattern)",
-            ),
-            suppress: SuppressKind::AddToConfigIgnoreDependencyOverrides,
-            issue_kind: "unused-dependency-override",
-        }),
-        "misconfigured_dependency_overrides" => Some(ActionSpec {
-            fix_type: "fix-dependency-override",
-            auto_fixable: false,
-            description: "Fix the override key or value: pnpm refuses to honor entries with an unparsable key or empty value",
-            note: Some(
-                "Common shapes: bare `pkg`, scoped `@scope/pkg`, version-selector `pkg@<2`, parent-chain `parent>child`. Valid values include semver ranges, `-` (removal), `$ref` (self-ref), and `npm:alias@^1`.",
-            ),
-            suppress: SuppressKind::AddToConfigIgnoreDependencyOverrides,
-            issue_kind: "misconfigured-dependency-override",
-        }),
-        _ => None,
-    }
-}
-
-/// Build the discriminated primary action for an `unresolved_catalog_references`
-/// finding. Reads `available_in_catalogs` to decide between the two high-confidence
-/// machine-actionable fixes; the result is appended ahead of the generic
-/// `remove-catalog-reference` fallback in `build_actions`.
-fn build_unresolved_catalog_reference_primary_action(
-    item: &serde_json::Value,
-) -> serde_json::Value {
-    let available: Vec<String> = item
-        .get("available_in_catalogs")
-        .and_then(serde_json::Value::as_array)
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(serde_json::Value::as_str)
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default();
-    let package_name = item
-        .get("entry_name")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("package");
-    let current_catalog = item
-        .get("catalog_name")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("default");
-    if available.is_empty() {
-        serde_json::json!({
-            "type": "add-catalog-entry",
-            "auto_fixable": false,
-            "description": format!(
-                "Add `{package_name}` to the `{current_catalog}` catalog in pnpm-workspace.yaml",
-            ),
-            "note": "Pin a version that satisfies the consumer's import; no other catalog declares this package today",
-        })
-    } else {
-        // When exactly one alternative catalog declares this package, the fix
-        // is unambiguous: name it as `suggested_target` so deterministic agents
-        // (rule-based, not LLM-driven) can land the edit without picking from
-        // a list. LLM agents that read `available_in_catalogs[0]` arrive at
-        // the same answer; this field just makes the choice machine-explicit.
-        let suggested_target = (available.len() == 1).then(|| available[0].clone());
-        let mut action = serde_json::json!({
-            "type": "update-catalog-reference",
-            "auto_fixable": false,
-            "description": format!(
-                "Switch the reference from `catalog:{current_catalog}` to a catalog that declares `{package_name}`",
-            ),
-            "available_in_catalogs": available,
-        });
-        if let Some(target) = suggested_target
-            && let serde_json::Value::Object(map) = &mut action
-        {
-            map.insert("suggested_target".to_string(), serde_json::json!(target));
-        }
-        action
-    }
-}
-
-/// Build the `actions` array for a single issue item.
-fn build_actions(
-    item: &serde_json::Value,
-    issue_key: &str,
-    spec: &ActionSpec,
-    config_fixable: bool,
-) -> serde_json::Value {
-    let mut actions = Vec::with_capacity(2);
-    let cross_workspace_dependency = is_dependency_issue(issue_key)
-        && item
-            .get("used_in_workspaces")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|workspaces| !workspaces.is_empty());
-
-    // unresolved-catalog-references emits a discriminated primary action
-    // before the generic remove-catalog-reference fallback below.
-    if issue_key == "unresolved_catalog_references" {
-        actions.push(build_unresolved_catalog_reference_primary_action(item));
-    }
-
-    // duplicate-exports: emit the safe `add-to-config` (ignoreExports) action
-    // FIRST so position-0 (the documented primary slot, see HealthFindingAction
-    // schema description) recommends the non-destructive path for the common
-    // shadcn / Radix / bits-ui namespace-barrel case. The fix action below
-    // (remove-duplicate) stays as the secondary, for findings where the
-    // duplication is genuinely accidental.
-    if issue_key == "duplicate_exports"
-        && let Some(value) = build_duplicate_exports_config_value(item)
-    {
-        actions.push(serde_json::json!({
-            "type": "add-to-config",
-            "auto_fixable": config_fixable,
-            "description": "Add an ignoreExports rule so these files are excluded from duplicate-export grouping (use when this duplication is an intentional namespace-barrel API).",
-            "config_key": "ignoreExports",
-            "value": value,
-            "value_schema": IGNORE_EXPORTS_VALUE_SCHEMA,
-        }));
-    }
-
-    // Primary fix action. `auto_fixable` is per-instance for issue types
-    // whose `fallow fix` applier has per-finding guards (e.g.
-    // `unused_catalog_entries` skips entries with non-empty
-    // `hardcoded_consumers`); for those types the ActionSpec carries the
-    // pessimistic default `false` and the per-instance override flips it
-    // to `true` here when the applier would actually run.
-    let auto_fixable = if issue_key == "unused_catalog_entries" {
-        item.get("hardcoded_consumers")
-            .and_then(serde_json::Value::as_array)
-            .is_none_or(Vec::is_empty)
-    } else {
-        spec.auto_fixable
-    };
-    let mut fix_action = if cross_workspace_dependency {
-        serde_json::json!({
-            "type": "move-dependency",
-            "auto_fixable": false,
-            "description": "Move this dependency to the workspace package.json that imports it",
-            "note": "fallow fix will not remove dependencies that are imported by another workspace",
-        })
-    } else {
-        serde_json::json!({
-            "type": spec.fix_type,
-            "auto_fixable": auto_fixable,
-            "description": spec.description,
-        })
-    };
-    if let Some(note) = spec.note {
-        fix_action["note"] = serde_json::json!(note);
-    }
-    actions.push(fix_action);
-
-    // Suppress action — every action carries `auto_fixable` for uniform filtering.
-    match spec.suppress {
-        SuppressKind::InlineComment => {
-            let mut suppress = serde_json::json!({
-                "type": "suppress-line",
-                "auto_fixable": false,
-                "description": "Suppress with an inline comment above the line",
-                "comment": format!("// fallow-ignore-next-line {}", spec.issue_kind),
-            });
-            // duplicate_exports has N locations, not one — flag multi-location scope.
-            if issue_key == "duplicate_exports" {
-                suppress["scope"] = serde_json::json!("per-location");
-            }
-            actions.push(suppress);
-        }
-        SuppressKind::YamlComment => {
-            actions.push(serde_json::json!({
-                "type": "suppress-line",
-                "auto_fixable": false,
-                "description": "Suppress with a YAML comment above the line",
-                "comment": format!("# fallow-ignore-next-line {}", spec.issue_kind),
-            }));
-        }
-        SuppressKind::AddToConfigIgnoreCatalogReferences => {
-            let package_name = item
-                .get("entry_name")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("package");
-            let catalog_name = item
-                .get("catalog_name")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("default");
-            let consumer_path = item
-                .get("path")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("");
-            let value = serde_json::json!({
-                "package": package_name,
-                "catalog": catalog_name,
-                "consumer": consumer_path,
-            });
-            actions.push(serde_json::json!({
-                "type": "add-to-config",
-                "auto_fixable": false,
-                "description": "Suppress this reference via ignoreCatalogReferences in fallow config (use when the catalog edit is intentionally landing in a separate PR or the package is a placeholder).",
-                "config_key": "ignoreCatalogReferences",
-                "value": value,
-                "value_schema": IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA,
-            }));
-        }
-        SuppressKind::AddToConfigIgnoreDependencyOverrides => {
-            // `target_package` is set on unused overrides (the key parsed
-            // successfully) but absent on misconfigured ones whose `raw_key`
-            // could not be parsed. Falling back to `raw_key` is unsafe in the
-            // misconfigured case: it may be empty or malformed. Skip the
-            // suppress action entirely when neither field yields a non-empty
-            // name; an `ignoreDependencyOverrides` entry with `package: ""`
-            // would be silently ignored by the config parser.
-            let package_name = item
-                .get("target_package")
-                .and_then(serde_json::Value::as_str)
-                .filter(|s| !s.is_empty())
-                .or_else(|| {
-                    item.get("raw_key")
-                        .and_then(serde_json::Value::as_str)
-                        .filter(|s| !s.is_empty())
-                });
-            if let Some(package_name) = package_name {
-                let source = item
-                    .get("source")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("pnpm-workspace.yaml");
-                let value = serde_json::json!({
-                    "package": package_name,
-                    "source": source,
-                });
-                actions.push(serde_json::json!({
-                    "type": "add-to-config",
-                    "auto_fixable": false,
-                    "description": "Suppress this override finding via ignoreDependencyOverrides in fallow config (use for CVE-fix overrides that target a purely-transitive package).",
-                    "config_key": "ignoreDependencyOverrides",
-                    "value": value,
-                    "value_schema": IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA,
-                }));
-            }
-        }
-    }
-
-    serde_json::Value::Array(actions)
-}
-
-/// Build a paste-ready `ignoreExports` config snippet from a duplicate-exports
-/// finding's `locations` array. Returns one `{ file, exports: ["*"] }` entry per
-/// distinct file in the finding, in stable order.
-fn build_duplicate_exports_config_value(item: &serde_json::Value) -> Option<serde_json::Value> {
-    let locations = item.get("locations")?.as_array()?;
-    let mut entries: Vec<serde_json::Value> = Vec::with_capacity(locations.len());
-    let mut seen: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
-    for loc in locations {
-        let Some(path) = loc.get("path").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        if !seen.insert(path) {
-            continue;
-        }
-        entries.push(serde_json::json!({
-            "file": path,
-            "exports": ["*"],
-        }));
-    }
-    if entries.is_empty() {
-        return None;
-    }
-    Some(serde_json::Value::Array(entries))
-}
-
-fn is_dependency_issue(issue_key: &str) -> bool {
-    matches!(
-        issue_key,
-        "unused_dependencies" | "unused_dev_dependencies" | "unused_optional_dependencies"
-    )
-}
-
-/// Inject `actions` arrays into every issue item in the JSON output.
-///
-/// Walks each known issue-type array and appends an `actions` field
-/// to every item, providing machine-actionable fix and suppress hints.
-fn inject_actions(output: &mut serde_json::Value, config_fixable: bool) {
-    let Some(map) = output.as_object_mut() else {
-        return;
-    };
-
-    for (key, value) in map.iter_mut() {
-        let Some(spec) = actions_for_issue_type(key) else {
-            continue;
-        };
-        let Some(arr) = value.as_array_mut() else {
-            continue;
-        };
-        for item in arr {
-            let actions = build_actions(item, key, &spec, config_fixable);
-            if let serde_json::Value::Object(obj) = item {
-                obj.insert("actions".to_string(), actions);
-            }
-        }
     }
 }
 
@@ -2148,21 +1756,23 @@ mod tests {
     fn json_strips_root_from_duplicate_export_locations() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "Config".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: root.join("src/config.ts"),
-                    line: 15,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: root.join("src/types.ts"),
-                    line: 30,
-                    col: 0,
-                },
-            ],
-        });
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "Config".to_string(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: root.join("src/config.ts"),
+                        line: 15,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: root.join("src/types.ts"),
+                        line: 30,
+                        col: 0,
+                    },
+                ],
+            }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2455,21 +2065,23 @@ mod tests {
     fn json_duplicate_export_contains_locations() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "Button".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: root.join("src/ui.ts"),
-                    line: 10,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: root.join("src/components.ts"),
-                    line: 25,
-                    col: 0,
-                },
-            ],
-        });
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "Button".to_string(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: root.join("src/ui.ts"),
+                        line: 10,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: root.join("src/components.ts"),
+                        line: 25,
+                        col: 0,
+                    },
+                ],
+            }));
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
@@ -2487,21 +2099,23 @@ mod tests {
         let root = dir.path();
         std::fs::write(root.join(".fallowrc.json"), "{}\n").unwrap();
         let mut results = AnalysisResults::default();
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "Button".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: root.join("src/ui.ts"),
-                    line: 10,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: root.join("src/components.ts"),
-                    line: 25,
-                    col: 0,
-                },
-            ],
-        });
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "Button".to_string(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: root.join("src/ui.ts"),
+                        line: 10,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: root.join("src/components.ts"),
+                        line: 25,
+                        col: 0,
+                    },
+                ],
+            }));
 
         let output = build_json(&results, root, Duration::ZERO).unwrap();
         let actions = output["duplicate_exports"][0]["actions"]
@@ -2520,21 +2134,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let mut results = AnalysisResults::default();
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "Button".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: root.join("src/ui.ts"),
-                    line: 10,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: root.join("src/components.ts"),
-                    line: 25,
-                    col: 0,
-                },
-            ],
-        });
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "Button".to_string(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: root.join("src/ui.ts"),
+                        line: 10,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: root.join("src/components.ts"),
+                        line: 25,
+                        col: 0,
+                    },
+                ],
+            }));
 
         let output = build_json(&results, root, Duration::ZERO).unwrap();
         let actions = output["duplicate_exports"][0]["actions"]
@@ -2560,21 +2176,23 @@ mod tests {
         let sub = workspace.join("packages/ui");
         std::fs::create_dir_all(&sub).unwrap();
         let mut results = AnalysisResults::default();
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "Button".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: sub.join("src/ui.ts"),
-                    line: 10,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: sub.join("src/components.ts"),
-                    line: 25,
-                    col: 0,
-                },
-            ],
-        });
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "Button".to_string(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: sub.join("src/ui.ts"),
+                        line: 10,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: sub.join("src/components.ts"),
+                        line: 25,
+                        col: 0,
+                    },
+                ],
+            }));
 
         let output = build_json(&results, &sub, Duration::ZERO).unwrap();
         let actions = output["duplicate_exports"][0]["actions"]

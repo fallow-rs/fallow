@@ -731,9 +731,12 @@ unresolved_imports: UnresolvedImportFinding[]
  */
 unlisted_dependencies: UnlistedDependencyFinding[]
 /**
- * Exports with the same name across multiple modules.
+ * Exports with the same name across multiple modules. Wrapped in
+ * [`DuplicateExportFinding`] so each entry carries a typed `actions`
+ * array natively, with the position-0 `add-to-config` `ignoreExports`
+ * snippet wired in at wrapper construction.
  */
-duplicate_exports: DuplicateExport[]
+duplicate_exports: DuplicateExportFinding[]
 /**
  * Production dependencies only used via type-only imports (could be
  * devDependencies). Only populated in production mode. Wrapped in
@@ -763,36 +766,43 @@ boundary_violations?: BoundaryViolationFinding[]
 stale_suppressions?: StaleSuppression[]
 /**
  * Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not
- * referenced by any workspace package via the catalog: protocol.
+ * referenced by any workspace package via the catalog: protocol. Wrapped
+ * in [`UnusedCatalogEntryFinding`] so each entry carries a typed
+ * `actions` array natively, with per-instance `auto_fixable` derived
+ * from `hardcoded_consumers`.
  */
-unused_catalog_entries?: UnusedCatalogEntry[]
+unused_catalog_entries?: UnusedCatalogEntryFinding[]
 /**
  * Named groups under pnpm-workspace.yaml's catalogs: section that declare
- * no package entries. The top-level catalog: map is not reported.
+ * no package entries. The top-level catalog: map is not reported. Wrapped
+ * in [`EmptyCatalogGroupFinding`].
  */
-empty_catalog_groups?: EmptyCatalogGroup[]
+empty_catalog_groups?: EmptyCatalogGroupFinding[]
 /**
  * Workspace package.json references to catalogs (`catalog:` or
  * `catalog:<name>`) that do not declare the consumed package. pnpm install
  * will error until the named catalog grows to include the package or the
- * reference is switched / removed.
+ * reference is switched / removed. Wrapped in
+ * [`UnresolvedCatalogReferenceFinding`] with the discriminated
+ * `add-catalog-entry` / `update-catalog-reference` primary at position 0.
  */
-unresolved_catalog_references?: UnresolvedCatalogReference[]
+unresolved_catalog_references?: UnresolvedCatalogReferenceFinding[]
 /**
  * Entries in pnpm-workspace.yaml's overrides: section, or package.json's
  * pnpm.overrides block, whose target package is not declared by any
  * workspace package and is not present in pnpm-lock.yaml. Default severity
  * is warn because projects without a readable lockfile fall back to
  * manifest-only checks; the hint field flags those conservative cases.
+ * Wrapped in [`UnusedDependencyOverrideFinding`].
  */
-unused_dependency_overrides?: UnusedDependencyOverride[]
+unused_dependency_overrides?: UnusedDependencyOverrideFinding[]
 /**
  * pnpm.overrides entries whose key or value does not parse as a valid
  * override spec (empty key, empty value, malformed selector, unbalanced
  * parent matcher). pnpm install will reject these. Default severity is
- * error.
+ * error. Wrapped in [`MisconfiguredDependencyOverrideFinding`].
  */
-misconfigured_dependency_overrides?: MisconfiguredDependencyOverride[]
+misconfigured_dependency_overrides?: MisconfiguredDependencyOverrideFinding[]
 /**
  * Per-category delta comparison against a saved baseline. Only present
  * when `--baseline` is used (today only via the combined invocation).
@@ -984,6 +994,14 @@ note?: (string | null)
  * source.
  */
 available_in_catalogs?: (string[] | null)
+/**
+ * Only present on `update-catalog-reference` actions when exactly one
+ * alternative catalog declares the package: the unambiguous switch
+ * target. Lets deterministic (non-LLM) agents land the edit without
+ * picking from a list. Absent when `available_in_catalogs` has zero
+ * or more than one entry.
+ */
+suggested_target?: (string | null)
 }
 /**
  * Inline-comment suppression for a single finding line.
@@ -1495,9 +1513,19 @@ line: number
 col: number
 }
 /**
- * An export that appears multiple times across the project.
+ * Wire-shape envelope for a [`DuplicateExport`] finding. Carries up to
+ * three actions in position-locked order: an `add-to-config` `ignoreExports`
+ * snippet (only when `locations[]` carries at least one path) followed by
+ * the `remove-duplicate` fix and the multi-location suppress.
+ *
+ * The `add-to-config` action sits at position 0 because the documented
+ * primary slot points at the safe, non-destructive path: the shadcn /
+ * Radix / bits-ui namespace-barrel case where every `index.*` reexports
+ * the directory's neighbours. The `remove-duplicate` fix stays as the
+ * secondary so consumers that pattern-match on `actions[0].type` for
+ * "primary fix" never propose deletion of an intentional barrel surface.
  */
-export interface DuplicateExport {
+export interface DuplicateExportFinding {
 /**
  * The duplicated export name.
  */
@@ -1507,10 +1535,15 @@ export_name: string
  */
 locations: DuplicateLocation[]
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
  * A location where a duplicate export appears.
@@ -1691,13 +1724,12 @@ col: number
 origin: SuppressionOrigin
 }
 /**
- * A pnpm catalog entry declared in pnpm-workspace.yaml that no workspace package
- * references via the `catalog:` protocol.
- *
- * The default catalog (top-level `catalog:` key) uses `catalog_name: "default"`.
- * Named catalogs (under `catalogs.<name>:`) use their declared name.
+ * Wire-shape envelope for an [`UnusedCatalogEntry`] finding. Per-instance
+ * `auto_fixable` flips to `false` when `hardcoded_consumers` is non-empty:
+ * the entry cannot be removed safely while a workspace package still pins
+ * the same package via a hardcoded version range.
  */
-export interface UnusedCatalogEntry {
+export interface UnusedCatalogEntryFinding {
 /**
  * Package name declared in the catalog (e.g. `"react"`, `"@scope/lib"`).
  */
@@ -1723,15 +1755,21 @@ line: number
  */
 hardcoded_consumers?: string[]
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted.
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
- * A named `catalogs.<name>:` group in `pnpm-workspace.yaml` with no package entries.
+ * Wire-shape envelope for an [`EmptyCatalogGroup`] finding. Carries a
+ * straightforward `remove-empty-catalog-group` primary plus a YAML-comment
+ * suppress.
  */
-export interface EmptyCatalogGroup {
+export interface EmptyCatalogGroupFinding {
 /**
  * Catalog group name declared under the top-level `catalogs:` map.
  */
@@ -1745,24 +1783,25 @@ path: string
  */
 line: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted.
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
- * A workspace package.json reference (`catalog:` or `catalog:<name>`) that points
- * at a catalog which does not declare the consumed package.
- *
- * `pnpm install` errors at install time with `ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL`
- * when this happens. fallow surfaces it statically so the failure is caught at
- * `fallow check` time, before any install.
- *
- * The default catalog (bare `catalog:` references the top-level `catalog:` map)
- * uses `catalog_name: "default"`. Named catalogs (`catalog:react17`) use the
- * declared catalog name.
+ * Wire-shape envelope for an [`UnresolvedCatalogReference`] finding. The
+ * primary action at position 0 discriminates on `available_in_catalogs`:
+ * `add-catalog-entry` when the array is empty (no other catalog declares
+ * the package), or `update-catalog-reference` when at least one
+ * alternative exists. When exactly one alternative exists, the action
+ * also carries `suggested_target` so deterministic agents can land the
+ * edit without picking from a list.
  */
-export interface UnresolvedCatalogReference {
+export interface UnresolvedCatalogReferenceFinding {
 /**
  * Package name being referenced via the catalog protocol (e.g. `"react"`).
  */
@@ -1793,19 +1832,23 @@ line: number
  */
 available_in_catalogs?: string[]
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted; position 0 is the discriminated
+ * primary (see struct docs).
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
- * An entry in pnpm's `overrides:` map (or the legacy `pnpm.overrides` in
- * `package.json`) whose target package is not declared in any workspace
- * `package.json` and is not present in `pnpm-lock.yaml`. Projects without a
- * readable lockfile fall back to package manifest checks; the `hint` field
- * flags that conservative mode.
+ * Wire-shape envelope for an [`UnusedDependencyOverride`] finding. Carries
+ * a `remove-dependency-override` primary plus an `add-to-config`
+ * `ignoreDependencyOverrides` suppress scoped to the target package and
+ * declaration source.
  */
-export interface UnusedDependencyOverride {
+export interface UnusedDependencyOverrideFinding {
 /**
  * The full original override key as written in the source (e.g.
  * `"react>react-dom"`, `"@types/react@<18"`). Preserved for round-trip
@@ -1852,17 +1895,23 @@ line: number
  */
 hint?: (string | null)
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted.
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
- * An override entry whose key or value is malformed. Default severity is
- * `error` because pnpm refuses to install (or silently produces a no-op
- * override) when it encounters these shapes.
+ * Wire-shape envelope for a [`MisconfiguredDependencyOverride`] finding.
+ * Carries a `fix-dependency-override` primary plus the conditional
+ * `add-to-config` `ignoreDependencyOverrides` suppress (skipped when both
+ * `target_package` and `raw_key` are empty, since the rule matcher keys on
+ * a non-empty package name).
  */
-export interface MisconfiguredDependencyOverride {
+export interface MisconfiguredDependencyOverrideFinding {
 /**
  * The full original override key as written in the source.
  */
@@ -1895,10 +1944,14 @@ path: string
  */
 line: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted.
  */
 actions: IssueAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
  * Per-category delta comparison against a saved baseline. Only present in
@@ -4878,9 +4931,12 @@ unresolved_imports: UnresolvedImportFinding[]
  */
 unlisted_dependencies: UnlistedDependencyFinding[]
 /**
- * Exports with the same name across multiple modules.
+ * Exports with the same name across multiple modules. Wrapped in
+ * [`DuplicateExportFinding`] so each entry carries a typed `actions`
+ * array natively, with the position-0 `add-to-config` `ignoreExports`
+ * snippet wired in at wrapper construction.
  */
-duplicate_exports: DuplicateExport[]
+duplicate_exports: DuplicateExportFinding[]
 /**
  * Production dependencies only used via type-only imports (could be
  * devDependencies). Only populated in production mode. Wrapped in
@@ -4910,36 +4966,43 @@ boundary_violations?: BoundaryViolationFinding[]
 stale_suppressions?: StaleSuppression[]
 /**
  * Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not
- * referenced by any workspace package via the catalog: protocol.
+ * referenced by any workspace package via the catalog: protocol. Wrapped
+ * in [`UnusedCatalogEntryFinding`] so each entry carries a typed
+ * `actions` array natively, with per-instance `auto_fixable` derived
+ * from `hardcoded_consumers`.
  */
-unused_catalog_entries?: UnusedCatalogEntry[]
+unused_catalog_entries?: UnusedCatalogEntryFinding[]
 /**
  * Named groups under pnpm-workspace.yaml's catalogs: section that declare
- * no package entries. The top-level catalog: map is not reported.
+ * no package entries. The top-level catalog: map is not reported. Wrapped
+ * in [`EmptyCatalogGroupFinding`].
  */
-empty_catalog_groups?: EmptyCatalogGroup[]
+empty_catalog_groups?: EmptyCatalogGroupFinding[]
 /**
  * Workspace package.json references to catalogs (`catalog:` or
  * `catalog:<name>`) that do not declare the consumed package. pnpm install
  * will error until the named catalog grows to include the package or the
- * reference is switched / removed.
+ * reference is switched / removed. Wrapped in
+ * [`UnresolvedCatalogReferenceFinding`] with the discriminated
+ * `add-catalog-entry` / `update-catalog-reference` primary at position 0.
  */
-unresolved_catalog_references?: UnresolvedCatalogReference[]
+unresolved_catalog_references?: UnresolvedCatalogReferenceFinding[]
 /**
  * Entries in pnpm-workspace.yaml's overrides: section, or package.json's
  * pnpm.overrides block, whose target package is not declared by any
  * workspace package and is not present in pnpm-lock.yaml. Default severity
  * is warn because projects without a readable lockfile fall back to
  * manifest-only checks; the hint field flags those conservative cases.
+ * Wrapped in [`UnusedDependencyOverrideFinding`].
  */
-unused_dependency_overrides?: UnusedDependencyOverride[]
+unused_dependency_overrides?: UnusedDependencyOverrideFinding[]
 /**
  * pnpm.overrides entries whose key or value does not parse as a valid
  * override spec (empty key, empty value, malformed selector, unbalanced
  * parent matcher). pnpm install will reject these. Default severity is
- * error.
+ * error. Wrapped in [`MisconfiguredDependencyOverrideFinding`].
  */
-misconfigured_dependency_overrides?: MisconfiguredDependencyOverride[]
+misconfigured_dependency_overrides?: MisconfiguredDependencyOverrideFinding[]
 }
 /**
  * Envelope emitted by bare `fallow --format json` (the combined

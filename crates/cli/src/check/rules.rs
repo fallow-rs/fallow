@@ -52,22 +52,25 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
             .retain(|s| config.resolve_rules_for_path(&s.path).stale_suppressions != Severity::Off);
         results.unresolved_catalog_references.retain(|r| {
             config
-                .resolve_rules_for_path(&r.path)
+                .resolve_rules_for_path(&r.reference.path)
                 .unresolved_catalog_references
                 != Severity::Off
         });
         results.empty_catalog_groups.retain(|g| {
-            config.resolve_rules_for_path(&g.path).empty_catalog_groups != Severity::Off
+            config
+                .resolve_rules_for_path(&g.group.path)
+                .empty_catalog_groups
+                != Severity::Off
         });
         results.unused_dependency_overrides.retain(|o| {
             config
-                .resolve_rules_for_path(&o.path)
+                .resolve_rules_for_path(&o.entry.path)
                 .unused_dependency_overrides
                 != Severity::Off
         });
         results.misconfigured_dependency_overrides.retain(|o| {
             config
-                .resolve_rules_for_path(&o.path)
+                .resolve_rules_for_path(&o.entry.path)
                 .misconfigured_dependency_overrides
                 != Severity::Off
         });
@@ -194,11 +197,14 @@ pub fn has_error_severity_issues(
                 config.resolve_rules_for_path(&s.path).stale_suppressions == Severity::Error
             }) || results.unresolved_catalog_references.iter().any(|r| {
                 config
-                    .resolve_rules_for_path(&r.path)
+                    .resolve_rules_for_path(&r.reference.path)
                     .unresolved_catalog_references
                     == Severity::Error
             }) || results.empty_catalog_groups.iter().any(|g| {
-                config.resolve_rules_for_path(&g.path).empty_catalog_groups == Severity::Error
+                config
+                    .resolve_rules_for_path(&g.group.path)
+                    .empty_catalog_groups
+                    == Severity::Error
             }) || results.circular_dependencies.iter().any(|c| {
                 c.cycle.files.iter().any(|path| {
                     config.resolve_rules_for_path(path).circular_dependencies == Severity::Error
@@ -416,21 +422,22 @@ mod tests {
                     }],
                 },
             ));
-        r.duplicate_exports.push(DuplicateExport {
-            export_name: "helper".into(),
-            locations: vec![
-                DuplicateLocation {
-                    path: PathBuf::from("/project/src/h.ts"),
-                    line: 15,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: PathBuf::from("/project/src/i.ts"),
-                    line: 30,
-                    col: 0,
-                },
-            ],
-        });
+        r.duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "helper".into(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/src/h.ts"),
+                        line: 15,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/src/i.ts"),
+                        line: 30,
+                        col: 0,
+                    },
+                ],
+            }));
         r
     }
 

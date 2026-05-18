@@ -23,7 +23,9 @@
 use std::path::Path;
 
 use fallow_config::OutputFormat;
-use fallow_core::results::{EmptyCatalogGroup, UnusedCatalogEntry};
+use fallow_core::results::{
+    EmptyCatalogGroup, EmptyCatalogGroupFinding, UnusedCatalogEntry, UnusedCatalogEntryFinding,
+};
 
 use super::io::{atomic_write, read_source};
 
@@ -36,7 +38,7 @@ use super::io::{atomic_write, read_source};
 /// does NOT count entries that produced a write error.
 pub(super) fn apply_catalog_entry_fixes(
     root: &Path,
-    entries: &[UnusedCatalogEntry],
+    entries: &[UnusedCatalogEntryFinding],
     output: OutputFormat,
     dry_run: bool,
     fixes: &mut Vec<serde_json::Value>,
@@ -53,6 +55,7 @@ pub(super) fn apply_catalog_entry_fixes(
     let mut by_path: rustc_hash::FxHashMap<&Path, Vec<&UnusedCatalogEntry>> =
         rustc_hash::FxHashMap::default();
     for entry in entries {
+        let entry = &entry.entry;
         by_path.entry(entry.path.as_path()).or_default().push(entry);
     }
 
@@ -231,7 +234,7 @@ pub(super) fn apply_catalog_entry_fixes(
 /// comment-preservation policy used by the catalog entry fixer.
 pub(super) fn apply_empty_catalog_group_fixes(
     root: &Path,
-    groups: &[EmptyCatalogGroup],
+    groups: &[EmptyCatalogGroupFinding],
     output: OutputFormat,
     dry_run: bool,
     fixes: &mut Vec<serde_json::Value>,
@@ -245,6 +248,7 @@ pub(super) fn apply_empty_catalog_group_fixes(
     let mut by_path: rustc_hash::FxHashMap<&Path, Vec<&EmptyCatalogGroup>> =
         rustc_hash::FxHashMap::default();
     for group in groups {
+        let group = &group.group;
         by_path.entry(group.path.as_path()).or_default().push(group);
     }
 
@@ -650,14 +654,14 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    fn make_entry(name: &str, catalog: &str, line: u32) -> UnusedCatalogEntry {
-        UnusedCatalogEntry {
+    fn make_entry(name: &str, catalog: &str, line: u32) -> UnusedCatalogEntryFinding {
+        UnusedCatalogEntryFinding::with_actions(UnusedCatalogEntry {
             entry_name: name.to_string(),
             catalog_name: catalog.to_string(),
             path: PathBuf::from("pnpm-workspace.yaml"),
             line,
             hardcoded_consumers: vec![],
-        }
+        })
     }
 
     fn make_entry_with_consumers(
@@ -665,22 +669,22 @@ mod tests {
         catalog: &str,
         line: u32,
         consumers: Vec<PathBuf>,
-    ) -> UnusedCatalogEntry {
-        UnusedCatalogEntry {
+    ) -> UnusedCatalogEntryFinding {
+        UnusedCatalogEntryFinding::with_actions(UnusedCatalogEntry {
             entry_name: name.to_string(),
             catalog_name: catalog.to_string(),
             path: PathBuf::from("pnpm-workspace.yaml"),
             line,
             hardcoded_consumers: consumers,
-        }
+        })
     }
 
-    fn make_group(name: &str, line: u32) -> EmptyCatalogGroup {
-        EmptyCatalogGroup {
+    fn make_group(name: &str, line: u32) -> EmptyCatalogGroupFinding {
+        EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
             catalog_name: name.to_string(),
             path: PathBuf::from("pnpm-workspace.yaml"),
             line,
-        }
+        })
     }
 
     fn seed_workspace_file(root: &Path, content: &str) {

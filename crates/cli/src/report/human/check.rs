@@ -5,10 +5,11 @@ use std::time::Duration;
 use colored::Colorize;
 use fallow_config::{RulesConfig, Severity};
 use fallow_core::results::{
-    AnalysisResults, DuplicateExport, TestOnlyDependency, TestOnlyDependencyFinding,
-    TypeOnlyDependency, TypeOnlyDependencyFinding, UnusedClassMemberFinding, UnusedDependency,
-    UnusedDependencyFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExport,
-    UnusedExportFinding, UnusedMember, UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    AnalysisResults, DuplicateExport, DuplicateExportFinding, TestOnlyDependency,
+    TestOnlyDependencyFinding, TypeOnlyDependency, TypeOnlyDependencyFinding,
+    UnusedClassMemberFinding, UnusedDependency, UnusedDependencyFinding,
+    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
+    UnusedMember, UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -56,9 +57,12 @@ fn is_namespace_barrel_location(path: &Path) -> bool {
 /// shape. Findings with fewer than two locations (already excluded from the
 /// human render) are skipped to keep the denominator aligned with what the user
 /// actually sees on screen.
-fn namespace_barrel_match_ratio(items: &[DuplicateExport]) -> f32 {
-    let renderable: Vec<&DuplicateExport> =
-        items.iter().filter(|d| d.locations.len() >= 2).collect();
+fn namespace_barrel_match_ratio(items: &[DuplicateExportFinding]) -> f32 {
+    let renderable: Vec<&DuplicateExport> = items
+        .iter()
+        .map(|d| &d.export)
+        .filter(|d| d.locations.len() >= 2)
+        .collect();
     if renderable.is_empty() {
         return 0.0;
     }
@@ -78,8 +82,11 @@ fn namespace_barrel_match_ratio(items: &[DuplicateExport]) -> f32 {
 /// `ratio >= NAMESPACE_BARREL_HINT_MIN_RATIO`. The floor prevents the hint
 /// from spamming small projects where the user already knows the layout; the
 /// ratio guards against false positives in mixed codebases.
-fn should_show_namespace_barrel_hint(items: &[DuplicateExport]) -> bool {
-    let renderable_count = items.iter().filter(|d| d.locations.len() >= 2).count();
+fn should_show_namespace_barrel_hint(items: &[DuplicateExportFinding]) -> bool {
+    let renderable_count = items
+        .iter()
+        .filter(|d| d.export.locations.len() >= 2)
+        .count();
     if renderable_count < NAMESPACE_BARREL_HINT_MIN_FINDINGS {
         return false;
     }
@@ -763,7 +770,7 @@ fn build_dependencies_section(
 /// empty or the rule is `Off` (which already removed entries upstream).
 fn push_unused_catalog_entries_section(
     lines: &mut Vec<String>,
-    entries: &[fallow_core::results::UnusedCatalogEntry],
+    entries: &[fallow_core::results::UnusedCatalogEntryFinding],
     severity: fallow_config::Severity,
     max_items: usize,
     total_issues: usize,
@@ -781,6 +788,7 @@ fn push_unused_catalog_entries_section(
         max_items,
         total_issues,
         |entry| {
+            let entry = &entry.entry;
             let path_display = root.join(&entry.path);
             let mut row = format!(
                 "  {entry_name}  {catalog}  {loc}",
@@ -814,7 +822,7 @@ fn push_unused_catalog_entries_section(
 
 fn push_empty_catalog_groups_section(
     lines: &mut Vec<String>,
-    groups: &[fallow_core::results::EmptyCatalogGroup],
+    groups: &[fallow_core::results::EmptyCatalogGroupFinding],
     severity: fallow_config::Severity,
     max_items: usize,
     total_issues: usize,
@@ -832,6 +840,7 @@ fn push_empty_catalog_groups_section(
         max_items,
         total_issues,
         |group| {
+            let group = &group.group;
             let path_display = root.join(&group.path);
             vec![format!(
                 "  {catalog}  {loc}",
@@ -858,7 +867,7 @@ fn push_empty_catalog_groups_section(
 /// write bare `catalog:` think of it as "the catalog", not as a named one.
 fn push_unresolved_catalog_references_section(
     lines: &mut Vec<String>,
-    findings: &[fallow_core::results::UnresolvedCatalogReference],
+    findings: &[fallow_core::results::UnresolvedCatalogReferenceFinding],
     severity: fallow_config::Severity,
     max_items: usize,
     total_issues: usize,
@@ -876,6 +885,7 @@ fn push_unresolved_catalog_references_section(
         max_items,
         total_issues,
         |finding| {
+            let finding = &finding.reference;
             let path_display = root.join(&finding.path);
             let catalog_label = if finding.catalog_name == "default" {
                 "default".to_string()
@@ -933,7 +943,7 @@ fn push_unresolved_catalog_references_section(
 /// conservative-static algorithm flags.
 fn push_unused_dependency_overrides_section(
     lines: &mut Vec<String>,
-    findings: &[fallow_core::results::UnusedDependencyOverride],
+    findings: &[fallow_core::results::UnusedDependencyOverrideFinding],
     severity: fallow_config::Severity,
     max_items: usize,
     total_issues: usize,
@@ -951,6 +961,7 @@ fn push_unused_dependency_overrides_section(
         max_items,
         total_issues,
         |finding| {
+            let finding = &finding.entry;
             let path_display = root.join(&finding.path);
             let row = format!(
                 "  {key}  {source}  {loc}",
@@ -986,7 +997,7 @@ fn push_unused_dependency_overrides_section(
 /// rule defaults to error.
 fn push_misconfigured_dependency_overrides_section(
     lines: &mut Vec<String>,
-    findings: &[fallow_core::results::MisconfiguredDependencyOverride],
+    findings: &[fallow_core::results::MisconfiguredDependencyOverrideFinding],
     severity: fallow_config::Severity,
     max_items: usize,
     total_issues: usize,
@@ -1004,6 +1015,7 @@ fn push_misconfigured_dependency_overrides_section(
         max_items,
         total_issues,
         |finding| {
+            let finding = &finding.entry;
             let path_display = root.join(&finding.path);
             let row = format!(
                 "  {key}  {source}  {loc}",
@@ -1269,7 +1281,7 @@ fn build_human_grouped_section<'a, T>(
 /// Build duplicate exports grouped by file pair instead of flat list.
 fn build_duplicate_exports_section(
     lines: &mut Vec<String>,
-    items: &[fallow_core::results::DuplicateExport],
+    items: &[fallow_core::results::DuplicateExportFinding],
     level: Level,
     root: &Path,
     total_issues: usize,
@@ -1286,6 +1298,7 @@ fn build_duplicate_exports_section(
         rustc_hash::FxHashMap::default();
 
     for dup in items {
+        let dup = &dup.export;
         if dup.locations.len() < 2 {
             continue;
         }
@@ -1835,6 +1848,7 @@ fn build_summary_footer(
     {
         let mut pair_set = rustc_hash::FxHashSet::default();
         for dup in &results.duplicate_exports {
+            let dup = &dup.export;
             if dup.locations.len() >= 2 {
                 let mut paths: Vec<&std::path::Path> =
                     dup.locations.iter().map(|l| l.path.as_path()).collect();
@@ -2325,8 +2339,8 @@ mod tests {
 
     // ── Namespace-barrel hint helpers ──
 
-    fn make_dup(name: &str, paths: &[&str]) -> DuplicateExport {
-        DuplicateExport {
+    fn make_dup(name: &str, paths: &[&str]) -> DuplicateExportFinding {
+        DuplicateExportFinding::with_actions(DuplicateExport {
             export_name: name.to_string(),
             locations: paths
                 .iter()
@@ -2336,7 +2350,7 @@ mod tests {
                     col: 0,
                 })
                 .collect(),
-        }
+        })
     }
 
     #[test]
@@ -2437,7 +2451,7 @@ mod tests {
 
     #[test]
     fn namespace_barrel_hint_fires_when_47_of_47_findings_match() {
-        let items: Vec<DuplicateExport> = (0..47)
+        let items: Vec<DuplicateExportFinding> = (0..47)
             .map(|i| {
                 let path_a = format!("packages/ui/dir_{i}/index.ts");
                 let path_b = format!("packages/ui/other_{i}/index.tsx");
@@ -2519,21 +2533,23 @@ mod tests {
     fn duplicate_exports_show_name_and_locations() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "Config".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: root.join("src/config.ts"),
-                    line: 15,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: root.join("src/types.ts"),
-                    line: 30,
-                    col: 0,
-                },
-            ],
-        });
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "Config".to_string(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: root.join("src/config.ts"),
+                        line: 15,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: root.join("src/types.ts"),
+                        line: 30,
+                        col: 0,
+                    },
+                ],
+            }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);

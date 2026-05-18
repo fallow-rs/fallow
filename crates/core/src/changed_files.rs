@@ -326,10 +326,13 @@ pub fn filter_results_by_changed_files(
 
     // Duplicate exports: filter locations to changed files, drop groups with < 2
     for dup in &mut results.duplicate_exports {
-        dup.locations
+        dup.export
+            .locations
             .retain(|loc| changed_files.contains(&loc.path));
     }
-    results.duplicate_exports.retain(|d| d.locations.len() >= 2);
+    results
+        .duplicate_exports
+        .retain(|d| d.export.locations.len() >= 2);
 
     // Circular deps: keep cycles where at least one file is changed
     results
@@ -350,20 +353,20 @@ pub fn filter_results_by_changed_files(
     // so keep only findings whose path is in the changed set.
     results
         .unresolved_catalog_references
-        .retain(|r| changed_files.contains(&r.path));
+        .retain(|r| changed_files.contains(&r.reference.path));
     results
         .empty_catalog_groups
-        .retain(|g| changed_files_contains_path(changed_files, &g.path));
+        .retain(|g| changed_files_contains_path(changed_files, &g.group.path));
 
     // Unused / misconfigured dependency overrides: anchored at the declaring
     // source file (pnpm-workspace.yaml or root package.json). Keep only
     // findings whose source file is in the changed set.
     results
         .unused_dependency_overrides
-        .retain(|o| changed_files.contains(&o.path));
+        .retain(|o| changed_files.contains(&o.entry.path));
     results
         .misconfigured_dependency_overrides
-        .retain(|o| changed_files.contains(&o.path));
+        .retain(|o| changed_files.contains(&o.entry.path));
 }
 
 fn changed_files_contains_path(changed_files: &FxHashSet<PathBuf>, path: &Path) -> bool {
@@ -448,7 +451,8 @@ mod tests {
         BoundaryViolation, CircularDependency, EmptyCatalogGroup, UnusedExport, UnusedFile,
     };
     use fallow_types::output_dead_code::{
-        BoundaryViolationFinding, CircularDependencyFinding, UnusedExportFinding, UnusedFileFinding,
+        BoundaryViolationFinding, CircularDependencyFinding, EmptyCatalogGroupFinding,
+        UnusedExportFinding, UnusedFileFinding,
     };
 
     #[test]
@@ -687,11 +691,13 @@ mod tests {
     #[test]
     fn filter_results_keeps_relative_empty_catalog_group_when_manifest_changed() {
         let mut results = AnalysisResults::default();
-        results.empty_catalog_groups.push(EmptyCatalogGroup {
-            catalog_name: "legacy".into(),
-            path: PathBuf::from("pnpm-workspace.yaml"),
-            line: 4,
-        });
+        results
+            .empty_catalog_groups
+            .push(EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
+                catalog_name: "legacy".into(),
+                path: PathBuf::from("pnpm-workspace.yaml"),
+                line: 4,
+            }));
 
         let mut changed: FxHashSet<PathBuf> = FxHashSet::default();
         changed.insert(PathBuf::from("/repo/pnpm-workspace.yaml"));
@@ -699,7 +705,7 @@ mod tests {
         filter_results_by_changed_files(&mut results, &changed);
 
         assert_eq!(results.empty_catalog_groups.len(), 1);
-        assert_eq!(results.empty_catalog_groups[0].catalog_name, "legacy");
+        assert_eq!(results.empty_catalog_groups[0].group.catalog_name, "legacy");
     }
 
     #[test]

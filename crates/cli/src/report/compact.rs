@@ -98,7 +98,7 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
         lines.push(format!("unlisted-dep:{}", dep.dep.package_name));
     }
     for dup in &results.duplicate_exports {
-        lines.push(format!("duplicate-export:{}", dup.export_name));
+        lines.push(format!("duplicate-export:{}", dup.export.export_name));
     }
     for dep in &results.type_only_dependencies {
         lines.push(format!("type-only-dep:{}", dep.dep.package_name));
@@ -148,45 +148,45 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
     for entry in &results.unused_catalog_entries {
         lines.push(format!(
             "unused-catalog-entry:{}:{}:{}:{}",
-            rel(&entry.path),
-            entry.line,
-            entry.catalog_name,
-            entry.entry_name,
+            rel(&entry.entry.path),
+            entry.entry.line,
+            entry.entry.catalog_name,
+            entry.entry.entry_name,
         ));
     }
     for group in &results.empty_catalog_groups {
         lines.push(format!(
             "empty-catalog-group:{}:{}:{}",
-            rel(&group.path),
-            group.line,
-            group.catalog_name,
+            rel(&group.group.path),
+            group.group.line,
+            group.group.catalog_name,
         ));
     }
     for finding in &results.unresolved_catalog_references {
         lines.push(format!(
             "unresolved-catalog-reference:{}:{}:{}:{}",
-            rel(&finding.path),
-            finding.line,
-            finding.catalog_name,
-            finding.entry_name,
+            rel(&finding.reference.path),
+            finding.reference.line,
+            finding.reference.catalog_name,
+            finding.reference.entry_name,
         ));
     }
     for finding in &results.unused_dependency_overrides {
         lines.push(format!(
             "unused-dependency-override:{}:{}:{}:{}",
-            rel(&finding.path),
-            finding.line,
-            finding.source.as_label(),
-            finding.raw_key,
+            rel(&finding.entry.path),
+            finding.entry.line,
+            finding.entry.source.as_label(),
+            finding.entry.raw_key,
         ));
     }
     for finding in &results.misconfigured_dependency_overrides {
         lines.push(format!(
             "misconfigured-dependency-override:{}:{}:{}:{}",
-            rel(&finding.path),
-            finding.line,
-            finding.source.as_label(),
-            finding.raw_key,
+            rel(&finding.entry.path),
+            finding.entry.line,
+            finding.entry.source.as_label(),
+            finding.entry.raw_key,
         ));
     }
 
@@ -714,21 +714,23 @@ mod tests {
     fn compact_duplicate_export_format() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "Config".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: root.join("src/a.ts"),
-                    line: 15,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: root.join("src/b.ts"),
-                    line: 30,
-                    col: 0,
-                },
-            ],
-        });
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "Config".to_string(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: root.join("src/a.ts"),
+                        line: 15,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: root.join("src/b.ts"),
+                        line: 30,
+                        col: 0,
+                    },
+                ],
+            }));
 
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "duplicate-export:Config");

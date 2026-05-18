@@ -488,7 +488,7 @@ fn duplicate_exports_detected() {
     let dup_names: Vec<&str> = results
         .duplicate_exports
         .iter()
-        .map(|d| d.export_name.as_str())
+        .map(|d| d.export.export_name.as_str())
         .collect();
 
     assert!(

@@ -155,6 +155,10 @@ pub struct ResultGroup {
 /// Each issue is assigned to a group by extracting its primary file path
 /// and resolving the group key via the `OwnershipResolver`.
 /// Returns groups sorted alphabetically by key, with `(unowned)` last.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one per-issue-type loop body; each loop is 4-7 lines and tightly correlated; splitting into helpers per type would scatter the per-path-key derivation logic that this fn exists to consolidate. Workspace-config issue types already factored into `group_workspace_config_issues`."
+)]
 pub fn group_analysis_results(
     results: &AnalysisResults,
     root: &Path,
@@ -283,6 +287,7 @@ pub fn group_analysis_results(
     }
     for item in &results.duplicate_exports {
         let key = item
+            .export
             .locations
             .first()
             .map_or_else(|| UNOWNED_LABEL.to_string(), |loc| key_for(&loc.path));
@@ -330,35 +335,35 @@ fn group_workspace_config_issues(
 ) {
     for item in &results.unused_catalog_entries {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.entry.path))
             .or_default()
             .unused_catalog_entries
             .push(item.clone());
     }
     for item in &results.empty_catalog_groups {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.group.path))
             .or_default()
             .empty_catalog_groups
             .push(item.clone());
     }
     for item in &results.unresolved_catalog_references {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.reference.path))
             .or_default()
             .unresolved_catalog_references
             .push(item.clone());
     }
     for item in &results.unused_dependency_overrides {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.entry.path))
             .or_default()
             .unused_dependency_overrides
             .push(item.clone());
     }
     for item in &results.misconfigured_dependency_overrides {
         groups
-            .entry(key_for(&item.path))
+            .entry(key_for(&item.entry.path))
             .or_default()
             .misconfigured_dependency_overrides
             .push(item.clone());
@@ -748,10 +753,12 @@ mod tests {
     #[test]
     fn duplicate_exports_empty_locations_goes_to_unowned() {
         let mut results = AnalysisResults::default();
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "dup".to_string(),
-            locations: vec![],
-        });
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "dup".to_string(),
+                locations: vec![],
+            }));
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
 

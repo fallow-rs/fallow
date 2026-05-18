@@ -171,13 +171,14 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         "Duplicate exports",
         |dup| {
             let locations: Vec<String> = dup
+                .export
                 .locations
                 .iter()
                 .map(|loc| format!("`{}`", rel(&loc.path)))
                 .collect();
             vec![format!(
                 "- `{}` in {}",
-                escape_backticks(&dup.export_name),
+                escape_backticks(&dup.export.export_name),
                 locations.join(", ")
             )]
         },
@@ -266,14 +267,15 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         |entry| {
             let mut row = format!(
                 "- `{}` (`{}`) `{}`:{}",
-                escape_backticks(&entry.entry_name),
-                escape_backticks(&entry.catalog_name),
-                rel(&entry.path),
-                entry.line,
+                escape_backticks(&entry.entry.entry_name),
+                escape_backticks(&entry.entry.catalog_name),
+                rel(&entry.entry.path),
+                entry.entry.line,
             );
-            if !entry.hardcoded_consumers.is_empty() {
+            if !entry.entry.hardcoded_consumers.is_empty() {
                 use std::fmt::Write as _;
                 let consumers = entry
+                    .entry
                     .hardcoded_consumers
                     .iter()
                     .map(|p| format!("`{}`", rel(p)))
@@ -291,9 +293,9 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         |group| {
             vec![format!(
                 "- `{}` `{}`:{}",
-                escape_backticks(&group.catalog_name),
-                rel(&group.path),
-                group.line,
+                escape_backticks(&group.group.catalog_name),
+                rel(&group.group.path),
+                group.group.line,
             )]
         },
     );
@@ -304,14 +306,15 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         |finding| {
             let mut row = format!(
                 "- `{}` (`{}`) `{}`:{}",
-                escape_backticks(&finding.entry_name),
-                escape_backticks(&finding.catalog_name),
-                rel(&finding.path),
-                finding.line,
+                escape_backticks(&finding.reference.entry_name),
+                escape_backticks(&finding.reference.catalog_name),
+                rel(&finding.reference.path),
+                finding.reference.line,
             );
-            if !finding.available_in_catalogs.is_empty() {
+            if !finding.reference.available_in_catalogs.is_empty() {
                 use std::fmt::Write as _;
                 let alts = finding
+                    .reference
                     .available_in_catalogs
                     .iter()
                     .map(|c| format!("`{}`", escape_backticks(c)))
@@ -330,13 +333,13 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
             use std::fmt::Write as _;
             let mut row = format!(
                 "- `{}` -> `{}` (`{}`) `{}`:{}",
-                escape_backticks(&finding.raw_key),
-                escape_backticks(&finding.version_range),
-                finding.source.as_label(),
-                rel(&finding.path),
-                finding.line,
+                escape_backticks(&finding.entry.raw_key),
+                escape_backticks(&finding.entry.version_range),
+                finding.entry.source.as_label(),
+                rel(&finding.entry.path),
+                finding.entry.line,
             );
-            if let Some(hint) = &finding.hint {
+            if let Some(hint) = &finding.entry.hint {
                 let _ = write!(row, " (hint: {})", escape_backticks(hint));
             }
             vec![row]
@@ -349,12 +352,12 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         |finding| {
             vec![format!(
                 "- `{}` -> `{}` (`{}`) `{}`:{} ({})",
-                escape_backticks(&finding.raw_key),
-                escape_backticks(&finding.raw_value),
-                finding.source.as_label(),
-                rel(&finding.path),
-                finding.line,
-                finding.reason.describe(),
+                escape_backticks(&finding.entry.raw_key),
+                escape_backticks(&finding.entry.raw_value),
+                finding.entry.source.as_label(),
+                rel(&finding.entry.path),
+                finding.entry.line,
+                finding.entry.reason.describe(),
             )]
         },
     );

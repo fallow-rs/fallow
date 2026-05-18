@@ -169,6 +169,7 @@ pub fn build_remove_catalog_entry_actions(
     }
 
     for entry in &results.unused_catalog_entries {
+        let entry = &entry.entry;
         // Skip entries with hardcoded consumers: the consumer-side
         // migration must happen first.
         if !entry.hardcoded_consumers.is_empty() {
@@ -336,6 +337,7 @@ pub fn build_remove_empty_catalog_group_actions(
     }
 
     for group in &results.empty_catalog_groups {
+        let group = &group.group;
         let Ok(group_uri) = Url::from_file_path(root.join(&group.path)) else {
             continue;
         };
@@ -1292,21 +1294,21 @@ mod tests {
     // build_remove_catalog_entry_actions
     // -----------------------------------------------------------------------
 
-    use fallow_core::results::UnusedCatalogEntry;
+    use fallow_core::results::{UnusedCatalogEntry, UnusedCatalogEntryFinding};
 
     fn make_catalog_entry(
         name: &str,
         catalog: &str,
         line: u32,
         consumers: Vec<PathBuf>,
-    ) -> UnusedCatalogEntry {
-        UnusedCatalogEntry {
+    ) -> UnusedCatalogEntryFinding {
+        UnusedCatalogEntryFinding::with_actions(UnusedCatalogEntry {
             entry_name: name.to_string(),
             catalog_name: catalog.to_string(),
             path: PathBuf::from("pnpm-workspace.yaml"),
             line,
             hardcoded_consumers: consumers,
-        }
+        })
     }
 
     fn workspace_yaml_uri(dir: &tempfile::TempDir) -> Url {
@@ -1716,14 +1718,14 @@ mod tests {
     // build_remove_empty_catalog_group_actions
     // -----------------------------------------------------------------------
 
-    use fallow_core::results::EmptyCatalogGroup;
+    use fallow_core::results::{EmptyCatalogGroup, EmptyCatalogGroupFinding};
 
-    fn make_empty_group(name: &str, line: u32) -> EmptyCatalogGroup {
-        EmptyCatalogGroup {
+    fn make_empty_group(name: &str, line: u32) -> EmptyCatalogGroupFinding {
+        EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
             catalog_name: name.to_string(),
             path: PathBuf::from("pnpm-workspace.yaml"),
             line,
-        }
+        })
     }
 
     #[test]

@@ -149,8 +149,8 @@ fn unrelated_route_files_not_flagged_as_duplicate_exports() {
     let route_dupes: Vec<&str> = results
         .duplicate_exports
         .iter()
-        .filter(|d| d.export_name == "Area" || d.export_name == "handler")
-        .map(|d| d.export_name.as_str())
+        .filter(|d| d.export.export_name == "Area" || d.export.export_name == "handler")
+        .map(|d| d.export.export_name.as_str())
         .collect();
     assert!(
         route_dupes.is_empty(),
@@ -169,14 +169,14 @@ fn shared_util_duplicates_with_common_importer_still_flagged() {
     let format_date_dupe = results
         .duplicate_exports
         .iter()
-        .find(|d| d.export_name == "formatDate");
+        .find(|d| d.export.export_name == "formatDate");
     assert!(
         format_date_dupe.is_some(),
         "formatDate in shared files with common importer should be flagged, got dupes: {:?}",
         results
             .duplicate_exports
             .iter()
-            .map(|d| &d.export_name)
+            .map(|d| &d.export.export_name)
             .collect::<Vec<_>>()
     );
 }

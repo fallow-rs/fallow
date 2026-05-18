@@ -6,9 +6,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::extract::MemberKind;
 use crate::output_dead_code::{
-    BoundaryViolationFinding, CircularDependencyFinding, PrivateTypeLeakFinding,
+    BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
+    EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding, PrivateTypeLeakFinding,
     TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
-    UnresolvedImportFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
+    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
     UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
@@ -101,8 +103,11 @@ pub struct AnalysisResults {
     /// Dependencies used in code but not listed in package.json. Wrapped in
     /// [`UnlistedDependencyFinding`].
     pub unlisted_dependencies: Vec<UnlistedDependencyFinding>,
-    /// Exports with the same name across multiple modules.
-    pub duplicate_exports: Vec<DuplicateExport>,
+    /// Exports with the same name across multiple modules. Wrapped in
+    /// [`DuplicateExportFinding`] so each entry carries a typed `actions`
+    /// array natively, with the position-0 `add-to-config` `ignoreExports`
+    /// snippet wired in at wrapper construction.
+    pub duplicate_exports: Vec<DuplicateExportFinding>,
     /// Production dependencies only used via type-only imports (could be
     /// devDependencies). Only populated in production mode. Wrapped in
     /// [`TypeOnlyDependencyFinding`].
@@ -124,32 +129,39 @@ pub struct AnalysisResults {
     #[serde(default)]
     pub stale_suppressions: Vec<StaleSuppression>,
     /// Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not
-    /// referenced by any workspace package via the catalog: protocol.
+    /// referenced by any workspace package via the catalog: protocol. Wrapped
+    /// in [`UnusedCatalogEntryFinding`] so each entry carries a typed
+    /// `actions` array natively, with per-instance `auto_fixable` derived
+    /// from `hardcoded_consumers`.
     #[serde(default)]
-    pub unused_catalog_entries: Vec<UnusedCatalogEntry>,
+    pub unused_catalog_entries: Vec<UnusedCatalogEntryFinding>,
     /// Named groups under pnpm-workspace.yaml's catalogs: section that declare
-    /// no package entries. The top-level catalog: map is not reported.
+    /// no package entries. The top-level catalog: map is not reported. Wrapped
+    /// in [`EmptyCatalogGroupFinding`].
     #[serde(default)]
-    pub empty_catalog_groups: Vec<EmptyCatalogGroup>,
+    pub empty_catalog_groups: Vec<EmptyCatalogGroupFinding>,
     /// Workspace package.json references to catalogs (`catalog:` or
     /// `catalog:<name>`) that do not declare the consumed package. pnpm install
     /// will error until the named catalog grows to include the package or the
-    /// reference is switched / removed.
+    /// reference is switched / removed. Wrapped in
+    /// [`UnresolvedCatalogReferenceFinding`] with the discriminated
+    /// `add-catalog-entry` / `update-catalog-reference` primary at position 0.
     #[serde(default)]
-    pub unresolved_catalog_references: Vec<UnresolvedCatalogReference>,
+    pub unresolved_catalog_references: Vec<UnresolvedCatalogReferenceFinding>,
     /// Entries in pnpm-workspace.yaml's overrides: section, or package.json's
     /// pnpm.overrides block, whose target package is not declared by any
     /// workspace package and is not present in pnpm-lock.yaml. Default severity
     /// is warn because projects without a readable lockfile fall back to
     /// manifest-only checks; the hint field flags those conservative cases.
+    /// Wrapped in [`UnusedDependencyOverrideFinding`].
     #[serde(default)]
-    pub unused_dependency_overrides: Vec<UnusedDependencyOverride>,
+    pub unused_dependency_overrides: Vec<UnusedDependencyOverrideFinding>,
     /// pnpm.overrides entries whose key or value does not parse as a valid
     /// override spec (empty key, empty value, malformed selector, unbalanced
     /// parent matcher). pnpm install will reject these. Default severity is
-    /// error.
+    /// error. Wrapped in [`MisconfiguredDependencyOverrideFinding`].
     #[serde(default)]
-    pub misconfigured_dependency_overrides: Vec<MisconfiguredDependencyOverride>,
+    pub misconfigured_dependency_overrides: Vec<MisconfiguredDependencyOverrideFinding>,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -333,9 +345,10 @@ impl AnalysisResults {
         }
 
         self.duplicate_exports
-            .sort_by(|a, b| a.export_name.cmp(&b.export_name));
+            .sort_by(|a, b| a.export.export_name.cmp(&b.export.export_name));
         for dup in &mut self.duplicate_exports {
-            dup.locations
+            dup.export
+                .locations
                 .sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
         }
 
@@ -379,56 +392,64 @@ impl AnalysisResults {
         });
 
         self.unused_catalog_entries.sort_by(|a, b| {
-            a.path
-                .cmp(&b.path)
+            a.entry
+                .path
+                .cmp(&b.entry.path)
                 .then_with(|| {
-                    catalog_sort_key(&a.catalog_name).cmp(&catalog_sort_key(&b.catalog_name))
+                    catalog_sort_key(&a.entry.catalog_name)
+                        .cmp(&catalog_sort_key(&b.entry.catalog_name))
                 })
-                .then(a.catalog_name.cmp(&b.catalog_name))
-                .then(a.entry_name.cmp(&b.entry_name))
+                .then(a.entry.catalog_name.cmp(&b.entry.catalog_name))
+                .then(a.entry.entry_name.cmp(&b.entry.entry_name))
         });
-        for entry in &mut self.unused_catalog_entries {
-            entry.hardcoded_consumers.sort();
-            entry.hardcoded_consumers.dedup();
+        for finding in &mut self.unused_catalog_entries {
+            finding.entry.hardcoded_consumers.sort();
+            finding.entry.hardcoded_consumers.dedup();
         }
 
         self.empty_catalog_groups.sort_by(|a, b| {
-            a.path
-                .cmp(&b.path)
+            a.group
+                .path
+                .cmp(&b.group.path)
                 .then_with(|| {
-                    catalog_sort_key(&a.catalog_name).cmp(&catalog_sort_key(&b.catalog_name))
+                    catalog_sort_key(&a.group.catalog_name)
+                        .cmp(&catalog_sort_key(&b.group.catalog_name))
                 })
-                .then(a.catalog_name.cmp(&b.catalog_name))
-                .then(a.line.cmp(&b.line))
+                .then(a.group.catalog_name.cmp(&b.group.catalog_name))
+                .then(a.group.line.cmp(&b.group.line))
         });
 
         self.unresolved_catalog_references.sort_by(|a, b| {
-            a.path
-                .cmp(&b.path)
-                .then(a.line.cmp(&b.line))
+            a.reference
+                .path
+                .cmp(&b.reference.path)
+                .then(a.reference.line.cmp(&b.reference.line))
                 .then_with(|| {
-                    catalog_sort_key(&a.catalog_name).cmp(&catalog_sort_key(&b.catalog_name))
+                    catalog_sort_key(&a.reference.catalog_name)
+                        .cmp(&catalog_sort_key(&b.reference.catalog_name))
                 })
-                .then(a.catalog_name.cmp(&b.catalog_name))
-                .then(a.entry_name.cmp(&b.entry_name))
+                .then(a.reference.catalog_name.cmp(&b.reference.catalog_name))
+                .then(a.reference.entry_name.cmp(&b.reference.entry_name))
         });
         for finding in &mut self.unresolved_catalog_references {
-            finding.available_in_catalogs.sort();
-            finding.available_in_catalogs.dedup();
+            finding.reference.available_in_catalogs.sort();
+            finding.reference.available_in_catalogs.dedup();
         }
 
         self.unused_dependency_overrides.sort_by(|a, b| {
-            a.path
-                .cmp(&b.path)
-                .then(a.line.cmp(&b.line))
-                .then(a.raw_key.cmp(&b.raw_key))
+            a.entry
+                .path
+                .cmp(&b.entry.path)
+                .then(a.entry.line.cmp(&b.entry.line))
+                .then(a.entry.raw_key.cmp(&b.entry.raw_key))
         });
 
         self.misconfigured_dependency_overrides.sort_by(|a, b| {
-            a.path
-                .cmp(&b.path)
-                .then(a.line.cmp(&b.line))
-                .then(a.raw_key.cmp(&b.raw_key))
+            a.entry
+                .path
+                .cmp(&b.entry.path)
+                .then(a.entry.line.cmp(&b.entry.line))
+                .then(a.entry.raw_key.cmp(&b.entry.raw_key))
         });
 
         self.feature_flags.sort_by(|a, b| {
@@ -1269,7 +1290,7 @@ mod tests {
                     }],
                 },
             )],
-            duplicate_exports: vec![DuplicateExport {
+            duplicate_exports: vec![DuplicateExportFinding::with_actions(DuplicateExport {
                 export_name: "dup".to_string(),
                 locations: vec![
                     DuplicateLocation {
@@ -1283,7 +1304,7 @@ mod tests {
                         col: 0,
                     },
                 ],
-            }],
+            })],
             unused_optional_dependencies: vec![UnusedOptionalDependencyFinding::with_actions(
                 test_unused_dependency("optional", DependencyLocation::OptionalDependencies),
             )],
@@ -1728,37 +1749,40 @@ mod tests {
     #[test]
     fn sort_duplicate_exports_by_name_and_inner_locations() {
         let mut r = AnalysisResults::default();
-        r.duplicate_exports.push(DuplicateExport {
-            export_name: "z".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: PathBuf::from("c.ts"),
+        r.duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "z".to_string(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: PathBuf::from("c.ts"),
+                        line: 1,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: PathBuf::from("a.ts"),
+                        line: 5,
+                        col: 0,
+                    },
+                ],
+            }));
+        r.duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "a".to_string(),
+                locations: vec![DuplicateLocation {
+                    path: PathBuf::from("b.ts"),
                     line: 1,
                     col: 0,
-                },
-                DuplicateLocation {
-                    path: PathBuf::from("a.ts"),
-                    line: 5,
-                    col: 0,
-                },
-            ],
-        });
-        r.duplicate_exports.push(DuplicateExport {
-            export_name: "a".to_string(),
-            locations: vec![DuplicateLocation {
-                path: PathBuf::from("b.ts"),
-                line: 1,
-                col: 0,
-            }],
-        });
+                }],
+            }));
         r.sort();
 
         // Outer sort: by export_name
-        assert_eq!(r.duplicate_exports[0].export_name, "a");
-        assert_eq!(r.duplicate_exports[1].export_name, "z");
+        assert_eq!(r.duplicate_exports[0].export.export_name, "a");
+        assert_eq!(r.duplicate_exports[1].export.export_name, "z");
 
         // Inner sort: locations sorted by path, then line
         let z_locs: Vec<_> = r.duplicate_exports[1]
+            .export
             .locations
             .iter()
             .map(|l| l.path.to_string_lossy().to_string())

@@ -548,9 +548,9 @@
         "duplicate_exports": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/DuplicateExport"
+            "$ref": "#/definitions/DuplicateExportFinding"
           },
-          "description": "Exports with the same name across multiple modules."
+          "description": "Exports with the same name across multiple modules. Wrapped in\n[`DuplicateExportFinding`] so each entry carries a typed `actions`\narray natively, with the position-0 `add-to-config` `ignoreExports`\nsnippet wired in at wrapper construction."
         },
         "type_only_dependencies": {
           "type": "array",
@@ -590,37 +590,37 @@
         "unused_catalog_entries": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedCatalogEntry"
+            "$ref": "#/definitions/UnusedCatalogEntryFinding"
           },
-          "description": "Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not\nreferenced by any workspace package via the catalog: protocol."
+          "description": "Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not\nreferenced by any workspace package via the catalog: protocol. Wrapped\nin [`UnusedCatalogEntryFinding`] so each entry carries a typed\n`actions` array natively, with per-instance `auto_fixable` derived\nfrom `hardcoded_consumers`."
         },
         "empty_catalog_groups": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/EmptyCatalogGroup"
+            "$ref": "#/definitions/EmptyCatalogGroupFinding"
           },
-          "description": "Named groups under pnpm-workspace.yaml's catalogs: section that declare\nno package entries. The top-level catalog: map is not reported."
+          "description": "Named groups under pnpm-workspace.yaml's catalogs: section that declare\nno package entries. The top-level catalog: map is not reported. Wrapped\nin [`EmptyCatalogGroupFinding`]."
         },
         "unresolved_catalog_references": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnresolvedCatalogReference"
+            "$ref": "#/definitions/UnresolvedCatalogReferenceFinding"
           },
-          "description": "Workspace package.json references to catalogs (`catalog:` or\n`catalog:<name>`) that do not declare the consumed package. pnpm install\nwill error until the named catalog grows to include the package or the\nreference is switched / removed."
+          "description": "Workspace package.json references to catalogs (`catalog:` or\n`catalog:<name>`) that do not declare the consumed package. pnpm install\nwill error until the named catalog grows to include the package or the\nreference is switched / removed. Wrapped in\n[`UnresolvedCatalogReferenceFinding`] with the discriminated\n`add-catalog-entry` / `update-catalog-reference` primary at position 0."
         },
         "unused_dependency_overrides": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependencyOverride"
+            "$ref": "#/definitions/UnusedDependencyOverrideFinding"
           },
-          "description": "Entries in pnpm-workspace.yaml's overrides: section, or package.json's\npnpm.overrides block, whose target package is not declared by any\nworkspace package and is not present in pnpm-lock.yaml. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases."
+          "description": "Entries in pnpm-workspace.yaml's overrides: section, or package.json's\npnpm.overrides block, whose target package is not declared by any\nworkspace package and is not present in pnpm-lock.yaml. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases.\nWrapped in [`UnusedDependencyOverrideFinding`]."
         },
         "misconfigured_dependency_overrides": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/MisconfiguredDependencyOverride"
+            "$ref": "#/definitions/MisconfiguredDependencyOverrideFinding"
           },
-          "description": "pnpm.overrides entries whose key or value does not parse as a valid\noverride spec (empty key, empty value, malformed selector, unbalanced\nparent matcher). pnpm install will reject these. Default severity is\nerror."
+          "description": "pnpm.overrides entries whose key or value does not parse as a valid\noverride spec (empty key, empty value, malformed selector, unbalanced\nparent matcher). pnpm install will reject these. Default severity is\nerror. Wrapped in [`MisconfiguredDependencyOverrideFinding`]."
         },
         "baseline_deltas": {
           "anyOf": [
@@ -845,9 +845,9 @@
         "duplicate_exports": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/DuplicateExport"
+            "$ref": "#/definitions/DuplicateExportFinding"
           },
-          "description": "Exports with the same name across multiple modules."
+          "description": "Exports with the same name across multiple modules. Wrapped in\n[`DuplicateExportFinding`] so each entry carries a typed `actions`\narray natively, with the position-0 `add-to-config` `ignoreExports`\nsnippet wired in at wrapper construction."
         },
         "type_only_dependencies": {
           "type": "array",
@@ -887,37 +887,37 @@
         "unused_catalog_entries": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedCatalogEntry"
+            "$ref": "#/definitions/UnusedCatalogEntryFinding"
           },
-          "description": "Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not\nreferenced by any workspace package via the catalog: protocol."
+          "description": "Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not\nreferenced by any workspace package via the catalog: protocol. Wrapped\nin [`UnusedCatalogEntryFinding`] so each entry carries a typed\n`actions` array natively, with per-instance `auto_fixable` derived\nfrom `hardcoded_consumers`."
         },
         "empty_catalog_groups": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/EmptyCatalogGroup"
+            "$ref": "#/definitions/EmptyCatalogGroupFinding"
           },
-          "description": "Named groups under pnpm-workspace.yaml's catalogs: section that declare\nno package entries. The top-level catalog: map is not reported."
+          "description": "Named groups under pnpm-workspace.yaml's catalogs: section that declare\nno package entries. The top-level catalog: map is not reported. Wrapped\nin [`EmptyCatalogGroupFinding`]."
         },
         "unresolved_catalog_references": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnresolvedCatalogReference"
+            "$ref": "#/definitions/UnresolvedCatalogReferenceFinding"
           },
-          "description": "Workspace package.json references to catalogs (`catalog:` or\n`catalog:<name>`) that do not declare the consumed package. pnpm install\nwill error until the named catalog grows to include the package or the\nreference is switched / removed."
+          "description": "Workspace package.json references to catalogs (`catalog:` or\n`catalog:<name>`) that do not declare the consumed package. pnpm install\nwill error until the named catalog grows to include the package or the\nreference is switched / removed. Wrapped in\n[`UnresolvedCatalogReferenceFinding`] with the discriminated\n`add-catalog-entry` / `update-catalog-reference` primary at position 0."
         },
         "unused_dependency_overrides": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependencyOverride"
+            "$ref": "#/definitions/UnusedDependencyOverrideFinding"
           },
-          "description": "Entries in pnpm-workspace.yaml's overrides: section, or package.json's\npnpm.overrides block, whose target package is not declared by any\nworkspace package and is not present in pnpm-lock.yaml. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases."
+          "description": "Entries in pnpm-workspace.yaml's overrides: section, or package.json's\npnpm.overrides block, whose target package is not declared by any\nworkspace package and is not present in pnpm-lock.yaml. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases.\nWrapped in [`UnusedDependencyOverrideFinding`]."
         },
         "misconfigured_dependency_overrides": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/MisconfiguredDependencyOverride"
+            "$ref": "#/definitions/MisconfiguredDependencyOverrideFinding"
           },
-          "description": "pnpm.overrides entries whose key or value does not parse as a valid\noverride spec (empty key, empty value, malformed selector, unbalanced\nparent matcher). pnpm install will reject these. Default severity is\nerror."
+          "description": "pnpm.overrides entries whose key or value does not parse as a valid\noverride spec (empty key, empty value, malformed selector, unbalanced\nparent matcher). pnpm install will reject these. Default severity is\nerror. Wrapped in [`MisconfiguredDependencyOverrideFinding`]."
         }
       },
       "required": [
@@ -3304,6 +3304,13 @@
             "type": "string"
           },
           "description": "Only present on `update-catalog-reference` actions: catalogs in the\nsame workspace that DO declare the package, sorted lexicographically.\nLets agents pick the catalog to switch to without re-reading the\nsource."
+        },
+        "suggested_target": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Only present on `update-catalog-reference` actions when exactly one\nalternative catalog declares the package: the unambiguous switch\ntarget. Lets deterministic (non-LLM) agents land the edit without\npicking from a list. Absent when `available_in_catalogs` has zero\nor more than one entry."
         }
       },
       "required": [
@@ -3880,22 +3887,11 @@
             "$ref": "#/definitions/DuplicateLocation"
           },
           "description": "Locations where this export name appears."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
         "export_name",
-        "locations",
-        "actions"
+        "locations"
       ],
       "description": "An export that appears multiple times across the project."
     },
@@ -4099,24 +4095,13 @@
             "type": "string"
           },
           "description": "Workspace `package.json` files that declare the same package with a\nhardcoded version range instead of `catalog:`. Empty when no consumer\nuses a hardcoded version. Sorted lexicographically for deterministic\noutput."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
         "entry_name",
         "catalog_name",
         "path",
-        "line",
-        "actions"
+        "line"
       ],
       "description": "A pnpm catalog entry declared in pnpm-workspace.yaml that no workspace package\nreferences via the `catalog:` protocol.\n\nThe default catalog (top-level `catalog:` key) uses `catalog_name: \"default\"`.\nNamed catalogs (under `catalogs.<name>:`) use their declared name."
     },
@@ -4134,23 +4119,12 @@
         "line": {
           "type": "integer",
           "description": "1-based line number of the empty group header within `pnpm-workspace.yaml`."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
         "catalog_name",
         "path",
-        "line",
-        "actions"
+        "line"
       ],
       "description": "A named `catalogs.<name>:` group in `pnpm-workspace.yaml` with no package entries."
     },
@@ -4179,24 +4153,13 @@
             "type": "string"
           },
           "description": "Other catalogs (in the same `pnpm-workspace.yaml`) that DO declare this\npackage. Empty when no catalog has the package. Sorted lexicographically.\nLets agents and humans decide whether to switch the reference to a\ndifferent catalog or to add the entry to the named catalog."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
         "entry_name",
         "catalog_name",
         "path",
-        "line",
-        "actions"
+        "line"
       ],
       "description": "A workspace package.json reference (`catalog:` or `catalog:<name>`) that points\nat a catalog which does not declare the consumed package.\n\n`pnpm install` errors at install time with `ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL`\nwhen this happens. fallow surfaces it statically so the failure is caught at\n`fallow check` time, before any install.\n\nThe default catalog (bare `catalog:` references the top-level `catalog:` map)\nuses `catalog_name: \"default\"`. Named catalogs (`catalog:react17`) use the\ndeclared catalog name."
     },
@@ -4247,16 +4210,6 @@
             "null"
           ],
           "description": "Soft hint reminding consumers to verify the override before removal.\nEmitted on every unused-override finding (both bare-target and\nparent-chain shapes) because projects without a readable lockfile still\nuse the conservative package-manifest fallback."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
@@ -4265,8 +4218,7 @@
         "version_range",
         "source",
         "path",
-        "line",
-        "actions"
+        "line"
       ],
       "description": "An entry in pnpm's `overrides:` map (or the legacy `pnpm.overrides` in\n`package.json`) whose target package is not declared in any workspace\n`package.json` and is not present in `pnpm-lock.yaml`. Projects without a\nreadable lockfile fall back to package manifest checks; the `hint` field\nflags that conservative mode."
     },
@@ -4303,16 +4255,6 @@
         "line": {
           "type": "integer",
           "description": "1-based line number of the entry within the source file."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested actions to resolve this issue."
-        },
-        "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
         }
       },
       "required": [
@@ -4321,8 +4263,7 @@
         "reason",
         "source",
         "path",
-        "line",
-        "actions"
+        "line"
       ],
       "description": "An override entry whose key or value is malformed. Default severity is\n`error` because pnpm refuses to install (or silently produces a no-op\noverride) when it encounters these shapes."
     },
@@ -5274,9 +5215,9 @@
         "duplicate_exports": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/DuplicateExport"
+            "$ref": "#/definitions/DuplicateExportFinding"
           },
-          "description": "Exports with the same name across multiple modules."
+          "description": "Exports with the same name across multiple modules. Wrapped in\n[`DuplicateExportFinding`] so each entry carries a typed `actions`\narray natively, with the position-0 `add-to-config` `ignoreExports`\nsnippet wired in at wrapper construction."
         },
         "type_only_dependencies": {
           "type": "array",
@@ -5316,37 +5257,37 @@
         "unused_catalog_entries": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedCatalogEntry"
+            "$ref": "#/definitions/UnusedCatalogEntryFinding"
           },
-          "description": "Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not\nreferenced by any workspace package via the catalog: protocol."
+          "description": "Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not\nreferenced by any workspace package via the catalog: protocol. Wrapped\nin [`UnusedCatalogEntryFinding`] so each entry carries a typed\n`actions` array natively, with per-instance `auto_fixable` derived\nfrom `hardcoded_consumers`."
         },
         "empty_catalog_groups": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/EmptyCatalogGroup"
+            "$ref": "#/definitions/EmptyCatalogGroupFinding"
           },
-          "description": "Named groups under pnpm-workspace.yaml's catalogs: section that declare\nno package entries. The top-level catalog: map is not reported."
+          "description": "Named groups under pnpm-workspace.yaml's catalogs: section that declare\nno package entries. The top-level catalog: map is not reported. Wrapped\nin [`EmptyCatalogGroupFinding`]."
         },
         "unresolved_catalog_references": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnresolvedCatalogReference"
+            "$ref": "#/definitions/UnresolvedCatalogReferenceFinding"
           },
-          "description": "Workspace package.json references to catalogs (`catalog:` or\n`catalog:<name>`) that do not declare the consumed package. pnpm install\nwill error until the named catalog grows to include the package or the\nreference is switched / removed."
+          "description": "Workspace package.json references to catalogs (`catalog:` or\n`catalog:<name>`) that do not declare the consumed package. pnpm install\nwill error until the named catalog grows to include the package or the\nreference is switched / removed. Wrapped in\n[`UnresolvedCatalogReferenceFinding`] with the discriminated\n`add-catalog-entry` / `update-catalog-reference` primary at position 0."
         },
         "unused_dependency_overrides": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/UnusedDependencyOverride"
+            "$ref": "#/definitions/UnusedDependencyOverrideFinding"
           },
-          "description": "Entries in pnpm-workspace.yaml's overrides: section, or package.json's\npnpm.overrides block, whose target package is not declared by any\nworkspace package and is not present in pnpm-lock.yaml. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases."
+          "description": "Entries in pnpm-workspace.yaml's overrides: section, or package.json's\npnpm.overrides block, whose target package is not declared by any\nworkspace package and is not present in pnpm-lock.yaml. Default severity\nis warn because projects without a readable lockfile fall back to\nmanifest-only checks; the hint field flags those conservative cases.\nWrapped in [`UnusedDependencyOverrideFinding`]."
         },
         "misconfigured_dependency_overrides": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/MisconfiguredDependencyOverride"
+            "$ref": "#/definitions/MisconfiguredDependencyOverrideFinding"
           },
-          "description": "pnpm.overrides entries whose key or value does not parse as a valid\noverride spec (empty key, empty value, malformed selector, unbalanced\nparent matcher). pnpm install will reject these. Default severity is\nerror."
+          "description": "pnpm.overrides entries whose key or value does not parse as a valid\noverride spec (empty key, empty value, malformed selector, unbalanced\nparent matcher). pnpm install will reject these. Default severity is\nerror. Wrapped in [`MisconfiguredDependencyOverrideFinding`]."
         }
       },
       "required": [
@@ -8294,6 +8235,338 @@
         }
       ],
       "description": "Provenance of a CRAP finding's coverage signal.\n\nDiscriminates whether the `coverage_tier` and `crap` score were derived\nfrom real Istanbul data, the graph-based estimated model evaluated against\nthe finding's own file, or the graph-based estimated model evaluated\nagainst a different file (today: an Angular component `.ts` reached via\nthe inverse `templateUrl` edge from a synthetic `<template>` finding on\nthe component's `.html` template).\n\nConsumers reading this field:\n- AI agents picking remediation actions (\"the score is inherited, the fix\n  may need to land on the component file, not the template\").\n- Dashboards plotting CRAP trends (\"the discriminator changed shape;\n  absorb the rollout rather than flagging a step change\").\n- Future tier 2 (AOT source-map back-mapping) will introduce\n  `MeasuredAotSourceMap` so consumers can distinguish measured-AOT from\n  inherited-JIT without parsing the score itself."
+    },
+    "DuplicateExportFinding": {
+      "type": "object",
+      "properties": {
+        "export_name": {
+          "type": "string",
+          "description": "The duplicated export name."
+        },
+        "locations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DuplicateLocation"
+          },
+          "description": "Locations where this export name appears."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "export_name",
+        "locations",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`DuplicateExport`] finding. Carries up to\nthree actions in position-locked order: an `add-to-config` `ignoreExports`\nsnippet (only when `locations[]` carries at least one path) followed by\nthe `remove-duplicate` fix and the multi-location suppress.\n\nThe `add-to-config` action sits at position 0 because the documented\nprimary slot points at the safe, non-destructive path: the shadcn /\nRadix / bits-ui namespace-barrel case where every `index.*` reexports\nthe directory's neighbours. The `remove-duplicate` fix stays as the\nsecondary so consumers that pattern-match on `actions[0].type` for\n\"primary fix\" never propose deletion of an intentional barrel surface."
+    },
+    "UnusedCatalogEntryFinding": {
+      "type": "object",
+      "properties": {
+        "entry_name": {
+          "type": "string",
+          "description": "Package name declared in the catalog (e.g. `\"react\"`, `\"@scope/lib\"`)."
+        },
+        "catalog_name": {
+          "type": "string",
+          "description": "Catalog group: `\"default\"` for the top-level `catalog:` map, or the\nnamed catalog key for entries declared under `catalogs.<name>:`."
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to `pnpm-workspace.yaml`, relative to the analyzed root."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the catalog entry within `pnpm-workspace.yaml`."
+        },
+        "hardcoded_consumers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Workspace `package.json` files that declare the same package with a\nhardcoded version range instead of `catalog:`. Empty when no consumer\nuses a hardcoded version. Sorted lexicographically for deterministic\noutput."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "entry_name",
+        "catalog_name",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedCatalogEntry`] finding. Per-instance\n`auto_fixable` flips to `false` when `hardcoded_consumers` is non-empty:\nthe entry cannot be removed safely while a workspace package still pins\nthe same package via a hardcoded version range."
+    },
+    "EmptyCatalogGroupFinding": {
+      "type": "object",
+      "properties": {
+        "catalog_name": {
+          "type": "string",
+          "description": "Catalog group name declared under the top-level `catalogs:` map."
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to `pnpm-workspace.yaml`, relative to the analyzed root."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the empty group header within `pnpm-workspace.yaml`."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "catalog_name",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`EmptyCatalogGroup`] finding. Carries a\nstraightforward `remove-empty-catalog-group` primary plus a YAML-comment\nsuppress."
+    },
+    "UnresolvedCatalogReferenceFinding": {
+      "type": "object",
+      "properties": {
+        "entry_name": {
+          "type": "string",
+          "description": "Package name being referenced via the catalog protocol (e.g. `\"react\"`)."
+        },
+        "catalog_name": {
+          "type": "string",
+          "description": "Catalog group the reference points at: `\"default\"` for bare `catalog:` references,\nor the named catalog key for `catalog:<name>` references."
+        },
+        "path": {
+          "type": "string",
+          "description": "Absolute path to the consumer `package.json`. Matches the storage\nconvention used by every path-anchored finding type (`UnusedFile`,\n`UnresolvedImport`, `UnusedExport`, etc.) so the shared filtering\npipelines (`filter_results_by_changed_files`, per-file overrides,\naudit attribution) work without a separate root-join pass. JSON\noutput strips the project-root prefix via `serde_path::serialize`."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the dependency entry in the consumer `package.json`."
+        },
+        "available_in_catalogs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Other catalogs (in the same `pnpm-workspace.yaml`) that DO declare this\npackage. Empty when no catalog has the package. Sorted lexicographically.\nLets agents and humans decide whether to switch the reference to a\ndifferent catalog or to add the entry to the named catalog."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted; position 0 is the discriminated\nprimary (see struct docs)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "entry_name",
+        "catalog_name",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnresolvedCatalogReference`] finding. The\nprimary action at position 0 discriminates on `available_in_catalogs`:\n`add-catalog-entry` when the array is empty (no other catalog declares\nthe package), or `update-catalog-reference` when at least one\nalternative exists. When exactly one alternative exists, the action\nalso carries `suggested_target` so deterministic agents can land the\nedit without picking from a list."
+    },
+    "UnusedDependencyOverrideFinding": {
+      "type": "object",
+      "properties": {
+        "raw_key": {
+          "type": "string",
+          "description": "The full original override key as written in the source (e.g.\n`\"react>react-dom\"`, `\"@types/react@<18\"`). Preserved for round-trip\nreporting so agents see the unmodified spelling."
+        },
+        "target_package": {
+          "type": "string",
+          "description": "The target package the override rewrites (e.g. `\"react-dom\"` for\n`\"react>react-dom\"`, `\"@types/react\"` for `\"@types/react@<18\"`)."
+        },
+        "parent_package": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Optional parent package (left side of `>`). `None` for bare-target keys."
+        },
+        "version_constraint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Optional version selector on the target (e.g. `Some(\"<18\")` for\n`\"@types/react@<18\"`)."
+        },
+        "version_range": {
+          "type": "string",
+          "description": "The right-hand side of the entry: the version pnpm should force."
+        },
+        "source": {
+          "description": "File the override was declared in. Matches the value users write in\n`ignoreDependencyOverrides[].source`.",
+          "$ref": "#/definitions/DependencyOverrideSource"
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to the source file. `pnpm-workspace.yaml` or a `package.json`,\nstored as an absolute filesystem path so `--changed-since` and\nper-file `overrides.rules` can compare directly against the analyzer's\nchanged-set / per-path rule lookups. JSON serialization strips the\nproject root via `serde_path::serialize`, matching the\n`UnresolvedCatalogReference` convention."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the entry within the source file."
+        },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Soft hint reminding consumers to verify the override before removal.\nEmitted on every unused-override finding (both bare-target and\nparent-chain shapes) because projects without a readable lockfile still\nuse the conservative package-manifest fallback."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "raw_key",
+        "target_package",
+        "version_range",
+        "source",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedDependencyOverride`] finding. Carries\na `remove-dependency-override` primary plus an `add-to-config`\n`ignoreDependencyOverrides` suppress scoped to the target package and\ndeclaration source."
+    },
+    "MisconfiguredDependencyOverrideFinding": {
+      "type": "object",
+      "properties": {
+        "raw_key": {
+          "type": "string",
+          "description": "The full original override key as written in the source."
+        },
+        "target_package": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Parsed target package name when the key was syntactically valid (the\n`EmptyValue` reason path). `None` for `UnparsableKey` findings whose\nkey could not be parsed at all. Used by JSON `add-to-config` actions to\nemit a paste-ready `ignoreDependencyOverrides` value that matches the\nsuppression matcher (which also keys on `target_package`); avoids the\npitfall where `raw_key` like `\"react@<18\"` would not match the rule\nthat targets package `\"react\"`."
+        },
+        "raw_value": {
+          "type": "string",
+          "description": "The right-hand side of the entry, exactly as written. Empty when the\nvalue was missing."
+        },
+        "reason": {
+          "description": "Classifier for the misconfiguration. 'unparsable-key' = the key is not a\nvalid pnpm shape; 'empty-value' = the value is missing, empty, or\ncontains line breaks.",
+          "$ref": "#/definitions/DependencyOverrideMisconfigReason"
+        },
+        "source": {
+          "description": "Where the override entry was declared.",
+          "$ref": "#/definitions/DependencyOverrideSource"
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to the source file. Stored as an absolute filesystem path so\n`--changed-since` and per-file `overrides.rules` can compare directly.\nJSON serialization strips the project root via `serde_path::serialize`."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the entry within the source file."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "raw_key",
+        "raw_value",
+        "reason",
+        "source",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`MisconfiguredDependencyOverride`] finding.\nCarries a `fix-dependency-override` primary plus the conditional\n`add-to-config` `ignoreDependencyOverrides` suppress (skipped when both\n`target_package` and `raw_key` are empty, since the rule matcher keys on\na non-empty package name)."
     }
   }
 }

@@ -18,9 +18,11 @@ use crate::extract::ModuleInfo;
 use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use fallow_types::output_dead_code::{
-    BoundaryViolationFinding, CircularDependencyFinding, PrivateTypeLeakFinding,
+    BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
+    EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding, PrivateTypeLeakFinding,
     TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
-    UnresolvedImportFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
+    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
     UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
@@ -473,6 +475,9 @@ pub fn find_dead_code_full(
                                             &line_offsets_by_file,
                                             resolved_modules,
                                         )
+                                        .into_iter()
+                                        .map(DuplicateExportFinding::with_actions)
+                                        .collect::<Vec<_>>()
                                     } else {
                                         Vec::new()
                                     }
@@ -601,17 +606,26 @@ pub fn find_dead_code_full(
         && let Some(state) = gather_pnpm_catalog_state(config, workspaces)
     {
         if need_unused_catalogs {
-            results.unused_catalog_entries = find_unused_catalog_entries(&state);
+            results.unused_catalog_entries = find_unused_catalog_entries(&state)
+                .into_iter()
+                .map(UnusedCatalogEntryFinding::with_actions)
+                .collect();
         }
         if need_empty_catalog_groups {
-            results.empty_catalog_groups = find_empty_catalog_groups(&state);
+            results.empty_catalog_groups = find_empty_catalog_groups(&state)
+                .into_iter()
+                .map(EmptyCatalogGroupFinding::with_actions)
+                .collect();
         }
         if need_unresolved_refs {
             results.unresolved_catalog_references = find_unresolved_catalog_references(
                 &state,
                 &config.compiled_ignore_catalog_references,
                 &config.root,
-            );
+            )
+            .into_iter()
+            .map(UnresolvedCatalogReferenceFinding::with_actions)
+            .collect();
         }
     }
 
@@ -627,11 +641,17 @@ pub fn find_dead_code_full(
         && let Some(state) = gather_pnpm_override_state(config, workspaces)
     {
         if need_unused_overrides {
-            results.unused_dependency_overrides = find_unused_dependency_overrides(&state, config);
+            results.unused_dependency_overrides = find_unused_dependency_overrides(&state, config)
+                .into_iter()
+                .map(UnusedDependencyOverrideFinding::with_actions)
+                .collect();
         }
         if need_misconfigured_overrides {
             results.misconfigured_dependency_overrides =
-                find_misconfigured_dependency_overrides(&state, config);
+                find_misconfigured_dependency_overrides(&state, config)
+                    .into_iter()
+                    .map(MisconfiguredDependencyOverrideFinding::with_actions)
+                    .collect();
         }
     }
 

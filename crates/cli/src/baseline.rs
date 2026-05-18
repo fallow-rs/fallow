@@ -216,7 +216,7 @@ impl BaselineData {
             duplicate_exports: results
                 .duplicate_exports
                 .iter()
-                .map(|d| duplicate_export_key(d, root))
+                .map(|d| duplicate_export_key(&d.export, root))
                 .collect(),
             type_only_dependencies: results
                 .type_only_dependencies
@@ -241,12 +241,12 @@ impl BaselineData {
             unused_catalog_entries: results
                 .unused_catalog_entries
                 .iter()
-                .map(|e| format!("{}:{}", e.catalog_name, e.entry_name))
+                .map(|e| format!("{}:{}", e.entry.catalog_name, e.entry.entry_name))
                 .collect(),
             empty_catalog_groups: results
                 .empty_catalog_groups
                 .iter()
-                .map(|g| g.catalog_name.clone())
+                .map(|g| g.group.catalog_name.clone())
                 .collect(),
             unresolved_catalog_references: results
                 .unresolved_catalog_references
@@ -254,22 +254,22 @@ impl BaselineData {
                 .map(|r| {
                     format!(
                         "{}:{}:{}:{}",
-                        relative_path(&r.path, root),
-                        r.line,
-                        r.catalog_name,
-                        r.entry_name,
+                        relative_path(&r.reference.path, root),
+                        r.reference.line,
+                        r.reference.catalog_name,
+                        r.reference.entry_name,
                     )
                 })
                 .collect(),
             unused_dependency_overrides: results
                 .unused_dependency_overrides
                 .iter()
-                .map(|o| format!("{}:{}", o.source, o.raw_key))
+                .map(|o| format!("{}:{}", o.entry.source, o.entry.raw_key))
                 .collect(),
             misconfigured_dependency_overrides: results
                 .misconfigured_dependency_overrides
                 .iter()
-                .map(|o| format!("{}:{}", o.source, o.raw_key))
+                .map(|o| format!("{}:{}", o.entry.source, o.entry.raw_key))
                 .collect(),
         }
     }
@@ -489,7 +489,7 @@ pub fn filter_new_issues(
         .map(String::as_str)
         .collect();
     results.duplicate_exports.retain(|d| {
-        let key = duplicate_export_key(d, root);
+        let key = duplicate_export_key(&d.export, root);
         !baseline_dup_exports.contains(key.as_str())
     });
 
@@ -539,7 +539,7 @@ pub fn filter_new_issues(
         .map(String::as_str)
         .collect();
     results.unused_catalog_entries.retain(|e| {
-        let key = format!("{}:{}", e.catalog_name, e.entry_name);
+        let key = format!("{}:{}", e.entry.catalog_name, e.entry.entry_name);
         !baseline_catalog.contains(key.as_str())
     });
 
@@ -550,7 +550,7 @@ pub fn filter_new_issues(
         .collect();
     results
         .empty_catalog_groups
-        .retain(|g| !baseline_empty_catalog_groups.contains(g.catalog_name.as_str()));
+        .retain(|g| !baseline_empty_catalog_groups.contains(g.group.catalog_name.as_str()));
 
     let baseline_unresolved: FxHashSet<&str> = baseline
         .unresolved_catalog_references
@@ -560,10 +560,10 @@ pub fn filter_new_issues(
     results.unresolved_catalog_references.retain(|r| {
         let key = format!(
             "{}:{}:{}:{}",
-            relative_path(&r.path, root),
-            r.line,
-            r.catalog_name,
-            r.entry_name,
+            relative_path(&r.reference.path, root),
+            r.reference.line,
+            r.reference.catalog_name,
+            r.reference.entry_name,
         );
         !baseline_unresolved.contains(key.as_str())
     });
@@ -574,7 +574,7 @@ pub fn filter_new_issues(
         .map(String::as_str)
         .collect();
     results.unused_dependency_overrides.retain(|o| {
-        let key = format!("{}:{}", o.source, o.raw_key);
+        let key = format!("{}:{}", o.entry.source, o.entry.raw_key);
         !baseline_unused_overrides.contains(key.as_str())
     });
 
@@ -584,7 +584,7 @@ pub fn filter_new_issues(
         .map(String::as_str)
         .collect();
     results.misconfigured_dependency_overrides.retain(|o| {
-        let key = format!("{}:{}", o.source, o.raw_key);
+        let key = format!("{}:{}", o.entry.source, o.entry.raw_key);
         !baseline_misconfigured_overrides.contains(key.as_str())
     });
 
@@ -2016,21 +2016,23 @@ mod tests {
             }),
         );
         r.duplicate_exports
-            .push(fallow_core::results::DuplicateExport {
-                export_name: "Config".to_string(),
-                locations: vec![
-                    fallow_core::results::DuplicateLocation {
-                        path: PathBuf::from("src/a.ts"),
-                        line: 1,
-                        col: 0,
-                    },
-                    fallow_core::results::DuplicateLocation {
-                        path: PathBuf::from("src/b.ts"),
-                        line: 5,
-                        col: 0,
-                    },
-                ],
-            });
+            .push(fallow_core::results::DuplicateExportFinding::with_actions(
+                fallow_core::results::DuplicateExport {
+                    export_name: "Config".to_string(),
+                    locations: vec![
+                        fallow_core::results::DuplicateLocation {
+                            path: PathBuf::from("src/a.ts"),
+                            line: 1,
+                            col: 0,
+                        },
+                        fallow_core::results::DuplicateLocation {
+                            path: PathBuf::from("src/b.ts"),
+                            line: 5,
+                            col: 0,
+                        },
+                    ],
+                },
+            ));
         r.type_only_dependencies.push(
             fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
                 package_name: "zod".to_string(),
@@ -2326,7 +2328,7 @@ mod tests {
                 col: 0,
                 specifier_col: 0,
             })],
-            duplicate_exports: vec![DuplicateExport {
+            duplicate_exports: vec![DuplicateExportFinding::with_actions(DuplicateExport {
                 export_name: "Config".to_string(),
                 locations: vec![
                     DuplicateLocation {
@@ -2340,7 +2342,7 @@ mod tests {
                         col: 0,
                     },
                 ],
-            }],
+            })],
             boundary_violations: vec![BoundaryViolationFinding::with_actions(BoundaryViolation {
                 from_path: p("src/ui/btn.ts"),
                 to_path: p("src/db/query.ts"),

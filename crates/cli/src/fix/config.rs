@@ -37,7 +37,7 @@ use std::path::{Component, Path, PathBuf};
 use fallow_config::{
     FallowConfig, IgnoreExportRule, OutputFormat, add_ignore_exports_rule_to_string,
 };
-use fallow_core::results::{AnalysisResults, DuplicateExport};
+use fallow_core::results::{AnalysisResults, DuplicateExportFinding};
 use rustc_hash::FxHashSet;
 
 use super::io::atomic_write;
@@ -149,7 +149,7 @@ pub(super) fn apply_config_fixes(
 fn apply_edit(
     root: &Path,
     config_path: &Path,
-    duplicate_exports: &[DuplicateExport],
+    duplicate_exports: &[DuplicateExportFinding],
     output: OutputFormat,
     dry_run: bool,
     fixes: &mut Vec<serde_json::Value>,
@@ -224,7 +224,7 @@ fn apply_edit(
 fn apply_create(
     root: &Path,
     target: &Path,
-    duplicate_exports: &[DuplicateExport],
+    duplicate_exports: &[DuplicateExportFinding],
     output: OutputFormat,
     dry_run: bool,
     fixes: &mut Vec<serde_json::Value>,
@@ -481,12 +481,13 @@ fn has_workspace_marker(dir: &Path) -> bool {
 fn ignore_export_entries(
     root: &Path,
     config_path: &Path,
-    duplicate_exports: &[DuplicateExport],
+    duplicate_exports: &[DuplicateExportFinding],
 ) -> Vec<IgnoreExportRule> {
     let config_dir = config_path.parent().unwrap_or(root);
     let mut seen = FxHashSet::default();
     let mut entries = Vec::new();
     for item in duplicate_exports {
+        let item = &item.export;
         for location in &item.locations {
             let file = relative_from_config_dir(root, config_dir, &location.path);
             if seen.insert(file.clone()) {
@@ -548,10 +549,10 @@ fn display_path(root: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::results::DuplicateLocation;
+    use fallow_core::results::{DuplicateExport, DuplicateLocation};
 
-    fn duplicate(paths: &[PathBuf]) -> DuplicateExport {
-        DuplicateExport {
+    fn duplicate(paths: &[PathBuf]) -> DuplicateExportFinding {
+        DuplicateExportFinding::with_actions(DuplicateExport {
             export_name: "Button".to_owned(),
             locations: paths
                 .iter()
@@ -561,7 +562,7 @@ mod tests {
                     col: 0,
                 })
                 .collect(),
-        }
+        })
     }
 
     #[test]
@@ -632,14 +633,14 @@ mod tests {
 
         fn results_with_duplicate(root: &Path, name: &str) -> AnalysisResults {
             AnalysisResults {
-                duplicate_exports: vec![DuplicateExport {
+                duplicate_exports: vec![DuplicateExportFinding::with_actions(DuplicateExport {
                     export_name: name.to_owned(),
                     locations: vec![DuplicateLocation {
                         path: root.join("src/components/Button/index.ts"),
                         line: 1,
                         col: 0,
                     }],
-                }],
+                })],
                 ..AnalysisResults::default()
             }
         }

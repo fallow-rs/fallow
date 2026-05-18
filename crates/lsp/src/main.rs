@@ -1173,12 +1173,13 @@ fn dedup_results(target: &mut AnalysisResults) {
         // roots that emitted the same group in different orders collapse
         // to one identity.
         let mut locs: Vec<_> = d
+            .export
             .locations
             .iter()
             .map(|l| (l.path.clone(), l.line, l.col))
             .collect();
         locs.sort();
-        (d.export_name.clone(), locs)
+        (d.export.export_name.clone(), locs)
     });
     dedup_by_key_preserving_order(&mut target.type_only_dependencies, |d| {
         (d.dep.package_name.clone(), d.dep.path.clone(), d.dep.line)
@@ -1207,24 +1208,36 @@ fn dedup_results(target: &mut AnalysisResults) {
         (s.path.clone(), s.line, s.col)
     });
     dedup_by_key_preserving_order(&mut target.unused_catalog_entries, |e| {
-        (e.path.clone(), e.catalog_name.clone(), e.entry_name.clone())
+        (
+            e.entry.path.clone(),
+            e.entry.catalog_name.clone(),
+            e.entry.entry_name.clone(),
+        )
     });
     dedup_by_key_preserving_order(&mut target.empty_catalog_groups, |g| {
-        (g.path.clone(), g.catalog_name.clone())
+        (g.group.path.clone(), g.group.catalog_name.clone())
     });
     dedup_by_key_preserving_order(&mut target.unresolved_catalog_references, |f| {
         (
-            f.path.clone(),
-            f.line,
-            f.catalog_name.clone(),
-            f.entry_name.clone(),
+            f.reference.path.clone(),
+            f.reference.line,
+            f.reference.catalog_name.clone(),
+            f.reference.entry_name.clone(),
         )
     });
     dedup_by_key_preserving_order(&mut target.unused_dependency_overrides, |o| {
-        (o.path.clone(), o.source, o.raw_key.clone())
+        (
+            o.entry.path.clone(),
+            o.entry.source,
+            o.entry.raw_key.clone(),
+        )
     });
     dedup_by_key_preserving_order(&mut target.misconfigured_dependency_overrides, |o| {
-        (o.path.clone(), o.source, o.raw_key.clone())
+        (
+            o.entry.path.clone(),
+            o.entry.source,
+            o.entry.raw_key.clone(),
+        )
     });
 
     // UnlistedDependency: real merge, not plain dedup. The same package can
@@ -1754,10 +1767,12 @@ mod tests {
                     imported_from: vec![],
                 },
             )],
-            duplicate_exports: vec![fallow_core::results::DuplicateExport {
-                export_name: "dup".to_string(),
-                locations: vec![],
-            }],
+            duplicate_exports: vec![fallow_core::results::DuplicateExportFinding::with_actions(
+                fallow_core::results::DuplicateExport {
+                    export_name: "dup".to_string(),
+                    locations: vec![],
+                },
+            )],
             type_only_dependencies: vec![
                 fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
                     package_name: "type-only".to_string(),

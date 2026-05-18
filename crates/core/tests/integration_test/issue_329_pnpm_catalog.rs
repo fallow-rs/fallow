@@ -25,7 +25,7 @@ fn detects_unused_default_and_named_catalog_entries() {
     let actual: FxHashSet<(&str, &str)> = results
         .unused_catalog_entries
         .iter()
-        .map(|e| (e.catalog_name.as_str(), e.entry_name.as_str()))
+        .map(|e| (e.entry.catalog_name.as_str(), e.entry.entry_name.as_str()))
         .collect();
     assert_eq!(actual, expected, "unexpected catalog findings: {actual:?}");
 
@@ -35,7 +35,7 @@ fn detects_unused_default_and_named_catalog_entries() {
         !results
             .unused_catalog_entries
             .iter()
-            .any(|e| e.catalog_name == "default" && e.entry_name == "react"),
+            .any(|e| e.entry.catalog_name == "default" && e.entry.entry_name == "react"),
         "default catalog 'react' is referenced by both consumers and must not be flagged"
     );
 
@@ -44,7 +44,7 @@ fn detects_unused_default_and_named_catalog_entries() {
         !results
             .unused_catalog_entries
             .iter()
-            .any(|e| e.catalog_name == "legacy"),
+            .any(|e| e.entry.catalog_name == "legacy"),
         "legacy catalog entries are all referenced and must not appear"
     );
 }
@@ -58,10 +58,11 @@ fn hardcoded_consumers_are_surfaced() {
     let hardcoded = results
         .unused_catalog_entries
         .iter()
-        .find(|e| e.entry_name == "hardcoded-pkg")
+        .find(|e| e.entry.entry_name == "hardcoded-pkg")
         .expect("hardcoded-pkg should be reported as unused");
 
     let consumer_paths: Vec<String> = hardcoded
+        .entry
         .hardcoded_consumers
         .iter()
         .map(|p| p.to_string_lossy().replace('\\', "/"))
@@ -78,7 +79,7 @@ fn catalog_entries_are_sorted_default_first() {
     let names: Vec<&str> = results
         .unused_catalog_entries
         .iter()
-        .map(|e| e.catalog_name.as_str())
+        .map(|e| e.entry.catalog_name.as_str())
         .collect();
     // Default catalog entries must precede named-catalog entries.
     let first_named = names.iter().position(|n| *n != "default");
@@ -97,6 +98,7 @@ fn path_is_relative_pnpm_workspace_yaml() {
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     for entry in &results.unused_catalog_entries {
+        let entry = &entry.entry;
         assert_eq!(
             entry.path,
             PathBuf::from("pnpm-workspace.yaml"),

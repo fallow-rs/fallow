@@ -19,6 +19,7 @@ pub fn push_duplicate_export_diagnostics(
     results: &AnalysisResults,
 ) {
     for dup in &results.duplicate_exports {
+        let dup = &dup.export;
         // Build related information linking all duplicate locations together
         for loc in &dup.locations {
             if let Ok(uri) = Url::from_file_path(&loc.path) {
@@ -197,8 +198,8 @@ mod tests {
 
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
     use fallow_core::results::{
-        AnalysisResults, DuplicateExport, DuplicateLocation, UnusedExport, UnusedExportFinding,
-        UnusedTypeFinding,
+        AnalysisResults, DuplicateExport, DuplicateExportFinding, DuplicateLocation, UnusedExport,
+        UnusedExportFinding, UnusedTypeFinding,
     };
     use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString, Url};
 
@@ -243,21 +244,23 @@ mod tests {
         let helpers_path = root.join("src/helpers.ts");
 
         let mut results = AnalysisResults::default();
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "formatDate".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: utils_path.clone(),
-                    line: 15,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: helpers_path.clone(),
-                    line: 30,
-                    col: 0,
-                },
-            ],
-        });
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "formatDate".to_string(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: utils_path.clone(),
+                        line: 15,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: helpers_path.clone(),
+                        line: 30,
+                        col: 0,
+                    },
+                ],
+            }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -414,14 +417,16 @@ mod tests {
         let path = root.join("src/solo.ts");
 
         let mut results = AnalysisResults::default();
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "helper".to_string(),
-            locations: vec![DuplicateLocation {
-                path: path.clone(),
-                line: 5,
-                col: 0,
-            }],
-        });
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "helper".to_string(),
+                locations: vec![DuplicateLocation {
+                    path: path.clone(),
+                    line: 5,
+                    col: 0,
+                }],
+            }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);

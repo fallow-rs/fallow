@@ -113,6 +113,13 @@ pub struct FixAction {
     /// source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub available_in_catalogs: Option<Vec<String>>,
+    /// Only present on `update-catalog-reference` actions when exactly one
+    /// alternative catalog declares the package: the unambiguous switch
+    /// target. Lets deterministic (non-LLM) agents land the edit without
+    /// picking from a list. Absent when `available_in_catalogs` has zero
+    /// or more than one entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_target: Option<String>,
 }
 
 /// Discriminant string for [`FixAction`]. Kebab-case per the JSON output

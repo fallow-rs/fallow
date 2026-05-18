@@ -58,7 +58,7 @@ fn duplicate_exports_flagged_without_ignore_exports() {
     let dupe_names: Vec<&str> = results
         .duplicate_exports
         .iter()
-        .map(|d| d.export_name.as_str())
+        .map(|d| d.export.export_name.as_str())
         .collect();
     assert!(
         dupe_names.contains(&"Root"),
@@ -95,7 +95,7 @@ fn ignore_exports_wildcard_clears_duplicate_exports() {
         results
             .duplicate_exports
             .iter()
-            .map(|d| &d.export_name)
+            .map(|d| &d.export.export_name)
             .collect::<Vec<_>>()
     );
 }
@@ -117,7 +117,7 @@ fn ignore_exports_named_clears_only_listed_names() {
     let dupe_names: Vec<&str> = results
         .duplicate_exports
         .iter()
-        .map(|d| d.export_name.as_str())
+        .map(|d| d.export.export_name.as_str())
         .collect();
     assert!(
         !dupe_names.contains(&"Root"),

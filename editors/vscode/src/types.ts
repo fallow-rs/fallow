@@ -26,15 +26,17 @@ export type {
   CloneGroupAction,
   CloneInstance,
   CombinedOutput,
-  DuplicateExport,
+  DuplicateExportFinding,
   DuplicateLocation,
   DupesOutput,
   DuplicationStats,
+  EmptyCatalogGroupFinding,
   EntryPoints,
   FixAction as SuggestionFixAction,
   HealthOutput,
   ImportSite,
   IssueAction,
+  MisconfiguredDependencyOverrideFinding,
   PrivateTypeLeakFinding,
   RefactoringSuggestion,
   StaleSuppression,
@@ -43,18 +45,18 @@ export type {
   TestOnlyDependencyFinding,
   TypeOnlyDependencyFinding,
   UnlistedDependencyFinding,
+  UnresolvedCatalogReferenceFinding,
   UnresolvedImportFinding,
-  UnusedCatalogEntry,
+  UnusedCatalogEntryFinding,
   UnusedClassMemberFinding,
   UnusedDependencyFinding,
-  UnusedDependencyOverride,
+  UnusedDependencyOverrideFinding,
   UnusedDevDependencyFinding,
   UnusedEnumMemberFinding,
   UnusedExportFinding,
   UnusedFileFinding,
   UnusedOptionalDependencyFinding,
   UnusedTypeFinding,
-  MisconfiguredDependencyOverride,
 } from "./generated/output-contract.js";
 
 // Backwards-compat aliases for downstream consumers that import the
@@ -64,13 +66,19 @@ export type {
 import type {
   BoundaryViolationFinding,
   CircularDependencyFinding,
+  DuplicateExportFinding,
+  EmptyCatalogGroupFinding,
+  MisconfiguredDependencyOverrideFinding,
   PrivateTypeLeakFinding,
   TestOnlyDependencyFinding,
   TypeOnlyDependencyFinding,
   UnlistedDependencyFinding,
+  UnresolvedCatalogReferenceFinding,
   UnresolvedImportFinding,
+  UnusedCatalogEntryFinding,
   UnusedClassMemberFinding,
   UnusedDependencyFinding,
+  UnusedDependencyOverrideFinding,
   UnusedDevDependencyFinding,
   UnusedEnumMemberFinding,
   UnusedExportFinding,
@@ -79,15 +87,22 @@ import type {
 } from "./generated/output-contract.js";
 export type BoundaryViolation = BoundaryViolationFinding;
 export type CircularDependency = CircularDependencyFinding;
+export type DuplicateExport = DuplicateExportFinding;
+export type EmptyCatalogGroup = EmptyCatalogGroupFinding;
+export type MisconfiguredDependencyOverride =
+  MisconfiguredDependencyOverrideFinding;
 export type PrivateTypeLeak = PrivateTypeLeakFinding;
 export type TestOnlyDependency = TestOnlyDependencyFinding;
 export type TypeOnlyDependency = TypeOnlyDependencyFinding;
 export type UnlistedDependency = UnlistedDependencyFinding;
+export type UnresolvedCatalogReference = UnresolvedCatalogReferenceFinding;
 export type UnresolvedImport = UnresolvedImportFinding;
+export type UnusedCatalogEntry = UnusedCatalogEntryFinding;
 export type UnusedDependency =
   | UnusedDependencyFinding
   | UnusedDevDependencyFinding
   | UnusedOptionalDependencyFinding;
+export type UnusedDependencyOverride = UnusedDependencyOverrideFinding;
 export type UnusedExport = UnusedExportFinding;
 export type UnusedFile = UnusedFileFinding;
 export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding;

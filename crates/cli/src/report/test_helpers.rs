@@ -103,21 +103,22 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
                 }],
             },
         ));
-    r.duplicate_exports.push(DuplicateExport {
-        export_name: "Config".to_string(),
-        locations: vec![
-            DuplicateLocation {
-                path: root.join("src/config.ts"),
-                line: 15,
-                col: 0,
-            },
-            DuplicateLocation {
-                path: root.join("src/types.ts"),
-                line: 30,
-                col: 0,
-            },
-        ],
-    });
+    r.duplicate_exports
+        .push(DuplicateExportFinding::with_actions(DuplicateExport {
+            export_name: "Config".to_string(),
+            locations: vec![
+                DuplicateLocation {
+                    path: root.join("src/config.ts"),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: root.join("src/types.ts"),
+                    line: 30,
+                    col: 0,
+                },
+            ],
+        }));
     r.type_only_dependencies
         .push(TypeOnlyDependencyFinding::with_actions(
             TypeOnlyDependency {

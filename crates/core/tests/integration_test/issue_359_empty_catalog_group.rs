@@ -11,9 +11,9 @@ fn detects_empty_named_catalog_groups_only() {
         .iter()
         .map(|group| {
             (
-                group.catalog_name.as_str(),
-                group.path.as_path(),
-                group.line,
+                group.group.catalog_name.as_str(),
+                group.group.path.as_path(),
+                group.group.line,
             )
         })
         .collect();
@@ -30,7 +30,7 @@ fn detects_empty_named_catalog_groups_only() {
         results
             .empty_catalog_groups
             .iter()
-            .all(|group| group.catalog_name != "default"),
+            .all(|group| group.group.catalog_name != "default"),
         "top-level catalog: must not be flagged even when empty",
     );
 }

@@ -262,6 +262,7 @@ pub fn push_dep_diagnostics(
     // entry.path is project-root-relative; Url::from_file_path requires an
     // absolute path, so join against the analyzer root before constructing.
     for entry in &results.unused_catalog_entries {
+        let entry = &entry.entry;
         if let Ok(entry_uri) = Url::from_file_path(root.join(&entry.path)) {
             let line = entry.line.saturating_sub(1);
             let message = if entry.catalog_name == "default" {
@@ -305,6 +306,7 @@ fn push_empty_catalog_group_diagnostics(
     root: &std::path::Path,
 ) {
     for group in &results.empty_catalog_groups {
+        let group = &group.group;
         let Ok(uri) = Url::from_file_path(root.join(&group.path)) else {
             continue;
         };
@@ -340,6 +342,7 @@ fn push_unresolved_catalog_reference_diagnostics(
 ) {
     use std::fmt::Write as _;
     for finding in &results.unresolved_catalog_references {
+        let finding = &finding.reference;
         let Ok(uri) = Url::from_file_path(&finding.path) else {
             continue;
         };
@@ -392,6 +395,7 @@ fn push_dependency_override_diagnostics(
 ) {
     use std::fmt::Write as _;
     for finding in &results.unused_dependency_overrides {
+        let finding = &finding.entry;
         let Ok(uri) = Url::from_file_path(&finding.path) else {
             continue;
         };
@@ -422,6 +426,7 @@ fn push_dependency_override_diagnostics(
         });
     }
     for finding in &results.misconfigured_dependency_overrides {
+        let finding = &finding.entry;
         let Ok(uri) = Url::from_file_path(&finding.path) else {
             continue;
         };
@@ -513,13 +518,15 @@ mod tests {
     use fallow_core::duplicates::{DuplicationReport, DuplicationStats};
     use fallow_core::extract::MemberKind;
     use fallow_core::results::{
-        AnalysisResults, DependencyLocation, EmptyCatalogGroup, ImportSite, TestOnlyDependency,
-        TestOnlyDependencyFinding, TypeOnlyDependency, TypeOnlyDependencyFinding,
-        UnlistedDependency, UnlistedDependencyFinding, UnresolvedCatalogReference,
-        UnresolvedImport, UnresolvedImportFinding, UnusedCatalogEntry, UnusedClassMemberFinding,
-        UnusedDependency, UnusedDependencyFinding, UnusedDevDependencyFinding,
-        UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding, UnusedFile, UnusedFileFinding,
-        UnusedMember, UnusedOptionalDependencyFinding, UnusedTypeFinding,
+        AnalysisResults, DependencyLocation, EmptyCatalogGroup, EmptyCatalogGroupFinding,
+        ImportSite, TestOnlyDependency, TestOnlyDependencyFinding, TypeOnlyDependency,
+        TypeOnlyDependencyFinding, UnlistedDependency, UnlistedDependencyFinding,
+        UnresolvedCatalogReference, UnresolvedCatalogReferenceFinding, UnresolvedImport,
+        UnresolvedImportFinding, UnusedCatalogEntry, UnusedCatalogEntryFinding,
+        UnusedClassMemberFinding, UnusedDependency, UnusedDependencyFinding,
+        UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
+        UnusedFile, UnusedFileFinding, UnusedMember, UnusedOptionalDependencyFinding,
+        UnusedTypeFinding,
     };
     use tower_lsp::lsp_types::{DiagnosticSeverity, DiagnosticTag, NumberOrString, Url};
 
@@ -986,13 +993,17 @@ mod tests {
         // squiggle ever lands on pnpm-workspace.yaml.
         let root = test_root();
         let mut results = AnalysisResults::default();
-        results.unused_catalog_entries.push(UnusedCatalogEntry {
-            entry_name: "is-even".to_string(),
-            catalog_name: "default".to_string(),
-            path: PathBuf::from("pnpm-workspace.yaml"),
-            line: 6,
-            hardcoded_consumers: vec![],
-        });
+        results
+            .unused_catalog_entries
+            .push(UnusedCatalogEntryFinding::with_actions(
+                UnusedCatalogEntry {
+                    entry_name: "is-even".to_string(),
+                    catalog_name: "default".to_string(),
+                    path: PathBuf::from("pnpm-workspace.yaml"),
+                    line: 6,
+                    hardcoded_consumers: vec![],
+                },
+            ));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -1019,13 +1030,17 @@ mod tests {
     fn unused_catalog_entry_message_mentions_named_catalog() {
         let root = test_root();
         let mut results = AnalysisResults::default();
-        results.unused_catalog_entries.push(UnusedCatalogEntry {
-            entry_name: "react-dom".to_string(),
-            catalog_name: "react17".to_string(),
-            path: PathBuf::from("pnpm-workspace.yaml"),
-            line: 12,
-            hardcoded_consumers: vec![],
-        });
+        results
+            .unused_catalog_entries
+            .push(UnusedCatalogEntryFinding::with_actions(
+                UnusedCatalogEntry {
+                    entry_name: "react-dom".to_string(),
+                    catalog_name: "react17".to_string(),
+                    path: PathBuf::from("pnpm-workspace.yaml"),
+                    line: 12,
+                    hardcoded_consumers: vec![],
+                },
+            ));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -1044,11 +1059,13 @@ mod tests {
     fn empty_catalog_group_produces_warning_diagnostic() {
         let root = test_root();
         let mut results = AnalysisResults::default();
-        results.empty_catalog_groups.push(EmptyCatalogGroup {
-            catalog_name: "legacy".to_string(),
-            path: PathBuf::from("pnpm-workspace.yaml"),
-            line: 9,
-        });
+        results
+            .empty_catalog_groups
+            .push(EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
+                catalog_name: "legacy".to_string(),
+                path: PathBuf::from("pnpm-workspace.yaml"),
+                line: 9,
+            }));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -1080,15 +1097,15 @@ mod tests {
         let root = test_root();
         let abs_path = root.join("packages/app/package.json");
         let mut results = AnalysisResults::default();
-        results
-            .unresolved_catalog_references
-            .push(UnresolvedCatalogReference {
+        results.unresolved_catalog_references.push(
+            UnresolvedCatalogReferenceFinding::with_actions(UnresolvedCatalogReference {
                 entry_name: "old-react".to_string(),
                 catalog_name: "react17".to_string(),
                 path: abs_path.clone(),
                 line: 14,
                 available_in_catalogs: vec!["react18".to_string()],
-            });
+            }),
+        );
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -1118,15 +1135,15 @@ mod tests {
         let root = test_root();
         let abs_path = root.join("package.json");
         let mut results = AnalysisResults::default();
-        results
-            .unresolved_catalog_references
-            .push(UnresolvedCatalogReference {
+        results.unresolved_catalog_references.push(
+            UnresolvedCatalogReferenceFinding::with_actions(UnresolvedCatalogReference {
                 entry_name: "foo".to_string(),
                 catalog_name: "default".to_string(),
                 path: abs_path.clone(),
                 line: 5,
                 available_in_catalogs: vec![],
-            });
+            }),
+        );
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -1150,24 +1167,28 @@ mod tests {
         // as UnusedCatalogEntry), so the diagnostic emitter must root.join
         // before calling Url::from_file_path. Asserting the key exists in the
         // map under the absolute URI proves the join happened.
-        use fallow_core::results::{DependencyOverrideSource, UnusedDependencyOverride};
+        use fallow_core::results::{
+            DependencyOverrideSource, UnusedDependencyOverride, UnusedDependencyOverrideFinding,
+        };
 
         let root = test_root();
         let mut results = AnalysisResults::default();
         let yaml_path = root.join("pnpm-workspace.yaml");
         results
             .unused_dependency_overrides
-            .push(UnusedDependencyOverride {
-                raw_key: "axios".to_string(),
-                target_package: "axios".to_string(),
-                parent_package: None,
-                version_constraint: None,
-                version_range: "^1.6.0".to_string(),
-                source: DependencyOverrideSource::PnpmWorkspaceYaml,
-                path: yaml_path.clone(),
-                line: 9,
-                hint: Some("may be intentional transitive pin".to_string()),
-            });
+            .push(UnusedDependencyOverrideFinding::with_actions(
+                UnusedDependencyOverride {
+                    raw_key: "axios".to_string(),
+                    target_package: "axios".to_string(),
+                    parent_package: None,
+                    version_constraint: None,
+                    version_range: "^1.6.0".to_string(),
+                    source: DependencyOverrideSource::PnpmWorkspaceYaml,
+                    path: yaml_path.clone(),
+                    line: 9,
+                    hint: Some("may be intentional transitive pin".to_string()),
+                },
+            ));
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -1199,15 +1220,14 @@ mod tests {
     fn misconfigured_dependency_override_produces_error_diagnostic() {
         use fallow_core::results::{
             DependencyOverrideMisconfigReason, DependencyOverrideSource,
-            MisconfiguredDependencyOverride,
+            MisconfiguredDependencyOverride, MisconfiguredDependencyOverrideFinding,
         };
 
         let root = test_root();
         let json_path = root.join("package.json");
         let mut results = AnalysisResults::default();
-        results
-            .misconfigured_dependency_overrides
-            .push(MisconfiguredDependencyOverride {
+        results.misconfigured_dependency_overrides.push(
+            MisconfiguredDependencyOverrideFinding::with_actions(MisconfiguredDependencyOverride {
                 raw_key: "@types/react@<<18".to_string(),
                 target_package: None,
                 raw_value: "18.0.0".to_string(),
@@ -1215,7 +1235,8 @@ mod tests {
                 source: DependencyOverrideSource::PnpmPackageJson,
                 path: json_path.clone(),
                 line: 3,
-            });
+            }),
+        );
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);

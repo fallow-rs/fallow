@@ -379,12 +379,16 @@ fn finding_definition_names() -> &'static [&'static str] {
         // `UnusedDependency` each back multiple wrappers (one per
         // issue-key view) so the schema documents the per-key fix
         // description / suppress comment.
-        "DuplicateExport",
-        "EmptyCatalogGroup",
-        "MisconfiguredDependencyOverride",
-        "UnresolvedCatalogReference",
-        "UnusedCatalogEntry",
-        "UnusedDependencyOverride",
+        //
+        // `DuplicateExport`, `UnusedCatalogEntry`, `EmptyCatalogGroup`,
+        // `UnresolvedCatalogReference`, `UnusedDependencyOverride`, and
+        // `MisconfiguredDependencyOverride` have ALSO been migrated to
+        // typed `*Finding` wrappers in
+        // `crates/types/src/output_dead_code.rs`; their bare inner-type
+        // schemas stay in the registry (`subschema_for::<...>` below) so
+        // external consumers can read the unwrapped shape, but the
+        // wrappers ship `actions[]` and `introduced` natively and the
+        // bare types no longer carry the augmented fields.
         // Health findings (actions[] -> per-finding action wrapper).
         // `introduced` attaches per `finding_augmentation` below: HealthFinding
         // is audit-aware (carries `introduced`), HotspotEntry and

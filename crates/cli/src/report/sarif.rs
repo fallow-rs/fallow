@@ -4,9 +4,11 @@ use std::process::ExitCode;
 use fallow_config::{RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{
-    AnalysisResults, BoundaryViolation, CircularDependency, DuplicateExport, PrivateTypeLeak,
+    AnalysisResults, BoundaryViolation, CircularDependency, DuplicateExportFinding,
+    EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding, PrivateTypeLeak,
     StaleSuppression, TestOnlyDependency, TypeOnlyDependency, UnlistedDependencyFinding,
-    UnresolvedImport, UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
+    UnresolvedCatalogReferenceFinding, UnresolvedImport, UnusedCatalogEntryFinding,
+    UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport, UnusedFile, UnusedMember,
 };
 use rustc_hash::FxHashMap;
 
@@ -423,10 +425,11 @@ fn sarif_stale_suppression_fields(
 }
 
 fn sarif_unused_catalog_entry_fields(
-    entry: &fallow_core::results::UnusedCatalogEntry,
+    entry: &UnusedCatalogEntryFinding,
     root: &Path,
     level: &'static str,
 ) -> SarifFields {
+    let entry = &entry.entry;
     let message = if entry.catalog_name == "default" {
         format!(
             "Catalog entry '{}' is not referenced by any workspace package",
@@ -450,10 +453,11 @@ fn sarif_unused_catalog_entry_fields(
 }
 
 fn sarif_unused_dependency_override_fields(
-    finding: &fallow_core::results::UnusedDependencyOverride,
+    finding: &UnusedDependencyOverrideFinding,
     root: &Path,
     level: &'static str,
 ) -> SarifFields {
+    let finding = &finding.entry;
     let mut message = format!(
         "Override `{}` forces version `{}` but `{}` is not declared by any workspace package or resolved in pnpm-lock.yaml",
         finding.raw_key, finding.version_range, finding.target_package,
@@ -474,10 +478,11 @@ fn sarif_unused_dependency_override_fields(
 }
 
 fn sarif_misconfigured_dependency_override_fields(
-    finding: &fallow_core::results::MisconfiguredDependencyOverride,
+    finding: &MisconfiguredDependencyOverrideFinding,
     root: &Path,
     level: &'static str,
 ) -> SarifFields {
+    let finding = &finding.entry;
     let message = format!(
         "Override `{}` -> `{}` is malformed: {}",
         finding.raw_key,
@@ -496,10 +501,11 @@ fn sarif_misconfigured_dependency_override_fields(
 }
 
 fn sarif_unresolved_catalog_reference_fields(
-    finding: &fallow_core::results::UnresolvedCatalogReference,
+    finding: &UnresolvedCatalogReferenceFinding,
     root: &Path,
     level: &'static str,
 ) -> SarifFields {
+    let finding = &finding.reference;
     let catalog_phrase = if finding.catalog_name == "default" {
         "the default catalog".to_string()
     } else {
@@ -535,10 +541,11 @@ fn sarif_unresolved_catalog_reference_fields(
 }
 
 fn sarif_empty_catalog_group_fields(
-    group: &fallow_core::results::EmptyCatalogGroup,
+    group: &EmptyCatalogGroupFinding,
     root: &Path,
     level: &'static str,
 ) -> SarifFields {
+    let group = &group.group;
     SarifFields {
         rule_id: "fallow/empty-catalog-group",
         level,
@@ -583,12 +590,13 @@ fn push_sarif_unlisted_deps(
 /// (SARIF 2.1.0 section 3.27.12), so they do not fit `push_sarif_results`.
 fn push_sarif_duplicate_exports(
     sarif_results: &mut Vec<serde_json::Value>,
-    dups: &[DuplicateExport],
+    dups: &[DuplicateExportFinding],
     root: &Path,
     level: &'static str,
     snippets: &mut SourceSnippetCache,
 ) {
     for dup in dups {
+        let dup = &dup.export;
         for loc in &dup.locations {
             let uri = relative_uri(&loc.path, root);
             let source_snippet = snippets.line(&loc.path, loc.line);
@@ -1762,21 +1770,23 @@ mod tests {
     fn sarif_duplicate_export_emits_one_result_per_location() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "Config".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: root.join("src/a.ts"),
-                    line: 15,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: root.join("src/b.ts"),
-                    line: 30,
-                    col: 0,
-                },
-            ],
-        });
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "Config".to_string(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: root.join("src/a.ts"),
+                        line: 15,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: root.join("src/b.ts"),
+                        line: 30,
+                        col: 0,
+                    },
+                ],
+            }));
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
         let entries = sarif["runs"][0]["results"].as_array().unwrap();

@@ -798,21 +798,22 @@ mod tests {
                     }],
                 },
             ));
-        r.duplicate_exports.push(DuplicateExport {
-            export_name: "helper".into(),
-            locations: vec![
-                DuplicateLocation {
-                    path: PathBuf::from("/project/src/h.ts"),
-                    line: 15,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: PathBuf::from("/project/src/i.ts"),
-                    line: 30,
-                    col: 0,
-                },
-            ],
-        });
+        r.duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "helper".into(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/src/h.ts"),
+                        line: 15,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/src/i.ts"),
+                        line: 30,
+                        col: 0,
+                    },
+                ],
+            }));
         r
     }
 

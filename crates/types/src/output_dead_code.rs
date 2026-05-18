@@ -31,13 +31,37 @@ use serde::Serialize;
 
 use crate::envelope::AuditIntroduced;
 use crate::output::{
-    AddToConfigAction, AddToConfigKind, AddToConfigValue, FixAction, FixActionType, IssueAction,
-    SuppressFileAction, SuppressFileKind, SuppressLineAction, SuppressLineKind,
+    AddToConfigAction, AddToConfigKind, AddToConfigValue, FixAction, FixActionType,
+    IgnoreExportsRule, IssueAction, SuppressFileAction, SuppressFileKind, SuppressLineAction,
+    SuppressLineKind, SuppressLineScope,
 };
 use crate::results::{
-    BoundaryViolation, CircularDependency, PrivateTypeLeak, TestOnlyDependency, TypeOnlyDependency,
-    UnlistedDependency, UnresolvedImport, UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
+    BoundaryViolation, CircularDependency, DependencyOverrideSource, DuplicateExport,
+    EmptyCatalogGroup, MisconfiguredDependencyOverride, PrivateTypeLeak, TestOnlyDependency,
+    TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport,
+    UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
+    UnusedMember,
 };
+
+/// Shared note for the `duplicate-exports` fix action. Mirrors the const used
+/// by the human report (see `crates/cli/src/report/shared.rs`); kept here so
+/// the wire-format builder reads from the same source of truth.
+pub const NAMESPACE_BARREL_HINT: &str = "If every location is the sole `index.*` of its directory, this is likely an intentional namespace-barrel API. Prefer adding these files to `ignoreExports` over removing exports.";
+
+/// JSON Schema fragment URL for the `add-to-config` `ignoreExports` action's
+/// `value` payload. Pinned to the main branch so users browsing the action
+/// value can navigate directly to the rule shape.
+const IGNORE_EXPORTS_VALUE_SCHEMA: &str =
+    "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreExports";
+
+/// JSON Schema fragment URL for the `ignoreCatalogReferences` rule items
+/// referenced by `add-to-config` actions on `unresolved-catalog-references`.
+const IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreCatalogReferences/items";
+
+/// JSON Schema fragment URL for the `ignoreDependencyOverrides` rule items
+/// referenced by `add-to-config` actions on both the unused- and
+/// misconfigured-override findings.
+const IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencyOverrides/items";
 
 /// Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
 /// flattens in via `#[serde(flatten)]`, with a typed `actions` array
@@ -74,6 +98,7 @@ impl UnusedFileFinding {
                         .to_string(),
                 ),
                 available_in_catalogs: None,
+                suggested_target: None,
             }),
             IssueAction::SuppressFile(SuppressFileAction {
                 kind: SuppressFileKind::SuppressFile,
@@ -122,6 +147,7 @@ impl PrivateTypeLeakFinding {
                     "Keep the type exported while it is part of a public signature".to_string(),
                 ),
                 available_in_catalogs: None,
+                suggested_target: None,
             }),
             IssueAction::SuppressLine(SuppressLineAction {
                 kind: SuppressLineKind::SuppressLine,
@@ -171,6 +197,7 @@ impl UnresolvedImportFinding {
                     "Verify the module path and check tsconfig paths configuration".to_string(),
                 ),
                 available_in_catalogs: None,
+                suggested_target: None,
             }),
             IssueAction::SuppressLine(SuppressLineAction {
                 kind: SuppressLineKind::SuppressLine,
@@ -222,6 +249,7 @@ impl CircularDependencyFinding {
                         .to_string(),
                 ),
                 available_in_catalogs: None,
+                suggested_target: None,
             }),
             IssueAction::SuppressLine(SuppressLineAction {
                 kind: SuppressLineKind::SuppressLine,
@@ -273,6 +301,7 @@ impl BoundaryViolationFinding {
                         .to_string(),
                 ),
                 available_in_catalogs: None,
+                suggested_target: None,
             }),
             IssueAction::SuppressLine(SuppressLineAction {
                 kind: SuppressLineKind::SuppressLine,
@@ -330,6 +359,7 @@ impl UnusedExportFinding {
                 description: "Remove the unused export from the public API".to_string(),
                 note,
                 available_in_catalogs: None,
+                suggested_target: None,
             }),
             IssueAction::SuppressLine(SuppressLineAction {
                 kind: SuppressLineKind::SuppressLine,
@@ -388,6 +418,7 @@ impl UnusedTypeFinding {
                         .to_string(),
                 note,
                 available_in_catalogs: None,
+                suggested_target: None,
             }),
             IssueAction::SuppressLine(SuppressLineAction {
                 kind: SuppressLineKind::SuppressLine,
@@ -433,6 +464,7 @@ impl UnusedEnumMemberFinding {
                 description: "Remove this enum member".to_string(),
                 note: None,
                 available_in_catalogs: None,
+                suggested_target: None,
             }),
             IssueAction::SuppressLine(SuppressLineAction {
                 kind: SuppressLineKind::SuppressLine,
@@ -485,6 +517,7 @@ impl UnusedClassMemberFinding {
                     "Class member may be used via dependency injection or decorators".to_string(),
                 ),
                 available_in_catalogs: None,
+                suggested_target: None,
             }),
             IssueAction::SuppressLine(SuppressLineAction {
                 kind: SuppressLineKind::SuppressLine,
@@ -530,6 +563,7 @@ fn build_unused_dependency_actions(
                     .to_string(),
             ),
             available_in_catalogs: None,
+            suggested_target: None,
         })
     } else {
         IssueAction::Fix(FixAction {
@@ -538,6 +572,7 @@ fn build_unused_dependency_actions(
             description: format!("Remove from {package_json_location} in package.json"),
             note: None,
             available_in_catalogs: None,
+            suggested_target: None,
         })
     });
     actions.push(build_ignore_dependencies_suppress_action(
@@ -704,6 +739,7 @@ impl UnlistedDependencyFinding {
                     "Verify this package should be a direct dependency before adding".to_string(),
                 ),
                 available_in_catalogs: None,
+                suggested_target: None,
             }),
             build_ignore_dependencies_suppress_action(&dep.package_name, "unlisted-dependency"),
         ];
@@ -747,6 +783,7 @@ impl TypeOnlyDependencyFinding {
                         .to_string(),
                 ),
                 available_in_catalogs: None,
+                suggested_target: None,
             }),
             build_ignore_dependencies_suppress_action(&dep.package_name, "type-only-dependency"),
         ];
@@ -790,6 +827,7 @@ impl TestOnlyDependencyFinding {
                         .to_string(),
                 ),
                 available_in_catalogs: None,
+                suggested_target: None,
             }),
             build_ignore_dependencies_suppress_action(&dep.package_name, "test-only-dependency"),
         ];
@@ -798,5 +836,724 @@ impl TestOnlyDependencyFinding {
             actions,
             introduced: None,
         }
+    }
+}
+
+// ── Catalog / dep-override family ───────────────────────────────
+//
+// These six wrappers replace the legacy `inject_actions` post-pass in
+// `crates/cli/src/report/json.rs` for the catalog and dependency-override
+// findings. Each `with_actions(...)` builds the typed `actions` array
+// directly from the inner struct (and any per-call context such as
+// `config_fixable`), so the wire shape is identical to the pre-2.76
+// post-pass output but the Rust compiler now owns the action contract.
+
+/// Wire-shape envelope for a [`DuplicateExport`] finding. Carries up to
+/// three actions in position-locked order: an `add-to-config` `ignoreExports`
+/// snippet (only when `locations[]` carries at least one path) followed by
+/// the `remove-duplicate` fix and the multi-location suppress.
+///
+/// The `add-to-config` action sits at position 0 because the documented
+/// primary slot points at the safe, non-destructive path: the shadcn /
+/// Radix / bits-ui namespace-barrel case where every `index.*` reexports
+/// the directory's neighbours. The `remove-duplicate` fix stays as the
+/// secondary so consumers that pattern-match on `actions[0].type` for
+/// "primary fix" never propose deletion of an intentional barrel surface.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DuplicateExportFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub export: DuplicateExport,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl DuplicateExportFinding {
+    /// Build the wrapper with the `add-to-config` action's `auto_fixable`
+    /// defaulting to `false`. The CLI's `build_json_with_config_fixable`
+    /// path layers the actual `config_fixable` signal via
+    /// [`Self::set_config_fixable`] right before serialization (the
+    /// fix-applier readiness check lives in `fallow-cli::fix` and is not
+    /// reachable from the analyzer layer where wrappers are first built).
+    /// Embedders that build `AnalysisResults` directly and never route
+    /// through the CLI's JSON path keep the conservative default.
+    #[must_use]
+    pub fn with_actions(export: DuplicateExport) -> Self {
+        let mut actions: Vec<IssueAction> = Vec::with_capacity(3);
+
+        if let Some(rules) = build_duplicate_exports_ignore_rules(&export) {
+            actions.push(IssueAction::AddToConfig(AddToConfigAction {
+                kind: AddToConfigKind::AddToConfig,
+                auto_fixable: false,
+                description: "Add an ignoreExports rule so these files are excluded from duplicate-export grouping (use when this duplication is an intentional namespace-barrel API).".to_string(),
+                config_key: "ignoreExports".to_string(),
+                value: AddToConfigValue::ExportsRules(rules),
+                value_schema: Some(IGNORE_EXPORTS_VALUE_SCHEMA.to_string()),
+            }));
+        }
+
+        actions.push(IssueAction::Fix(FixAction {
+            kind: FixActionType::RemoveDuplicate,
+            auto_fixable: false,
+            description: "Keep one canonical export location and remove the others".to_string(),
+            note: Some(NAMESPACE_BARREL_HINT.to_string()),
+            available_in_catalogs: None,
+            suggested_target: None,
+        }));
+
+        actions.push(IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
+            auto_fixable: false,
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line duplicate-export".to_string(),
+            scope: Some(SuppressLineScope::PerLocation),
+        }));
+
+        Self {
+            export,
+            actions,
+            introduced: None,
+        }
+    }
+
+    /// Update the position-0 `add-to-config` action's `auto_fixable` flag.
+    /// Idempotent and a no-op when position 0 is not an `add-to-config`
+    /// action (happens when the finding has no locations). Called by the
+    /// CLI's JSON serializer with the result of
+    /// `crate::fix::is_config_fixable` before emitting bytes.
+    pub fn set_config_fixable(&mut self, fixable: bool) {
+        if let Some(IssueAction::AddToConfig(action)) = self.actions.first_mut() {
+            action.auto_fixable = fixable;
+        }
+    }
+}
+
+/// Build a paste-ready `ignoreExports` config value from a duplicate-export
+/// finding's locations. Returns one `{ file, exports: ["*"] }` entry per
+/// distinct file in insertion order. `None` when no locations carry a path.
+fn build_duplicate_exports_ignore_rules(
+    export: &DuplicateExport,
+) -> Option<Vec<IgnoreExportsRule>> {
+    let mut entries: Vec<IgnoreExportsRule> = Vec::with_capacity(export.locations.len());
+    for loc in &export.locations {
+        let path = loc.path.to_string_lossy().to_string();
+        if path.is_empty() {
+            continue;
+        }
+        if entries.iter().any(|existing| existing.file == path) {
+            continue;
+        }
+        entries.push(IgnoreExportsRule {
+            file: path,
+            exports: vec!["*".to_string()],
+        });
+    }
+    if entries.is_empty() {
+        None
+    } else {
+        Some(entries)
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedCatalogEntry`] finding. Per-instance
+/// `auto_fixable` flips to `false` when `hardcoded_consumers` is non-empty:
+/// the entry cannot be removed safely while a workspace package still pins
+/// the same package via a hardcoded version range.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedCatalogEntryFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub entry: UnusedCatalogEntry,
+    /// Suggested next steps. Always emitted.
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedCatalogEntryFinding {
+    /// Build the wrapper. Per-instance `auto_fixable` is `true` only when
+    /// `hardcoded_consumers` is empty; otherwise `fallow fix` skips the
+    /// entry to avoid breaking `pnpm install` on the holdout consumer.
+    #[must_use]
+    pub fn with_actions(entry: UnusedCatalogEntry) -> Self {
+        let auto_fixable = entry.hardcoded_consumers.is_empty();
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::RemoveCatalogEntry,
+                auto_fixable,
+                description: "Remove the entry from pnpm-workspace.yaml".to_string(),
+                note: Some(
+                    "If any consumer declares the same package with a hardcoded version, switch the consumer to `catalog:` before removing"
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress with a YAML comment above the line".to_string(),
+                comment: "# fallow-ignore-next-line unused-catalog-entry".to_string(),
+                scope: None,
+            }),
+        ];
+        Self {
+            entry,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`EmptyCatalogGroup`] finding. Carries a
+/// straightforward `remove-empty-catalog-group` primary plus a YAML-comment
+/// suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct EmptyCatalogGroupFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub group: EmptyCatalogGroup,
+    /// Suggested next steps. Always emitted.
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl EmptyCatalogGroupFinding {
+    /// Build the wrapper.
+    #[must_use]
+    pub fn with_actions(group: EmptyCatalogGroup) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::RemoveEmptyCatalogGroup,
+                auto_fixable: true,
+                description: "Remove the empty named catalog group from pnpm-workspace.yaml"
+                    .to_string(),
+                note: Some(
+                    "Only named groups under `catalogs:` are flagged; the top-level `catalog:` hook is intentionally ignored"
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress with a YAML comment above the line".to_string(),
+                comment: "# fallow-ignore-next-line empty-catalog-group".to_string(),
+                scope: None,
+            }),
+        ];
+        Self {
+            group,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnresolvedCatalogReference`] finding. The
+/// primary action at position 0 discriminates on `available_in_catalogs`:
+/// `add-catalog-entry` when the array is empty (no other catalog declares
+/// the package), or `update-catalog-reference` when at least one
+/// alternative exists. When exactly one alternative exists, the action
+/// also carries `suggested_target` so deterministic agents can land the
+/// edit without picking from a list.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnresolvedCatalogReferenceFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub reference: UnresolvedCatalogReference,
+    /// Suggested next steps. Always emitted; position 0 is the discriminated
+    /// primary (see struct docs).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnresolvedCatalogReferenceFinding {
+    /// Build the wrapper. The discriminator at position 0 is the
+    /// `add-catalog-entry` vs `update-catalog-reference` pick documented on
+    /// the struct.
+    #[must_use]
+    pub fn with_actions(reference: UnresolvedCatalogReference) -> Self {
+        let consumer_path = reference.path.to_string_lossy().to_string();
+        let primary = if reference.available_in_catalogs.is_empty() {
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::AddCatalogEntry,
+                auto_fixable: false,
+                description: format!(
+                    "Add `{}` to the `{}` catalog in pnpm-workspace.yaml",
+                    reference.entry_name, reference.catalog_name
+                ),
+                note: Some(
+                    "Pin a version that satisfies the consumer's import; no other catalog declares this package today"
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            })
+        } else {
+            let available = reference.available_in_catalogs.clone();
+            let suggested_target = (available.len() == 1).then(|| available[0].clone());
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::UpdateCatalogReference,
+                auto_fixable: false,
+                description: format!(
+                    "Switch the reference from `catalog:{}` to a catalog that declares `{}`",
+                    reference.catalog_name, reference.entry_name
+                ),
+                note: None,
+                available_in_catalogs: Some(available),
+                suggested_target,
+            })
+        };
+
+        let fallback = IssueAction::Fix(FixAction {
+            kind: FixActionType::RemoveCatalogReference,
+            auto_fixable: false,
+            description:
+                "Remove the catalog reference and pin a hardcoded version in package.json"
+                    .to_string(),
+            note: Some(
+                "Use only when neither another catalog declares the package nor the named catalog should grow to include it"
+                    .to_string(),
+            ),
+            available_in_catalogs: None,
+            suggested_target: None,
+        });
+
+        let mut suppress_value = serde_json::Map::new();
+        suppress_value.insert(
+            "package".to_string(),
+            serde_json::Value::String(reference.entry_name.clone()),
+        );
+        suppress_value.insert(
+            "catalog".to_string(),
+            serde_json::Value::String(reference.catalog_name.clone()),
+        );
+        suppress_value.insert(
+            "consumer".to_string(),
+            serde_json::Value::String(consumer_path),
+        );
+        let suppress = IssueAction::AddToConfig(AddToConfigAction {
+            kind: AddToConfigKind::AddToConfig,
+            auto_fixable: false,
+            description: "Suppress this reference via ignoreCatalogReferences in fallow config (use when the catalog edit is intentionally landing in a separate PR or the package is a placeholder).".to_string(),
+            config_key: "ignoreCatalogReferences".to_string(),
+            value: AddToConfigValue::RuleObject(suppress_value),
+            value_schema: Some(IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA.to_string()),
+        });
+
+        Self {
+            reference,
+            actions: vec![primary, fallback, suppress],
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedDependencyOverride`] finding. Carries
+/// a `remove-dependency-override` primary plus an `add-to-config`
+/// `ignoreDependencyOverrides` suppress scoped to the target package and
+/// declaration source.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedDependencyOverrideFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub entry: UnusedDependencyOverride,
+    /// Suggested next steps. Always emitted.
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl UnusedDependencyOverrideFinding {
+    /// Build the wrapper.
+    #[must_use]
+    pub fn with_actions(entry: UnusedDependencyOverride) -> Self {
+        let mut actions: Vec<IssueAction> = Vec::with_capacity(2);
+        actions.push(IssueAction::Fix(FixAction {
+            kind: FixActionType::RemoveDependencyOverride,
+            auto_fixable: false,
+            description: "Remove the override entry from pnpm-workspace.yaml or pnpm.overrides"
+                .to_string(),
+            note: Some(
+                "Conservative static check; verify against `pnpm install --frozen-lockfile` before removing in case the override targets a transitive dependency (CVE-fix pattern)"
+                    .to_string(),
+            ),
+            available_in_catalogs: None,
+            suggested_target: None,
+        }));
+
+        if let Some(suppress) = build_ignore_dependency_overrides_suppress(
+            Some(&entry.target_package),
+            &entry.raw_key,
+            entry.source,
+        ) {
+            actions.push(suppress);
+        }
+
+        Self {
+            entry,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`MisconfiguredDependencyOverride`] finding.
+/// Carries a `fix-dependency-override` primary plus the conditional
+/// `add-to-config` `ignoreDependencyOverrides` suppress (skipped when both
+/// `target_package` and `raw_key` are empty, since the rule matcher keys on
+/// a non-empty package name).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MisconfiguredDependencyOverrideFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub entry: MisconfiguredDependencyOverride,
+    /// Suggested next steps. Always emitted.
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl MisconfiguredDependencyOverrideFinding {
+    /// Build the wrapper. The suppress action is omitted when neither
+    /// `target_package` (set on `EmptyValue` cases) nor `raw_key` provides a
+    /// non-empty package name; an `ignoreDependencyOverrides` entry with
+    /// `package: ""` would be silently ignored by the config parser.
+    #[must_use]
+    pub fn with_actions(entry: MisconfiguredDependencyOverride) -> Self {
+        let mut actions: Vec<IssueAction> = Vec::with_capacity(2);
+        actions.push(IssueAction::Fix(FixAction {
+            kind: FixActionType::FixDependencyOverride,
+            auto_fixable: false,
+            description:
+                "Fix the override key or value: pnpm refuses to honor entries with an unparsable key or empty value"
+                    .to_string(),
+            note: Some(
+                "Common shapes: bare `pkg`, scoped `@scope/pkg`, version-selector `pkg@<2`, parent-chain `parent>child`. Valid values include semver ranges, `-` (removal), `$ref` (self-ref), and `npm:alias@^1`."
+                    .to_string(),
+            ),
+            available_in_catalogs: None,
+            suggested_target: None,
+        }));
+
+        if let Some(suppress) = build_ignore_dependency_overrides_suppress(
+            entry.target_package.as_deref(),
+            &entry.raw_key,
+            entry.source,
+        ) {
+            actions.push(suppress);
+        }
+
+        Self {
+            entry,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Shared `add-to-config` `ignoreDependencyOverrides` builder for the two
+/// override findings. Returns `None` when no non-empty package name is
+/// available; the config parser silently drops entries with an empty
+/// `package` field, so emitting one would be a no-op that misleads agents.
+fn build_ignore_dependency_overrides_suppress(
+    target_package: Option<&str>,
+    raw_key: &str,
+    source: DependencyOverrideSource,
+) -> Option<IssueAction> {
+    let package = target_package
+        .filter(|s| !s.is_empty())
+        .or_else(|| Some(raw_key).filter(|s| !s.is_empty()))?
+        .to_string();
+    let mut value = serde_json::Map::new();
+    value.insert("package".to_string(), serde_json::Value::String(package));
+    value.insert(
+        "source".to_string(),
+        serde_json::Value::String(source.as_label().to_string()),
+    );
+    Some(IssueAction::AddToConfig(AddToConfigAction {
+        kind: AddToConfigKind::AddToConfig,
+        auto_fixable: false,
+        description: "Suppress this override finding via ignoreDependencyOverrides in fallow config (use for CVE-fix overrides that target a purely-transitive package).".to_string(),
+        config_key: "ignoreDependencyOverrides".to_string(),
+        value: AddToConfigValue::RuleObject(value),
+        value_schema: Some(IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA.to_string()),
+    }))
+}
+
+// ── Position-0 invariant golden tests ───────────────────────────
+//
+// These tests document the load-bearing position-0 semantics that flow
+// downstream into the GitHub Action / GitLab CI jq scripts, the MCP server
+// `actions[0].type` pattern-match, and the VS Code LSP code-action
+// rendering. Snapshot tests assert structural equality; these named tests
+// document WHY position 0 has a specific value, so a future refactor that
+// re-orders actions tells you what broke instead of just "the snapshot
+// changed".
+#[cfg(test)]
+mod position_0_invariants {
+    use super::*;
+    use crate::output::FixActionType;
+    use crate::results::{DependencyOverrideSource, DuplicateLocation};
+    use std::path::PathBuf;
+
+    /// Helper: extract the kebab-case `type` discriminant from an
+    /// [`IssueAction`] at a specific position. Returns `None` when the
+    /// position is out of bounds or the action shape lacks a discriminant
+    /// (today every variant has one).
+    fn action_type(action: &IssueAction) -> &'static str {
+        match action {
+            IssueAction::Fix(fix) => match fix.kind {
+                FixActionType::RemoveExport => "remove-export",
+                FixActionType::DeleteFile => "delete-file",
+                FixActionType::RemoveDependency => "remove-dependency",
+                FixActionType::MoveDependency => "move-dependency",
+                FixActionType::RemoveEnumMember => "remove-enum-member",
+                FixActionType::RemoveClassMember => "remove-class-member",
+                FixActionType::ResolveImport => "resolve-import",
+                FixActionType::InstallDependency => "install-dependency",
+                FixActionType::RemoveDuplicate => "remove-duplicate",
+                FixActionType::MoveToDev => "move-to-dev",
+                FixActionType::RefactorCycle => "refactor-cycle",
+                FixActionType::RefactorBoundary => "refactor-boundary",
+                FixActionType::ExportType => "export-type",
+                FixActionType::RemoveCatalogEntry => "remove-catalog-entry",
+                FixActionType::RemoveEmptyCatalogGroup => "remove-empty-catalog-group",
+                FixActionType::UpdateCatalogReference => "update-catalog-reference",
+                FixActionType::AddCatalogEntry => "add-catalog-entry",
+                FixActionType::RemoveCatalogReference => "remove-catalog-reference",
+                FixActionType::RemoveDependencyOverride => "remove-dependency-override",
+                FixActionType::FixDependencyOverride => "fix-dependency-override",
+            },
+            IssueAction::SuppressLine(_) => "suppress-line",
+            IssueAction::SuppressFile(_) => "suppress-file",
+            IssueAction::AddToConfig(_) => "add-to-config",
+        }
+    }
+
+    /// Invariant: when no other catalog declares the package, position 0
+    /// of `unresolved_catalog_references[].actions` is `add-catalog-entry`,
+    /// directing the agent to grow the targeted catalog.
+    ///
+    /// Downstream consumers (MCP `actions[0].type` dispatch, jq scripts in
+    /// `action/jq/review-comments-check.jq` and `ci/jq/review-check.jq`)
+    /// pattern-match on this string. A future refactor that puts the
+    /// generic `remove-catalog-reference` fallback at position 0 would
+    /// flip every CI annotation from "add this entry" to "remove this
+    /// reference", reversing the recommended action.
+    #[test]
+    fn unresolved_catalog_position_0_is_add_when_no_alternatives() {
+        let inner = UnresolvedCatalogReference {
+            entry_name: "react".to_string(),
+            catalog_name: "default".to_string(),
+            path: PathBuf::from("apps/web/package.json"),
+            line: 7,
+            available_in_catalogs: Vec::new(),
+        };
+        let finding = UnresolvedCatalogReferenceFinding::with_actions(inner);
+        assert_eq!(
+            action_type(&finding.actions[0]),
+            "add-catalog-entry",
+            "position-0 must be `add-catalog-entry` when no alternative catalog declares the package"
+        );
+        let IssueAction::Fix(fix) = &finding.actions[0] else {
+            panic!("position-0 should be an IssueAction::Fix");
+        };
+        assert!(
+            fix.available_in_catalogs.is_none(),
+            "add-catalog-entry must NOT carry available_in_catalogs"
+        );
+        assert!(
+            fix.suggested_target.is_none(),
+            "add-catalog-entry must NOT carry suggested_target"
+        );
+    }
+
+    /// Invariant: when at least one alternative catalog declares the
+    /// package, position 0 flips to `update-catalog-reference` and carries
+    /// the alternative list. When exactly one alternative exists, the
+    /// action also carries `suggested_target` so deterministic agents can
+    /// land the edit without picking from the list. This is the
+    /// counterpart to `unresolved_catalog_position_0_is_add_when_no_alternatives`.
+    #[test]
+    fn unresolved_catalog_position_0_is_update_when_alternatives_exist() {
+        let inner = UnresolvedCatalogReference {
+            entry_name: "react".to_string(),
+            catalog_name: "default".to_string(),
+            path: PathBuf::from("apps/web/package.json"),
+            line: 7,
+            available_in_catalogs: vec!["react18".to_string()],
+        };
+        let finding = UnresolvedCatalogReferenceFinding::with_actions(inner);
+        assert_eq!(
+            action_type(&finding.actions[0]),
+            "update-catalog-reference",
+            "position-0 must be `update-catalog-reference` when at least one alternative catalog declares the package"
+        );
+        let IssueAction::Fix(fix) = &finding.actions[0] else {
+            panic!("position-0 should be an IssueAction::Fix");
+        };
+        assert_eq!(
+            fix.available_in_catalogs.as_deref(),
+            Some(&["react18".to_string()][..]),
+            "update-catalog-reference must carry the alternative list"
+        );
+        assert_eq!(
+            fix.suggested_target.as_deref(),
+            Some("react18"),
+            "single-alternative case must surface `suggested_target` for deterministic agents"
+        );
+
+        // Two alternatives: still update, but no unambiguous target.
+        let inner_two = UnresolvedCatalogReference {
+            entry_name: "react".to_string(),
+            catalog_name: "default".to_string(),
+            path: PathBuf::from("apps/web/package.json"),
+            line: 7,
+            available_in_catalogs: vec!["react17".to_string(), "react18".to_string()],
+        };
+        let finding_two = UnresolvedCatalogReferenceFinding::with_actions(inner_two);
+        assert_eq!(
+            action_type(&finding_two.actions[0]),
+            "update-catalog-reference"
+        );
+        let IssueAction::Fix(fix_two) = &finding_two.actions[0] else {
+            panic!("position-0 should be an IssueAction::Fix");
+        };
+        assert!(
+            fix_two.suggested_target.is_none(),
+            "multi-alternative case must NOT carry `suggested_target` (agent must pick)"
+        );
+    }
+
+    /// Invariant: position 0 of `duplicate_exports[].actions` is
+    /// `add-to-config` (the safe `ignoreExports` rule for the
+    /// namespace-barrel case), NOT the destructive `remove-duplicate`.
+    ///
+    /// This protects the shadcn / Radix / bits-ui pattern where every
+    /// `components/ui/<name>/index.ts` intentionally re-exports the same
+    /// short names. Any consumer that reads `actions[0].type` as "the
+    /// recommended fix" must see the non-destructive path first; flipping
+    /// position 0 to `remove-duplicate` would propose deleting an
+    /// intentional API surface.
+    ///
+    /// This test pins position 0 across both possible auto_fixable values
+    /// for the add-to-config action (the per-instance flip flag handled
+    /// by `set_config_fixable`).
+    #[test]
+    fn duplicate_exports_position_0_is_add_to_config_not_remove_duplicate() {
+        let inner = DuplicateExport {
+            export_name: "Root".to_string(),
+            locations: vec![
+                DuplicateLocation {
+                    path: PathBuf::from("components/ui/accordion/index.ts"),
+                    line: 1,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: PathBuf::from("components/ui/dialog/index.ts"),
+                    line: 1,
+                    col: 0,
+                },
+            ],
+        };
+        let finding = DuplicateExportFinding::with_actions(inner);
+        assert_eq!(
+            action_type(&finding.actions[0]),
+            "add-to-config",
+            "position-0 must be `add-to-config` (safe `ignoreExports` path), NOT `remove-duplicate`"
+        );
+        assert_eq!(
+            action_type(&finding.actions[1]),
+            "remove-duplicate",
+            "position-1 must be the destructive `remove-duplicate` fallback"
+        );
+
+        // `set_config_fixable(true)` flips the position-0 add-to-config
+        // bool but must NOT re-order positions.
+        let mut promoted = finding;
+        promoted.set_config_fixable(true);
+        assert_eq!(action_type(&promoted.actions[0]), "add-to-config");
+        let IssueAction::AddToConfig(action) = &promoted.actions[0] else {
+            panic!("position-0 should still be AddToConfig after set_config_fixable");
+        };
+        assert!(
+            action.auto_fixable,
+            "set_config_fixable(true) must flip auto_fixable"
+        );
+    }
+
+    /// Invariant: a duplicate-exports finding with empty `locations`
+    /// degenerate input drops the `add-to-config` action entirely, so
+    /// position 0 falls through to `remove-duplicate`. Documents the
+    /// degenerate-case contract.
+    #[test]
+    fn duplicate_exports_no_locations_falls_through_to_remove_duplicate() {
+        let inner = DuplicateExport {
+            export_name: "Root".to_string(),
+            locations: Vec::new(),
+        };
+        let finding = DuplicateExportFinding::with_actions(inner);
+        assert_eq!(
+            action_type(&finding.actions[0]),
+            "remove-duplicate",
+            "with no locations there is no ignoreExports rule to suggest; the destructive remove becomes position-0"
+        );
+
+        // `set_config_fixable(true)` is a no-op on this shape.
+        let mut promoted = finding;
+        promoted.set_config_fixable(true);
+        assert_eq!(
+            action_type(&promoted.actions[0]),
+            "remove-duplicate",
+            "set_config_fixable is a no-op when position-0 is not add-to-config"
+        );
+    }
+
+    /// Invariant: misconfigured-dependency-override with empty
+    /// `target_package` AND empty `raw_key` drops the suppress action
+    /// (no usable package name for the `ignoreDependencyOverrides`
+    /// matcher; emitting `package: ""` would be silently dropped by the
+    /// config parser). Documents the suppress-omission contract.
+    #[test]
+    fn misconfigured_override_drops_suppress_when_no_package_name() {
+        let inner = MisconfiguredDependencyOverride {
+            raw_key: String::new(),
+            target_package: None,
+            raw_value: String::new(),
+            reason: crate::results::DependencyOverrideMisconfigReason::EmptyValue,
+            source: DependencyOverrideSource::PnpmWorkspaceYaml,
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line: 12,
+        };
+        let finding = MisconfiguredDependencyOverrideFinding::with_actions(inner);
+        // Only the primary fix-dependency-override action: no suppress.
+        assert_eq!(finding.actions.len(), 1);
+        assert_eq!(action_type(&finding.actions[0]), "fix-dependency-override");
     }
 }

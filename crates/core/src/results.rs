@@ -1,8 +1,10 @@
 // Re-export all result types from fallow-types
 pub use fallow_types::output_dead_code::{
-    BoundaryViolationFinding, CircularDependencyFinding, PrivateTypeLeakFinding,
+    BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
+    EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding, PrivateTypeLeakFinding,
     TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
-    UnresolvedImportFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
+    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
     UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
@@ -150,21 +152,23 @@ mod tests {
                     }],
                 },
             ));
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "dup".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: PathBuf::from("h.ts"),
-                    line: 15,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: PathBuf::from("i.ts"),
-                    line: 30,
-                    col: 0,
-                },
-            ],
-        });
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "dup".to_string(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: PathBuf::from("h.ts"),
+                        line: 15,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: PathBuf::from("i.ts"),
+                        line: 30,
+                        col: 0,
+                    },
+                ],
+            }));
 
         assert_eq!(results.total_issues(), 10);
         assert!(results.has_issues());

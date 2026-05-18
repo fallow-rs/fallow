@@ -65,9 +65,11 @@ pub fn filter_to_workspaces(
 
     // Duplicate exports: filter locations to workspace, drop groups with < 2
     for dup in &mut results.duplicate_exports {
-        dup.locations.retain(|loc| any_under(&loc.path));
+        dup.export.locations.retain(|loc| any_under(&loc.path));
     }
-    results.duplicate_exports.retain(|d| d.locations.len() >= 2);
+    results
+        .duplicate_exports
+        .retain(|d| d.export.locations.len() >= 2);
 
     // Circular deps: keep cycles where at least one file is in a matched workspace
     results
@@ -91,7 +93,7 @@ pub fn filter_to_workspaces(
     // so they ARE workspace-scoped: retain only findings under the active set.
     results
         .unresolved_catalog_references
-        .retain(|r| any_under(&r.path));
+        .retain(|r| any_under(&r.reference.path));
     // Dependency overrides live in the project-root pnpm-workspace.yaml or
     // root package.json's pnpm.overrides, not per-workspace. Same reasoning as
     // unused-catalog-entries: drop when --workspace narrows.
@@ -511,36 +513,40 @@ mod tests {
     #[test]
     fn filter_to_workspace_drops_duplicate_exports_below_two_locations() {
         let mut results = AnalysisResults::default();
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "helper".into(),
-            locations: vec![
-                DuplicateLocation {
-                    path: PathBuf::from("/project/packages/ui/src/a.ts"),
-                    line: 15,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: PathBuf::from("/project/packages/api/src/b.ts"),
-                    line: 30,
-                    col: 0,
-                },
-            ],
-        });
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "utils".into(),
-            locations: vec![
-                DuplicateLocation {
-                    path: PathBuf::from("/project/packages/ui/src/c.ts"),
-                    line: 15,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: PathBuf::from("/project/packages/ui/src/d.ts"),
-                    line: 30,
-                    col: 0,
-                },
-            ],
-        });
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "helper".into(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/packages/ui/src/a.ts"),
+                        line: 15,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/packages/api/src/b.ts"),
+                        line: 30,
+                        col: 0,
+                    },
+                ],
+            }));
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "utils".into(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/packages/ui/src/c.ts"),
+                        line: 15,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/packages/ui/src/d.ts"),
+                        line: 30,
+                        col: 0,
+                    },
+                ],
+            }));
 
         let ws_root = PathBuf::from("/project/packages/ui");
         filter_to_workspace(&mut results, &ws_root);
@@ -548,7 +554,7 @@ mod tests {
         // "helper" had only 1 location in workspace — dropped
         // "utils" had 2 locations in workspace — kept
         assert_eq!(results.duplicate_exports.len(), 1);
-        assert_eq!(results.duplicate_exports[0].export_name, "utils");
+        assert_eq!(results.duplicate_exports[0].export.export_name, "utils");
     }
 
     #[test]
@@ -766,21 +772,23 @@ mod tests {
     #[test]
     fn filter_changed_files_drops_duplicate_exports_below_two() {
         let mut results = AnalysisResults::default();
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "helper".into(),
-            locations: vec![
-                DuplicateLocation {
-                    path: PathBuf::from("/project/src/a.ts"),
-                    line: 1,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: PathBuf::from("/project/src/b.ts"),
-                    line: 2,
-                    col: 0,
-                },
-            ],
-        });
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "helper".into(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/src/a.ts"),
+                        line: 1,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/src/b.ts"),
+                        line: 2,
+                        col: 0,
+                    },
+                ],
+            }));
 
         let mut changed = rustc_hash::FxHashSet::default();
         changed.insert(PathBuf::from("/project/src/a.ts"));
@@ -1211,21 +1219,23 @@ mod tests {
     #[test]
     fn filter_changed_files_keeps_duplicate_exports_when_both_changed() {
         let mut results = AnalysisResults::default();
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "helper".into(),
-            locations: vec![
-                DuplicateLocation {
-                    path: PathBuf::from("/project/src/a.ts"),
-                    line: 1,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: PathBuf::from("/project/src/b.ts"),
-                    line: 2,
-                    col: 0,
-                },
-            ],
-        });
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "helper".into(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/src/a.ts"),
+                        line: 1,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/src/b.ts"),
+                        line: 2,
+                        col: 0,
+                    },
+                ],
+            }));
 
         let mut changed = rustc_hash::FxHashSet::default();
         changed.insert(PathBuf::from("/project/src/a.ts"));
@@ -1234,7 +1244,7 @@ mod tests {
         filter_changed_files(&mut results, &changed);
 
         assert_eq!(results.duplicate_exports.len(), 1);
-        assert_eq!(results.duplicate_exports[0].locations.len(), 2);
+        assert_eq!(results.duplicate_exports[0].export.locations.len(), 2);
     }
 
     #[test]

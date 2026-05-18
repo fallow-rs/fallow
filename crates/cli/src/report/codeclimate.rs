@@ -382,7 +382,7 @@ fn push_unlisted_dep_issues(
 
 fn push_duplicate_export_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    dups: &[fallow_core::results::DuplicateExport],
+    dups: &[fallow_core::results::DuplicateExportFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -391,6 +391,7 @@ fn push_duplicate_export_issues(
     }
     let level = severity_to_codeclimate(severity);
     for dup in dups {
+        let dup = &dup.export;
         for loc in &dup.locations {
             let path = cc_path(&loc.path, root);
             let line_str = loc.line.to_string();
@@ -516,7 +517,7 @@ fn push_stale_suppression_issues(
 
 fn push_unused_catalog_entry_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    entries: &[fallow_core::results::UnusedCatalogEntry],
+    entries: &[fallow_core::results::UnusedCatalogEntryFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -525,6 +526,7 @@ fn push_unused_catalog_entry_issues(
     }
     let level = severity_to_codeclimate(severity);
     for entry in entries {
+        let entry = &entry.entry;
         let path = cc_path(&entry.path, root);
         let line_str = entry.line.to_string();
         let fp = fingerprint_hash(&[
@@ -559,7 +561,7 @@ fn push_unused_catalog_entry_issues(
 
 fn push_unresolved_catalog_reference_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_core::results::UnresolvedCatalogReference],
+    findings: &[fallow_core::results::UnresolvedCatalogReferenceFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -568,6 +570,7 @@ fn push_unresolved_catalog_reference_issues(
     }
     let level = severity_to_codeclimate(severity);
     for finding in findings {
+        let finding = &finding.reference;
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
         let fp = fingerprint_hash(&[
@@ -614,7 +617,7 @@ fn push_unresolved_catalog_reference_issues(
 
 fn push_empty_catalog_group_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    groups: &[fallow_core::results::EmptyCatalogGroup],
+    groups: &[fallow_core::results::EmptyCatalogGroupFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -623,6 +626,7 @@ fn push_empty_catalog_group_issues(
     }
     let level = severity_to_codeclimate(severity);
     for group in groups {
+        let group = &group.group;
         let path = cc_path(&group.path, root);
         let line_str = group.line.to_string();
         let fp = fingerprint_hash(&[
@@ -645,7 +649,7 @@ fn push_empty_catalog_group_issues(
 
 fn push_unused_dependency_override_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_core::results::UnusedDependencyOverride],
+    findings: &[fallow_core::results::UnusedDependencyOverrideFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -654,6 +658,7 @@ fn push_unused_dependency_override_issues(
     }
     let level = severity_to_codeclimate(severity);
     for finding in findings {
+        let finding = &finding.entry;
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
         let fp = fingerprint_hash(&[
@@ -685,7 +690,7 @@ fn push_unused_dependency_override_issues(
 
 fn push_misconfigured_dependency_override_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_core::results::MisconfiguredDependencyOverride],
+    findings: &[fallow_core::results::MisconfiguredDependencyOverrideFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -694,6 +699,7 @@ fn push_misconfigured_dependency_override_issues(
     }
     let level = severity_to_codeclimate(severity);
     for finding in findings {
+        let finding = &finding.entry;
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
         let fp = fingerprint_hash(&[
@@ -1484,26 +1490,28 @@ mod tests {
     fn codeclimate_duplicate_export_one_issue_per_location() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        results.duplicate_exports.push(DuplicateExport {
-            export_name: "Config".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: root.join("src/a.ts"),
-                    line: 10,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: root.join("src/b.ts"),
-                    line: 20,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: root.join("src/c.ts"),
-                    line: 30,
-                    col: 0,
-                },
-            ],
-        });
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "Config".to_string(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: root.join("src/a.ts"),
+                        line: 10,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: root.join("src/b.ts"),
+                        line: 20,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: root.join("src/c.ts"),
+                        line: 30,
+                        col: 0,
+                    },
+                ],
+            }));
         let rules = RulesConfig::default();
         let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let arr = output.as_array().unwrap();

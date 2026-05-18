@@ -1389,6 +1389,7 @@ fn dead_code_keys(
     }
     for item in &results.duplicate_exports {
         let mut locations: Vec<String> = item
+            .export
             .locations
             .iter()
             .map(|loc| relative_key_path(&loc.path, root))
@@ -1397,7 +1398,7 @@ fn dead_code_keys(
         locations.dedup();
         keys.insert(format!(
             "duplicate-export:{}:{}",
-            item.export_name,
+            item.export.export_name,
             locations.join("|")
         ));
     }
@@ -1443,32 +1444,32 @@ fn dead_code_keys(
     for item in &results.unresolved_catalog_references {
         keys.insert(format!(
             "unresolved-catalog-reference:{}:{}:{}:{}",
-            relative_key_path(&item.path, root),
-            item.line,
-            item.catalog_name,
-            item.entry_name
+            relative_key_path(&item.reference.path, root),
+            item.reference.line,
+            item.reference.catalog_name,
+            item.reference.entry_name
         ));
     }
     for item in &results.unused_catalog_entries {
-        keys.insert(unused_catalog_entry_key(item, root));
+        keys.insert(unused_catalog_entry_key(&item.entry, root));
     }
     for item in &results.empty_catalog_groups {
-        keys.insert(empty_catalog_group_key(item, root));
+        keys.insert(empty_catalog_group_key(&item.group, root));
     }
     for item in &results.unused_dependency_overrides {
         keys.insert(format!(
             "unused-dependency-override:{}:{}:{}",
-            relative_key_path(&item.path, root),
-            item.line,
-            item.raw_key
+            relative_key_path(&item.entry.path, root),
+            item.entry.line,
+            item.entry.raw_key
         ));
     }
     for item in &results.misconfigured_dependency_overrides {
         keys.insert(format!(
             "misconfigured-dependency-override:{}:{}:{}",
-            relative_key_path(&item.path, root),
-            item.line,
-            item.raw_key
+            relative_key_path(&item.entry.path, root),
+            item.entry.line,
+            item.entry.raw_key
         ));
     }
     keys
@@ -1544,6 +1545,7 @@ fn retain_introduced_dead_code(
         .retain(|item| keep(unlisted_dependency_key(&item.dep, root)));
     results.duplicate_exports.retain(|item| {
         let mut locations: Vec<String> = item
+            .export
             .locations
             .iter()
             .map(|loc| relative_key_path(&loc.path, root))
@@ -1552,7 +1554,7 @@ fn retain_introduced_dead_code(
         locations.dedup();
         keep(format!(
             "duplicate-export:{}:{}",
-            item.export_name,
+            item.export.export_name,
             locations.join("|")
         ))
     });
@@ -1598,32 +1600,32 @@ fn retain_introduced_dead_code(
     results.unresolved_catalog_references.retain(|item| {
         keep(format!(
             "unresolved-catalog-reference:{}:{}:{}:{}",
-            relative_key_path(&item.path, root),
-            item.line,
-            item.catalog_name,
-            item.entry_name
+            relative_key_path(&item.reference.path, root),
+            item.reference.line,
+            item.reference.catalog_name,
+            item.reference.entry_name
         ))
     });
     results
         .unused_catalog_entries
-        .retain(|item| keep(unused_catalog_entry_key(item, root)));
+        .retain(|item| keep(unused_catalog_entry_key(&item.entry, root)));
     results
         .empty_catalog_groups
-        .retain(|item| keep(empty_catalog_group_key(item, root)));
+        .retain(|item| keep(empty_catalog_group_key(&item.group, root)));
     results.unused_dependency_overrides.retain(|item| {
         keep(format!(
             "unused-dependency-override:{}:{}:{}",
-            relative_key_path(&item.path, root),
-            item.line,
-            item.raw_key
+            relative_key_path(&item.entry.path, root),
+            item.entry.line,
+            item.entry.raw_key
         ))
     });
     results.misconfigured_dependency_overrides.retain(|item| {
         keep(format!(
             "misconfigured-dependency-override:{}:{}:{}",
-            relative_key_path(&item.path, root),
-            item.line,
-            item.raw_key
+            relative_key_path(&item.entry.path, root),
+            item.entry.line,
+            item.entry.raw_key
         ))
     });
 }
@@ -1780,6 +1782,7 @@ fn annotate_dead_code_json(
         "duplicate_exports",
         results.duplicate_exports.iter().map(|item| {
             let mut locations: Vec<String> = item
+                .export
                 .locations
                 .iter()
                 .map(|loc| relative_key_path(&loc.path, root))
@@ -1789,7 +1792,7 @@ fn annotate_dead_code_json(
             issue_was_introduced(
                 &format!(
                     "duplicate-export:{}:{}",
-                    item.export_name,
+                    item.export.export_name,
                     locations.join("|")
                 ),
                 base,
@@ -1874,10 +1877,10 @@ fn annotate_dead_code_json(
             issue_was_introduced(
                 &format!(
                     "unresolved-catalog-reference:{}:{}:{}:{}",
-                    relative_key_path(&item.path, root),
-                    item.line,
-                    item.catalog_name,
-                    item.entry_name
+                    relative_key_path(&item.reference.path, root),
+                    item.reference.line,
+                    item.reference.catalog_name,
+                    item.reference.entry_name
                 ),
                 base,
             )
@@ -1889,7 +1892,7 @@ fn annotate_dead_code_json(
         results
             .unused_catalog_entries
             .iter()
-            .map(|item| issue_was_introduced(&unused_catalog_entry_key(item, root), base)),
+            .map(|item| issue_was_introduced(&unused_catalog_entry_key(&item.entry, root), base)),
     );
     annotate_issue_array(
         json,
@@ -1897,7 +1900,7 @@ fn annotate_dead_code_json(
         results
             .empty_catalog_groups
             .iter()
-            .map(|item| issue_was_introduced(&empty_catalog_group_key(item, root), base)),
+            .map(|item| issue_was_introduced(&empty_catalog_group_key(&item.group, root), base)),
     );
     annotate_issue_array(
         json,
@@ -1906,9 +1909,9 @@ fn annotate_dead_code_json(
             issue_was_introduced(
                 &format!(
                     "unused-dependency-override:{}:{}:{}",
-                    relative_key_path(&item.path, root),
-                    item.line,
-                    item.raw_key
+                    relative_key_path(&item.entry.path, root),
+                    item.entry.line,
+                    item.entry.raw_key
                 ),
                 base,
             )
@@ -1924,9 +1927,9 @@ fn annotate_dead_code_json(
                 issue_was_introduced(
                     &format!(
                         "misconfigured-dependency-override:{}:{}:{}",
-                        relative_key_path(&item.path, root),
-                        item.line,
-                        item.raw_key
+                        relative_key_path(&item.entry.path, root),
+                        item.entry.line,
+                        item.entry.raw_key
                     ),
                     base,
                 )
