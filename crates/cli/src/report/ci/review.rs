@@ -123,9 +123,12 @@ fn render_comment(
         // review comments are intentionally not modeled in this envelope yet.
         Provider::Github => ReviewComment::GitHub(GitHubReviewComment {
             path: issue.path.clone(),
-            // CiIssue.line is u64 for legacy reasons but every callsite
-            // populates it from a u32 line number (`begin_line: Option<u32>`
-            // in `cc_issue`); the typed envelope locks the wire to u32.
+            // `CiIssue.line` is `u64` for legacy reasons but every callsite
+            // populates it from a `u32` line number (`begin_line: Option<u32>`
+            // in `cc_issue`); the typed envelope locks the wire to `u32`.
+            // Follow-up: narrow `CiIssue.line` to `u32` at construction time
+            // in `pr_comment.rs::issues_from_codeclimate` so this cast goes
+            // away entirely (out of scope for the #384 ladder migration).
             line: u32::try_from(issue.line).unwrap_or(u32::MAX),
             side: GitHubReviewSide::Right,
             body,
@@ -139,6 +142,8 @@ fn render_comment(
                 position_type: GitLabReviewPositionType::Text,
                 old_path: issue.path.clone(),
                 new_path: issue.path.clone(),
+                // Same `u64 -> u32` narrowing as the GitHub branch above;
+                // see the follow-up note there.
                 new_line: u32::try_from(issue.line).unwrap_or(u32::MAX),
             };
             ReviewComment::GitLab(GitLabReviewComment {

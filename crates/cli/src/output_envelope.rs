@@ -608,12 +608,15 @@ pub enum CodeClimateIssueKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
-#[allow(
-    dead_code,
-    reason = "schema-source-of-truth: documents the full CodeClimate severity spec; runtime never produces `Info` or `Blocker` today, but the schema needs the variants so consumers can validate against either fallow output or a third-party CodeClimate emitter without spec divergence."
-)]
 pub enum CodeClimateSeverity {
-    /// Informational.
+    /// Informational. Reserved for future severity mappings; not produced
+    /// by the current runtime path (which only emits Minor / Major /
+    /// Critical via `severity_to_codeclimate` and the health / runtime-
+    /// coverage match arms).
+    #[allow(
+        dead_code,
+        reason = "schema-source-of-truth: documents the full CodeClimate severity spec; runtime never produces this variant today, but the schema needs it so consumers can validate against either fallow output or a third-party CodeClimate emitter without spec divergence."
+    )]
     Info,
     /// Minor finding.
     Minor,
@@ -621,7 +624,12 @@ pub enum CodeClimateSeverity {
     Major,
     /// Critical finding.
     Critical,
-    /// Blocker (highest severity).
+    /// Blocker (highest severity). Reserved for future severity
+    /// mappings; not produced by the current runtime path.
+    #[allow(
+        dead_code,
+        reason = "schema-source-of-truth: documents the full CodeClimate severity spec; runtime never produces this variant today, but the schema needs it so consumers can validate against either fallow output or a third-party CodeClimate emitter without spec divergence."
+    )]
     Blocker,
 }
 
