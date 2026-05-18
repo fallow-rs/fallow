@@ -441,8 +441,8 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
         "fallow/high-cyclomatic-complexity"
         | "fallow/high-cognitive-complexity"
         | "fallow/high-complexity" => RuleGuide {
-            example: "A function contains several nested conditionals, loops, and early exits, exceeding the configured complexity threshold.",
-            how_to_fix: "Extract named helpers, split independent branches, flatten guard clauses, and add tests around the behavior before refactoring.",
+            example: "A function contains several nested conditionals, loops, and early exits, exceeding the configured complexity threshold. fallow also flags synthetic `<template>` findings on Angular .html templates and inline `@Component({ template: ... })` literals, and `<component>` rollup findings that combine the worst class method with its template.",
+            how_to_fix: "For function findings, extract named helpers, split independent branches, flatten guard clauses, and add tests around the behavior before refactoring. For `<template>` findings, split the template into child components, hoist data into the component class as computed signals, or replace nested `@if`/`@for` with a flatter structure. For `<component>` rollup findings, attack the larger half first; the per-half breakdown lives in `component_rollup`.",
         },
         "fallow/high-crap-score" => RuleGuide {
             example: "A complex function has little or no matching Istanbul coverage, so its CRAP score crosses the configured gate.",
@@ -578,7 +578,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         category: "Health",
         name: "High Cyclomatic Complexity",
         short: "Function has high cyclomatic complexity",
-        full: "McCabe cyclomatic complexity exceeds the configured threshold. Cyclomatic complexity counts the number of independent paths through a function (1 + decision points: if/else, switch cases, loops, ternary, logical operators). High values indicate functions that are hard to test exhaustively.",
+        full: "McCabe cyclomatic complexity exceeds the configured threshold. Cyclomatic complexity counts the number of independent paths through a function (1 + decision points: if/else, switch cases, loops, ternary, logical operators). High values indicate functions that are hard to test exhaustively. fallow also emits this rule on synthetic `<template>` findings (Angular .html templates and inline `@Component({ template: ... })` literals), counting template control-flow blocks (`@if`, `@else if`, `@for`, `@case`, `@defer (when ...)`, legacy `*ngIf`/`*ngFor`) plus ternary and logical operators inside bound attributes and `{{ }}` interpolations; and on synthetic `<component>` rollup findings whose `cyclomatic` is the worst class method's score plus the template's. Ranking and `--targets` use the rollup total; JSON exposes the per-half breakdown under `component_rollup`.",
         docs_path: "explanations/health#cyclomatic-complexity",
     },
     RuleDef {
@@ -586,7 +586,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         category: "Health",
         name: "High Cognitive Complexity",
         short: "Function has high cognitive complexity",
-        full: "SonarSource cognitive complexity exceeds the configured threshold. Unlike cyclomatic complexity, cognitive complexity penalizes nesting depth and non-linear control flow (breaks, continues, early returns). It measures how hard a function is to understand when reading sequentially.",
+        full: "SonarSource cognitive complexity exceeds the configured threshold. Unlike cyclomatic complexity, cognitive complexity penalizes nesting depth and non-linear control flow (breaks, continues, early returns). It measures how hard a function is to understand when reading sequentially. fallow also emits this rule on synthetic `<template>` findings (Angular .html templates and inline `@Component({ template: ... })` literals), where nesting penalties accumulate on stacked `@if`/`@for`/`@switch` blocks; and on synthetic `<component>` rollup findings whose `cognitive` is the worst class method's score plus the template's. Ranking and `--targets` use the rollup total; JSON exposes the per-half breakdown under `component_rollup`.",
         docs_path: "explanations/health#cognitive-complexity",
     },
     RuleDef {
@@ -594,7 +594,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         category: "Health",
         name: "High Complexity (Both)",
         short: "Function exceeds both complexity thresholds",
-        full: "Function exceeds both cyclomatic and cognitive complexity thresholds. This is the strongest signal that a function needs refactoring, it has many paths AND is hard to understand.",
+        full: "Function exceeds both cyclomatic and cognitive complexity thresholds. This is the strongest signal that a function needs refactoring, it has many paths AND is hard to understand. The same rule fires on synthetic `<template>` findings (Angular .html templates and inline `@Component({ template: ... })` literals) when both metrics exceed their thresholds, and on synthetic `<component>` rollup findings whose totals are the worst class method's score plus the template's. Ranking and `--targets` use the rollup totals; JSON exposes the per-half breakdown under `component_rollup`.",
         docs_path: "explanations/health#complexity-metrics",
     },
     RuleDef {

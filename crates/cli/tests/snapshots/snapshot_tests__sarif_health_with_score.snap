@@ -19,7 +19,7 @@ expression: redact_health_sarif_version(&json_str)
                 "text": "Function has high cyclomatic complexity"
               },
               "fullDescription": {
-                "text": "McCabe cyclomatic complexity exceeds the configured threshold. Cyclomatic complexity counts the number of independent paths through a function (1 + decision points: if/else, switch cases, loops, ternary, logical operators). High values indicate functions that are hard to test exhaustively."
+                "text": "McCabe cyclomatic complexity exceeds the configured threshold. Cyclomatic complexity counts the number of independent paths through a function (1 + decision points: if/else, switch cases, loops, ternary, logical operators). High values indicate functions that are hard to test exhaustively. fallow also emits this rule on synthetic `<template>` findings (Angular .html templates and inline `@Component({ template: ... })` literals), counting template control-flow blocks (`@if`, `@else if`, `@for`, `@case`, `@defer (when ...)`, legacy `*ngIf`/`*ngFor`) plus ternary and logical operators inside bound attributes and `{{ }}` interpolations; and on synthetic `<component>` rollup findings whose `cyclomatic` is the worst class method's score plus the template's. Ranking and `--targets` use the rollup total; JSON exposes the per-half breakdown under `component_rollup`."
               },
               "helpUri": "https://docs.fallow.tools/explanations/health#cyclomatic-complexity",
               "defaultConfiguration": {
@@ -32,7 +32,7 @@ expression: redact_health_sarif_version(&json_str)
                 "text": "Function has high cognitive complexity"
               },
               "fullDescription": {
-                "text": "SonarSource cognitive complexity exceeds the configured threshold. Unlike cyclomatic complexity, cognitive complexity penalizes nesting depth and non-linear control flow (breaks, continues, early returns). It measures how hard a function is to understand when reading sequentially."
+                "text": "SonarSource cognitive complexity exceeds the configured threshold. Unlike cyclomatic complexity, cognitive complexity penalizes nesting depth and non-linear control flow (breaks, continues, early returns). It measures how hard a function is to understand when reading sequentially. fallow also emits this rule on synthetic `<template>` findings (Angular .html templates and inline `@Component({ template: ... })` literals), where nesting penalties accumulate on stacked `@if`/`@for`/`@switch` blocks; and on synthetic `<component>` rollup findings whose `cognitive` is the worst class method's score plus the template's. Ranking and `--targets` use the rollup total; JSON exposes the per-half breakdown under `component_rollup`."
               },
               "helpUri": "https://docs.fallow.tools/explanations/health#cognitive-complexity",
               "defaultConfiguration": {
@@ -45,7 +45,7 @@ expression: redact_health_sarif_version(&json_str)
                 "text": "Function exceeds both complexity thresholds"
               },
               "fullDescription": {
-                "text": "Function exceeds both cyclomatic and cognitive complexity thresholds. This is the strongest signal that a function needs refactoring, it has many paths AND is hard to understand."
+                "text": "Function exceeds both cyclomatic and cognitive complexity thresholds. This is the strongest signal that a function needs refactoring, it has many paths AND is hard to understand. The same rule fires on synthetic `<template>` findings (Angular .html templates and inline `@Component({ template: ... })` literals) when both metrics exceed their thresholds, and on synthetic `<component>` rollup findings whose totals are the worst class method's score plus the template's. Ranking and `--targets` use the rollup totals; JSON exposes the per-half breakdown under `component_rollup`."
               },
               "helpUri": "https://docs.fallow.tools/explanations/health#complexity-metrics",
               "defaultConfiguration": {
