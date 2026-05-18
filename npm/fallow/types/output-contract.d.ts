@@ -25,9 +25,9 @@
 
 
 /**
- * Schemas for the JSON output of fallow commands. Bare `fallow --format json` produces a combined envelope with `check`, `dupes`, and `health` keys. Individual commands (`fallow dead-code --format json`, `fallow health --format json`, `fallow dupes --format json`, `fallow audit --format json`, `fallow explain <issue-type> --format json`, `fallow coverage setup --json`, `fallow list --boundaries --format json`) produce their own top-level structure.
+ * Schemas for the JSON output of fallow commands. Bare `fallow --format json` produces a combined envelope with `check`, `dupes`, and `health` keys. Individual commands (`fallow dead-code --format json`, `fallow health --format json`, `fallow dupes --format json`, `fallow audit --format json`, `fallow explain <issue-type> --format json`, `fallow coverage setup --json`) produce their own top-level structure.
  */
-export type FallowJsonOutput = (CombinedOutput | CheckOutput | CheckGroupedOutput | HealthOutput | DupesOutput | AuditOutput | ExplainOutput | CoverageSetupOutput | CodeClimateOutput | ReviewEnvelopeOutput | ReviewReconcileOutput | ListBoundariesOutput)
+export type FallowJsonOutput = (CombinedOutput | CheckOutput | CheckGroupedOutput | HealthOutput | DupesOutput | AuditOutput | ExplainOutput | CoverageSetupOutput | CodeClimateOutput | ReviewEnvelopeOutput | ReviewReconcileOutput)
 /**
  * Schema version for this output format (independent of tool version). Bump
  * policy: ADDITIVE changes (new optional top-level fields, new optional struct
@@ -480,13 +480,6 @@ export type ReviewCheckConclusion = ("success" | "neutral" | "failure")
  * Schema-version discriminator for the review reconcile envelope.
  */
 export type ReviewReconcileSchema = "fallow-review-reconcile/v1"
-/**
- * Discovery outcome for a [`LogicalGroup`]. Discriminates "no children" into
- * "the directory exists and is empty" versus "at least one `autoDiscover`
- * path was invalid or unreadable", so consumers can render an actionable
- * hint instead of "0 children, mystery".
- */
-export type LogicalGroupStatus = ("ok" | "empty" | "invalid_path")
 
 /**
  * Envelope emitted by bare `fallow --format json` (the combined
@@ -4639,167 +4632,4 @@ threads_resolved: number
  * Errors collected during apply, one entry per failure.
  */
 apply_errors: string[]
-}
-/**
- * Envelope emitted by `fallow list --boundaries --format json`. Surfaces
- * the architecture boundary zones, rules, and (issue #373) the user's
- * pre-expansion `autoDiscover` logical groups so consumers can render
- * grouping intent that `expand_auto_discover` would otherwise flatten out
- * of `zones[]`.
- */
-export interface ListBoundariesOutput {
-boundaries: BoundariesListing
-}
-/**
- * `boundaries` block carried by [`ListBoundariesOutput`].
- */
-export interface BoundariesListing {
-/**
- * `false` when the project has no `boundaries` configured; `true`
- * otherwise. When `false` every array below is empty and every count
- * is `0` (parity is enforced so consumers can read the counts without
- * first branching on this flag).
- */
-configured: boolean
-/**
- * Length of [`Self::zones`]; emitted alongside the array for parity
- * with `rule_count` / `logical_group_count`.
- */
-zone_count: number
-/**
- * Boundary zones after preset and `autoDiscover` expansion.
- */
-zones: BoundariesListZone[]
-/**
- * Length of [`Self::rules`].
- */
-rule_count: number
-/**
- * Boundary import rules, each `from -> allow[]`.
- */
-rules: BoundariesListRule[]
-/**
- * Length of [`Self::logical_groups`]. Always present (issue #373).
- */
-logical_group_count: number
-/**
- * Pre-expansion `autoDiscover` groups carrying the user-authored parent
- * name and grouping intent (issue #373).
- */
-logical_groups: BoundariesListLogicalGroup[]
-}
-/**
- * A boundary zone after preset and `autoDiscover` expansion. Each entry
- * classifies files into a single zone via glob patterns.
- */
-export interface BoundariesListZone {
-/**
- * Zone identifier as referenced in rules (e.g. `app`, `features/auth`).
- */
-name: string
-/**
- * Compiled glob patterns. Children of an `autoDiscover` parent each
- * carry a single pattern like `src/features/auth/**`.
- */
-patterns: string[]
-/**
- * Number of discovered files classified into this zone.
- */
-file_count: number
-}
-/**
- * A boundary import rule, expanded to operate on concrete child zone
- * names after `autoDiscover` flattening. The user's pre-expansion rule
- * (keyed on the logical parent name, if any) is preserved on the
- * corresponding [`BoundariesListLogicalGroup::authored_rule`].
- */
-export interface BoundariesListRule {
-/**
- * Source zone the rule applies to.
- */
-from: string
-/**
- * Target zones [`Self::from`] is allowed to import from. Self-imports
- * are always allowed implicitly.
- */
-allow: string[]
-}
-/**
- * A pre-expansion `autoDiscover` logical group surfaced for observability
- * (issue #373). Captured during `expand_auto_discover` so consumers can
- * see the user-authored parent name and grouping intent after expansion
- * would otherwise flatten it out of [`BoundariesListing::zones`].
- */
-export interface BoundariesListLogicalGroup {
-/**
- * Logical parent zone name as authored by the user.
- */
-name: string
-/**
- * Discovered child zone names in stable directory-sorted order.
- */
-children: string[]
-/**
- * Verbatim `autoDiscover` strings from the user's config (not
- * normalized) so round-trip tooling can match byte-for-byte.
- */
-auto_discover: string[]
-status: LogicalGroupStatus
-/**
- * Position of the parent zone in the user's pre-expansion `zones[]`.
- */
-source_zone_index: number
-/**
- * Sum of `file_count` across [`Self::children`] plus the fallback
- * zone's `file_count` when present.
- */
-file_count: number
-/**
- * Pre-expansion rule keyed on the parent name, when the user wrote
- * one.
- */
-authored_rule?: (AuthoredRule | null)
-/**
- * When the parent zone also carried explicit `patterns`, it stayed in
- * [`BoundariesListing::zones`] as a fallback classifier; this is its
- * name. Equal to [`Self::name`] when present.
- */
-fallback_zone?: (string | null)
-/**
- * Parent zone indices merged into this group when the user declared
- * the same parent name multiple times.
- */
-merged_from?: (number[] | null)
-/**
- * Echo of the parent zone's `root` (subtree scope) as the user wrote
- * it. `None` when the parent had no `root` field.
- */
-original_zone_root?: (string | null)
-/**
- * Parallel to [`Self::children`]: for child at index `i`, the index
- * into [`Self::auto_discover`] of the path that produced it. Empty
- * when only one path was authored (every child trivially maps to
- * index 0). `serde(default)` keeps the schema's `required` array in
- * step with the runtime's `skip_serializing_if` behavior.
- */
-child_source_indices?: number[]
-}
-/**
- * Pre-expansion `from`-rule preserved on a [`LogicalGroup`]. Surfaces the
- * user's original intent (`{ from: "features", allow: ["shared"] }`) even
- * after `expand_auto_discover` rewrote it into per-child rules
- * (`features/auth -> shared`, `features/billing -> shared`).
- */
-export interface AuthoredRule {
-/**
- * Pre-expansion `allow` list as the user wrote it.
- */
-allow: string[]
-/**
- * Pre-expansion `allowTypeOnly` list as the user wrote it. Omitted
- * from JSON output when empty; `serde(default)` keeps the derived
- * schema in lock-step (schemars 1 marks any field with a
- * `serde(default)` attribute as non-required).
- */
-allow_type_only?: string[]
 }

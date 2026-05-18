@@ -757,23 +757,25 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
             .collect::<Vec<_>>()
     );
     let v = &results.boundary_violations[0];
-    assert_eq!(v.from_zone, "features");
-    assert_eq!(v.to_zone, "app");
+    assert_eq!(v.violation.from_zone, "features");
+    assert_eq!(v.violation.to_zone, "app");
     assert!(
-        v.from_path
+        v.violation
+            .from_path
             .to_string_lossy()
             .replace('\\', "/")
             .ends_with("src/features/types.ts"),
         "from_path should end with src/features/types.ts, got: {}",
-        v.from_path.display()
+        v.violation.from_path.display()
     );
     assert!(
-        v.to_path
+        v.violation
+            .to_path
             .to_string_lossy()
             .replace('\\', "/")
             .ends_with("src/app/page.ts"),
         "to_path should end with src/app/page.ts, got: {}",
-        v.to_path.display()
+        v.violation.to_path.display()
     );
 }
 
@@ -832,10 +834,13 @@ fn collect_violation_from_paths(
         .boundary_violations
         .iter()
         .map(|v| {
-            v.from_path.strip_prefix(fixture_root).map_or_else(
-                |_| v.from_path.to_string_lossy().replace('\\', "/"),
-                |p| p.to_string_lossy().replace('\\', "/"),
-            )
+            v.violation
+                .from_path
+                .strip_prefix(fixture_root)
+                .map_or_else(
+                    |_| v.violation.from_path.to_string_lossy().replace('\\', "/"),
+                    |p| p.to_string_lossy().replace('\\', "/"),
+                )
         })
         .collect()
 }
@@ -892,7 +897,8 @@ fn mixed_edge_violation_anchors_on_the_value_import_line_not_the_type_only_one()
         .boundary_violations
         .iter()
         .find(|v| {
-            v.from_path
+            v.violation
+                .from_path
                 .to_string_lossy()
                 .replace('\\', "/")
                 .ends_with("src/ui/sibling_imports.ts")
@@ -917,10 +923,10 @@ fn mixed_edge_violation_anchors_on_the_value_import_line_not_the_type_only_one()
         .expect("type-only import line must exist in fixture");
 
     assert_eq!(
-        sibling.line, value_line,
+        sibling.violation.line, value_line,
         "violation must anchor on the value-import line ({value_line}), \
          not the type-only line ({type_only_line}); got {}",
-        sibling.line
+        sibling.violation.line
     );
 }
 

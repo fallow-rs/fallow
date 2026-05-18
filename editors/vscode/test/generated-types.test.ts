@@ -17,7 +17,7 @@ import type {
   DupesOutput,
   HealthOutput,
   IssueAction,
-  UnusedFile,
+  UnusedFileFinding,
 } from "../src/generated/output-contract.js";
 
 describe("generated/output-contract.d.ts", () => {
@@ -89,8 +89,8 @@ describe("generated/output-contract.d.ts", () => {
     expect(health).toEqual({});
   });
 
-  it("ties UnusedFile.actions[] to the IssueAction discriminated union", () => {
-    const sample: UnusedFile = {
+  it("ties UnusedFileFinding.actions[] to the IssueAction discriminated union", () => {
+    const sample: UnusedFileFinding = {
       path: "src/foo.ts",
       actions: [
         {

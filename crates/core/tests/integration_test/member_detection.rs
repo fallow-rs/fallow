@@ -243,7 +243,7 @@ fn playwright_fixture_teardown_credits_factory_getter_member_usage() {
     let unused_class_members: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
     assert!(
@@ -271,7 +271,7 @@ fn fluent_builder_chain_credits_intermediate_setters() {
     let unused_class_members: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
     for credited in [
@@ -308,7 +308,7 @@ fn generic_constrained_param_credits_base_class_member() {
     let unused_class_members: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.parent_name, m.member_name))
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
         .collect();
 
     assert!(

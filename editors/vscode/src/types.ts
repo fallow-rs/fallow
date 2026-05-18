@@ -16,10 +16,10 @@
 export type {
   AddToConfigAction,
   AuditOutput,
-  BoundaryViolation,
+  BoundaryViolationFinding,
   CheckOutput,
   CheckSummary,
-  CircularDependency,
+  CircularDependencyFinding,
   CloneFamily,
   CloneFamilyAction,
   CloneGroup,
@@ -35,7 +35,7 @@ export type {
   HealthOutput,
   ImportSite,
   IssueAction,
-  PrivateTypeLeak,
+  PrivateTypeLeakFinding,
   RefactoringSuggestion,
   StaleSuppression,
   SuppressFileAction,
@@ -43,15 +43,39 @@ export type {
   TestOnlyDependency,
   TypeOnlyDependency,
   UnlistedDependency,
-  UnresolvedImport,
+  UnresolvedImportFinding,
   UnusedCatalogEntry,
+  UnusedClassMemberFinding,
   UnusedDependency,
   UnusedDependencyOverride,
+  UnusedEnumMemberFinding,
+  UnusedExportFinding,
+  UnusedFileFinding,
+  UnusedTypeFinding,
   MisconfiguredDependencyOverride,
-  UnusedExport,
-  UnusedFile,
-  UnusedMember,
 } from "./generated/output-contract.js";
+
+// Backwards-compat aliases for downstream consumers that import the
+// pre-#384-item-1 bare type names. The wire shape is byte-identical: each
+// wrapper flattens the bare finding's fields and adds `actions` plus
+// optional `introduced`. New code should prefer the `*Finding` names above.
+import type {
+  BoundaryViolationFinding,
+  CircularDependencyFinding,
+  PrivateTypeLeakFinding,
+  UnresolvedImportFinding,
+  UnusedClassMemberFinding,
+  UnusedEnumMemberFinding,
+  UnusedExportFinding,
+  UnusedFileFinding,
+} from "./generated/output-contract.js";
+export type BoundaryViolation = BoundaryViolationFinding;
+export type CircularDependency = CircularDependencyFinding;
+export type PrivateTypeLeak = PrivateTypeLeakFinding;
+export type UnresolvedImport = UnresolvedImportFinding;
+export type UnusedExport = UnusedExportFinding;
+export type UnusedFile = UnusedFileFinding;
+export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding;
 
 export type { CheckOutput as FallowCheckResult } from "./generated/output-contract.js";
 // The VS Code extension reads dupes only via the combined invocation
