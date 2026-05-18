@@ -1772,24 +1772,27 @@ mod tests {
         };
         let root = PathBuf::from("/project");
         let report = HealthReport {
-            findings: vec![ComplexityViolation {
-                path: root.join("src/untested.ts"),
-                name: "risky".to_string(),
-                line: 7,
-                col: 0,
-                cyclomatic: 10,
-                cognitive: 10,
-                line_count: 20,
-                param_count: 1,
-                exceeded: crate::health_types::ExceededThreshold::Crap,
-                severity: FindingSeverity::High,
-                crap: Some(60.0),
-                coverage_pct: Some(25.0),
-                coverage_tier: None,
-                coverage_source: None,
-                inherited_from: None,
-                component_rollup: None,
-            }],
+            findings: vec![
+                ComplexityViolation {
+                    path: root.join("src/untested.ts"),
+                    name: "risky".to_string(),
+                    line: 7,
+                    col: 0,
+                    cyclomatic: 10,
+                    cognitive: 10,
+                    line_count: 20,
+                    param_count: 1,
+                    exceeded: crate::health_types::ExceededThreshold::Crap,
+                    severity: FindingSeverity::High,
+                    crap: Some(60.0),
+                    coverage_pct: Some(25.0),
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                }
+                .into(),
+            ],
             summary: HealthSummary {
                 functions_analyzed: 10,
                 functions_above_threshold: 1,

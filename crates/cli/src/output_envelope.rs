@@ -499,9 +499,9 @@ pub struct CheckGroupedEntry {
 /// ...) lives at the top level. Grouped runs populate `grouped_by` +
 /// `groups` with per-bucket recomputed metrics. The `actions_meta`
 /// breadcrumb is modeled on `HealthReport` as an `Option<HealthActionsMeta>`
-/// so the schema documents the field; `inject_health_actions` still
-/// populates it post-construction on the `serde_json::Value` tree because
-/// the suppression context lives inside the report builder.
+/// and is set at construction time by the report builder when the active
+/// `HealthActionContext` requests suppress-line omission, so the schema
+/// documents the field and serde populates it natively.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(title = "fallow health --format json"))]

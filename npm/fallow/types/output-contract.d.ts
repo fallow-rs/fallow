@@ -2345,7 +2345,10 @@ clone_groups_below_min_occurrences?: number
 export interface HealthReport {
 /**
  * Functions and synthetic template entries exceeding complexity
- * thresholds, sorted by the --sort criteria.
+ * thresholds, sorted by the --sort criteria. Each entry wraps its
+ * inner [`ComplexityViolation`] payload (flattened on the wire) with
+ * the typed `actions` list and an optional audit-mode `introduced`
+ * flag.
  */
 findings: HealthFinding[]
 summary: HealthSummary
@@ -2414,15 +2417,18 @@ health_trend?: (HealthTrend | null)
 actions_meta?: (HealthActionsMeta | null)
 }
 /**
- * A single function that exceeds a complexity threshold.
+ * Wire envelope for a single complexity finding.
  *
- * Schema-emitted as `HealthFinding` for public-contract continuity (npm
- * `fallow/types`, `docs/output-schema.json`, downstream JSON Schema
- * consumers). The Rust internal name `ComplexityViolation` is a
- * prerequisite for #384 B2, which introduces a new `HealthFinding`
- * wrapper that flattens this struct and adds typed actions / introduced.
- * At B2 the `schemars(rename)` attribute below drops off and the public
- * name `HealthFinding` migrates from this inner type to the wrapper.
+ * Flattens [`ComplexityViolation`] for wire continuity and adds the typed
+ * `actions` list plus the audit-mode `introduced` flag. The
+ * `#[serde(flatten)]` keeps each `findings[]` item byte-identical to the
+ * pre-wrapper shape: inner fields (`path`, `name`, `line`, `cyclomatic`,
+ * ...) sit at the top level alongside `actions` and optional `introduced`.
+ *
+ * Construct via [`HealthFinding::with_actions`] in the typical health
+ * pipeline (the wrapper computes its own `actions` from a
+ * [`HealthActionContext`]) or via [`HealthFinding::new`] when the caller
+ * already has the action list (e.g., tests, audit cross-attribution).
  */
 export interface HealthFinding {
 /**
@@ -2508,25 +2514,37 @@ inherited_from?: (string | null)
  * contributed to a per-component complexity rollup); absent on every
  * other finding kind.
  *
- * The owning [`HealthFinding`]'s [`cyclomatic`](Self::cyclomatic) /
- * [`cognitive`](Self::cognitive) totals are
- * `class_worst_function + template`, so consumers ranking by complexity
- * see the component as one unit. The breakdown carries the
- * pre-summation numbers plus the worst class function's name so
+ * The owning [`HealthFinding`](crate::health_types::HealthFinding)'s
+ * [`cyclomatic`](Self::cyclomatic) / [`cognitive`](Self::cognitive)
+ * totals are `class_worst_function + template`, so consumers ranking
+ * by complexity see the component as one unit. The breakdown carries
+ * the pre-summation numbers plus the worst class function's name so
  * consumers can explain "this component ranked high because the
  * template added 6 cyclomatic on top of the worst class function's 3".
  */
 component_rollup?: (ComponentRollup | null)
 /**
- * Suggested actions to resolve this issue.
+ * Machine-actionable fix and suppress hints. Always populated; never
+ * empty in the typical pipeline (the action selector emits at least
+ * `suppress-line` or `suppress-file` unless suppressed by the
+ * context).
  */
 actions: HealthFindingAction[]
-introduced?: AuditIntroduced
+/**
+ * Audit-mode flag indicating whether the finding is new versus the
+ * audit base snapshot. `Some(true)` when introduced in the diff,
+ * `Some(false)` when present in both snapshots, `None` outside audit
+ * mode (the field is skipped from the wire).
+ */
+introduced?: (boolean | null)
 }
 /**
  * Per-component breakdown attached to a synthetic `<component>`
- * [`HealthFinding`]. See [`HealthFinding::component_rollup`] for the
- * owning-finding contract.
+ * [`HealthFinding`](crate::health_types::HealthFinding). See
+ * [`ComplexityViolation::component_rollup`] for the owning-finding
+ * contract; the wrapper flattens the inner type's
+ * [`component_rollup`](ComplexityViolation::component_rollup) field
+ * onto its own wire shape.
  */
 export interface ComponentRollup {
 /**
@@ -3097,12 +3115,12 @@ actions: UntestedFileAction[]
 /**
  * Suggested action attached to an [`UntestedFile`] coverage-gap finding.
  *
- * `inject_health_actions` emits a two-entry array on every untested-file
- * item: an `add-tests` primary action (scaffold tests for the runtime
- * file) and a `suppress-file` action (`// fallow-ignore-file coverage-gaps`).
- * Both variants share the same struct shape; the field that is populated
- * (`note` for `add-tests`, `comment` for `suppress-file`) depends on the
- * `kind`.
+ * `build_untested_file_actions` emits a two-entry array on every
+ * untested-file item: an `add-tests` primary action (scaffold tests for
+ * the runtime file) and a `suppress-file` action
+ * (`// fallow-ignore-file coverage-gaps`). Both variants share the same
+ * struct shape; the field that is populated (`note` for `add-tests`,
+ * `comment` for `suppress-file`) depends on the `kind`.
  *
  * [`UntestedFile`]: ../../fallow-cli/src/health_types/coverage.rs
  */
@@ -3160,9 +3178,9 @@ actions: UntestedExportAction[]
  * Suggested action attached to an [`UntestedExport`] coverage-gap
  * finding.
  *
- * `inject_health_actions` emits a two-entry array on every untested-export
- * item: an `add-test-import` primary action (import the export from a
- * test-reachable module) and a `suppress-file` action
+ * `build_untested_export_actions` emits a two-entry array on every
+ * untested-export item: an `add-test-import` primary action (import the
+ * export from a test-reachable module) and a `suppress-file` action
  * (`// fallow-ignore-file coverage-gaps`). The export-specific variant
  * `add-test-import` reflects that a test-reachable reference chain, not
  * just any test coverage, is what closes the gap.
@@ -4020,9 +4038,11 @@ total: number
  * Auditable breadcrumb recording when health-finding `suppress-line`
  * action hints were omitted from the report.
  *
- * Emitted at the report root by `inject_health_actions` when it was
- * called with `omit_suppress_line: true`. Lets consumers see "where did
- * the suppress-line hints go?" without having to grep the config or CLI
+ * Set at construction time on [`HealthReport::actions_meta`] (and on
+ * each [`HealthGroup::actions_meta`](crate::health_types::HealthGroup)
+ * when grouped) by the report builder, derived from the active
+ * [`HealthActionContext`]. Lets consumers see "where did the
+ * suppress-line hints go?" without having to grep the config or CLI
  * history.
  *
  * Stable `reason` codes:
@@ -4030,12 +4050,6 @@ total: number
  *   become dead annotations once the baseline regenerates.
  * - `config-disabled`: `health.suggestInlineSuppression` is `false`.
  * - `unspecified`: the caller did not record a reason.
- *
- * The runtime path constructs this breadcrumb as a `serde_json::Value`
- * post-pass in `inject_health_actions` rather than on the typed envelope,
- * because the suppression context lives inside the report builder. The
- * typed shape here exists so the schema documents the field instead of
- * hiding it behind a JSON-tree augmentation.
  */
 export interface HealthActionsMeta {
 /**
@@ -4566,9 +4580,9 @@ allow_type_only?: string[]
  * ...) lives at the top level. Grouped runs populate `grouped_by` +
  * `groups` with per-bucket recomputed metrics. The `actions_meta`
  * breadcrumb is modeled on `HealthReport` as an `Option<HealthActionsMeta>`
- * so the schema documents the field; `inject_health_actions` still
- * populates it post-construction on the `serde_json::Value` tree because
- * the suppression context lives inside the report builder.
+ * and is set at construction time by the report builder when the active
+ * `HealthActionContext` requests suppress-line omission, so the schema
+ * documents the field and serde populates it natively.
  */
 export interface HealthOutput {
 schema_version: SchemaVersion
@@ -4576,7 +4590,10 @@ version: ToolVersion
 elapsed_ms: ElapsedMs
 /**
  * Functions and synthetic template entries exceeding complexity
- * thresholds, sorted by the --sort criteria.
+ * thresholds, sorted by the --sort criteria. Each entry wraps its
+ * inner [`ComplexityViolation`] payload (flattened on the wire) with
+ * the typed `actions` list and an optional audit-mode `introduced`
+ * flag.
  */
 findings: HealthFinding[]
 summary: HealthSummary
@@ -4713,7 +4730,10 @@ vital_signs?: (VitalSigns | null)
  */
 health_score?: (HealthScore | null)
 /**
- * Findings restricted to files in this group.
+ * Findings restricted to files in this group. Each entry is the typed
+ * [`HealthFinding`] wrapper around a
+ * [`ComplexityViolation`](crate::health_types::ComplexityViolation)
+ * payload.
  */
 findings?: HealthFinding[]
 /**
@@ -4735,8 +4755,9 @@ targets?: RefactoringTarget[]
 /**
  * Auditable breadcrumb recording why `suppress-line` action hints
  * were omitted from this group's findings. Mirrors the project-level
- * `HealthReport.actions_meta`; populated by `inject_health_actions`
- * per group when the suppression context applies uniformly.
+ * `HealthReport.actions_meta`; populated at construction time when the
+ * per-group [`HealthActionContext`](crate::health_types::HealthActionContext)
+ * suppresses inline hints.
  */
 actions_meta?: (HealthActionsMeta | null)
 }

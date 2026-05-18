@@ -5,6 +5,7 @@
 //! reference these types without pulling in binary-only dependencies.
 
 mod coverage;
+mod finding;
 mod grouped;
 mod runtime_coverage;
 mod scores;
@@ -13,6 +14,7 @@ mod trends;
 mod vital_signs;
 
 pub use coverage::*;
+pub use finding::*;
 pub use grouped::*;
 pub use runtime_coverage::*;
 pub use scores::*;
@@ -41,9 +43,11 @@ pub struct HealthTimings {
 /// Auditable breadcrumb recording when health-finding `suppress-line`
 /// action hints were omitted from the report.
 ///
-/// Emitted at the report root by `inject_health_actions` when it was
-/// called with `omit_suppress_line: true`. Lets consumers see "where did
-/// the suppress-line hints go?" without having to grep the config or CLI
+/// Set at construction time on [`HealthReport::actions_meta`] (and on
+/// each [`HealthGroup::actions_meta`](crate::health_types::HealthGroup)
+/// when grouped) by the report builder, derived from the active
+/// [`HealthActionContext`]. Lets consumers see "where did the
+/// suppress-line hints go?" without having to grep the config or CLI
 /// history.
 ///
 /// Stable `reason` codes:
@@ -51,12 +55,6 @@ pub struct HealthTimings {
 ///   become dead annotations once the baseline regenerates.
 /// - `config-disabled`: `health.suggestInlineSuppression` is `false`.
 /// - `unspecified`: the caller did not record a reason.
-///
-/// The runtime path constructs this breadcrumb as a `serde_json::Value`
-/// post-pass in `inject_health_actions` rather than on the typed envelope,
-/// because the suppression context lives inside the report builder. The
-/// typed shape here exists so the schema documents the field instead of
-/// hiding it behind a JSON-tree augmentation.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthActionsMeta {
@@ -74,8 +72,11 @@ pub struct HealthActionsMeta {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthReport {
     /// Functions and synthetic template entries exceeding complexity
-    /// thresholds, sorted by the --sort criteria.
-    pub findings: Vec<ComplexityViolation>,
+    /// thresholds, sorted by the --sort criteria. Each entry wraps its
+    /// inner [`ComplexityViolation`] payload (flattened on the wire) with
+    /// the typed `actions` list and an optional audit-mode `introduced`
+    /// flag.
+    pub findings: Vec<HealthFinding>,
     /// Summary statistics.
     pub summary: HealthSummary,
     /// Project-wide vital signs (always computed from available data).

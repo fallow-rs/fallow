@@ -458,93 +458,26 @@ pub fn build_baseline_deltas_json<'a>(
     })
 }
 
-/// Cyclomatic distance from `max_cyclomatic_threshold` at which a
-/// CRAP-only finding still warrants a secondary `refactor-function` action.
+/// Inject `actions` arrays into `targets[]` and `hotspots[]` in a health
+/// JSON output.
 ///
-/// Reasoning: a function whose cyclomatic count is within this band of the
-/// configured threshold is "almost too complex" already, so refactoring is a
-/// useful complement to the primary coverage action. Keeping the boundary
-/// expressed as a band (threshold minus N) rather than a ratio links it
-/// to the existing `health.maxCyclomatic` knob: tightening the threshold
-/// automatically widens the population that gets the secondary suggestion.
-const SECONDARY_REFACTOR_BAND: u16 = 5;
-
-/// Options controlling how `inject_health_actions` populates JSON output.
+/// Complexity findings now carry their `actions` natively via the typed
+/// [`HealthFinding`](crate::health_types::HealthFinding) wrapper, so the
+/// findings post-pass that lived here previously was retired in
+/// PR B2 of issue #384. The `actions_meta` breadcrumb is set on the typed
+/// [`HealthReport`](crate::health_types::HealthReport) at construction
+/// time and flows through serde natively.
 ///
-/// `omit_suppress_line` skips the `suppress-line` action across every
-/// health finding. Set when:
-/// - A baseline is active (`opts.baseline.is_some()` or
-///   `opts.save_baseline.is_some()`): the baseline file already suppresses
-///   findings, and adding `// fallow-ignore-next-line` comments on top
-///   creates dead annotations once the baseline regenerates.
-/// - The team has opted out via `health.suggestInlineSuppression: false`.
-///
-/// When omitted, a top-level `actions_meta` object on the report records
-/// the omission and the reason so consumers can audit "where did
-/// health finding suppress-line go?" without having to grep the config
-/// or CLI history. Wire shape is documented by `HealthActionsMeta` in
-/// `crates/cli/src/health_types/`.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct HealthActionOptions {
-    /// Skip emission of `suppress-line` action entries.
-    pub omit_suppress_line: bool,
-    /// Human-readable reason surfaced in the `actions_meta` breadcrumb when
-    /// `omit_suppress_line` is true. Stable codes:
-    /// - `"baseline-active"`: `--baseline` or `--save-baseline` was passed
-    /// - `"config-disabled"`: `health.suggestInlineSuppression: false`
-    pub omit_reason: Option<&'static str>,
-}
-
-/// Inject `actions` arrays into complexity findings in a health JSON output.
-///
-/// Walks `findings` and `targets` arrays, appending machine-actionable
-/// fix and suppress hints to each item. The `opts` argument controls
-/// whether `suppress-line` actions are emitted; when suppressed, an
-/// `actions_meta` breadcrumb at the report root records the omission.
+/// Refactoring targets and hotspots still use the JSON post-pass until
+/// their typed wrapper migrations land in PR B3.
 #[allow(
     clippy::redundant_pub_crate,
     reason = "pub(crate) needed, used by audit.rs via re-export, but not part of public API"
 )]
-pub(crate) fn inject_health_actions(output: &mut serde_json::Value, opts: HealthActionOptions) {
+pub(crate) fn inject_health_post_pass_actions(output: &mut serde_json::Value) {
     let Some(map) = output.as_object_mut() else {
         return;
     };
-
-    // The complexity thresholds live on `summary.*_threshold`; read once so
-    // action selection for findings has access without re-walking the envelope.
-    let max_cyclomatic_threshold = map
-        .get("summary")
-        .and_then(|s| s.get("max_cyclomatic_threshold"))
-        .and_then(serde_json::Value::as_u64)
-        .and_then(|v| u16::try_from(v).ok())
-        .unwrap_or(20);
-    let max_cognitive_threshold = map
-        .get("summary")
-        .and_then(|s| s.get("max_cognitive_threshold"))
-        .and_then(serde_json::Value::as_u64)
-        .and_then(|v| u16::try_from(v).ok())
-        .unwrap_or(15);
-    let max_crap_threshold = map
-        .get("summary")
-        .and_then(|s| s.get("max_crap_threshold"))
-        .and_then(serde_json::Value::as_f64)
-        .unwrap_or(30.0);
-
-    // Complexity findings: refactor the function to reduce complexity
-    if let Some(findings) = map.get_mut("findings").and_then(|v| v.as_array_mut()) {
-        for item in findings {
-            let actions = build_health_finding_actions(
-                item,
-                opts,
-                max_cyclomatic_threshold,
-                max_cognitive_threshold,
-                max_crap_threshold,
-            );
-            if let serde_json::Value::Object(obj) = item {
-                obj.insert("actions".to_string(), actions);
-            }
-        }
-    }
 
     // Refactoring targets: apply the recommended refactoring
     if let Some(targets) = map.get_mut("targets").and_then(|v| v.as_array_mut()) {
@@ -576,282 +509,13 @@ pub(crate) fn inject_health_actions(output: &mut serde_json::Value, opts: Health
     // directly via serde (see `RuntimeCoverageAction` in
     // `crates/cli/src/health_types/runtime_coverage.rs`), so no post-hoc
     // injection is needed here.
-
-    // Auditable breadcrumb: when the suppress-line hint was omitted, record
-    // it at the report root so consumers don't have to infer the absence.
-    // Wire shape mirrors `HealthActionsMeta` in `crates/cli/src/health_types/`;
-    // the JSON injection lives here (rather than on the typed envelope) because
-    // the suppression context only becomes known inside the report builder.
-    if opts.omit_suppress_line {
-        let reason = opts.omit_reason.unwrap_or("unspecified");
-        map.insert(
-            "actions_meta".to_string(),
-            serde_json::json!({
-                "suppression_hints_omitted": true,
-                "reason": reason,
-                "scope": "health-findings",
-            }),
-        );
-    }
 }
 
-/// Build the `actions` array for a single complexity finding.
-///
-/// The primary action depends on which thresholds were exceeded and the
-/// finding's bucketed coverage tier (`none`/`partial`/`high`):
-///
-/// - Exceeded cyclomatic/cognitive only (no CRAP): `refactor-function`.
-/// - Exceeded CRAP, tier `none` or absent: `add-tests` (no test path
-///   reaches this function; start from scratch).
-/// - Exceeded CRAP, tier `partial`: `increase-coverage` (file already has
-///   some test path; add targeted assertions for uncovered branches).
-/// - Exceeded CRAP, full coverage can clear CRAP: tier-specific coverage
-///   action (`add-tests` for `none`, `increase-coverage` for `partial`/
-///   `high`).
-/// - Exceeded CRAP, full coverage cannot clear CRAP: `refactor-function`
-///   because reducing cyclomatic complexity is the remaining lever.
-/// - Exceeded both CRAP and cyclomatic/cognitive: emit BOTH the
-///   tier-appropriate coverage action AND `refactor-function`.
-/// - CRAP-only with cyclomatic close to the threshold (within
-///   `SECONDARY_REFACTOR_BAND`): also append `refactor-function` as a
-///   secondary action; the function is "almost too complex" already.
-///
-/// `suppress-line` is appended last unless `opts.omit_suppress_line` is
-/// true (baseline active or `health.suggestInlineSuppression: false`).
-fn build_health_finding_actions(
-    item: &serde_json::Value,
-    opts: HealthActionOptions,
-    max_cyclomatic_threshold: u16,
-    max_cognitive_threshold: u16,
-    max_crap_threshold: f64,
-) -> serde_json::Value {
-    let name = item
-        .get("name")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("function");
-    let path = item
-        .get("path")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    let exceeded = item
-        .get("exceeded")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    let includes_crap = matches!(
-        exceeded,
-        "crap" | "cyclomatic_crap" | "cognitive_crap" | "all"
-    );
-    let crap_only = exceeded == "crap";
-    let tier = item
-        .get("coverage_tier")
-        .and_then(serde_json::Value::as_str);
-    let cyclomatic = item
-        .get("cyclomatic")
-        .and_then(serde_json::Value::as_u64)
-        .and_then(|v| u16::try_from(v).ok())
-        .unwrap_or(0);
-    let cognitive = item
-        .get("cognitive")
-        .and_then(serde_json::Value::as_u64)
-        .and_then(|v| u16::try_from(v).ok())
-        .unwrap_or(0);
-    let full_coverage_can_clear_crap = !includes_crap || f64::from(cyclomatic) < max_crap_threshold;
-
-    let mut actions: Vec<serde_json::Value> = Vec::new();
-
-    // Coverage-leaning action: only emitted when CRAP contributed. For
-    // synthetic <template> findings whose CRAP was inherited from the
-    // owning .component.ts via the inverse templateUrl edge, the action
-    // description must point AI agents at the component file rather than
-    // the .html template, otherwise agents will hallucinate Angular
-    // template test harnesses or try to scaffold a spec for the .html
-    // path directly (which is structurally impossible). The inherited_from
-    // string is the project-relative .ts path emitted alongside the
-    // coverage_source discriminator.
-    let inherited_from = item
-        .get("inherited_from")
-        .and_then(serde_json::Value::as_str);
-    if includes_crap {
-        let coverage_action =
-            build_crap_coverage_action(name, tier, full_coverage_can_clear_crap, inherited_from);
-        if let Some(action) = coverage_action {
-            actions.push(action);
-        }
-    }
-
-    // Refactor action conditions:
-    //   1. Exceeded cyclomatic/cognitive (with or without CRAP), or
-    //   2. CRAP-only where even full coverage cannot bring CRAP below the
-    //      configured threshold, so reducing complexity is the remaining
-    //      lever), or
-    //   3. CRAP-only with cyclomatic within SECONDARY_REFACTOR_BAND of the
-    //      threshold AND cognitive complexity past the cognitive floor (the
-    //      function is almost too complex anyway and the cognitive signal
-    //      confirms that refactoring would actually help). Without the
-    //      cognitive floor, flat type-tag dispatchers and JSX render maps
-    //      (high CC, near-zero cog) get a misleading refactor suggestion.
-    //
-    // `build_crap_coverage_action` returns `None` for case 2 instead of
-    // pushing `refactor-function` itself, so this branch unconditionally
-    // pushes the refactor entry without needing to dedupe.
-    let crap_only_needs_complexity_reduction = crap_only && !full_coverage_can_clear_crap;
-    let cognitive_floor = max_cognitive_threshold / 2;
-    let near_cyclomatic_threshold = crap_only
-        && cyclomatic > 0
-        && cyclomatic >= max_cyclomatic_threshold.saturating_sub(SECONDARY_REFACTOR_BAND)
-        && cognitive >= cognitive_floor;
-    let is_template = name == "<template>";
-    let is_component = name == "<component>";
-    let component_rollup = item.get("component_rollup");
-    if !crap_only || crap_only_needs_complexity_reduction || near_cyclomatic_threshold {
-        let (description, note): (String, &str) = if is_component {
-            // Component rollup: name is the literal "<component>"; the
-            // breakdown lives in `component_rollup`. Direct AI agents at the
-            // component as the unit so they consider splitting the template
-            // OR refactoring the worst class method, not just one of them.
-            let class_name = component_rollup
-                .and_then(|r| r.get("component"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("the component");
-            let worst_method = component_rollup
-                .and_then(|r| r.get("class_worst_function"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("the worst class method");
-            let class_cyc = component_rollup
-                .and_then(|r| r.get("class_cyclomatic"))
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0);
-            let template_cyc = component_rollup
-                .and_then(|r| r.get("template_cyclomatic"))
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0);
-            (
-                format!(
-                    "Refactor `{class_name}` to reduce component complexity (rolled-up cyclomatic {cyclomatic} = {class_cyc} on `{worst_method}` + {template_cyc} on the template)"
-                ),
-                "Consider splitting the template into smaller components OR extracting helpers from the worst class method; the rollup reflects the component as one complexity unit",
-            )
-        } else if is_template {
-            (
-                format!(
-                    "Refactor `{name}` to reduce template complexity (simplify control flow and bindings)"
-                ),
-                "Consider splitting complex template branches into smaller components or simpler bindings",
-            )
-        } else {
-            (
-                format!(
-                    "Refactor `{name}` to reduce complexity (extract helper functions, simplify branching)"
-                ),
-                "Consider splitting into smaller functions with single responsibilities",
-            )
-        };
-        actions.push(serde_json::json!({
-            "type": "refactor-function",
-            "auto_fixable": false,
-            "description": description,
-            "note": note,
-        }));
-    }
-
-    if !opts.omit_suppress_line {
-        if is_template
-            && Path::new(path)
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("html"))
-        {
-            actions.push(serde_json::json!({
-                "type": "suppress-file",
-                "auto_fixable": false,
-                "description": "Suppress with an HTML comment at the top of the template",
-                "comment": "<!-- fallow-ignore-file complexity -->",
-                "placement": "top-of-template",
-            }));
-        } else if is_template {
-            actions.push(serde_json::json!({
-                "type": "suppress-line",
-                "auto_fixable": false,
-                "description": "Suppress with an inline comment above the Angular decorator",
-                "comment": "// fallow-ignore-next-line complexity",
-                "placement": "above-angular-decorator",
-            }));
-        } else if is_component {
-            // Rollup anchors at the worst class function's line; the same
-            // suppression that hides the worst function also hides the
-            // rollup, but the description tells the user which line it
-            // lands on so they don't expect the comment above the
-            // @Component decorator (which would NOT match the rollup's line).
-            actions.push(serde_json::json!({
-                "type": "suppress-line",
-                "auto_fixable": false,
-                "description": "Suppress with an inline comment above the worst class method (the rollup is anchored at that method's line, so a comment above it hides both the function finding and the rollup)",
-                "comment": "// fallow-ignore-next-line complexity",
-                "placement": "above-component-worst-method",
-            }));
-        } else {
-            actions.push(serde_json::json!({
-                "type": "suppress-line",
-                "auto_fixable": false,
-                "description": "Suppress with an inline comment above the function declaration",
-                "comment": "// fallow-ignore-next-line complexity",
-                "placement": "above-function-declaration",
-            }));
-        }
-    }
-
-    serde_json::Value::Array(actions)
-}
-
-/// Build the coverage-leaning action for a CRAP-contributing finding.
-///
-/// Returns `None` when even 100% coverage could not bring the function below
-/// the configured CRAP threshold. In that case the primary action becomes
-/// `refactor-function`, which the caller emits separately.
-fn build_crap_coverage_action(
-    name: &str,
-    tier: Option<&str>,
-    full_coverage_can_clear_crap: bool,
-    inherited_from: Option<&str>,
-) -> Option<serde_json::Value> {
-    if !full_coverage_can_clear_crap {
-        return None;
-    }
-
-    // Inherited-coverage path: when the CRAP score on a `<template>` finding
-    // was derived from the owning Angular component .ts file, the test
-    // surface to act on is the component, not the .html. Override the
-    // description so agents do not try to scaffold tests against the
-    // template path directly.
-    if let Some(owner) = inherited_from {
-        return Some(serde_json::json!({
-            "type": "increase-coverage",
-            "auto_fixable": false,
-            "description": format!("Increase test coverage on `{owner}` (the CRAP score on `{name}` is inherited from this Angular component; add component tests there rather than against the template)"),
-            "note": "CRAP = CC^2 * (1 - cov/100)^3 + CC; .html templates are exercised through their @Component class, so the test target is the .ts file referenced by `inherited_from`",
-            "target_path": owner,
-        }));
-    }
-
-    match tier {
-        // Partial coverage: the file already has some test path. Pivot
-        // the action description from "add tests" to "increase coverage"
-        // so agents add targeted assertions for uncovered branches
-        // instead of scaffolding new tests from scratch.
-        Some("partial" | "high") => Some(serde_json::json!({
-            "type": "increase-coverage",
-            "auto_fixable": false,
-            "description": format!("Increase test coverage for `{name}` (file is reachable from existing tests; add targeted assertions for uncovered branches)"),
-            "note": "CRAP = CC^2 * (1 - cov/100)^3 + CC; targeted branch coverage is more efficient than scaffolding new test files when the file already has coverage",
-        })),
-        // None / unknown tier: keep the original "add-tests" message.
-        _ => Some(serde_json::json!({
-            "type": "add-tests",
-            "auto_fixable": false,
-            "description": format!("Add test coverage for `{name}` to lower its CRAP score (coverage reduces risk even without refactoring)"),
-            "note": "CRAP = CC^2 * (1 - cov/100)^3 + CC; higher coverage is the fastest way to bring CRAP under threshold",
-        })),
-    }
-}
+// Complexity-finding action construction lives in
+// `crates/cli/src/health_types/finding.rs::build_health_finding_actions`
+// as of PR B2 of issue #384. The typed `HealthFinding` wrapper carries its
+// `actions` list natively, so no JSON post-pass walker is needed for
+// `findings[]` anymore.
 
 /// Build the `actions` array for a single hotspot entry.
 fn build_hotspot_actions(item: &serde_json::Value) -> serde_json::Value {
@@ -1178,7 +842,6 @@ pub fn build_health_json(
     root: &Path,
     elapsed: Duration,
     explain: bool,
-    action_opts: HealthActionOptions,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let envelope = HealthOutput {
         schema_version: SchemaVersion(SCHEMA_VERSION),
@@ -1192,7 +855,7 @@ pub fn build_health_json(
     let mut output = serde_json::to_value(&envelope)?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
-    inject_health_actions(&mut output, action_opts);
+    inject_health_post_pass_actions(&mut output);
     if explain {
         insert_meta(&mut output, explain::health_meta());
     }
@@ -1204,9 +867,8 @@ pub(super) fn print_health_json(
     root: &Path,
     elapsed: Duration,
     explain: bool,
-    action_opts: HealthActionOptions,
 ) -> ExitCode {
-    match build_health_json(report, root, elapsed, explain, action_opts) {
+    match build_health_json(report, root, elapsed, explain) {
         Ok(output) => emit_json(&output, "JSON"),
         Err(e) => {
             eprintln!("Error: failed to serialize health report: {e}");
@@ -1240,7 +902,6 @@ pub fn build_grouped_health_json(
     root: &Path,
     elapsed: Duration,
     explain: bool,
-    action_opts: HealthActionOptions,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let root_prefix = format!("{}/", root.display());
     // Per-group sub-envelopes share the project-level suppression state:
@@ -1264,7 +925,7 @@ pub fn build_grouped_health_json(
     };
     let mut output = serde_json::to_value(&envelope)?;
     strip_root_prefix(&mut output, &root_prefix);
-    inject_health_actions(&mut output, action_opts);
+    inject_health_post_pass_actions(&mut output);
 
     let group_values: Vec<serde_json::Value> = grouping
         .groups
@@ -1272,7 +933,7 @@ pub fn build_grouped_health_json(
         .map(|g| {
             let mut value = serde_json::to_value(g)?;
             strip_root_prefix(&mut value, &root_prefix);
-            inject_health_actions(&mut value, action_opts);
+            inject_health_post_pass_actions(&mut value);
             Ok(value)
         })
         .collect::<Result<_, serde_json::Error>>()?;
@@ -1294,9 +955,8 @@ pub(super) fn print_grouped_health_json(
     root: &Path,
     elapsed: Duration,
     explain: bool,
-    action_opts: HealthActionOptions,
 ) -> ExitCode {
-    match build_grouped_health_json(report, grouping, root, elapsed, explain, action_opts) {
+    match build_grouped_health_json(report, grouping, root, elapsed, explain) {
         Ok(output) => emit_json(&output, "JSON"),
         Err(e) => {
             eprintln!("Error: failed to serialize grouped health report: {e}");
@@ -1606,7 +1266,7 @@ mod tests {
         };
         let mut output = serde_json::to_value(&envelope).expect("should serialize health envelope");
         strip_root_prefix(&mut output, "/project/");
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
 
         assert_eq!(
             output["runtime_coverage"]["verdict"],
@@ -2938,10 +2598,137 @@ mod tests {
 
     // ── Health actions injection ───────────────────────────────────
 
+    /// Test helper: deserialize a JSON finding shape into a typed
+    /// [`ComplexityViolation`], run [`HealthFinding::with_actions`] with
+    /// the supplied thresholds, and return the resulting `actions` array
+    /// as `serde_json::Value` so existing JSON-shape assertions keep
+    /// working after PR B2 of #384 moved finding action selection from
+    /// the JSON post-pass into the typed wrapper.
+    fn build_actions_for_finding_json(
+        finding_json: serde_json::Value,
+        opts: crate::health_types::HealthActionOptions,
+        max_cyclomatic_threshold: u16,
+        max_cognitive_threshold: u16,
+        max_crap_threshold: f64,
+    ) -> Vec<serde_json::Value> {
+        let mut value = finding_json;
+        // The CV struct skip-serializes `Option::None` fields, but the
+        // shorthand `serde_json::json!({})` test fixtures sometimes omit
+        // optional fields. Adapt missing defaults so deserialization
+        // succeeds for synthetic test inputs.
+        if let Some(map) = value.as_object_mut() {
+            map.entry("col".to_string())
+                .or_insert(serde_json::Value::from(0_u32));
+            map.entry("line_count".to_string())
+                .or_insert(serde_json::Value::from(0_u32));
+            map.entry("param_count".to_string())
+                .or_insert(serde_json::Value::from(0_u8));
+            map.entry("severity".to_string())
+                .or_insert(serde_json::Value::String("moderate".to_string()));
+        }
+        // ComplexityViolation derives Serialize only; for tests we
+        // reconstruct it field by field via a small helper that reads
+        // the JSON shape used by these tests.
+        let violation = synthesize_complexity_violation(&value);
+        let ctx = crate::health_types::HealthActionContext {
+            opts,
+            max_cyclomatic_threshold,
+            max_cognitive_threshold,
+            max_crap_threshold,
+        };
+        let finding = crate::health_types::HealthFinding::with_actions(violation, &ctx);
+        let serialized = serde_json::to_value(&finding).expect("serialize HealthFinding");
+        serialized["actions"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Reads a JSON object with finding-shape fields and produces a
+    /// [`ComplexityViolation`]. Test-only: panics on schema mismatches so
+    /// authors notice when synthetic fixtures drift from the canonical
+    /// shape.
+    fn synthesize_complexity_violation(
+        value: &serde_json::Value,
+    ) -> crate::health_types::ComplexityViolation {
+        use crate::health_types::{
+            CoverageSource, CoverageTier, ExceededThreshold, FindingSeverity,
+        };
+        let exceeded = match value["exceeded"].as_str().unwrap_or("crap") {
+            "cyclomatic" => ExceededThreshold::Cyclomatic,
+            "cognitive" => ExceededThreshold::Cognitive,
+            "both" => ExceededThreshold::Both,
+            "crap" => ExceededThreshold::Crap,
+            "cyclomatic_crap" => ExceededThreshold::CyclomaticCrap,
+            "cognitive_crap" => ExceededThreshold::CognitiveCrap,
+            "all" => ExceededThreshold::All,
+            other => panic!("unknown exceeded label: {other}"),
+        };
+        let severity = match value["severity"].as_str().unwrap_or("moderate") {
+            "moderate" => FindingSeverity::Moderate,
+            "high" => FindingSeverity::High,
+            "critical" => FindingSeverity::Critical,
+            other => panic!("unknown severity label: {other}"),
+        };
+        let coverage_tier = value
+            .get("coverage_tier")
+            .and_then(|v| v.as_str())
+            .map(|t| match t {
+                "none" => CoverageTier::None,
+                "partial" => CoverageTier::Partial,
+                "high" => CoverageTier::High,
+                other => panic!("unknown coverage_tier label: {other}"),
+            });
+        let coverage_source =
+            value
+                .get("coverage_source")
+                .and_then(|v| v.as_str())
+                .map(|s| match s {
+                    "istanbul" => CoverageSource::Istanbul,
+                    "estimated" => CoverageSource::Estimated,
+                    "estimated_component_inherited" => CoverageSource::EstimatedComponentInherited,
+                    other => panic!("unknown coverage_source label: {other}"),
+                });
+        crate::health_types::ComplexityViolation {
+            path: std::path::PathBuf::from(value["path"].as_str().unwrap_or("src/x.ts")),
+            name: value["name"].as_str().unwrap_or("fn").to_string(),
+            line: u32::try_from(value["line"].as_u64().unwrap_or(0)).unwrap_or(0),
+            col: u32::try_from(value["col"].as_u64().unwrap_or(0)).unwrap_or(0),
+            cyclomatic: u16::try_from(value["cyclomatic"].as_u64().unwrap_or(0)).unwrap_or(0),
+            cognitive: u16::try_from(value["cognitive"].as_u64().unwrap_or(0)).unwrap_or(0),
+            line_count: u32::try_from(value["line_count"].as_u64().unwrap_or(0)).unwrap_or(0),
+            param_count: u8::try_from(value["param_count"].as_u64().unwrap_or(0)).unwrap_or(0),
+            exceeded,
+            severity,
+            crap: value.get("crap").and_then(|v| v.as_f64()),
+            coverage_pct: value.get("coverage_pct").and_then(|v| v.as_f64()),
+            coverage_tier,
+            coverage_source,
+            inherited_from: value
+                .get("inherited_from")
+                .and_then(|v| v.as_str())
+                .map(std::path::PathBuf::from),
+            component_rollup: value.get("component_rollup").and_then(|v| {
+                let map = v.as_object()?;
+                Some(crate::health_types::ComponentRollup {
+                    component: map.get("component")?.as_str()?.to_string(),
+                    class_worst_function: map.get("class_worst_function")?.as_str()?.to_string(),
+                    class_cyclomatic: u16::try_from(map.get("class_cyclomatic")?.as_u64()?).ok()?,
+                    class_cognitive: u16::try_from(map.get("class_cognitive")?.as_u64()?).ok()?,
+                    template_path: std::path::PathBuf::from(map.get("template_path")?.as_str()?),
+                    template_cyclomatic: u16::try_from(map.get("template_cyclomatic")?.as_u64()?)
+                        .ok()?,
+                    template_cognitive: u16::try_from(map.get("template_cognitive")?.as_u64()?)
+                        .ok()?,
+                })
+            }),
+        }
+    }
+
     #[test]
     fn health_finding_has_actions() {
-        let mut output = serde_json::json!({
-            "findings": [{
+        let actions = build_actions_for_finding_json(
+            serde_json::json!({
                 "path": "src/utils.ts",
                 "name": "processData",
                 "line": 10,
@@ -2950,12 +2737,13 @@ mod tests {
                 "cognitive": 30,
                 "line_count": 150,
                 "exceeded": "both"
-            }]
-        });
+            }),
+            crate::health_types::HealthActionOptions::default(),
+            20,
+            15,
+            30.0,
+        );
 
-        inject_health_actions(&mut output, HealthActionOptions::default());
-
-        let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 2);
         assert_eq!(actions[0]["type"], "refactor-function");
         assert_eq!(actions[0]["auto_fixable"], false);
@@ -2987,7 +2775,7 @@ mod tests {
             }]
         });
 
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
 
         let actions = output["targets"][0]["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 2);
@@ -3015,7 +2803,7 @@ mod tests {
             }]
         });
 
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
 
         let actions = output["targets"][0]["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 1);
@@ -3029,7 +2817,7 @@ mod tests {
             "targets": []
         });
 
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
 
         assert!(output["findings"].as_array().unwrap().is_empty());
         assert!(output["targets"].as_array().unwrap().is_empty());
@@ -3046,7 +2834,7 @@ mod tests {
             }]
         });
 
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
 
         let actions = output["hotspots"][0]["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 2);
@@ -3075,7 +2863,7 @@ mod tests {
             }]
         });
 
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
 
         let actions = output["hotspots"][0]["actions"].as_array().unwrap();
         assert!(
@@ -3107,7 +2895,7 @@ mod tests {
             }]
         });
 
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
 
         let actions = output["hotspots"][0]["actions"].as_array().unwrap();
         let unowned = actions
@@ -3135,7 +2923,7 @@ mod tests {
             }]
         });
 
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
 
         let actions = output["hotspots"][0]["actions"].as_array().unwrap();
         assert!(
@@ -3160,7 +2948,7 @@ mod tests {
             }]
         });
 
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
 
         let actions = output["hotspots"][0]["actions"].as_array().unwrap();
         let drift = actions
@@ -3202,8 +2990,8 @@ mod tests {
 
     #[test]
     fn health_finding_suppress_has_placement() {
-        let mut output = serde_json::json!({
-            "findings": [{
+        let actions = build_actions_for_finding_json(
+            serde_json::json!({
                 "path": "src/utils.ts",
                 "name": "processData",
                 "line": 10,
@@ -3212,19 +3000,20 @@ mod tests {
                 "cognitive": 30,
                 "line_count": 150,
                 "exceeded": "both"
-            }]
-        });
+            }),
+            crate::health_types::HealthActionOptions::default(),
+            20,
+            15,
+            30.0,
+        );
 
-        inject_health_actions(&mut output, HealthActionOptions::default());
-
-        let suppress = &output["findings"][0]["actions"][1];
-        assert_eq!(suppress["placement"], "above-function-declaration");
+        assert_eq!(actions[1]["placement"], "above-function-declaration");
     }
 
     #[test]
     fn html_template_health_finding_uses_html_suppression() {
-        let mut output = serde_json::json!({
-            "findings": [{
+        let actions = build_actions_for_finding_json(
+            serde_json::json!({
                 "path": "src/app.component.html",
                 "name": "<template>",
                 "line": 1,
@@ -3233,12 +3022,14 @@ mod tests {
                 "cognitive": 30,
                 "line_count": 40,
                 "exceeded": "both"
-            }]
-        });
+            }),
+            crate::health_types::HealthActionOptions::default(),
+            20,
+            15,
+            30.0,
+        );
 
-        inject_health_actions(&mut output, HealthActionOptions::default());
-
-        let suppress = &output["findings"][0]["actions"][1];
+        let suppress = &actions[1];
         assert_eq!(suppress["type"], "suppress-file");
         assert_eq!(
             suppress["comment"],
@@ -3249,8 +3040,8 @@ mod tests {
 
     #[test]
     fn inline_template_health_finding_uses_decorator_suppression() {
-        let mut output = serde_json::json!({
-            "findings": [{
+        let actions = build_actions_for_finding_json(
+            serde_json::json!({
                 "path": "src/app.component.ts",
                 "name": "<template>",
                 "line": 5,
@@ -3259,12 +3050,14 @@ mod tests {
                 "cognitive": 30,
                 "line_count": 40,
                 "exceeded": "both"
-            }]
-        });
+            }),
+            crate::health_types::HealthActionOptions::default(),
+            20,
+            15,
+            30.0,
+        );
 
-        inject_health_actions(&mut output, HealthActionOptions::default());
-
-        let refactor = &output["findings"][0]["actions"][0];
+        let refactor = &actions[0];
         assert_eq!(refactor["type"], "refactor-function");
         assert!(
             refactor["description"]
@@ -3272,7 +3065,7 @@ mod tests {
                 .unwrap()
                 .contains("template complexity")
         );
-        let suppress = &output["findings"][0]["actions"][1];
+        let suppress = &actions[1];
         assert_eq!(suppress["type"], "suppress-line");
         assert_eq!(
             suppress["description"],
@@ -3467,6 +3260,13 @@ mod tests {
         )
     }
 
+    /// Build a synthetic health JSON envelope around a single typed
+    /// [`HealthFinding`] so the existing JSON-shaped assertions in this
+    /// module keep working after PR B2 of #384 moved action selection from
+    /// the JSON post-pass into [`HealthFinding::with_actions`]. Defaults to
+    /// the un-suppressed action context; callers that want to exercise the
+    /// `omit_suppress_line` path should go through
+    /// [`build_finding_envelope_with_ctx`].
     fn crap_only_finding_envelope_with_max_crap(
         coverage_tier: Option<&str>,
         cyclomatic: u16,
@@ -3475,34 +3275,89 @@ mod tests {
         max_cognitive_threshold: u16,
         max_crap_threshold: f64,
     ) -> serde_json::Value {
-        let mut finding = serde_json::json!({
-            "path": "src/risk.ts",
-            "name": "computeScore",
-            "line": 12,
-            "col": 0,
-            "cyclomatic": cyclomatic,
-            "cognitive": cognitive,
-            "line_count": 40,
-            "exceeded": "crap",
-            "crap": 35.5,
+        build_finding_envelope_with_ctx(
+            coverage_tier,
+            cyclomatic,
+            cognitive,
+            max_cyclomatic_threshold,
+            max_cognitive_threshold,
+            max_crap_threshold,
+            crate::health_types::HealthActionOptions::default(),
+        )
+    }
+
+    /// Build a single-finding health JSON envelope with the supplied action
+    /// context. Used by the suppress-line gating tests to exercise the
+    /// `baseline-active` / `config-disabled` reasons.
+    fn build_finding_envelope_with_ctx(
+        coverage_tier: Option<&str>,
+        cyclomatic: u16,
+        cognitive: u16,
+        max_cyclomatic_threshold: u16,
+        max_cognitive_threshold: u16,
+        max_crap_threshold: f64,
+        action_opts: crate::health_types::HealthActionOptions,
+    ) -> serde_json::Value {
+        let tier = coverage_tier.map(|t| match t {
+            "none" => crate::health_types::CoverageTier::None,
+            "partial" => crate::health_types::CoverageTier::Partial,
+            "high" => crate::health_types::CoverageTier::High,
+            other => panic!("unknown coverage tier label: {other}"),
         });
-        if let Some(tier) = coverage_tier {
-            finding["coverage_tier"] = serde_json::Value::String(tier.to_owned());
-        }
-        serde_json::json!({
-            "findings": [finding],
+        let violation = crate::health_types::ComplexityViolation {
+            path: std::path::PathBuf::from("src/risk.ts"),
+            name: "computeScore".to_string(),
+            line: 12,
+            col: 0,
+            cyclomatic,
+            cognitive,
+            line_count: 40,
+            param_count: 0,
+            exceeded: crate::health_types::ExceededThreshold::Crap,
+            severity: crate::health_types::FindingSeverity::Moderate,
+            crap: Some(35.5),
+            coverage_pct: None,
+            coverage_tier: tier,
+            coverage_source: None,
+            inherited_from: None,
+            component_rollup: None,
+        };
+        let ctx = crate::health_types::HealthActionContext {
+            opts: action_opts,
+            max_cyclomatic_threshold,
+            max_cognitive_threshold,
+            max_crap_threshold,
+        };
+        let finding = crate::health_types::HealthFinding::with_actions(violation, &ctx);
+        let actions_meta = if action_opts.omit_suppress_line {
+            Some(serde_json::json!({
+                "suppression_hints_omitted": true,
+                "reason": action_opts.omit_reason.unwrap_or("unspecified"),
+                "scope": "health-findings",
+            }))
+        } else {
+            None
+        };
+        let mut envelope = serde_json::json!({
+            "findings": [serde_json::to_value(&finding).unwrap()],
             "summary": {
                 "max_cyclomatic_threshold": max_cyclomatic_threshold,
                 "max_cognitive_threshold": max_cognitive_threshold,
                 "max_crap_threshold": max_crap_threshold,
             },
-        })
+        });
+        if let Some(meta) = actions_meta
+            && let Some(map) = envelope.as_object_mut()
+        {
+            map.insert("actions_meta".to_string(), meta);
+        }
+        envelope
     }
 
     #[test]
     fn crap_only_tier_none_emits_add_tests() {
         let mut output = crap_only_finding_envelope(Some("none"), 6, 20);
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
         let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert!(
             actions.iter().any(|a| a["type"] == "add-tests"),
@@ -3517,7 +3372,7 @@ mod tests {
     #[test]
     fn crap_only_tier_partial_emits_increase_coverage() {
         let mut output = crap_only_finding_envelope(Some("partial"), 6, 20);
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
         let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert!(
             actions.iter().any(|a| a["type"] == "increase-coverage"),
@@ -3535,7 +3390,7 @@ mod tests {
         // falls to 20.0, below the default max_crap_threshold=30. Coverage
         // is therefore still a valid remediation even though tier=high.
         let mut output = crap_only_finding_envelope(Some("high"), 20, 30);
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
         let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert!(
             actions.iter().any(|a| a["type"] == "increase-coverage"),
@@ -3558,7 +3413,7 @@ mod tests {
         // finding; the primary action should be complexity reduction.
         let mut output =
             crap_only_finding_envelope_with_max_crap(Some("high"), 35, 12, 50, 15, 30.0);
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
         let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert!(
             actions.iter().any(|a| a["type"] == "refactor-function"),
@@ -3579,7 +3434,7 @@ mod tests {
         // CC=16 with threshold=20 => within SECONDARY_REFACTOR_BAND (5)
         // of the threshold; refactor is a useful complement to coverage.
         let mut output = crap_only_finding_envelope(Some("none"), 16, 20);
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
         let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert!(
             actions.iter().any(|a| a["type"] == "add-tests"),
@@ -3595,7 +3450,7 @@ mod tests {
     fn crap_only_far_below_threshold_no_secondary_refactor() {
         // CC=6 with threshold=20 => far outside the band; refactor not added.
         let mut output = crap_only_finding_envelope(Some("none"), 6, 20);
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
         let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert!(
             !actions.iter().any(|a| a["type"] == "refactor-function"),
@@ -3614,7 +3469,7 @@ mod tests {
         // secondary refactor in this case while still firing it for genuinely
         // tangled functions (CC>=15 + cog>=8) where refactor would help.
         let mut output = crap_only_finding_envelope_with_cognitive(Some("none"), 17, 2, 20);
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
         let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert!(
             actions.iter().any(|a| a["type"] == "add-tests"),
@@ -3634,7 +3489,7 @@ mod tests {
         // "tangled but near-threshold" function that genuinely benefits from
         // both coverage AND refactoring.
         let mut output = crap_only_finding_envelope_with_cognitive(Some("none"), 16, 10, 20);
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
         let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert!(
             actions.iter().any(|a| a["type"] == "add-tests"),
@@ -3648,8 +3503,8 @@ mod tests {
 
     #[test]
     fn cyclomatic_only_emits_only_refactor_function() {
-        let mut output = serde_json::json!({
-            "findings": [{
+        let actions = build_actions_for_finding_json(
+            serde_json::json!({
                 "path": "src/cyclo.ts",
                 "name": "branchy",
                 "line": 5,
@@ -3658,11 +3513,12 @@ mod tests {
                 "cognitive": 10,
                 "line_count": 80,
                 "exceeded": "cyclomatic",
-            }],
-            "summary": { "max_cyclomatic_threshold": 20 },
-        });
-        inject_health_actions(&mut output, HealthActionOptions::default());
-        let actions = output["findings"][0]["actions"].as_array().unwrap();
+            }),
+            crate::health_types::HealthActionOptions::default(),
+            20,
+            15,
+            30.0,
+        );
         assert!(
             actions.iter().any(|a| a["type"] == "refactor-function"),
             "non-CRAP findings emit refactor-function"
@@ -3681,10 +3537,14 @@ mod tests {
 
     #[test]
     fn suppress_line_omitted_when_baseline_active() {
-        let mut output = crap_only_finding_envelope(Some("none"), 6, 20);
-        inject_health_actions(
-            &mut output,
-            HealthActionOptions {
+        let output = build_finding_envelope_with_ctx(
+            Some("none"),
+            6,
+            12,
+            20,
+            15,
+            30.0,
+            crate::health_types::HealthActionOptions {
                 omit_suppress_line: true,
                 omit_reason: Some("baseline-active"),
             },
@@ -3704,10 +3564,14 @@ mod tests {
 
     #[test]
     fn suppress_line_omitted_when_config_disabled() {
-        let mut output = crap_only_finding_envelope(Some("none"), 6, 20);
-        inject_health_actions(
-            &mut output,
-            HealthActionOptions {
+        let output = build_finding_envelope_with_ctx(
+            Some("none"),
+            6,
+            12,
+            20,
+            15,
+            30.0,
+            crate::health_types::HealthActionOptions {
                 omit_suppress_line: true,
                 omit_reason: Some("config-disabled"),
             },
@@ -3718,7 +3582,7 @@ mod tests {
     #[test]
     fn suppress_line_emitted_by_default() {
         let mut output = crap_only_finding_envelope(Some("none"), 6, 20);
-        inject_health_actions(&mut output, HealthActionOptions::default());
+        inject_health_post_pass_actions(&mut output);
         let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert!(
             actions.iter().any(|a| a["type"] == "suppress-line"),
@@ -3768,12 +3632,14 @@ mod tests {
             if let Some(t) = tier {
                 finding["coverage_tier"] = serde_json::Value::String(t.to_owned());
             }
-            let mut output = serde_json::json!({
-                "findings": [finding],
-                "summary": { "max_cyclomatic_threshold": max },
-            });
-            inject_health_actions(&mut output, HealthActionOptions::default());
-            for action in output["findings"][0]["actions"].as_array().unwrap() {
+            let actions = build_actions_for_finding_json(
+                finding,
+                crate::health_types::HealthActionOptions::default(),
+                max,
+                15,
+                30.0,
+            );
+            for action in &actions {
                 if let Some(ty) = action["type"].as_str() {
                     emitted.insert(ty.to_owned());
                 }

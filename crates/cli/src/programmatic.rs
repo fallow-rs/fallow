@@ -739,13 +739,11 @@ pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<ser
     let health_options = build_complexity_options(&resolved, options);
     let result = crate::health::execute_health(&health_options)
         .map_err(|_| generic_analysis_error("health"))?;
-    let action_opts = crate::health::health_action_opts(&result);
     build_health_json(
         &result.report,
         &result.config.root,
         result.elapsed,
         resolved.explain,
-        action_opts,
     )
     .map_err(|err| {
         ProgrammaticError::new(format!("failed to serialize health report: {err}"), 2)

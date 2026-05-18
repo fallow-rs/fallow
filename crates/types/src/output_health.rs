@@ -249,12 +249,12 @@ pub enum RefactoringTargetActionType {
 
 /// Suggested action attached to an [`UntestedFile`] coverage-gap finding.
 ///
-/// `inject_health_actions` emits a two-entry array on every untested-file
-/// item: an `add-tests` primary action (scaffold tests for the runtime
-/// file) and a `suppress-file` action (`// fallow-ignore-file coverage-gaps`).
-/// Both variants share the same struct shape; the field that is populated
-/// (`note` for `add-tests`, `comment` for `suppress-file`) depends on the
-/// `kind`.
+/// `build_untested_file_actions` emits a two-entry array on every
+/// untested-file item: an `add-tests` primary action (scaffold tests for
+/// the runtime file) and a `suppress-file` action
+/// (`// fallow-ignore-file coverage-gaps`). Both variants share the same
+/// struct shape; the field that is populated (`note` for `add-tests`,
+/// `comment` for `suppress-file`) depends on the `kind`.
 ///
 /// [`UntestedFile`]: ../../fallow-cli/src/health_types/coverage.rs
 #[derive(Debug, Clone, Serialize)]
@@ -294,9 +294,9 @@ pub enum UntestedFileActionType {
 /// Suggested action attached to an [`UntestedExport`] coverage-gap
 /// finding.
 ///
-/// `inject_health_actions` emits a two-entry array on every untested-export
-/// item: an `add-test-import` primary action (import the export from a
-/// test-reachable module) and a `suppress-file` action
+/// `build_untested_export_actions` emits a two-entry array on every
+/// untested-export item: an `add-test-import` primary action (import the
+/// export from a test-reachable module) and a `suppress-file` action
 /// (`// fallow-ignore-file coverage-gaps`). The export-specific variant
 /// `add-test-import` reflects that a test-reachable reference chain, not
 /// just any test coverage, is what closes the gap.

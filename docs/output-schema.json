@@ -960,7 +960,7 @@
           "items": {
             "$ref": "#/definitions/HealthFinding"
           },
-          "description": "Functions and synthetic template entries exceeding complexity\nthresholds, sorted by the --sort criteria."
+          "description": "Functions and synthetic template entries exceeding complexity\nthresholds, sorted by the --sort criteria. Each entry wraps its\ninner [`ComplexityViolation`] payload (flattened on the wire) with\nthe typed `actions` list and an optional audit-mode `introduced`\nflag."
         },
         "summary": {
           "description": "Summary statistics.",
@@ -1122,7 +1122,7 @@
         "findings",
         "summary"
       ],
-      "description": "Envelope emitted by `fallow health --format json` (plus the `health` block\ninside the combined and audit envelopes).\n\nThe body is `HealthReport` flattened into the envelope so every report\nfield (`findings`, `summary`, `vital_signs`, `hotspots`, `actions_meta`,\n...) lives at the top level. Grouped runs populate `grouped_by` +\n`groups` with per-bucket recomputed metrics. The `actions_meta`\nbreadcrumb is modeled on `HealthReport` as an `Option<HealthActionsMeta>`\nso the schema documents the field; `inject_health_actions` still\npopulates it post-construction on the `serde_json::Value` tree because\nthe suppression context lives inside the report builder.",
+      "description": "Envelope emitted by `fallow health --format json` (plus the `health` block\ninside the combined and audit envelopes).\n\nThe body is `HealthReport` flattened into the envelope so every report\nfield (`findings`, `summary`, `vital_signs`, `hotspots`, `actions_meta`,\n...) lives at the top level. Grouped runs populate `grouped_by` +\n`groups` with per-bucket recomputed metrics. The `actions_meta`\nbreadcrumb is modeled on `HealthReport` as an `Option<HealthActionsMeta>`\nand is set at construction time by the report builder when the active\n`HealthActionContext` requests suppress-line omission, so the schema\ndocuments the field and serde populates it natively.",
       "title": "fallow health --format json"
     },
     "HealthGroup": {
@@ -1177,7 +1177,7 @@
           "items": {
             "$ref": "#/definitions/HealthFinding"
           },
-          "description": "Findings restricted to files in this group."
+          "description": "Findings restricted to files in this group. Each entry is the typed\n[`HealthFinding`] wrapper around a\n[`ComplexityViolation`](crate::health_types::ComplexityViolation)\npayload."
         },
         "file_scores": {
           "type": "array",
@@ -1216,7 +1216,7 @@
               "type": "null"
             }
           ],
-          "description": "Auditable breadcrumb recording why `suppress-line` action hints\nwere omitted from this group's findings. Mirrors the project-level\n`HealthReport.actions_meta`; populated by `inject_health_actions`\nper group when the suppression context applies uniformly."
+          "description": "Auditable breadcrumb recording why `suppress-line` action hints\nwere omitted from this group's findings. Mirrors the project-level\n`HealthReport.actions_meta`; populated at construction time when the\nper-group [`HealthActionContext`](crate::health_types::HealthActionContext)\nsuppresses inline hints."
         }
       },
       "required": [
@@ -1824,7 +1824,7 @@
           "items": {
             "$ref": "#/definitions/HealthFinding"
           },
-          "description": "Functions and synthetic template entries exceeding complexity\nthresholds, sorted by the --sort criteria."
+          "description": "Functions and synthetic template entries exceeding complexity\nthresholds, sorted by the --sort criteria. Each entry wraps its\ninner [`ComplexityViolation`] payload (flattened on the wire) with\nthe typed `actions` list and an optional audit-mode `introduced`\nflag."
         },
         "summary": {
           "description": "Summary statistics.",
@@ -2312,17 +2312,21 @@
               "type": "null"
             }
           ],
-          "description": "Breakdown of a synthetic `<component>` rollup finding into its\nworst-class-function and template contributions. Present only on\nfindings whose [`name`](Self::name) is the literal string\n`\"<component>\"` (Angular components whose class AND template both\ncontributed to a per-component complexity rollup); absent on every\nother finding kind.\n\nThe owning [`HealthFinding`]'s [`cyclomatic`](Self::cyclomatic) /\n[`cognitive`](Self::cognitive) totals are\n`class_worst_function + template`, so consumers ranking by complexity\nsee the component as one unit. The breakdown carries the\npre-summation numbers plus the worst class function's name so\nconsumers can explain \"this component ranked high because the\ntemplate added 6 cyclomatic on top of the worst class function's 3\"."
+          "description": "Breakdown of a synthetic `<component>` rollup finding into its\nworst-class-function and template contributions. Present only on\nfindings whose [`name`](Self::name) is the literal string\n`\"<component>\"` (Angular components whose class AND template both\ncontributed to a per-component complexity rollup); absent on every\nother finding kind.\n\nThe owning [`HealthFinding`](crate::health_types::HealthFinding)'s\n[`cyclomatic`](Self::cyclomatic) / [`cognitive`](Self::cognitive)\ntotals are `class_worst_function + template`, so consumers ranking\nby complexity see the component as one unit. The breakdown carries\nthe pre-summation numbers plus the worst class function's name so\nconsumers can explain \"this component ranked high because the\ntemplate added 6 cyclomatic on top of the worst class function's 3\"."
         },
         "actions": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/HealthFindingAction"
           },
-          "description": "Suggested actions to resolve this issue."
+          "description": "Machine-actionable fix and suppress hints. Always populated; never\nempty in the typical pipeline (the action selector emits at least\n`suppress-line` or `suppress-file` unless suppressed by the\ncontext)."
         },
         "introduced": {
-          "$ref": "#/definitions/AuditIntroduced"
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Audit-mode flag indicating whether the finding is new versus the\naudit base snapshot. `Some(true)` when introduced in the diff,\n`Some(false)` when present in both snapshots, `None` outside audit\nmode (the field is skipped from the wire)."
         }
       },
       "required": [
@@ -2338,7 +2342,7 @@
         "severity",
         "actions"
       ],
-      "description": "A single function that exceeds a complexity threshold.\n\nSchema-emitted as `HealthFinding` for public-contract continuity (npm\n`fallow/types`, `docs/output-schema.json`, downstream JSON Schema\nconsumers). The Rust internal name `ComplexityViolation` is a\nprerequisite for #384 B2, which introduces a new `HealthFinding`\nwrapper that flattens this struct and adds typed actions / introduced.\nAt B2 the `schemars(rename)` attribute below drops off and the public\nname `HealthFinding` migrates from this inner type to the wrapper."
+      "description": "Wire envelope for a single complexity finding.\n\nFlattens [`ComplexityViolation`] for wire continuity and adds the typed\n`actions` list plus the audit-mode `introduced` flag. The\n`#[serde(flatten)]` keeps each `findings[]` item byte-identical to the\npre-wrapper shape: inner fields (`path`, `name`, `line`, `cyclomatic`,\n...) sit at the top level alongside `actions` and optional `introduced`.\n\nConstruct via [`HealthFinding::with_actions`] in the typical health\npipeline (the wrapper computes its own `actions` from a\n[`HealthActionContext`]) or via [`HealthFinding::new`] when the caller\nalready has the action list (e.g., tests, audit cross-attribution)."
     },
     "LargeFunctionEntry": {
       "type": "object",
@@ -2927,7 +2931,7 @@
         "auto_fixable",
         "description"
       ],
-      "description": "Suggested action attached to an [`UntestedFile`] coverage-gap finding.\n\n`inject_health_actions` emits a two-entry array on every untested-file\nitem: an `add-tests` primary action (scaffold tests for the runtime\nfile) and a `suppress-file` action (`// fallow-ignore-file coverage-gaps`).\nBoth variants share the same struct shape; the field that is populated\n(`note` for `add-tests`, `comment` for `suppress-file`) depends on the\n`kind`.\n\n[`UntestedFile`]: ../../fallow-cli/src/health_types/coverage.rs"
+      "description": "Suggested action attached to an [`UntestedFile`] coverage-gap finding.\n\n`build_untested_file_actions` emits a two-entry array on every\nuntested-file item: an `add-tests` primary action (scaffold tests for\nthe runtime file) and a `suppress-file` action\n(`// fallow-ignore-file coverage-gaps`). Both variants share the same\nstruct shape; the field that is populated (`note` for `add-tests`,\n`comment` for `suppress-file`) depends on the `kind`.\n\n[`UntestedFile`]: ../../fallow-cli/src/health_types/coverage.rs"
     },
     "UntestedExportAction": {
       "type": "object",
@@ -2964,7 +2968,7 @@
         "auto_fixable",
         "description"
       ],
-      "description": "Suggested action attached to an [`UntestedExport`] coverage-gap\nfinding.\n\n`inject_health_actions` emits a two-entry array on every untested-export\nitem: an `add-test-import` primary action (import the export from a\ntest-reachable module) and a `suppress-file` action\n(`// fallow-ignore-file coverage-gaps`). The export-specific variant\n`add-test-import` reflects that a test-reachable reference chain, not\njust any test coverage, is what closes the gap.\n\n[`UntestedExport`]: ../../fallow-cli/src/health_types/coverage.rs"
+      "description": "Suggested action attached to an [`UntestedExport`] coverage-gap\nfinding.\n\n`build_untested_export_actions` emits a two-entry array on every\nuntested-export item: an `add-test-import` primary action (import the\nexport from a test-reachable module) and a `suppress-file` action\n(`// fallow-ignore-file coverage-gaps`). The export-specific variant\n`add-test-import` reflects that a test-reachable reference chain, not\njust any test coverage, is what closes the gap.\n\n[`UntestedExport`]: ../../fallow-cli/src/health_types/coverage.rs"
     },
     "HealthScore": {
       "type": "object",
@@ -5141,7 +5145,7 @@
         "reason",
         "scope"
       ],
-      "description": "Auditable breadcrumb recording when health-finding `suppress-line`\naction hints were omitted from the report.\n\nEmitted at the report root by `inject_health_actions` when it was\ncalled with `omit_suppress_line: true`. Lets consumers see \"where did\nthe suppress-line hints go?\" without having to grep the config or CLI\nhistory.\n\nStable `reason` codes:\n- `baseline-active`: a baseline is active and inline ignores would\n  become dead annotations once the baseline regenerates.\n- `config-disabled`: `health.suggestInlineSuppression` is `false`.\n- `unspecified`: the caller did not record a reason.\n\nThe runtime path constructs this breadcrumb as a `serde_json::Value`\npost-pass in `inject_health_actions` rather than on the typed envelope,\nbecause the suppression context lives inside the report builder. The\ntyped shape here exists so the schema documents the field instead of\nhiding it behind a JSON-tree augmentation."
+      "description": "Auditable breadcrumb recording when health-finding `suppress-line`\naction hints were omitted from the report.\n\nSet at construction time on [`HealthReport::actions_meta`] (and on\neach [`HealthGroup::actions_meta`](crate::health_types::HealthGroup)\nwhen grouped) by the report builder, derived from the active\n[`HealthActionContext`]. Lets consumers see \"where did the\nsuppress-line hints go?\" without having to grep the config or CLI\nhistory.\n\nStable `reason` codes:\n- `baseline-active`: a baseline is active and inline ignores would\n  become dead annotations once the baseline regenerates.\n- `config-disabled`: `health.suggestInlineSuppression` is `false`.\n- `unspecified`: the caller did not record a reason."
     },
     "AnalysisResults": {
       "type": "object",
@@ -8278,7 +8282,7 @@
         "template_cyclomatic",
         "template_cognitive"
       ],
-      "description": "Per-component breakdown attached to a synthetic `<component>`\n[`HealthFinding`]. See [`HealthFinding::component_rollup`] for the\nowning-finding contract."
+      "description": "Per-component breakdown attached to a synthetic `<component>`\n[`HealthFinding`](crate::health_types::HealthFinding). See\n[`ComplexityViolation::component_rollup`] for the owning-finding\ncontract; the wrapper flattens the inner type's\n[`component_rollup`](ComplexityViolation::component_rollup) field\nonto its own wire shape."
     },
     "DuplicateExportFinding": {
       "type": "object",
@@ -8611,6 +8615,118 @@
         "actions"
       ],
       "description": "Wire-shape envelope for a [`MisconfiguredDependencyOverride`] finding.\nCarries a `fix-dependency-override` primary plus the conditional\n`add-to-config` `ignoreDependencyOverrides` suppress (skipped when both\n`target_package` and `raw_key` are empty, since the rule matcher keys on\na non-empty package name)."
+    },
+    "ComplexityViolation": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute file path."
+        },
+        "name": {
+          "type": "string",
+          "description": "Function name, `\"<anonymous>\"` for unnamed functions/arrows, or\n`\"<template>\"` for synthetic Angular template findings."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based column."
+        },
+        "cyclomatic": {
+          "type": "integer",
+          "description": "Cyclomatic complexity."
+        },
+        "cognitive": {
+          "type": "integer",
+          "description": "SonarSource cognitive complexity (structural + nesting penalty)."
+        },
+        "line_count": {
+          "type": "integer",
+          "description": "Number of lines in the function."
+        },
+        "param_count": {
+          "type": "integer",
+          "description": "Number of parameters (excluding TypeScript's this parameter)."
+        },
+        "exceeded": {
+          "description": "Which threshold(s) this finding exceeds. `crap` and its combinations are\nemitted when `max_crap_threshold` is crossed.",
+          "$ref": "#/definitions/ExceededThreshold"
+        },
+        "severity": {
+          "description": "How far above the threshold: moderate (just above), high (recommended\nfor extraction), or critical (immediate extraction candidate). Defaults:\ncognitive 25/40, cyclomatic 30/50.",
+          "$ref": "#/definitions/FindingSeverity"
+        },
+        "crap": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "CRAP score (`CC^2 * (1 - cov/100)^3 + CC`), rounded to one decimal.\nPresent when the function also exceeded `--max-crap`, otherwise absent."
+        },
+        "coverage_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Per-function statement coverage percentage (0.0 to 100.0) used to\nderive `crap`. Present when Istanbul data matched the function,\notherwise absent (estimated model or unmatched functions)."
+        },
+        "coverage_tier": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CoverageTier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Bucketed coverage tier used to drive action selection. Present whenever\nCRAP triggered the finding (Istanbul or estimated), absent otherwise.\n`none` = coverage is at most 0% (file not test-reachable, or Istanbul\nreports 0); `partial` = coverage is in `(0, 70)`; `high` = coverage is\nat or above the high watermark (default `>= 70`, or the estimated 85%\nband)."
+        },
+        "coverage_source": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CoverageSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Provenance of the coverage signal. Present whenever CRAP triggered the\nfinding. `istanbul` = direct fnMap match; `estimated` = graph-based\nestimate against the finding's own file; `estimated_component_inherited`\n= graph-based estimate inherited from an Angular component `.ts`\nreached via the inverse `templateUrl` edge (synthetic `<template>`\nfindings on `.html` files only)."
+        },
+        "inherited_from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Owning component file that contributed reachability when\n`coverage_source == \"estimated_component_inherited\"`. Always paired\nwith that variant of `coverage_source` and absent otherwise. The\nvalue is the `.ts` file fallow walked to via the inverse `templateUrl`\nedge (e.g. `permissions.component.ts`); the JSON serializer strips it\nto project-relative form just like other path fields. Lets human and\nAI consumers explain \"the template scored partial because the\ncomponent it belongs to is tested\" without re-deriving the link."
+        },
+        "component_rollup": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ComponentRollup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Breakdown of a synthetic `<component>` rollup finding into its\nworst-class-function and template contributions. Present only on\nfindings whose [`name`](Self::name) is the literal string\n`\"<component>\"` (Angular components whose class AND template both\ncontributed to a per-component complexity rollup); absent on every\nother finding kind.\n\nThe owning [`HealthFinding`](crate::health_types::HealthFinding)'s\n[`cyclomatic`](Self::cyclomatic) / [`cognitive`](Self::cognitive)\ntotals are `class_worst_function + template`, so consumers ranking\nby complexity see the component as one unit. The breakdown carries\nthe pre-summation numbers plus the worst class function's name so\nconsumers can explain \"this component ranked high because the\ntemplate added 6 cyclomatic on top of the worst class function's 3\"."
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "line",
+        "col",
+        "cyclomatic",
+        "cognitive",
+        "line_count",
+        "param_count",
+        "exceeded",
+        "severity"
+      ],
+      "description": "Inner complexity-violation payload, wrapped by\n[`HealthFinding`](crate::health_types::HealthFinding).\n\nCarries the raw measured signals for a single function or synthetic\ntemplate entry that crossed a complexity threshold. The wrapper adds\nthe typed `actions` list and the audit-mode `introduced` flag using\n`#[serde(flatten)]` so `findings[]` items expose these fields at the\ntop level for wire continuity with the pre-wrapper shape."
     }
   }
 }

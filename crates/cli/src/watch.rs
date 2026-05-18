@@ -119,7 +119,6 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
         show_explain_tip: true,
         baseline_matched: None,
         config_fixable: crate::fix::is_config_fixable(&config.root, opts.config_path.as_ref()),
-        health_action_opts: report::HealthActionOptions::default(),
     };
     let report_code = report::print_results(&results, &ctx, config.output, None);
     if report_code != ExitCode::SUCCESS {

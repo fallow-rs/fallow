@@ -224,13 +224,15 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "SuppressFileAction",
         "SuppressLineAction",
         // crates/cli/src/health_types/ - health output subtree.
-        // `HealthFinding` is the schema-emitted name (via
-        // `schemars(rename = "HealthFinding")`) for the Rust
-        // `ComplexityViolation` struct; the rename keeps the public schema
-        // and codegen-derived TS contracts stable across #384 B1 (this PR)
-        // and B2 (the future wrapper that will take over the
-        // `HealthFinding` name natively). See the doc comment on
-        // `ComplexityViolation` in `health_types/scores.rs`.
+        // `HealthFinding` is the typed wrapper introduced in #384 B2 that
+        // flattens `ComplexityViolation` and carries the typed `actions`
+        // list plus the optional audit-mode `introduced` flag natively.
+        // `ComplexityViolation` is the inner payload; both definitions
+        // ship in `docs/output-schema.json` since the wrapper's
+        // `#[serde(flatten)]` keeps the on-the-wire shape compatible with
+        // pre-wrapper consumers that read the inner fields at the top
+        // level of each `findings[]` item.
+        "ComplexityViolation",
         "ContributorEntry",
         "CoverageGapSummary",
         "CoverageGaps",
@@ -369,7 +371,7 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
 /// optional `actions` while emitting them; it is retired.
 fn finding_definition_names() -> &'static [&'static str] {
     // Each entry MUST appear in `actions_for_issue_type` (dead-code findings)
-    // or `inject_health_actions` (health findings) in
+    // or `inject_health_post_pass_actions` (health hotspots / targets) in
     // `crates/cli/src/report/json.rs`. `StaleSuppression` is intentionally
     // excluded: the JSON layer does not inject actions on stale_suppressions
     // today, and the committed schema matches that.
@@ -397,12 +399,14 @@ fn finding_definition_names() -> &'static [&'static str] {
         // wrappers ship `actions[]` and `introduced` natively and the
         // bare types no longer carry the augmented fields.
         // Health findings (actions[] -> per-finding action wrapper).
-        // `introduced` attaches per `finding_augmentation` below:
-        // `HealthFinding` (the schema-emitted name for the Rust
-        // `ComplexityViolation` inner type, via `schemars(rename)`) is
-        // audit-aware (carries `introduced`), `HotspotEntry` and
-        // `RefactoringTarget` are not.
-        "HealthFinding",
+        // `HealthFinding` has been migrated to a typed wrapper in
+        // `crates/cli/src/health_types/finding.rs` that flattens
+        // `ComplexityViolation` and carries the typed `actions` array
+        // plus the optional audit-mode `introduced` flag natively via
+        // schemars, so it is no longer post-pass-augmented here.
+        // `HotspotEntry` and `RefactoringTarget` still go through the
+        // augmentation; their typed-wrapper migration is deferred to
+        // PR B3 of issue #384.
         "HotspotEntry",
         "RefactoringTarget",
         // Coverage-gap items (`coverage_gaps.files[]` and
@@ -431,11 +435,11 @@ fn finding_definition_names() -> &'static [&'static str] {
 /// Per-finding override for `augment_finding_definition`.
 ///
 /// The default augmentation attaches `actions: array<IssueAction>` and an
-/// `introduced` audit-mode flag. Health findings carry a typed action wrapper
-/// (`HealthFindingAction`, `HotspotAction`, `RefactoringTargetAction`), and
-/// only `HealthFinding` (the schema-emitted name for the Rust
-/// `ComplexityViolation` inner type) carries the audit `introduced` flag
-/// today.
+/// `introduced` audit-mode flag. Health findings use typed action wrappers
+/// (`HotspotAction`, `RefactoringTargetAction`); `HealthFinding` itself is
+/// no longer augmented because it became a typed wrapper in #384 B2 that
+/// flattens `ComplexityViolation` and carries `actions` + `introduced`
+/// natively via schemars.
 #[derive(Debug, Clone, Copy)]
 struct FindingAugmentation {
     /// Schema `$ref` for the items in the `actions` array.
@@ -451,18 +455,12 @@ const DEFAULT_FINDING_AUGMENTATION: FindingAugmentation = FindingAugmentation {
     include_introduced: true,
 };
 
-/// Pick the augmentation for a specific finding. Health findings use typed
-/// per-finding action wrappers and (with the exception of `HealthFinding`,
-/// the schema-emitted name for the Rust `ComplexityViolation` inner type)
-/// skip the audit `introduced` flag because hotspot ranking and refactoring
-/// targets do not run through `fallow audit`'s introduced-vs-inherited
-/// classifier.
+/// Pick the augmentation for a specific finding. Health hotspot ranking and
+/// refactoring targets use typed per-finding action wrappers and skip the
+/// audit `introduced` flag because they do not run through `fallow audit`'s
+/// introduced-vs-inherited classifier.
 fn finding_augmentation(name: &str) -> FindingAugmentation {
     match name {
-        "HealthFinding" => FindingAugmentation {
-            actions_item_ref: "#/definitions/HealthFindingAction",
-            include_introduced: true,
-        },
         "HotspotEntry" => FindingAugmentation {
             actions_item_ref: "#/definitions/HotspotAction",
             include_introduced: false,
@@ -1275,9 +1273,11 @@ mod drift_tests {
         // `actions_meta` was previously here for the `HealthOutput` post-pass
         // injection, but Phase 8 modelled it as `Option<HealthActionsMeta>` on
         // `HealthReport` (flattened into `HealthOutput`) so schemars emits the
-        // field natively; the runtime `inject_health_actions` post-pass still
-        // populates it. Permit `actions` / `introduced` to differ between
-        // sides without firing the gate; everything else must match.
+        // field natively. As of #384 B2 the typed `HealthFinding` wrapper
+        // also carries `actions` + `introduced` natively, so those keys do
+        // not need an augmentation graft for `HealthFinding`. Permit
+        // `actions` / `introduced` to differ between sides without firing
+        // the gate; everything else must match.
         const AUGMENTATION_KEYS: &[&str] = &["actions", "introduced"];
 
         let mut failures: Vec<String> = Vec::new();

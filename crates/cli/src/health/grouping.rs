@@ -35,7 +35,7 @@ struct GroupBucket {
 /// excluded from the run.
 #[expect(
     clippy::too_many_arguments,
-    reason = "grouping consumes the full health pipeline state"
+    reason = "build_health_grouping aggregates the full health pipeline state into per-group sub-reports"
 )]
 pub(super) fn build_health_grouping(
     resolver: &OwnershipResolver,
@@ -55,6 +55,7 @@ pub(super) fn build_health_grouping(
     needs_file_scores: bool,
     needs_hotspots: bool,
     show_vital_signs: bool,
+    action_ctx: &crate::health_types::HealthActionContext,
 ) -> HealthGrouping {
     let buckets = bucket_paths(resolver, project_root, candidate_paths);
 
@@ -78,6 +79,7 @@ pub(super) fn build_health_grouping(
                 needs_file_scores,
                 needs_hotspots,
                 show_vital_signs,
+                action_ctx,
             )
         })
         .collect();
@@ -147,6 +149,7 @@ fn build_group(
     needs_file_scores: bool,
     needs_hotspots: bool,
     show_vital_signs: bool,
+    action_ctx: &crate::health_types::HealthActionContext,
 ) -> HealthGroup {
     let GroupBucket { key, owners, paths } = bucket;
     let subset = SubsetFilter::Paths(&paths);
@@ -203,6 +206,10 @@ fn build_group(
         score_requested.then(|| vital_signs::compute_health_score(&vital_signs, total_files));
 
     let functions_above_threshold = group_findings.len();
+    let wrapped_findings: Vec<crate::health_types::HealthFinding> = group_findings
+        .into_iter()
+        .map(|v| crate::health_types::HealthFinding::with_actions(v, action_ctx))
+        .collect();
 
     HealthGroup {
         key,
@@ -211,11 +218,23 @@ fn build_group(
         functions_above_threshold,
         vital_signs: show_vital_signs.then_some(vital_signs),
         health_score,
-        findings: group_findings,
+        findings: wrapped_findings,
         file_scores: group_file_scores,
         hotspots: group_hotspots,
         large_functions: group_large_functions,
         targets: group_targets,
-        actions_meta: None,
+        actions_meta: if action_ctx.opts.omit_suppress_line {
+            Some(crate::health_types::HealthActionsMeta {
+                suppression_hints_omitted: true,
+                reason: action_ctx
+                    .opts
+                    .omit_reason
+                    .unwrap_or("unspecified")
+                    .to_string(),
+                scope: "health-findings".to_string(),
+            })
+        } else {
+            None
+        },
     }
 }

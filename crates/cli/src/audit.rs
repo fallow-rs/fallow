@@ -2845,7 +2845,7 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
             Ok(mut json) => {
                 let root_prefix = format!("{}/", health.config.root.display());
                 report::strip_root_prefix(&mut json, &root_prefix);
-                report::inject_health_actions(&mut json, crate::health::health_action_opts(health));
+                report::inject_health_post_pass_actions(&mut json);
                 if let Some(ref base) = result.base_snapshot {
                     annotate_health_json(
                         &mut json,

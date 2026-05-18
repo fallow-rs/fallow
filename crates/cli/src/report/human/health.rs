@@ -1877,24 +1877,27 @@ mod tests {
     fn health_findings_show_function_details() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::ComplexityViolation {
-                path: root.join("src/parser.ts"),
-                name: "parseExpression".to_string(),
-                line: 42,
-                col: 0,
-                cyclomatic: 25,
-                cognitive: 30,
-                line_count: 80,
-                param_count: 0,
-                exceeded: crate::health_types::ExceededThreshold::Both,
-                severity: crate::health_types::FindingSeverity::High,
-                crap: None,
-                coverage_pct: None,
-                coverage_tier: None,
-                coverage_source: None,
-                inherited_from: None,
-                component_rollup: None,
-            }],
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/parser.ts"),
+                    name: "parseExpression".to_string(),
+                    line: 42,
+                    col: 0,
+                    cyclomatic: 25,
+                    cognitive: 30,
+                    line_count: 80,
+                    param_count: 0,
+                    exceeded: crate::health_types::ExceededThreshold::Both,
+                    severity: crate::health_types::FindingSeverity::High,
+                    crap: None,
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                }
+                .into(),
+            ],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
@@ -1918,24 +1921,27 @@ mod tests {
     fn health_shown_vs_total_when_truncated() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::ComplexityViolation {
-                path: root.join("src/a.ts"),
-                name: "fn1".to_string(),
-                line: 1,
-                col: 0,
-                cyclomatic: 25,
-                cognitive: 20,
-                line_count: 50,
-                param_count: 0,
-                exceeded: crate::health_types::ExceededThreshold::Both,
-                severity: crate::health_types::FindingSeverity::High,
-                crap: None,
-                coverage_pct: None,
-                coverage_tier: None,
-                coverage_source: None,
-                inherited_from: None,
-                component_rollup: None,
-            }],
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: root.join("src/a.ts"),
+                    name: "fn1".to_string(),
+                    line: 1,
+                    col: 0,
+                    cyclomatic: 25,
+                    cognitive: 20,
+                    line_count: 50,
+                    param_count: 0,
+                    exceeded: crate::health_types::ExceededThreshold::Both,
+                    severity: crate::health_types::FindingSeverity::High,
+                    crap: None,
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                }
+                .into(),
+            ],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 100,
                 functions_analyzed: 500,
@@ -1972,7 +1978,8 @@ mod tests {
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
-                },
+                }
+                .into(),
                 crate::health_types::ComplexityViolation {
                     path: root.join("src/parser.ts"),
                     name: "fn2".to_string(),
@@ -1990,7 +1997,8 @@ mod tests {
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
-                },
+                }
+                .into(),
             ],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 10,
@@ -3351,24 +3359,27 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.summary.functions_above_threshold = 1;
-        report.findings = vec![crate::health_types::ComplexityViolation {
-            path: root.join("src/complex.ts"),
-            name: "bigFn".to_string(),
-            line: 10,
-            col: 0,
-            cyclomatic: 25,
-            cognitive: 20,
-            line_count: 80,
-            param_count: 0,
-            exceeded: crate::health_types::ExceededThreshold::Both,
-            severity: crate::health_types::FindingSeverity::Moderate,
-            crap: None,
-            coverage_pct: None,
-            coverage_tier: None,
-            coverage_source: None,
-            inherited_from: None,
-            component_rollup: None,
-        }];
+        report.findings = vec![
+            crate::health_types::ComplexityViolation {
+                path: root.join("src/complex.ts"),
+                name: "bigFn".to_string(),
+                line: 10,
+                col: 0,
+                cyclomatic: 25,
+                cognitive: 20,
+                line_count: 80,
+                param_count: 0,
+                exceeded: crate::health_types::ExceededThreshold::Both,
+                severity: crate::health_types::FindingSeverity::Moderate,
+                crap: None,
+                coverage_pct: None,
+                coverage_tier: None,
+                coverage_source: None,
+                inherited_from: None,
+                component_rollup: None,
+            }
+            .into(),
+        ];
         report.health_score = Some(crate::health_types::HealthScore {
             formula_version: crate::health_types::HEALTH_SCORE_FORMULA_VERSION,
             score: 75.0,
@@ -3450,24 +3461,27 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.summary.functions_above_threshold = 1;
-        report.findings = vec![crate::health_types::ComplexityViolation {
-            path: root.join("src/a.ts"),
-            name: "fn1".to_string(),
-            line: 1,
-            col: 0,
-            cyclomatic: 25, // exceeds 20
-            cognitive: 10,  // does not exceed 15
-            line_count: 50,
-            param_count: 0,
-            exceeded: crate::health_types::ExceededThreshold::Cyclomatic,
-            severity: crate::health_types::FindingSeverity::Moderate,
-            crap: None,
-            coverage_pct: None,
-            coverage_tier: None,
-            coverage_source: None,
-            inherited_from: None,
-            component_rollup: None,
-        }];
+        report.findings = vec![
+            crate::health_types::ComplexityViolation {
+                path: root.join("src/a.ts"),
+                name: "fn1".to_string(),
+                line: 1,
+                col: 0,
+                cyclomatic: 25, // exceeds 20
+                cognitive: 10,  // does not exceed 15
+                line_count: 50,
+                param_count: 0,
+                exceeded: crate::health_types::ExceededThreshold::Cyclomatic,
+                severity: crate::health_types::FindingSeverity::Moderate,
+                crap: None,
+                coverage_pct: None,
+                coverage_tier: None,
+                coverage_source: None,
+                inherited_from: None,
+                component_rollup: None,
+            }
+            .into(),
+        ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
         assert!(text.contains("25 cyclomatic"));
@@ -3479,24 +3493,27 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.summary.functions_above_threshold = 1;
-        report.findings = vec![crate::health_types::ComplexityViolation {
-            path: root.join("src/a.ts"),
-            name: "fn1".to_string(),
-            line: 1,
-            col: 0,
-            cyclomatic: 10, // does not exceed 20
-            cognitive: 25,  // exceeds 15
-            line_count: 50,
-            param_count: 0,
-            exceeded: crate::health_types::ExceededThreshold::Cognitive,
-            severity: crate::health_types::FindingSeverity::High,
-            crap: None,
-            coverage_pct: None,
-            coverage_tier: None,
-            coverage_source: None,
-            inherited_from: None,
-            component_rollup: None,
-        }];
+        report.findings = vec![
+            crate::health_types::ComplexityViolation {
+                path: root.join("src/a.ts"),
+                name: "fn1".to_string(),
+                line: 1,
+                col: 0,
+                cyclomatic: 10, // does not exceed 20
+                cognitive: 25,  // exceeds 15
+                line_count: 50,
+                param_count: 0,
+                exceeded: crate::health_types::ExceededThreshold::Cognitive,
+                severity: crate::health_types::FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
+                coverage_tier: None,
+                coverage_source: None,
+                inherited_from: None,
+                component_rollup: None,
+            }
+            .into(),
+        ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
         assert!(text.contains("10 cyclomatic"));
@@ -3526,7 +3543,8 @@ mod tests {
                 coverage_source: None,
                 inherited_from: None,
                 component_rollup: None,
-            },
+            }
+            .into(),
             crate::health_types::ComplexityViolation {
                 path: root.join("src/b.ts"),
                 name: "fn2".to_string(),
@@ -3544,7 +3562,8 @@ mod tests {
                 coverage_source: None,
                 inherited_from: None,
                 component_rollup: None,
-            },
+            }
+            .into(),
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -3558,24 +3577,27 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.summary.functions_above_threshold = 1;
-        report.findings = vec![crate::health_types::ComplexityViolation {
-            path: root.join("src/a.ts"),
-            name: "fn1".to_string(),
-            line: 1,
-            col: 0,
-            cyclomatic: 25,
-            cognitive: 20,
-            line_count: 50,
-            param_count: 0,
-            exceeded: crate::health_types::ExceededThreshold::Both,
-            severity: crate::health_types::FindingSeverity::Moderate,
-            crap: None,
-            coverage_pct: None,
-            coverage_tier: None,
-            coverage_source: None,
-            inherited_from: None,
-            component_rollup: None,
-        }];
+        report.findings = vec![
+            crate::health_types::ComplexityViolation {
+                path: root.join("src/a.ts"),
+                name: "fn1".to_string(),
+                line: 1,
+                col: 0,
+                cyclomatic: 25,
+                cognitive: 20,
+                line_count: 50,
+                param_count: 0,
+                exceeded: crate::health_types::ExceededThreshold::Both,
+                severity: crate::health_types::FindingSeverity::Moderate,
+                crap: None,
+                coverage_pct: None,
+                coverage_tier: None,
+                coverage_source: None,
+                inherited_from: None,
+                component_rollup: None,
+            }
+            .into(),
+        ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
         assert!(text.contains("docs.fallow.tools/explanations/health#complexity-metrics"));

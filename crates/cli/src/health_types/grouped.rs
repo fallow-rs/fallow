@@ -10,7 +10,7 @@
 use serde::Serialize;
 
 use crate::health_types::{
-    ComplexityViolation, FileHealthScore, HealthActionsMeta, HealthScore, HotspotEntry,
+    FileHealthScore, HealthActionsMeta, HealthFinding, HealthScore, HotspotEntry,
     LargeFunctionEntry, RefactoringTarget, VitalSigns,
 };
 
@@ -54,9 +54,12 @@ pub struct HealthGroup {
     /// when --score was not requested.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health_score: Option<HealthScore>,
-    /// Findings restricted to files in this group.
+    /// Findings restricted to files in this group. Each entry is the typed
+    /// [`HealthFinding`] wrapper around a
+    /// [`ComplexityViolation`](crate::health_types::ComplexityViolation)
+    /// payload.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub findings: Vec<ComplexityViolation>,
+    pub findings: Vec<HealthFinding>,
     /// File scores restricted to files in this group.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub file_scores: Vec<FileHealthScore>,
@@ -71,8 +74,9 @@ pub struct HealthGroup {
     pub targets: Vec<RefactoringTarget>,
     /// Auditable breadcrumb recording why `suppress-line` action hints
     /// were omitted from this group's findings. Mirrors the project-level
-    /// `HealthReport.actions_meta`; populated by `inject_health_actions`
-    /// per group when the suppression context applies uniformly.
+    /// `HealthReport.actions_meta`; populated at construction time when the
+    /// per-group [`HealthActionContext`](crate::health_types::HealthActionContext)
+    /// suppresses inline hints.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actions_meta: Option<HealthActionsMeta>,
 }

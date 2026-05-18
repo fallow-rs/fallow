@@ -2191,25 +2191,34 @@ fn markdown_workspace_dep_snapshot() {
 
 /// Build a minimal health report with one finding for snapshot tests.
 fn sample_health_report(root: &Path) -> HealthReport {
+    let action_ctx = fallow_cli::health_types::HealthActionContext {
+        opts: fallow_cli::health_types::HealthActionOptions::default(),
+        max_cyclomatic_threshold: 20,
+        max_cognitive_threshold: 15,
+        max_crap_threshold: 30.0,
+    };
     HealthReport {
-        findings: vec![ComplexityViolation {
-            path: root.join("src/complex.ts"),
-            name: "processData".to_string(),
-            line: 42,
-            col: 0,
-            cyclomatic: 25,
-            cognitive: 30,
-            line_count: 120,
-            param_count: 0,
-            exceeded: ExceededThreshold::Both,
-            severity: FindingSeverity::High,
-            crap: None,
-            coverage_pct: None,
-            coverage_tier: None,
-            coverage_source: None,
-            inherited_from: None,
-            component_rollup: None,
-        }],
+        findings: vec![fallow_cli::health_types::HealthFinding::with_actions(
+            ComplexityViolation {
+                path: root.join("src/complex.ts"),
+                name: "processData".to_string(),
+                line: 42,
+                col: 0,
+                cyclomatic: 25,
+                cognitive: 30,
+                line_count: 120,
+                param_count: 0,
+                exceeded: ExceededThreshold::Both,
+                severity: FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
+                coverage_tier: None,
+                coverage_source: None,
+                inherited_from: None,
+                component_rollup: None,
+            },
+            &action_ctx,
+        )],
         summary: HealthSummary {
             files_analyzed: 50,
             functions_analyzed: 200,
@@ -2486,14 +2495,8 @@ fn codeclimate_health_with_runtime_coverage_snapshot() {
 fn json_health_with_runtime_coverage_snapshot() {
     let root = PathBuf::from("/project");
     let report = health_report_with_runtime_coverage(&root);
-    let value = build_health_json(
-        &report,
-        &root,
-        Duration::ZERO,
-        false,
-        fallow_cli::report::HealthActionOptions::default(),
-    )
-    .expect("health JSON build should succeed");
+    let value = build_health_json(&report, &root, Duration::ZERO, false)
+        .expect("health JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
         "json_health_with_runtime_coverage",
@@ -2547,14 +2550,8 @@ fn health_report_with_coverage_gaps(root: &Path) -> HealthReport {
 fn json_health_with_coverage_gaps_snapshot() {
     let root = PathBuf::from("/project");
     let report = health_report_with_coverage_gaps(&root);
-    let value = build_health_json(
-        &report,
-        &root,
-        Duration::ZERO,
-        false,
-        fallow_cli::report::HealthActionOptions::default(),
-    )
-    .expect("health JSON build should succeed");
+    let value = build_health_json(&report, &root, Duration::ZERO, false)
+        .expect("health JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_health_with_coverage_gaps", redact_version(&json_str));
 }

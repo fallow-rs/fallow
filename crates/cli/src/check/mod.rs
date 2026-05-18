@@ -507,7 +507,6 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
         show_explain_tip: opts.show_explain_tip,
         baseline_matched: result.baseline_matched,
         config_fixable: result.config_fixable,
-        health_action_opts: report::HealthActionOptions::default(),
     };
     let report_code = report::print_results(
         &result.results,

@@ -234,18 +234,16 @@ pub enum CoverageSource {
     EstimatedComponentInherited,
 }
 
-/// A single function that exceeds a complexity threshold.
+/// Inner complexity-violation payload, wrapped by
+/// [`HealthFinding`](crate::health_types::HealthFinding).
 ///
-/// Schema-emitted as `HealthFinding` for public-contract continuity (npm
-/// `fallow/types`, `docs/output-schema.json`, downstream JSON Schema
-/// consumers). The Rust internal name `ComplexityViolation` is a
-/// prerequisite for #384 B2, which introduces a new `HealthFinding`
-/// wrapper that flattens this struct and adds typed actions / introduced.
-/// At B2 the `schemars(rename)` attribute below drops off and the public
-/// name `HealthFinding` migrates from this inner type to the wrapper.
+/// Carries the raw measured signals for a single function or synthetic
+/// template entry that crossed a complexity threshold. The wrapper adds
+/// the typed `actions` list and the audit-mode `introduced` flag using
+/// `#[serde(flatten)]` so `findings[]` items expose these fields at the
+/// top level for wire continuity with the pre-wrapper shape.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(rename = "HealthFinding"))]
 pub struct ComplexityViolation {
     /// Absolute file path.
     pub path: std::path::PathBuf,
@@ -313,11 +311,11 @@ pub struct ComplexityViolation {
     /// contributed to a per-component complexity rollup); absent on every
     /// other finding kind.
     ///
-    /// The owning `HealthFinding`'s [`cyclomatic`](Self::cyclomatic) /
-    /// [`cognitive`](Self::cognitive) totals are
-    /// `class_worst_function + template`, so consumers ranking by complexity
-    /// see the component as one unit. The breakdown carries the
-    /// pre-summation numbers plus the worst class function's name so
+    /// The owning [`HealthFinding`](crate::health_types::HealthFinding)'s
+    /// [`cyclomatic`](Self::cyclomatic) / [`cognitive`](Self::cognitive)
+    /// totals are `class_worst_function + template`, so consumers ranking
+    /// by complexity see the component as one unit. The breakdown carries
+    /// the pre-summation numbers plus the worst class function's name so
     /// consumers can explain "this component ranked high because the
     /// template added 6 cyclomatic on top of the worst class function's 3".
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -325,9 +323,11 @@ pub struct ComplexityViolation {
 }
 
 /// Per-component breakdown attached to a synthetic `<component>`
-/// `HealthFinding` (the schema-emitted name for the wire envelope).
-/// See [`ComplexityViolation::component_rollup`] for the owning-finding
-/// contract.
+/// [`HealthFinding`](crate::health_types::HealthFinding). See
+/// [`ComplexityViolation::component_rollup`] for the owning-finding
+/// contract; the wrapper flattens the inner type's
+/// [`component_rollup`](ComplexityViolation::component_rollup) field
+/// onto its own wire shape.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ComponentRollup {

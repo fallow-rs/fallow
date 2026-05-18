@@ -53,12 +53,6 @@ pub struct ReportContext<'a> {
     /// This is caller-provided because an explicit `--config` path is fixable
     /// even when default config discovery from the root would find nothing.
     pub config_fixable: bool,
-    /// JSON-only: controls emission of `suppress-line` action entries on
-    /// health findings. Other formats ignore this field. Computed by the
-    /// caller from `HealthResult::baseline_active` and
-    /// `health.suggestInlineSuppression` config (see
-    /// `crate::health::health_action_opts`).
-    pub health_action_opts: HealthActionOptions,
 }
 
 /// Strip the project root prefix from a path for display, falling back to the full path.
@@ -520,15 +514,8 @@ pub fn print_health_report(
                 ctx.root,
                 ctx.elapsed,
                 ctx.explain,
-                ctx.health_action_opts,
             ),
-            None => json::print_health_json(
-                report,
-                ctx.root,
-                ctx.elapsed,
-                ctx.explain,
-                ctx.health_action_opts,
-            ),
+            None => json::print_health_json(report, ctx.root, ctx.elapsed, ctx.explain),
         },
         OutputFormat::CodeClimate => match group_resolver {
             Some(resolver) => {
@@ -673,7 +660,6 @@ pub use codeclimate::issues_to_value as codeclimate_issues_to_value;
     reason = "target-dependent: used in lib, unused in bin"
 )]
 pub use compact::build_compact_lines;
-pub use json::HealthActionOptions;
 #[allow(
     clippy::redundant_pub_crate,
     reason = "pub(crate) deliberately limits visibility, report is pub but these are internal"
@@ -721,7 +707,7 @@ pub(crate) use json::inject_dupes_actions;
     clippy::redundant_pub_crate,
     reason = "pub(crate) deliberately limits visibility, report is pub but these are internal"
 )]
-pub(crate) use json::inject_health_actions;
+pub(crate) use json::inject_health_post_pass_actions;
 #[allow(
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"
