@@ -27,6 +27,7 @@ use super::helpers::{
     extract_nested_type_bindings, extract_query_list_element_type, extract_super_class_name,
     extract_type_annotation_name, has_angular_class_decorator, has_angular_plural_query_decorator,
     is_meta_url_arg, lit_custom_element_decorator, regex_pattern_to_suffix,
+    ts_import_type_qualifier_root,
 };
 use super::{
     ModuleInfoExtractor, SideEffectRegistrationTarget, try_extract_arrow_wrapped_import,
@@ -1749,12 +1750,18 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // Detect `new URL('./path', import.meta.url)` pattern.
         // This is the standard Vite/bundler pattern for referencing worker files and assets.
         // Treat the path as a dynamic import so the target file is considered reachable.
+        //
+        // Directory-only specifiers (`./`, `../`, `./foo/`) construct a directory URL,
+        // not a file URL; the canonical __dirname idiom
+        // `fileURLToPath(new URL('./', import.meta.url))` must not surface as an import.
+        // See issue #399.
         if let Expression::Identifier(callee) = &expr.callee
             && callee.name == "URL"
             && expr.arguments.len() == 2
             && let Some(Argument::StringLiteral(path_lit)) = expr.arguments.first()
             && is_meta_url_arg(&expr.arguments[1])
             && (path_lit.value.starts_with("./") || path_lit.value.starts_with("../"))
+            && !path_lit.value.ends_with('/')
         {
             self.dynamic_imports.push(DynamicImportInfo {
                 source: path_lit.value.to_string(),
@@ -1766,6 +1773,36 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
 
         walk::walk_new_expression(self, expr);
+    }
+
+    /// Trace `typeof import('./path').X` references inside type positions.
+    ///
+    /// `auto-imports.d.ts` (unplugin-auto-import) and `components.d.ts`
+    /// (unplugin-vue-components) embed these references inside
+    /// `declare global { ... }` and `declare module 'vue' { ... }` ambient
+    /// declarations. Without this handler, oxc walks the bodies but the
+    /// `TSImportType` node has no extractor, so the referenced files end up
+    /// flagged as `unused-files`. See issues #396 and #397.
+    fn visit_ts_import_type(&mut self, node: &oxc_ast::ast::TSImportType<'a>) {
+        let source = node.source.value.to_string();
+        let source_span = node.source.span;
+
+        let imported_name = node.qualifier.as_ref().map_or_else(
+            || ImportedName::SideEffect,
+            |q| ImportedName::Named(ts_import_type_qualifier_root(q).to_string()),
+        );
+
+        self.imports.push(ImportInfo {
+            source,
+            imported_name,
+            local_name: String::new(),
+            is_type_only: true,
+            from_style: false,
+            span: node.span,
+            source_span,
+        });
+
+        walk::walk_ts_import_type(self, node);
     }
 
     #[expect(

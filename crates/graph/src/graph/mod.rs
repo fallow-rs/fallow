@@ -24,6 +24,20 @@ use fallow_types::extract::ImportedName;
 // Re-export all public types so downstream sees the same API as before.
 pub use types::{ExportSymbol, ModuleNode, ReExportEdge, ReferenceKind, SymbolReference};
 
+/// True when the path's final component looks like a TypeScript declaration
+/// file (`.d.ts`, `.d.mts`, `.d.cts`). Used to seed declaration files as
+/// overall entry points so ambient `typeof import()` references stay alive.
+///
+/// Keep in sync with `fallow_core::analyze::predicates::is_declaration_file`;
+/// the graph crate cannot depend on core, so the predicate is duplicated.
+fn is_declaration_file_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|name| {
+            name.ends_with(".d.ts") || name.ends_with(".d.mts") || name.ends_with(".d.cts")
+        })
+}
+
 /// The core module dependency graph.
 #[derive(Debug)]
 pub struct ModuleGraph {
@@ -147,10 +161,24 @@ impl ModuleGraph {
             resolved_modules.iter().map(|m| (m.file_id, m)).collect();
 
         // Build entry point set — use path_to_id map instead of O(n) scan per entry
-        let entry_point_ids = Self::resolve_entry_point_ids(entry_points, &path_to_id);
+        let mut entry_point_ids = Self::resolve_entry_point_ids(entry_points, &path_to_id);
         let runtime_entry_point_ids =
             Self::resolve_entry_point_ids(runtime_entry_points, &path_to_id);
         let test_entry_point_ids = Self::resolve_entry_point_ids(test_entry_points, &path_to_id);
+
+        // TypeScript declaration files (`.d.ts`, `.d.mts`, `.d.cts`) participate
+        // in the program's ambient type surface globally. They are already
+        // exempt from `unused-files` (declaration_file_module is silently
+        // ignored). Treat them as overall entry points so any
+        // `typeof import('./x').Y` reference inside a `declare global { ... }`
+        // or `declare module 'pkg' { ... }` body keeps the target file
+        // reachable. Runtime/test reachability stays narrower: declaration
+        // files emit no runtime side effects. See issues #396 and #397.
+        for file in files {
+            if is_declaration_file_path(&file.path) {
+                entry_point_ids.insert(file.id);
+            }
+        }
 
         // Phase 1: Build flat edge storage, module nodes, and package usage from resolved modules
         let mut graph = Self::populate_edges(

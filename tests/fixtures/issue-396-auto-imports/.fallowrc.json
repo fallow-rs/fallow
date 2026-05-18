@@ -1,0 +1,3 @@
+{
+  "entry": ["src/main.ts", "auto-imports.d.ts"]
+}

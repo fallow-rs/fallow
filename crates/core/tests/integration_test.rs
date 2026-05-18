@@ -122,6 +122,8 @@ mod issue_336_unused_overrides;
 mod issue_358_custom_eslint_config;
 #[path = "integration_test/issue_359_empty_catalog_group.rs"]
 mod issue_359_empty_catalog_group;
+#[path = "integration_test/issue_396_397_399_typeof_import_and_new_url.rs"]
+mod issue_396_397_399_typeof_import_and_new_url;
 #[path = "integration_test/script_multiplexers.rs"]
 mod script_multiplexers;
 #[path = "integration_test/visibility_tags.rs"]

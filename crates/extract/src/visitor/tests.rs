@@ -3071,6 +3071,35 @@ fn new_url_without_import_meta_url_not_tracked() {
     assert!(info.dynamic_imports.is_empty());
 }
 
+// Issue #399: `new URL('./', import.meta.url)` is the canonical __dirname
+// idiom and constructs a directory URL, not a module reference.
+#[test]
+fn new_url_dot_slash_not_tracked() {
+    let info = parse("new URL('./', import.meta.url);");
+    assert!(
+        info.dynamic_imports.is_empty(),
+        "directory-only specifier `./` must not produce an import edge"
+    );
+}
+
+#[test]
+fn new_url_dotdot_slash_not_tracked() {
+    let info = parse("new URL('../', import.meta.url);");
+    assert!(
+        info.dynamic_imports.is_empty(),
+        "directory-only specifier `../` must not produce an import edge"
+    );
+}
+
+#[test]
+fn new_url_subdir_trailing_slash_not_tracked() {
+    let info = parse("new URL('./assets/', import.meta.url);");
+    assert!(
+        info.dynamic_imports.is_empty(),
+        "directory specifier `./assets/` must not produce an import edge"
+    );
+}
+
 // ── import.meta.glob ─────────────────────────────────────────
 
 #[test]
@@ -4195,4 +4224,133 @@ fn angular_component_all_metadata_combined() {
         .unwrap();
     assert!(name_member.has_decorator);
     assert!(saved_member.has_decorator);
+}
+
+// ── TSImportType (typeof import('./x').Foo) ──────────────────
+//
+// `unplugin-auto-import` (#396) and `unplugin-vue-components` (#397) embed
+// `typeof import('./path').X` references inside `declare global { ... }` and
+// `declare module 'vue' { ... }` ambient declarations. The visitor must trace
+// each reference as a type-only import so the target file stays reachable.
+
+#[test]
+fn ts_import_type_with_identifier_qualifier_named() {
+    let info = parse("type T = typeof import('./composables/useCounter').useCounter;");
+    let entry = info
+        .imports
+        .iter()
+        .find(|i| i.source == "./composables/useCounter")
+        .expect("typeof import('./composables/useCounter') must produce an import");
+    assert!(entry.is_type_only, "typeof import() is always type-only");
+    assert!(matches!(
+        &entry.imported_name,
+        ImportedName::Named(n) if n == "useCounter"
+    ));
+}
+
+#[test]
+fn ts_import_type_with_qualified_name_credits_root() {
+    let info = parse("type T = typeof import('./mod').A.B.C;");
+    let entry = info
+        .imports
+        .iter()
+        .find(|i| i.source == "./mod")
+        .expect("typeof import('./mod') must produce an import");
+    assert!(entry.is_type_only);
+    assert!(
+        matches!(&entry.imported_name, ImportedName::Named(n) if n == "A"),
+        "qualified name credits root identifier"
+    );
+}
+
+#[test]
+fn ts_import_type_without_qualifier_is_side_effect() {
+    // `typeof import('./MyButton.vue')['default']` parses with no qualifier;
+    // the `['default']` is a TSIndexedAccessType wrapping the TSImportType.
+    let info = parse("type T = typeof import('./MyButton.vue')['default'];");
+    let entry = info
+        .imports
+        .iter()
+        .find(|i| i.source == "./MyButton.vue")
+        .expect("typeof import('./MyButton.vue') must produce an import");
+    assert!(entry.is_type_only);
+    assert!(matches!(entry.imported_name, ImportedName::SideEffect));
+}
+
+#[test]
+fn ts_import_type_inside_declare_global() {
+    // Mirrors auto-imports.d.ts (issue #396).
+    let info = parse(
+        "export {};\n\
+         declare global {\n\
+           const useCounter: typeof import('./src/composables/useCounter').useCounter;\n\
+         }\n",
+    );
+    let entry = info
+        .imports
+        .iter()
+        .find(|i| i.source == "./src/composables/useCounter")
+        .expect("typeof import() inside `declare global` must produce an import");
+    assert!(entry.is_type_only);
+    assert!(matches!(
+        &entry.imported_name,
+        ImportedName::Named(n) if n == "useCounter"
+    ));
+}
+
+#[test]
+fn ts_import_type_inside_actual_dts_file() {
+    // Parse with the actual `.d.ts` filename to confirm SourceType + visitor
+    // behavior matches the integration scenario.
+    use crate::parse::parse_source_to_module;
+    use fallow_types::discover::FileId;
+    use std::path::Path;
+
+    let m = parse_source_to_module(
+        FileId(0),
+        Path::new("auto-imports.d.ts"),
+        "export {}\n\
+         declare global {\n\
+           const useCounter: typeof import('./src/composables/useCounter').useCounter\n\
+         }\n",
+        0,
+        false,
+    );
+    let entry = m
+        .imports
+        .iter()
+        .find(|i| i.source == "./src/composables/useCounter")
+        .unwrap_or_else(|| {
+            panic!(
+                ".d.ts file must produce import; got {} imports: {:?}",
+                m.imports.len(),
+                m.imports.iter().map(|i| &i.source).collect::<Vec<_>>()
+            )
+        });
+    assert!(entry.is_type_only);
+    assert!(matches!(
+        &entry.imported_name,
+        ImportedName::Named(n) if n == "useCounter"
+    ));
+}
+
+#[test]
+fn ts_import_type_inside_declare_module_augmentation() {
+    // Mirrors components.d.ts (issue #397).
+    let info = parse(
+        "export {};\n\
+         declare module 'vue' {\n\
+           export interface GlobalComponents {\n\
+             MyButton: typeof import('./src/components/MyButton.vue')['default'];\n\
+           }\n\
+         }\n",
+    );
+    let entry = info
+        .imports
+        .iter()
+        .find(|i| i.source == "./src/components/MyButton.vue")
+        .expect("typeof import() inside `declare module` must produce an import");
+    assert!(entry.is_type_only);
+    // No qualifier (the `['default']` is indexed-access wrapping), so SideEffect.
+    assert!(matches!(entry.imported_name, ImportedName::SideEffect));
 }

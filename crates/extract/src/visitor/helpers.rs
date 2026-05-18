@@ -932,6 +932,23 @@ pub(super) fn is_meta_url_arg(arg: &Argument<'_>) -> bool {
     false
 }
 
+/// Walk a `TSImportType` qualifier chain to its leftmost identifier name.
+///
+/// `typeof import('./x').A.B.C` produces a nested
+/// `QualifiedName { left: QualifiedName { left: Identifier("A"), right: "B" }, right: "C" }`.
+/// Returns `"A"` for that shape, `"foo"` for a flat `Identifier("foo")` qualifier.
+pub(super) fn ts_import_type_qualifier_root<'a>(
+    qualifier: &'a oxc_ast::ast::TSImportTypeQualifier<'a>,
+) -> &'a str {
+    let mut current = qualifier;
+    loop {
+        match current {
+            oxc_ast::ast::TSImportTypeQualifier::Identifier(id) => return id.name.as_str(),
+            oxc_ast::ast::TSImportTypeQualifier::QualifiedName(qn) => current = &qn.left,
+        }
+    }
+}
+
 /// Extract static prefix and optional suffix from a binary addition chain.
 pub(super) fn extract_concat_parts(
     expr: &BinaryExpression<'_>,
