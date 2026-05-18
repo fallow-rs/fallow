@@ -896,7 +896,26 @@ fn normalize_schema(value: &mut Value) {
                 map.remove("allOf");
                 map.insert("$ref".to_string(), reference);
             }
-            for child in map.values_mut() {
+            for (key, child) in map.iter_mut() {
+                // Keys inside `properties` / `definitions` / `$defs` /
+                // `patternProperties` maps are user-facing names (struct field
+                // names, type names), not schema keywords. Recurse into each
+                // VALUE (each is itself a schema) without applying the
+                // keyword strip to the surrounding map's keys; otherwise a
+                // struct field literally named `format` / `default` /
+                // `minimum` / etc. would be silently dropped from the
+                // emitted schema. Issue #394 fired this for
+                // `ContributorEntry.format: ContributorIdentifierFormat`.
+                if matches!(
+                    key.as_str(),
+                    "properties" | "definitions" | "$defs" | "patternProperties"
+                ) && let Value::Object(inner) = child
+                {
+                    for inner_value in inner.values_mut() {
+                        normalize_schema(inner_value);
+                    }
+                    continue;
+                }
                 normalize_schema(child);
             }
         }
@@ -994,7 +1013,25 @@ mod drift_tests {
                             .cmp(b.as_str().unwrap_or_default())
                     });
                 }
-                for child in map.values_mut() {
+                for (key, child) in map.iter_mut() {
+                    // Mirror the production-side guard in `normalize_schema`:
+                    // do not apply the keyword strip to keys inside
+                    // `properties` / `definitions` / `$defs` /
+                    // `patternProperties` maps because those keys are
+                    // property/type names, not schema keywords. Without this
+                    // guard a struct field named `format` (or `default` /
+                    // `minimum` / etc) is dropped before the drift gate
+                    // compares structures, masking a real schema regression.
+                    if matches!(
+                        key.as_str(),
+                        "properties" | "definitions" | "$defs" | "patternProperties"
+                    ) && let Value::Object(inner) = child
+                    {
+                        for inner_value in inner.values_mut() {
+                            normalize_one(inner_value);
+                        }
+                        continue;
+                    }
                     normalize_one(child);
                 }
             }
@@ -1397,6 +1434,94 @@ mod drift_tests {
             failures.len(),
             if failures.len() == 1 { "" } else { "s" },
             failures.join("\n\n"),
+        );
+    }
+
+    /// Regression for issue #394: `normalize_schema` recursively walks every
+    /// JSON object and strips schema-keyword names (`format`, `default`,
+    /// `minimum`, `maximum`, `examples`, `exclusiveMinimum`,
+    /// `exclusiveMaximum`). Before the fix it also stripped those keys when
+    /// they appeared as struct-field names inside a `properties` map,
+    /// silently dropping `ContributorEntry.format` from the emitted schema
+    /// and triggering ajv `strictRequired` because `format` stayed in the
+    /// `required` array. The guard skips the strip inside `properties` /
+    /// `definitions` / `$defs` / `patternProperties` so a property named
+    /// `format` (or any other keyword name) survives.
+    #[test]
+    fn normalize_schema_preserves_property_named_format() {
+        let mut value = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "format": { "$ref": "#/definitions/SomeEnum" },
+                "minimum": { "type": "integer" },
+                "default": { "type": "string" },
+                "regular": { "type": "string", "format": "uri" }
+            },
+            "required": ["format", "minimum", "default", "regular"]
+        });
+        super::normalize_schema(&mut value);
+        let properties = value
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties stays an object");
+        assert!(
+            properties.contains_key("format"),
+            "property `format` must survive normalize_schema (issue #394)"
+        );
+        assert!(
+            properties.contains_key("minimum"),
+            "property `minimum` must survive normalize_schema"
+        );
+        assert!(
+            properties.contains_key("default"),
+            "property `default` must survive normalize_schema"
+        );
+        let regular = properties
+            .get("regular")
+            .and_then(Value::as_object)
+            .expect("`regular` stays an object");
+        assert!(
+            !regular.contains_key("format"),
+            "schemars `format` keyword inside a property's schema is still stripped"
+        );
+    }
+
+    /// Mirror of `normalize_schema_preserves_property_named_format` for the
+    /// drift-test side `normalize_one`. Without the same guard the
+    /// canonicalized committed schema would lose its `format` property
+    /// before the comparison and the drift gate would silently accept a
+    /// Rust-side rename or removal of that field.
+    #[test]
+    fn normalize_one_preserves_property_named_format() {
+        let mut value = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "format": { "$ref": "#/definitions/SomeEnum" },
+                "minimum": { "type": "integer" },
+                "regular": { "type": "string", "format": "uri" }
+            },
+            "required": ["format", "minimum", "regular"]
+        });
+        normalize_one(&mut value);
+        let properties = value
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties stays an object");
+        assert!(
+            properties.contains_key("format"),
+            "property `format` must survive normalize_one"
+        );
+        assert!(
+            properties.contains_key("minimum"),
+            "property `minimum` must survive normalize_one"
+        );
+        let regular = properties
+            .get("regular")
+            .and_then(Value::as_object)
+            .expect("`regular` stays an object");
+        assert!(
+            !regular.contains_key("format"),
+            "schemars `format` keyword inside a property's schema is still stripped"
         );
     }
 }

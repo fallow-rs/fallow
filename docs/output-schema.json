@@ -2605,9 +2605,9 @@
           "type": "string",
           "description": "Display string per the configured email mode: raw email\n(`alice@example.com`), local-part handle (`alice`), or stable hash\npseudonym (`xxh3:<16hex>`). The format depends on `format`.\n\nRenamed from `email` because in `handle` and `hash` modes the value\nis no longer an email address; consumers tempted to use it as one\n(e.g. `mailto:`) would be wrong."
         },
-        "commits": {
-          "type": "integer",
-          "description": "Total commits by this contributor in the analysis window."
+        "format": {
+          "description": "Format of [`identifier`](Self::identifier): `raw`, `handle`, or `hash`.\nLets type-aware consumers branch without re-parsing the string.",
+          "$ref": "#/definitions/ContributorIdentifierFormat"
         },
         "share": {
           "type": "number",
@@ -2616,6 +2616,10 @@
         "stale_days": {
           "type": "integer",
           "description": "Days since this contributor last touched the file."
+        },
+        "commits": {
+          "type": "integer",
+          "description": "Total commits by this contributor in the analysis window."
         }
       },
       "required": [
