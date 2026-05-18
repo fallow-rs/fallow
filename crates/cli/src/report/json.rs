@@ -1623,11 +1623,25 @@ pub(crate) fn inject_dupes_actions(output: &mut serde_json::Value) {
         return;
     };
 
-    // Clone families: extract shared module/function
+    // Clone families: extract shared module/function. Each family also
+    // carries a nested `groups[]` array of `CloneGroup` items that must
+    // get their own `actions` field; the committed schema marks `actions`
+    // as required on every `CloneGroup`, but without this nested walk the
+    // inner groups silently shipped without it and JSON Schema strict
+    // consumers saw a `required 'actions' is a required property`
+    // violation on every nested group (issue #393).
     if let Some(families) = map.get_mut("clone_families").and_then(|v| v.as_array_mut()) {
         for item in families {
             let actions = build_clone_family_actions(item);
             if let serde_json::Value::Object(obj) = item {
+                if let Some(serde_json::Value::Array(groups)) = obj.get_mut("groups") {
+                    for inner in groups {
+                        let inner_actions = build_clone_group_actions(inner);
+                        if let serde_json::Value::Object(inner_obj) = inner {
+                            inner_obj.insert("actions".to_string(), inner_actions);
+                        }
+                    }
+                }
                 obj.insert("actions".to_string(), actions);
             }
         }
@@ -3858,6 +3872,61 @@ mod tests {
 
         assert!(output["clone_families"].as_array().unwrap().is_empty());
         assert!(output["clone_groups"].as_array().unwrap().is_empty());
+    }
+
+    /// Regression for issue #393: `inject_dupes_actions` must also walk
+    /// every `clone_families[i].groups[j]` (each a `CloneGroup`) and inject
+    /// `actions` on the inner item. The schema marks `actions` as required
+    /// on every `CloneGroup`; without the nested walk, JSON Schema strict
+    /// consumers saw a `required 'actions' is a required property`
+    /// violation on every nested group.
+    #[test]
+    fn clone_family_nested_groups_have_actions() {
+        let mut output = serde_json::json!({
+            "clone_families": [{
+                "files": ["src/a.ts", "src/b.ts"],
+                "groups": [
+                    {
+                        "instances": [
+                            {"file": "src/a.ts", "start_line": 1, "end_line": 10},
+                            {"file": "src/b.ts", "start_line": 5, "end_line": 14}
+                        ],
+                        "token_count": 50,
+                        "line_count": 10
+                    },
+                    {
+                        "instances": [
+                            {"file": "src/a.ts", "start_line": 20, "end_line": 30},
+                            {"file": "src/b.ts", "start_line": 25, "end_line": 35}
+                        ],
+                        "token_count": 60,
+                        "line_count": 11
+                    }
+                ],
+                "total_duplicated_lines": 21,
+                "total_duplicated_tokens": 110
+            }]
+        });
+
+        inject_dupes_actions(&mut output);
+
+        let family = &output["clone_families"][0];
+        assert!(
+            family.get("actions").and_then(|v| v.as_array()).is_some(),
+            "family carries top-level actions"
+        );
+        let groups = family["groups"].as_array().expect("groups array");
+        for (idx, group) in groups.iter().enumerate() {
+            let actions = group["actions"]
+                .as_array()
+                .unwrap_or_else(|| panic!("inner group {idx} missing actions"));
+            assert!(
+                !actions.is_empty(),
+                "inner group {idx} has at least one action"
+            );
+            assert_eq!(actions[0]["type"], "extract-shared");
+            assert_eq!(actions.last().unwrap()["type"], "suppress-line");
+        }
     }
 
     // ── Tier-aware health action emission ──────────────────────────

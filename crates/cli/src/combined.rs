@@ -580,6 +580,7 @@ fn print_combined_json(
         match serde_json::to_value(&result.report) {
             Ok(mut json) => {
                 report::strip_root_prefix(&mut json, &root_prefix);
+                report::inject_dupes_actions(&mut json);
                 combined.insert("dupes".into(), json);
             }
             Err(e) => {
