@@ -2917,30 +2917,31 @@ fn print_audit_codeclimate(result: &AuditResult) -> ExitCode {
 }
 
 fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
-    let mut all_issues = Vec::new();
+    let mut all_issues: Vec<crate::output_envelope::CodeClimateIssue> = Vec::new();
 
-    if let Some(ref check) = result.check
-        && let serde_json::Value::Array(items) =
-            report::build_codeclimate(&check.results, &check.config.root, &check.config.rules)
-    {
-        all_issues.extend(items);
+    if let Some(ref check) = result.check {
+        all_issues.extend(report::build_codeclimate(
+            &check.results,
+            &check.config.root,
+            &check.config.rules,
+        ));
     }
 
-    if let Some(ref dupes) = result.dupes
-        && let serde_json::Value::Array(items) =
-            report::build_duplication_codeclimate(&dupes.report, &dupes.config.root)
-    {
-        all_issues.extend(items);
+    if let Some(ref dupes) = result.dupes {
+        all_issues.extend(report::build_duplication_codeclimate(
+            &dupes.report,
+            &dupes.config.root,
+        ));
     }
 
-    if let Some(ref health) = result.health
-        && let serde_json::Value::Array(items) =
-            report::build_health_codeclimate(&health.report, &health.config.root)
-    {
-        all_issues.extend(items);
+    if let Some(ref health) = result.health {
+        all_issues.extend(report::build_health_codeclimate(
+            &health.report,
+            &health.config.root,
+        ));
     }
 
-    serde_json::Value::Array(all_issues)
+    serde_json::to_value(&all_issues).expect("CodeClimateIssue serializes infallibly")
 }
 
 // ── Entry point ──────────────────────────────────────────────────

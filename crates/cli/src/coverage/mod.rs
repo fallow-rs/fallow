@@ -100,20 +100,6 @@ impl FrameworkKind {
         }
     }
 
-    const fn id(self) -> &'static str {
-        match self {
-            Self::NextJs => "nextjs",
-            Self::NestJs => "nestjs",
-            Self::Nuxt => "nuxt",
-            Self::SvelteKit => "sveltekit",
-            Self::Astro => "astro",
-            Self::Remix => "remix",
-            Self::ViteBrowser => "vite",
-            Self::PlainNode => "plain_node",
-            Self::Other => "unknown",
-        }
-    }
-
     const fn runtime_targets(self) -> &'static [&'static str] {
         match self {
             Self::NextJs | Self::Nuxt | Self::SvelteKit | Self::Astro | Self::Remix => {
@@ -343,6 +329,16 @@ fn run_setup_json(root: &Path, explain: bool) -> ExitCode {
 }
 
 fn build_setup_json(root: &Path, explain: bool) -> serde_json::Value {
+    let envelope = build_setup_envelope(root, explain);
+    serde_json::to_value(&envelope).expect("CoverageSetupOutput serializes infallibly")
+}
+
+fn build_setup_envelope(root: &Path, explain: bool) -> crate::output_envelope::CoverageSetupOutput {
+    use crate::output_envelope::{
+        CoverageSetupFramework, CoverageSetupOutput, CoverageSetupRuntimeTarget,
+        CoverageSetupSchemaVersion,
+    };
+
     let members = detect_setup_members(root);
     let primary_member = members.first();
     let fallback = detect_setup_context(root);
@@ -353,12 +349,20 @@ fn build_setup_json(root: &Path, explain: bool) -> serde_json::Value {
         .unwrap_or_default();
     let snippets = primary_member.map_or_else(Vec::new, |_| setup_snippets(&primary));
     let files_to_edit = snippets_to_files(&snippets, &primary_prefix);
-    let snippet_values = snippets_to_json(&snippets, &primary_prefix);
-    let runtime_targets = union_runtime_targets(members.iter().map(|member| &member.context));
-    let member_values: Vec<serde_json::Value> = members
+    let snippet_values = snippets_to_typed(&snippets, &primary_prefix);
+    let runtime_targets: Vec<CoverageSetupRuntimeTarget> =
+        union_runtime_targets(members.iter().map(|member| &member.context))
+            .into_iter()
+            .map(runtime_target_from_str)
+            .collect();
+    let member_values: Vec<crate::output_envelope::CoverageSetupMember> = members
         .iter()
-        .map(|member| setup_member_json(root, member))
+        .map(|member| setup_member_typed(root, member))
         .collect();
+    let framework_detected = primary_member.map_or(CoverageSetupFramework::Unknown, |_| {
+        framework_to_typed(primary.framework)
+    });
+    let dockerfile = primary_member.and_then(|_| dockerfile_snippet_string(&primary));
     let mut warnings = primary_member.map_or_else(
         || setup_json_warnings(root, &fallback),
         |_| setup_json_warnings(root, &primary),
@@ -369,35 +373,71 @@ fn build_setup_json(root: &Path, explain: bool) -> serde_json::Value {
         );
     }
 
-    let mut payload = serde_json::json!({
-        "schema_version": "1",
-        "framework_detected": primary_member.map_or("unknown", |_| primary.framework.id()),
-        "package_manager": primary.package_manager.map(PackageManager::label),
-        "runtime_targets": runtime_targets,
-        "members": member_values,
-        "config_written": null,
-        "commands": [
+    CoverageSetupOutput {
+        schema_version: CoverageSetupSchemaVersion::V1,
+        framework_detected,
+        package_manager: primary.package_manager.map(package_manager_to_typed),
+        runtime_targets,
+        members: member_values,
+        config_written: None,
+        commands: vec![
             package_manager.add_runtime_package_command("@fallow-cli/beacon"),
             package_manager.install_command(),
         ],
-        "files_to_edit": files_to_edit,
-        "snippets": snippet_values,
-        "dockerfile_snippet": primary_member
-            .map_or(serde_json::Value::Null, |_| dockerfile_snippet(&primary)),
-        "next_steps": [
-            "Add the snippets to your application.",
-            "Deploy with the beacon enabled.",
-            "Run fallow health --runtime-coverage ./coverage --format json after collecting a local capture.",
-            "Set FALLOW_API_KEY in CI before running fallow coverage upload-inventory."
+        files_to_edit,
+        snippets: snippet_values,
+        dockerfile_snippet: dockerfile,
+        next_steps: vec![
+            "Add the snippets to your application.".to_owned(),
+            "Deploy with the beacon enabled.".to_owned(),
+            "Run fallow health --runtime-coverage ./coverage --format json after collecting a local capture.".to_owned(),
+            "Set FALLOW_API_KEY in CI before running fallow coverage upload-inventory.".to_owned(),
         ],
-        "warnings": warnings,
-    });
-
-    if explain && let Some(object) = payload.as_object_mut() {
-        object.insert("_meta".to_owned(), crate::explain::coverage_setup_meta());
+        warnings,
+        meta: if explain {
+            Some(crate::explain::coverage_setup_meta())
+        } else {
+            None
+        },
     }
+}
 
-    payload
+fn framework_to_typed(kind: FrameworkKind) -> crate::output_envelope::CoverageSetupFramework {
+    use crate::output_envelope::CoverageSetupFramework as F;
+    match kind {
+        FrameworkKind::NextJs => F::NextJs,
+        FrameworkKind::NestJs => F::NestJs,
+        FrameworkKind::Nuxt => F::Nuxt,
+        FrameworkKind::SvelteKit => F::SvelteKit,
+        FrameworkKind::Astro => F::Astro,
+        FrameworkKind::Remix => F::Remix,
+        FrameworkKind::ViteBrowser => F::Vite,
+        FrameworkKind::PlainNode => F::PlainNode,
+        FrameworkKind::Other => F::Unknown,
+    }
+}
+
+fn package_manager_to_typed(
+    pm: PackageManager,
+) -> crate::output_envelope::CoverageSetupPackageManager {
+    use crate::output_envelope::CoverageSetupPackageManager as P;
+    match pm {
+        PackageManager::Npm => P::Npm,
+        PackageManager::Pnpm => P::Pnpm,
+        PackageManager::Yarn => P::Yarn,
+        PackageManager::Bun => P::Bun,
+    }
+}
+
+fn runtime_target_from_str(target: &str) -> crate::output_envelope::CoverageSetupRuntimeTarget {
+    use crate::output_envelope::CoverageSetupRuntimeTarget as T;
+    match target {
+        "browser" => T::Browser,
+        // Node is the conservative default; the upstream
+        // `FrameworkKind::runtime_targets()` only ever yields `"node"` or
+        // `"browser"`.
+        _ => T::Node,
+    }
 }
 
 struct SetupSnippet {
@@ -407,44 +447,55 @@ struct SetupSnippet {
     content: String,
 }
 
-fn setup_member_json(root: &Path, member: &CoverageSetupMember) -> serde_json::Value {
+fn setup_member_typed(
+    root: &Path,
+    member: &CoverageSetupMember,
+) -> crate::output_envelope::CoverageSetupMember {
     let member_path = display_member_path(root, &member.root);
     let prefix = member_path_prefix(&member_path);
     let snippets = setup_snippets(&member.context);
-    serde_json::json!({
-        "name": member.name,
-        "path": member_path,
-        "framework_detected": member.context.framework.id(),
-        "package_manager": member.context.package_manager.map(PackageManager::label),
-        "runtime_targets": member.context.framework.runtime_targets(),
-        "files_to_edit": snippets_to_files(&snippets, &prefix),
-        "snippets": snippets_to_json(&snippets, &prefix),
-        "dockerfile_snippet": dockerfile_snippet(&member.context),
-        "warnings": setup_json_warnings(&member.root, &member.context),
-    })
+    crate::output_envelope::CoverageSetupMember {
+        name: member.name.clone(),
+        path: member_path,
+        framework_detected: framework_to_typed(member.context.framework),
+        package_manager: member.context.package_manager.map(package_manager_to_typed),
+        runtime_targets: member
+            .context
+            .framework
+            .runtime_targets()
+            .iter()
+            .map(|t| runtime_target_from_str(t))
+            .collect(),
+        files_to_edit: snippets_to_files(&snippets, &prefix),
+        snippets: snippets_to_typed(&snippets, &prefix),
+        dockerfile_snippet: dockerfile_snippet_string(&member.context),
+        warnings: setup_json_warnings(&member.root, &member.context),
+    }
 }
 
-fn snippets_to_files(snippets: &[SetupSnippet], prefix: &str) -> Vec<serde_json::Value> {
+fn snippets_to_files(
+    snippets: &[SetupSnippet],
+    prefix: &str,
+) -> Vec<crate::output_envelope::CoverageSetupFileToEdit> {
     snippets
         .iter()
-        .map(|snippet| {
-            serde_json::json!({
-                "path": prefixed_member_path(prefix, &snippet.path),
-                "reason": snippet.reason,
-            })
+        .map(|snippet| crate::output_envelope::CoverageSetupFileToEdit {
+            path: prefixed_member_path(prefix, &snippet.path),
+            reason: snippet.reason.to_owned(),
         })
         .collect()
 }
 
-fn snippets_to_json(snippets: &[SetupSnippet], prefix: &str) -> Vec<serde_json::Value> {
+fn snippets_to_typed(
+    snippets: &[SetupSnippet],
+    prefix: &str,
+) -> Vec<crate::output_envelope::CoverageSetupSnippet> {
     snippets
         .iter()
-        .map(|snippet| {
-            serde_json::json!({
-                "label": snippet.label,
-                "path": prefixed_member_path(prefix, &snippet.path),
-                "content": snippet.content,
-            })
+        .map(|snippet| crate::output_envelope::CoverageSetupSnippet {
+            label: snippet.label.to_owned(),
+            path: prefixed_member_path(prefix, &snippet.path),
+            content: snippet.content.clone(),
         })
         .collect()
 }
@@ -569,11 +620,11 @@ fn setup_snippets(context: &CoverageSetupContext) -> Vec<SetupSnippet> {
     }
 }
 
-fn dockerfile_snippet(context: &CoverageSetupContext) -> serde_json::Value {
+fn dockerfile_snippet_string(context: &CoverageSetupContext) -> Option<String> {
     if context.framework.runtime_targets().contains(&"node") {
-        serde_json::json!("ENV FALLOW_TRANSPORT=fs\nENV FALLOW_WRITE_TO_DIR=/tmp/fallow-coverage")
+        Some("ENV FALLOW_TRANSPORT=fs\nENV FALLOW_WRITE_TO_DIR=/tmp/fallow-coverage".to_owned())
     } else {
-        serde_json::Value::Null
+        None
     }
 }
 

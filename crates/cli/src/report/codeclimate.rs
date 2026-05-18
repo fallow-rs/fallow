@@ -5,14 +5,22 @@ use fallow_config::{RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{AnalysisResults, PrivateTypeLeak};
 
-use super::ci::{fingerprint, severity};
+use super::ci::fingerprint;
 use super::grouping::{self, OwnershipResolver};
 use super::{emit_json, normalize_uri, relative_path};
 use crate::health_types::{ExceededThreshold, HealthReport};
+use crate::output_envelope::{
+    CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
+    CodeClimateSeverity,
+};
 
 /// Map fallow severity to CodeClimate severity.
-fn severity_to_codeclimate(s: Severity) -> &'static str {
-    severity::codeclimate_severity(s)
+fn severity_to_codeclimate(s: Severity) -> CodeClimateSeverity {
+    match s {
+        Severity::Error => CodeClimateSeverity::Major,
+        Severity::Warn => CodeClimateSeverity::Minor,
+        Severity::Off => unreachable!(),
+    }
 }
 
 /// Compute a relative path string with forward-slash normalization.
@@ -31,38 +39,37 @@ fn fingerprint_hash(parts: &[&str]) -> String {
     fingerprint::fingerprint_hash(parts)
 }
 
-/// Build a single CodeClimate issue object.
+/// Build a single CodeClimate issue. Wire shape is locked by the
+/// [`CodeClimateIssue`] typed envelope (and the schema drift gate);
+/// changes to the wire must flow through that struct.
 fn cc_issue(
     check_name: &str,
     description: &str,
-    severity: &str,
+    severity: CodeClimateSeverity,
     category: &str,
     path: &str,
     begin_line: Option<u32>,
     fingerprint: &str,
-) -> serde_json::Value {
-    let lines = begin_line.map_or_else(
-        || serde_json::json!({ "begin": 1 }),
-        |line| serde_json::json!({ "begin": line }),
-    );
-
-    serde_json::json!({
-        "type": "issue",
-        "check_name": check_name,
-        "description": description,
-        "categories": [category],
-        "severity": severity,
-        "fingerprint": fingerprint,
-        "location": {
-            "path": path,
-            "lines": lines
-        }
-    })
+) -> CodeClimateIssue {
+    CodeClimateIssue {
+        kind: CodeClimateIssueKind::Issue,
+        check_name: check_name.to_string(),
+        description: description.to_string(),
+        categories: vec![category.to_string()],
+        severity,
+        fingerprint: fingerprint.to_string(),
+        location: CodeClimateLocation {
+            path: path.to_string(),
+            lines: CodeClimateLines {
+                begin: begin_line.unwrap_or(1),
+            },
+        },
+    }
 }
 
 /// Push CodeClimate issues for unused dependencies with a shared structure.
 fn push_dep_cc_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     deps: &[fallow_core::results::UnusedDependency],
     root: &Path,
     rule_id: &str,
@@ -104,7 +111,7 @@ fn push_dep_cc_issues(
 }
 
 fn push_unused_file_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     files: &[fallow_core::results::UnusedFile],
     root: &Path,
     severity: Severity,
@@ -134,7 +141,7 @@ fn push_unused_file_issues(
 /// prose for both `unused-export` (Export / Re-export) and `unused-type`
 /// (Type export / Type re-export) rule ids.
 fn push_unused_export_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     exports: &[fallow_core::results::UnusedExport],
     root: &Path,
     rule_id: &str,
@@ -171,7 +178,7 @@ fn push_unused_export_issues(
 }
 
 fn push_private_type_leak_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     leaks: &[PrivateTypeLeak],
     root: &Path,
     severity: Severity,
@@ -206,7 +213,7 @@ fn push_private_type_leak_issues(
 }
 
 fn push_type_only_dep_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     deps: &[fallow_core::results::TypeOnlyDependency],
     root: &Path,
     severity: Severity,
@@ -235,7 +242,7 @@ fn push_type_only_dep_issues(
 }
 
 fn push_test_only_dep_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     deps: &[fallow_core::results::TestOnlyDependency],
     root: &Path,
     severity: Severity,
@@ -268,7 +275,7 @@ fn push_test_only_dep_issues(
 /// `entity_label` is `"Enum"` or `"Class"` so the rendered description reads
 /// "Enum member ..." or "Class member ..." accordingly.
 fn push_unused_member_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     members: &[fallow_core::results::UnusedMember],
     root: &Path,
     rule_id: &str,
@@ -305,7 +312,7 @@ fn push_unused_member_issues(
 }
 
 fn push_unresolved_import_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     imports: &[fallow_core::results::UnresolvedImport],
     root: &Path,
     severity: Severity,
@@ -336,7 +343,7 @@ fn push_unresolved_import_issues(
 }
 
 fn push_unlisted_dep_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     deps: &[fallow_core::results::UnlistedDependency],
     root: &Path,
     severity: Severity,
@@ -372,7 +379,7 @@ fn push_unlisted_dep_issues(
 }
 
 fn push_duplicate_export_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     dups: &[fallow_core::results::DuplicateExport],
     root: &Path,
     severity: Severity,
@@ -405,7 +412,7 @@ fn push_duplicate_export_issues(
 }
 
 fn push_circular_dep_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     cycles: &[fallow_core::results::CircularDependency],
     root: &Path,
     severity: Severity,
@@ -448,7 +455,7 @@ fn push_circular_dep_issues(
 }
 
 fn push_boundary_violation_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     violations: &[fallow_core::results::BoundaryViolation],
     root: &Path,
     severity: Severity,
@@ -478,7 +485,7 @@ fn push_boundary_violation_issues(
 }
 
 fn push_stale_suppression_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     suppressions: &[fallow_core::results::StaleSuppression],
     root: &Path,
     severity: Severity,
@@ -504,7 +511,7 @@ fn push_stale_suppression_issues(
 }
 
 fn push_unused_catalog_entry_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     entries: &[fallow_core::results::UnusedCatalogEntry],
     root: &Path,
     severity: Severity,
@@ -547,7 +554,7 @@ fn push_unused_catalog_entry_issues(
 }
 
 fn push_unresolved_catalog_reference_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     findings: &[fallow_core::results::UnresolvedCatalogReference],
     root: &Path,
     severity: Severity,
@@ -602,7 +609,7 @@ fn push_unresolved_catalog_reference_issues(
 }
 
 fn push_empty_catalog_group_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     groups: &[fallow_core::results::EmptyCatalogGroup],
     root: &Path,
     severity: Severity,
@@ -633,7 +640,7 @@ fn push_empty_catalog_group_issues(
 }
 
 fn push_unused_dependency_override_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     findings: &[fallow_core::results::UnusedDependencyOverride],
     root: &Path,
     severity: Severity,
@@ -673,7 +680,7 @@ fn push_unused_dependency_override_issues(
 }
 
 fn push_misconfigured_dependency_override_issues(
-    issues: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<CodeClimateIssue>,
     findings: &[fallow_core::results::MisconfiguredDependencyOverride],
     root: &Path,
     severity: Severity,
@@ -710,13 +717,31 @@ fn push_misconfigured_dependency_override_issues(
     }
 }
 
-/// Build CodeClimate JSON array from dead-code analysis results.
+/// Serialize a typed CodeClimate issue list to the wire-shape JSON array.
+/// Centralizes the `serde_json::to_value(&issues)` conversion used by every
+/// callsite that needs a `serde_json::Value` (PR comment, review envelope,
+/// CodeClimate format dispatch, combined / audit aggregation).
+///
+/// Infallible: `CodeClimateIssue` only contains `String`, `u32`, and enum
+/// variants serialized as kebab-case strings; serde_json cannot fail on
+/// these shapes.
+#[must_use]
+pub fn issues_to_value(issues: &[CodeClimateIssue]) -> serde_json::Value {
+    serde_json::to_value(issues).expect("CodeClimateIssue serializes infallibly")
+}
+
+/// Build CodeClimate issues from dead-code analysis results.
+///
+/// Returns the typed [`CodeClimateIssue`] vec; callers that emit the wire
+/// shape convert via [`issues_to_value`]. The schema drift gate locks the
+/// per-issue shape against [`CodeClimateOutput`](
+/// crate::output_envelope::CodeClimateOutput).
 #[must_use]
 pub fn build_codeclimate(
     results: &AnalysisResults,
     root: &Path,
     rules: &RulesConfig,
-) -> serde_json::Value {
+) -> Vec<CodeClimateIssue> {
     let mut issues = Vec::new();
 
     push_unused_file_issues(&mut issues, &results.unused_files, root, rules.unused_files);
@@ -863,7 +888,7 @@ pub fn build_codeclimate(
         rules.misconfigured_dependency_overrides,
     );
 
-    serde_json::Value::Array(issues)
+    issues
 }
 
 /// Print dead-code analysis results in CodeClimate format.
@@ -872,7 +897,8 @@ pub(super) fn print_codeclimate(
     root: &Path,
     rules: &RulesConfig,
 ) -> ExitCode {
-    let value = build_codeclimate(results, root, rules);
+    let issues = build_codeclimate(results, root, rules);
+    let value = issues_to_value(&issues);
     emit_json(&value, "CodeClimate")
 }
 
@@ -887,10 +913,11 @@ pub(super) fn print_grouped_codeclimate(
     rules: &RulesConfig,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
-    let mut value = build_codeclimate(results, root, rules);
+    let issues = build_codeclimate(results, root, rules);
+    let mut value = issues_to_value(&issues);
 
-    if let Some(issues) = value.as_array_mut() {
-        for issue in issues {
+    if let Some(items) = value.as_array_mut() {
+        for issue in items {
             let path = issue
                 .pointer("/location/path")
                 .and_then(|v| v.as_str())
@@ -912,7 +939,7 @@ pub(super) fn print_grouped_codeclimate(
     clippy::too_many_lines,
     reason = "CRAP adds a fourth exceeded-threshold branch plus its description; splitting the dispatch table would fragment the mapping."
 )]
-pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> serde_json::Value {
+pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeClimateIssue> {
     let mut issues = Vec::new();
 
     let cyc_t = report.summary.max_cyclomatic_threshold;
@@ -960,9 +987,9 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> serde_jso
         };
         // Map finding severity to CodeClimate severity levels
         let severity = match finding.severity {
-            crate::health_types::FindingSeverity::Critical => "critical",
-            crate::health_types::FindingSeverity::High => "major",
-            crate::health_types::FindingSeverity::Moderate => "minor",
+            crate::health_types::FindingSeverity::Critical => CodeClimateSeverity::Critical,
+            crate::health_types::FindingSeverity::High => CodeClimateSeverity::Major,
+            crate::health_types::FindingSeverity::Moderate => CodeClimateSeverity::Minor,
         };
         let line_str = finding.line.to_string();
         let fp = fingerprint_hash(&[check_name, &path, &line_str, &finding.name]);
@@ -1018,9 +1045,13 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> serde_jso
             // "minor" — "info" is schema-valid but silently dropped from MR
             // annotations.
             let severity = match finding.verdict {
-                crate::health_types::RuntimeCoverageVerdict::SafeToDelete => "critical",
-                crate::health_types::RuntimeCoverageVerdict::ReviewRequired => "major",
-                _ => "minor",
+                crate::health_types::RuntimeCoverageVerdict::SafeToDelete => {
+                    CodeClimateSeverity::Critical
+                }
+                crate::health_types::RuntimeCoverageVerdict::ReviewRequired => {
+                    CodeClimateSeverity::Major
+                }
+                _ => CodeClimateSeverity::Minor,
             };
             let fp = fingerprint_hash(&[
                 check_name,
@@ -1061,7 +1092,7 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> serde_jso
             issues.push(cc_issue(
                 "fallow/untested-file",
                 &description,
-                "minor",
+                CodeClimateSeverity::Minor,
                 "Coverage",
                 &path,
                 None,
@@ -1085,7 +1116,7 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> serde_jso
             issues.push(cc_issue(
                 "fallow/untested-export",
                 &description,
-                "minor",
+                CodeClimateSeverity::Minor,
                 "Coverage",
                 &path,
                 Some(item.line),
@@ -1094,12 +1125,13 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> serde_jso
         }
     }
 
-    serde_json::Value::Array(issues)
+    issues
 }
 
 /// Print health analysis results in CodeClimate format.
 pub(super) fn print_health_codeclimate(report: &HealthReport, root: &Path) -> ExitCode {
-    let value = build_health_codeclimate(report, root);
+    let issues = build_health_codeclimate(report, root);
+    let value = issues_to_value(&issues);
     emit_json(&value, "CodeClimate")
 }
 
@@ -1116,10 +1148,11 @@ pub(super) fn print_grouped_health_codeclimate(
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
-    let mut value = build_health_codeclimate(report, root);
+    let issues = build_health_codeclimate(report, root);
+    let mut value = issues_to_value(&issues);
 
-    if let Some(issues) = value.as_array_mut() {
-        for issue in issues {
+    if let Some(items) = value.as_array_mut() {
+        for issue in items {
             let path = issue
                 .pointer("/location/path")
                 .and_then(|v| v.as_str())
@@ -1141,7 +1174,10 @@ pub(super) fn print_grouped_health_codeclimate(
     clippy::cast_possible_truncation,
     reason = "line numbers are bounded by source size"
 )]
-pub fn build_duplication_codeclimate(report: &DuplicationReport, root: &Path) -> serde_json::Value {
+pub fn build_duplication_codeclimate(
+    report: &DuplicationReport,
+    root: &Path,
+) -> Vec<CodeClimateIssue> {
     let mut issues = Vec::new();
 
     for (i, group) in report.clone_groups.iter().enumerate() {
@@ -1174,7 +1210,7 @@ pub fn build_duplication_codeclimate(report: &DuplicationReport, root: &Path) ->
                     group.line_count,
                     group.instances.len()
                 ),
-                "minor",
+                CodeClimateSeverity::Minor,
                 "Duplication",
                 &path,
                 Some(instance.start_line as u32),
@@ -1183,12 +1219,13 @@ pub fn build_duplication_codeclimate(report: &DuplicationReport, root: &Path) ->
         }
     }
 
-    serde_json::Value::Array(issues)
+    issues
 }
 
 /// Print duplication analysis results in CodeClimate format.
 pub(super) fn print_duplication_codeclimate(report: &DuplicationReport, root: &Path) -> ExitCode {
-    let value = build_duplication_codeclimate(report, root);
+    let issues = build_duplication_codeclimate(report, root);
+    let value = issues_to_value(&issues);
     emit_json(&value, "CodeClimate")
 }
 
@@ -1205,7 +1242,8 @@ pub(super) fn print_grouped_duplication_codeclimate(
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
-    let mut value = build_duplication_codeclimate(report, root);
+    let issues = build_duplication_codeclimate(report, root);
+    let mut value = issues_to_value(&issues);
 
     // Build a flat lookup from each instance path -> primary owner. Every
     // instance of a clone group inherits the group's largest-owner key.
@@ -1219,8 +1257,8 @@ pub(super) fn print_grouped_duplication_codeclimate(
         }
     }
 
-    if let Some(issues) = value.as_array_mut() {
-        for issue in issues {
+    if let Some(items) = value.as_array_mut() {
+        for issue in items {
             let path = issue
                 .pointer("/location/path")
                 .and_then(|v| v.as_str())
@@ -1269,7 +1307,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let rules = RulesConfig::default();
-        let output = build_codeclimate(&results, &root, &rules);
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let arr = output.as_array().unwrap();
         assert!(arr.is_empty());
     }
@@ -1279,7 +1317,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let rules = RulesConfig::default();
-        let output = build_codeclimate(&results, &root, &rules);
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert!(output.is_array());
         let arr = output.as_array().unwrap();
         // Should have at least one issue per type
@@ -1294,7 +1332,7 @@ mod tests {
             path: root.join("src/dead.ts"),
         });
         let rules = RulesConfig::default();
-        let output = build_codeclimate(&results, &root, &rules);
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let issue = &output.as_array().unwrap()[0];
 
         assert_eq!(issue["type"], "issue");
@@ -1318,7 +1356,7 @@ mod tests {
 
         // Error severity -> major
         let rules = RulesConfig::default();
-        let output = build_codeclimate(&results, &root, &rules);
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["severity"], "major");
 
         // Warn severity -> minor
@@ -1326,7 +1364,7 @@ mod tests {
             unused_files: Severity::Warn,
             ..RulesConfig::default()
         };
-        let output = build_codeclimate(&results, &root, &rules);
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["severity"], "minor");
     }
 
@@ -1344,7 +1382,7 @@ mod tests {
             is_re_export: false,
         });
         let rules = RulesConfig::default();
-        let output = build_codeclimate(&results, &root, &rules);
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let issue = &output[0];
         assert_eq!(issue["location"]["lines"]["begin"], 10);
     }
@@ -1357,7 +1395,7 @@ mod tests {
             path: root.join("src/dead.ts"),
         });
         let rules = RulesConfig::default();
-        let output = build_codeclimate(&results, &root, &rules);
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let issue = &output[0];
         assert_eq!(issue["location"]["lines"]["begin"], 1);
     }
@@ -1370,7 +1408,7 @@ mod tests {
             path: root.join("src/deep/nested/file.ts"),
         });
         let rules = RulesConfig::default();
-        let output = build_codeclimate(&results, &root, &rules);
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let path = output[0]["location"]["path"].as_str().unwrap();
         assert_eq!(path, "src/deep/nested/file.ts");
         assert!(!path.starts_with("/project"));
@@ -1390,7 +1428,7 @@ mod tests {
             is_re_export: true,
         });
         let rules = RulesConfig::default();
-        let output = build_codeclimate(&results, &root, &rules);
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("Re-export"));
     }
@@ -1415,7 +1453,7 @@ mod tests {
             ],
         });
         let rules = RulesConfig::default();
-        let output = build_codeclimate(&results, &root, &rules);
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let arr = output.as_array().unwrap();
         assert_eq!(arr.len(), 2);
         assert_eq!(arr[0]["check_name"], "fallow/unlisted-dependency");
@@ -1447,7 +1485,7 @@ mod tests {
             ],
         });
         let rules = RulesConfig::default();
-        let output = build_codeclimate(&results, &root, &rules);
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let arr = output.as_array().unwrap();
         assert_eq!(arr.len(), 3);
     }
@@ -1464,7 +1502,7 @@ mod tests {
             is_cross_package: false,
         });
         let rules = RulesConfig::default();
-        let output = build_codeclimate(&results, &root, &rules);
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("Circular dependency"));
         assert!(desc.contains("src/a.ts"));
@@ -1476,8 +1514,8 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let rules = RulesConfig::default();
-        let output1 = build_codeclimate(&results, &root, &rules);
-        let output2 = build_codeclimate(&results, &root, &rules);
+        let output1 = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output2 = issues_to_value(&build_codeclimate(&results, &root, &rules));
 
         let fps1: Vec<&str> = output1
             .as_array()
@@ -1499,7 +1537,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let rules = RulesConfig::default();
-        let output = build_codeclimate(&results, &root, &rules);
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
 
         let mut fps: Vec<&str> = output
             .as_array()
@@ -1523,7 +1561,7 @@ mod tests {
             line: 8,
         });
         let rules = RulesConfig::default();
-        let output = build_codeclimate(&results, &root, &rules);
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/type-only-dependency");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("zod"));
@@ -1542,7 +1580,7 @@ mod tests {
             used_in_workspaces: Vec::new(),
         });
         let rules = RulesConfig::default();
-        let output = build_codeclimate(&results, &root, &rules);
+        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
         // Line 0 -> begin defaults to 1
         assert_eq!(output[0]["location"]["lines"]["begin"], 1);
     }
@@ -1582,12 +1620,18 @@ mod tests {
 
     #[test]
     fn severity_error_maps_to_major() {
-        assert_eq!(severity_to_codeclimate(Severity::Error), "major");
+        assert_eq!(
+            severity_to_codeclimate(Severity::Error),
+            CodeClimateSeverity::Major
+        );
     }
 
     #[test]
     fn severity_warn_maps_to_minor() {
-        assert_eq!(severity_to_codeclimate(Severity::Warn), "minor");
+        assert_eq!(
+            severity_to_codeclimate(Severity::Warn),
+            CodeClimateSeverity::Minor
+        );
     }
 
     #[test]
@@ -1661,7 +1705,7 @@ mod tests {
             ..Default::default()
         };
 
-        let output = build_health_codeclimate(&report, &root);
+        let output = issues_to_value(&build_health_codeclimate(&report, &root));
         let issues = output.as_array().unwrap();
         assert_eq!(issues.len(), 2);
         assert_eq!(issues[0]["check_name"], "fallow/untested-file");
@@ -1704,7 +1748,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let json = build_health_codeclimate(&report, &root);
+        let json = issues_to_value(&build_health_codeclimate(&report, &root));
         let issues = json.as_array().unwrap();
         assert_eq!(issues[0]["check_name"], "fallow/high-crap-score");
         assert_eq!(issues[0]["severity"], "major");

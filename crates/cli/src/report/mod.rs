@@ -212,19 +212,23 @@ pub fn print_results(
         }
         OutputFormat::CodeClimate => codeclimate::print_codeclimate(results, ctx.root, ctx.rules),
         OutputFormat::PrCommentGithub => {
-            let value = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
+            let issues = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
+            let value = codeclimate::issues_to_value(&issues);
             ci::pr_comment::print_pr_comment("dead-code", ci::pr_comment::Provider::Github, &value)
         }
         OutputFormat::PrCommentGitlab => {
-            let value = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
+            let issues = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
+            let value = codeclimate::issues_to_value(&issues);
             ci::pr_comment::print_pr_comment("dead-code", ci::pr_comment::Provider::Gitlab, &value)
         }
         OutputFormat::ReviewGithub => {
-            let value = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
+            let issues = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
+            let value = codeclimate::issues_to_value(&issues);
             ci::review::print_review_envelope("dead-code", ci::pr_comment::Provider::Github, &value)
         }
         OutputFormat::ReviewGitlab => {
-            let value = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
+            let issues = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
+            let value = codeclimate::issues_to_value(&issues);
             ci::review::print_review_envelope("dead-code", ci::pr_comment::Provider::Gitlab, &value)
         }
         OutputFormat::Badge => {
@@ -277,19 +281,23 @@ fn print_grouped_results(
             codeclimate::print_grouped_codeclimate(original, ctx.root, ctx.rules, resolver)
         }
         OutputFormat::PrCommentGithub => {
-            let value = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
+            let issues = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
+            let value = codeclimate::issues_to_value(&issues);
             ci::pr_comment::print_pr_comment("dead-code", ci::pr_comment::Provider::Github, &value)
         }
         OutputFormat::PrCommentGitlab => {
-            let value = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
+            let issues = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
+            let value = codeclimate::issues_to_value(&issues);
             ci::pr_comment::print_pr_comment("dead-code", ci::pr_comment::Provider::Gitlab, &value)
         }
         OutputFormat::ReviewGithub => {
-            let value = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
+            let issues = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
+            let value = codeclimate::issues_to_value(&issues);
             ci::review::print_review_envelope("dead-code", ci::pr_comment::Provider::Github, &value)
         }
         OutputFormat::ReviewGitlab => {
-            let value = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
+            let issues = codeclimate::build_codeclimate(original, ctx.root, ctx.rules);
+            let value = codeclimate::issues_to_value(&issues);
             ci::review::print_review_envelope("dead-code", ci::pr_comment::Provider::Gitlab, &value)
         }
         OutputFormat::Badge => {
@@ -345,19 +353,23 @@ pub fn print_duplication_report(
         }
         OutputFormat::CodeClimate => codeclimate::print_duplication_codeclimate(report, ctx.root),
         OutputFormat::PrCommentGithub => {
-            let value = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            let value = codeclimate::issues_to_value(&issues);
             ci::pr_comment::print_pr_comment("dupes", ci::pr_comment::Provider::Github, &value)
         }
         OutputFormat::PrCommentGitlab => {
-            let value = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            let value = codeclimate::issues_to_value(&issues);
             ci::pr_comment::print_pr_comment("dupes", ci::pr_comment::Provider::Gitlab, &value)
         }
         OutputFormat::ReviewGithub => {
-            let value = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            let value = codeclimate::issues_to_value(&issues);
             ci::review::print_review_envelope("dupes", ci::pr_comment::Provider::Github, &value)
         }
         OutputFormat::ReviewGitlab => {
-            let value = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            let value = codeclimate::issues_to_value(&issues);
             ci::review::print_review_envelope("dupes", ci::pr_comment::Provider::Gitlab, &value)
         }
         OutputFormat::Badge => {
@@ -399,19 +411,23 @@ fn print_grouped_duplication_report(
             codeclimate::print_grouped_duplication_codeclimate(report, ctx.root, resolver)
         }
         OutputFormat::PrCommentGithub => {
-            let value = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            let value = codeclimate::issues_to_value(&issues);
             ci::pr_comment::print_pr_comment("dupes", ci::pr_comment::Provider::Github, &value)
         }
         OutputFormat::PrCommentGitlab => {
-            let value = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            let value = codeclimate::issues_to_value(&issues);
             ci::pr_comment::print_pr_comment("dupes", ci::pr_comment::Provider::Gitlab, &value)
         }
         OutputFormat::ReviewGithub => {
-            let value = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            let value = codeclimate::issues_to_value(&issues);
             ci::review::print_review_envelope("dupes", ci::pr_comment::Provider::Github, &value)
         }
         OutputFormat::ReviewGitlab => {
-            let value = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            let issues = codeclimate::build_duplication_codeclimate(report, ctx.root);
+            let value = codeclimate::issues_to_value(&issues);
             ci::review::print_review_envelope("dupes", ci::pr_comment::Provider::Gitlab, &value)
         }
         OutputFormat::Compact => {
@@ -521,19 +537,23 @@ pub fn print_health_report(
             None => codeclimate::print_health_codeclimate(report, ctx.root),
         },
         OutputFormat::PrCommentGithub => {
-            let value = codeclimate::build_health_codeclimate(report, ctx.root);
+            let issues = codeclimate::build_health_codeclimate(report, ctx.root);
+            let value = codeclimate::issues_to_value(&issues);
             ci::pr_comment::print_pr_comment("health", ci::pr_comment::Provider::Github, &value)
         }
         OutputFormat::PrCommentGitlab => {
-            let value = codeclimate::build_health_codeclimate(report, ctx.root);
+            let issues = codeclimate::build_health_codeclimate(report, ctx.root);
+            let value = codeclimate::issues_to_value(&issues);
             ci::pr_comment::print_pr_comment("health", ci::pr_comment::Provider::Gitlab, &value)
         }
         OutputFormat::ReviewGithub => {
-            let value = codeclimate::build_health_codeclimate(report, ctx.root);
+            let issues = codeclimate::build_health_codeclimate(report, ctx.root);
+            let value = codeclimate::issues_to_value(&issues);
             ci::review::print_review_envelope("health", ci::pr_comment::Provider::Github, &value)
         }
         OutputFormat::ReviewGitlab => {
-            let value = codeclimate::build_health_codeclimate(report, ctx.root);
+            let issues = codeclimate::build_health_codeclimate(report, ctx.root);
+            let value = codeclimate::issues_to_value(&issues);
             ci::review::print_review_envelope("health", ci::pr_comment::Provider::Gitlab, &value)
         }
         OutputFormat::Badge => {
@@ -643,6 +663,11 @@ pub use codeclimate::build_duplication_codeclimate;
     reason = "target-dependent: used in lib, unused in bin"
 )]
 pub use codeclimate::build_health_codeclimate;
+#[allow(
+    unused_imports,
+    reason = "target-dependent: used in lib, unused in bin"
+)]
+pub use codeclimate::issues_to_value as codeclimate_issues_to_value;
 #[allow(
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"

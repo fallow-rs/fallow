@@ -11,6 +11,7 @@ use fallow_cli::report::{
         pr_comment::{Provider, issues_from_codeclimate, render_pr_comment},
         review::render_review_envelope,
     },
+    codeclimate_issues_to_value,
 };
 use fallow_config::RulesConfig;
 use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
@@ -1104,7 +1105,7 @@ fn codeclimate_output_snapshot() {
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
     let rules = RulesConfig::default();
-    let cc = build_codeclimate(&results, &root, &rules);
+    let cc = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_output", json_str);
 }
@@ -1114,7 +1115,7 @@ fn codeclimate_empty_results_snapshot() {
     let root = PathBuf::from("/project");
     let results = AnalysisResults::default();
     let rules = RulesConfig::default();
-    let cc = build_codeclimate(&results, &root, &rules);
+    let cc = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_empty", json_str);
 }
@@ -1128,7 +1129,8 @@ fn codeclimate_unused_files_only_snapshot() {
     results.unused_files.push(UnusedFile {
         path: root.join("src/dead.ts"),
     });
-    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_unused_files_only", json_str);
 }
@@ -1146,7 +1148,8 @@ fn codeclimate_unused_exports_only_snapshot() {
         span_start: 120,
         is_re_export: false,
     });
-    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_unused_exports_only", json_str);
 }
@@ -1164,7 +1167,8 @@ fn codeclimate_unused_types_only_snapshot() {
         span_start: 60,
         is_re_export: false,
     });
-    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_unused_types_only", json_str);
 }
@@ -1180,7 +1184,8 @@ fn codeclimate_unused_deps_only_snapshot() {
         line: 5,
         used_in_workspaces: Vec::new(),
     });
-    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_unused_deps_only", json_str);
 }
@@ -1196,7 +1201,8 @@ fn codeclimate_unresolved_imports_only_snapshot() {
         col: 0,
         specifier_col: 0,
     });
-    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_unresolved_imports_only", json_str);
 }
@@ -1213,7 +1219,8 @@ fn codeclimate_unlisted_deps_only_snapshot() {
             col: 0,
         }],
     });
-    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_unlisted_deps_only", json_str);
 }
@@ -1230,7 +1237,8 @@ fn codeclimate_unused_enum_members_only_snapshot() {
         line: 8,
         col: 2,
     });
-    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_unused_enum_members_only", json_str);
 }
@@ -1247,7 +1255,8 @@ fn codeclimate_unused_class_members_only_snapshot() {
         line: 42,
         col: 4,
     });
-    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_unused_class_members_only", json_str);
 }
@@ -1271,7 +1280,8 @@ fn codeclimate_duplicate_exports_only_snapshot() {
             },
         ],
     });
-    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_duplicate_exports_only", json_str);
 }
@@ -1289,7 +1299,8 @@ fn codeclimate_re_export_variant_snapshot() {
         span_start: 0,
         is_re_export: true,
     });
-    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_re_export_variant", json_str);
 }
@@ -1324,7 +1335,7 @@ fn codeclimate_mixed_severity_snapshot() {
         unused_dependency_overrides: fallow_config::Severity::Warn,
         misconfigured_dependency_overrides: fallow_config::Severity::Error,
     };
-    let cc = build_codeclimate(&results, &root, &rules);
+    let cc = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_mixed_severity", json_str);
 }
@@ -1338,7 +1349,8 @@ fn codeclimate_type_only_deps_snapshot() {
         path: root.join("package.json"),
         line: 8,
     });
-    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_type_only_deps", json_str);
 }
@@ -1354,7 +1366,8 @@ fn codeclimate_unused_dev_deps_only_snapshot() {
         line: 12,
         used_in_workspaces: Vec::new(),
     });
-    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_unused_dev_deps_only", json_str);
 }
@@ -1370,7 +1383,8 @@ fn codeclimate_unused_optional_deps_only_snapshot() {
         line: 5,
         used_in_workspaces: Vec::new(),
     });
-    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_unused_optional_deps_only", json_str);
 }
@@ -1386,7 +1400,8 @@ fn codeclimate_circular_deps_only_snapshot() {
         col: 0,
         is_cross_package: false,
     });
-    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_circular_deps_only", json_str);
 }
@@ -1422,7 +1437,8 @@ fn codeclimate_multiple_exports_same_file_snapshot() {
         span_start: 0,
         is_re_export: false,
     });
-    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_multiple_exports_same_file", json_str);
 }
@@ -1438,7 +1454,8 @@ fn codeclimate_workspace_dep_snapshot() {
         line: 5,
         used_in_workspaces: Vec::new(),
     });
-    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_workspace_deps", json_str);
 }
@@ -1449,7 +1466,8 @@ fn codeclimate_workspace_dep_snapshot() {
 fn pr_comment_github_snapshot() {
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
-    let codeclimate = build_codeclimate(&results, &root, &RulesConfig::default());
+    let codeclimate =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let issues = issues_from_codeclimate(&codeclimate);
     let output = render_pr_comment("check", Provider::Github, &issues);
 
@@ -1460,7 +1478,8 @@ fn pr_comment_github_snapshot() {
 fn pr_comment_gitlab_snapshot() {
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
-    let codeclimate = build_codeclimate(&results, &root, &RulesConfig::default());
+    let codeclimate =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let issues = issues_from_codeclimate(&codeclimate);
     let output = render_pr_comment("check", Provider::Gitlab, &issues);
 
@@ -1471,7 +1490,8 @@ fn pr_comment_gitlab_snapshot() {
 fn review_github_envelope_snapshot() {
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
-    let codeclimate = build_codeclimate(&results, &root, &RulesConfig::default());
+    let codeclimate =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let issues = issues_from_codeclimate(&codeclimate);
     let envelope = render_review_envelope("check", Provider::Github, &issues);
     let json_str = serde_json::to_string_pretty(&envelope).expect("should serialize");
@@ -1483,7 +1503,8 @@ fn review_github_envelope_snapshot() {
 fn review_gitlab_envelope_snapshot() {
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
-    let codeclimate = build_codeclimate(&results, &root, &RulesConfig::default());
+    let codeclimate =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let issues = issues_from_codeclimate(&codeclimate);
     let envelope = render_review_envelope("check", Provider::Gitlab, &issues);
     let json_str = serde_json::to_string_pretty(&envelope).expect("should serialize");
@@ -2152,7 +2173,7 @@ fn sarif_health_empty_snapshot() {
 fn codeclimate_health_output_snapshot() {
     let root = PathBuf::from("/project");
     let report = sample_health_report(&root);
-    let cc = build_health_codeclimate(&report, &root);
+    let cc = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_health_output", json_str);
 }
@@ -2161,7 +2182,7 @@ fn codeclimate_health_output_snapshot() {
 fn codeclimate_health_empty_snapshot() {
     let root = PathBuf::from("/project");
     let report = empty_health_report();
-    let cc = build_health_codeclimate(&report, &root);
+    let cc = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_health_empty", json_str);
 }
@@ -2190,7 +2211,7 @@ fn sarif_health_with_runtime_coverage_snapshot() {
 fn codeclimate_health_with_runtime_coverage_snapshot() {
     let root = PathBuf::from("/project");
     let report = health_report_with_runtime_coverage(&root);
-    let cc = build_health_codeclimate(&report, &root);
+    let cc = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_health_with_runtime_coverage", json_str);
 }
@@ -2282,7 +2303,7 @@ fn sarif_health_with_score_snapshot() {
 fn codeclimate_health_with_score_snapshot() {
     let root = PathBuf::from("/project");
     let report = health_report_with_score(&root);
-    let cc = build_health_codeclimate(&report, &root);
+    let cc = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_health_with_score", json_str);
 }
@@ -2435,7 +2456,7 @@ fn markdown_duplication_empty_snapshot() {
 fn codeclimate_duplication_output_snapshot() {
     let root = PathBuf::from("/project");
     let report = sample_duplication_report(&root);
-    let cc = build_duplication_codeclimate(&report, &root);
+    let cc = codeclimate_issues_to_value(&build_duplication_codeclimate(&report, &root));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_duplication_output", json_str);
 }
@@ -2444,7 +2465,7 @@ fn codeclimate_duplication_output_snapshot() {
 fn codeclimate_duplication_empty_snapshot() {
     let root = PathBuf::from("/project");
     let report = DuplicationReport::default();
-    let cc = build_duplication_codeclimate(&report, &root);
+    let cc = codeclimate_issues_to_value(&build_duplication_codeclimate(&report, &root));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_duplication_empty", json_str);
 }
@@ -2556,7 +2577,7 @@ fn grouped_duplication_codeclimate_directory_snapshot() {
     // Build the codeclimate output, then post-process per-issue with the
     // group key (replicates the runtime path inside print_grouped_duplication_codeclimate
     // for snapshot stability without going through stdout).
-    let mut value = build_duplication_codeclimate(&report, &root);
+    let mut value = codeclimate_issues_to_value(&build_duplication_codeclimate(&report, &root));
     let mut path_to_owner = rustc_hash::FxHashMap::<String, String>::default();
     for group in &report.clone_groups {
         let owner = fallow_cli::report::dupes_grouping::largest_owner(group, &root, &resolver);

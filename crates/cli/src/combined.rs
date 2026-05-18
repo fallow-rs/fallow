@@ -713,29 +713,30 @@ fn build_combined_codeclimate(
     dupes: Option<&DupesResult>,
     health: Option<&HealthResult>,
 ) -> serde_json::Value {
-    let mut all_issues = Vec::new();
-    if let Some(result) = check
-        && let serde_json::Value::Array(items) =
-            report::build_codeclimate(&result.results, &result.config.root, &result.config.rules)
-    {
-        all_issues.extend(items);
+    let mut all_issues: Vec<crate::output_envelope::CodeClimateIssue> = Vec::new();
+    if let Some(result) = check {
+        all_issues.extend(report::build_codeclimate(
+            &result.results,
+            &result.config.root,
+            &result.config.rules,
+        ));
     }
 
-    if let Some(result) = dupes
-        && let serde_json::Value::Array(items) =
-            report::build_duplication_codeclimate(&result.report, &result.config.root)
-    {
-        all_issues.extend(items);
+    if let Some(result) = dupes {
+        all_issues.extend(report::build_duplication_codeclimate(
+            &result.report,
+            &result.config.root,
+        ));
     }
 
-    if let Some(result) = health
-        && let serde_json::Value::Array(items) =
-            report::build_health_codeclimate(&result.report, &result.config.root)
-    {
-        all_issues.extend(items);
+    if let Some(result) = health {
+        all_issues.extend(report::build_health_codeclimate(
+            &result.report,
+            &result.config.root,
+        ));
     }
 
-    serde_json::Value::Array(all_issues)
+    serde_json::to_value(&all_issues).expect("CodeClimateIssue serializes infallibly")
 }
 
 /// Build the dupes options and dispatch to either `execute_dupes` or

@@ -21,20 +21,19 @@
 //! post-passes on the `Value` tree because they cross result-type boundaries
 //! that typed wrappers do not.
 //!
-//! The CodeClimate (`CodeClimateOutput` + sub-types) and review-envelope
-//! (`ReviewEnvelopeOutput` + sub-types) shapes are NOT constructed at
-//! runtime today: `crates/cli/src/report/codeclimate.rs` builds CodeClimate
-//! issues via a `cc_issue` helper that returns `serde_json::Value`, and the
-//! review-envelope renderer (`crates/cli/src/report/ci/review.rs`) builds
-//! provider-specific comment payloads via `serde_json::json!`. Migrating
-//! those builders is a follow-up; the types here exist so the drift gate
-//! can lock the schema shape against Rust source even though the runtime
-//! emit is still dynamic.
-
-#![allow(
-    dead_code,
-    reason = "review and codeclimate envelope structs document the schema shape; runtime emit is still Value-based pending a follow-up that swaps each builder"
-)]
+//! Runtime emit for the CodeClimate, review-envelope, and coverage-setup
+//! shapes now flows through the typed structs in this module:
+//! `crates/cli/src/report/codeclimate.rs` constructs `CodeClimateIssue`
+//! directly via `cc_issue`,
+//! `crates/cli/src/report/ci/review.rs::render_review_envelope` constructs
+//! `ReviewEnvelopeOutput`, and
+//! `crates/cli/src/coverage/mod.rs::build_setup_envelope` constructs
+//! `CoverageSetupOutput`. The wire `serde_json::Value` is the
+//! `serde_json::to_value(&envelope)` of those typed structs, so adding a
+//! field to one of those structs automatically flows to the wire. The
+//! `AuditOutput` and `ListBoundariesOutput` families remain
+//! schema-source-of-truth only (their wire is still hand-built via
+//! `serde_json::json!`); the drift gate keeps them honest.
 
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
@@ -52,11 +51,10 @@ use crate::health_types::{HealthGroup, HealthReport};
 /// `members` carries one entry per detected runtime package; `runtime_targets`
 /// is the union of all member targets.
 ///
-/// The runtime path in `crates/cli/src/coverage/mod.rs::build_setup_json`
-/// still constructs the wire shape via `serde_json::json!` macros (one per
-/// member, snippet, and file-to-edit). The typed struct here serves as the
-/// schema source of truth via the drift gate; a follow-up can swap the
-/// runtime over without changing the wire.
+/// Constructed at runtime by
+/// `crates/cli/src/coverage/mod.rs::build_setup_envelope`; the wire is
+/// `serde_json::to_value(&envelope)`. The drift gate keeps this struct
+/// aligned with `docs/output-schema.json`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(title = "fallow coverage setup --json"))]
@@ -226,6 +224,10 @@ pub struct CoverageSetupSnippet {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(title = "fallow audit --format json"))]
+#[allow(
+    dead_code,
+    reason = "schema-source-of-truth: audit.rs still builds the wire via serde_json::json!; this struct locks the schema shape via the drift gate. Migration is a follow-up to issue #384 items 3a/3b/3c."
+)]
 pub struct AuditOutput {
     /// Schema version for this output format.
     pub schema_version: SchemaVersion,
@@ -280,6 +282,7 @@ pub struct AuditOutput {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
+#[allow(dead_code, reason = "schema-source-of-truth: see `AuditOutput`.")]
 pub enum AuditCommand {
     /// The only valid command discriminator for `AuditOutput`.
     Audit,
@@ -564,6 +567,10 @@ pub struct ExplainOutput {
     schemars(title = "fallow --format codeclimate / gitlab-codequality")
 )]
 #[serde(transparent)]
+#[allow(
+    dead_code,
+    reason = "schema-source-of-truth wrapper: runtime emits a `Vec<CodeClimateIssue>` directly via `codeclimate::issues_to_value`; this newtype exists so `schemars` can title and document the bare-array shape for the drift gate."
+)]
 pub struct CodeClimateOutput(pub Vec<CodeClimateIssue>);
 
 /// Single CodeClimate-compatible issue inside [`CodeClimateOutput`].
@@ -601,6 +608,10 @@ pub enum CodeClimateIssueKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
+#[allow(
+    dead_code,
+    reason = "schema-source-of-truth: documents the full CodeClimate severity spec; runtime never produces `Info` or `Blocker` today, but the schema needs the variants so consumers can validate against either fallow output or a third-party CodeClimate emitter without spec divergence."
+)]
 pub enum CodeClimateSeverity {
     /// Informational.
     Info,
@@ -875,10 +886,9 @@ pub enum GroupByMode {
 //
 // The runtime path builds the wire shape via `serde_json::json!` in
 // `crates/cli/src/list.rs::boundary_data_to_json`; the typed structs below
-// exist so the drift gate can lock the schema shape against Rust source
-// (mirrors the established `CodeClimateOutput` / `ReviewEnvelopeOutput`
-// pattern). A follow-up that swaps the runtime builder over to typed
-// construction can land independently.
+// exist so the drift gate can lock the schema shape against Rust source.
+// A follow-up that swaps the runtime builder over to typed construction
+// can land independently (out of scope for issue #384 items 3a/3b/3c).
 
 /// Envelope emitted by `fallow list --boundaries --format json`. Surfaces
 /// the architecture boundary zones, rules, and (issue #373) the user's
@@ -891,6 +901,10 @@ pub enum GroupByMode {
     feature = "schema",
     schemars(title = "fallow list --boundaries --format json")
 )]
+#[allow(
+    dead_code,
+    reason = "schema-source-of-truth: list.rs still builds the wire via serde_json::json!; this struct and its sub-types lock the schema shape via the drift gate. Migration is a follow-up to issue #384 items 3a/3b/3c."
+)]
 pub struct ListBoundariesOutput {
     /// The boundaries section. The list command can also emit `files`,
     /// `plugins`, `entry_points` siblings under additional flags; those
@@ -901,6 +915,10 @@ pub struct ListBoundariesOutput {
 /// `boundaries` block carried by [`ListBoundariesOutput`].
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[allow(
+    dead_code,
+    reason = "schema-source-of-truth: see `ListBoundariesOutput`."
+)]
 pub struct BoundariesListing {
     /// `false` when the project has no `boundaries` configured; `true`
     /// otherwise. When `false` every array below is empty and every count
@@ -927,6 +945,10 @@ pub struct BoundariesListing {
 /// classifies files into a single zone via glob patterns.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[allow(
+    dead_code,
+    reason = "schema-source-of-truth: see `ListBoundariesOutput`."
+)]
 pub struct BoundariesListZone {
     /// Zone identifier as referenced in rules (e.g. `app`, `features/auth`).
     pub name: String,
@@ -943,6 +965,10 @@ pub struct BoundariesListZone {
 /// corresponding [`BoundariesListLogicalGroup::authored_rule`].
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[allow(
+    dead_code,
+    reason = "schema-source-of-truth: see `ListBoundariesOutput`."
+)]
 pub struct BoundariesListRule {
     /// Source zone the rule applies to.
     pub from: String,
@@ -957,6 +983,10 @@ pub struct BoundariesListRule {
 /// would otherwise flatten it out of [`BoundariesListing::zones`].
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[allow(
+    dead_code,
+    reason = "schema-source-of-truth: see `ListBoundariesOutput`."
+)]
 pub struct BoundariesListLogicalGroup {
     /// Logical parent zone name as authored by the user.
     pub name: String,

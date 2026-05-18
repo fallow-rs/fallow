@@ -4,10 +4,19 @@ use serde_json::Value;
 
 use super::pr_comment::{CiIssue, Provider, command_title, escape_md};
 use super::severity;
+use crate::output_envelope::{
+    GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
+    GitLabReviewPositionType, ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent,
+    ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewProvider,
+};
 use crate::report::emit_json;
 
 #[must_use]
-pub fn render_review_envelope(command: &str, provider: Provider, issues: &[CiIssue]) -> Value {
+pub fn render_review_envelope(
+    command: &str,
+    provider: Provider,
+    issues: &[CiIssue],
+) -> ReviewEnvelopeOutput {
     let max = std::env::var("FALLOW_MAX_COMMENTS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
@@ -22,31 +31,33 @@ pub fn render_review_envelope(command: &str, provider: Provider, issues: &[CiIss
         if issues.len().min(max) == 1 { "" } else { "s" },
         provider.name(),
     );
-    let comments = issues
+    let comments: Vec<ReviewComment> = issues
         .iter()
         .take(max)
         .map(|issue| render_comment(provider, issue, gitlab_diff_refs.as_ref()))
-        .collect::<Vec<_>>();
+        .collect();
 
     match provider {
-        Provider::Github => serde_json::json!({
-            "event": "COMMENT",
-            "body": body,
-            "comments": comments,
-            "meta": {
-                "schema": "fallow-review-envelope/v1",
-                "provider": "github",
-                "check_conclusion": github_check_conclusion(issues),
-            }
-        }),
-        Provider::Gitlab => serde_json::json!({
-            "body": body,
-            "comments": comments,
-            "meta": {
-                "schema": "fallow-review-envelope/v1",
-                "provider": "gitlab"
-            }
-        }),
+        Provider::Github => ReviewEnvelopeOutput {
+            event: Some(ReviewEnvelopeEvent::Comment),
+            body,
+            comments,
+            meta: ReviewEnvelopeMeta {
+                schema: ReviewEnvelopeSchema::V1,
+                provider: ReviewProvider::Github,
+                check_conclusion: Some(github_check_conclusion(issues)),
+            },
+        },
+        Provider::Gitlab => ReviewEnvelopeOutput {
+            event: None,
+            body,
+            comments,
+            meta: ReviewEnvelopeMeta {
+                schema: ReviewEnvelopeSchema::V1,
+                provider: ReviewProvider::Gitlab,
+                check_conclusion: None,
+            },
+        },
     }
 }
 
@@ -56,7 +67,9 @@ pub fn print_review_envelope(command: &str, provider: Provider, codeclimate: &Va
         super::pr_comment::issues_from_codeclimate(codeclimate),
     );
     let envelope = render_review_envelope(command, provider, &issues);
-    emit_json(&envelope, "review envelope")
+    let value =
+        serde_json::to_value(&envelope).expect("ReviewEnvelopeOutput serializes infallibly");
+    emit_json(&value, "review envelope")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,7 +106,7 @@ fn render_comment(
     provider: Provider,
     issue: &CiIssue,
     gitlab_diff_refs: Option<&GitlabDiffRefs>,
-) -> Value {
+) -> ReviewComment {
     let label = review_label_from_codeclimate(&issue.severity);
     let mut body = format!(
         "**{}** `{}`: {}\n\n<!-- fallow-fingerprint: {} -->",
@@ -108,29 +121,30 @@ fn render_comment(
     match provider {
         // Fallow findings point at the current file state. GitHub deletion-side
         // review comments are intentionally not modeled in this envelope yet.
-        Provider::Github => serde_json::json!({
-            "path": issue.path,
-            "line": issue.line,
-            "side": "RIGHT",
-            "body": body,
-            "fingerprint": issue.fingerprint,
+        Provider::Github => ReviewComment::GitHub(GitHubReviewComment {
+            path: issue.path.clone(),
+            // CiIssue.line is u64 for legacy reasons but every callsite
+            // populates it from a u32 line number (`begin_line: Option<u32>`
+            // in `cc_issue`); the typed envelope locks the wire to u32.
+            line: u32::try_from(issue.line).unwrap_or(u32::MAX),
+            side: GitHubReviewSide::Right,
+            body,
+            fingerprint: issue.fingerprint.clone(),
         }),
         Provider::Gitlab => {
-            let mut position = serde_json::json!({
-                "position_type": "text",
-                "old_path": issue.path,
-                "new_path": issue.path,
-                "new_line": issue.line,
-            });
-            if let Some(diff_refs) = gitlab_diff_refs {
-                position["base_sha"] = serde_json::json!(diff_refs.base_sha);
-                position["start_sha"] = serde_json::json!(diff_refs.start_sha);
-                position["head_sha"] = serde_json::json!(diff_refs.head_sha);
-            }
-            serde_json::json!({
-                "body": body,
-                "position": position,
-                "fingerprint": issue.fingerprint,
+            let position = GitLabReviewPosition {
+                base_sha: gitlab_diff_refs.map(|r| r.base_sha.clone()),
+                start_sha: gitlab_diff_refs.map(|r| r.start_sha.clone()),
+                head_sha: gitlab_diff_refs.map(|r| r.head_sha.clone()),
+                position_type: GitLabReviewPositionType::Text,
+                old_path: issue.path.clone(),
+                new_path: issue.path.clone(),
+                new_line: u32::try_from(issue.line).unwrap_or(u32::MAX),
+            };
+            ReviewComment::GitLab(GitLabReviewComment {
+                body,
+                position,
+                fingerprint: issue.fingerprint.clone(),
             })
         }
     }
@@ -143,22 +157,30 @@ fn review_label_from_codeclimate(severity_name: &str) -> &'static str {
     }
 }
 
-fn github_check_conclusion(issues: &[CiIssue]) -> &'static str {
+fn github_check_conclusion(issues: &[CiIssue]) -> ReviewCheckConclusion {
     if issues
         .iter()
         .any(|issue| matches!(issue.severity.as_str(), "major" | "critical" | "blocker"))
     {
-        severity::github_check_conclusion(fallow_config::Severity::Error)
+        ReviewCheckConclusion::Failure
     } else if issues.is_empty() {
-        severity::github_check_conclusion(fallow_config::Severity::Off)
+        ReviewCheckConclusion::Success
     } else {
-        severity::github_check_conclusion(fallow_config::Severity::Warn)
+        ReviewCheckConclusion::Neutral
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn to_value(envelope: &ReviewEnvelopeOutput) -> Value {
+        serde_json::to_value(envelope).expect("ReviewEnvelopeOutput serializes infallibly")
+    }
+
+    fn comment_to_value(comment: &ReviewComment) -> Value {
+        serde_json::to_value(comment).expect("ReviewComment serializes infallibly")
+    }
 
     #[test]
     fn github_review_envelope_matches_api_shape() {
@@ -170,7 +192,7 @@ mod tests {
             line: 1,
             fingerprint: "abc".into(),
         }];
-        let envelope = render_review_envelope("check", Provider::Github, &issues);
+        let envelope = to_value(&render_review_envelope("check", Provider::Github, &issues));
         assert_eq!(envelope["event"], "COMMENT");
         assert_eq!(envelope["comments"][0]["path"], "src/a.ts");
         assert!(
@@ -191,7 +213,7 @@ mod tests {
             line: 1,
             fingerprint: "abc".into(),
         };
-        let comment = render_comment(Provider::Github, &issue, None);
+        let comment = comment_to_value(&render_comment(Provider::Github, &issue, None));
         assert_eq!(comment["side"], "RIGHT");
     }
 
@@ -205,7 +227,7 @@ mod tests {
             line: 1,
             fingerprint: "abc".into(),
         };
-        let comment = render_comment(Provider::Github, &issue, None);
+        let comment = comment_to_value(&render_comment(Provider::Github, &issue, None));
         assert!(comment["body"].as_str().unwrap().starts_with("**error**"));
     }
 
@@ -224,7 +246,7 @@ mod tests {
             start_sha: "start".into(),
             head_sha: "head".into(),
         };
-        let comment = render_comment(Provider::Gitlab, &issue, Some(&refs));
+        let comment = comment_to_value(&render_comment(Provider::Gitlab, &issue, Some(&refs)));
         assert_eq!(comment["position"]["position_type"], "text");
         assert_eq!(comment["position"]["base_sha"], "base");
         assert_eq!(comment["position"]["start_sha"], "start");
