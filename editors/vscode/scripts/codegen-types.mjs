@@ -191,40 +191,101 @@ function stripTrailingWhitespace(contents) {
 }
 
 /**
- * Append aliases for schema definitions that json-schema-to-typescript
- * dedupes because their property set is fully subsumed by a parent type
- * via `#[serde(flatten)]`. Even with `unreachableDefinitions: true`, jstt
- * suppresses the interface when every property is already inlined on the
- * flattening parent.
+ * Schema definitions that json-schema-to-typescript dedupes because their
+ * property set is fully subsumed by a parent type via `#[serde(flatten)]`.
+ * Even with `unreachableDefinitions: true`, jstt suppresses the interface
+ * when every property is already inlined on the flattening parent.
  *
- * Today this affects `ComplexityViolation`, which is flattened into
- * `HealthFinding`. The schema still ships both definitions for JSON-schema
+ * For each entry, the codegen appends
+ * `export type <name> = Omit<<parent>, "<wrapperOnly[0]>" | ...>;`
+ * after generation. The schema still ships both definitions for JSON-schema
  * consumers (OpenAPI validators, doc-driven tooling); this alias exposes
- * the same shape to TypeScript consumers without forcing them to use the
- * wrapper. Adding entries here is a strict superset of what jstt emits:
- * if the consuming codebase already has the alias defined organically
- * (because a future PR materialises the inner under a different name), the
- * alias becomes a no-op duplicate that the compiler resolves transparently.
+ * the same shape to TypeScript consumers without forcing them to reach
+ * through the wrapper.
  *
- * Future serde(flatten) wrappers in the same migration ladder
- * (`HotspotFinding`, `RefactoringTargetFinding` in PR B3) will need the
- * matching aliases added here too.
+ * Adding entries (e.g. for `HotspotEntry` and `RefactoringTarget` once
+ * their `*Finding` wrappers land in PR B3 of issue #384):
+ *   1. Confirm jstt actually dedupes the new inner by inspecting the
+ *      generated `.d.ts` for `export interface <inner-name>\b`. If
+ *      present, the entry is unnecessary (and would conflict on the
+ *      duplicate identifier).
+ *   2. Append a `{ name, parent, wrapperOnlyFields, description }` row
+ *      below.
+ *   3. Regenerate via `pnpm --filter fallow-vscode codegen:types`.
+ */
+const FLATTEN_DEDUPED_ALIASES = [
+  {
+    name: "ComplexityViolation",
+    parent: "HealthFinding",
+    wrapperOnlyFields: ["actions", "introduced"],
+    description:
+      "Inner complexity-violation payload, flattened into `HealthFinding`\n" +
+      " * on the wire via `#[serde(flatten)]`. Exposed here because\n" +
+      " * json-schema-to-typescript dedupes definitions whose property set is\n" +
+      " * fully subsumed by a flattening parent; the schema definition exists\n" +
+      " * in `docs/output-schema.json` but the TS interface is suppressed.\n" +
+      " * Consumers that need to type just the inner payload should use this\n" +
+      " * alias; consumers that need the full envelope (with `actions` and\n" +
+      " * optional `introduced`) should use `HealthFinding` directly.",
+  },
+];
+
+/**
+ * Append aliases for serde-flattened inner types that jstt dedupes (see
+ * `FLATTEN_DEDUPED_ALIASES` for the full rationale and extension recipe).
  */
 function appendDedupedFlattenAliases(contents) {
-  return (
-    contents +
-    "\n/**\n" +
-    " * Inner complexity-violation payload, flattened into `HealthFinding`\n" +
-    " * on the wire via `#[serde(flatten)]`. Exposed here because\n" +
-    " * json-schema-to-typescript dedupes definitions whose property set is\n" +
-    " * fully subsumed by a flattening parent; the schema definition exists\n" +
-    " * in `docs/output-schema.json` but the TS interface is suppressed.\n" +
-    " * Consumers that need to type just the inner payload should use this\n" +
-    " * alias; consumers that need the full envelope (with `actions` and\n" +
-    " * optional `introduced`) should use `HealthFinding` directly.\n" +
-    " */\n" +
-    'export type ComplexityViolation = Omit<HealthFinding, "actions" | "introduced">;\n'
-  );
+  let out = contents;
+  for (const alias of FLATTEN_DEDUPED_ALIASES) {
+    const omitKeys = alias.wrapperOnlyFields
+      .map((field) => `"${field}"`)
+      .join(" | ");
+    out +=
+      `\n/**\n * ${alias.description}\n */\n` +
+      `export type ${alias.name} = Omit<${alias.parent}, ${omitKeys}>;\n`;
+  }
+  return out;
+}
+
+/**
+ * Verify each `FLATTEN_DEDUPED_ALIASES` entry actually landed in the
+ * generated `.d.ts`, AND that its `parent` interface exists (otherwise the
+ * `Omit<Parent, ...>` alias would not resolve at consumer type-check time).
+ *
+ * Throws if either invariant is violated. Catches three drift scenarios:
+ *   1. `appendDedupedFlattenAliases` regressed (e.g. typo in the emit
+ *      template) and the alias is missing from the output.
+ *   2. The parent type was renamed in the schema (e.g. `HealthFinding` to
+ *      `HealthFindingEnvelope`) but the alias entry still references the
+ *      old name. The alias would emit `Omit<<old-name>, ...>` and break.
+ *   3. The parent type got dedupe-suppressed itself (e.g. someone wrapped
+ *      `HealthFinding` in another `#[serde(flatten)]` wrapper). The
+ *      alias would silently resolve to an unknown type.
+ *
+ * Future-proofing note: if jstt starts emitting the inner natively (e.g. a
+ * version bump that disables the subsume-dedupe heuristic), the alias and
+ * the natively-emitted interface would conflict on a duplicate identifier
+ * and `pnpm run lint` (tsc --noEmit) would fail; this assertion is
+ * deliberately narrower so the failure surfaces at codegen time first.
+ */
+function assertAliasesEmitted(contents) {
+  for (const alias of FLATTEN_DEDUPED_ALIASES) {
+    const aliasRe = new RegExp(`^export type ${alias.name}\\b`, "m");
+    if (!aliasRe.test(contents)) {
+      throw new Error(
+        `assertAliasesEmitted: expected \`export type ${alias.name}\` in generated output. ` +
+          `If jstt now emits this type natively or it was renamed, update FLATTEN_DEDUPED_ALIASES.`,
+      );
+    }
+    const parentRe = new RegExp(`^export interface ${alias.parent}\\b`, "m");
+    if (!parentRe.test(contents)) {
+      throw new Error(
+        `assertAliasesEmitted: expected \`export interface ${alias.parent}\` (parent of ${alias.name}) in generated output. ` +
+          `The alias \`Omit<${alias.parent}, ...>\` would fail to resolve without it. ` +
+          `Did ${alias.parent} get renamed or dedupe-suppressed?`,
+      );
+    }
+  }
 }
 
 async function generate() {
@@ -236,9 +297,11 @@ async function generate() {
   // top-level union type.
   const raw_ts = await compile(parsed, "FallowJsonOutput", OPTIONS);
   const version = await readRustSchemaVersion();
-  return appendDedupedFlattenAliases(
+  const final = appendDedupedFlattenAliases(
     stripTrailingWhitespace(pinSchemaVersion(raw_ts, version)),
   );
+  assertAliasesEmitted(final);
+  return final;
 }
 
 async function writeAll(contents) {
