@@ -1054,6 +1054,15 @@ pub struct BoundariesListLogicalGroup {
 /// variants in order; field sets differ enough that the first matching
 /// variant is the correct one in practice.
 ///
+/// Variant order is **most-specific first**. Schemars 1 preserves
+/// declaration order in the emitted `oneOf`, and validators that enforce
+/// strict `oneOf` (and any future migration that adds `Deserialize`) will
+/// try branches top-to-bottom. The required-field sets shrink as we move
+/// down the list, with [`CombinedOutput`] last because its three required
+/// fields (`schema_version`, `version`, `elapsed_ms`) are a strict subset
+/// of every other variant's required set; placing it earlier would let a
+/// `CheckOutput` payload silently match `CombinedOutput` first.
+///
 /// Two envelopes are intentionally NOT in this enum:
 /// - `CodeClimateOutput` serializes as a bare JSON array
 ///   (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality
@@ -1062,9 +1071,10 @@ pub struct BoundariesListLogicalGroup {
 ///   carries it as a sibling `oneOf` branch alongside `FallowOutput`.
 /// - `CoverageAnalyzeOutput` (`fallow coverage analyze --format json`)
 ///   does not yet have a Rust struct; it lives on the
-///   `HAND_MAINTAINED_ALLOW_LIST` in `schema_emit.rs` pending typed
-///   migration. The root schema preserves it as a sibling `oneOf` branch
-///   so the documented union stays complete until the migration lands.
+///   `HAND_MAINTAINED_ROOT_ENVELOPES` constant in `schema_emit.rs`
+///   pending typed migration. The root schema preserves it as a sibling
+///   `oneOf` branch so the documented union stays complete until the
+///   migration lands.
 ///
 /// A future major release plans to switch this to
 /// `#[serde(tag = "kind")]` for true O(1) discriminability on AI / agent
@@ -1078,26 +1088,40 @@ pub struct BoundariesListLogicalGroup {
 )]
 #[serde(untagged)]
 pub enum FallowOutput {
-    /// Bare `fallow --format json` (combined dead-code + dupes + health).
-    Combined(CombinedOutput),
-    /// `fallow check --format json` / `fallow dead-code --format json`.
-    Check(CheckOutput),
-    /// `fallow check --format json --group-by <mode>`.
-    CheckGrouped(CheckGroupedOutput),
-    /// `fallow health --format json`.
-    Health(HealthOutput),
-    /// `fallow dupes --format json`.
-    Dupes(DupesOutput),
-    /// `fallow audit --format json`.
+    /// `fallow audit --format json`. Required `command: "audit"` singleton
+    /// plus `verdict` and `summary`.
     Audit(AuditOutput),
-    /// `fallow explain <issue-type> --format json`.
+    /// `fallow explain <issue-type> --format json`. Required `id`, `name`,
+    /// `rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.
     Explain(ExplainOutput),
-    /// `fallow coverage setup --json`.
-    CoverageSetup(CoverageSetupOutput),
-    /// `fallow --format review-github` / `--format review-gitlab`.
+    /// `fallow --format review-github` / `--format review-gitlab`. Required
+    /// `body`, `comments`, `meta`; no `schema_version`.
     ReviewEnvelope(ReviewEnvelopeOutput),
-    /// `fallow ci reconcile-review --format json`.
+    /// `fallow ci reconcile-review --format json`. Required `schema`
+    /// singleton plus `provider`, `comments`, and the various
+    /// `*_fingerprints` arrays.
     ReviewReconcile(ReviewReconcileOutput),
-    /// `fallow list --boundaries --format json`.
+    /// `fallow coverage setup --json`. Required `schema_version` singleton
+    /// plus `framework_detected`, `members`, `commands`, `snippets`.
+    CoverageSetup(CoverageSetupOutput),
+    /// `fallow list --boundaries --format json`. Required `boundaries`
+    /// sub-object; no `schema_version`.
     ListBoundaries(ListBoundariesOutput),
+    /// `fallow health --format json`. Required `report: HealthReport`.
+    Health(HealthOutput),
+    /// `fallow dupes --format json`. Required `report: DuplicationReport`.
+    Dupes(DupesOutput),
+    /// `fallow check --format json --group-by <mode>`. Required `grouped_by`
+    /// plus a `groups` array; ordered before [`Self::Check`] because the
+    /// `grouped_by` discriminator field is uniquely present here.
+    CheckGrouped(CheckGroupedOutput),
+    /// `fallow check --format json` / `fallow dead-code --format json`.
+    /// Required `total_issues` plus `summary: CheckSummary`.
+    Check(CheckOutput),
+    /// Bare `fallow --format json` (combined dead-code + dupes + health).
+    /// LAST because its required-field set (`schema_version`, `version`,
+    /// `elapsed_ms`) is a strict subset of every other variant's required
+    /// set; placing it earlier would let untagged narrowing match a
+    /// `CheckOutput` payload against `CombinedOutput` first.
+    Combined(CombinedOutput),
 }

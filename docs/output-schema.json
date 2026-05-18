@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Fallow JSON Output Schemas",
-  "description": "Schemas for the JSON output of fallow commands. Every object-shaped envelope is a variant of `FallowOutput` (untagged: the wire shape is unchanged, consumers narrow by unique field presence; e.g. `summary.total_issues` for check, `report` for health, `groups` for dupes, `check`+`dupes`+`health` keys for the bare combined invocation, `boundaries` for list --boundaries). `CodeClimateOutput` is a bare JSON array per the Code Climate / GitLab Code Quality spec and stays a sibling root branch. `CoverageAnalyzeOutput` is still hand-maintained pending the typed migration in issue #384 item 3.",
+  "description": "Schemas for the JSON output of fallow commands. To identify which envelope you have, check for the unique top-level field: `summary.total_issues` (check), `report` (health), `groups` (dupes), `boundaries` (list --boundaries), `command: \"audit\"` (audit), `body` plus `comments` (review-github / review-gitlab), `schema: \"fallow-review-reconcile/v1\"` (ci reconcile-review), `framework_detected` plus `members` (coverage setup), `id` plus `how_to_fix` (explain), `check`+`dupes`+`health` keys together (bare combined invocation). Every object-shaped envelope is a variant of `FallowOutput`; `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch; `CoverageAnalyzeOutput` is still hand-maintained pending the typed migration in issue #384 item 3.",
   "oneOf": [
     {
       "$ref": "#/definitions/FallowOutput"
@@ -7465,52 +7465,52 @@
     "FallowOutput": {
       "anyOf": [
         {
-          "description": "Bare `fallow --format json` (combined dead-code + dupes + health).",
-          "$ref": "#/definitions/CombinedOutput"
-        },
-        {
-          "description": "`fallow check --format json` / `fallow dead-code --format json`.",
-          "$ref": "#/definitions/CheckOutput"
-        },
-        {
-          "description": "`fallow check --format json --group-by <mode>`.",
-          "$ref": "#/definitions/CheckGroupedOutput"
-        },
-        {
-          "description": "`fallow health --format json`.",
-          "$ref": "#/definitions/HealthOutput"
-        },
-        {
-          "description": "`fallow dupes --format json`.",
-          "$ref": "#/definitions/DupesOutput"
-        },
-        {
-          "description": "`fallow audit --format json`.",
+          "description": "`fallow audit --format json`. Required `command: \"audit\"` singleton\nplus `verdict` and `summary`.",
           "$ref": "#/definitions/AuditOutput"
         },
         {
-          "description": "`fallow explain <issue-type> --format json`.",
+          "description": "`fallow explain <issue-type> --format json`. Required `id`, `name`,\n`rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.",
           "$ref": "#/definitions/ExplainOutput"
         },
         {
-          "description": "`fallow coverage setup --json`.",
-          "$ref": "#/definitions/CoverageSetupOutput"
-        },
-        {
-          "description": "`fallow --format review-github` / `--format review-gitlab`.",
+          "description": "`fallow --format review-github` / `--format review-gitlab`. Required\n`body`, `comments`, `meta`; no `schema_version`.",
           "$ref": "#/definitions/ReviewEnvelopeOutput"
         },
         {
-          "description": "`fallow ci reconcile-review --format json`.",
+          "description": "`fallow ci reconcile-review --format json`. Required `schema`\nsingleton plus `provider`, `comments`, and the various\n`*_fingerprints` arrays.",
           "$ref": "#/definitions/ReviewReconcileOutput"
         },
         {
-          "description": "`fallow list --boundaries --format json`.",
+          "description": "`fallow coverage setup --json`. Required `schema_version` singleton\nplus `framework_detected`, `members`, `commands`, `snippets`.",
+          "$ref": "#/definitions/CoverageSetupOutput"
+        },
+        {
+          "description": "`fallow list --boundaries --format json`. Required `boundaries`\nsub-object; no `schema_version`.",
           "$ref": "#/definitions/ListBoundariesOutput"
+        },
+        {
+          "description": "`fallow health --format json`. Required `report: HealthReport`.",
+          "$ref": "#/definitions/HealthOutput"
+        },
+        {
+          "description": "`fallow dupes --format json`. Required `report: DuplicationReport`.",
+          "$ref": "#/definitions/DupesOutput"
+        },
+        {
+          "description": "`fallow check --format json --group-by <mode>`. Required `grouped_by`\nplus a `groups` array; ordered before [`Self::Check`] because the\n`grouped_by` discriminator field is uniquely present here.",
+          "$ref": "#/definitions/CheckGroupedOutput"
+        },
+        {
+          "description": "`fallow check --format json` / `fallow dead-code --format json`.\nRequired `total_issues` plus `summary: CheckSummary`.",
+          "$ref": "#/definitions/CheckOutput"
+        },
+        {
+          "description": "Bare `fallow --format json` (combined dead-code + dupes + health).\nLAST because its required-field set (`schema_version`, `version`,\n`elapsed_ms`) is a strict subset of every other variant's required\nset; placing it earlier would let untagged narrowing match a\n`CheckOutput` payload against `CombinedOutput` first.",
+          "$ref": "#/definitions/CombinedOutput"
         }
       ],
       "title": "fallow --format json (typed root)",
-      "description": "Typed root of every fallow `--format json` envelope shape that\nserializes as a JSON object. The schema derived from this enum drives\nthe document-root `oneOf` in `docs/output-schema.json`, replacing the\npreviously hand-maintained block.\n\n`#[serde(untagged)]` preserves wire compatibility: consumers see exactly\nthe same top-level keys today (`schema_version`, `version`, `results`,\n`summary`, etc.). The schema's `oneOf` lets agents narrow by trying\nvariants in order; field sets differ enough that the first matching\nvariant is the correct one in practice.\n\nTwo envelopes are intentionally NOT in this enum:\n- `CodeClimateOutput` serializes as a bare JSON array\n  (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality\n  spec; `#[serde(tag = ...)]` cannot internally tag a non-object\n  variant and wrapping the array would break the spec. The root schema\n  carries it as a sibling `oneOf` branch alongside `FallowOutput`.\n- `CoverageAnalyzeOutput` (`fallow coverage analyze --format json`)\n  does not yet have a Rust struct; it lives on the\n  `HAND_MAINTAINED_ALLOW_LIST` in `schema_emit.rs` pending typed\n  migration. The root schema preserves it as a sibling `oneOf` branch\n  so the documented union stays complete until the migration lands.\n\nA future major release plans to switch this to\n`#[serde(tag = \"kind\")]` for true O(1) discriminability on AI / agent\nconsumers, paired with a one-cycle `--legacy-envelope` opt-out flag.\nTracked under issue #384."
+      "description": "Typed root of every fallow `--format json` envelope shape that\nserializes as a JSON object. The schema derived from this enum drives\nthe document-root `oneOf` in `docs/output-schema.json`, replacing the\npreviously hand-maintained block.\n\n`#[serde(untagged)]` preserves wire compatibility: consumers see exactly\nthe same top-level keys today (`schema_version`, `version`, `results`,\n`summary`, etc.). The schema's `oneOf` lets agents narrow by trying\nvariants in order; field sets differ enough that the first matching\nvariant is the correct one in practice.\n\nVariant order is **most-specific first**. Schemars 1 preserves\ndeclaration order in the emitted `oneOf`, and validators that enforce\nstrict `oneOf` (and any future migration that adds `Deserialize`) will\ntry branches top-to-bottom. The required-field sets shrink as we move\ndown the list, with [`CombinedOutput`] last because its three required\nfields (`schema_version`, `version`, `elapsed_ms`) are a strict subset\nof every other variant's required set; placing it earlier would let a\n`CheckOutput` payload silently match `CombinedOutput` first.\n\nTwo envelopes are intentionally NOT in this enum:\n- `CodeClimateOutput` serializes as a bare JSON array\n  (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality\n  spec; `#[serde(tag = ...)]` cannot internally tag a non-object\n  variant and wrapping the array would break the spec. The root schema\n  carries it as a sibling `oneOf` branch alongside `FallowOutput`.\n- `CoverageAnalyzeOutput` (`fallow coverage analyze --format json`)\n  does not yet have a Rust struct; it lives on the\n  `HAND_MAINTAINED_ROOT_ENVELOPES` constant in `schema_emit.rs`\n  pending typed migration. The root schema preserves it as a sibling\n  `oneOf` branch so the documented union stays complete until the\n  migration lands.\n\nA future major release plans to switch this to\n`#[serde(tag = \"kind\")]` for true O(1) discriminability on AI / agent\nconsumers, paired with a one-cycle `--legacy-envelope` opt-out flag.\nTracked under issue #384."
     }
   }
 }

@@ -831,16 +831,20 @@ fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
     root.insert(
         "description".to_string(),
         Value::String(
-            "Schemas for the JSON output of fallow commands. Every \
-             object-shaped envelope is a variant of `FallowOutput` (untagged: \
-             the wire shape is unchanged, consumers narrow by unique field \
-             presence; e.g. `summary.total_issues` for check, `report` for \
-             health, `groups` for dupes, `check`+`dupes`+`health` keys for the \
-             bare combined invocation, `boundaries` for list --boundaries). \
-             `CodeClimateOutput` is a bare JSON array per the Code Climate / \
-             GitLab Code Quality spec and stays a sibling root branch. \
-             `CoverageAnalyzeOutput` is still hand-maintained pending the \
-             typed migration in issue #384 item 3."
+            "Schemas for the JSON output of fallow commands. To identify which \
+             envelope you have, check for the unique top-level field: \
+             `summary.total_issues` (check), `report` (health), `groups` \
+             (dupes), `boundaries` (list --boundaries), `command: \"audit\"` \
+             (audit), `body` plus `comments` (review-github / review-gitlab), \
+             `schema: \"fallow-review-reconcile/v1\"` (ci reconcile-review), \
+             `framework_detected` plus `members` (coverage setup), `id` plus \
+             `how_to_fix` (explain), `check`+`dupes`+`health` keys together \
+             (bare combined invocation). Every object-shaped envelope is a \
+             variant of `FallowOutput`; `CodeClimateOutput` is a bare JSON \
+             array (per the Code Climate / GitLab Code Quality spec) and \
+             stays a sibling root branch; `CoverageAnalyzeOutput` is still \
+             hand-maintained pending the typed migration in issue #384 \
+             item 3."
                 .to_string(),
         ),
     );
