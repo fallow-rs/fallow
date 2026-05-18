@@ -67,6 +67,41 @@ export type ElapsedMs = number
  * 
  * The discriminator is `type` (snake_case `type` field), the payload uses the
  * matching kebab-case identifier per variant.
+ * 
+ * ## `auto_fixable` is per-finding, not per action type
+ * 
+ * Every action variant carries an `auto_fixable: bool` field. The value is
+ * evaluated PER FINDING, not per action type: the same action type may
+ * appear with `auto_fixable: true` on one finding and `auto_fixable: false`
+ * on another, depending on per-instance guards in the `fallow fix` applier.
+ * Agents that filter on `auto_fixable: true` must branch on the bool of
+ * each individual finding's action, not on the action `type` alone.
+ * 
+ * Current per-instance flips:
+ * 
+ * - `remove-catalog-entry` (`unused-catalog-entries`): `true` only when the
+ *   finding's `hardcoded_consumers` array is empty. When a workspace
+ *   package still pins a hardcoded version of the same package, `fallow fix`
+ *   skips the entry to avoid breaking `pnpm install`, and the action is
+ *   emitted with `auto_fixable: false`.
+ * - `remove-dependency` vs `move-dependency` (dependency findings): when the
+ *   finding's `used_in_workspaces` array is non-empty, the primary action
+ *   flips to `move-dependency` with `auto_fixable: false` (`fallow fix` will
+ *   not remove a dependency that another workspace imports). On findings
+ *   without cross-workspace consumers the action stays `remove-dependency`
+ *   with `auto_fixable: true`.
+ * - `add-to-config` for `ignoreExports` (`duplicate-exports`): `true` when
+ *   a fallow config file exists on disk; `false` otherwise (the applier
+ *   declines to materialize a config file from scratch).
+ * - `update-catalog-reference` (`unresolved-catalog-references`): always
+ *   `false` today (the catalog-switching applier is not wired in yet); the
+ *   field is non-singleton so that future enablement does not require a
+ *   schema change.
+ * 
+ * All `suppress-line` and `suppress-file` actions are uniformly
+ * `auto_fixable: false`. The field is non-singleton on the wire so that a
+ * future auto-applier (e.g. an LLM-driven suppression writer) can promote
+ * individual variants without a schema bump.
  */
 export type IssueAction = (FixAction | SuppressLineAction | SuppressFileAction | AddToConfigAction)
 /**
@@ -755,7 +790,15 @@ introduced?: AuditIntroduced
 export interface FixAction {
 type: FixActionType
 /**
- * Whether `fallow fix` can apply this fix automatically.
+ * Whether `fallow fix` can apply this fix automatically. Evaluated PER
+ * FINDING, not per action type: the same `type` may carry
+ * `auto_fixable: true` on one finding and `auto_fixable: false` on
+ * another when per-instance guards in the applier discriminate (e.g.
+ * `remove-catalog-entry` flips on `hardcoded_consumers`, the primary
+ * dependency action flips between `remove-dependency` /
+ * `move-dependency` on `used_in_workspaces`). Filter on this bool of
+ * each individual action, not on `type`. See the [`IssueAction`]
+ * enum-level docs for the full list of per-instance flips.
  */
 auto_fixable: boolean
 /**
@@ -828,10 +871,14 @@ comment: string
 export interface AddToConfigAction {
 type: AddToConfigKind
 /**
- * True when `fallow fix` can apply this config action automatically for
- * the current action type. `ignoreExports` duplicate-export actions are
- * auto-fixable when a config file exists; older scalar config-ignore
- * actions remain manual.
+ * True when `fallow fix` can apply this config action automatically.
+ * Evaluated PER FINDING, not per action type: `ignoreExports`
+ * duplicate-export actions are auto-fixable when a fallow config file
+ * exists and manual when one does not. Older scalar config-ignore
+ * actions (e.g. `ignoreDependencies` on dependency findings) are always
+ * manual today. Filter on this bool of each individual action, not on
+ * the `type` alone. See the [`IssueAction`] enum-level docs for the
+ * full list of per-instance flips.
  */
 auto_fixable: boolean
 /**

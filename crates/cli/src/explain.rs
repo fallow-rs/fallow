@@ -29,6 +29,18 @@ pub const COVERAGE_SETUP_DOCS: &str = "https://docs.fallow.tools/cli/coverage#ag
 /// Docs URL for `fallow coverage analyze --format json --explain`.
 pub const COVERAGE_ANALYZE_DOCS: &str = "https://docs.fallow.tools/cli/coverage#analyze";
 
+// ── Shared field definitions ────────────────────────────────────
+
+/// `_meta` description for the per-finding `actions[]` array shared across
+/// `check`, `health`, and `dupes` JSON output.
+const ACTIONS_FIELD_DEFINITION: &str = "Per-finding fix and suppression suggestions. Each entry carries a `type` discriminant (kebab-case) plus a per-action `auto_fixable` bool. Consumers dispatch on `type` to choose the remediation and filter on `auto_fixable` of each individual entry.";
+
+/// `_meta` description for the per-action `auto_fixable` bool. Calls out the
+/// per-finding (not per-action-type) evaluation rule and the currently active
+/// per-instance flips so agents know to branch on the field value of EACH
+/// finding's action, not on the action `type` alone.
+const ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION: &str = "Evaluated PER FINDING, not per action type. The same `type` may carry `auto_fixable: true` on one finding and `auto_fixable: false` on another when per-instance guards in the `fallow fix` applier discriminate. Filter on this bool of each individual action, not on `type` alone. Current per-instance flips: (1) `remove-catalog-entry` is `true` only when the finding's `hardcoded_consumers` array is empty (else fallow fix skips the entry to avoid breaking `pnpm install`); (2) the primary dependency action flips between `remove-dependency` (`auto_fixable: true`) and `move-dependency` (`auto_fixable: false`) based on `used_in_workspaces`; (3) `add-to-config` for `ignoreExports` is `true` only when a fallow config file exists on disk; (4) `update-catalog-reference` is always `false` today (catalog-switching applier not yet wired). All `suppress-line` and `suppress-file` actions are uniformly `false`.";
+
 // ── Check rules ─────────────────────────────────────────────────
 
 /// Rule definition for SARIF `fullDescription` and JSON `_meta`.
@@ -690,7 +702,11 @@ pub fn check_meta() -> Value {
 
     json!({
         "docs": CHECK_DOCS,
-        "rules": rules
+        "rules": rules,
+        "field_definitions": {
+            "actions[]": ACTIONS_FIELD_DEFINITION,
+            "actions[].auto_fixable": ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION
+        }
     })
 }
 
@@ -703,6 +719,10 @@ pub fn check_meta() -> Value {
 pub fn health_meta() -> Value {
     json!({
         "docs": HEALTH_DOCS,
+        "field_definitions": {
+            "actions[]": ACTIONS_FIELD_DEFINITION,
+            "actions[].auto_fixable": ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION
+        },
         "metrics": {
             "cyclomatic": {
                 "name": "Cyclomatic Complexity",
@@ -887,6 +907,10 @@ pub fn health_meta() -> Value {
 pub fn dupes_meta() -> Value {
     json!({
         "docs": DUPES_DOCS,
+        "field_definitions": {
+            "actions[]": ACTIONS_FIELD_DEFINITION,
+            "actions[].auto_fixable": ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION
+        },
         "metrics": {
             "duplication_percentage": {
                 "name": "Duplication Percentage",
@@ -1100,6 +1124,45 @@ mod tests {
         assert!(rules.contains_key("duplicate-export"));
         assert!(rules.contains_key("type-only-dependency"));
         assert!(rules.contains_key("circular-dependency"));
+    }
+
+    #[test]
+    fn check_meta_documents_per_finding_auto_fixable() {
+        let meta = check_meta();
+        let defs = meta["field_definitions"].as_object().unwrap();
+        let note = defs["actions[].auto_fixable"].as_str().unwrap();
+        assert!(
+            note.contains("PER FINDING"),
+            "auto_fixable note must call out per-finding evaluation"
+        );
+        assert!(
+            note.contains("remove-catalog-entry"),
+            "auto_fixable note must cite remove-catalog-entry per-instance flip"
+        );
+        assert!(
+            note.contains("used_in_workspaces"),
+            "auto_fixable note must cite the dependency-action per-instance flip"
+        );
+        assert!(
+            note.contains("ignoreExports"),
+            "auto_fixable note must cite the duplicate-exports config-fixable flip"
+        );
+        assert!(defs.contains_key("actions[]"));
+    }
+
+    #[test]
+    fn health_and_dupes_meta_share_actions_field_definitions() {
+        for meta in [health_meta(), dupes_meta()] {
+            let defs = meta["field_definitions"].as_object().unwrap();
+            assert_eq!(
+                defs["actions[]"].as_str().unwrap(),
+                ACTIONS_FIELD_DEFINITION,
+            );
+            assert_eq!(
+                defs["actions[].auto_fixable"].as_str().unwrap(),
+                ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION,
+            );
+        }
     }
 
     #[test]
