@@ -2338,7 +2338,7 @@
         "severity",
         "actions"
       ],
-      "description": "A single function that exceeds a complexity threshold."
+      "description": "A single function that exceeds a complexity threshold.\n\nSchema-emitted as `HealthFinding` for public-contract continuity (npm\n`fallow/types`, `docs/output-schema.json`, downstream JSON Schema\nconsumers). The Rust internal name `ComplexityViolation` is a\nprerequisite for #384 B2, which introduces a new `HealthFinding`\nwrapper that flattens this struct and adds typed actions / introduced.\nAt B2 the `schemars(rename)` attribute below drops off and the public\nname `HealthFinding` migrates from this inner type to the wrapper."
     },
     "LargeFunctionEntry": {
       "type": "object",
@@ -3487,7 +3487,7 @@
         "auto_fixable",
         "description"
       ],
-      "description": "Suggested action attached to a [`HealthFinding`].\n\nEach complexity finding carries an array of these on the JSON wire\n(`findings[].actions[]`). The action selector in\n`crates/cli/src/report/json.rs::build_health_finding_actions` picks the\nprimary action based on which thresholds triggered the finding and the\nbucketed coverage tier. See [`HealthFindingActionType`] for the full\ndiscriminant list.\n\n`note`, `comment`, and `placement` are populated per-variant: refactor\nactions carry a `note`, suppress-line / suppress-file actions carry\n`comment` plus `placement`, and the coverage-leaning actions\n(`add-tests`, `increase-coverage`) carry only `note`.\n\n[`HealthFinding`]: ../../fallow-cli/src/health_types/scores.rs"
+      "description": "Suggested action attached to a [`ComplexityViolation`].\n\nEach complexity finding carries an array of these on the JSON wire\n(`findings[].actions[]`). The action selector in\n`crates/cli/src/report/json.rs::build_health_finding_actions` picks the\nprimary action based on which thresholds triggered the finding and the\nbucketed coverage tier. See [`HealthFindingActionType`] for the full\ndiscriminant list.\n\n`note`, `comment`, and `placement` are populated per-variant: refactor\nactions carry a `note`, suppress-line / suppress-file actions carry\n`comment` plus `placement`, and the coverage-leaning actions\n(`add-tests`, `increase-coverage`) carry only `note`.\n\n[`ComplexityViolation`]: ../../fallow-cli/src/health_types/scores.rs"
     },
     "HotspotAction": {
       "type": "object",
@@ -3572,7 +3572,7 @@
         "auto_fixable",
         "description"
       ],
-      "description": "Suggested action attached to a [`RefactoringTarget`].\n\nThe list always begins with `apply-refactoring`. A trailing\n`suppress-line` is appended only when the target carries `evidence`\nlinking to specific functions (e.g., `extract_complex_functions`,\n`add_test_coverage`).\n\nUnlike [`HealthFindingAction`], the `suppress-line` variant emitted\nhere does NOT carry a `placement` field: the parent\n[`RefactoringTarget`] points at a file (not a specific function\ndeclaration site), so a per-line placement hint would have no\nreferent. Consumers that want the placement metadata should follow\nthe target's `evidence.complex_functions` back to the matching\n`HealthFinding` and read placement from THAT action instead.\n\n[`RefactoringTarget`]: ../../fallow-cli/src/health_types/targets.rs"
+      "description": "Suggested action attached to a [`RefactoringTarget`].\n\nThe list always begins with `apply-refactoring`. A trailing\n`suppress-line` is appended only when the target carries `evidence`\nlinking to specific functions (e.g., `extract_complex_functions`,\n`add_test_coverage`).\n\nUnlike [`HealthFindingAction`], the `suppress-line` variant emitted\nhere does NOT carry a `placement` field: the parent\n[`RefactoringTarget`] points at a file (not a specific function\ndeclaration site), so a per-line placement hint would have no\nreferent. Consumers that want the placement metadata should follow\nthe target's `evidence.complex_functions` back to the matching\n`ComplexityViolation` and read placement from THAT action instead.\n\n[`RefactoringTarget`]: ../../fallow-cli/src/health_types/targets.rs"
     },
     "CloneFamilyAction": {
       "description": "A suggested action for a clone family.",

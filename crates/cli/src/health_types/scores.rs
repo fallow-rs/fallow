@@ -235,8 +235,17 @@ pub enum CoverageSource {
 }
 
 /// A single function that exceeds a complexity threshold.
+///
+/// Schema-emitted as `HealthFinding` for public-contract continuity (npm
+/// `fallow/types`, `docs/output-schema.json`, downstream JSON Schema
+/// consumers). The Rust internal name `ComplexityViolation` is a
+/// prerequisite for #384 B2, which introduces a new `HealthFinding`
+/// wrapper that flattens this struct and adds typed actions / introduced.
+/// At B2 the `schemars(rename)` attribute below drops off and the public
+/// name `HealthFinding` migrates from this inner type to the wrapper.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(rename = "HealthFinding"))]
 pub struct ComplexityViolation {
     /// Absolute file path.
     pub path: std::path::PathBuf,
@@ -304,7 +313,7 @@ pub struct ComplexityViolation {
     /// contributed to a per-component complexity rollup); absent on every
     /// other finding kind.
     ///
-    /// The owning [`HealthFinding`]'s [`cyclomatic`](Self::cyclomatic) /
+    /// The owning `HealthFinding`'s [`cyclomatic`](Self::cyclomatic) /
     /// [`cognitive`](Self::cognitive) totals are
     /// `class_worst_function + template`, so consumers ranking by complexity
     /// see the component as one unit. The breakdown carries the
@@ -316,8 +325,9 @@ pub struct ComplexityViolation {
 }
 
 /// Per-component breakdown attached to a synthetic `<component>`
-/// [`HealthFinding`]. See [`HealthFinding::component_rollup`] for the
-/// owning-finding contract.
+/// `HealthFinding` (the schema-emitted name for the wire envelope).
+/// See [`ComplexityViolation::component_rollup`] for the owning-finding
+/// contract.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ComponentRollup {

@@ -223,13 +223,20 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "IssueAction",
         "SuppressFileAction",
         "SuppressLineAction",
-        // crates/cli/src/health_types/ - health output subtree
-        "ComplexityViolation",
+        // crates/cli/src/health_types/ - health output subtree.
+        // `HealthFinding` is the schema-emitted name (via
+        // `schemars(rename = "HealthFinding")`) for the Rust
+        // `ComplexityViolation` struct; the rename keeps the public schema
+        // and codegen-derived TS contracts stable across #384 B1 (this PR)
+        // and B2 (the future wrapper that will take over the
+        // `HealthFinding` name natively). See the doc comment on
+        // `ComplexityViolation` in `health_types/scores.rs`.
         "ContributorEntry",
         "CoverageGapSummary",
         "CoverageGaps",
         "FileHealthScore",
         "HealthActionsMeta",
+        "HealthFinding",
         "HealthScore",
         "HealthScorePenalties",
         "HealthSummary",
@@ -390,10 +397,12 @@ fn finding_definition_names() -> &'static [&'static str] {
         // wrappers ship `actions[]` and `introduced` natively and the
         // bare types no longer carry the augmented fields.
         // Health findings (actions[] -> per-finding action wrapper).
-        // `introduced` attaches per `finding_augmentation` below: ComplexityViolation
-        // is audit-aware (carries `introduced`), HotspotEntry and
-        // RefactoringTarget are not.
-        "ComplexityViolation",
+        // `introduced` attaches per `finding_augmentation` below:
+        // `HealthFinding` (the schema-emitted name for the Rust
+        // `ComplexityViolation` inner type, via `schemars(rename)`) is
+        // audit-aware (carries `introduced`), `HotspotEntry` and
+        // `RefactoringTarget` are not.
+        "HealthFinding",
         "HotspotEntry",
         "RefactoringTarget",
         // Coverage-gap items (`coverage_gaps.files[]` and
@@ -424,7 +433,9 @@ fn finding_definition_names() -> &'static [&'static str] {
 /// The default augmentation attaches `actions: array<IssueAction>` and an
 /// `introduced` audit-mode flag. Health findings carry a typed action wrapper
 /// (`HealthFindingAction`, `HotspotAction`, `RefactoringTargetAction`), and
-/// only `ComplexityViolation` carries the audit `introduced` flag today.
+/// only `HealthFinding` (the schema-emitted name for the Rust
+/// `ComplexityViolation` inner type) carries the audit `introduced` flag
+/// today.
 #[derive(Debug, Clone, Copy)]
 struct FindingAugmentation {
     /// Schema `$ref` for the items in the `actions` array.
@@ -441,13 +452,14 @@ const DEFAULT_FINDING_AUGMENTATION: FindingAugmentation = FindingAugmentation {
 };
 
 /// Pick the augmentation for a specific finding. Health findings use typed
-/// per-finding action wrappers and (with the exception of `ComplexityViolation`)
+/// per-finding action wrappers and (with the exception of `HealthFinding`,
+/// the schema-emitted name for the Rust `ComplexityViolation` inner type)
 /// skip the audit `introduced` flag because hotspot ranking and refactoring
 /// targets do not run through `fallow audit`'s introduced-vs-inherited
 /// classifier.
 fn finding_augmentation(name: &str) -> FindingAugmentation {
     match name {
-        "ComplexityViolation" => FindingAugmentation {
+        "HealthFinding" => FindingAugmentation {
             actions_item_ref: "#/definitions/HealthFindingAction",
             include_introduced: true,
         },
