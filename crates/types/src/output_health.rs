@@ -13,7 +13,7 @@
 
 use serde::Serialize;
 
-/// Suggested action attached to a [`HealthFinding`].
+/// Suggested action attached to a [`ComplexityViolation`].
 ///
 /// Each complexity finding carries an array of these on the JSON wire
 /// (`findings[].actions[]`). The action selector in
@@ -27,7 +27,7 @@ use serde::Serialize;
 /// `comment` plus `placement`, and the coverage-leaning actions
 /// (`add-tests`, `increase-coverage`) carry only `note`.
 ///
-/// [`HealthFinding`]: ../../fallow-cli/src/health_types/scores.rs
+/// [`ComplexityViolation`]: ../../fallow-cli/src/health_types/scores.rs
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthFindingAction {
@@ -208,7 +208,7 @@ pub enum HotspotActionHeuristic {
 /// declaration site), so a per-line placement hint would have no
 /// referent. Consumers that want the placement metadata should follow
 /// the target's `evidence.complex_functions` back to the matching
-/// `HealthFinding` and read placement from THAT action instead.
+/// `ComplexityViolation` and read placement from THAT action instead.
 ///
 /// [`RefactoringTarget`]: ../../fallow-cli/src/health_types/targets.rs
 #[derive(Debug, Clone, Serialize)]

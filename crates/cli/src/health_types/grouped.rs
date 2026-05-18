@@ -10,7 +10,7 @@
 use serde::Serialize;
 
 use crate::health_types::{
-    FileHealthScore, HealthActionsMeta, HealthFinding, HealthScore, HotspotEntry,
+    ComplexityViolation, FileHealthScore, HealthActionsMeta, HealthScore, HotspotEntry,
     LargeFunctionEntry, RefactoringTarget, VitalSigns,
 };
 
@@ -56,7 +56,7 @@ pub struct HealthGroup {
     pub health_score: Option<HealthScore>,
     /// Findings restricted to files in this group.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub findings: Vec<HealthFinding>,
+    pub findings: Vec<ComplexityViolation>,
     /// File scores restricted to files in this group.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub file_scores: Vec<FileHealthScore>,

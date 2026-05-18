@@ -803,7 +803,7 @@ fn append_suppression_hints(lines: &mut Vec<String>, report: &crate::health_type
 /// link from the JSON payload), `None` otherwise. Extracted from
 /// `render_findings` to keep that function under the SIG unit-size threshold.
 fn render_component_rollup_breakdown(
-    finding: &crate::health_types::HealthFinding,
+    finding: &crate::health_types::ComplexityViolation,
 ) -> Option<String> {
     let rollup = finding.component_rollup.as_ref()?;
     let template_basename = rollup.template_path.file_name().map_or_else(
@@ -1877,7 +1877,7 @@ mod tests {
     fn health_findings_show_function_details() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::HealthFinding {
+            findings: vec![crate::health_types::ComplexityViolation {
                 path: root.join("src/parser.ts"),
                 name: "parseExpression".to_string(),
                 line: 42,
@@ -1918,7 +1918,7 @@ mod tests {
     fn health_shown_vs_total_when_truncated() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::HealthFinding {
+            findings: vec![crate::health_types::ComplexityViolation {
                 path: root.join("src/a.ts"),
                 name: "fn1".to_string(),
                 line: 1,
@@ -1955,7 +1955,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
             findings: vec![
-                crate::health_types::HealthFinding {
+                crate::health_types::ComplexityViolation {
                     path: root.join("src/parser.ts"),
                     name: "fn1".to_string(),
                     line: 10,
@@ -1973,7 +1973,7 @@ mod tests {
                     inherited_from: None,
                     component_rollup: None,
                 },
-                crate::health_types::HealthFinding {
+                crate::health_types::ComplexityViolation {
                     path: root.join("src/parser.ts"),
                     name: "fn2".to_string(),
                     line: 60,
@@ -3351,7 +3351,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.summary.functions_above_threshold = 1;
-        report.findings = vec![crate::health_types::HealthFinding {
+        report.findings = vec![crate::health_types::ComplexityViolation {
             path: root.join("src/complex.ts"),
             name: "bigFn".to_string(),
             line: 10,
@@ -3450,7 +3450,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.summary.functions_above_threshold = 1;
-        report.findings = vec![crate::health_types::HealthFinding {
+        report.findings = vec![crate::health_types::ComplexityViolation {
             path: root.join("src/a.ts"),
             name: "fn1".to_string(),
             line: 1,
@@ -3479,7 +3479,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.summary.functions_above_threshold = 1;
-        report.findings = vec![crate::health_types::HealthFinding {
+        report.findings = vec![crate::health_types::ComplexityViolation {
             path: root.join("src/a.ts"),
             name: "fn1".to_string(),
             line: 1,
@@ -3509,7 +3509,7 @@ mod tests {
         let mut report = empty_report();
         report.summary.functions_above_threshold = 2;
         report.findings = vec![
-            crate::health_types::HealthFinding {
+            crate::health_types::ComplexityViolation {
                 path: root.join("src/a.ts"),
                 name: "fn1".to_string(),
                 line: 1,
@@ -3527,7 +3527,7 @@ mod tests {
                 inherited_from: None,
                 component_rollup: None,
             },
-            crate::health_types::HealthFinding {
+            crate::health_types::ComplexityViolation {
                 path: root.join("src/b.ts"),
                 name: "fn2".to_string(),
                 line: 5,
@@ -3558,7 +3558,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.summary.functions_above_threshold = 1;
-        report.findings = vec![crate::health_types::HealthFinding {
+        report.findings = vec![crate::health_types::ComplexityViolation {
             path: root.join("src/a.ts"),
             name: "fn1".to_string(),
             line: 1,

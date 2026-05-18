@@ -1903,7 +1903,7 @@ mod tests {
     fn health_sarif_cyclomatic_only() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::HealthFinding {
+            findings: vec![crate::health_types::ComplexityViolation {
                 path: root.join("src/utils.ts"),
                 name: "parseExpression".to_string(),
                 line: 42,
@@ -1952,7 +1952,7 @@ mod tests {
     fn health_sarif_cognitive_only() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::HealthFinding {
+            findings: vec![crate::health_types::ComplexityViolation {
                 path: root.join("src/api.ts"),
                 name: "handleRequest".to_string(),
                 line: 10,
@@ -1995,7 +1995,7 @@ mod tests {
     fn health_sarif_both_thresholds() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::HealthFinding {
+            findings: vec![crate::health_types::ComplexityViolation {
                 path: root.join("src/complex.ts"),
                 name: "doEverything".to_string(),
                 line: 1,
@@ -2035,7 +2035,7 @@ mod tests {
         // above the CRAP threshold. Rule must be `fallow/high-crap-score`.
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::HealthFinding {
+            findings: vec![crate::health_types::ComplexityViolation {
                 path: root.join("src/untested.ts"),
                 name: "risky".to_string(),
                 line: 8,
@@ -2075,7 +2075,7 @@ mod tests {
         // the cyclomatic breach; only one SARIF result is emitted.
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::HealthFinding {
+            findings: vec![crate::health_types::ComplexityViolation {
                 path: root.join("src/hot.ts"),
                 name: "branchy".to_string(),
                 line: 1,

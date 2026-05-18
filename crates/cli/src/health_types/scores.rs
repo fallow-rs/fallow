@@ -237,7 +237,7 @@ pub enum CoverageSource {
 /// A single function that exceeds a complexity threshold.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct HealthFinding {
+pub struct ComplexityViolation {
     /// Absolute file path.
     pub path: std::path::PathBuf,
     /// Function name, `"<anonymous>"` for unnamed functions/arrows, or

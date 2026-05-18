@@ -1141,7 +1141,7 @@ fn apply_duplication_metrics(
 }
 
 /// Sort findings by the specified criteria.
-fn sort_findings(findings: &mut [HealthFinding], sort: &SortBy) {
+fn sort_findings(findings: &mut [ComplexityViolation], sort: &SortBy) {
     match sort {
         SortBy::Severity => findings.sort_by_key(|f| {
             std::cmp::Reverse((
@@ -1497,7 +1497,7 @@ fn compute_health_trend(
 
 struct HealthReportAssembly {
     report_coverage_gaps: bool,
-    findings: Vec<HealthFinding>,
+    findings: Vec<ComplexityViolation>,
     files_analyzed: usize,
     total_functions: usize,
     total_above_threshold: usize,
@@ -1767,10 +1767,10 @@ fn collect_findings(
     ws_roots: Option<&[std::path::PathBuf]>,
     max_cyclomatic: u16,
     max_cognitive: u16,
-) -> (Vec<HealthFinding>, usize, usize) {
+) -> (Vec<ComplexityViolation>, usize, usize) {
     let mut files_analyzed = 0usize;
     let mut total_functions = 0usize;
-    let mut findings: Vec<HealthFinding> = Vec::new();
+    let mut findings: Vec<ComplexityViolation> = Vec::new();
 
     for module in modules {
         let Some(&path) = file_paths.get(&module.file_id) else {
@@ -1807,7 +1807,7 @@ fn collect_findings(
             let exceeds_cyclomatic = fc.cyclomatic > max_cyclomatic;
             let exceeds_cognitive = fc.cognitive > max_cognitive;
             if exceeds_cyclomatic || exceeds_cognitive {
-                findings.push(HealthFinding {
+                findings.push(ComplexityViolation {
                     path: path.clone(),
                     name: fc.name.clone(),
                     line: fc.line,
@@ -1856,7 +1856,7 @@ fn collect_findings(
     reason = "CRAP merge needs the same filter pipeline as collect_findings"
 )]
 fn merge_crap_findings(
-    findings: &mut Vec<HealthFinding>,
+    findings: &mut Vec<ComplexityViolation>,
     modules: &[fallow_core::extract::ModuleInfo],
     file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
     config_root: &std::path::Path,
@@ -1907,7 +1907,7 @@ fn merge_crap_findings(
         })
         .collect();
 
-    let mut new_findings: Vec<HealthFinding> = Vec::new();
+    let mut new_findings: Vec<ComplexityViolation> = Vec::new();
     for (path, per_fn) in per_function_crap {
         // Apply the same filters as collect_findings so CRAP findings respect
         // `ignore`, `--changed-since`, and `--workspace`.
@@ -1978,7 +1978,7 @@ fn merge_crap_findings(
                 // thresholds but still exceeds CRAP on its own.
                 let exceeds_cyclomatic = fc.cyclomatic > max_cyclomatic;
                 let exceeds_cognitive = fc.cognitive > max_cognitive;
-                new_findings.push(HealthFinding {
+                new_findings.push(ComplexityViolation {
                     path: path.clone(),
                     name: fc.name.clone(),
                     line: fc.line,
@@ -2022,7 +2022,7 @@ fn merge_crap_findings(
 ///
 /// For each Angular component that has both at least one class-function
 /// finding above threshold AND a synthetic `<template>` finding, emit a new
-/// `<component>` `HealthFinding` whose `cyclomatic` / `cognitive` totals are
+/// `<component>` `ComplexityViolation` whose `cyclomatic` / `cognitive` totals are
 /// `max(class) + template`. The rollup is anchored at the worst class
 /// function's `(path, line, col)` so an existing
 /// `// fallow-ignore-next-line complexity` placed above that function (or
@@ -2054,12 +2054,12 @@ fn merge_crap_findings(
 ///
 /// `[`ComponentRollup`]`: crate::health_types::ComponentRollup
 fn append_component_rollup_findings(
-    findings: &mut Vec<crate::health_types::HealthFinding>,
+    findings: &mut Vec<crate::health_types::ComplexityViolation>,
     template_owner_lookup: Option<&rustc_hash::FxHashMap<std::path::PathBuf, std::path::PathBuf>>,
     max_cyclomatic: u16,
     max_cognitive: u16,
 ) {
-    use crate::health_types::{ComponentRollup, ExceededThreshold, HealthFinding};
+    use crate::health_types::{ComplexityViolation, ComponentRollup, ExceededThreshold};
 
     // Group: owner .ts path -> (class function finding indices, template finding indices).
     let mut by_owner: rustc_hash::FxHashMap<std::path::PathBuf, (Vec<usize>, Vec<usize>)> =
@@ -2106,7 +2106,7 @@ fn append_component_rollup_findings(
         }
     }
 
-    let mut to_push: Vec<HealthFinding> = Vec::new();
+    let mut to_push: Vec<ComplexityViolation> = Vec::new();
     for (owner, (class_idxs, template_idxs)) in by_owner {
         if class_idxs.is_empty() || template_idxs.is_empty() {
             continue;
@@ -2159,7 +2159,7 @@ fn append_component_rollup_findings(
             DEFAULT_CYCLOMATIC_HIGH,
             DEFAULT_CYCLOMATIC_CRITICAL,
         );
-        to_push.push(HealthFinding {
+        to_push.push(ComplexityViolation {
             path: owner,
             name: "<component>".to_string(),
             line: worst.line,
@@ -2220,7 +2220,7 @@ fn inherited_from_for(
 /// Save health baseline to disk.
 fn save_health_baseline(
     save_path: &std::path::Path,
-    findings: &[HealthFinding],
+    findings: &[ComplexityViolation],
     runtime_coverage_findings: &[crate::health_types::RuntimeCoverageFinding],
     targets: &[RefactoringTarget],
     config_root: &std::path::Path,
@@ -2268,7 +2268,7 @@ fn save_health_baseline(
 /// Load and apply a health baseline, filtering findings to show only new ones.
 fn load_health_baseline(
     baseline_path: &std::path::Path,
-    findings: &mut Vec<HealthFinding>,
+    findings: &mut Vec<ComplexityViolation>,
     root: &std::path::Path,
     quiet: bool,
     output: OutputFormat,
@@ -2540,8 +2540,8 @@ mod tests {
         assert!(set.is_match(Path::new("foo.js")));
     }
 
-    fn make_finding(name: &str, exceeded: ExceededThreshold) -> HealthFinding {
-        HealthFinding {
+    fn make_finding(name: &str, exceeded: ExceededThreshold) -> ComplexityViolation {
+        ComplexityViolation {
             path: PathBuf::from("/project/src/a.ts"),
             name: name.to_string(),
             line: 1,
@@ -2919,7 +2919,7 @@ mod tests {
         // Neither function exceeds the cyclomatic (20) or cognitive (15)
         // thresholds, so collect_findings would emit zero findings. The CRAP
         // pass is what surfaces the inner arrow.
-        let mut findings: Vec<HealthFinding> = Vec::new();
+        let mut findings: Vec<ComplexityViolation> = Vec::new();
 
         let mut per_function_crap: FxHashMap<PathBuf, Vec<scoring::PerFunctionCrap>> =
             FxHashMap::default();
@@ -3024,7 +3024,7 @@ mod tests {
         let mut file_paths: FxHashMap<FileId, &PathBuf> = FxHashMap::default();
         file_paths.insert(FileId(0), &path);
 
-        let mut findings: Vec<HealthFinding> = Vec::new();
+        let mut findings: Vec<ComplexityViolation> = Vec::new();
         let mut per_function_crap: FxHashMap<PathBuf, Vec<scoring::PerFunctionCrap>> =
             FxHashMap::default();
         per_function_crap.insert(
@@ -3887,8 +3887,8 @@ mod tests {
         line: u32,
         cyclomatic: u16,
         cognitive: u16,
-    ) -> HealthFinding {
-        HealthFinding {
+    ) -> ComplexityViolation {
+        ComplexityViolation {
             path: PathBuf::from(path),
             name: name.to_string(),
             line,
@@ -3913,8 +3913,8 @@ mod tests {
         line: u32,
         cyclomatic: u16,
         cognitive: u16,
-    ) -> HealthFinding {
-        HealthFinding {
+    ) -> ComplexityViolation {
+        ComplexityViolation {
             path: PathBuf::from(path),
             name: "<template>".to_string(),
             line,

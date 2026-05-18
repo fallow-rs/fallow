@@ -26,6 +26,7 @@ export type {
   CloneGroupAction,
   CloneInstance,
   CombinedOutput,
+  ComplexityViolation,
   DuplicateExportFinding,
   DuplicateLocation,
   DupesOutput,
@@ -66,6 +67,7 @@ export type {
 import type {
   BoundaryViolationFinding,
   CircularDependencyFinding,
+  ComplexityViolation,
   DuplicateExportFinding,
   EmptyCatalogGroupFinding,
   MisconfiguredDependencyOverrideFinding,
@@ -89,6 +91,12 @@ export type BoundaryViolation = BoundaryViolationFinding;
 export type CircularDependency = CircularDependencyFinding;
 export type DuplicateExport = DuplicateExportFinding;
 export type EmptyCatalogGroup = EmptyCatalogGroupFinding;
+// The Rust struct was renamed from `HealthFinding` to `ComplexityViolation`
+// as a prerequisite for #384 B2 (a future `HealthFinding` wrapper that will
+// flatten `ComplexityViolation` and add `actions` + `introduced`). The
+// JSON wire-level field name `findings[]` is controlled by serde and stays
+// byte-identical across the rename. Keep this alias until the wrapper lands.
+export type HealthFinding = ComplexityViolation;
 export type MisconfiguredDependencyOverride =
   MisconfiguredDependencyOverrideFinding;
 export type PrivateTypeLeak = PrivateTypeLeakFinding;

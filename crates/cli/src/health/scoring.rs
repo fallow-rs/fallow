@@ -270,7 +270,7 @@ pub(super) struct PerFunctionCrap {
     /// matches, `Estimated` for graph-based fallbacks against the finding's
     /// own file, `EstimatedComponentInherited` for the template-inherit path
     /// that reaches the owning Angular `.component.ts` through the inverse
-    /// `templateUrl` edge. Threaded into `HealthFinding.coverage_source` by
+    /// `templateUrl` edge. Threaded into `ComplexityViolation.coverage_source` by
     /// `merge_crap_findings`.
     pub coverage_source: crate::health_types::CoverageSource,
 }

@@ -75,7 +75,7 @@ pub struct HealthActionsMeta {
 pub struct HealthReport {
     /// Functions and synthetic template entries exceeding complexity
     /// thresholds, sorted by the --sort criteria.
-    pub findings: Vec<HealthFinding>,
+    pub findings: Vec<ComplexityViolation>,
     /// Summary statistics.
     pub summary: HealthSummary,
     /// Project-wide vital signs (always computed from available data).

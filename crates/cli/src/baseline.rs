@@ -780,7 +780,7 @@ const HEALTH_FINDING_DIMENSIONS: [HealthFindingDimension; 2] = [
 impl HealthBaselineData {
     /// Build a health baseline from findings and targets.
     pub fn from_findings(
-        findings: &[crate::health_types::HealthFinding],
+        findings: &[crate::health_types::ComplexityViolation],
         runtime_coverage_findings: &[crate::health_types::RuntimeCoverageFinding],
         targets: &[crate::health_types::RefactoringTarget],
         root: &Path,
@@ -813,7 +813,7 @@ impl HealthBaselineData {
 
     pub fn overlap_entry_count(
         &self,
-        findings: &[crate::health_types::HealthFinding],
+        findings: &[crate::health_types::ComplexityViolation],
         root: &Path,
     ) -> usize {
         if !self.finding_counts.is_empty() {
@@ -841,7 +841,7 @@ fn target_baseline_key(target: &crate::health_types::RefactoringTarget, root: &P
 }
 
 /// Generate a stable key for a health finding.
-fn health_finding_key(finding: &crate::health_types::HealthFinding, root: &Path) -> String {
+fn health_finding_key(finding: &crate::health_types::ComplexityViolation, root: &Path) -> String {
     format!(
         "{}:{}:{}",
         relative_path(&finding.path, root),
@@ -851,7 +851,7 @@ fn health_finding_key(finding: &crate::health_types::HealthFinding, root: &Path)
 }
 
 fn health_finding_counts(
-    findings: &[crate::health_types::HealthFinding],
+    findings: &[crate::health_types::ComplexityViolation],
     root: &Path,
 ) -> HealthFindingCountMap {
     let mut counts = BTreeMap::new();
@@ -869,7 +869,7 @@ fn health_finding_counts(
 }
 
 fn health_finding_categories(
-    finding: &crate::health_types::HealthFinding,
+    finding: &crate::health_types::ComplexityViolation,
 ) -> [Option<HealthFindingCategory>; 2] {
     let complexity_category = HealthFindingCategory {
         dimension: HealthFindingDimension::Complexity,
@@ -1019,10 +1019,10 @@ fn runtime_coverage_finding_key(
 
 /// Filter health findings to only include those not present in the baseline.
 pub fn filter_new_health_findings(
-    mut findings: Vec<crate::health_types::HealthFinding>,
+    mut findings: Vec<crate::health_types::ComplexityViolation>,
     baseline: &HealthBaselineData,
     root: &Path,
-) -> Vec<crate::health_types::HealthFinding> {
+) -> Vec<crate::health_types::ComplexityViolation> {
     if !baseline.finding_counts.is_empty() {
         let current_counts = health_finding_counts(&findings, root);
         let overflow_categories =
@@ -1621,7 +1621,7 @@ mod tests {
         root: &Path,
         name: &str,
         line: u32,
-    ) -> crate::health_types::HealthFinding {
+    ) -> crate::health_types::ComplexityViolation {
         make_health_finding_with(
             root,
             name,
@@ -1637,8 +1637,8 @@ mod tests {
         line: u32,
         exceeded: crate::health_types::ExceededThreshold,
         severity: crate::health_types::FindingSeverity,
-    ) -> crate::health_types::HealthFinding {
-        crate::health_types::HealthFinding {
+    ) -> crate::health_types::ComplexityViolation {
+        crate::health_types::ComplexityViolation {
             path: root.join("src/utils.ts"),
             name: name.to_string(),
             line,

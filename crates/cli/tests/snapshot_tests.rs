@@ -2192,7 +2192,7 @@ fn markdown_workspace_dep_snapshot() {
 /// Build a minimal health report with one finding for snapshot tests.
 fn sample_health_report(root: &Path) -> HealthReport {
     HealthReport {
-        findings: vec![HealthFinding {
+        findings: vec![ComplexityViolation {
             path: root.join("src/complex.ts"),
             name: "processData".to_string(),
             line: 42,

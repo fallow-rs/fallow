@@ -1767,10 +1767,12 @@ mod tests {
 
     #[test]
     fn health_codeclimate_crap_only_uses_crap_check_name() {
-        use crate::health_types::{FindingSeverity, HealthFinding, HealthReport, HealthSummary};
+        use crate::health_types::{
+            ComplexityViolation, FindingSeverity, HealthReport, HealthSummary,
+        };
         let root = PathBuf::from("/project");
         let report = HealthReport {
-            findings: vec![HealthFinding {
+            findings: vec![ComplexityViolation {
                 path: root.join("src/untested.ts"),
                 name: "risky".to_string(),
                 line: 7,

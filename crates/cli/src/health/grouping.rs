@@ -13,8 +13,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::scoring::FileScoreOutput;
 use super::{SubsetFilter, apply_duplication_metrics, compute_vital_signs_and_counts};
 use crate::health_types::{
-    FileHealthScore, HealthFinding, HealthGroup, HealthGrouping, HotspotEntry, LargeFunctionEntry,
-    RefactoringTarget,
+    ComplexityViolation, FileHealthScore, HealthGroup, HealthGrouping, HotspotEntry,
+    LargeFunctionEntry, RefactoringTarget,
 };
 use crate::report::OwnershipResolver;
 use crate::vital_signs;
@@ -46,7 +46,7 @@ pub(super) fn build_health_grouping(
     candidate_paths: &FxHashSet<PathBuf>,
     score_output: Option<&FileScoreOutput>,
     file_scores: &[FileHealthScore],
-    findings: &[HealthFinding],
+    findings: &[ComplexityViolation],
     hotspots: &[HotspotEntry],
     large_functions: &[LargeFunctionEntry],
     targets: &[RefactoringTarget],
@@ -138,7 +138,7 @@ fn build_group(
     file_paths: &FxHashMap<fallow_core::discover::FileId, &PathBuf>,
     score_output: Option<&FileScoreOutput>,
     file_scores: &[FileHealthScore],
-    findings: &[HealthFinding],
+    findings: &[ComplexityViolation],
     hotspots: &[HotspotEntry],
     large_functions: &[LargeFunctionEntry],
     targets: &[RefactoringTarget],
@@ -151,7 +151,7 @@ fn build_group(
     let GroupBucket { key, owners, paths } = bucket;
     let subset = SubsetFilter::Paths(&paths);
 
-    let group_findings: Vec<HealthFinding> = findings
+    let group_findings: Vec<ComplexityViolation> = findings
         .iter()
         .filter(|f| paths.contains(&f.path))
         .cloned()

@@ -1992,7 +1992,7 @@ fn health_keys(report: &crate::health_types::HealthReport, root: &Path) -> FxHas
         .collect()
 }
 
-fn health_finding_key(finding: &crate::health_types::HealthFinding, root: &Path) -> String {
+fn health_finding_key(finding: &crate::health_types::ComplexityViolation, root: &Path) -> String {
     format!(
         "complexity:{}:{}:{:?}",
         relative_key_path(&finding.path, root),

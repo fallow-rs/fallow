@@ -36,7 +36,7 @@ pub struct ModuleInfo {
     /// to gate the discriminator `coverage_source == "estimated_component_inherited"`:
     /// a `.ts` file that imports an `.html` via plain `import './x.html'` is
     /// NOT a component owner and must not trigger the inherit path. Without
-    /// this gate, the contract documented on `HealthFinding.inherited_from`
+    /// this gate, the contract documented on `ComplexityViolation.inherited_from`
     /// (Angular component `.ts` reached via the inverse `templateUrl` edge)
     /// is silently violated for any non-Angular file importing an `.html`.
     pub has_angular_component_template_url: bool,

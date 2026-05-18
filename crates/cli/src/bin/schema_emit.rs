@@ -34,9 +34,9 @@ use schemars::generate::SchemaSettings;
 use serde_json::{Map, Value};
 
 use fallow_cli::health_types::{
-    ContributorEntry, ContributorIdentifierFormat, CoverageGapSummary, CoverageGaps, CoverageModel,
-    CoverageTier, ExceededThreshold, FileHealthScore, FindingSeverity, HealthActionsMeta,
-    HealthFinding, HealthScore, HealthScorePenalties, HealthSummary, HealthTrend, HotspotEntry,
+    ComplexityViolation, ContributorEntry, ContributorIdentifierFormat, CoverageGapSummary,
+    CoverageGaps, CoverageModel, CoverageTier, ExceededThreshold, FileHealthScore, FindingSeverity,
+    HealthActionsMeta, HealthScore, HealthScorePenalties, HealthSummary, HealthTrend, HotspotEntry,
     HotspotSummary, LargeFunctionEntry, OwnershipMetrics, RecommendationCategory,
     RefactoringTarget, RiskProfile, RuntimeCoverageReport, TargetThresholds, TrendCount,
     UntestedExport, UntestedExportFinding, UntestedFile, UntestedFileFinding, VitalSigns,
@@ -224,12 +224,12 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "SuppressFileAction",
         "SuppressLineAction",
         // crates/cli/src/health_types/ - health output subtree
+        "ComplexityViolation",
         "ContributorEntry",
         "CoverageGapSummary",
         "CoverageGaps",
         "FileHealthScore",
         "HealthActionsMeta",
-        "HealthFinding",
         "HealthScore",
         "HealthScorePenalties",
         "HealthSummary",
@@ -390,10 +390,10 @@ fn finding_definition_names() -> &'static [&'static str] {
         // wrappers ship `actions[]` and `introduced` natively and the
         // bare types no longer carry the augmented fields.
         // Health findings (actions[] -> per-finding action wrapper).
-        // `introduced` attaches per `finding_augmentation` below: HealthFinding
+        // `introduced` attaches per `finding_augmentation` below: ComplexityViolation
         // is audit-aware (carries `introduced`), HotspotEntry and
         // RefactoringTarget are not.
-        "HealthFinding",
+        "ComplexityViolation",
         "HotspotEntry",
         "RefactoringTarget",
         // Coverage-gap items (`coverage_gaps.files[]` and
@@ -424,7 +424,7 @@ fn finding_definition_names() -> &'static [&'static str] {
 /// The default augmentation attaches `actions: array<IssueAction>` and an
 /// `introduced` audit-mode flag. Health findings carry a typed action wrapper
 /// (`HealthFindingAction`, `HotspotAction`, `RefactoringTargetAction`), and
-/// only `HealthFinding` carries the audit `introduced` flag today.
+/// only `ComplexityViolation` carries the audit `introduced` flag today.
 #[derive(Debug, Clone, Copy)]
 struct FindingAugmentation {
     /// Schema `$ref` for the items in the `actions` array.
@@ -441,13 +441,13 @@ const DEFAULT_FINDING_AUGMENTATION: FindingAugmentation = FindingAugmentation {
 };
 
 /// Pick the augmentation for a specific finding. Health findings use typed
-/// per-finding action wrappers and (with the exception of `HealthFinding`)
+/// per-finding action wrappers and (with the exception of `ComplexityViolation`)
 /// skip the audit `introduced` flag because hotspot ranking and refactoring
 /// targets do not run through `fallow audit`'s introduced-vs-inherited
 /// classifier.
 fn finding_augmentation(name: &str) -> FindingAugmentation {
     match name {
-        "HealthFinding" => FindingAugmentation {
+        "ComplexityViolation" => FindingAugmentation {
             actions_item_ref: "#/definitions/HealthFindingAction",
             include_introduced: true,
         },
@@ -579,7 +579,7 @@ fn derived_definitions() -> Map<String, Value> {
 
     // Health output subtree (crates/cli/src/health_types/).
     let _ = generator.subschema_for::<HealthSummary>();
-    let _ = generator.subschema_for::<HealthFinding>();
+    let _ = generator.subschema_for::<ComplexityViolation>();
     let _ = generator.subschema_for::<ExceededThreshold>();
     let _ = generator.subschema_for::<FindingSeverity>();
     let _ = generator.subschema_for::<CoverageTier>();

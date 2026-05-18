@@ -1579,7 +1579,7 @@ mod tests {
     fn health_markdown_table_format() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::HealthFinding {
+            findings: vec![crate::health_types::ComplexityViolation {
                 path: root.join("src/utils.ts"),
                 name: "parseExpression".to_string(),
                 line: 42,
@@ -1621,7 +1621,7 @@ mod tests {
     fn health_markdown_crap_column_shows_score_and_marker() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::HealthFinding {
+            findings: vec![crate::health_types::ComplexityViolation {
                 path: root.join("src/risky.ts"),
                 name: "branchy".to_string(),
                 line: 1,
@@ -1666,7 +1666,7 @@ mod tests {
     fn health_markdown_no_marker_when_below_threshold() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::HealthFinding {
+            findings: vec![crate::health_types::ComplexityViolation {
                 path: root.join("src/utils.ts"),
                 name: "helper".to_string(),
                 line: 10,
@@ -2023,7 +2023,7 @@ mod tests {
     fn health_markdown_file_scores_table() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::HealthFinding {
+            findings: vec![crate::health_types::ComplexityViolation {
                 path: root.join("src/dummy.ts"),
                 name: "fn".to_string(),
                 line: 1,
@@ -2078,7 +2078,7 @@ mod tests {
     fn health_markdown_hotspots_table() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::HealthFinding {
+            findings: vec![crate::health_types::ComplexityViolation {
                 path: root.join("src/dummy.ts"),
                 name: "fn".to_string(),
                 line: 1,
@@ -2136,7 +2136,7 @@ mod tests {
     fn health_markdown_metric_legend_with_scores() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::HealthFinding {
+            findings: vec![crate::health_types::ComplexityViolation {
                 path: root.join("src/x.ts"),
                 name: "f".to_string(),
                 line: 1,
@@ -2191,7 +2191,7 @@ mod tests {
     fn health_markdown_truncated_findings_shown_count() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::HealthFinding {
+            findings: vec![crate::health_types::ComplexityViolation {
                 path: root.join("src/x.ts"),
                 name: "f".to_string(),
                 line: 1,
@@ -2282,7 +2282,7 @@ mod tests {
     fn health_markdown_hotspots_no_excluded_message() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![crate::health_types::HealthFinding {
+            findings: vec![crate::health_types::ComplexityViolation {
                 path: root.join("src/x.ts"),
                 name: "f".to_string(),
                 line: 1,
