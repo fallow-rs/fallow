@@ -37,8 +37,8 @@ importers:
         specifier: 11.7.5
         version: 11.7.5
       ovsx:
-        specifier: 0.10.11
-        version: 0.10.11
+        specifier: 0.10.12
+        version: 0.10.12
       rolldown:
         specifier: 1.0.0-rc.18
         version: 1.0.0-rc.18
@@ -1559,8 +1559,8 @@ packages:
     resolution: {integrity: sha512-weP+BZ8MVNnlCm8c0Qdc1WSWq4Qn7I+9CJGm7Qali6g44e/PUzbjNqJX5NJ9ljlNMosfJvg1fKEGILklK9cwnw==}
     engines: {node: '>=18'}
 
-  ovsx@0.10.11:
-    resolution: {integrity: sha512-VYYlAWO7hvcrP0EIM/Q5lCdXTumXIiGyDnSXm8ztNbGN9zCSNW6iGiJMMMUNhPRWqJjNKpo/Vc2+B4uFRy8ACg==}
+  ovsx@0.10.12:
+    resolution: {integrity: sha512-WwMj1iQDvCk02029oxPnkFXsPrHZ+WzmoNW5pJ8JGepHtL30i2JE4s3C3wqzQqj6a35vx2hp0gV3TdfefGmvMg==}
     engines: {node: '>= 20'}
     hasBin: true
 
@@ -1760,6 +1760,11 @@ packages:
 
   semver@7.7.4:
     resolution: {integrity: sha512-vFKC2IEtQnVhpT78h1Yp8wzwrf8CM+MzKMHGJZfBtzhZNycRFnXsHk6E5TxIkkMsgNS7mdX3AGB7x2QM2di4lA==}
+    engines: {node: '>=10'}
+    hasBin: true
+
+  semver@7.8.0:
+    resolution: {integrity: sha512-AcM7dV/5ul4EekoQ29Agm5vri8JNqRyj39o0qpX6vDF2GZrtutZl5RwgD1XnZjiTAfncsJhMI48QQH3sN87YNA==}
     engines: {node: '>=10'}
     hasBin: true
 
@@ -3417,7 +3422,7 @@ snapshots:
       lodash.isstring: 4.0.1
       lodash.once: 4.1.1
       ms: 2.1.3
-      semver: 7.7.4
+      semver: 7.8.0
 
   jszip@3.10.1:
     dependencies:
@@ -3637,7 +3642,7 @@ snapshots:
 
   node-abi@3.89.0:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.0
     optional: true
 
   node-addon-api@4.3.0:
@@ -3651,7 +3656,7 @@ snapshots:
   normalize-package-data@6.0.2:
     dependencies:
       hosted-git-info: 7.0.2
-      semver: 7.7.4
+      semver: 7.8.0
       validate-npm-package-license: 3.0.4
 
   nth-check@2.1.1:
@@ -3692,14 +3697,14 @@ snapshots:
       string-width: 7.2.0
       strip-ansi: 7.2.0
 
-  ovsx@0.10.11:
+  ovsx@0.10.12:
     dependencies:
       '@vscode/vsce': 3.9.1
       commander: 6.2.1
       follow-redirects: 1.16.0
       is-ci: 2.0.0
       leven: 3.1.0
-      semver: 7.7.4
+      semver: 7.8.0
       tmp: 0.2.5
       yauzl-promise: 4.0.0
     transitivePeerDependencies:
@@ -3947,6 +3952,8 @@ snapshots:
   semver@5.7.2: {}
 
   semver@7.7.4: {}
+
+  semver@7.8.0: {}
 
   serialize-javascript@6.0.2:
     dependencies:
