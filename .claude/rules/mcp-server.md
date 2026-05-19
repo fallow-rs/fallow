@@ -34,7 +34,7 @@ MCP server exposing fallow analysis as tools for AI agents. Stdio transport, wra
 - `threads` (usize) — parser thread count
 
 ## Environment-driven scoping
-- `FALLOW_DIFF_FILE` (path to unified diff) and `FALLOW_CHANGED_SINCE` (git ref) inherited from the agent's process env scope hot-path matching for the runtime-coverage tools and the audit tool. The `tools/mod.rs::run_fallow` spawn does not strip the env. Unset both for project-wide results.
+- `FALLOW_DIFF_FILE` (path to unified diff) inherited from the agent's process env scopes EVERY finding (dead-code, complexity, duplication, boundary, runtime-coverage hot paths) by line: point findings drop when their source line is not in an added hunk; range findings (complexity hotspots, clone families) filter via overlap. Project-level findings (unused deps, catalog entries, dependency overrides, unused-files at the file level) bypass the line filter. `FALLOW_CHANGED_SINCE` (git ref) scopes file discovery; when both env vars are set, diff-file wins for line-level filtering and changed-since still picks the file set. The `tools/mod.rs::run_fallow` spawn does not strip the env. Unset both for project-wide results.
 
 ## Flags on analysis tools (analyze, check_changed, find_dupes, check_health)
 - `baseline` (string) — compare against saved baseline
