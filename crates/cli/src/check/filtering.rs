@@ -307,6 +307,139 @@ pub use fallow_core::changed_files::{
     try_get_changed_files,
 };
 
+// ── Diff-line filtering (issue #424) ─────────────────────────────
+
+/// Drop findings whose source line is not inside an added hunk of the
+/// supplied unified diff. Range-shaped findings (clone instances live in
+/// dupes, not here; complexity hotspots live in health, not here) are
+/// handled in their own subsystems. This filter only governs the per-file
+/// findings that live on `AnalysisResults`.
+///
+/// **Project-level findings bypass the filter.** A PR that deletes the
+/// last consumer of `lodash` semantically caused the `unused-dependency`
+/// finding even though the diff never touches `package.json`; the same
+/// reasoning applies to catalog entries, dependency overrides, type-only
+/// deps, and test-only deps. The line filter is a noise-floor reducer for
+/// source-anchored findings; CI must still fail on project-level findings
+/// the PR caused. Mirrors the bypass that the existing
+/// `summary_filter_with` applies for PR-comment rendering.
+///
+/// `relative_to_diff_path` normalizes the finding's absolute path to the
+/// forward-slashed key shape `git diff` writes (`+++ b/<path>`). When the
+/// path cannot be expressed relative to `root` (different drive, traversal
+/// escape), the finding is RETAINED rather than silently dropped: an
+/// unfilterable path is better surfaced than silently hidden.
+pub fn filter_results_by_diff(
+    results: &mut fallow_core::results::AnalysisResults,
+    diff_index: &crate::report::ci::diff_filter::DiffIndex,
+    root: &Path,
+) {
+    use crate::report::ci::diff_filter::relative_to_diff_path;
+
+    let touches_file = |path: &Path| -> bool {
+        match relative_to_diff_path(path, root) {
+            Some(p) => diff_index.touches_file(&p),
+            None => true,
+        }
+    };
+    let line_in_diff = |path: &Path, line: u32| -> bool {
+        match relative_to_diff_path(path, root) {
+            Some(p) => diff_index
+                .added_lines_in(&p)
+                .is_some_and(|set| set.contains(&u64::from(line))),
+            None => true,
+        }
+    };
+
+    // File-only findings: keep when the file appears anywhere in the diff.
+    results.unused_files.retain(|f| touches_file(&f.file.path));
+
+    // Point findings: keep when the source line is an added line.
+    results
+        .unused_exports
+        .retain(|e| line_in_diff(&e.export.path, e.export.line));
+    results
+        .unused_types
+        .retain(|e| line_in_diff(&e.export.path, e.export.line));
+    results
+        .private_type_leaks
+        .retain(|e| line_in_diff(&e.leak.path, e.leak.line));
+    results
+        .unused_enum_members
+        .retain(|m| line_in_diff(&m.member.path, m.member.line));
+    results
+        .unused_class_members
+        .retain(|m| line_in_diff(&m.member.path, m.member.line));
+    results
+        .unresolved_imports
+        .retain(|i| line_in_diff(&i.import.path, i.import.line));
+
+    // Unlisted dependencies: keep if any importing site is in the diff.
+    // The package-name finding wraps an aggregate of import sites; we
+    // narrow the sites to the in-diff subset first so a future renderer
+    // can show only the relevant ones, then drop the finding entirely if
+    // nothing remains.
+    for unlisted in &mut results.unlisted_dependencies {
+        unlisted
+            .dep
+            .imported_from
+            .retain(|s| line_in_diff(&s.path, s.line));
+    }
+    results
+        .unlisted_dependencies
+        .retain(|d| !d.dep.imported_from.is_empty());
+
+    // Duplicate exports: same group-level shape as the workspace filter.
+    // Keep locations that intersect the diff; drop the group when fewer
+    // than 2 locations remain (a "duplicate" of one is no longer a
+    // duplicate). The pre-existing PR-comment renderer already follows
+    // this shape for `--workspace` so the parallel here is intentional.
+    for dup in &mut results.duplicate_exports {
+        dup.export
+            .locations
+            .retain(|loc| line_in_diff(&loc.path, loc.line));
+    }
+    results
+        .duplicate_exports
+        .retain(|d| d.export.locations.len() >= 2);
+
+    // Circular dependencies: keep cycle if any file in the cycle is in
+    // the diff. File-level rather than line-level because the cycle's
+    // line/col anchors at the import site of the first file only, but
+    // the cycle itself spans every file in `files[]`.
+    results
+        .circular_dependencies
+        .retain(|c| c.cycle.files.iter().any(|f| touches_file(f)));
+
+    // Boundary violations: drop when the importing source line is not in
+    // the diff. The violation anchors at the offending `import` statement
+    // in `from_path`, so use that.
+    results
+        .boundary_violations
+        .retain(|v| line_in_diff(&v.violation.from_path, v.violation.line));
+
+    // Stale suppressions: drop when the suppression's source line is not
+    // in the diff. A stale `// fallow-ignore-next-line` is still real
+    // even when the PR doesn't touch it, but the diff filter is opt-in
+    // noise reduction, so consistent line-level treatment is the choice.
+    results
+        .stale_suppressions
+        .retain(|s| line_in_diff(&s.path, s.line));
+
+    // Project-level findings (deps, catalog, override) bypass the filter.
+    // These anchor at fixed lines inside `package.json` /
+    // `pnpm-workspace.yaml` that a PR rarely touches even when the PR
+    // semantically caused the finding (e.g., removing the last consumer
+    // of a dep). See `pr_comment::PROJECT_LEVEL_RULE_IDS` for the
+    // canonical list and rationale.
+    //   unused_dependencies, unused_dev_dependencies,
+    //   unused_optional_dependencies, type_only_dependencies,
+    //   test_only_dependencies, unused_catalog_entries,
+    //   empty_catalog_groups, unresolved_catalog_references,
+    //   unused_dependency_overrides, misconfigured_dependency_overrides
+    // are NOT touched here.
+}
+
 // ── Changed workspaces ───────────────────────────────────────────
 
 /// Given a list of discovered workspaces and a set of changed file paths,
@@ -1665,4 +1798,270 @@ mod tests {
     }
 
     // ChangedFilesError::describe is tested in fallow_core::changed_files
+
+    // ── filter_results_by_diff (issue #424) ────────────────────────
+
+    fn build_diff(text: &str) -> crate::report::ci::diff_filter::DiffIndex {
+        crate::report::ci::diff_filter::DiffIndex::from_unified_diff(text)
+    }
+
+    #[test]
+    fn filter_by_diff_drops_unused_export_not_on_added_line() {
+        let diff = build_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -10,1 +10,2 @@\n\
+              ctx\n\
+             +touched\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        // Touched line 11 -> kept; untouched line 30 -> dropped.
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/a.ts"),
+                export_name: "kept".into(),
+                is_type_only: false,
+                line: 11,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("/project/src/a.ts"),
+                export_name: "dropped".into(),
+                is_type_only: false,
+                line: 30,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        filter_results_by_diff(&mut results, &diff, root);
+        let names: Vec<&str> = results
+            .unused_exports
+            .iter()
+            .map(|e| e.export.export_name.as_str())
+            .collect();
+        assert_eq!(names, vec!["kept"]);
+    }
+
+    #[test]
+    fn filter_by_diff_keeps_project_level_deps_even_when_diff_misses_package_json() {
+        // The bug Mira flagged: deleting `import 'lodash'` from a source
+        // file makes `lodash` an unused-dep, but the PR doesn't touch
+        // `package.json` so a naive line filter would silently drop the
+        // finding. Project-level findings MUST bypass the line filter.
+        let diff = build_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -1,3 +1,2 @@\n\
+              keep\n\
+             -import 'lodash';\n\
+              keep\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash".into(),
+                location: DependencyLocation::Dependencies,
+                path: PathBuf::from("/project/package.json"),
+                line: 42,
+                used_in_workspaces: Vec::new(),
+            }));
+        results
+            .unused_catalog_entries
+            .push(UnusedCatalogEntryFinding::with_actions(
+                UnusedCatalogEntry {
+                    entry_name: "react".into(),
+                    catalog_name: "default".into(),
+                    path: PathBuf::from("/project/pnpm-workspace.yaml"),
+                    line: 5,
+                    hardcoded_consumers: Vec::new(),
+                },
+            ));
+        filter_results_by_diff(&mut results, &diff, root);
+        assert_eq!(
+            results.unused_dependencies.len(),
+            1,
+            "unused-dependency must bypass the diff filter"
+        );
+        assert_eq!(
+            results.unused_catalog_entries.len(),
+            1,
+            "unused-catalog-entry must bypass the diff filter"
+        );
+    }
+
+    #[test]
+    fn filter_by_diff_drops_duplicate_export_when_no_location_in_diff() {
+        let diff = build_diff(
+            "diff --git a/src/other.ts b/src/other.ts\n\
+             --- a/src/other.ts\n\
+             +++ b/src/other.ts\n\
+             @@ -1,0 +1,1 @@\n\
+             +untouched-by-dups\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "helper".into(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/src/a.ts"),
+                        line: 5,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/src/b.ts"),
+                        line: 5,
+                        col: 0,
+                    },
+                ],
+            }));
+        filter_results_by_diff(&mut results, &diff, root);
+        assert!(results.duplicate_exports.is_empty());
+    }
+
+    #[test]
+    fn filter_by_diff_keeps_duplicate_export_when_both_locations_in_diff() {
+        let diff = build_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -1,0 +1,1 @@\n\
+             +line1\n\
+             diff --git a/src/b.ts b/src/b.ts\n\
+             --- a/src/b.ts\n\
+             +++ b/src/b.ts\n\
+             @@ -1,0 +1,1 @@\n\
+             +line1\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "helper".into(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/src/a.ts"),
+                        line: 1,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/src/b.ts"),
+                        line: 1,
+                        col: 0,
+                    },
+                ],
+            }));
+        filter_results_by_diff(&mut results, &diff, root);
+        assert_eq!(results.duplicate_exports.len(), 1);
+        assert_eq!(results.duplicate_exports[0].export.locations.len(), 2);
+    }
+
+    #[test]
+    fn filter_by_diff_keeps_unlisted_dep_only_when_at_least_one_import_site_in_diff() {
+        let diff = build_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -0,0 +1,1 @@\n\
+             +import 'chalk';\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .unlisted_dependencies
+            .push(UnlistedDependencyFinding::with_actions(
+                UnlistedDependency {
+                    package_name: "chalk".into(),
+                    imported_from: vec![
+                        ImportSite {
+                            path: PathBuf::from("/project/src/a.ts"),
+                            line: 1,
+                            col: 0,
+                        },
+                        ImportSite {
+                            path: PathBuf::from("/project/src/b.ts"),
+                            line: 5,
+                            col: 0,
+                        },
+                    ],
+                },
+            ));
+        filter_results_by_diff(&mut results, &diff, root);
+        assert_eq!(results.unlisted_dependencies.len(), 1);
+        // Only the in-diff import site survives the inner retain.
+        assert_eq!(results.unlisted_dependencies[0].dep.imported_from.len(), 1);
+        assert_eq!(
+            results.unlisted_dependencies[0].dep.imported_from[0].path,
+            PathBuf::from("/project/src/a.ts")
+        );
+    }
+
+    #[test]
+    fn filter_by_diff_drops_unlisted_dep_when_no_import_sites_in_diff() {
+        let diff = build_diff(
+            "diff --git a/src/elsewhere.ts b/src/elsewhere.ts\n\
+             --- a/src/elsewhere.ts\n\
+             +++ b/src/elsewhere.ts\n\
+             @@ -0,0 +1,1 @@\n\
+             +nothing\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .unlisted_dependencies
+            .push(UnlistedDependencyFinding::with_actions(
+                UnlistedDependency {
+                    package_name: "chalk".into(),
+                    imported_from: vec![ImportSite {
+                        path: PathBuf::from("/project/src/a.ts"),
+                        line: 1,
+                        col: 0,
+                    }],
+                },
+            ));
+        filter_results_by_diff(&mut results, &diff, root);
+        assert!(results.unlisted_dependencies.is_empty());
+    }
+
+    #[test]
+    fn filter_by_diff_unused_files_use_file_level_membership() {
+        let diff = build_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -0,0 +1,1 @@\n\
+             +touched\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("/project/src/a.ts"),
+            }));
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("/project/src/b.ts"),
+            }));
+        filter_results_by_diff(&mut results, &diff, root);
+        assert_eq!(results.unused_files.len(), 1);
+        assert_eq!(
+            results.unused_files[0].file.path,
+            PathBuf::from("/project/src/a.ts")
+        );
+    }
 }

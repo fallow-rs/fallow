@@ -523,6 +523,20 @@ fn execute_health_inner(
         max_cyclomatic,
         max_cognitive,
     );
+
+    // Diff-line filtering (issue #424). Drop complexity findings whose
+    // function body `[line..=line + line_count - 1]` does NOT overlap any
+    // added line in the supplied diff. Runs AFTER component rollup so
+    // synthetic rollup findings on touched components survive, and BEFORE
+    // `total_above_threshold` so the report's headline number reflects
+    // the filtered set (matches the panel's "JSON total_issues must be
+    // accurate, not jq-corrected" goal). Hotspots and refactoring
+    // targets filter at file level later in this function; the line-
+    // level filter only fits findings that carry a function-body span.
+    if let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index() {
+        filter_complexity_findings_by_diff(&mut findings, diff_index, &config.root);
+    }
+
     sort_findings(&mut findings, &opts.sort);
     let total_above_threshold = findings.len();
 
@@ -554,7 +568,7 @@ fn execute_health_inner(
 
     // Compute hotspot analysis using pre-fetched churn data
     let t = Instant::now();
-    let (hotspots, hotspot_summary) = if let Some(churn_data) = churn_fetch {
+    let (mut hotspots, hotspot_summary) = if let Some(churn_data) = churn_fetch {
         compute_hotspots(
             opts,
             &config,
@@ -566,11 +580,14 @@ fn execute_health_inner(
     } else {
         (Vec::new(), None)
     };
+    if let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index() {
+        filter_hotspots_by_diff(&mut hotspots, diff_index, &config.root);
+    }
     let hotspots_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     // Compute refactoring targets
     let t = Instant::now();
-    let (targets, target_thresholds) = compute_targets(
+    let (mut targets, target_thresholds) = compute_targets(
         opts,
         score_output.as_ref(),
         file_scores_slice,
@@ -578,6 +595,9 @@ fn execute_health_inner(
         loaded_baseline.as_ref(),
         &config.root,
     );
+    if let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index() {
+        filter_refactoring_targets_by_diff(&mut targets, diff_index, &config.root);
+    }
     let targets_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     if let Some(report) = runtime_coverage.as_mut() {
@@ -671,7 +691,7 @@ fn execute_health_inner(
     };
 
     // Collect large functions (>60 LOC) when the risk profile warrants it
-    let large_functions = collect_large_functions(
+    let mut large_functions = collect_large_functions(
         &vital_signs,
         &modules,
         &file_paths,
@@ -680,6 +700,9 @@ fn execute_health_inner(
         changed_files.as_ref(),
         ws_roots.as_deref(),
     );
+    if let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index() {
+        filter_large_functions_by_diff(&mut large_functions, diff_index, &config.root);
+    }
 
     // Determine coverage model for snapshot and report
     let active_coverage_model = if istanbul_coverage.is_some() {
@@ -1034,6 +1057,90 @@ fn relative_to_root(path: &std::path::Path, root: &std::path::Path) -> Option<St
         path
     };
     Some(relative.to_string_lossy().replace('\\', "/"))
+}
+
+/// Drop complexity findings whose function body span does NOT overlap any
+/// added line in the supplied diff. The function spans
+/// `[line..=line + line_count - 1]`: a hotspot that starts before the
+/// diff but extends into a touched line counts as overlap. `line_count`
+/// of zero collapses to `[line..=line]` so older fixture rows without
+/// extents do not silently match every diff.
+///
+/// Paths that cannot be expressed relative to `root` (different drive,
+/// path-traversal escape) are RETAINED rather than silently dropped:
+/// surfacing an unfilterable path is better than hiding a finding.
+fn filter_complexity_findings_by_diff(
+    findings: &mut Vec<ComplexityViolation>,
+    diff_index: &crate::report::ci::diff_filter::DiffIndex,
+    root: &std::path::Path,
+) {
+    findings.retain(|f| {
+        let Some(rel) = relative_to_root(&f.path, root) else {
+            return true;
+        };
+        let start = u64::from(f.line);
+        let end = if f.line_count == 0 {
+            start
+        } else {
+            start + u64::from(f.line_count) - 1
+        };
+        diff_index.range_overlaps_added(&rel, start, end)
+    });
+}
+
+/// Drop hotspot entries whose file is not touched by the supplied diff.
+/// Hotspots are per-file aggregates without a per-line position
+/// (`HotspotEntry` has no `line` field), so file-level matching is the
+/// only signal the diff carries. Paths outside `root` are RETAINED for
+/// the same reason as [`filter_complexity_findings_by_diff`].
+fn filter_hotspots_by_diff(
+    hotspots: &mut Vec<crate::health_types::HotspotEntry>,
+    diff_index: &crate::report::ci::diff_filter::DiffIndex,
+    root: &std::path::Path,
+) {
+    hotspots.retain(|h| match relative_to_root(&h.path, root) {
+        Some(rel) => diff_index.touches_file(&rel),
+        None => true,
+    });
+}
+
+/// Drop refactoring targets whose file is not touched by the diff.
+/// `RefactoringTarget` is per-file (no line range on the target itself);
+/// the line-anchored evidence under `target.evidence.complex_functions`
+/// is left intact for downstream renderers because dropping individual
+/// evidence rows could turn a multi-function recommendation into a
+/// confusing zero-evidence entry.
+fn filter_refactoring_targets_by_diff(
+    targets: &mut Vec<crate::health_types::RefactoringTarget>,
+    diff_index: &crate::report::ci::diff_filter::DiffIndex,
+    root: &std::path::Path,
+) {
+    targets.retain(|t| match relative_to_root(&t.path, root) {
+        Some(rel) => diff_index.touches_file(&rel),
+        None => true,
+    });
+}
+
+/// Drop large-function entries whose body span does NOT overlap any added
+/// line in the supplied diff. Same range semantics as
+/// [`filter_complexity_findings_by_diff`].
+fn filter_large_functions_by_diff(
+    entries: &mut Vec<crate::health_types::LargeFunctionEntry>,
+    diff_index: &crate::report::ci::diff_filter::DiffIndex,
+    root: &std::path::Path,
+) {
+    entries.retain(|e| {
+        let Some(rel) = relative_to_root(&e.path, root) else {
+            return true;
+        };
+        let start = u64::from(e.line);
+        let end = if e.line_count == 0 {
+            start
+        } else {
+            start + u64::from(e.line_count) - 1
+        };
+        diff_index.range_overlaps_added(&rel, start, end)
+    });
 }
 
 /// Populate `report.signals` with every finding the report carries, then
@@ -2822,6 +2929,185 @@ mod tests {
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].name, "fnA");
         assert_eq!(files, 1);
+    }
+
+    // ── filter_*_by_diff (issue #424) ──────────────────────────────
+
+    fn build_diff(text: &str) -> crate::report::ci::diff_filter::DiffIndex {
+        crate::report::ci::diff_filter::DiffIndex::from_unified_diff(text)
+    }
+
+    #[test]
+    fn filter_complexity_findings_by_diff_keeps_hotspot_overlapping_diff_line() {
+        // Function body spans [10..=119] (line=10, line_count=110). PR
+        // touches line 115 inside the body. Must overlap.
+        let mut findings = vec![ComplexityViolation {
+            path: PathBuf::from("/project/src/big.ts"),
+            name: "wide_fn".into(),
+            line: 10,
+            col: 0,
+            cyclomatic: 30,
+            cognitive: 30,
+            line_count: 110,
+            param_count: 0,
+            exceeded: ExceededThreshold::Both,
+            severity: FindingSeverity::High,
+            crap: None,
+            coverage_pct: None,
+            coverage_tier: None,
+            coverage_source: None,
+            inherited_from: None,
+            component_rollup: None,
+        }];
+        let diff = build_diff(
+            "diff --git a/src/big.ts b/src/big.ts\n\
+             --- a/src/big.ts\n\
+             +++ b/src/big.ts\n\
+             @@ -114,1 +114,2 @@\n\
+              ctx\n\
+             +touched\n",
+        );
+        filter_complexity_findings_by_diff(&mut findings, &diff, Path::new("/project"));
+        assert_eq!(findings.len(), 1);
+    }
+
+    #[test]
+    fn filter_complexity_findings_by_diff_drops_finding_outside_diff() {
+        let mut findings = vec![ComplexityViolation {
+            path: PathBuf::from("/project/src/elsewhere.ts"),
+            name: "outside".into(),
+            line: 10,
+            col: 0,
+            cyclomatic: 30,
+            cognitive: 30,
+            line_count: 5,
+            param_count: 0,
+            exceeded: ExceededThreshold::Both,
+            severity: FindingSeverity::High,
+            crap: None,
+            coverage_pct: None,
+            coverage_tier: None,
+            coverage_source: None,
+            inherited_from: None,
+            component_rollup: None,
+        }];
+        let diff = build_diff(
+            "diff --git a/src/big.ts b/src/big.ts\n\
+             --- a/src/big.ts\n\
+             +++ b/src/big.ts\n\
+             @@ -114,1 +114,2 @@\n\
+              ctx\n\
+             +touched\n",
+        );
+        filter_complexity_findings_by_diff(&mut findings, &diff, Path::new("/project"));
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn filter_complexity_findings_by_diff_handles_zero_line_count() {
+        // line_count == 0 collapses to [line..=line]; the finding must
+        // overlap only when the diff touches that exact line.
+        let mut findings = vec![ComplexityViolation {
+            path: PathBuf::from("/project/src/a.ts"),
+            name: "zero_extent".into(),
+            line: 5,
+            col: 0,
+            cyclomatic: 30,
+            cognitive: 30,
+            line_count: 0,
+            param_count: 0,
+            exceeded: ExceededThreshold::Both,
+            severity: FindingSeverity::High,
+            crap: None,
+            coverage_pct: None,
+            coverage_tier: None,
+            coverage_source: None,
+            inherited_from: None,
+            component_rollup: None,
+        }];
+        let diff = build_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -4,1 +4,2 @@\n\
+              ctx\n\
+             +touched\n",
+        );
+        filter_complexity_findings_by_diff(&mut findings, &diff, Path::new("/project"));
+        assert_eq!(findings.len(), 1);
+    }
+
+    #[test]
+    fn filter_hotspots_by_diff_uses_file_level_membership() {
+        use crate::health_types::HotspotEntry;
+        let mut hotspots = vec![
+            HotspotEntry {
+                path: PathBuf::from("/project/src/touched.ts"),
+                score: 90.0,
+                commits: 50,
+                weighted_commits: 25.0,
+                lines_added: 1000,
+                lines_deleted: 500,
+                complexity_density: 0.4,
+                fan_in: 5,
+                trend: fallow_core::churn::ChurnTrend::Stable,
+                ownership: None,
+                is_test_path: false,
+            },
+            HotspotEntry {
+                path: PathBuf::from("/project/src/untouched.ts"),
+                score: 90.0,
+                commits: 50,
+                weighted_commits: 25.0,
+                lines_added: 1000,
+                lines_deleted: 500,
+                complexity_density: 0.4,
+                fan_in: 5,
+                trend: fallow_core::churn::ChurnTrend::Stable,
+                ownership: None,
+                is_test_path: false,
+            },
+        ];
+        let diff = build_diff(
+            "diff --git a/src/touched.ts b/src/touched.ts\n\
+             --- a/src/touched.ts\n\
+             +++ b/src/touched.ts\n\
+             @@ -0,0 +1,1 @@\n\
+             +new\n",
+        );
+        filter_hotspots_by_diff(&mut hotspots, &diff, Path::new("/project"));
+        assert_eq!(hotspots.len(), 1);
+        assert_eq!(hotspots[0].path, PathBuf::from("/project/src/touched.ts"));
+    }
+
+    #[test]
+    fn filter_large_functions_by_diff_uses_range_overlap() {
+        use crate::health_types::LargeFunctionEntry;
+        let mut entries = vec![
+            LargeFunctionEntry {
+                path: PathBuf::from("/project/src/a.ts"),
+                name: "kept".into(),
+                line: 10,
+                line_count: 100,
+            },
+            LargeFunctionEntry {
+                path: PathBuf::from("/project/src/a.ts"),
+                name: "dropped".into(),
+                line: 500,
+                line_count: 100,
+            },
+        ];
+        let diff = build_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -49,1 +49,2 @@\n\
+              ctx\n\
+             +touched\n",
+        );
+        filter_large_functions_by_diff(&mut entries, &diff, Path::new("/project"));
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "kept");
     }
 
     #[test]

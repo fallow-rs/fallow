@@ -167,6 +167,44 @@ fn filter_by_workspaces(
     report.stats = recompute_stats(report);
 }
 
+/// Filter a duplication report to only retain clone groups whose at least
+/// one instance has its `[start_line..=end_line]` range overlap an added
+/// line for that instance's file in the supplied diff. Group-level
+/// retention (panel guidance for issue #424): a group is kept if ANY of
+/// its instances overlaps, even when the other instances do not, so the
+/// reviewer sees the full clone family in PR context. Single-instance
+/// drop is fine because a clone-of-one is no longer a clone.
+///
+/// Families and stats are rebuilt from the surviving groups so that the
+/// reported duplication percentage reflects the scoped slice.
+fn filter_by_diff(
+    report: &mut fallow_core::duplicates::DuplicationReport,
+    diff_index: &crate::report::ci::diff_filter::DiffIndex,
+    root: &std::path::Path,
+) {
+    use crate::report::ci::diff_filter::relative_to_diff_path;
+
+    let instance_overlaps = |instance: &fallow_core::duplicates::CloneInstance| -> bool {
+        let Some(rel) = relative_to_diff_path(&instance.file, root) else {
+            return true;
+        };
+        let start = u64::try_from(instance.start_line).unwrap_or(u64::MAX);
+        let end = u64::try_from(instance.end_line).unwrap_or(u64::MAX);
+        diff_index.range_overlaps_added(&rel, start, end)
+    };
+
+    report
+        .clone_groups
+        .retain(|g| g.instances.iter().any(instance_overlaps));
+    report.clone_families =
+        fallow_core::duplicates::families::group_into_families(&report.clone_groups, root);
+    report.mirrored_directories = fallow_core::duplicates::families::detect_mirrored_directories(
+        &report.clone_families,
+        root,
+    );
+    report.stats = recompute_stats(report);
+}
+
 /// Result of executing duplication analysis without printing.
 pub struct DupesResult {
     pub report: DuplicationReport,
@@ -330,6 +368,16 @@ fn execute_dupes_inner(
     // the focused path was used).
     if let Some(changed) = effective_changed_files {
         filter_by_changed_files(&mut report, changed, &config.root);
+    }
+
+    // Diff-line filtering (issue #424). Group-level retention: a clone
+    // family stays in the report when at least one of its instances'
+    // `[start_line..=end_line]` ranges overlaps an added line in the
+    // diff. Runs AFTER the changed-files pass so the latter has already
+    // narrowed to touched files; this then narrows to touched LINES
+    // within those files. No-op when no diff was supplied.
+    if let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index() {
+        filter_by_diff(&mut report, diff_index, &config.root);
     }
 
     // Workspace scoping (either --workspace or --changed-workspaces).
@@ -1505,6 +1553,126 @@ mod tests {
         filter_by_changed_files(&mut report, &changed, Path::new(""));
 
         assert!(report.clone_groups.is_empty());
+    }
+
+    // ── filter_by_diff (issue #424) ─────────────────────────────────
+
+    fn build_diff(text: &str) -> crate::report::ci::diff_filter::DiffIndex {
+        crate::report::ci::diff_filter::DiffIndex::from_unified_diff(text)
+    }
+
+    #[test]
+    fn filter_by_diff_keeps_group_when_one_of_four_instances_overlaps() {
+        // Panel-guided shape: a clone group with 4 instances; only the
+        // first instance's [1..=10] overlaps the diff line at 5. The
+        // group MUST survive at the group level even though the other 3
+        // instances are off-diff.
+        let group = make_group(
+            vec![
+                instance("src/a.ts", 1, 10),
+                instance("src/b.ts", 100, 110),
+                instance("src/c.ts", 200, 210),
+                instance("src/d.ts", 300, 310),
+            ],
+            50,
+            10,
+        );
+        let mut report = make_report(vec![group], 10, 1000);
+        let diff = build_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -4,1 +4,2 @@\n\
+              ctx\n\
+             +touched\n",
+        );
+
+        filter_by_diff(&mut report, &diff, Path::new(""));
+
+        assert_eq!(
+            report.clone_groups.len(),
+            1,
+            "group must survive when any one instance overlaps the diff"
+        );
+        assert_eq!(report.clone_groups[0].instances.len(), 4);
+    }
+
+    #[test]
+    fn filter_by_diff_drops_group_with_no_instance_in_diff() {
+        let group = make_group(
+            vec![
+                instance("src/a.ts", 100, 110),
+                instance("src/b.ts", 100, 110),
+            ],
+            50,
+            10,
+        );
+        let mut report = make_report(vec![group], 10, 1000);
+        let diff = build_diff(
+            "diff --git a/src/elsewhere.ts b/src/elsewhere.ts\n\
+             --- a/src/elsewhere.ts\n\
+             +++ b/src/elsewhere.ts\n\
+             @@ -0,0 +1,1 @@\n\
+             +noop\n",
+        );
+
+        filter_by_diff(&mut report, &diff, Path::new(""));
+
+        assert!(report.clone_groups.is_empty());
+    }
+
+    #[test]
+    fn filter_by_diff_drops_group_when_instance_path_matches_but_range_does_not() {
+        // Same file is in the diff, but the clone's [100..=110] doesn't
+        // overlap the touched line at 5. The group must drop.
+        let group = make_group(
+            vec![
+                instance("src/a.ts", 100, 110),
+                instance("src/b.ts", 200, 210),
+            ],
+            50,
+            10,
+        );
+        let mut report = make_report(vec![group], 10, 1000);
+        let diff = build_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -4,1 +4,2 @@\n\
+              ctx\n\
+             +touched\n",
+        );
+
+        filter_by_diff(&mut report, &diff, Path::new(""));
+
+        assert!(report.clone_groups.is_empty());
+    }
+
+    #[test]
+    fn filter_by_diff_handles_long_instance_with_diff_in_middle() {
+        // Hotspot-shaped: a 200-line clone with the diff touching line
+        // 150 in the middle. Must overlap.
+        let group = make_group(
+            vec![
+                instance("src/big.ts", 50, 250),
+                instance("src/other.ts", 50, 250),
+            ],
+            500,
+            200,
+        );
+        let mut report = make_report(vec![group], 10, 5000);
+        let diff = build_diff(
+            "diff --git a/src/big.ts b/src/big.ts\n\
+             --- a/src/big.ts\n\
+             +++ b/src/big.ts\n\
+             @@ -149,1 +149,2 @@\n\
+              ctx\n\
+             +touched\n",
+        );
+
+        filter_by_diff(&mut report, &diff, Path::new(""));
+
+        assert_eq!(report.clone_groups.len(), 1);
     }
 
     // ── filter_by_workspaces ────────────────────────────────────────

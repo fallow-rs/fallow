@@ -337,6 +337,18 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         filtering::filter_changed_files(&mut results, changed);
     }
 
+    // Diff-line filtering (issue #424). When `--diff-file` or `$FALLOW_DIFF_FILE`
+    // was supplied, the shared cache is populated by `main()` and every
+    // subsystem applies the same line-level filter so combined runs do not
+    // re-read the diff three times. The filter is opt-in: when no diff is
+    // configured, `shared_diff_index()` returns `None` and this block is a
+    // no-op. Runs AFTER `filter_changed_files` so the latter has already
+    // narrowed the result set to the touched files; the diff filter then
+    // narrows to the touched LINES, and project-level findings bypass.
+    if let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index() {
+        filtering::filter_results_by_diff(&mut results, diff_index, opts.root);
+    }
+
     // Single-file filtering (--file)
     if !opts.file.is_empty() {
         let file_set: rustc_hash::FxHashSet<std::path::PathBuf> = opts
