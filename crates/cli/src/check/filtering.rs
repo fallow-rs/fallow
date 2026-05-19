@@ -389,19 +389,27 @@ pub fn filter_results_by_diff(
         .unlisted_dependencies
         .retain(|d| !d.dep.imported_from.is_empty());
 
-    // Duplicate exports: same group-level shape as the workspace filter.
-    // Keep locations that intersect the diff; drop the group when fewer
-    // than 2 locations remain (a "duplicate" of one is no longer a
-    // duplicate). The pre-existing PR-comment renderer already follows
-    // this shape for `--workspace` so the parallel here is intentional.
-    for dup in &mut results.duplicate_exports {
-        dup.export
+    // Duplicate exports: group-level retention without narrowing the
+    // locations list. A PR that adds ONE new duplicate against an
+    // existing off-diff location is exactly the case this filter must
+    // surface: the PR caused the duplicate, so the finding belongs in
+    // the review comment even though only one location is in the diff.
+    // Keep the finding if ANY location is in the diff, and KEEP ALL
+    // locations so the renderer can show the conflict pair (in-diff
+    // location + off-diff sibling) for context and so the
+    // `add-to-config` action has the full list to suppress.
+    //
+    // Diverges from `filter_to_workspaces` (which DOES narrow + drop
+    // below 2) because workspace scoping asks "show me only THIS
+    // workspace's duplicates", whereas the diff filter asks "show me
+    // duplicates THIS PR caused or touched", which inherently spans
+    // diff and non-diff locations.
+    results.duplicate_exports.retain(|d| {
+        d.export
             .locations
-            .retain(|loc| line_in_diff(&loc.path, loc.line));
-    }
-    results
-        .duplicate_exports
-        .retain(|d| d.export.locations.len() >= 2);
+            .iter()
+            .any(|loc| line_in_diff(&loc.path, loc.line))
+    });
 
     // Circular dependencies: keep cycle if any file in the cycle is in
     // the diff. File-level rather than line-level because the cycle's
@@ -1967,6 +1975,64 @@ mod tests {
         filter_results_by_diff(&mut results, &diff, root);
         assert_eq!(results.duplicate_exports.len(), 1);
         assert_eq!(results.duplicate_exports[0].export.locations.len(), 2);
+    }
+
+    #[test]
+    fn filter_by_diff_keeps_duplicate_export_when_pr_adds_one_against_off_diff_existing() {
+        // The bug an external reviewer caught: a PR adds a new duplicate
+        // export in `src/a.ts:1` against an existing off-diff location in
+        // `src/b.ts:5`. The PR semantically CAUSED the duplicate, but the
+        // prior implementation narrowed `locations` to only the in-diff
+        // entry, then dropped the finding for falling below the 2-location
+        // floor. Result: zero findings reported even though the diff
+        // introduced a real duplicate. The fix keeps the finding when ANY
+        // location overlaps the diff AND preserves both locations so the
+        // renderer can show the conflict pair.
+        let diff = build_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -0,0 +1,1 @@\n\
+             +export const helper = 1;\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "helper".into(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/src/a.ts"),
+                        line: 1,
+                        col: 0,
+                    },
+                    DuplicateLocation {
+                        path: PathBuf::from("/project/src/b.ts"),
+                        line: 5,
+                        col: 0,
+                    },
+                ],
+            }));
+        filter_results_by_diff(&mut results, &diff, root);
+        assert_eq!(
+            results.duplicate_exports.len(),
+            1,
+            "PR-introduced duplicate must surface even when only one location is in the diff"
+        );
+        assert_eq!(
+            results.duplicate_exports[0].export.locations.len(),
+            2,
+            "both locations must be retained so the renderer can show the conflict pair"
+        );
+        let paths: Vec<&Path> = results.duplicate_exports[0]
+            .export
+            .locations
+            .iter()
+            .map(|loc| loc.path.as_path())
+            .collect();
+        assert!(paths.contains(&Path::new("/project/src/a.ts")));
+        assert!(paths.contains(&Path::new("/project/src/b.ts")));
     }
 
     #[test]

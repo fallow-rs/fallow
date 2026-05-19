@@ -120,11 +120,11 @@ pub struct AuditOptions<'a> {
     pub runtime_coverage: Option<&'a std::path::Path>,
     /// Threshold for hot-path classification, forwarded to the sidecar.
     pub min_invocations_hot: u64,
-    /// Path to a unified diff for line-level scoping of `hot-path-touched`.
-    /// Resolves against `root` if relative; falls back to `FALLOW_DIFF_FILE`.
-    /// Mirrors `fallow health --diff-file` so the two surfaces stay
-    /// behaviorally identical.
-    pub diff_file: Option<&'a std::path::Path>,
+    // `diff_file` was removed from this struct: audit now sources the
+    // parsed diff index from the process-wide cache in
+    // `crate::report::ci::diff_filter::shared_diff_index()`, populated
+    // by `main()`. The cache covers `--diff-file PATH`, `--diff-file -`,
+    // `--diff-stdin`, and the `$FALLOW_DIFF_FILE` env var.
 }
 
 // ── Auto-detect base branch ──────────────────────────────────────
@@ -708,7 +708,6 @@ fn compute_base_snapshot(
         // cost on every audit run.
         runtime_coverage: None,
         min_invocations_hot: opts.min_invocations_hot,
-        diff_file: None,
     };
 
     let base_changed_files = remap_focus_files(changed_files, opts.root, &base_root);
@@ -2464,7 +2463,6 @@ fn run_audit_health<'a>(
         performance: opts.performance,
         min_severity: None,
         runtime_coverage,
-        diff_file: opts.diff_file,
     };
     let health_run = if let Some(shared) = shared_parse {
         crate::health::execute_health_with_shared_parse(&health_opts, shared)
@@ -2973,20 +2971,19 @@ pub fn run_audit(opts: &AuditOptions<'_>) -> ExitCode {
     let coverage_resolved = opts
         .coverage
         .map(|p| crate::health::scoring::resolve_relative_to_root(p, Some(opts.root)));
-    // Absolutize runtime_coverage and diff_file at the public entry for the
-    // same reason coverage is absolutized: `compute_base_snapshot` swaps
+    // Absolutize runtime_coverage at the public entry for the same
+    // reason coverage is absolutized: `compute_base_snapshot` swaps
     // `opts.root` to a temp worktree directory, and any relative path
-    // would re-resolve against that worktree on the recursive base pass.
+    // would re-resolve against that worktree on the recursive base
+    // pass. The diff source is resolved separately by `main()` into
+    // the process-wide shared-diff cache before audit even runs, so
+    // it does not need entry-point absolutization here.
     let runtime_coverage_resolved = opts
         .runtime_coverage
-        .map(|p| crate::health::scoring::resolve_relative_to_root(p, Some(opts.root)));
-    let diff_file_resolved = opts
-        .diff_file
         .map(|p| crate::health::scoring::resolve_relative_to_root(p, Some(opts.root)));
     let resolved_opts = AuditOptions {
         coverage: coverage_resolved.as_deref(),
         runtime_coverage: runtime_coverage_resolved.as_deref(),
-        diff_file: diff_file_resolved.as_deref(),
         ..*opts
     };
     match execute_audit(&resolved_opts) {
@@ -3260,7 +3257,6 @@ mod tests {
             include_entry_exports: false,
             runtime_coverage: None,
             min_invocations_hot: 100,
-            diff_file: None,
         };
 
         let first = config_file_fingerprint(&opts).expect("fingerprint should be computed");
@@ -3331,7 +3327,6 @@ mod tests {
             include_entry_exports: false,
             runtime_coverage: None,
             min_invocations_hot: 100,
-            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -3407,7 +3402,6 @@ mod tests {
             include_entry_exports: false,
             runtime_coverage: None,
             min_invocations_hot: 100,
-            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -3499,7 +3493,6 @@ mod tests {
             include_entry_exports: false,
             runtime_coverage: None,
             min_invocations_hot: 100,
-            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -3581,7 +3574,6 @@ mod tests {
             include_entry_exports: false,
             runtime_coverage: None,
             min_invocations_hot: 100,
-            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -3747,7 +3739,6 @@ mod tests {
             include_entry_exports: false,
             runtime_coverage: None,
             min_invocations_hot: 100,
-            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -3876,7 +3867,6 @@ export function App() {
             include_entry_exports: false,
             runtime_coverage: None,
             min_invocations_hot: 100,
-            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -4012,7 +4002,6 @@ export function App() {
             include_entry_exports: false,
             runtime_coverage: None,
             min_invocations_hot: 100,
-            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -4093,7 +4082,6 @@ export function App() {
             include_entry_exports: false,
             runtime_coverage: None,
             min_invocations_hot: 100,
-            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute with a new explicit config");
@@ -4168,7 +4156,6 @@ export function App() {
             include_entry_exports: false,
             runtime_coverage: None,
             min_invocations_hot: 100,
-            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -4249,7 +4236,6 @@ export function App() {
             include_entry_exports: false,
             runtime_coverage: None,
             min_invocations_hot: 100,
-            diff_file: None,
         };
 
         let first = execute_audit(&opts).expect("first audit should execute");
@@ -4353,7 +4339,6 @@ export function App() {
             include_entry_exports: false,
             runtime_coverage: None,
             min_invocations_hot: 100,
-            diff_file: None,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");

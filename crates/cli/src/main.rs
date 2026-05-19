@@ -2046,7 +2046,6 @@ fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
         fail_on_issues,
         sarif_file: cli.sarif_file.as_deref(),
         changed_since: cli.changed_since.as_deref(),
-        diff_file: cli.diff_file.as_deref(),
         baseline: cli.baseline.as_deref(),
         save_baseline: cli.save_baseline.as_deref(),
         production: cli.production,
@@ -2439,7 +2438,6 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 include_entry_exports: cli.include_entry_exports,
                 runtime_coverage: runtime_coverage.as_deref(),
                 min_invocations_hot,
-                diff_file: cli.diff_file.as_deref(),
             })
         }
         Command::Schema => unreachable!("handled above"),
@@ -2972,7 +2970,6 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         coverage_root,
         performance: cli.performance,
         runtime_coverage,
-        diff_file: cli.diff_file.as_deref(),
     })
 }
 

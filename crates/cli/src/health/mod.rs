@@ -129,13 +129,16 @@ pub struct HealthOptions<'a> {
     pub min_severity: Option<FindingSeverity>,
     /// Paid runtime coverage sidecar input.
     pub runtime_coverage: Option<RuntimeCoverageOptions>,
-    /// Path to a unified diff for line-level scoping of `hot-path-touched`.
-    /// Resolved against `root` if relative. Falls back to the
-    /// `FALLOW_DIFF_FILE` env var inside `run_health` when this is `None`.
-    /// The PR/MR-comment scripts already export the env var; this flag
-    /// gives `--diff-file` parity with `--changed-since` for ad-hoc and
-    /// MCP callers that cannot easily set environment variables.
-    pub diff_file: Option<&'a std::path::Path>,
+    // `diff_file` was removed from this struct: health now sources the
+    // parsed diff index from the process-wide cache in
+    // `crate::report::ci::diff_filter::shared_diff_index()`, populated
+    // by `main()`. The cache covers `--diff-file PATH`, `--diff-file -`,
+    // `--diff-stdin`, and the `$FALLOW_DIFF_FILE` env var; the prior
+    // per-options field only accepted a path and silently dropped the
+    // two stdin forms. Programmatic API callers that want to scope
+    // hot-path-touched by a diff must populate the shared cache via
+    // `diff_filter::init_shared_diff(...)` before invoking
+    // `execute_health`.
 }
 
 struct HealthPipelineTimings {
@@ -271,7 +274,18 @@ fn execute_health_inner(
     let changed_files = opts
         .changed_since
         .and_then(|git_ref| get_changed_files(opts.root, git_ref));
-    let diff_index = load_diff_index(opts.diff_file, opts.root, opts.quiet);
+    // Source the runtime-coverage diff index from the same process-wide
+    // cache that drives the finding-level filter. `main()` resolves
+    // `--diff-file`, `--diff-stdin`, the `-` stdin sentinel, and the
+    // `$FALLOW_DIFF_FILE` env var into a single parsed `DiffIndex` and
+    // populates `SHARED_DIFF`; both the hot-path-touched verdict here
+    // AND the cross-cutting finding filter must read from that cache so
+    // they cannot diverge. The old per-path loader (which only accepted
+    // `Option<&Path>`) silently ignored `--diff-stdin` (None) and
+    // tried to read a file literally named `-` for the stdin sentinel,
+    // producing a degraded runtime-coverage verdict for the new stdin
+    // paths even though help text and CI docs advertised them.
+    let diff_index = crate::report::ci::diff_filter::shared_diff_index();
     let ws_roots = resolve_workspace_scope(
         opts.root,
         opts.workspace,
@@ -605,7 +619,7 @@ fn execute_health_inner(
             .with_baseline(loaded_baseline.as_ref())
             .with_top(opts.top)
             .with_changed_files(changed_files.as_ref())
-            .with_diff_index(diff_index.as_ref());
+            .with_diff_index(diff_index);
         apply_runtime_coverage_filters(report, &ctx);
     }
 
@@ -924,17 +938,28 @@ fn apply_runtime_coverage_filters(
 /// Returns `true` if any change-scope signal was supplied; the caller uses
 /// that to flip the verdict.
 ///
-/// Per-file fallback (best signal per file wins):
-///   - For each hot path, if `diff_index` knows the file, retain when an
-///     added line falls in `[start_line, end_line]`. `end_line == 0`
-///     collapses to `line..=line` so older 0.4 sidecars do not claim false
-///     overlap with the rest of the function body.
-///   - For files NOT in the diff (rename-only edit, vendored bundle, file
-///     touched by `--changed-since` but not by the diff blob), fall back to
-///     `changed_files` membership. Hot paths arrive from the protocol with
-///     project-root-relative paths; `changed_files` carries absolute paths
-///     from `git rev-parse --show-toplevel`. Compare both forms.
+/// Per-file precedence (line-level beats file-level when both signals
+/// know the file):
+///   - For each hot path, if `diff_index` TOUCHES the file (i.e. the
+///     file appears as a `+++ b/<path>` header in the diff), the
+///     line-level decision wins and we do NOT fall through to
+///     `changed_files`. A touched file with added lines is retained
+///     when an added line falls in `[start_line, end_line]`. A touched
+///     file with NO added lines (deletion-only or pure-rename hunk) is
+///     dropped: per `--diff-file`'s precedence contract, the diff is
+///     the source of truth for line-level inclusion when the diff
+///     knows the file, and a file the diff touched but in which no
+///     line was added does not contain any "touched" hot path.
+///   - For files NOT in the diff at all (rename-only edit, vendored
+///     bundle, file touched by `--changed-since` but absent from the
+///     diff blob), fall back to `changed_files` file-level membership.
+///     Hot paths arrive from the protocol with project-root-relative
+///     paths; `changed_files` carries absolute paths from
+///     `git rev-parse --show-toplevel`. Compare both forms.
 ///   - When a hot path's file is in neither signal, drop it.
+///
+/// `end_line == 0` collapses to `line..=line` so older 0.4 sidecars do
+/// not claim false overlap with the rest of the function body.
 fn retain_hot_paths_in_change_scope(
     report: &mut crate::health_types::RuntimeCoverageReport,
     ctx: &RuntimeCoverageFilterContext<'_>,
@@ -946,8 +971,16 @@ fn retain_hot_paths_in_change_scope(
     report.hot_paths.retain(|hot_path| {
         if let Some(diff_index) = ctx.diff_index
             && let Some(rel) = relative_to_root(&hot_path.path, ctx.root)
-            && let Some(added) = diff_index.added_lines_in(&rel)
+            && diff_index.touches_file(&rel)
         {
+            // Diff knows this file: trust its line-level verdict and
+            // do NOT fall through to changed_files. A touched-but-no-
+            // added-lines file (deletion-only hunk) returns `None`
+            // here, which we treat as "no line of this file's hot
+            // path was added" -> drop.
+            let Some(added) = diff_index.added_lines_in(&rel) else {
+                return false;
+            };
             let start = u64::from(hot_path.line);
             let end = if hot_path.end_line == 0 {
                 start
@@ -972,77 +1005,15 @@ fn retain_hot_paths_in_change_scope(
     true
 }
 
-/// Resolve `--diff-file <path>` (or `$FALLOW_DIFF_FILE` when the flag is
-/// omitted) into a parsed `DiffIndex`. Returns `None` when neither source
-/// is set. Failure modes (file missing, unreadable, oversized) emit a
-/// `fallow: warning [diff-file]` line on stderr and produce `None`, so
-/// the runtime-coverage filter degrades to file-level matching rather
-/// than failing the whole `fallow health` run for a CI-script issue.
-/// `quiet` suppresses the warning so JSON-mode CI does not get a
-/// non-empty stderr stream.
-///
-/// Path resolution: relative paths join against `root` so callers do not
-/// have to absolutize before passing the flag. Mirrors the
-/// `health::scoring::resolve_relative_to_root` pattern used by
-/// `--coverage` and `--coverage-root`.
-fn load_diff_index(
-    diff_file: Option<&std::path::Path>,
-    root: &std::path::Path,
-    quiet: bool,
-) -> Option<crate::report::ci::diff_filter::DiffIndex> {
-    let resolved_path: PathBuf = if let Some(path) = diff_file {
-        if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            root.join(path)
-        }
-    } else {
-        let env = std::env::var_os("FALLOW_DIFF_FILE")?;
-        let raw = PathBuf::from(env);
-        if raw.is_absolute() {
-            raw
-        } else {
-            root.join(raw)
-        }
-    };
-
-    // Reject diffs above the size cap before reading them into memory. A
-    // pathological vendored dump or accidentally-checked-in binary blob
-    // would otherwise allocate proportional to file size in
-    // `read_to_string` before the line-cap inside `from_unified_diff`
-    // can fire. Mirrors the early-return pattern in
-    // `report::ci::diff_filter::filter_issues_from_path`.
-    if let Ok(meta) = std::fs::metadata(&resolved_path)
-        && meta.len() > crate::report::ci::diff_filter::MAX_DIFF_BYTES
-    {
-        if !quiet {
-            eprintln!(
-                "warning [diff-file]: {} exceeds {} bytes; line-level \
-                 hot-path matching disabled, falling back to file-level \
-                 if --changed-since is set",
-                resolved_path.display(),
-                crate::report::ci::diff_filter::MAX_DIFF_BYTES
-            );
-        }
-        return None;
-    }
-
-    match std::fs::read_to_string(&resolved_path) {
-        Ok(text) => Some(crate::report::ci::diff_filter::DiffIndex::from_unified_diff(&text)),
-        Err(error) => {
-            if !quiet {
-                eprintln!(
-                    "warning [diff-file]: could not read {}: {} \
-                     (line-level hot-path matching disabled; falling back to \
-                     file-level if --changed-since is set)",
-                    resolved_path.display(),
-                    error
-                );
-            }
-            None
-        }
-    }
-}
+// `health::load_diff_index` (formerly here) was retired in favour of the
+// process-wide `diff_filter::shared_diff_index()` cache populated by
+// `main()`. The retired helper only knew how to read from a path or the
+// `$FALLOW_DIFF_FILE` env var; it silently dropped `--diff-stdin` (None
+// path) and the `-` stdin sentinel (path literally `-`, no file on
+// disk). Sourcing the index from the shared cache lets the runtime-
+// coverage hot-path verdict honor every diff source the CLI accepts,
+// matches the finding-level filter's behaviour, and keeps the diff
+// parsed exactly once per process.
 
 /// Reduce `path` to a forward-slashed, project-root-relative string for
 /// matching against a unified diff's `+++ b/<path>` keys. Returns `None`
@@ -4028,29 +3999,51 @@ mod tests {
         );
     }
 
-    #[test]
-    fn load_diff_index_resolves_relative_path_against_root_and_parses() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let root = temp.path();
-        let diff_path = root.join("pr.diff");
-        let diff = "diff --git a/src/hot.ts b/src/hot.ts\n\
-                    --- a/src/hot.ts\n\
-                    +++ b/src/hot.ts\n\
-                    @@ -10,1 +10,2 @@\n\
-                    +  // touched\n";
-        std::fs::write(&diff_path, diff).expect("write diff");
-
-        let index = load_diff_index(Some(Path::new("pr.diff")), root, true)
-            .expect("relative diff path should resolve and parse");
-        assert!(index.added_lines_in("src/hot.ts").is_some());
-    }
+    // `load_diff_index_*` tests retired: the per-path loader they
+    // exercised was removed when health switched to the process-wide
+    // `diff_filter::shared_diff_index()` cache. The cache's path /
+    // env / stdin resolution is covered end-to-end in
+    // `crates/cli/src/report/ci/diff_filter.rs` tests
+    // (resolve_diff_source + load_diff_index_for_findings).
 
     #[test]
-    fn load_diff_index_returns_none_for_missing_file() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let root = temp.path();
-        let result = load_diff_index(Some(Path::new("nonexistent.diff")), root, true);
-        assert!(result.is_none());
+    fn retain_hot_paths_drops_when_diff_touches_file_but_no_added_lines() {
+        // Diff TOUCHES the file (it appears as `+++ b/...` header) but
+        // has no added lines in it (deletion-only or pure-rename body).
+        // Per --diff-file's precedence contract, the diff is the source
+        // of truth for line-level inclusion when the diff knows the
+        // file. The hot path must drop, NOT fall through to changed_files.
+        let root = Path::new("/project");
+        let diff = crate::report::ci::diff_filter::DiffIndex::from_unified_diff(
+            "diff --git a/src/hot.ts b/src/hot.ts\n\
+             --- a/src/hot.ts\n\
+             +++ b/src/hot.ts\n\
+             @@ -10,3 +10,1 @@\n\
+             -one\n\
+             -two\n\
+             -three\n\
+             ctx\n",
+        );
+        let mut changed_files = FxHashSet::default();
+        changed_files.insert(PathBuf::from("/project/src/hot.ts"));
+        let mut report = fx_runtime_coverage_report_with_hot_paths(vec![fx_hot_path(
+            "fallow:hot:deletiononly",
+            "src/hot.ts",
+            10,
+            12,
+        )]);
+
+        apply_runtime_coverage_filters(
+            &mut report,
+            &RuntimeCoverageFilterContext::new(root)
+                .with_diff_index(Some(&diff))
+                .with_changed_files(Some(&changed_files)),
+        );
+
+        assert!(
+            report.hot_paths.is_empty(),
+            "diff touched the file with no added lines: must drop, not fall through to changed_files"
+        );
     }
 
     #[test]

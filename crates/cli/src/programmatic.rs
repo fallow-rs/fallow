@@ -710,8 +710,9 @@ fn build_complexity_options<'a>(
         min_severity: None,
         runtime_coverage: None,
         // Programmatic API does not surface line-level PR scoping; callers
-        // that want it use the CLI's `--diff-file` directly.
-        diff_file: None,
+        // that want it populate the process-wide diff cache via
+        // `crate::report::ci::diff_filter::init_shared_diff(...)` before
+        // calling `compute_complexity`.
     }
 }
 

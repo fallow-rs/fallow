@@ -22,7 +22,10 @@ pub struct CombinedOptions<'a> {
     pub fail_on_issues: bool,
     pub sarif_file: Option<&'a std::path::Path>,
     pub changed_since: Option<&'a str>,
-    pub diff_file: Option<&'a std::path::Path>,
+    // `diff_file` was removed: the combined pipeline (and every
+    // subsystem it dispatches) reads the parsed diff index from the
+    // process-wide cache in `crate::report::ci::diff_filter::shared_diff_index()`,
+    // populated by `main()`.
     pub baseline: Option<&'a std::path::Path>,
     pub save_baseline: Option<&'a std::path::Path>,
     pub production: bool,
@@ -871,7 +874,6 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         performance: opts.performance,
         min_severity: None,
         runtime_coverage: None,
-        diff_file: opts.diff_file,
     }
 }
 
