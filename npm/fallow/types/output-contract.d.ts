@@ -2132,10 +2132,12 @@ export interface DupesReportPayload {
 clone_groups: CloneGroupFinding[]
 /**
  * Clone families, each wrapped with typed actions. Inner `groups`
- * inside each family stay as bare [`CloneGroup`] entries because
- * `clone_families[].groups[]` and top-level `clone_groups[]` are
- * kept in sync; consumers that want the per-inner-group actions read
- * them off the top-level array.
+ * inside each [`CloneFamilyFinding`] are themselves wrapped as
+ * [`CloneGroupFinding`] entries carrying their own `actions[]` (and
+ * optional audit-mode `introduced` flag), so JSON-Schema strict
+ * consumers and TS consumers reading `clone_families[].groups[]` see
+ * the same shape as the top-level `clone_groups[]` array (preserves
+ * the issue #393 regression contract).
  */
 clone_families: CloneFamilyFinding[]
 /**
@@ -4906,10 +4908,12 @@ elapsed_ms: ElapsedMs
 clone_groups: CloneGroupFinding[]
 /**
  * Clone families, each wrapped with typed actions. Inner `groups`
- * inside each family stay as bare [`CloneGroup`] entries because
- * `clone_families[].groups[]` and top-level `clone_groups[]` are
- * kept in sync; consumers that want the per-inner-group actions read
- * them off the top-level array.
+ * inside each [`CloneFamilyFinding`] are themselves wrapped as
+ * [`CloneGroupFinding`] entries carrying their own `actions[]` (and
+ * optional audit-mode `introduced` flag), so JSON-Schema strict
+ * consumers and TS consumers reading `clone_families[].groups[]` see
+ * the same shape as the top-level `clone_groups[]` array (preserves
+ * the issue #393 regression contract).
  */
 clone_families: CloneFamilyFinding[]
 /**

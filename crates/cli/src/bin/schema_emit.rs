@@ -440,10 +440,6 @@ const DEFAULT_FINDING_AUGMENTATION: FindingAugmentation = FindingAugmentation {
 /// family in #409 and the standalone coverage envelope in #410); no
 /// definition currently routes through here. The function stays in place
 /// so a future hand-augmented finding can be wired with a single arm.
-#[allow(
-    dead_code,
-    reason = "no finding currently routes through augmentation; kept so a future hand-augmented finding can wire in via a single match arm"
-)]
 fn finding_augmentation(_name: &str) -> FindingAugmentation {
     DEFAULT_FINDING_AUGMENTATION
 }

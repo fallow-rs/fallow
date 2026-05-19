@@ -1982,7 +1982,7 @@
           "items": {
             "$ref": "#/definitions/CloneFamilyFinding"
           },
-          "description": "Clone families, each wrapped with typed actions. Inner `groups`\ninside each family stay as bare [`CloneGroup`] entries because\n`clone_families[].groups[]` and top-level `clone_groups[]` are\nkept in sync; consumers that want the per-inner-group actions read\nthem off the top-level array."
+          "description": "Clone families, each wrapped with typed actions. Inner `groups`\ninside each [`CloneFamilyFinding`] are themselves wrapped as\n[`CloneGroupFinding`] entries carrying their own `actions[]` (and\noptional audit-mode `introduced` flag), so JSON-Schema strict\nconsumers and TS consumers reading `clone_families[].groups[]` see\nthe same shape as the top-level `clone_groups[]` array (preserves\nthe issue #393 regression contract)."
         },
         "mirrored_directories": {
           "type": "array",
@@ -9019,7 +9019,7 @@
           "items": {
             "$ref": "#/definitions/CloneFamilyFinding"
           },
-          "description": "Clone families, each wrapped with typed actions. Inner `groups`\ninside each family stay as bare [`CloneGroup`] entries because\n`clone_families[].groups[]` and top-level `clone_groups[]` are\nkept in sync; consumers that want the per-inner-group actions read\nthem off the top-level array."
+          "description": "Clone families, each wrapped with typed actions. Inner `groups`\ninside each [`CloneFamilyFinding`] are themselves wrapped as\n[`CloneGroupFinding`] entries carrying their own `actions[]` (and\noptional audit-mode `introduced` flag), so JSON-Schema strict\nconsumers and TS consumers reading `clone_families[].groups[]` see\nthe same shape as the top-level `clone_groups[]` array (preserves\nthe issue #393 regression contract)."
         },
         "mirrored_directories": {
           "type": "array",
