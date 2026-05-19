@@ -5357,3 +5357,53 @@ export type HotspotEntry = Omit<HotspotFinding, "actions">;
  * refactoring targets do not run through audit attribution.
  */
 export type RefactoringTarget = Omit<RefactoringTargetFinding, "actions">;
+
+/**
+ * Backwards-compat alias for the pre-#409 bare clone-group name.
+ * jstt dedupes the bare interface because every field is fully
+ * subsumed by `CloneGroupFinding` (the wrapper flattens the bare
+ * `CloneGroup` via `#[serde(flatten)]`). Aliased to the full
+ * wrapper (not `Omit<>`-stripped) because the pre-migration wire
+ * always carried `actions[]` on every clone group via the legacy
+ * `inject_dupes_actions` post-pass, so the bare alias matching the
+ * wrapper shape is the byte-faithful continuation. Consumers that
+ * imported `CloneGroup` from `fallow/types` pre-migration continue
+ * to work via this alias; new code should prefer `CloneGroupFinding`.
+ */
+export type CloneGroup = CloneGroupFinding;
+
+/**
+ * Backwards-compat alias for the pre-#409 bare clone-family name.
+ * jstt dedupes the bare interface because every field is subsumed
+ * by `CloneFamilyFinding`. The wrapper's `groups[]` items are
+ * `CloneGroupFinding` rather than bare `CloneGroup`, which matches
+ * the pre-migration wire shape (the legacy `inject_dupes_actions`
+ * post-pass injected `actions[]` on every nested group too).
+ * Consumers that imported `CloneFamily` from `fallow/types`
+ * pre-migration continue to work via this alias; new code should
+ * prefer `CloneFamilyFinding`.
+ */
+export type CloneFamily = CloneFamilyFinding;
+
+/**
+ * Backwards-compat alias for the pre-#409 bare attributed-clone-group
+ * name (`fallow dupes --group-by` per-bucket attribution).
+ * Consumers that imported `AttributedCloneGroup` from `fallow/types`
+ * pre-migration continue to work via this alias; new code should
+ * prefer `AttributedCloneGroupFinding`.
+ */
+export type AttributedCloneGroup = AttributedCloneGroupFinding;
+
+/**
+ * Backwards-compat alias for the pre-#409 `DuplicationReport` name.
+ * The wire shape is byte-identical between the two: the typed
+ * `DupesReportPayload` mirrors `DuplicationReport` field-for-field
+ * with `clone_groups[]` / `clone_families[]` carrying typed
+ * `CloneGroupFinding` / `CloneFamilyFinding` wrappers instead of
+ * bare findings (the pre-migration wire ALSO carried `actions[]`
+ * on each item via the legacy `inject_dupes_actions` post-pass).
+ * Consumers that imported `DuplicationReport` from `fallow/types`
+ * pre-migration continue to work via this alias; new code should
+ * prefer `DupesReportPayload`.
+ */
+export type DuplicationReport = DupesReportPayload;

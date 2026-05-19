@@ -15,14 +15,17 @@
 
 export type {
   AddToConfigAction,
+  AttributedCloneGroup,
   AttributedCloneGroupFinding,
   AuditOutput,
   BoundaryViolationFinding,
   CheckOutput,
   CheckSummary,
   CircularDependencyFinding,
+  CloneFamily,
   CloneFamilyAction,
   CloneFamilyFinding,
+  CloneGroup,
   CloneGroupAction,
   CloneGroupFinding,
   CloneInstance,
@@ -32,6 +35,7 @@ export type {
   DuplicateLocation,
   DupesOutput,
   DupesReportPayload,
+  DuplicationReport,
   DuplicationStats,
   EmptyCatalogGroupFinding,
   EntryPoints,
@@ -66,12 +70,15 @@ export type {
 // pre-#384-item-1 bare type names. The wire shape is byte-identical: each
 // wrapper flattens the bare finding's fields and adds `actions` plus
 // optional `introduced`. New code should prefer the `*Finding` names above.
+//
+// Dupes wrappers (`CloneGroup`, `CloneFamily`, `AttributedCloneGroup`,
+// `DuplicationReport`) are aliased upstream in the generated
+// `output-contract.d.ts` via `editors/vscode/scripts/codegen-types.mjs`'s
+// `FLATTEN_DEDUPED_ALIASES` table, so they're re-exported from the
+// `export type {...}` block above rather than redeclared here.
 import type {
-  AttributedCloneGroupFinding,
   BoundaryViolationFinding,
   CircularDependencyFinding,
-  CloneFamilyFinding,
-  CloneGroupFinding,
   DuplicateExportFinding,
   EmptyCatalogGroupFinding,
   MisconfiguredDependencyOverrideFinding,
@@ -91,11 +98,8 @@ import type {
   UnusedFileFinding,
   UnusedOptionalDependencyFinding,
 } from "./generated/output-contract.js";
-export type AttributedCloneGroup = AttributedCloneGroupFinding;
 export type BoundaryViolation = BoundaryViolationFinding;
 export type CircularDependency = CircularDependencyFinding;
-export type CloneFamily = CloneFamilyFinding;
-export type CloneGroup = CloneGroupFinding;
 export type DuplicateExport = DuplicateExportFinding;
 export type EmptyCatalogGroup = EmptyCatalogGroupFinding;
 export type MisconfiguredDependencyOverride =
