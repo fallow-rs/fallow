@@ -322,10 +322,12 @@ pub struct DupesReportPayload {
     /// All detected clone groups, each wrapped with typed actions.
     pub clone_groups: Vec<CloneGroupFinding>,
     /// Clone families, each wrapped with typed actions. Inner `groups`
-    /// inside each family stay as bare [`CloneGroup`] entries because
-    /// `clone_families[].groups[]` and top-level `clone_groups[]` are
-    /// kept in sync; consumers that want the per-inner-group actions read
-    /// them off the top-level array.
+    /// inside each [`CloneFamilyFinding`] are themselves wrapped as
+    /// [`CloneGroupFinding`] entries carrying their own `actions[]` (and
+    /// optional audit-mode `introduced` flag), so JSON-Schema strict
+    /// consumers and TS consumers reading `clone_families[].groups[]` see
+    /// the same shape as the top-level `clone_groups[]` array (preserves
+    /// the issue #393 regression contract).
     pub clone_families: Vec<CloneFamilyFinding>,
     /// Mirrored directory pairs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

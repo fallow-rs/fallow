@@ -46,14 +46,16 @@ MCP server exposing fallow analysis as tools for AI agents. Stdio transport, wra
 - Exit code 1: treated as success (issues found, not an error)
 - Pre-spawn validation rejections (empty required field, out-of-range line, invalid mode, unknown issue type) return the same envelope with `exit_code: 0` via `validation_error_body` in `tools/mod.rs`. Clients should branch on `error: true`, not on `exit_code`, since `0` can mean either "never spawned" (validation) or "spawned and succeeded" (normal result).
 
-## Actions injection
-All JSON output includes structured `actions` arrays on every finding:
-- Dead-code issues: fix action + suppress action (via `inject_actions` in `report/json.rs`)
-- Health findings: `refactor-function` + suppress (via `inject_health_actions`)
-- Health targets: `apply-refactoring` + suppress when evidence exists
-- Dupes families: `extract-shared` + suggestions + suppress (via `inject_dupes_actions`)
-- Dupes groups: `extract-shared` + suppress
-- Audit: inherits actions from all three sub-analyses
+## Actions
+All JSON output includes structured `actions` arrays on every finding, all derived from typed Rust wrappers (no JSON post-pass injection remains):
+- Dead-code issues: `fix` + `suppress` action (typed wrappers in `crates/types/src/output_dead_code.rs::*Finding`)
+- Catalog / dep-override issues: same wrapper pattern, with per-instance `auto_fixable` flips computed inside each wrapper's `with_actions` constructor
+- Health findings (`findings[]`): `refactor-function` / `add-tests` / `increase-coverage` + suppress (typed via `crates/cli/src/health_types/finding.rs::HealthFinding`)
+- Health hotspots / targets: `refactor-file` / `add-tests` / `apply-refactoring` + ownership-derived variants (typed via `HotspotFinding` / `RefactoringTargetFinding`)
+- Dupes families: `extract-shared` + per-suggestion `apply-suggestion` + `suppress-line` (typed via `crates/cli/src/output_dupes.rs::CloneFamilyFinding`)
+- Dupes groups (top-level and per-bucket `--group-by`): `extract-shared` + `suppress-line` (typed via `CloneGroupFinding` / `AttributedCloneGroupFinding`)
+- Coverage analyze: typed envelope via `crates/cli/src/output_envelope.rs::CoverageAnalyzeOutput`; no per-finding `actions` (runtime coverage findings carry their own typed action enum)
+- Audit: inherits actions from all sub-analyses verbatim
 
 All params structs derive `Default` for ergonomic test construction except those with required non-default fields: `CheckChangedParams` (`since`), `CheckRuntimeCoverageParams` (`coverage`), `TraceExportParams` (`file`, `export_name`), `TraceFileParams` (`file`), `TraceDependencyParams` (`package_name`), and `TraceCloneParams` (`file`, `line`). Trace param tests build struct literals directly; the first two use the helpers `check_changed("main")` and `check_runtime_coverage("./coverage")`.
 
