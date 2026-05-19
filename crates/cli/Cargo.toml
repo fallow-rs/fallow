@@ -82,7 +82,7 @@ ureq = { workspace = true }
 url = "2"
 http = "1"
 xxhash-rust = { workspace = true }
-similar = { version = "2", default-features = false, features = ["text"] }
+similar = { version = "3", default-features = false, features = ["text"] }
 
 # Schema-emit support: pulled in only when the `schema-emit` feature is active
 # (via the dedicated bin target above). Keeps schemars out of the default
