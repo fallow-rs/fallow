@@ -396,10 +396,13 @@ variables:
         fi
       fi
 
-      # ── Pre-compute unified diff for line-level hot-path scoping ───
+      # ── Pre-compute unified diff for line-level finding scoping ────
       # When the user did not supply $FALLOW_DIFF_FILE, write a
-      # fallow-mr.diff alongside the analysis output so the runtime-
-      # coverage filter can do line-overlap matching against hot paths.
+      # fallow-mr.diff alongside the analysis output so fallow can
+      # narrow every finding (dead-code, complexity, duplication,
+      # boundary violations, runtime-coverage hot paths) to lines
+      # inside the diff. Project-level findings (unused deps, catalog,
+      # override) bypass the filter and pass through unchanged.
       # GitLab CI runs each script line in the same shell, so an exported
       # variable is visible to the analysis below; for the comment /
       # review jobs (separate jobs in the pipeline) we rely on the
@@ -412,7 +415,7 @@ variables:
           export FALLOW_DIFF_FILE="$PWD/fallow-mr.diff"
         else
           rm -f fallow-mr.diff
-          echo "fallow: warning [shallow-clone]: could not produce unified diff for line-level hot-path scoping. Set GIT_DEPTH: \"0\" in the pipeline to enable line-precision."
+          echo "fallow: warning [shallow-clone]: could not produce unified diff for line-level finding scoping. Set GIT_DEPTH: \"0\" in the pipeline to enable line-precision."
         fi
       fi
 

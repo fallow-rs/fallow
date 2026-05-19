@@ -108,20 +108,6 @@ impl DiffIndex {
         self.added_line_count
     }
 
-    /// True when the diff carries at least one file header. A diff that
-    /// only deletes files (`+++ /dev/null` everywhere) returns `false` even
-    /// though it parsed successfully; callers treating it as "no scope"
-    /// degrade gracefully to a no-op filter rather than silently dropping
-    /// every finding.
-    #[must_use]
-    #[allow(
-        dead_code,
-        reason = "kept on the public API for callers that want a quick is-empty probe before iterating; the runtime filter uses `added_line_count` for the same purpose. Test code exercises this method, so the dead_code lint may or may not fire depending on the build config."
-    )]
-    pub fn has_touched_files(&self) -> bool {
-        !self.touched_files.is_empty()
-    }
-
     /// True when `path` (repo-root-relative, forward-slashed) appears as a
     /// `+++ b/<path>` header in the diff. Used by the finding-level filter
     /// to short-circuit before line-range checks: a file not in the diff
@@ -236,16 +222,11 @@ impl DiffSource {
 }
 
 /// Result of [`load_diff_index_for_findings`]. Carries the parsed
-/// `DiffIndex` plus the source breadcrumb so downstream code that wants
-/// to emit additional diagnostics can attribute them correctly.
+/// `DiffIndex`; the source breadcrumb is consumed by the function during
+/// load to compose warning messages and is not retained beyond that.
 #[derive(Debug)]
 pub struct LoadedDiff {
     pub index: DiffIndex,
-    #[allow(
-        dead_code,
-        reason = "kept as a forward-looking breadcrumb so future code emitting per-finding diagnostics can attribute them to the diff source the user actually supplied; not read by any current caller"
-    )]
-    pub source: DiffSource,
 }
 
 /// Resolve a diff source from CLI input.
@@ -322,7 +303,7 @@ pub fn resolve_diff_source(
 /// Stdin is consumed exactly once. The first call drains it; downstream
 /// callers must reuse the returned `LoadedDiff` rather than re-loading.
 #[must_use]
-pub fn load_diff_index_for_findings(source: DiffSource, quiet: bool) -> Option<LoadedDiff> {
+pub fn load_diff_index_for_findings(source: &DiffSource, quiet: bool) -> Option<LoadedDiff> {
     match source {
         DiffSource::Stdin => {
             let mut buf = String::new();
@@ -333,26 +314,26 @@ pub fn load_diff_index_for_findings(source: DiffSource, quiet: bool) -> Option<L
                         eprintln!(
                             "fallow: warning [diff-file]: --diff-stdin parsed \
                              0 added lines; no findings will pass the diff filter. \
-                             Did you pipe a non-unified diff or an empty stream?"
+                             Did you pipe a non-unified diff or an empty stream? \
+                             (Pure-rename, binary-only, and deletion-only diffs \
+                             also produce empty indices.)"
                         );
                     }
-                    Some(LoadedDiff {
-                        index,
-                        source: DiffSource::Stdin,
-                    })
+                    Some(LoadedDiff { index })
                 }
                 Err(err) => {
                     if !quiet {
                         eprintln!(
                             "fallow: warning [diff-file]: could not read stdin: {err} \
-                             (line-level filtering disabled)"
+                             (line-level filtering disabled; rerun with \
+                             --diff-file PATH to point at a file on disk)"
                         );
                     }
                     None
                 }
             }
         }
-        DiffSource::Flag(ref path) | DiffSource::EnvVar(ref path) => {
+        DiffSource::Flag(path) | DiffSource::EnvVar(path) => {
             let label = source.label();
             if let Ok(meta) = std::fs::metadata(path)
                 && meta.len() > MAX_DIFF_BYTES
@@ -374,10 +355,11 @@ pub fn load_diff_index_for_findings(source: DiffSource, quiet: bool) -> Option<L
                             "fallow: warning [diff-file]: {label} parsed 0 added \
                              lines; no findings will pass the diff filter. \
                              Verify the file is a unified diff (look for \
-                             `+++ b/<path>` headers)."
+                             `+++ b/<path>` headers). Pure-rename, binary-only, \
+                             and deletion-only diffs also produce empty indices."
                         );
                     }
-                    Some(LoadedDiff { index, source })
+                    Some(LoadedDiff { index })
                 }
                 Err(err) => {
                     if !quiet {
@@ -414,7 +396,7 @@ static SHARED_DIFF: OnceLock<Option<LoadedDiff>> = OnceLock::new();
 /// Pass `None` to lock the cache to "no diff" without reading anything,
 /// so a subsequent errant load attempt cannot accidentally populate the
 /// cache later.
-pub fn init_shared_diff(source: Option<DiffSource>, quiet: bool) -> Option<&'static DiffIndex> {
+pub fn init_shared_diff(source: Option<&DiffSource>, quiet: bool) -> Option<&'static DiffIndex> {
     let loaded = source.and_then(|src| load_diff_index_for_findings(src, quiet));
     let _ = SHARED_DIFF.set(loaded);
     shared_diff_index()
@@ -779,7 +761,6 @@ diff --git a/b b/b
 ";
         let index = DiffIndex::from_unified_diff(diff);
         assert_eq!(index.added_line_count(), 3);
-        assert!(index.has_touched_files());
         assert!(index.touches_file("a"));
         assert!(index.touches_file("b"));
         assert!(!index.touches_file("c"));
@@ -789,7 +770,6 @@ diff --git a/b b/b
     fn empty_diff_has_zero_added_lines_and_no_touched_files() {
         let index = DiffIndex::from_unified_diff("");
         assert_eq!(index.added_line_count(), 0);
-        assert!(!index.has_touched_files());
         assert!(!index.touches_file("any/path"));
     }
 
@@ -810,7 +790,7 @@ deleted file mode 100644
 ";
         let index = DiffIndex::from_unified_diff(diff);
         assert_eq!(index.added_line_count(), 0);
-        assert!(!index.has_touched_files());
+        assert!(!index.touches_file("dead.ts"));
         assert!(!index.range_overlaps_added("dead.ts", 1, 3));
     }
 

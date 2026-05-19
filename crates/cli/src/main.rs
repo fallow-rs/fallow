@@ -113,8 +113,11 @@ struct Cli {
     /// the precedence is visible in CI logs.
     ///
     /// Examples:
+    ///
     ///   fallow audit --diff-file pr.diff
+    ///
     ///   gh pr diff | fallow audit --diff-file -
+    ///
     ///   git diff main...HEAD | fallow check --diff-stdin
     #[arg(long = "diff-file", value_name = "PATH", global = true)]
     diff_file: Option<PathBuf>,
@@ -1919,10 +1922,23 @@ fn main() -> ExitCode {
     if diff_source.is_some() && cli.changed_since.is_some() && !quiet {
         eprintln!(
             "fallow: --diff-file precedes --changed-since for line-level \
-             filtering; --changed-since still scopes file discovery"
+             filtering; --changed-since still scopes file discovery. Drop \
+             one of them to disable this combination."
         );
     }
-    let _ = report::ci::diff_filter::init_shared_diff(diff_source, quiet);
+    // The empty-parse warning inside `init_shared_diff` is gated on `quiet`,
+    // but a misconfigured `--diff-file` (typo, wrong path, non-unified file)
+    // silently produces a zero-finding run that looks identical to a clean
+    // pass. Always pass `false` for the quiet gate when the source is
+    // explicitly set so CI users see the warning even with `--quiet`/`--ci`;
+    // env-var fallback paths respect the user's quiet preference so a
+    // `FALLOW_DIFF_FILE` set elsewhere does not spam logs.
+    let suppress_warnings = quiet
+        && matches!(
+            diff_source,
+            Some(report::ci::diff_filter::DiffSource::EnvVar(_)) | None
+        );
+    let _ = report::ci::diff_filter::init_shared_diff(diff_source.as_ref(), suppress_warnings);
 
     // Validate --ci/--fail-on-issues/--sarif-file are not used with irrelevant commands
     if (cli.ci || cli.fail_on_issues || cli.sarif_file.is_some())
