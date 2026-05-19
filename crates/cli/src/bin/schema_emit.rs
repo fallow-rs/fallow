@@ -42,18 +42,22 @@ use fallow_cli::health_types::{
     TargetThresholds, TrendCount, UntestedExport, UntestedExportFinding, UntestedFile,
     UntestedFileFinding, VitalSigns, VitalSignsCounts,
 };
+use fallow_cli::output_dupes::{
+    AttributedCloneGroupFinding, CloneFamilyAction, CloneFamilyActionType, CloneFamilyFinding,
+    CloneGroupAction, CloneGroupActionType, CloneGroupFinding, DupesReportPayload,
+};
 use fallow_cli::output_envelope::{
     AuditCommand, AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
     BoundariesListing, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CodeClimateIssue,
     CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation, CodeClimateOutput,
-    CodeClimateSeverity, CombinedOutput, CoverageSetupFileToEdit, CoverageSetupFramework,
-    CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
-    CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion, CoverageSetupSnippet, DupesOutput,
-    ExplainOutput, FallowOutput, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
-    GitLabReviewPosition, GitLabReviewPositionType, GroupByMode, HealthOutput,
-    ListBoundariesOutput, ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent,
-    ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewProvider,
-    ReviewReconcileOutput, ReviewReconcileSchema,
+    CodeClimateSeverity, CombinedOutput, CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion,
+    CoverageSetupFileToEdit, CoverageSetupFramework, CoverageSetupMember, CoverageSetupOutput,
+    CoverageSetupPackageManager, CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion,
+    CoverageSetupSnippet, DupesOutput, ExplainOutput, FallowOutput, GitHubReviewComment,
+    GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition, GitLabReviewPositionType,
+    GroupByMode, HealthOutput, ListBoundariesOutput, ReviewCheckConclusion, ReviewComment,
+    ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema,
+    ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema,
 };
 use fallow_cli::report::dupes_grouping::{
     AttributedCloneGroup, AttributedInstance, DuplicationGroup,
@@ -353,6 +357,27 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "AttributedCloneGroup",
         "AttributedInstance",
         "DuplicationGroup",
+        // crates/cli/src/output_dupes.rs - typed duplication wrappers
+        // introduced in #409 (PR C of the #384 ladder). Each wraps the
+        // matching bare finding via `#[serde(flatten)]` and carries the
+        // typed `actions[]` array (plus optional `introduced` audit flag
+        // on the top-level CloneGroupFinding) natively, retiring the
+        // legacy `inject_dupes_actions` post-pass.
+        "AttributedCloneGroupFinding",
+        "CloneFamilyAction",
+        "CloneFamilyActionType",
+        "CloneFamilyFinding",
+        "CloneGroupAction",
+        "CloneGroupActionType",
+        "CloneGroupFinding",
+        "DupesReportPayload",
+        // crates/cli/src/output_envelope.rs - typed CoverageAnalyzeOutput
+        // root envelope introduced in #410 (PR D of the #384 ladder).
+        // Replaces the hand-built `serde_json::json!` macro in
+        // `crates/cli/src/coverage/analyze.rs::print_runtime_json` and
+        // joins `FallowOutput` as a sibling object variant.
+        "CoverageAnalyzeOutput",
+        "CoverageAnalyzeSchemaVersion",
     ]
 }
 
@@ -372,57 +397,19 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
 /// pre-Phase-8 escape hatch that documented some finding types as having
 /// optional `actions` while emitting them; it is retired.
 fn finding_definition_names() -> &'static [&'static str] {
-    // Each entry MUST appear in `actions_for_issue_type` (dead-code findings)
-    // or in the duplication post-pass (`inject_dupes_actions`) in
-    // `crates/cli/src/report/json.rs`. `StaleSuppression` is intentionally
-    // excluded: the JSON layer does not inject actions on stale_suppressions
-    // today, and the committed schema matches that.
-    &[
-        // Dead-code findings (actions[] -> IssueAction, with `introduced`)
-        // `BoundaryViolation`, `CircularDependency`, `PrivateTypeLeak`,
-        // `UnresolvedImport`, `UnusedFile`, `UnusedExport`, `UnusedMember`,
-        // `UnusedDependency`, `UnlistedDependency`, `TypeOnlyDependency`,
-        // and `TestOnlyDependency` have been migrated to typed `*Finding`
-        // envelope wrappers in `crates/types/src/output_dead_code.rs` and
-        // are no longer post-pass-injected; the wrappers carry the typed
-        // `actions` array and the optional `introduced` audit breadcrumb
-        // natively via schemars. `UnusedExport`, `UnusedMember`, and
-        // `UnusedDependency` each back multiple wrappers (one per
-        // issue-key view) so the schema documents the per-key fix
-        // description / suppress comment.
-        //
-        // `DuplicateExport`, `UnusedCatalogEntry`, `EmptyCatalogGroup`,
-        // `UnresolvedCatalogReference`, `UnusedDependencyOverride`, and
-        // `MisconfiguredDependencyOverride` have ALSO been migrated to
-        // typed `*Finding` wrappers in
-        // `crates/types/src/output_dead_code.rs`; their bare inner-type
-        // schemas stay in the registry (`subschema_for::<...>` below) so
-        // external consumers can read the unwrapped shape, but the
-        // wrappers ship `actions[]` and `introduced` natively and the
-        // bare types no longer carry the augmented fields.
-        // Health findings (actions[] -> per-finding action wrapper).
-        // `HealthFinding`, `HotspotFinding`, and `RefactoringTargetFinding`
-        // have all been migrated to typed wrappers in
-        // `crates/cli/src/health_types/finding.rs` that flatten their
-        // respective inner payloads (`ComplexityViolation`, `HotspotEntry`,
-        // `RefactoringTarget`) and carry the typed `actions` array natively
-        // via schemars. Only `HealthFinding` additionally carries
-        // `introduced` because hotspot ranking and refactoring targets are
-        // not produced by the audit base-snapshot classifier.
-        // Duplication findings (`clone_groups[]` and `clone_families[]`).
-        // `inject_dupes_actions` in `crates/cli/src/report/json.rs` walks
-        // both arrays and appends an `actions` field to every item; the
-        // Rust source structs (`CloneGroup`, `CloneFamily` in
-        // `crates/core/src/duplicates/types.rs`) do not carry the field.
-        // `CloneGroup` carries the audit `introduced` flag because
-        // `fallow audit` attributes clone groups; `CloneFamily` does not.
-        "CloneFamily",
-        "CloneGroup",
-        // Per-group attribution wrapper (`fallow dupes --group-by`). Same
-        // augmentation as `CloneGroup` because `inject_dupes_actions` walks
-        // the same `clone_groups` field name on every level of nesting.
-        "AttributedCloneGroup",
-    ]
+    // Every finding family has now been migrated to typed `*Finding` wrappers
+    // (in `crates/types/src/output_dead_code.rs`, `crates/cli/src/health_types/finding.rs`,
+    // or `crates/cli/src/output_dupes.rs`); the wrappers flatten the bare
+    // finding via `#[serde(flatten)]` and carry the typed `actions[]` (plus
+    // optional `introduced`) array natively via schemars. No definition
+    // requires the legacy `augment_finding_definition` post-graft anymore.
+    //
+    // Kept as a function returning an empty slice (rather than a const) so
+    // adding a future hand-augmented finding requires the same one-liner
+    // edit, and the in-test scaffolding (`augment_finding_definition`,
+    // `FindingAugmentation`, `finding_augmentation`) stays in place ready
+    // for the rare case it is needed again.
+    &[]
 }
 
 /// Per-finding override for `augment_finding_definition`.
@@ -448,26 +435,17 @@ const DEFAULT_FINDING_AUGMENTATION: FindingAugmentation = FindingAugmentation {
     include_introduced: true,
 };
 
-/// Pick the augmentation for a specific finding. Today only the
-/// duplication wrappers go through the augmentation pipeline; every
-/// health finding has migrated to a typed wrapper that emits `actions`
-/// natively.
-fn finding_augmentation(name: &str) -> FindingAugmentation {
-    match name {
-        "CloneFamily" => FindingAugmentation {
-            actions_item_ref: "#/definitions/CloneFamilyAction",
-            include_introduced: false,
-        },
-        "CloneGroup" => FindingAugmentation {
-            actions_item_ref: "#/definitions/CloneGroupAction",
-            include_introduced: true,
-        },
-        "AttributedCloneGroup" => FindingAugmentation {
-            actions_item_ref: "#/definitions/CloneGroupAction",
-            include_introduced: false,
-        },
-        _ => DEFAULT_FINDING_AUGMENTATION,
-    }
+/// Pick the augmentation for a specific finding. Every finding family has
+/// migrated to typed `*Finding` wrappers (most recently the duplication
+/// family in #409 and the standalone coverage envelope in #410); no
+/// definition currently routes through here. The function stays in place
+/// so a future hand-augmented finding can be wired with a single arm.
+#[allow(
+    dead_code,
+    reason = "no finding currently routes through augmentation; kept so a future hand-augmented finding can wire in via a single match arm"
+)]
+fn finding_augmentation(_name: &str) -> FindingAugmentation {
+    DEFAULT_FINDING_AUGMENTATION
 }
 
 /// Build derived schemas for every in-scope type using one shared generator.
@@ -537,6 +515,20 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<AttributedCloneGroup>();
     let _ = generator.subschema_for::<DuplicationGroup>();
     let _ = generator.subschema_for::<DuplicationStats>();
+
+    // Typed duplication wrappers (crates/cli/src/output_dupes.rs).
+    // Each wraps a bare clone finding via `#[serde(flatten)]` and carries
+    // a typed `actions[]` array natively, retiring the legacy
+    // `inject_dupes_actions` post-pass in `crates/cli/src/report/json.rs`
+    // (#409 / PR C of the #384 ladder).
+    let _ = generator.subschema_for::<CloneGroupFinding>();
+    let _ = generator.subschema_for::<CloneFamilyFinding>();
+    let _ = generator.subschema_for::<AttributedCloneGroupFinding>();
+    let _ = generator.subschema_for::<CloneGroupAction>();
+    let _ = generator.subschema_for::<CloneGroupActionType>();
+    let _ = generator.subschema_for::<CloneFamilyAction>();
+    let _ = generator.subschema_for::<CloneFamilyActionType>();
+    let _ = generator.subschema_for::<DupesReportPayload>();
 
     // JSON-output augmentation types from `crates/types/src/output.rs`.
     let _ = generator.subschema_for::<IssueAction>();
@@ -669,6 +661,8 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<CoverageSetupFramework>();
     let _ = generator.subschema_for::<CoverageSetupPackageManager>();
     let _ = generator.subschema_for::<CoverageSetupRuntimeTarget>();
+    let _ = generator.subschema_for::<CoverageAnalyzeOutput>();
+    let _ = generator.subschema_for::<CoverageAnalyzeSchemaVersion>();
     let _ = generator.subschema_for::<CombinedOutput>();
     let _ = generator.subschema_for::<CheckOutput>();
     let _ = generator.subschema_for::<CheckGroupedOutput>();
@@ -797,12 +791,7 @@ fn merge_with_committed(derived: &Map<String, Value>) -> Result<Value, String> {
 /// corresponding `definitions[<name>]` block must also be removed (or
 /// remain only as a transitive helper) so the test
 /// `every_registered_name_resolves_to_a_derived_schema` still passes.
-const HAND_MAINTAINED_ROOT_ENVELOPES: &[&str] = &[
-    // `fallow coverage analyze --format json`. Pending #384 item 3c
-    // (typed CoverageAnalyzeOutput); the hand-maintained definition lives
-    // in `docs/output-schema.json` until then.
-    "CoverageAnalyzeOutput",
-];
+const HAND_MAINTAINED_ROOT_ENVELOPES: &[&str] = &[];
 
 /// Drive the document-root `oneOf` from the typed `FallowOutput` enum plus
 /// the two non-object branches (`CodeClimateOutput`, hand-maintained
@@ -835,21 +824,19 @@ fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
             "Schemas for the JSON output of fallow commands. To identify which \
              envelope you have, check for the unique top-level field: \
              `summary.total_issues` (check), `health_score` (health), \
-             `clone_groups` (dupes), `boundaries` (list --boundaries), \
-             `command: \"audit\"` (audit), `body` plus `comments` \
-             (review-github / review-gitlab), \
+             `clone_groups` (dupes), `runtime_coverage` (coverage analyze), \
+             `boundaries` (list --boundaries), `command: \"audit\"` (audit), \
+             `body` plus `comments` (review-github / review-gitlab), \
              `schema: \"fallow-review-reconcile/v1\"` (ci reconcile-review), \
              `framework_detected` plus `members` (coverage setup), `id` plus \
              `how_to_fix` (explain), `check`+`dupes`+`health` keys together \
              (bare combined invocation). `HealthOutput` and `DupesOutput` \
-             flatten their body (`HealthReport`/`DuplicationReport`) into \
+             flatten their body (`HealthReport` / `DupesReportPayload`) into \
              top-level fields, so the discriminator field is from the body \
              shape itself, not a wrapper key. Every object-shaped envelope \
              is a variant of `FallowOutput`; `CodeClimateOutput` is a bare \
              JSON array (per the Code Climate / GitLab Code Quality spec) \
-             and stays a sibling root branch; `CoverageAnalyzeOutput` is \
-             still hand-maintained pending the typed migration in issue \
-             #384 item 3."
+             and stays a sibling root branch."
                 .to_string(),
         ),
     );
@@ -1527,27 +1514,7 @@ mod drift_tests {
         // hand-maintained pending other #384 items. Each entry MUST link to
         // the issue item that will retire it; this is not a permanent
         // escape hatch.
-        const HAND_MAINTAINED_ALLOW_LIST: &[(&str, &str)] = &[
-            // Action types referenced by `augment_finding_definition` for
-            // duplication findings. Will be retired by #384 item 1 (typed
-            // action wrappers for every finding, same shape as
-            // `HotspotAction` / `RefactoringTargetAction`).
-            (
-                "CloneFamilyAction",
-                "retired by #384 item 1 (typed action wrappers)",
-            ),
-            (
-                "CloneGroupAction",
-                "retired by #384 item 1 (typed action wrappers)",
-            ),
-            // Envelope for `fallow coverage analyze --format json`, still
-            // built via `serde_json::json!` in `crates/cli/src/coverage/`.
-            // Will be retired by #384 item 3 follow-up (typed envelope).
-            (
-                "CoverageAnalyzeOutput",
-                "retired by #384 item 3 (typed envelope builders)",
-            ),
-        ];
+        const HAND_MAINTAINED_ALLOW_LIST: &[(&str, &str)] = &[];
         let allow_list: rustc_hash::FxHashSet<&'static str> = HAND_MAINTAINED_ALLOW_LIST
             .iter()
             .map(|(name, _)| *name)

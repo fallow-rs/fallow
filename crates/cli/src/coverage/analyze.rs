@@ -968,19 +968,32 @@ fn print_runtime_json(
     elapsed: std::time::Duration,
     explain: bool,
 ) -> ExitCode {
-    let runtime = match serde_json::to_value(report) {
+    use crate::output_envelope::{CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion};
+    use fallow_types::envelope::{ElapsedMs, ToolVersion};
+
+    // Schema-derived constant: the schema-version enum has a single variant
+    // serialized as `"1"`; the legacy `RUNTIME_COVERAGE_SCHEMA_VERSION`
+    // constant is retained for the cloud client surface but the wire-shape
+    // source of truth is now the typed enum.
+    debug_assert_eq!(
+        RUNTIME_COVERAGE_SCHEMA_VERSION, "1",
+        "the schema-version enum has one variant serialized as \"1\"; bump CoverageAnalyzeSchemaVersion if the constant moves"
+    );
+
+    let envelope = CoverageAnalyzeOutput {
+        schema_version: CoverageAnalyzeSchemaVersion::V1,
+        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
+        runtime_coverage: report.clone(),
+        meta: None,
+    };
+    let mut output = match serde_json::to_value(&envelope) {
         Ok(value) => value,
         Err(err) => {
             eprintln!("Error: failed to serialize runtime coverage report: {err}");
             return ExitCode::from(2);
         }
     };
-    let mut output = serde_json::json!({
-        "schema_version": RUNTIME_COVERAGE_SCHEMA_VERSION,
-        "version": env!("CARGO_PKG_VERSION"),
-        "elapsed_ms": elapsed.as_millis(),
-        "runtime_coverage": runtime,
-    });
     if explain && let Some(map) = output.as_object_mut() {
         map.insert("_meta".to_owned(), crate::explain::coverage_analyze_meta());
     }

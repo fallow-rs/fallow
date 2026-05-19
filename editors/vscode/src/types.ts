@@ -15,20 +15,23 @@
 
 export type {
   AddToConfigAction,
+  AttributedCloneGroupFinding,
   AuditOutput,
   BoundaryViolationFinding,
   CheckOutput,
   CheckSummary,
   CircularDependencyFinding,
-  CloneFamily,
   CloneFamilyAction,
-  CloneGroup,
+  CloneFamilyFinding,
   CloneGroupAction,
+  CloneGroupFinding,
   CloneInstance,
   CombinedOutput,
+  CoverageAnalyzeOutput,
   DuplicateExportFinding,
   DuplicateLocation,
   DupesOutput,
+  DupesReportPayload,
   DuplicationStats,
   EmptyCatalogGroupFinding,
   EntryPoints,
@@ -64,8 +67,11 @@ export type {
 // wrapper flattens the bare finding's fields and adds `actions` plus
 // optional `introduced`. New code should prefer the `*Finding` names above.
 import type {
+  AttributedCloneGroupFinding,
   BoundaryViolationFinding,
   CircularDependencyFinding,
+  CloneFamilyFinding,
+  CloneGroupFinding,
   DuplicateExportFinding,
   EmptyCatalogGroupFinding,
   MisconfiguredDependencyOverrideFinding,
@@ -85,8 +91,11 @@ import type {
   UnusedFileFinding,
   UnusedOptionalDependencyFinding,
 } from "./generated/output-contract.js";
+export type AttributedCloneGroup = AttributedCloneGroupFinding;
 export type BoundaryViolation = BoundaryViolationFinding;
 export type CircularDependency = CircularDependencyFinding;
+export type CloneFamily = CloneFamilyFinding;
+export type CloneGroup = CloneGroupFinding;
 export type DuplicateExport = DuplicateExportFinding;
 export type EmptyCatalogGroup = EmptyCatalogGroupFinding;
 export type MisconfiguredDependencyOverride =
@@ -109,14 +118,17 @@ export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding;
 
 export type { CheckOutput as FallowCheckResult } from "./generated/output-contract.js";
 // The VS Code extension reads dupes only via the combined invocation
-// (`fallow --format json`), where `combined.dupes` is the bare
-// `DuplicationReport` body, NOT the full `DupesOutput` envelope with
-// schema_version / version / elapsed_ms. Aliasing `FallowDupesResult`
-// to `DuplicationReport` keeps every downstream consumer's existing
-// usage (clone_groups, clone_families, stats, mirrored_directories)
-// honest. If a future VS Code feature calls `fallow dupes` standalone,
-// switch its return type to the full `DupesOutput` instead.
-export type { DuplicationReport as FallowDupesResult } from "./generated/output-contract.js";
+// (`fallow --format json`), where `combined.dupes` is the typed
+// `DupesReportPayload` body (introduced in #409), NOT the full
+// `DupesOutput` envelope with schema_version / version / elapsed_ms.
+// Aliasing `FallowDupesResult` to `DupesReportPayload` keeps every
+// downstream consumer's existing usage (clone_groups, clone_families,
+// stats, mirrored_directories) honest; the inner `clone_groups[]` and
+// `clone_families[]` items are now `CloneGroupFinding` /
+// `CloneFamilyFinding` (each carrying typed actions[]). If a future VS
+// Code feature calls `fallow dupes` standalone, switch its return type
+// to the full `DupesOutput` instead.
+export type { DupesReportPayload as FallowDupesResult } from "./generated/output-contract.js";
 export type { CombinedOutput as FallowCombinedResult } from "./generated/output-contract.js";
 
 export type { DuplicationMode, IssueTypeConfig, TraceLevel } from "./settings.js";

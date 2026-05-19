@@ -35,7 +35,6 @@
 //! schema-source-of-truth only (their wire is still hand-built via
 //! `serde_json::json!`); the drift gate keeps them honest.
 
-use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 use fallow_types::envelope::{
     BaselineDeltas, BaselineMatch, CheckSummary, ElapsedMs, EntryPoints, Meta, RegressionResult,
@@ -44,7 +43,8 @@ use fallow_types::envelope::{
 use serde::Serialize;
 
 use crate::audit::{AuditAttribution, AuditSummary, AuditVerdict};
-use crate::health_types::{HealthGroup, HealthReport};
+use crate::health_types::{HealthGroup, HealthReport, RuntimeCoverageReport};
+use crate::output_dupes::DupesReportPayload;
 use crate::report::dupes_grouping::DuplicationGroup;
 
 /// Envelope emitted by `fallow coverage setup --json`. Deterministic
@@ -215,10 +215,12 @@ pub struct CoverageSetupSnippet {
 /// new-vs-inherited attribution, and full sub-results.
 ///
 /// Like [`CombinedOutput`], `audit`'s `duplication` and `complexity`
-/// sub-keys hold bare body types (`DuplicationReport` / `HealthReport`)
-/// rather than the per-command envelope shapes; `dead_code` is the full
+/// sub-keys hold body shapes rather than per-command envelopes:
+/// `duplication` is [`DupesReportPayload`] (the typed wrapper payload
+/// emitted via `crate::output_dupes::DupesReportPayload::from_report`),
+/// `complexity` is [`HealthReport`]. `dead_code` is the full
 /// [`CheckOutput`] envelope. The committed schema points `duplication`
-/// at `#/definitions/DuplicationReport` and `complexity` at
+/// at `#/definitions/DupesReportPayload` and `complexity` at
 /// `#/definitions/HealthReport` so the documented shape matches the
 /// wire; the `committed_property_refs_match_derived_property_refs`
 /// drift test enforces the alignment.
@@ -270,9 +272,12 @@ pub struct AuditOutput {
     pub dead_code: Option<CheckOutput>,
     /// Full duplication results (omitted if no changed files). Clone groups
     /// include introduced: true/false when audit can compare against the base
-    /// ref.
+    /// ref. Carries typed [`crate::output_dupes::CloneGroupFinding`] and
+    /// [`crate::output_dupes::CloneFamilyFinding`] wrappers (matches what
+    /// `crates/cli/src/audit.rs` emits via
+    /// `crate::output_dupes::DupesReportPayload::from_report`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duplication: Option<DuplicationReport>,
+    pub duplication: Option<DupesReportPayload>,
     /// Full complexity results (omitted if no changed files). Findings include
     /// introduced: true/false when audit can compare against the base ref.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -296,11 +301,12 @@ pub enum AuditCommand {
 /// Each sub-result is `Option<...>` so `--only` / `--skip` can suppress a
 /// pass without leaving an empty key on the wire. The `check` sub-result is
 /// the full [`CheckOutput`] envelope (including its own `schema_version` /
-/// `version` / `elapsed_ms`), but `dupes` and `health` are the bare body
-/// types: the runtime emit calls `serde_json::to_value(&report)` on
-/// `DuplicationReport` / `HealthReport` directly rather than wrapping them
-/// in their per-command envelope. The committed schema points `dupes` at
-/// `#/definitions/DuplicationReport` and `health` at
+/// `version` / `elapsed_ms`), `dupes` is the typed [`DupesReportPayload`]
+/// emitted via `crate::output_dupes::DupesReportPayload::from_report`, and
+/// `health` is the bare [`HealthReport`] body: the runtime emit calls
+/// `serde_json::to_value(&report)` directly rather than wrapping it in the
+/// per-command envelope. The committed schema points `dupes` at
+/// `#/definitions/DupesReportPayload` and `health` at
 /// `#/definitions/HealthReport` so the documented shape matches the
 /// wire; the `committed_property_refs_match_derived_property_refs`
 /// drift test enforces the alignment.
@@ -320,22 +326,77 @@ pub struct CombinedOutput {
     /// Dead-code analysis sub-envelope. Absent when `--skip check`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check: Option<CheckOutput>,
-    /// Duplication analysis body (bare `DuplicationReport`, not the full
-    /// `DupesOutput` envelope). Absent when `--skip dupes`.
+    /// Duplication analysis body (typed [`DupesReportPayload`], not the full
+    /// `DupesOutput` envelope). Absent when `--skip dupes`. The payload
+    /// wraps each clone group / family with its typed `actions[]` array via
+    /// `crate::output_dupes::DupesReportPayload::from_report`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dupes: Option<DuplicationReport>,
+    pub dupes: Option<DupesReportPayload>,
     /// Complexity analysis body (bare `HealthReport`, not the full
     /// `HealthOutput` envelope). Absent when `--skip health`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<HealthReport>,
 }
 
+/// Singleton schema-version discriminator for [`CoverageAnalyzeOutput`].
+/// Independent from the global [`SchemaVersion`] because the runtime
+/// coverage envelope versions independently from the rest of the
+/// JSON contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum CoverageAnalyzeSchemaVersion {
+    /// First release of the standalone `fallow coverage analyze` envelope.
+    #[serde(rename = "1")]
+    V1,
+}
+
+/// Envelope emitted by `fallow coverage analyze --format json`.
+///
+/// Focused runtime coverage analysis output. Local mode reads
+/// `--runtime-coverage <path>`. Cloud mode requires explicit `--cloud` /
+/// `--runtime-coverage-cloud` or `FALLOW_RUNTIME_COVERAGE_SOURCE=cloud`;
+/// `FALLOW_API_KEY` alone does NOT select cloud mode.
+///
+/// Constructed at runtime in
+/// `crates/cli/src/coverage/analyze.rs::print_runtime_json`; the wire is
+/// `serde_json::to_value(&envelope)`. The drift gate keeps this struct
+/// aligned with `docs/output-schema.json`. Carries its own schema-version
+/// discriminator ([`CoverageAnalyzeSchemaVersion`]) because runtime
+/// coverage iterates independently of the main JSON contract version.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(title = "fallow coverage analyze --format json")
+)]
+pub struct CoverageAnalyzeOutput {
+    /// Standalone coverage analyze envelope version.
+    pub schema_version: CoverageAnalyzeSchemaVersion,
+    /// fallow CLI version.
+    pub version: ToolVersion,
+    /// Analysis duration in milliseconds.
+    pub elapsed_ms: ElapsedMs,
+    /// The same runtime coverage block emitted by health JSON.
+    pub runtime_coverage: RuntimeCoverageReport,
+    /// `_meta` block with metric / rule definitions, emitted when `--explain`
+    /// is passed. Populated via the post-pass injection in
+    /// `print_runtime_json` (matches the pattern used by every other typed
+    /// envelope; the typed struct sets this to `None` and the JSON layer
+    /// merges in the `crate::explain::coverage_analyze_meta()` payload).
+    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Meta>,
+}
+
 /// Envelope emitted by `fallow dupes --format json` (plus the `dupes` block
 /// inside the combined and audit envelopes).
 ///
-/// The body is the full `DuplicationReport` flattened into the envelope so
-/// the wire shape stays `{ schema_version, version, elapsed_ms, clone_groups,
-/// clone_families, stats, ... }` exactly as the existing JSON layer emits.
+/// The body is the typed [`DupesReportPayload`] flattened into the envelope
+/// so the wire shape stays `{ schema_version, version, elapsed_ms,
+/// clone_groups, clone_families, stats, ... }` exactly as the existing JSON
+/// layer emits. The payload's `clone_groups` and `clone_families` carry
+/// typed [`crate::output_dupes::CloneGroupFinding`] /
+/// [`crate::output_dupes::CloneFamilyFinding`] wrappers so the `actions[]`
+/// field is part of the schema-derived contract.
 /// `grouped_by` / `groups` / `total_issues` are populated by the grouped
 /// builder; on the ungrouped path they stay `None` and `skip_serializing_if`
 /// drops them.
@@ -351,9 +412,12 @@ pub struct DupesOutput {
     pub elapsed_ms: ElapsedMs,
     /// Project-level duplication payload (`clone_groups`, `clone_families`,
     /// `stats`, optional `mirrored_directories`). Flattened so the wire shape
-    /// stays a single object.
+    /// stays a single object. Carries typed [`crate::output_dupes::CloneGroupFinding`]
+    /// and [`crate::output_dupes::CloneFamilyFinding`] wrappers instead of bare
+    /// findings so the `actions[]` array (and audit-mode `introduced`) are part
+    /// of the schema-derived contract rather than a JSON post-pass.
     #[serde(flatten)]
-    pub report: DuplicationReport,
+    pub report: DupesReportPayload,
     /// Resolver mode used for partitioning. Present only when `--group-by` is
     /// active.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -369,11 +433,10 @@ pub struct DupesOutput {
     /// tiebreak). Sort: most clone groups first, then alphabetical, with
     /// `(unowned)` pinned last.
     ///
-    /// Runtime emission still goes through a `serde_json::Value` post-pass in
-    /// `crates/cli/src/report/json.rs::build_grouped_duplication_json` so the
-    /// per-group `actions` augmentation can run on every `AttributedCloneGroup`
-    /// and `CloneFamily`; the typed field here is the schema source of truth
-    /// so validators and generated TS consumers can reach the typed shape.
+    /// Each bucket's `clone_groups` and `clone_families` carry the typed
+    /// finding wrappers ([`crate::output_dupes::AttributedCloneGroupFinding`],
+    /// [`crate::output_dupes::CloneFamilyFinding`]) so the `actions[]`
+    /// augmentation is part of the schema-derived contract.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groups: Option<Vec<DuplicationGroup>>,
     /// `_meta` block with metric / rule definitions, emitted when `--explain`
@@ -1067,18 +1130,12 @@ pub struct BoundariesListLogicalGroup {
 /// of every other variant's required set; placing it earlier would let a
 /// `CheckOutput` payload silently match `CombinedOutput` first.
 ///
-/// Two envelopes are intentionally NOT in this enum:
+/// One envelope is intentionally NOT in this enum:
 /// - `CodeClimateOutput` serializes as a bare JSON array
 ///   (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality
 ///   spec; `#[serde(tag = ...)]` cannot internally tag a non-object
 ///   variant and wrapping the array would break the spec. The root schema
 ///   carries it as a sibling `oneOf` branch alongside `FallowOutput`.
-/// - `CoverageAnalyzeOutput` (`fallow coverage analyze --format json`)
-///   does not yet have a Rust struct; it lives on the
-///   `HAND_MAINTAINED_ROOT_ENVELOPES` constant in `schema_emit.rs`
-///   pending typed migration. The root schema preserves it as a sibling
-///   `oneOf` branch so the documented union stays complete until the
-///   migration lands.
 ///
 /// A future major release plans to switch this to
 /// `#[serde(tag = "kind")]` for true O(1) discriminability on AI / agent
@@ -1112,12 +1169,20 @@ pub enum FallowOutput {
     /// `fallow coverage setup --json`. Required `schema_version` singleton
     /// plus `framework_detected`, `members`, `commands`, `snippets`.
     CoverageSetup(CoverageSetupOutput),
+    /// `fallow coverage analyze --format json`. Required
+    /// `schema_version: "1"` singleton plus `version`, `elapsed_ms`,
+    /// `runtime_coverage`. The `runtime_coverage` discriminator field is
+    /// uniquely present here; ordered before broader variants so untagged
+    /// narrowing matches `CoverageAnalyzeOutput` first.
+    CoverageAnalyze(CoverageAnalyzeOutput),
     /// `fallow list --boundaries --format json`. Required `boundaries`
     /// sub-object; no `schema_version`.
     ListBoundaries(ListBoundariesOutput),
     /// `fallow health --format json`. Required `report: HealthReport`.
     Health(HealthOutput),
-    /// `fallow dupes --format json`. Required `report: DuplicationReport`.
+    /// `fallow dupes --format json`. Required `report: DupesReportPayload`
+    /// (typed wrapper payload carrying `clone_groups[]: CloneGroupFinding`
+    /// and `clone_families[]: CloneFamilyFinding`).
     Dupes(DupesOutput),
     /// `fallow check --format json --group-by <mode>`. Required `grouped_by`
     /// plus a `groups` array; ordered before [`Self::Check`] because the

@@ -25,9 +25,9 @@
 
 
 /**
- * Schemas for the JSON output of fallow commands. To identify which envelope you have, check for the unique top-level field: `summary.total_issues` (check), `health_score` (health), `clone_groups` (dupes), `boundaries` (list --boundaries), `command: "audit"` (audit), `body` plus `comments` (review-github / review-gitlab), `schema: "fallow-review-reconcile/v1"` (ci reconcile-review), `framework_detected` plus `members` (coverage setup), `id` plus `how_to_fix` (explain), `check`+`dupes`+`health` keys together (bare combined invocation). `HealthOutput` and `DupesOutput` flatten their body (`HealthReport`/`DuplicationReport`) into top-level fields, so the discriminator field is from the body shape itself, not a wrapper key. Every object-shaped envelope is a variant of `FallowOutput`; `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch; `CoverageAnalyzeOutput` is still hand-maintained pending the typed migration in issue #384 item 3.
+ * Schemas for the JSON output of fallow commands. To identify which envelope you have, check for the unique top-level field: `summary.total_issues` (check), `health_score` (health), `clone_groups` (dupes), `runtime_coverage` (coverage analyze), `boundaries` (list --boundaries), `command: "audit"` (audit), `body` plus `comments` (review-github / review-gitlab), `schema: "fallow-review-reconcile/v1"` (ci reconcile-review), `framework_detected` plus `members` (coverage setup), `id` plus `how_to_fix` (explain), `check`+`dupes`+`health` keys together (bare combined invocation). `HealthOutput` and `DupesOutput` flatten their body (`HealthReport` / `DupesReportPayload`) into top-level fields, so the discriminator field is from the body shape itself, not a wrapper key. Every object-shaped envelope is a variant of `FallowOutput`; `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch.
  */
-export type FallowJsonOutput = (FallowOutput | CodeClimateOutput | CoverageAnalyzeOutput)
+export type FallowJsonOutput = (FallowOutput | CodeClimateOutput)
 /**
  * Typed root of every fallow `--format json` envelope shape that
  * serializes as a JSON object. The schema derived from this enum drives
@@ -53,25 +53,19 @@ export type FallowJsonOutput = (FallowOutput | CodeClimateOutput | CoverageAnaly
  * of every other variant's required set; placing it earlier would let a
  * `CheckOutput` payload silently match `CombinedOutput` first.
  *
- * Two envelopes are intentionally NOT in this enum:
+ * One envelope is intentionally NOT in this enum:
  * - `CodeClimateOutput` serializes as a bare JSON array
  *   (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality
  *   spec; `#[serde(tag = ...)]` cannot internally tag a non-object
  *   variant and wrapping the array would break the spec. The root schema
  *   carries it as a sibling `oneOf` branch alongside `FallowOutput`.
- * - `CoverageAnalyzeOutput` (`fallow coverage analyze --format json`)
- *   does not yet have a Rust struct; it lives on the
- *   `HAND_MAINTAINED_ROOT_ENVELOPES` constant in `schema_emit.rs`
- *   pending typed migration. The root schema preserves it as a sibling
- *   `oneOf` branch so the documented union stays complete until the
- *   migration lands.
  *
  * A future major release plans to switch this to
  * `#[serde(tag = "kind")]` for true O(1) discriminability on AI / agent
  * consumers, paired with a one-cycle `--legacy-envelope` opt-out flag.
  * Tracked under issue #384.
  */
-export type FallowOutput = (AuditOutput | ExplainOutput | ReviewEnvelopeOutput | ReviewReconcileOutput | CoverageSetupOutput | ListBoundariesOutput | HealthOutput | DupesOutput | CheckGroupedOutput | CheckOutput | CombinedOutput)
+export type FallowOutput = (AuditOutput | ExplainOutput | ReviewEnvelopeOutput | ReviewReconcileOutput | CoverageSetupOutput | CoverageAnalyzeOutput | ListBoundariesOutput | HealthOutput | DupesOutput | CheckGroupedOutput | CheckOutput | CombinedOutput)
 /**
  * Schema version for this output format (independent of tool version). Bump
  * policy: ADDITIVE changes (new optional top-level fields, new optional struct
@@ -280,9 +274,18 @@ export type RegressionStatus = ("pass" | "exceeded" | "skipped")
  */
 export type RegressionToleranceKind = ("absolute" | "percentage")
 /**
+ * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
+ * emitted by the legacy `build_clone_group_actions` walker.
+ */
+export type CloneGroupActionType = ("extract-shared" | "suppress-line")
+/**
  * The kind of refactoring suggested for a clone family.
  */
 export type RefactoringKind = ("ExtractFunction" | "ExtractModule")
+/**
+ * Discriminant for [`CloneFamilyAction::kind`].
+ */
+export type CloneFamilyActionType = ("extract-shared" | "apply-suggestion" | "suppress-line")
 /**
  * Which complexity threshold was exceeded.
  */
@@ -523,6 +526,13 @@ export type CoverageSetupPackageManager = ("npm" | "pnpm" | "yarn" | "bun")
  */
 export type CoverageSetupRuntimeTarget = ("node" | "browser")
 /**
+ * Singleton schema-version discriminator for [`CoverageAnalyzeOutput`].
+ * Independent from the global [`SchemaVersion`] because the runtime
+ * coverage envelope versions independently from the rest of the
+ * JSON contract.
+ */
+export type CoverageAnalyzeSchemaVersion = "1"
+/**
  * Discovery outcome for a [`LogicalGroup`]. Discriminates "no children" into
  * "the directory exists and is empty" versus "at least one `autoDiscover`
  * path was invalid or unreadable", so consumers can render an actionable
@@ -559,10 +569,12 @@ export type CodeClimateOutput = CodeClimateIssue[]
  * new-vs-inherited attribution, and full sub-results.
  *
  * Like [`CombinedOutput`], `audit`'s `duplication` and `complexity`
- * sub-keys hold bare body types (`DuplicationReport` / `HealthReport`)
- * rather than the per-command envelope shapes; `dead_code` is the full
+ * sub-keys hold body shapes rather than per-command envelopes:
+ * `duplication` is [`DupesReportPayload`] (the typed wrapper payload
+ * emitted via `crate::output_dupes::DupesReportPayload::from_report`),
+ * `complexity` is [`HealthReport`]. `dead_code` is the full
  * [`CheckOutput`] envelope. The committed schema points `duplication`
- * at `#/definitions/DuplicationReport` and `complexity` at
+ * at `#/definitions/DupesReportPayload` and `complexity` at
  * `#/definitions/HealthReport` so the documented shape matches the
  * wire; the `committed_property_refs_match_derived_property_refs`
  * drift test enforces the alignment.
@@ -604,9 +616,12 @@ dead_code?: (CheckOutput | null)
 /**
  * Full duplication results (omitted if no changed files). Clone groups
  * include introduced: true/false when audit can compare against the base
- * ref.
+ * ref. Carries typed [`crate::output_dupes::CloneGroupFinding`] and
+ * [`crate::output_dupes::CloneFamilyFinding`] wrappers (matches what
+ * `crates/cli/src/audit.rs` emits via
+ * `crate::output_dupes::DupesReportPayload::from_report`).
  */
-duplication?: (DuplicationReport | null)
+duplication?: (DupesReportPayload | null)
 /**
  * Full complexity results (omitted if no changed files). Findings include
  * introduced: true/false when audit can compare against the base ref.
@@ -2100,29 +2115,42 @@ description?: (string | null)
 docs?: (string | null)
 }
 /**
- * Overall duplication analysis report.
+ * Wire-shape payload for `fallow dupes --format json` (the body that
+ * flattens into [`crate::output_envelope::DupesOutput`] and is also
+ * emitted under the `dupes` / `duplication` key inside the combined and
+ * audit envelopes).
+ *
+ * Mirrors [`DuplicationReport`] field-for-field, except `clone_groups`
+ * and `clone_families` carry the typed wrapper envelopes instead of bare
+ * findings, so the schema (and any TS / agent consumer) sees the typed
+ * `actions[]` natively.
  */
-export interface DuplicationReport {
+export interface DupesReportPayload {
 /**
- * All detected clone groups. Each group contains 2+ instances of identical
- * or near-identical code.
+ * All detected clone groups, each wrapped with typed actions.
  */
-clone_groups: CloneGroup[]
+clone_groups: CloneGroupFinding[]
 /**
- * Clone families: groups of clone groups sharing the same file set,
- * indicating systematic duplication patterns.
+ * Clone families, each wrapped with typed actions. Inner `groups`
+ * inside each family stay as bare [`CloneGroup`] entries because
+ * `clone_families[].groups[]` and top-level `clone_groups[]` are
+ * kept in sync; consumers that want the per-inner-group actions read
+ * them off the top-level array.
  */
-clone_families: CloneFamily[]
+clone_families: CloneFamilyFinding[]
 /**
- * Detected mirrored directory trees (directories with many identical files).
+ * Mirrored directory pairs.
  */
 mirrored_directories?: MirroredDirectory[]
 stats: DuplicationStats
 }
 /**
- * A group of code clones -- the same (or normalized-equivalent) code appearing in multiple places.
+ * Wire-shape envelope for a [`CloneGroup`] finding. Flattens the bare
+ * group via `#[serde(flatten)]` and carries a typed `actions` array plus
+ * the optional audit-mode `introduced` flag. Replaces the legacy
+ * post-pass injection in `crates/cli/src/report/json.rs::inject_dupes_actions`.
  */
-export interface CloneGroup {
+export interface CloneGroupFinding {
 /**
  * All instances where this duplicated code appears.
  */
@@ -2136,10 +2164,16 @@ token_count: number
  */
 line_count: number
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps: an `extract-shared` primary and a
+ * `suppress-line` secondary. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: CloneGroupAction[]
-introduced?: AuditIntroduced
+/**
+ * Set by the audit pass when this clone group is introduced relative
+ * to the merge-base. `None` when serialized directly from Rust.
+ */
+introduced?: (AuditIntroduced | null)
 }
 /**
  * A single instance of duplicated code at a specific location.
@@ -2171,15 +2205,17 @@ end_col: number
 fragment: string
 }
 /**
- * A suggested action for a clone group.
+ * Per-action wire shape attached to each [`CloneGroupFinding`] and
+ * [`AttributedCloneGroupFinding`]. Mirrors the action types previously
+ * emitted by `inject_dupes_actions::build_clone_group_actions` in
+ * `crates/cli/src/report/json.rs`: `extract-shared` plus `suppress-line`.
  */
 export interface CloneGroupAction {
+type: CloneGroupActionType
 /**
- * Action type identifier.
- */
-type: ("extract-shared" | "suppress-line")
-/**
- * Whether fallow can auto-fix this action.
+ * Whether `fallow fix` can auto-apply this action. Both variants are
+ * manual today; the field is non-singleton so a future auto-applier
+ * does not need a schema change.
  */
 auto_fixable: boolean
 /**
@@ -2187,26 +2223,35 @@ auto_fixable: boolean
  */
 description: string
 /**
- * The inline comment to insert (e.g., '// fallow-ignore-next-line code-duplication'). Present for suppress-line actions.
+ * The inline comment to insert (e.g.,
+ * `// fallow-ignore-next-line code-duplication`). Present on
+ * `suppress-line`; absent on `extract-shared`.
  */
-comment?: string
+comment?: (string | null)
 }
 /**
- * A clone family: a set of clone groups that share the same file set.
+ * Wire-shape envelope for a [`CloneFamily`] finding.
  *
- * When multiple clone groups are all duplicated between the same set of files,
- * they form a family — indicating a deeper structural relationship that should
- * be refactored together rather than group-by-group.
+ * Unlike most `*Finding` wrappers this one is NOT `#[serde(flatten)]` over
+ * the bare [`CloneFamily`], because the family's nested
+ * `groups: Vec<CloneGroup>` field needs to carry the typed
+ * [`CloneGroupFinding`] wrapper too (so every nested clone group gets its
+ * own `actions[]` array, matching the legacy post-pass behavior; see issue
+ * #393 regression test). The wire shape stays byte-identical to the
+ * previous post-pass output. No `introduced` field because `fallow audit`
+ * attributes clone groups (not families) when running against a base ref.
  */
-export interface CloneFamily {
+export interface CloneFamilyFinding {
 /**
  * The files involved in this family (sorted for stable output).
  */
 files: string[]
 /**
- * Clone groups belonging to this family.
+ * Clone groups belonging to this family, each wrapped with typed
+ * `actions[]` so consumers that read `clone_families[].groups[]`
+ * directly see the same shape as the top-level `clone_groups[]`.
  */
-groups: CloneGroup[]
+groups: CloneGroupFinding[]
 /**
  * Total number of duplicated lines across all groups.
  */
@@ -2220,7 +2265,10 @@ total_duplicated_tokens: number
  */
 suggestions: RefactoringSuggestion[]
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps: an `extract-shared` primary, one
+ * `apply-suggestion` per [`RefactoringSuggestion`] on the family, and
+ * a trailing `suppress-line`. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: CloneFamilyAction[]
 }
@@ -2239,15 +2287,17 @@ description: string
 estimated_savings: number
 }
 /**
- * A suggested action for a clone family.
+ * Per-action wire shape attached to each [`CloneFamilyFinding`]. Mirrors
+ * the action types previously emitted by
+ * `build_clone_family_actions`: `extract-shared`, one `apply-suggestion`
+ * per [`RefactoringSuggestion`] on the family, and a trailing
+ * `suppress-line`.
  */
 export interface CloneFamilyAction {
+type: CloneFamilyActionType
 /**
- * Action type identifier.
- */
-type: ("extract-shared" | "apply-suggestion" | "suppress-line")
-/**
- * Whether fallow can auto-fix this action.
+ * Whether `fallow fix` can auto-apply this action. All three variants
+ * are manual today.
  */
 auto_fixable: boolean
 /**
@@ -2255,13 +2305,16 @@ auto_fixable: boolean
  */
 description: string
 /**
- * Additional context for the action.
+ * Additional context. Present on `extract-shared` (explaining that
+ * the family's clone groups share the same files); absent otherwise.
  */
-note?: string
+note?: (string | null)
 /**
- * The inline comment to insert (e.g., '// fallow-ignore-next-line code-duplication'). Present for suppress-line actions.
+ * The inline comment to insert (e.g.,
+ * `// fallow-ignore-next-line code-duplication`). Present on
+ * `suppress-line` only.
  */
-comment?: string
+comment?: (string | null)
 }
 /**
  * A detected mirrored directory pattern: two directory prefixes that contain
@@ -4438,6 +4491,35 @@ path: string
 content: string
 }
 /**
+ * Envelope emitted by `fallow coverage analyze --format json`.
+ *
+ * Focused runtime coverage analysis output. Local mode reads
+ * `--runtime-coverage <path>`. Cloud mode requires explicit `--cloud` /
+ * `--runtime-coverage-cloud` or `FALLOW_RUNTIME_COVERAGE_SOURCE=cloud`;
+ * `FALLOW_API_KEY` alone does NOT select cloud mode.
+ *
+ * Constructed at runtime in
+ * `crates/cli/src/coverage/analyze.rs::print_runtime_json`; the wire is
+ * `serde_json::to_value(&envelope)`. The drift gate keeps this struct
+ * aligned with `docs/output-schema.json`. Carries its own schema-version
+ * discriminator ([`CoverageAnalyzeSchemaVersion`]) because runtime
+ * coverage iterates independently of the main JSON contract version.
+ */
+export interface CoverageAnalyzeOutput {
+schema_version: CoverageAnalyzeSchemaVersion
+version: ToolVersion
+elapsed_ms: ElapsedMs
+runtime_coverage: RuntimeCoverageReport
+/**
+ * `_meta` block with metric / rule definitions, emitted when `--explain`
+ * is passed. Populated via the post-pass injection in
+ * `print_runtime_json` (matches the pattern used by every other typed
+ * envelope; the typed struct sets this to `None` and the JSON layer
+ * merges in the `crate::explain::coverage_analyze_meta()` payload).
+ */
+_meta?: (Meta | null)
+}
+/**
  * Envelope emitted by `fallow list --boundaries --format json`. Surfaces
  * the architecture boundary zones, rules, and (issue #373) the user's
  * pre-expansion `autoDiscover` logical groups so consumers can render
@@ -4803,9 +4885,13 @@ actions_meta?: (HealthActionsMeta | null)
  * Envelope emitted by `fallow dupes --format json` (plus the `dupes` block
  * inside the combined and audit envelopes).
  *
- * The body is the full `DuplicationReport` flattened into the envelope so
- * the wire shape stays `{ schema_version, version, elapsed_ms, clone_groups,
- * clone_families, stats, ... }` exactly as the existing JSON layer emits.
+ * The body is the typed [`DupesReportPayload`] flattened into the envelope
+ * so the wire shape stays `{ schema_version, version, elapsed_ms,
+ * clone_groups, clone_families, stats, ... }` exactly as the existing JSON
+ * layer emits. The payload's `clone_groups` and `clone_families` carry
+ * typed [`crate::output_dupes::CloneGroupFinding`] /
+ * [`crate::output_dupes::CloneFamilyFinding`] wrappers so the `actions[]`
+ * field is part of the schema-derived contract.
  * `grouped_by` / `groups` / `total_issues` are populated by the grouped
  * builder; on the ungrouped path they stay `None` and `skip_serializing_if`
  * drops them.
@@ -4815,17 +4901,19 @@ schema_version: SchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 /**
- * All detected clone groups. Each group contains 2+ instances of identical
- * or near-identical code.
+ * All detected clone groups, each wrapped with typed actions.
  */
-clone_groups: CloneGroup[]
+clone_groups: CloneGroupFinding[]
 /**
- * Clone families: groups of clone groups sharing the same file set,
- * indicating systematic duplication patterns.
+ * Clone families, each wrapped with typed actions. Inner `groups`
+ * inside each family stay as bare [`CloneGroup`] entries because
+ * `clone_families[].groups[]` and top-level `clone_groups[]` are
+ * kept in sync; consumers that want the per-inner-group actions read
+ * them off the top-level array.
  */
-clone_families: CloneFamily[]
+clone_families: CloneFamilyFinding[]
 /**
- * Detected mirrored directory trees (directories with many identical files).
+ * Mirrored directory pairs.
  */
 mirrored_directories?: MirroredDirectory[]
 stats: DuplicationStats
@@ -4847,11 +4935,10 @@ total_issues?: (number | null)
  * tiebreak). Sort: most clone groups first, then alphabetical, with
  * `(unowned)` pinned last.
  *
- * Runtime emission still goes through a `serde_json::Value` post-pass in
- * `crates/cli/src/report/json.rs::build_grouped_duplication_json` so the
- * per-group `actions` augmentation can run on every `AttributedCloneGroup`
- * and `CloneFamily`; the typed field here is the schema source of truth
- * so validators and generated TS consumers can reach the typed shape.
+ * Each bucket's `clone_groups` and `clone_families` carry the typed
+ * finding wrappers ([`crate::output_dupes::AttributedCloneGroupFinding`],
+ * [`crate::output_dupes::CloneFamilyFinding`]) so the `actions[]`
+ * augmentation is part of the schema-derived contract.
  */
 groups?: (DuplicationGroup[] | null)
 /**
@@ -4873,18 +4960,26 @@ export interface DuplicationGroup {
 key: string
 stats: DuplicationStats
 /**
- * Clone groups attributed to this owner. Each group's `primary_owner` is
- * its largest-owner key; per-instance `owner` lets consumers see
- * cross-bucket fan-out without re-resolving paths.
+ * Clone groups attributed to this owner, each wrapped with the typed
+ * `actions[]` array. Each group's `primary_owner` is its largest-owner
+ * key; per-instance `owner` lets consumers see cross-bucket fan-out
+ * without re-resolving paths.
  */
-clone_groups: AttributedCloneGroup[]
-clone_families: CloneFamily[]
+clone_groups: AttributedCloneGroupFinding[]
+/**
+ * Clone families overlapping this bucket, each wrapped with the typed
+ * `actions[]` array.
+ */
+clone_families: CloneFamilyFinding[]
 }
 /**
- * A clone group annotated with its largest-owner attribution and per-instance
- * owner keys.
+ * Wire-shape envelope for an [`AttributedCloneGroup`] finding (per-bucket
+ * duplication attribution emitted under `fallow dupes --group-by`).
+ * Flattens the attributed group and carries the same typed
+ * `CloneGroupAction` array as [`CloneGroupFinding`]; no `introduced`
+ * field because `fallow audit` does not run on grouped output.
  */
-export interface AttributedCloneGroup {
+export interface AttributedCloneGroupFinding {
 /**
  * Largest-owner attribution: the resolver key with the most instances in
  * this clone group. Ties broken alphabetically (smallest key wins).
@@ -4898,7 +4993,7 @@ line_count: number
  */
 instances: AttributedInstance[]
 /**
- * Suggested actions to resolve this issue.
+ * Suggested next steps. Always emitted.
  */
 actions: CloneGroupAction[]
 }
@@ -5146,11 +5241,12 @@ misconfigured_dependency_overrides?: MisconfiguredDependencyOverrideFinding[]
  * Each sub-result is `Option<...>` so `--only` / `--skip` can suppress a
  * pass without leaving an empty key on the wire. The `check` sub-result is
  * the full [`CheckOutput`] envelope (including its own `schema_version` /
- * `version` / `elapsed_ms`), but `dupes` and `health` are the bare body
- * types: the runtime emit calls `serde_json::to_value(&report)` on
- * `DuplicationReport` / `HealthReport` directly rather than wrapping them
- * in their per-command envelope. The committed schema points `dupes` at
- * `#/definitions/DuplicationReport` and `health` at
+ * `version` / `elapsed_ms`), `dupes` is the typed [`DupesReportPayload`]
+ * emitted via `crate::output_dupes::DupesReportPayload::from_report`, and
+ * `health` is the bare [`HealthReport`] body: the runtime emit calls
+ * `serde_json::to_value(&report)` directly rather than wrapping it in the
+ * per-command envelope. The committed schema points `dupes` at
+ * `#/definitions/DupesReportPayload` and `health` at
  * `#/definitions/HealthReport` so the documented shape matches the
  * wire; the `committed_property_refs_match_derived_property_refs`
  * drift test enforces the alignment.
@@ -5164,10 +5260,12 @@ elapsed_ms: ElapsedMs
  */
 check?: (CheckOutput | null)
 /**
- * Duplication analysis body (bare `DuplicationReport`, not the full
- * `DupesOutput` envelope). Absent when `--skip dupes`.
+ * Duplication analysis body (typed [`DupesReportPayload`], not the full
+ * `DupesOutput` envelope). Absent when `--skip dupes`. The payload
+ * wraps each clone group / family with its typed `actions[]` array via
+ * `crate::output_dupes::DupesReportPayload::from_report`.
  */
-dupes?: (DuplicationReport | null)
+dupes?: (DupesReportPayload | null)
 /**
  * Complexity analysis body (bare `HealthReport`, not the full
  * `HealthOutput` envelope). Absent when `--skip health`.
@@ -5217,22 +5315,6 @@ export interface CodeClimateLines {
  * 1-based start line.
  */
 begin: number
-}
-/**
- * Focused runtime coverage analysis output. Local mode reads --runtime-coverage <path>. Cloud mode requires explicit --cloud / --runtime-coverage-cloud or FALLOW_RUNTIME_COVERAGE_SOURCE=cloud; FALLOW_API_KEY alone does not select cloud mode.
- */
-export interface CoverageAnalyzeOutput {
-/**
- * Standalone coverage analyze envelope version.
- */
-schema_version: "1"
-/**
- * fallow CLI version.
- */
-version: string
-elapsed_ms: number
-runtime_coverage: RuntimeCoverageReport
-_meta?: Meta
 }
 
 /**

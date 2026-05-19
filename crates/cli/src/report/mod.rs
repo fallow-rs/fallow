@@ -692,15 +692,6 @@ pub use json::build_health_json;
 pub(crate) use json::harmonize_multi_kind_suppress_line_actions;
 #[allow(
     unused_imports,
-    reason = "target-dependent: used in bin audit.rs, unused in lib"
-)]
-#[allow(
-    clippy::redundant_pub_crate,
-    reason = "pub(crate) deliberately limits visibility — report is pub but these are internal"
-)]
-pub(crate) use json::inject_dupes_actions;
-#[allow(
-    unused_imports,
     reason = "target-dependent: used in lib, unused in bin"
 )]
 pub use json::{build_json, build_json_with_config_fixable};

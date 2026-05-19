@@ -14,9 +14,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use fallow_core::duplicates::{
-    CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
-};
+use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 
@@ -24,6 +22,7 @@ use super::grouping::OwnershipResolver;
 use super::relative_path;
 use crate::baseline::recompute_stats;
 use crate::codeowners::UNOWNED_LABEL;
+use crate::output_dupes::{AttributedCloneGroupFinding, CloneFamilyFinding};
 
 /// Resolve the group key for a single instance file.
 fn key_for_instance(instance: &CloneInstance, root: &Path, resolver: &OwnershipResolver) -> String {
@@ -119,11 +118,14 @@ pub struct DuplicationGroup {
     /// section mode.
     pub key: String,
     pub stats: DuplicationStats,
-    /// Clone groups attributed to this owner. Each group's `primary_owner` is
-    /// its largest-owner key; per-instance `owner` lets consumers see
-    /// cross-bucket fan-out without re-resolving paths.
-    pub clone_groups: Vec<AttributedCloneGroup>,
-    pub clone_families: Vec<CloneFamily>,
+    /// Clone groups attributed to this owner, each wrapped with the typed
+    /// `actions[]` array. Each group's `primary_owner` is its largest-owner
+    /// key; per-instance `owner` lets consumers see cross-bucket fan-out
+    /// without re-resolving paths.
+    pub clone_groups: Vec<AttributedCloneGroupFinding>,
+    /// Clone families overlapping this bucket, each wrapped with the typed
+    /// `actions[]` array.
+    pub clone_families: Vec<CloneFamilyFinding>,
 }
 
 /// Wrapper carrying the resolver mode label and grouped buckets.
@@ -199,17 +201,23 @@ pub fn build_duplication_grouping(
                 .iter()
                 .flat_map(|ag| ag.instances.iter().map(|i| i.instance.file.as_path()))
                 .collect();
-            let clone_families: Vec<CloneFamily> = report
+            let clone_families: Vec<CloneFamilyFinding> = report
                 .clone_families
                 .iter()
                 .filter(|f| f.files.iter().any(|fp| bucket_files.contains(fp.as_path())))
                 .cloned()
+                .map(CloneFamilyFinding::with_actions)
+                .collect();
+
+            let clone_groups: Vec<AttributedCloneGroupFinding> = attributed_groups
+                .into_iter()
+                .map(AttributedCloneGroupFinding::with_actions)
                 .collect();
 
             DuplicationGroup {
                 key,
                 stats: subset.stats,
-                clone_groups: attributed_groups,
+                clone_groups,
                 clone_families,
             }
         })
@@ -365,12 +373,16 @@ mod tests {
         let bucket = &grouping.groups[0];
         assert_eq!(bucket.key, "src");
         assert_eq!(bucket.clone_groups.len(), 1);
-        let cg = &bucket.clone_groups[0];
+        let finding = &bucket.clone_groups[0];
+        let cg = &finding.group;
         assert_eq!(cg.primary_owner, "src");
         assert_eq!(cg.instances.len(), 3);
         let owners: Vec<&str> = cg.instances.iter().map(|i| i.owner.as_str()).collect();
         assert!(owners.contains(&"src"));
         assert!(owners.contains(&"lib"));
+        // Each AttributedCloneGroupFinding carries the canonical 2-action array
+        // (extract-shared + suppress-line).
+        assert_eq!(finding.actions.len(), 2);
     }
 
     #[test]

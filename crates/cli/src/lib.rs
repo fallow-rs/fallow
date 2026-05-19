@@ -76,6 +76,11 @@ pub mod health_types;
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
 mod license;
+/// Typed wrapper envelopes for duplication findings emitted by
+/// `fallow dupes --format json`. Lives here (rather than in `fallow-types`)
+/// because the bare findings live in `fallow-core` and `crates/cli/src/report/dupes_grouping.rs`.
+pub mod output_dupes;
+
 /// Typed envelope structs for the JSON output contract. Live here rather
 /// than in `fallow-types` because the body fields reach into `fallow-core`
 /// and into this crate's own `health_types`.

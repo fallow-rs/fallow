@@ -2820,11 +2820,11 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
     }
 
     if let Some(ref dupes) = result.dupes {
-        match serde_json::to_value(&dupes.report) {
+        let payload = crate::output_dupes::DupesReportPayload::from_report(&dupes.report);
+        match serde_json::to_value(&payload) {
             Ok(mut json) => {
                 let root_prefix = format!("{}/", dupes.config.root.display());
                 report::strip_root_prefix(&mut json, &root_prefix);
-                report::inject_dupes_actions(&mut json);
                 if let Some(ref base) = result.base_snapshot {
                     annotate_dupes_json(&mut json, &dupes.report, &dupes.config.root, &base.dupes);
                 }

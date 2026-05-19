@@ -485,9 +485,10 @@ pub(in crate::report) fn print_grouped_duplication_human(
 
         let shown = total_groups.min(MAX_CLONE_GROUPS);
         let mut sorted: Vec<_> = bucket.clone_groups.iter().collect();
-        sorted.sort_by_key(|cg| std::cmp::Reverse(cg.line_count));
+        sorted.sort_by_key(|cg| std::cmp::Reverse(cg.group.line_count));
 
-        for cg in &sorted[..shown] {
+        for finding in &sorted[..shown] {
+            let cg = &finding.group;
             let lc = cg.line_count;
             let lc_str = format!("{:>5}", thousands(lc));
             let lc_colored = if lc > 1000 {

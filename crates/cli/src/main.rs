@@ -30,6 +30,7 @@ mod init;
 mod license;
 mod list;
 mod migrate;
+mod output_dupes;
 mod output_envelope;
 mod rayon_pool;
 mod regression;

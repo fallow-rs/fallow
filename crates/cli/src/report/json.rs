@@ -9,6 +9,7 @@ use fallow_types::envelope::{CheckSummary, ElapsedMs, EntryPoints, SchemaVersion
 
 use super::{emit_json, normalize_uri};
 use crate::explain;
+use crate::output_dupes::DupesReportPayload;
 use crate::output_envelope::{
     CheckGroupedEntry, CheckGroupedOutput, CheckOutput, DupesOutput, GroupByMode, HealthOutput,
 };
@@ -477,135 +478,14 @@ pub fn build_baseline_deltas_json<'a>(
 // time and flows through serde natively, so no post-pass walker is
 // needed for any health output anymore.
 
-// ── Duplication action injection ────────────────────────────────
-
-/// Inject `actions` arrays into clone families/groups in a duplication JSON output.
-///
-/// Walks `clone_families` and `clone_groups` arrays, appending
-/// machine-actionable fix and config hints to each item.
-#[allow(
-    clippy::redundant_pub_crate,
-    reason = "pub(crate) needed — used by audit.rs via re-export, but not part of public API"
-)]
-pub(crate) fn inject_dupes_actions(output: &mut serde_json::Value) {
-    let Some(map) = output.as_object_mut() else {
-        return;
-    };
-
-    // Clone families: extract shared module/function. Each family also
-    // carries a nested `groups[]` array of `CloneGroup` items that must
-    // get their own `actions` field; the committed schema marks `actions`
-    // as required on every `CloneGroup`, but without this nested walk the
-    // inner groups silently shipped without it and JSON Schema strict
-    // consumers saw a `required 'actions' is a required property`
-    // violation on every nested group (issue #393).
-    if let Some(families) = map.get_mut("clone_families").and_then(|v| v.as_array_mut()) {
-        for item in families {
-            let actions = build_clone_family_actions(item);
-            if let serde_json::Value::Object(obj) = item {
-                if let Some(serde_json::Value::Array(groups)) = obj.get_mut("groups") {
-                    for inner in groups {
-                        let inner_actions = build_clone_group_actions(inner);
-                        if let serde_json::Value::Object(inner_obj) = inner {
-                            inner_obj.insert("actions".to_string(), inner_actions);
-                        }
-                    }
-                }
-                obj.insert("actions".to_string(), actions);
-            }
-        }
-    }
-
-    // Clone groups: extract shared code
-    if let Some(groups) = map.get_mut("clone_groups").and_then(|v| v.as_array_mut()) {
-        for item in groups {
-            let actions = build_clone_group_actions(item);
-            if let serde_json::Value::Object(obj) = item {
-                obj.insert("actions".to_string(), actions);
-            }
-        }
-    }
-}
-
-/// Build the `actions` array for a single clone family.
-fn build_clone_family_actions(item: &serde_json::Value) -> serde_json::Value {
-    let group_count = item
-        .get("groups")
-        .and_then(|v| v.as_array())
-        .map_or(0, Vec::len);
-
-    let total_lines = item
-        .get("total_duplicated_lines")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-
-    let mut actions = vec![serde_json::json!({
-        "type": "extract-shared",
-        "auto_fixable": false,
-        "description": format!(
-            "Extract {group_count} duplicated code block{} ({total_lines} lines) into a shared module",
-            if group_count == 1 { "" } else { "s" }
-        ),
-        "note": "These clone groups share the same files, indicating a structural relationship; refactor together",
-    })];
-
-    // Include any refactoring suggestions from the family
-    if let Some(suggestions) = item.get("suggestions").and_then(|v| v.as_array()) {
-        for suggestion in suggestions {
-            if let Some(desc) = suggestion
-                .get("description")
-                .and_then(serde_json::Value::as_str)
-            {
-                actions.push(serde_json::json!({
-                    "type": "apply-suggestion",
-                    "auto_fixable": false,
-                    "description": desc,
-                }));
-            }
-        }
-    }
-
-    actions.push(serde_json::json!({
-        "type": "suppress-line",
-        "auto_fixable": false,
-        "description": "Suppress with an inline comment above the duplicated code",
-        "comment": "// fallow-ignore-next-line code-duplication",
-    }));
-
-    serde_json::Value::Array(actions)
-}
-
-/// Build the `actions` array for a single clone group.
-fn build_clone_group_actions(item: &serde_json::Value) -> serde_json::Value {
-    let instance_count = item
-        .get("instances")
-        .and_then(|v| v.as_array())
-        .map_or(0, Vec::len);
-
-    let line_count = item
-        .get("line_count")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-
-    let actions = vec![
-        serde_json::json!({
-            "type": "extract-shared",
-            "auto_fixable": false,
-            "description": format!(
-                "Extract duplicated code ({line_count} lines, {instance_count} instance{}) into a shared function",
-                if instance_count == 1 { "" } else { "s" }
-            ),
-        }),
-        serde_json::json!({
-            "type": "suppress-line",
-            "auto_fixable": false,
-            "description": "Suppress with an inline comment above the duplicated code",
-            "comment": "// fallow-ignore-next-line code-duplication",
-        }),
-    ];
-
-    serde_json::Value::Array(actions)
-}
+// Duplication action injection retired in #409: the wire shape now flows
+// through typed `CloneGroupFinding` / `CloneFamilyFinding` /
+// `AttributedCloneGroupFinding` wrappers in `crate::output_dupes`, each
+// carrying its `actions[]` array natively. The legacy
+// `inject_dupes_actions` `serde_json::Value` post-pass (plus
+// `build_clone_family_actions` and `build_clone_group_actions`) used to
+// graft the same fields onto the serialized JSON after the bare findings
+// went through; both are no longer needed.
 
 /// Insert a `_meta` key into a JSON object value.
 fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
@@ -762,7 +642,7 @@ pub fn build_duplication_json(
         schema_version: SchemaVersion(SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
-        report: report.clone(),
+        report: DupesReportPayload::from_report(report),
         grouped_by: None,
         total_issues: None,
         groups: None,
@@ -771,7 +651,6 @@ pub fn build_duplication_json(
     let mut output = serde_json::to_value(&envelope)?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
-    inject_dupes_actions(&mut output);
 
     if explain {
         insert_meta(&mut output, explain::dupes_meta());
@@ -831,18 +710,18 @@ pub fn build_grouped_duplication_json(
         schema_version: SchemaVersion(SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
-        report: report.clone(),
+        report: DupesReportPayload::from_report(report),
         grouped_by: Some(group_by_mode_from_label(grouping.mode)),
         total_issues: Some(report.clone_groups.len()),
         // Per-group buckets are serialized separately below so each carries
-        // its own path-stripping + actions injection; splice them in via the
-        // `Value` post-pass.
+        // its own path-stripping; splice them in via the `Value` post-pass.
+        // Wrapper-level `actions[]` is already typed on each bucket's
+        // `clone_groups` / `clone_families`.
         groups: None,
         meta: None,
     };
     let mut output = serde_json::to_value(&envelope)?;
     strip_root_prefix(&mut output, &root_prefix);
-    inject_dupes_actions(&mut output);
 
     let group_values: Vec<serde_json::Value> = grouping
         .groups
@@ -850,7 +729,6 @@ pub fn build_grouped_duplication_json(
         .map(|g| {
             let mut value = serde_json::to_value(g)?;
             strip_root_prefix(&mut value, &root_prefix);
-            inject_dupes_actions(&mut value);
             Ok(value)
         })
         .collect::<Result<_, serde_json::Error>>()?;
@@ -2636,152 +2514,11 @@ mod tests {
         assert_eq!(suppress["placement"], "above-angular-decorator");
     }
 
-    // ── Duplication actions injection ─────────────────────────────
-
-    #[test]
-    fn clone_family_has_actions() {
-        let mut output = serde_json::json!({
-            "clone_families": [{
-                "files": ["src/a.ts", "src/b.ts"],
-                "groups": [
-                    { "instances": [{"file": "src/a.ts"}, {"file": "src/b.ts"}], "token_count": 100, "line_count": 20 }
-                ],
-                "total_duplicated_lines": 20,
-                "total_duplicated_tokens": 100,
-                "suggestions": [
-                    { "kind": "ExtractFunction", "description": "Extract shared validation logic", "estimated_savings": 15 }
-                ]
-            }]
-        });
-
-        inject_dupes_actions(&mut output);
-
-        let actions = output["clone_families"][0]["actions"].as_array().unwrap();
-        assert_eq!(actions.len(), 3);
-        assert_eq!(actions[0]["type"], "extract-shared");
-        assert_eq!(actions[0]["auto_fixable"], false);
-        assert!(
-            actions[0]["description"]
-                .as_str()
-                .unwrap()
-                .contains("20 lines")
-        );
-        // Suggestion forwarded as action
-        assert_eq!(actions[1]["type"], "apply-suggestion");
-        assert!(
-            actions[1]["description"]
-                .as_str()
-                .unwrap()
-                .contains("validation logic")
-        );
-        // Suppress action
-        assert_eq!(actions[2]["type"], "suppress-line");
-        assert_eq!(
-            actions[2]["comment"],
-            "// fallow-ignore-next-line code-duplication"
-        );
-    }
-
-    #[test]
-    fn clone_group_has_actions() {
-        let mut output = serde_json::json!({
-            "clone_groups": [{
-                "instances": [
-                    {"file": "src/a.ts", "start_line": 1, "end_line": 10},
-                    {"file": "src/b.ts", "start_line": 5, "end_line": 14}
-                ],
-                "token_count": 50,
-                "line_count": 10
-            }]
-        });
-
-        inject_dupes_actions(&mut output);
-
-        let actions = output["clone_groups"][0]["actions"].as_array().unwrap();
-        assert_eq!(actions.len(), 2);
-        assert_eq!(actions[0]["type"], "extract-shared");
-        assert!(
-            actions[0]["description"]
-                .as_str()
-                .unwrap()
-                .contains("10 lines")
-        );
-        assert!(
-            actions[0]["description"]
-                .as_str()
-                .unwrap()
-                .contains("2 instances")
-        );
-        assert_eq!(actions[1]["type"], "suppress-line");
-    }
-
-    #[test]
-    fn dupes_empty_results_no_actions() {
-        let mut output = serde_json::json!({
-            "clone_families": [],
-            "clone_groups": []
-        });
-
-        inject_dupes_actions(&mut output);
-
-        assert!(output["clone_families"].as_array().unwrap().is_empty());
-        assert!(output["clone_groups"].as_array().unwrap().is_empty());
-    }
-
-    /// Regression for issue #393: `inject_dupes_actions` must also walk
-    /// every `clone_families[i].groups[j]` (each a `CloneGroup`) and inject
-    /// `actions` on the inner item. The schema marks `actions` as required
-    /// on every `CloneGroup`; without the nested walk, JSON Schema strict
-    /// consumers saw a `required 'actions' is a required property`
-    /// violation on every nested group.
-    #[test]
-    fn clone_family_nested_groups_have_actions() {
-        let mut output = serde_json::json!({
-            "clone_families": [{
-                "files": ["src/a.ts", "src/b.ts"],
-                "groups": [
-                    {
-                        "instances": [
-                            {"file": "src/a.ts", "start_line": 1, "end_line": 10},
-                            {"file": "src/b.ts", "start_line": 5, "end_line": 14}
-                        ],
-                        "token_count": 50,
-                        "line_count": 10
-                    },
-                    {
-                        "instances": [
-                            {"file": "src/a.ts", "start_line": 20, "end_line": 30},
-                            {"file": "src/b.ts", "start_line": 25, "end_line": 35}
-                        ],
-                        "token_count": 60,
-                        "line_count": 11
-                    }
-                ],
-                "total_duplicated_lines": 21,
-                "total_duplicated_tokens": 110
-            }]
-        });
-
-        inject_dupes_actions(&mut output);
-
-        let family = &output["clone_families"][0];
-        assert!(
-            family.get("actions").and_then(|v| v.as_array()).is_some(),
-            "family carries top-level actions"
-        );
-        let groups = family["groups"].as_array().expect("groups array");
-        for (idx, group) in groups.iter().enumerate() {
-            let actions = group["actions"]
-                .as_array()
-                .unwrap_or_else(|| panic!("inner group {idx} missing actions"));
-            assert!(
-                !actions.is_empty(),
-                "inner group {idx} has at least one action"
-            );
-            assert_eq!(actions[0]["type"], "extract-shared");
-            assert_eq!(actions.last().unwrap()["type"], "suppress-line");
-        }
-    }
+    // Duplication action injection tests retired in #409: the wire shape
+    // now flows through typed wrappers in `crate::output_dupes`; the
+    // wrappers carry their own unit tests covering the same per-finding
+    // `actions[]` semantics (extract-shared / apply-suggestion /
+    // suppress-line position-0 invariants, issue #393 nested groups).
 
     // ── Tier-aware health action emission ──────────────────────────
 
