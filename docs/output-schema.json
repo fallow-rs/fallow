@@ -1009,9 +1009,9 @@
         "hotspots": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/HotspotEntry"
+            "$ref": "#/definitions/HotspotFinding"
           },
-          "description": "Hotspot entries combining git churn with complexity. Only present when\n--hotspots is used. Sorted by score descending (highest risk first)."
+          "description": "Hotspot entries combining git churn with complexity. Only present when\n--hotspots is used. Sorted by score descending (highest risk first).\nEach entry wraps its inner [`HotspotEntry`] payload (flattened on the\nwire) with a typed `actions` list."
         },
         "hotspot_summary": {
           "anyOf": [
@@ -1045,9 +1045,9 @@
         "targets": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/RefactoringTarget"
+            "$ref": "#/definitions/RefactoringTargetFinding"
           },
-          "description": "Ranked refactoring recommendations. Only present when --targets is used.\nSorted by efficiency (priority/effort) descending."
+          "description": "Ranked refactoring recommendations. Only present when --targets is used.\nSorted by efficiency (priority/effort) descending. Each entry wraps\nits inner [`RefactoringTarget`] payload (flattened on the wire) with\na typed `actions` list."
         },
         "target_thresholds": {
           "anyOf": [
@@ -1189,9 +1189,9 @@
         "hotspots": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/HotspotEntry"
+            "$ref": "#/definitions/HotspotFinding"
           },
-          "description": "Hotspots restricted to files in this group."
+          "description": "Hotspots restricted to files in this group. Each entry is the typed\n[`HotspotFinding`] wrapper around a\n[`HotspotEntry`](crate::health_types::HotspotEntry) payload."
         },
         "large_functions": {
           "type": "array",
@@ -1203,9 +1203,9 @@
         "targets": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/RefactoringTarget"
+            "$ref": "#/definitions/RefactoringTargetFinding"
           },
-          "description": "Refactoring targets in files belonging to this group."
+          "description": "Refactoring targets in files belonging to this group. Each entry is\nthe typed [`RefactoringTargetFinding`] wrapper around a\n[`RefactoringTarget`](crate::health_types::RefactoringTarget)\npayload."
         },
         "actions_meta": {
           "anyOf": [
@@ -1873,9 +1873,9 @@
         "hotspots": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/HotspotEntry"
+            "$ref": "#/definitions/HotspotFinding"
           },
-          "description": "Hotspot entries combining git churn with complexity. Only present when\n--hotspots is used. Sorted by score descending (highest risk first)."
+          "description": "Hotspot entries combining git churn with complexity. Only present when\n--hotspots is used. Sorted by score descending (highest risk first).\nEach entry wraps its inner [`HotspotEntry`] payload (flattened on the\nwire) with a typed `actions` list."
         },
         "hotspot_summary": {
           "anyOf": [
@@ -1909,9 +1909,9 @@
         "targets": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/RefactoringTarget"
+            "$ref": "#/definitions/RefactoringTargetFinding"
           },
-          "description": "Ranked refactoring recommendations. Only present when --targets is used.\nSorted by efficiency (priority/effort) descending."
+          "description": "Ranked refactoring recommendations. Only present when --targets is used.\nSorted by efficiency (priority/effort) descending. Each entry wraps\nits inner [`RefactoringTarget`] payload (flattened on the wire) with\na typed `actions` list."
         },
         "target_thresholds": {
           "anyOf": [
@@ -2493,13 +2493,6 @@
         "is_test_path": {
           "type": "boolean",
           "description": "True when the file path matches a test/mock convention (e.g.\n`**/__tests__/**`, `**/*.test.*`, `**/*.spec.*`, `**/__mocks__/**`).\nTest files are intentionally included in hotspot ranking (test\nmaintenance IS real work), but tagging them lets consumers decide\nwhether to weight or filter them downstream."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/HotspotAction"
-          },
-          "description": "Suggested actions to resolve this issue."
         }
       },
       "required": [
@@ -2511,8 +2504,7 @@
         "lines_deleted",
         "complexity_density",
         "fan_in",
-        "trend",
-        "actions"
+        "trend"
       ],
       "description": "A hotspot: a file that is both complex and frequently changing.\n\n## Score Formula\n\n```text\nnormalized_churn = weighted_commits / max_weighted_commits   (0..1)\nnormalized_complexity = complexity_density / max_density      (0..1)\nscore = normalized_churn × normalized_complexity × 100       (0..100)\n```\n\nScore uses within-project max normalization. Higher score = higher risk.\nFan-in is shown separately as \"blast radius\" — not baked into the score."
     },
@@ -2693,13 +2685,6 @@
             }
           ],
           "description": "Structured evidence linking to specific analysis data."
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/RefactoringTargetAction"
-          },
-          "description": "Suggested actions to resolve this issue."
         }
       },
       "required": [
@@ -2709,8 +2694,7 @@
         "recommendation",
         "category",
         "effort",
-        "confidence",
-        "actions"
+        "confidence"
       ]
     },
     "TargetThresholds": {
@@ -8727,6 +8711,151 @@
         "severity"
       ],
       "description": "Inner complexity-violation payload, wrapped by\n[`HealthFinding`](crate::health_types::HealthFinding).\n\nCarries the raw measured signals for a single function or synthetic\ntemplate entry that crossed a complexity threshold. The wrapper adds\nthe typed `actions` list and the audit-mode `introduced` flag using\n`#[serde(flatten)]` so `findings[]` items expose these fields at the\ntop level for wire continuity with the pre-wrapper shape."
+    },
+    "HotspotFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File path (absolute; stripped to relative in output)."
+        },
+        "score": {
+          "type": "number",
+          "description": "Hotspot score (0–100). Higher means more risk."
+        },
+        "commits": {
+          "type": "integer",
+          "description": "Number of commits in the analysis window."
+        },
+        "weighted_commits": {
+          "type": "number",
+          "description": "Recency-weighted commit count (exponential decay, half-life 90 days)."
+        },
+        "lines_added": {
+          "type": "integer",
+          "description": "Total lines added across all commits."
+        },
+        "lines_deleted": {
+          "type": "integer",
+          "description": "Total lines deleted across all commits."
+        },
+        "complexity_density": {
+          "type": "number",
+          "description": "Cyclomatic complexity / lines of code."
+        },
+        "fan_in": {
+          "type": "integer",
+          "description": "Number of files that import this file (blast radius)."
+        },
+        "trend": {
+          "description": "Churn trend: accelerating (recent > 1.5× older), stable, or cooling\n(recent < 0.67× older).",
+          "$ref": "#/definitions/ChurnTrend"
+        },
+        "ownership": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OwnershipMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Ownership signals (bus factor, contributors, declared owner, drift).\nPopulated only when `--ownership` is requested."
+        },
+        "is_test_path": {
+          "type": "boolean",
+          "description": "True when the file path matches a test/mock convention (e.g.\n`**/__tests__/**`, `**/*.test.*`, `**/*.spec.*`, `**/__mocks__/**`).\nTest files are intentionally included in hotspot ranking (test\nmaintenance IS real work), but tagging them lets consumers decide\nwhether to weight or filter them downstream."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/HotspotAction"
+          },
+          "description": "Machine-actionable refactor and review hints. Always populated;\nthe list never empties because the action selector unconditionally\nemits `refactor-file` plus `add-tests`. Ownership-derived variants\n(`low-bus-factor`, `unowned-hotspot`, `ownership-drift`) are\nappended when `--ownership` is active and the corresponding signal\nfires."
+        }
+      },
+      "required": [
+        "path",
+        "score",
+        "commits",
+        "weighted_commits",
+        "lines_added",
+        "lines_deleted",
+        "complexity_density",
+        "fan_in",
+        "trend",
+        "actions"
+      ],
+      "description": "Wire envelope for a single hotspot entry.\n\nFlattens [`HotspotEntry`] for wire continuity and adds the typed\n`actions` list. The `#[serde(flatten)]` keeps each `hotspots[]` item\nbyte-identical to the pre-wrapper shape: inner fields (`path`,\n`score`, `commits`, `weighted_commits`, ...) sit at the top level\nalongside `actions`. Optional inner fields (`ownership`,\n`is_test_path`) keep their original `skip_serializing_if` behaviour\nbecause serde applies the flatten before the parent serializer runs.\n\nConstruct via [`HotspotFinding::with_actions`] in the typical health\npipeline (the typed action builder operates on the inner\n[`HotspotEntry`]) or via [`HotspotFinding::from`] for fixture and\ntest code."
+    },
+    "RefactoringTargetFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute file path (stripped to relative in output)."
+        },
+        "priority": {
+          "type": "number",
+          "description": "Priority score (0–100, higher = more urgent)."
+        },
+        "efficiency": {
+          "type": "number",
+          "description": "Efficiency score (priority / effort). Higher = better quick-win value.\nSurfaces low-effort, high-priority targets first."
+        },
+        "recommendation": {
+          "type": "string",
+          "description": "One-line actionable recommendation."
+        },
+        "category": {
+          "description": "Recommendation category for tooling/filtering.",
+          "$ref": "#/definitions/RecommendationCategory"
+        },
+        "effort": {
+          "description": "Estimated effort to address this target.",
+          "$ref": "#/definitions/EffortEstimate"
+        },
+        "confidence": {
+          "description": "Confidence in this recommendation based on data source reliability.",
+          "$ref": "#/definitions/Confidence"
+        },
+        "factors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ContributingFactor"
+          },
+          "description": "Contributing factors that triggered this recommendation. Empty array\nomitted from JSON."
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TargetEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Structured evidence linking to specific analysis data."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RefactoringTargetAction"
+          },
+          "description": "Machine-actionable refactoring and suppression hints. Always\npopulated; the list never empties because the action selector\nunconditionally emits `apply-refactoring`. A trailing\n`suppress-line` is appended only when the target carries\n[`RefactoringTarget::evidence`] linking to specific functions."
+        }
+      },
+      "required": [
+        "path",
+        "priority",
+        "efficiency",
+        "recommendation",
+        "category",
+        "effort",
+        "confidence",
+        "actions"
+      ],
+      "description": "Wire envelope for a single refactoring target.\n\nFlattens [`RefactoringTarget`] for wire continuity and adds the typed\n`actions` list. The `#[serde(flatten)]` keeps each `targets[]` item\nbyte-identical to the pre-wrapper shape: inner fields (`path`,\n`priority`, `efficiency`, `recommendation`, `category`, ...) sit at\nthe top level alongside `actions`. Optional inner fields (`factors`,\n`evidence`) keep their original `skip_serializing_if` behaviour.\n\nConstruct via [`RefactoringTargetFinding::with_actions`] in the\ntypical health pipeline or via [`RefactoringTargetFinding::from`] for\nfixture and test code."
     }
   }
 }

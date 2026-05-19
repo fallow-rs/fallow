@@ -174,11 +174,8 @@ fn build_group(
         .filter(|l| paths.contains(&l.path))
         .cloned()
         .collect();
-    let group_targets: Vec<RefactoringTarget> = targets
-        .iter()
-        .filter(|t| paths.contains(&t.path))
-        .cloned()
-        .collect();
+    // `group_targets` flows straight into `RefactoringTargetFinding::with_actions`
+    // below; no intermediate collect needed.
 
     let total_files = paths.len();
     let (mut vital_signs, mut counts) = compute_vital_signs_and_counts(
@@ -210,6 +207,16 @@ fn build_group(
         .into_iter()
         .map(|v| crate::health_types::HealthFinding::with_actions(v, action_ctx))
         .collect();
+    let wrapped_hotspots: Vec<crate::health_types::HotspotFinding> = group_hotspots
+        .into_iter()
+        .map(|h| crate::health_types::HotspotFinding::with_actions(h, project_root))
+        .collect();
+    let wrapped_targets: Vec<crate::health_types::RefactoringTargetFinding> = targets
+        .iter()
+        .filter(|t| paths.contains(&t.path))
+        .cloned()
+        .map(crate::health_types::RefactoringTargetFinding::with_actions)
+        .collect();
 
     HealthGroup {
         key,
@@ -220,9 +227,9 @@ fn build_group(
         health_score,
         findings: wrapped_findings,
         file_scores: group_file_scores,
-        hotspots: group_hotspots,
+        hotspots: wrapped_hotspots,
         large_functions: group_large_functions,
-        targets: group_targets,
+        targets: wrapped_targets,
         actions_meta: if action_ctx.opts.omit_suppress_line {
             Some(crate::health_types::HealthActionsMeta {
                 suppression_hints_omitted: true,
