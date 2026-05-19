@@ -2575,17 +2575,20 @@ mod tests {
                 functions_analyzed: 50,
                 ..Default::default()
             },
-            targets: vec![RefactoringTarget {
-                path: root.join("src/complex.ts"),
-                priority: 85.0,
-                efficiency: 42.5,
-                recommendation: "Split high-impact file".into(),
-                category: RecommendationCategory::SplitHighImpact,
-                effort: EffortEstimate::Medium,
-                confidence: Confidence::High,
-                factors: vec![],
-                evidence: None,
-            }],
+            targets: vec![
+                RefactoringTarget {
+                    path: root.join("src/complex.ts"),
+                    priority: 85.0,
+                    efficiency: 42.5,
+                    recommendation: "Split high-impact file".into(),
+                    category: RecommendationCategory::SplitHighImpact,
+                    effort: EffortEstimate::Medium,
+                    confidence: Confidence::High,
+                    factors: vec![],
+                    evidence: None,
+                }
+                .into(),
+            ],
             ..Default::default()
         };
 

@@ -2377,8 +2377,10 @@ coverage_gaps?: (CoverageGaps | null)
 /**
  * Hotspot entries combining git churn with complexity. Only present when
  * --hotspots is used. Sorted by score descending (highest risk first).
+ * Each entry wraps its inner [`HotspotEntry`] payload (flattened on the
+ * wire) with a typed `actions` list.
  */
-hotspots?: HotspotEntry[]
+hotspots?: HotspotFinding[]
 /**
  * Hotspot analysis summary (only set with `--hotspots`).
  */
@@ -2395,9 +2397,11 @@ runtime_coverage?: (RuntimeCoverageReport | null)
 large_functions?: LargeFunctionEntry[]
 /**
  * Ranked refactoring recommendations. Only present when --targets is used.
- * Sorted by efficiency (priority/effort) descending.
+ * Sorted by efficiency (priority/effort) descending. Each entry wraps
+ * its inner [`RefactoringTarget`] payload (flattened on the wire) with
+ * a typed `actions` list.
  */
-targets?: RefactoringTarget[]
+targets?: RefactoringTargetFinding[]
 /**
  * Adaptive thresholds used for target scoring (only set with `--targets`).
  */
@@ -3212,20 +3216,22 @@ note?: (string | null)
 comment?: (string | null)
 }
 /**
- * A hotspot: a file that is both complex and frequently changing.
+ * Wire envelope for a single hotspot entry.
  *
- * ## Score Formula
+ * Flattens [`HotspotEntry`] for wire continuity and adds the typed
+ * `actions` list. The `#[serde(flatten)]` keeps each `hotspots[]` item
+ * byte-identical to the pre-wrapper shape: inner fields (`path`,
+ * `score`, `commits`, `weighted_commits`, ...) sit at the top level
+ * alongside `actions`. Optional inner fields (`ownership`,
+ * `is_test_path`) keep their original `skip_serializing_if` behaviour
+ * because serde applies the flatten before the parent serializer runs.
  *
- * ```text
- * normalized_churn = weighted_commits / max_weighted_commits   (0..1)
- * normalized_complexity = complexity_density / max_density      (0..1)
- * score = normalized_churn × normalized_complexity × 100       (0..100)
- * ```
- *
- * Score uses within-project max normalization. Higher score = higher risk.
- * Fan-in is shown separately as "blast radius" — not baked into the score.
+ * Construct via [`HotspotFinding::with_actions`] in the typical health
+ * pipeline (the typed action builder operates on the inner
+ * [`HotspotEntry`]) or via [`HotspotFinding::from`] for fixture and
+ * test code.
  */
-export interface HotspotEntry {
+export interface HotspotFinding {
 /**
  * File path (absolute; stripped to relative in output).
  */
@@ -3273,7 +3279,12 @@ ownership?: (OwnershipMetrics | null)
  */
 is_test_path?: boolean
 /**
- * Suggested actions to resolve this issue.
+ * Machine-actionable refactor and review hints. Always populated;
+ * the list never empties because the action selector unconditionally
+ * emits `refactor-file` plus `add-tests`. Ownership-derived variants
+ * (`low-bus-factor`, `unowned-hotspot`, `ownership-drift`) are
+ * appended when `--ownership` is active and the corresponding signal
+ * fires.
  */
 actions: HotspotAction[]
 }
@@ -3777,7 +3788,21 @@ line: number
  */
 line_count: number
 }
-export interface RefactoringTarget {
+/**
+ * Wire envelope for a single refactoring target.
+ *
+ * Flattens [`RefactoringTarget`] for wire continuity and adds the typed
+ * `actions` list. The `#[serde(flatten)]` keeps each `targets[]` item
+ * byte-identical to the pre-wrapper shape: inner fields (`path`,
+ * `priority`, `efficiency`, `recommendation`, `category`, ...) sit at
+ * the top level alongside `actions`. Optional inner fields (`factors`,
+ * `evidence`) keep their original `skip_serializing_if` behaviour.
+ *
+ * Construct via [`RefactoringTargetFinding::with_actions`] in the
+ * typical health pipeline or via [`RefactoringTargetFinding::from`] for
+ * fixture and test code.
+ */
+export interface RefactoringTargetFinding {
 /**
  * Absolute file path (stripped to relative in output).
  */
@@ -3808,7 +3833,11 @@ factors?: ContributingFactor[]
  */
 evidence?: (TargetEvidence | null)
 /**
- * Suggested actions to resolve this issue.
+ * Machine-actionable refactoring and suppression hints. Always
+ * populated; the list never empties because the action selector
+ * unconditionally emits `apply-refactoring`. A trailing
+ * `suppress-line` is appended only when the target carries
+ * [`RefactoringTarget::evidence`] linking to specific functions.
  */
 actions: RefactoringTargetAction[]
 }
@@ -4622,8 +4651,10 @@ coverage_gaps?: (CoverageGaps | null)
 /**
  * Hotspot entries combining git churn with complexity. Only present when
  * --hotspots is used. Sorted by score descending (highest risk first).
+ * Each entry wraps its inner [`HotspotEntry`] payload (flattened on the
+ * wire) with a typed `actions` list.
  */
-hotspots?: HotspotEntry[]
+hotspots?: HotspotFinding[]
 /**
  * Hotspot analysis summary (only set with `--hotspots`).
  */
@@ -4640,9 +4671,11 @@ runtime_coverage?: (RuntimeCoverageReport | null)
 large_functions?: LargeFunctionEntry[]
 /**
  * Ranked refactoring recommendations. Only present when --targets is used.
- * Sorted by efficiency (priority/effort) descending.
+ * Sorted by efficiency (priority/effort) descending. Each entry wraps
+ * its inner [`RefactoringTarget`] payload (flattened on the wire) with
+ * a typed `actions` list.
  */
-targets?: RefactoringTarget[]
+targets?: RefactoringTargetFinding[]
 /**
  * Adaptive thresholds used for target scoring (only set with `--targets`).
  */
@@ -4741,17 +4774,22 @@ findings?: HealthFinding[]
  */
 file_scores?: FileHealthScore[]
 /**
- * Hotspots restricted to files in this group.
+ * Hotspots restricted to files in this group. Each entry is the typed
+ * [`HotspotFinding`] wrapper around a
+ * [`HotspotEntry`](crate::health_types::HotspotEntry) payload.
  */
-hotspots?: HotspotEntry[]
+hotspots?: HotspotFinding[]
 /**
  * Large functions in files belonging to this group.
  */
 large_functions?: LargeFunctionEntry[]
 /**
- * Refactoring targets in files belonging to this group.
+ * Refactoring targets in files belonging to this group. Each entry is
+ * the typed [`RefactoringTargetFinding`] wrapper around a
+ * [`RefactoringTarget`](crate::health_types::RefactoringTarget)
+ * payload.
  */
-targets?: RefactoringTarget[]
+targets?: RefactoringTargetFinding[]
 /**
  * Auditable breadcrumb recording why `suppress-line` action hints
  * were omitted from this group's findings. Mirrors the project-level
@@ -5208,3 +5246,28 @@ _meta?: Meta
  * optional `introduced`) should use `HealthFinding` directly.
  */
 export type ComplexityViolation = Omit<HealthFinding, "actions" | "introduced">;
+
+/**
+ * Inner hotspot payload, flattened into `HotspotFinding` on the wire
+ * via `#[serde(flatten)]`. Exposed here for the same reason as
+ * `ComplexityViolation`: jstt dedupes the inner because its property
+ * set is fully subsumed by the wrapper. Consumers that want only the
+ * inner shape should use this alias; consumers that need the full
+ * envelope with `actions` should use `HotspotFinding` directly.
+ * Unlike `HealthFinding`, the wrapper does not carry `introduced`
+ * because hotspot ranking does not run through audit attribution.
+ */
+export type HotspotEntry = Omit<HotspotFinding, "actions">;
+
+/**
+ * Inner refactoring-target payload, flattened into
+ * `RefactoringTargetFinding` on the wire via `#[serde(flatten)]`.
+ * Exposed here for the same reason as `ComplexityViolation`: jstt
+ * dedupes the inner because its property set is fully subsumed by
+ * the wrapper. Consumers that want only the inner shape should use
+ * this alias; consumers that need the full envelope with `actions`
+ * should use `RefactoringTargetFinding` directly. Unlike
+ * `HealthFinding`, the wrapper does not carry `introduced` because
+ * refactoring targets do not run through audit attribution.
+ */
+export type RefactoringTarget = Omit<RefactoringTargetFinding, "actions">;

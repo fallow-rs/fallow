@@ -37,10 +37,10 @@ use fallow_cli::health_types::{
     ComplexityViolation, ContributorEntry, ContributorIdentifierFormat, CoverageGapSummary,
     CoverageGaps, CoverageModel, CoverageTier, ExceededThreshold, FileHealthScore, FindingSeverity,
     HealthActionsMeta, HealthScore, HealthScorePenalties, HealthSummary, HealthTrend, HotspotEntry,
-    HotspotSummary, LargeFunctionEntry, OwnershipMetrics, RecommendationCategory,
-    RefactoringTarget, RiskProfile, RuntimeCoverageReport, TargetThresholds, TrendCount,
-    UntestedExport, UntestedExportFinding, UntestedFile, UntestedFileFinding, VitalSigns,
-    VitalSignsCounts,
+    HotspotFinding, HotspotSummary, LargeFunctionEntry, OwnershipMetrics, RecommendationCategory,
+    RefactoringTarget, RefactoringTargetFinding, RiskProfile, RuntimeCoverageReport,
+    TargetThresholds, TrendCount, UntestedExport, UntestedExportFinding, UntestedFile,
+    UntestedFileFinding, VitalSigns, VitalSignsCounts,
 };
 use fallow_cli::output_envelope::{
     AuditCommand, AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
@@ -244,10 +244,12 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "HealthSummary",
         "HealthTrend",
         "HotspotEntry",
+        "HotspotFinding",
         "HotspotSummary",
         "LargeFunctionEntry",
         "OwnershipMetrics",
         "RefactoringTarget",
+        "RefactoringTargetFinding",
         "RiskProfile",
         "RuntimeCoverageReport",
         "TargetThresholds",
@@ -371,7 +373,7 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
 /// optional `actions` while emitting them; it is retired.
 fn finding_definition_names() -> &'static [&'static str] {
     // Each entry MUST appear in `actions_for_issue_type` (dead-code findings)
-    // or `inject_health_post_pass_actions` (health hotspots / targets) in
+    // or in the duplication post-pass (`inject_dupes_actions`) in
     // `crates/cli/src/report/json.rs`. `StaleSuppression` is intentionally
     // excluded: the JSON layer does not inject actions on stale_suppressions
     // today, and the committed schema matches that.
@@ -399,23 +401,14 @@ fn finding_definition_names() -> &'static [&'static str] {
         // wrappers ship `actions[]` and `introduced` natively and the
         // bare types no longer carry the augmented fields.
         // Health findings (actions[] -> per-finding action wrapper).
-        // `HealthFinding` has been migrated to a typed wrapper in
-        // `crates/cli/src/health_types/finding.rs` that flattens
-        // `ComplexityViolation` and carries the typed `actions` array
-        // plus the optional audit-mode `introduced` flag natively via
-        // schemars, so it is no longer post-pass-augmented here.
-        // `HotspotEntry` and `RefactoringTarget` still go through the
-        // augmentation; their typed-wrapper migration is deferred to
-        // PR B3 of issue #384.
-        "HotspotEntry",
-        "RefactoringTarget",
-        // Coverage-gap items (`coverage_gaps.files[]` and
-        // `coverage_gaps.exports[]`) have been migrated to typed
-        // `UntestedFileFinding` / `UntestedExportFinding` envelope
-        // wrappers in `crates/cli/src/health_types/coverage.rs`, so the
-        // bare `UntestedFile` / `UntestedExport` definitions are no
-        // longer augmented; their wrappers carry the typed `actions`
-        // array natively via schemars.
+        // `HealthFinding`, `HotspotFinding`, and `RefactoringTargetFinding`
+        // have all been migrated to typed wrappers in
+        // `crates/cli/src/health_types/finding.rs` that flatten their
+        // respective inner payloads (`ComplexityViolation`, `HotspotEntry`,
+        // `RefactoringTarget`) and carry the typed `actions` array natively
+        // via schemars. Only `HealthFinding` additionally carries
+        // `introduced` because hotspot ranking and refactoring targets are
+        // not produced by the audit base-snapshot classifier.
         // Duplication findings (`clone_groups[]` and `clone_families[]`).
         // `inject_dupes_actions` in `crates/cli/src/report/json.rs` walks
         // both arrays and appends an `actions` field to every item; the
@@ -435,11 +428,11 @@ fn finding_definition_names() -> &'static [&'static str] {
 /// Per-finding override for `augment_finding_definition`.
 ///
 /// The default augmentation attaches `actions: array<IssueAction>` and an
-/// `introduced` audit-mode flag. Health findings use typed action wrappers
-/// (`HotspotAction`, `RefactoringTargetAction`); `HealthFinding` itself is
-/// no longer augmented because it became a typed wrapper in #384 B2 that
-/// flattens `ComplexityViolation` and carries `actions` + `introduced`
-/// natively via schemars.
+/// `introduced` audit-mode flag. Health findings (`HealthFinding`,
+/// `HotspotFinding`, `RefactoringTargetFinding`) are no longer augmented
+/// because they became typed wrappers in #384 B2 and B3 that flatten
+/// their respective inner payloads and carry typed `actions` (plus
+/// `introduced` for `HealthFinding` only) natively via schemars.
 #[derive(Debug, Clone, Copy)]
 struct FindingAugmentation {
     /// Schema `$ref` for the items in the `actions` array.
@@ -455,20 +448,12 @@ const DEFAULT_FINDING_AUGMENTATION: FindingAugmentation = FindingAugmentation {
     include_introduced: true,
 };
 
-/// Pick the augmentation for a specific finding. Health hotspot ranking and
-/// refactoring targets use typed per-finding action wrappers and skip the
-/// audit `introduced` flag because they do not run through `fallow audit`'s
-/// introduced-vs-inherited classifier.
+/// Pick the augmentation for a specific finding. Today only the
+/// duplication wrappers go through the augmentation pipeline; every
+/// health finding has migrated to a typed wrapper that emits `actions`
+/// natively.
 fn finding_augmentation(name: &str) -> FindingAugmentation {
     match name {
-        "HotspotEntry" => FindingAugmentation {
-            actions_item_ref: "#/definitions/HotspotAction",
-            include_introduced: false,
-        },
-        "RefactoringTarget" => FindingAugmentation {
-            actions_item_ref: "#/definitions/RefactoringTargetAction",
-            include_introduced: false,
-        },
         "CloneFamily" => FindingAugmentation {
             actions_item_ref: "#/definitions/CloneFamilyAction",
             include_introduced: false,
@@ -597,11 +582,13 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<LargeFunctionEntry>();
     let _ = generator.subschema_for::<FileHealthScore>();
     let _ = generator.subschema_for::<HotspotEntry>();
+    let _ = generator.subschema_for::<HotspotFinding>();
     let _ = generator.subschema_for::<HotspotSummary>();
     let _ = generator.subschema_for::<OwnershipMetrics>();
     let _ = generator.subschema_for::<ContributorEntry>();
     let _ = generator.subschema_for::<ContributorIdentifierFormat>();
     let _ = generator.subschema_for::<RefactoringTarget>();
+    let _ = generator.subschema_for::<RefactoringTargetFinding>();
     let _ = generator.subschema_for::<RecommendationCategory>();
     let _ = generator.subschema_for::<TargetThresholds>();
     let _ = generator.subschema_for::<HealthTrend>();

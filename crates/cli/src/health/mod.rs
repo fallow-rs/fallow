@@ -1680,7 +1680,10 @@ fn assemble_health_report(
         } else {
             coverage_gaps
         },
-        hotspots: report_hotspots,
+        hotspots: report_hotspots
+            .into_iter()
+            .map(|h| crate::health_types::HotspotFinding::with_actions(h, opts.root))
+            .collect(),
         hotspot_summary: if opts.score_only_output {
             None
         } else {
@@ -1696,6 +1699,9 @@ fn assemble_health_report(
             Vec::new()
         } else {
             targets
+                .into_iter()
+                .map(crate::health_types::RefactoringTargetFinding::with_actions)
+                .collect()
         },
         target_thresholds: if opts.score_only_output {
             None

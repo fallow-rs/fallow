@@ -2967,19 +2967,22 @@ mod tests {
     fn hotspots_accelerating_trend() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.hotspots = vec![crate::health_types::HotspotEntry {
-            path: root.join("src/core.ts"),
-            score: 75.0,
-            commits: 42,
-            weighted_commits: 30.0,
-            lines_added: 500,
-            lines_deleted: 200,
-            complexity_density: 0.85,
-            fan_in: 10,
-            trend: fallow_core::churn::ChurnTrend::Accelerating,
-            ownership: None,
-            is_test_path: false,
-        }];
+        report.hotspots = vec![
+            crate::health_types::HotspotEntry {
+                path: root.join("src/core.ts"),
+                score: 75.0,
+                commits: 42,
+                weighted_commits: 30.0,
+                lines_added: 500,
+                lines_deleted: 200,
+                complexity_density: 0.85,
+                fan_in: 10,
+                trend: fallow_core::churn::ChurnTrend::Accelerating,
+                ownership: None,
+                is_test_path: false,
+            }
+            .into(),
+        ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
         assert!(text.contains("Hotspots (1 files)"));
@@ -2996,19 +2999,22 @@ mod tests {
     fn hotspots_cooling_trend() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.hotspots = vec![crate::health_types::HotspotEntry {
-            path: root.join("src/old.ts"),
-            score: 20.0,
-            commits: 5,
-            weighted_commits: 2.0,
-            lines_added: 50,
-            lines_deleted: 30,
-            complexity_density: 0.3,
-            fan_in: 2,
-            trend: fallow_core::churn::ChurnTrend::Cooling,
-            ownership: None,
-            is_test_path: false,
-        }];
+        report.hotspots = vec![
+            crate::health_types::HotspotEntry {
+                path: root.join("src/old.ts"),
+                score: 20.0,
+                commits: 5,
+                weighted_commits: 2.0,
+                lines_added: 50,
+                lines_deleted: 30,
+                complexity_density: 0.3,
+                fan_in: 2,
+                trend: fallow_core::churn::ChurnTrend::Cooling,
+                ownership: None,
+                is_test_path: false,
+            }
+            .into(),
+        ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
         assert!(text.contains("20.0"));
@@ -3019,19 +3025,22 @@ mod tests {
     fn hotspots_stable_trend() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.hotspots = vec![crate::health_types::HotspotEntry {
-            path: root.join("src/mid.ts"),
-            score: 45.0,
-            commits: 15,
-            weighted_commits: 10.0,
-            lines_added: 200,
-            lines_deleted: 100,
-            complexity_density: 0.5,
-            fan_in: 5,
-            trend: fallow_core::churn::ChurnTrend::Stable,
-            ownership: None,
-            is_test_path: false,
-        }];
+        report.hotspots = vec![
+            crate::health_types::HotspotEntry {
+                path: root.join("src/mid.ts"),
+                score: 45.0,
+                commits: 15,
+                weighted_commits: 10.0,
+                lines_added: 200,
+                lines_deleted: 100,
+                complexity_density: 0.5,
+                fan_in: 5,
+                trend: fallow_core::churn::ChurnTrend::Stable,
+                ownership: None,
+                is_test_path: false,
+            }
+            .into(),
+        ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
         assert!(text.contains("45.0"));
@@ -3042,19 +3051,22 @@ mod tests {
     fn hotspots_with_summary_and_since() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.hotspots = vec![crate::health_types::HotspotEntry {
-            path: root.join("src/a.ts"),
-            score: 50.0,
-            commits: 10,
-            weighted_commits: 8.0,
-            lines_added: 100,
-            lines_deleted: 50,
-            complexity_density: 0.4,
-            fan_in: 3,
-            trend: fallow_core::churn::ChurnTrend::Stable,
-            ownership: None,
-            is_test_path: false,
-        }];
+        report.hotspots = vec![
+            crate::health_types::HotspotEntry {
+                path: root.join("src/a.ts"),
+                score: 50.0,
+                commits: 10,
+                weighted_commits: 8.0,
+                lines_added: 100,
+                lines_deleted: 50,
+                complexity_density: 0.4,
+                fan_in: 3,
+                trend: fallow_core::churn::ChurnTrend::Stable,
+                ownership: None,
+                is_test_path: false,
+            }
+            .into(),
+        ];
         report.hotspot_summary = Some(crate::health_types::HotspotSummary {
             since: "6 months".to_string(),
             min_commits: 3,
@@ -3072,19 +3084,22 @@ mod tests {
     fn hotspots_summary_no_exclusions() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.hotspots = vec![crate::health_types::HotspotEntry {
-            path: root.join("src/a.ts"),
-            score: 50.0,
-            commits: 10,
-            weighted_commits: 8.0,
-            lines_added: 100,
-            lines_deleted: 50,
-            complexity_density: 0.4,
-            fan_in: 3,
-            trend: fallow_core::churn::ChurnTrend::Stable,
-            ownership: None,
-            is_test_path: false,
-        }];
+        report.hotspots = vec![
+            crate::health_types::HotspotEntry {
+                path: root.join("src/a.ts"),
+                score: 50.0,
+                commits: 10,
+                weighted_commits: 8.0,
+                lines_added: 100,
+                lines_deleted: 50,
+                complexity_density: 0.4,
+                fan_in: 3,
+                trend: fallow_core::churn::ChurnTrend::Stable,
+                ownership: None,
+                is_test_path: false,
+            }
+            .into(),
+        ];
         report.hotspot_summary = Some(crate::health_types::HotspotSummary {
             since: "3 months".to_string(),
             min_commits: 2,
@@ -3102,19 +3117,22 @@ mod tests {
     fn hotspots_docs_link() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.hotspots = vec![crate::health_types::HotspotEntry {
-            path: root.join("src/a.ts"),
-            score: 50.0,
-            commits: 10,
-            weighted_commits: 8.0,
-            lines_added: 100,
-            lines_deleted: 50,
-            complexity_density: 0.4,
-            fan_in: 3,
-            trend: fallow_core::churn::ChurnTrend::Stable,
-            ownership: None,
-            is_test_path: false,
-        }];
+        report.hotspots = vec![
+            crate::health_types::HotspotEntry {
+                path: root.join("src/a.ts"),
+                score: 50.0,
+                commits: 10,
+                weighted_commits: 8.0,
+                lines_added: 100,
+                lines_deleted: 50,
+                complexity_density: 0.4,
+                fan_in: 3,
+                trend: fallow_core::churn::ChurnTrend::Stable,
+                ownership: None,
+                is_test_path: false,
+            }
+            .into(),
+        ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
         assert!(text.contains("docs.fallow.tools/explanations/health#hotspot-metrics"));
@@ -3126,17 +3144,20 @@ mod tests {
     fn refactoring_targets_single_low_effort() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.targets = vec![crate::health_types::RefactoringTarget {
-            path: root.join("src/legacy.ts"),
-            priority: 65.0,
-            efficiency: 65.0,
-            recommendation: "Extract complex logic into helper functions".to_string(),
-            category: crate::health_types::RecommendationCategory::ExtractComplexFunctions,
-            effort: crate::health_types::EffortEstimate::Low,
-            confidence: crate::health_types::Confidence::High,
-            factors: vec![],
-            evidence: None,
-        }];
+        report.targets = vec![
+            crate::health_types::RefactoringTarget {
+                path: root.join("src/legacy.ts"),
+                priority: 65.0,
+                efficiency: 65.0,
+                recommendation: "Extract complex logic into helper functions".to_string(),
+                category: crate::health_types::RecommendationCategory::ExtractComplexFunctions,
+                effort: crate::health_types::EffortEstimate::Low,
+                confidence: crate::health_types::Confidence::High,
+                factors: vec![],
+                evidence: None,
+            }
+            .into(),
+        ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
         assert!(text.contains("Refactoring targets (1)"));
@@ -3165,7 +3186,8 @@ mod tests {
                 confidence: crate::health_types::Confidence::High,
                 factors: vec![],
                 evidence: None,
-            },
+            }
+            .into(),
             crate::health_types::RefactoringTarget {
                 path: root.join("src/b.ts"),
                 priority: 60.0,
@@ -3176,7 +3198,8 @@ mod tests {
                 confidence: crate::health_types::Confidence::Medium,
                 factors: vec![],
                 evidence: None,
-            },
+            }
+            .into(),
             crate::health_types::RefactoringTarget {
                 path: root.join("src/c.ts"),
                 priority: 50.0,
@@ -3187,7 +3210,8 @@ mod tests {
                 confidence: crate::health_types::Confidence::Low,
                 factors: vec![],
                 evidence: None,
-            },
+            }
+            .into(),
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -3208,17 +3232,20 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         for i in 0..12 {
-            report.targets.push(crate::health_types::RefactoringTarget {
-                path: root.join(format!("src/target{i}.ts")),
-                priority: 50.0,
-                efficiency: 25.0,
-                recommendation: format!("Fix target {i}"),
-                category: crate::health_types::RecommendationCategory::ExtractComplexFunctions,
-                effort: crate::health_types::EffortEstimate::Medium,
-                confidence: crate::health_types::Confidence::Medium,
-                factors: vec![],
-                evidence: None,
-            });
+            report.targets.push(
+                crate::health_types::RefactoringTarget {
+                    path: root.join(format!("src/target{i}.ts")),
+                    priority: 50.0,
+                    efficiency: 25.0,
+                    recommendation: format!("Fix target {i}"),
+                    category: crate::health_types::RecommendationCategory::ExtractComplexFunctions,
+                    effort: crate::health_types::EffortEstimate::Medium,
+                    confidence: crate::health_types::Confidence::Medium,
+                    factors: vec![],
+                    evidence: None,
+                }
+                .into(),
+            );
         }
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -3233,17 +3260,20 @@ mod tests {
     fn refactoring_targets_docs_link() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.targets = vec![crate::health_types::RefactoringTarget {
-            path: root.join("src/a.ts"),
-            priority: 50.0,
-            efficiency: 50.0,
-            recommendation: "Fix it".to_string(),
-            category: crate::health_types::RecommendationCategory::ExtractDependencies,
-            effort: crate::health_types::EffortEstimate::Low,
-            confidence: crate::health_types::Confidence::High,
-            factors: vec![],
-            evidence: None,
-        }];
+        report.targets = vec![
+            crate::health_types::RefactoringTarget {
+                path: root.join("src/a.ts"),
+                priority: 50.0,
+                efficiency: 50.0,
+                recommendation: "Fix it".to_string(),
+                category: crate::health_types::RecommendationCategory::ExtractDependencies,
+                effort: crate::health_types::EffortEstimate::Low,
+                confidence: crate::health_types::Confidence::High,
+                factors: vec![],
+                evidence: None,
+            }
+            .into(),
+        ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
         assert!(text.contains("docs.fallow.tools/explanations/health#refactoring-targets"));
@@ -3284,17 +3314,20 @@ mod tests {
             ),
         ];
         for (i, (cat, _label)) in categories.iter().enumerate() {
-            report.targets.push(crate::health_types::RefactoringTarget {
-                path: root.join(format!("src/cat{i}.ts")),
-                priority: 50.0,
-                efficiency: 50.0,
-                recommendation: format!("Fix cat{i}"),
-                category: cat.clone(),
-                effort: crate::health_types::EffortEstimate::Low,
-                confidence: crate::health_types::Confidence::High,
-                factors: vec![],
-                evidence: None,
-            });
+            report.targets.push(
+                crate::health_types::RefactoringTarget {
+                    path: root.join(format!("src/cat{i}.ts")),
+                    priority: 50.0,
+                    efficiency: 50.0,
+                    recommendation: format!("Fix cat{i}"),
+                    category: cat.clone(),
+                    effort: crate::health_types::EffortEstimate::Low,
+                    confidence: crate::health_types::Confidence::High,
+                    factors: vec![],
+                    evidence: None,
+                }
+                .into(),
+            );
         }
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -3321,7 +3354,8 @@ mod tests {
                 confidence: crate::health_types::Confidence::High,
                 factors: vec![],
                 evidence: None,
-            },
+            }
+            .into(),
             crate::health_types::RefactoringTarget {
                 path: root.join("src/mid.ts"),
                 priority: 50.0,
@@ -3332,7 +3366,8 @@ mod tests {
                 confidence: crate::health_types::Confidence::Medium,
                 factors: vec![],
                 evidence: None,
-            },
+            }
+            .into(),
             crate::health_types::RefactoringTarget {
                 path: root.join("src/low.ts"),
                 priority: 50.0,
@@ -3343,7 +3378,8 @@ mod tests {
                 confidence: crate::health_types::Confidence::Low,
                 factors: vec![],
                 evidence: None,
-            },
+            }
+            .into(),
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -3412,30 +3448,36 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
         }];
-        report.hotspots = vec![crate::health_types::HotspotEntry {
-            path: root.join("src/complex.ts"),
-            score: 65.0,
-            commits: 20,
-            weighted_commits: 15.0,
-            lines_added: 300,
-            lines_deleted: 100,
-            complexity_density: 0.5,
-            fan_in: 5,
-            trend: fallow_core::churn::ChurnTrend::Accelerating,
-            ownership: None,
-            is_test_path: false,
-        }];
-        report.targets = vec![crate::health_types::RefactoringTarget {
-            path: root.join("src/complex.ts"),
-            priority: 70.0,
-            efficiency: 70.0,
-            recommendation: "Extract complex functions".to_string(),
-            category: crate::health_types::RecommendationCategory::ExtractComplexFunctions,
-            effort: crate::health_types::EffortEstimate::Low,
-            confidence: crate::health_types::Confidence::High,
-            factors: vec![],
-            evidence: None,
-        }];
+        report.hotspots = vec![
+            crate::health_types::HotspotEntry {
+                path: root.join("src/complex.ts"),
+                score: 65.0,
+                commits: 20,
+                weighted_commits: 15.0,
+                lines_added: 300,
+                lines_deleted: 100,
+                complexity_density: 0.5,
+                fan_in: 5,
+                trend: fallow_core::churn::ChurnTrend::Accelerating,
+                ownership: None,
+                is_test_path: false,
+            }
+            .into(),
+        ];
+        report.targets = vec![
+            crate::health_types::RefactoringTarget {
+                path: root.join("src/complex.ts"),
+                priority: 70.0,
+                efficiency: 70.0,
+                recommendation: "Extract complex functions".to_string(),
+                category: crate::health_types::RecommendationCategory::ExtractComplexFunctions,
+                effort: crate::health_types::EffortEstimate::Low,
+                confidence: crate::health_types::Confidence::High,
+                factors: vec![],
+                evidence: None,
+            }
+            .into(),
+        ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
         // All sections present
@@ -3622,7 +3664,8 @@ mod tests {
                 trend: fallow_core::churn::ChurnTrend::Accelerating,
                 ownership: None,
                 is_test_path: false,
-            },
+            }
+            .into(),
             crate::health_types::HotspotEntry {
                 path: root.join("src/medium.ts"),
                 score: 45.0, // yellow: >= 30
@@ -3635,7 +3678,8 @@ mod tests {
                 trend: fallow_core::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
-            },
+            }
+            .into(),
             crate::health_types::HotspotEntry {
                 path: root.join("src/low.ts"),
                 score: 15.0, // green: < 30
@@ -3648,7 +3692,8 @@ mod tests {
                 trend: fallow_core::churn::ChurnTrend::Cooling,
                 ownership: None,
                 is_test_path: false,
-            },
+            }
+            .into(),
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);

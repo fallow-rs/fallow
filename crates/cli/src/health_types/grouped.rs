@@ -10,8 +10,8 @@
 use serde::Serialize;
 
 use crate::health_types::{
-    FileHealthScore, HealthActionsMeta, HealthFinding, HealthScore, HotspotEntry,
-    LargeFunctionEntry, RefactoringTarget, VitalSigns,
+    FileHealthScore, HealthActionsMeta, HealthFinding, HealthScore, HotspotFinding,
+    LargeFunctionEntry, RefactoringTargetFinding, VitalSigns,
 };
 
 /// A health report scoped to a single group.
@@ -63,15 +63,20 @@ pub struct HealthGroup {
     /// File scores restricted to files in this group.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub file_scores: Vec<FileHealthScore>,
-    /// Hotspots restricted to files in this group.
+    /// Hotspots restricted to files in this group. Each entry is the typed
+    /// [`HotspotFinding`] wrapper around a
+    /// [`HotspotEntry`](crate::health_types::HotspotEntry) payload.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub hotspots: Vec<HotspotEntry>,
+    pub hotspots: Vec<HotspotFinding>,
     /// Large functions in files belonging to this group.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub large_functions: Vec<LargeFunctionEntry>,
-    /// Refactoring targets in files belonging to this group.
+    /// Refactoring targets in files belonging to this group. Each entry is
+    /// the typed [`RefactoringTargetFinding`] wrapper around a
+    /// [`RefactoringTarget`](crate::health_types::RefactoringTarget)
+    /// payload.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub targets: Vec<RefactoringTarget>,
+    pub targets: Vec<RefactoringTargetFinding>,
     /// Auditable breadcrumb recording why `suppress-line` action hints
     /// were omitted from this group's findings. Mirrors the project-level
     /// `HealthReport.actions_meta`; populated at construction time when the

@@ -203,8 +203,7 @@ function stripTrailingWhitespace(contents) {
  * the same shape to TypeScript consumers without forcing them to reach
  * through the wrapper.
  *
- * Adding entries (e.g. for `HotspotEntry` and `RefactoringTarget` once
- * their `*Finding` wrappers land in PR B3 of issue #384):
+ * Adding new entries:
  *   1. Confirm jstt actually dedupes the new inner by inspecting the
  *      generated `.d.ts` for `export interface <inner-name>\b`. If
  *      present, the entry is unnecessary (and would conflict on the
@@ -227,6 +226,35 @@ const FLATTEN_DEDUPED_ALIASES = [
       " * Consumers that need to type just the inner payload should use this\n" +
       " * alias; consumers that need the full envelope (with `actions` and\n" +
       " * optional `introduced`) should use `HealthFinding` directly.",
+  },
+  {
+    name: "HotspotEntry",
+    parent: "HotspotFinding",
+    wrapperOnlyFields: ["actions"],
+    description:
+      "Inner hotspot payload, flattened into `HotspotFinding` on the wire\n" +
+      " * via `#[serde(flatten)]`. Exposed here for the same reason as\n" +
+      " * `ComplexityViolation`: jstt dedupes the inner because its property\n" +
+      " * set is fully subsumed by the wrapper. Consumers that want only the\n" +
+      " * inner shape should use this alias; consumers that need the full\n" +
+      " * envelope with `actions` should use `HotspotFinding` directly.\n" +
+      " * Unlike `HealthFinding`, the wrapper does not carry `introduced`\n" +
+      " * because hotspot ranking does not run through audit attribution.",
+  },
+  {
+    name: "RefactoringTarget",
+    parent: "RefactoringTargetFinding",
+    wrapperOnlyFields: ["actions"],
+    description:
+      "Inner refactoring-target payload, flattened into\n" +
+      " * `RefactoringTargetFinding` on the wire via `#[serde(flatten)]`.\n" +
+      " * Exposed here for the same reason as `ComplexityViolation`: jstt\n" +
+      " * dedupes the inner because its property set is fully subsumed by\n" +
+      " * the wrapper. Consumers that want only the inner shape should use\n" +
+      " * this alias; consumers that need the full envelope with `actions`\n" +
+      " * should use `RefactoringTargetFinding` directly. Unlike\n" +
+      " * `HealthFinding`, the wrapper does not carry `introduced` because\n" +
+      " * refactoring targets do not run through audit attribution.",
   },
 ];
 

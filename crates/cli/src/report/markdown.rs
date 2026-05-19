@@ -1735,7 +1735,8 @@ mod tests {
                         detail: "25 files depend on this".into(),
                     }],
                     evidence: None,
-                },
+                }
+                .into(),
                 RefactoringTarget {
                     path: PathBuf::from("/project/src/legacy.ts"),
                     priority: 45.0,
@@ -1746,7 +1747,8 @@ mod tests {
                     confidence: crate::health_types::Confidence::High,
                     factors: vec![],
                     evidence: None,
-                },
+                }
+                .into(),
             ],
             ..Default::default()
         };
@@ -2117,19 +2119,22 @@ mod tests {
                 functions_above_threshold: 1,
                 ..Default::default()
             },
-            hotspots: vec![crate::health_types::HotspotEntry {
-                path: root.join("src/hot.ts"),
-                score: 85.0,
-                commits: 42,
-                weighted_commits: 35.0,
-                lines_added: 500,
-                lines_deleted: 200,
-                complexity_density: 1.2,
-                fan_in: 10,
-                trend: fallow_core::churn::ChurnTrend::Accelerating,
-                ownership: None,
-                is_test_path: false,
-            }],
+            hotspots: vec![
+                crate::health_types::HotspotEntry {
+                    path: root.join("src/hot.ts"),
+                    score: 85.0,
+                    commits: 42,
+                    weighted_commits: 35.0,
+                    lines_added: 500,
+                    lines_deleted: 200,
+                    complexity_density: 1.2,
+                    fan_in: 10,
+                    trend: fallow_core::churn::ChurnTrend::Accelerating,
+                    ownership: None,
+                    is_test_path: false,
+                }
+                .into(),
+            ],
             hotspot_summary: Some(crate::health_types::HotspotSummary {
                 since: "6 months".to_string(),
                 min_commits: 3,
@@ -2330,19 +2335,22 @@ mod tests {
                 functions_above_threshold: 1,
                 ..Default::default()
             },
-            hotspots: vec![crate::health_types::HotspotEntry {
-                path: root.join("src/hot.ts"),
-                score: 50.0,
-                commits: 10,
-                weighted_commits: 8.0,
-                lines_added: 100,
-                lines_deleted: 50,
-                complexity_density: 0.5,
-                fan_in: 3,
-                trend: fallow_core::churn::ChurnTrend::Stable,
-                ownership: None,
-                is_test_path: false,
-            }],
+            hotspots: vec![
+                crate::health_types::HotspotEntry {
+                    path: root.join("src/hot.ts"),
+                    score: 50.0,
+                    commits: 10,
+                    weighted_commits: 8.0,
+                    lines_added: 100,
+                    lines_deleted: 50,
+                    complexity_density: 0.5,
+                    fan_in: 3,
+                    trend: fallow_core::churn::ChurnTrend::Stable,
+                    ownership: None,
+                    is_test_path: false,
+                }
+                .into(),
+            ],
             hotspot_summary: Some(crate::health_types::HotspotSummary {
                 since: "6 months".to_string(),
                 min_commits: 3,

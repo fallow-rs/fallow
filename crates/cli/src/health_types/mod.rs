@@ -99,8 +99,10 @@ pub struct HealthReport {
     pub coverage_gaps: Option<CoverageGaps>,
     /// Hotspot entries combining git churn with complexity. Only present when
     /// --hotspots is used. Sorted by score descending (highest risk first).
+    /// Each entry wraps its inner [`HotspotEntry`] payload (flattened on the
+    /// wire) with a typed `actions` list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub hotspots: Vec<HotspotEntry>,
+    pub hotspots: Vec<HotspotFinding>,
     /// Hotspot analysis summary (only set with `--hotspots`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hotspot_summary: Option<HotspotSummary>,
@@ -113,9 +115,11 @@ pub struct HealthReport {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub large_functions: Vec<LargeFunctionEntry>,
     /// Ranked refactoring recommendations. Only present when --targets is used.
-    /// Sorted by efficiency (priority/effort) descending.
+    /// Sorted by efficiency (priority/effort) descending. Each entry wraps
+    /// its inner [`RefactoringTarget`] payload (flattened on the wire) with
+    /// a typed `actions` list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub targets: Vec<RefactoringTarget>,
+    pub targets: Vec<RefactoringTargetFinding>,
     /// Adaptive thresholds used for target scoring (only set with `--targets`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_thresholds: Option<TargetThresholds>,
