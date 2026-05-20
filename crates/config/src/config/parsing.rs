@@ -695,36 +695,52 @@ pub(super) fn collect_unknown_rule_keys(
     findings
 }
 
-/// Process-wide counter incremented every time
-/// [`warn_on_unknown_rule_keys`] emits a `tracing::warn!` (i.e. after dedupe).
-///
-/// Tests use [`unknown_rule_warning_count`] to assert that `FallowConfig::load`
-/// actually invokes the warn pass without subscribing to tracing output. The
-/// counter is monotonic and process-wide; tests must use a unique typo string
-/// per assertion and check a before / after delta rather than an absolute value.
-static UNKNOWN_RULE_WARNING_COUNT: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
+thread_local! {
+    /// Per-thread capture of unknown-rule findings, for the wiring regression
+    /// test in this module. Each test installs a fresh capture via
+    /// [`capture_unknown_rule_warnings`], runs `FallowConfig::load`, and reads
+    /// back the findings. Thread-local so parallel test execution does not
+    /// race; bypassed entirely in production code (`UnknownRuleCapture::None`).
+    #[cfg(test)]
+    static UNKNOWN_RULE_CAPTURE: std::cell::RefCell<Option<Vec<super::rules::UnknownRuleKey>>> =
+        const { std::cell::RefCell::new(None) };
+}
 
-/// Current value of [`UNKNOWN_RULE_WARNING_COUNT`]. Test-only introspection.
+/// Install a thread-local capture buffer and run `body`. Returns the findings
+/// emitted by every `warn_on_unknown_rule_keys` call within `body`'s call tree
+/// on the current thread, in order. Test-only.
 #[cfg(test)]
-pub(super) fn unknown_rule_warning_count() -> usize {
-    UNKNOWN_RULE_WARNING_COUNT.load(std::sync::atomic::Ordering::Relaxed)
+pub(super) fn capture_unknown_rule_warnings<F: FnOnce() -> R, R>(
+    body: F,
+) -> (R, Vec<super::rules::UnknownRuleKey>) {
+    UNKNOWN_RULE_CAPTURE.with(|cell| {
+        *cell.borrow_mut() = Some(Vec::new());
+    });
+    let result = body();
+    let findings = UNKNOWN_RULE_CAPTURE.with(|cell| cell.borrow_mut().take().unwrap_or_default());
+    (result, findings)
 }
 
 /// Emit a `tracing::warn!` per finding from [`collect_unknown_rule_keys`].
+///
+/// `config_path` is the file the merged value originated from; it appears in
+/// the warning text AND in the dedupe key so two different config files with
+/// the same typo each warn once instead of the second one being silenced.
 ///
 /// Deduplicates within the process: `FallowConfig::load` runs multiple times
 /// per analysis (combined mode runs check + dupes + health, each through the
 /// same config load path), so without a dedupe the same typo emits 3+ warnings
 /// per run.
-fn warn_on_unknown_rule_keys(merged: &serde_json::Value) {
+fn warn_on_unknown_rule_keys(config_path: &Path, merged: &serde_json::Value) {
     use std::sync::{Mutex, OnceLock};
 
     static WARNED: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
     let warned = WARNED.get_or_init(|| Mutex::new(FxHashSet::default()));
 
+    let path_display = config_path.display().to_string();
+
     for finding in collect_unknown_rule_keys(merged) {
-        let dedupe_key = format!("{}::{}", finding.context, finding.key);
+        let dedupe_key = format!("{path_display}::{}::{}", finding.context, finding.key);
         // On a poisoned mutex, fall through and emit anyway: over-warning is
         // strictly better than swallowing a typo silently.
         if let Ok(mut set) = warned.lock()
@@ -733,21 +749,28 @@ fn warn_on_unknown_rule_keys(merged: &serde_json::Value) {
             continue;
         }
 
-        UNKNOWN_RULE_WARNING_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        #[cfg(test)]
+        UNKNOWN_RULE_CAPTURE.with(|cell| {
+            if let Some(buf) = cell.borrow_mut().as_mut() {
+                buf.push(finding.clone());
+            }
+        });
 
         if let Some(suggestion) = finding.suggestion {
             tracing::warn!(
-                "unknown rule '{key}' in {context} (did you mean '{suggestion}'?); \
+                "unknown rule '{key}' in {context} of {path} (did you mean '{suggestion}'?); \
                  the rule will be ignored. A future release will reject unknown rule names.",
                 key = finding.key,
                 context = finding.context,
+                path = path_display,
             );
         } else {
             tracing::warn!(
-                "unknown rule '{key}' in {context}; the rule will be ignored. \
+                "unknown rule '{key}' in {context} of {path}; the rule will be ignored. \
                  A future release will reject unknown rule names.",
                 key = finding.key,
                 context = finding.context,
+                path = path_display,
             );
         }
     }
@@ -779,7 +802,7 @@ impl FallowConfig {
         let mut visited = FxHashSet::default();
         let merged = resolve_extends(path, &mut visited, 0)?;
 
-        warn_on_unknown_rule_keys(&merged);
+        warn_on_unknown_rule_keys(path, &merged);
 
         let config: Self = serde_json::from_value(merged).map_err(|e| {
             miette::miette!(
@@ -3315,30 +3338,40 @@ minTokens = 100
     fn load_wires_warn_on_unknown_rule_keys_into_load_path() {
         // Wiring regression test: asserts FallowConfig::load actually invokes
         // the warn pass on the merged value. If a future refactor removes the
-        // `warn_on_unknown_rule_keys(&merged)` line from `load`, the helper
-        // tests still pass but this delta-check fails.
+        // `warn_on_unknown_rule_keys` line from `load`, the helper tests still
+        // pass but this capture-based assertion fails because no finding is
+        // pushed onto the thread-local buffer.
         //
-        // Uses a typo string that is unique across the workspace test suite
-        // so the process-wide warning counter (and the warn-pass dedupe set)
-        // sees it for the first time on THIS load and the +1 delta is reliable
-        // even under parallel test execution.
+        // Uses a thread-local capture (not a process-global counter) so that
+        // parallel test execution does not race; each test thread has its own
+        // capture buffer. Uses a unique typo per test invocation so the
+        // process-wide dedupe set does not suppress the finding if another
+        // test happens to load a config with the same typo earlier.
         let dir = test_dir("wiring");
-        std::fs::write(
-            dir.path().join(".fallowrc.json"),
-            r#"{"rules": {"wiring-probe-zxyw-load-test": "warn"}}"#,
-        )
-        .unwrap();
-
-        let before = unknown_rule_warning_count();
-        let _config = FallowConfig::load(&dir.path().join(".fallowrc.json"))
-            .expect("load should succeed in phase 1");
-        let after = unknown_rule_warning_count();
-
-        assert_eq!(
-            after,
-            before + 1,
-            "FallowConfig::load must invoke warn_on_unknown_rule_keys exactly once for one new unknown key"
+        let path = dir.path().join(".fallowrc.json");
+        let typo = format!(
+            "wiring-probe-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
         );
+        std::fs::write(&path, format!(r#"{{"rules": {{"{typo}": "warn"}}}}"#)).unwrap();
+
+        let (config_res, captured) = capture_unknown_rule_warnings(|| FallowConfig::load(&path));
+
+        assert!(
+            config_res.is_ok(),
+            "load should succeed in phase 1: {:?}",
+            config_res.err()
+        );
+        assert_eq!(
+            captured.len(),
+            1,
+            "FallowConfig::load must invoke warn_on_unknown_rule_keys exactly once for one new unknown key, got: {captured:?}"
+        );
+        assert_eq!(captured[0].key, typo);
+        assert_eq!(captured[0].context, "rules");
     }
 
     #[test]

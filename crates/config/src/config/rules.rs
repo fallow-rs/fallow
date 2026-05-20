@@ -811,6 +811,64 @@ mod tests {
     }
 
     #[test]
+    fn known_rule_names_covers_every_serde_alias_in_source() {
+        // Source-level drift guard: parse this file's text and extract every
+        // `alias = "<kebab>"` literal that appears on a `RulesConfig` /
+        // `PartialRulesConfig` field. Assert each one is in
+        // `KNOWN_RULE_NAMES`.
+        //
+        // Complements `known_rule_names_count_matches_struct` (catches new
+        // fields) and `every_known_rule_name_round_trips_through_partial`
+        // (catches stale or renamed entries). This one catches a new alias
+        // added to an existing field without a matching KNOWN_RULE_NAMES
+        // update; that's invisible to the count guard (count stays the
+        // same), invisible to the canonical-coverage walk (the canonical
+        // name is already present), and invisible to the roundtrip guard
+        // (the roundtrip walks KNOWN_RULE_NAMES, never discovering an
+        // alias that was added to the struct but not to the list).
+        let source = include_str!("rules.rs");
+
+        let mut aliases_found = Vec::new();
+        for line in source.lines() {
+            let trimmed = line.trim();
+            // Skip line comments (the test's own doc strings would otherwise
+            // pollute the count with placeholder examples).
+            if trimmed.starts_with("//") {
+                continue;
+            }
+            let Some(after) = trimmed.split("alias = \"").nth(1) else {
+                continue;
+            };
+            let Some(end) = after.find('"') else {
+                continue;
+            };
+            let alias = &after[..end];
+            // Real aliases are kebab-case ASCII; placeholder examples in any
+            // accidentally-included strings (`<kebab>`, `...`) get filtered.
+            if alias.is_empty() || !alias.chars().all(|c| c.is_ascii_lowercase() || c == '-') {
+                continue;
+            }
+            aliases_found.push(alias.to_owned());
+        }
+
+        // 24 alias attrs on RulesConfig + 24 on PartialRulesConfig = 48.
+        assert_eq!(
+            aliases_found.len(),
+            48,
+            "expected 48 source-level alias attrs (24 per struct); got {}: {:?}",
+            aliases_found.len(),
+            aliases_found
+        );
+
+        for alias in &aliases_found {
+            assert!(
+                KNOWN_RULE_NAMES.contains(&alias.as_str()),
+                "serde alias '{alias}' is in rules.rs source but missing from KNOWN_RULE_NAMES"
+            );
+        }
+    }
+
+    #[test]
     fn every_known_rule_name_round_trips_through_partial() {
         // Stronger drift guard than the count + canonical-coverage tests:
         // every entry in KNOWN_RULE_NAMES must deserialize successfully via
