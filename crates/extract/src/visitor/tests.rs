@@ -1210,6 +1210,162 @@ fn playwright_nested_fixture_chained_access_records_dotted_path_uses() {
 }
 
 #[test]
+fn playwright_helper_function_records_fixture_definitions() {
+    let info = parse(
+        r"
+            import { test as base } from '@playwright/test';
+            import { LoginActions } from './login-actions';
+
+            type MyFixtures = {
+                appUi: {
+                    step: {
+                        login: LoginActions;
+                    };
+                };
+            };
+
+            export function appTest() {
+                return base.extend<MyFixtures>({});
+            }
+        ",
+    );
+
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object
+                == format!(
+                    "{}appTest:appUi.step.login",
+                    crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL
+                )
+                && a.member == "LoginActions"
+        }),
+        "helper-function Playwright fixture should record a def sentinel keyed by the function name, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn playwright_helper_arrow_records_fixture_definitions() {
+    let info = parse(
+        r"
+            import { test as base } from '@playwright/test';
+            import { LoginActions } from './login-actions';
+
+            type MyFixtures = {
+                login: LoginActions;
+            };
+
+            export const appTest = () => base.extend<MyFixtures>({});
+        ",
+    );
+
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}appTest:login", crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
+                && a.member == "LoginActions"
+        }),
+        "arrow-expression helper should record a def sentinel keyed by the variable name, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn playwright_helper_chain_records_fixture_definitions() {
+    let info = parse(
+        r"
+            import { test as base } from '@playwright/test';
+            import { LoginActions } from './login-actions';
+
+            type MyFixtures = {
+                login: LoginActions;
+            };
+
+            export function appTest() {
+                return setupTestFixture();
+            }
+
+            function setupTestFixture() {
+                return base.extend<MyFixtures>({});
+            }
+        ",
+    );
+
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object == format!("{}appTest:login", crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
+                && a.member == "LoginActions"
+        }),
+        "helper chain (appTest -> setupTestFixture) should propagate bindings onto the outer name, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object
+                == format!(
+                    "{}setupTestFixture:login",
+                    crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL
+                )
+                && a.member == "LoginActions"
+        }),
+        "the inner helper itself should also retain its own def sentinel, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn playwright_helper_records_use_sentinels_for_curried_call() {
+    let info = parse(
+        r"
+            import { appTest } from './fixtures';
+
+            appTest()('uses login', async ({ appUi }) => {
+                await appUi.step.login.openLogin();
+            });
+        ",
+    );
+
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object
+                == format!(
+                    "{}appTest:appUi.step.login",
+                    crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL
+                )
+                && a.member == "openLogin"
+        }),
+        "curried `appTest()(...)` call should emit a use sentinel keyed by the helper name, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn non_playwright_helper_does_not_record_fixture_definitions() {
+    let info = parse(
+        r"
+            import { extend } from './framework';
+            import { LoginActions } from './login-actions';
+
+            type MyFixtures = {
+                login: LoginActions;
+            };
+
+            export function appTest() {
+                return extend.extend<MyFixtures>({});
+            }
+        ",
+    );
+
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object.starts_with(crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)),
+        "non-Playwright helper should not emit Playwright fixture definitions, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn angular_inject_field_maps_this_field_member_access() {
     let info = parse(
         r"

@@ -261,8 +261,61 @@ fn playwright_test_callee_name(expr: &Expression<'_>) -> Option<String> {
     match expr {
         Expression::Identifier(ident) => Some(ident.name.to_string()),
         Expression::StaticMemberExpression(member) => playwright_test_callee_name(&member.object),
+        // Curried form `appTest()(...)` where the test value is produced by
+        // a helper function call. Recurse into the inner call's callee so
+        // the def sentinel keyed by the helper name (recorded via
+        // `resolve_playwright_factory_call_definitions`) correlates with
+        // the use sentinel emitted here. Safe because def sentinels gate
+        // the analyzer; use sentinels for unmatched names produce no credit.
+        // See issue #491.
+        Expression::CallExpression(call) => playwright_test_callee_name(&call.callee),
         _ => None,
     }
+}
+
+/// Find the call expression that is the sole `return <call>` statement of a
+/// function body, or `None` if the body is empty, has more than one statement,
+/// or returns anything other than a call expression.
+///
+/// Used to detect helper-function Playwright fixtures such as
+/// `function appTest() { return base.extend<T>(...); }` and chained helpers
+/// `function appTest() { return setupTestFixture(); }`. See issue #491.
+fn extract_function_body_single_return_call<'a, 'b>(
+    body: &'b oxc_ast::ast::FunctionBody<'a>,
+) -> Option<&'b CallExpression<'a>> {
+    if body.statements.len() != 1 {
+        return None;
+    }
+    let Statement::ReturnStatement(ret) = body.statements.first()? else {
+        return None;
+    };
+    let Expression::CallExpression(call) = ret.argument.as_ref()? else {
+        return None;
+    };
+    Some(call.as_ref())
+}
+
+/// Find the call expression that is the body of an arrow function, supporting
+/// both expression-body (`() => base.extend<T>(...)`) and block-body
+/// (`() => { return base.extend<T>(...); }`) shapes. See issue #491.
+fn extract_arrow_single_return_call<'a, 'b>(
+    arrow: &'b oxc_ast::ast::ArrowFunctionExpression<'a>,
+) -> Option<&'b CallExpression<'a>> {
+    if arrow.expression {
+        // Expression-body arrows: oxc wraps the body expression as the sole
+        // ExpressionStatement of `arrow.body.statements`.
+        if arrow.body.statements.len() != 1 {
+            return None;
+        }
+        let Statement::ExpressionStatement(stmt) = arrow.body.statements.first()? else {
+            return None;
+        };
+        let Expression::CallExpression(call) = &stmt.expression else {
+            return None;
+        };
+        return Some(call.as_ref());
+    }
+    extract_function_body_single_return_call(&arrow.body)
 }
 
 fn collect_playwright_fixture_member_uses(
@@ -936,6 +989,51 @@ impl ModuleInfoExtractor {
                     }),
             );
     }
+
+    /// Capture a helper-function Playwright fixture or alias from a body's
+    /// sole `return <call>` statement.
+    ///
+    /// Distinguishes two shapes:
+    /// 1. `return base.extend<T>(...)`: collect type bindings now (mirrors
+    ///    `record_playwright_fixture_definitions` but defers the import gate
+    ///    to finalize so source order is irrelevant).
+    /// 2. `return otherHelper()`: record a `(test_name, otherHelper)` alias
+    ///    that finalize's fixed-point pass resolves into bindings when
+    ///    `otherHelper` itself is, transitively, a Playwright fixture
+    ///    factory in the same file.
+    ///
+    /// Non-matching shapes (member-call return, no callee identifier) are
+    /// dropped silently: false matches would just produce inert def
+    /// sentinels with no use-side correlate. See issue #491.
+    pub(super) fn try_capture_playwright_factory_helper(
+        &mut self,
+        test_name: &str,
+        call: &CallExpression<'_>,
+    ) {
+        if let Some(base_name) = playwright_extend_base_name(call) {
+            let Some(type_arguments) = call.type_arguments.as_deref() else {
+                return;
+            };
+            let mut bindings = Vec::new();
+            for type_arg in &type_arguments.params {
+                bindings.extend(self.collect_playwright_fixture_type_bindings(type_arg));
+            }
+            bindings.sort_unstable();
+            bindings.dedup();
+            if bindings.is_empty() {
+                return;
+            }
+            self.pending_playwright_factory_calls
+                .push(super::PendingPlaywrightFactory {
+                    test_name: test_name.to_string(),
+                    base_name,
+                    type_bindings: bindings,
+                });
+        } else if let Expression::Identifier(ident) = &call.callee {
+            self.pending_playwright_factory_aliases
+                .push((test_name.to_string(), ident.name.to_string()));
+        }
+    }
 }
 
 impl<'a> Visit<'a> for ModuleInfoExtractor {
@@ -1043,6 +1141,16 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         self.record_local_declaration_name(&id.name);
                         let refs = Self::collect_function_signature_refs(function);
                         self.record_local_signature_refs(&id.name, refs);
+
+                        // `function appTest() { return base.extend<T>(...); }`
+                        // or `function appTest() { return setupTestFixture(); }`
+                        // is a helper-function Playwright fixture consumed via
+                        // the curried `appTest()(...)` form. See issue #491.
+                        if let Some(body) = function.body.as_deref()
+                            && let Some(call) = extract_function_body_single_return_call(body)
+                        {
+                            self.try_capture_playwright_factory_helper(id.name.as_str(), call);
+                        }
                     }
                 }
                 Declaration::TSTypeAliasDeclaration(alias) => {
@@ -1408,6 +1516,27 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 && let Expression::CallExpression(call) = init
             {
                 self.record_playwright_fixture_definitions(id.name.as_str(), call);
+            }
+
+            // `const appTest = () => base.extend<T>(...)` or
+            // `const appTest = () => { return base.extend<T>(...); }` or
+            // `const appTest = function () { return base.extend<T>(...); }`
+            // are helper-function Playwright fixtures consumed via the curried
+            // `appTest()(...)` form. See issue #491.
+            if let BindingPattern::BindingIdentifier(id) = &declarator.id {
+                let helper_call = match init {
+                    Expression::ArrowFunctionExpression(arrow) => {
+                        extract_arrow_single_return_call(arrow)
+                    }
+                    Expression::FunctionExpression(func) => func
+                        .body
+                        .as_deref()
+                        .and_then(extract_function_body_single_return_call),
+                    _ => None,
+                };
+                if let Some(call) = helper_call {
+                    self.try_capture_playwright_factory_helper(id.name.as_str(), call);
+                }
             }
 
             if let BindingPattern::BindingIdentifier(id) = &declarator.id

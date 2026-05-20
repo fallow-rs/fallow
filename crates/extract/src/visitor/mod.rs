@@ -60,6 +60,18 @@ pub(crate) struct FactoryCallCandidate {
     pub(crate) callee_method: String,
 }
 
+/// Captured at function / declarator visit time when a helper's body returns
+/// `base.extend<T>(...)`. Resolved at finalize against this module's imports
+/// (gating the `base` local on `@playwright/test`'s `test` named import) so
+/// helper-side Playwright fixtures correlate with curried `appTest()(...)`
+/// uses. See issue #491.
+#[derive(Debug, Clone)]
+pub(crate) struct PendingPlaywrightFactory {
+    pub(crate) test_name: String,
+    pub(crate) base_name: String,
+    pub(crate) type_bindings: Vec<(String, String)>,
+}
+
 #[derive(Debug, Clone)]
 enum SideEffectRegistrationTarget {
     LocalClass(String),
@@ -198,6 +210,20 @@ pub(crate) struct ModuleInfoExtractor {
     /// `this.client -> BaseClient` instead of the unresolvable `TClient`.
     /// Pushed in `visit_class`, popped on exit. See issue #388.
     pub(crate) class_type_param_constraints: Vec<FxHashMap<String, Option<String>>>,
+    /// Captured during the walk when a helper function (or arrow / function
+    /// expression declarator) has a body that is a single return of
+    /// `base.extend<T>(...)`. Resolved at finalize so the `base` local can
+    /// be checked against `@playwright/test`'s `test` named import regardless
+    /// of source order. See issue #491.
+    pub(crate) pending_playwright_factory_calls: Vec<PendingPlaywrightFactory>,
+    /// Captured during the walk when a helper function's body is a single
+    /// return of `otherHelper()` (CallExpression with an Identifier callee).
+    /// Pairs `(caller_name, callee_name)` are resolved at finalize via a
+    /// fixed-point pass: if `callee_name` ends up bound to Playwright type
+    /// bindings, those bindings propagate to `caller_name` so chained
+    /// helpers like `function a() { return b(); } function b() { return
+    /// base.extend<T>(...); }` correlate end-to-end. See issue #491.
+    pub(crate) pending_playwright_factory_aliases: Vec<(String, String)>,
 }
 
 impl ModuleInfoExtractor {
@@ -467,6 +493,90 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Resolve pending helper-function Playwright fixture factories captured
+    /// by `try_capture_playwright_factory_helper`.
+    ///
+    /// Two-phase finalize pass:
+    /// 1. Gate each pending `base.extend<T>(...)` capture on the `base` local
+    ///    being a `test`-named import from `@playwright/test`. Done at
+    ///    finalize so the import declaration can be source-order-independent
+    ///    relative to the helper-function declaration.
+    /// 2. Propagate the resulting `{ test_name -> type_bindings }` map across
+    ///    same-file helper chains. A pending alias `(caller, callee)` means
+    ///    `function caller() { return callee(); }`; if `callee` is bound to
+    ///    bindings, `caller` inherits them. A capped fixed-point loop covers
+    ///    arbitrary depth in-file. Cross-file chains are out of scope: the
+    ///    matcher is per-module and does not consult imports of `callee`.
+    ///
+    /// Emit one `MemberAccess` per `(test_name, fixture_name, type_name)`
+    /// triple in the def-sentinel shape the analyzer's
+    /// `propagate_playwright_fixture_accesses` walker already correlates
+    /// against use sentinels. See issue #491.
+    fn resolve_playwright_factory_call_definitions(&mut self) {
+        let pending_calls = std::mem::take(&mut self.pending_playwright_factory_calls);
+        let pending_aliases = std::mem::take(&mut self.pending_playwright_factory_aliases);
+        if pending_calls.is_empty() && pending_aliases.is_empty() {
+            return;
+        }
+
+        let mut factory_bindings: FxHashMap<String, Vec<(String, String)>> = FxHashMap::default();
+        for entry in pending_calls {
+            let base_local_resolves = self.imports.iter().any(|import| {
+                import.source == "@playwright/test"
+                    && import.local_name == entry.base_name
+                    && matches!(
+                        &import.imported_name,
+                        ImportedName::Named(name) if name == "test"
+                    )
+            });
+            if !base_local_resolves {
+                continue;
+            }
+            factory_bindings
+                .entry(entry.test_name)
+                .or_default()
+                .extend(entry.type_bindings);
+        }
+        for bindings in factory_bindings.values_mut() {
+            bindings.sort();
+            bindings.dedup();
+        }
+
+        // Fixed-point alias propagation. Cap by alias count plus one so a
+        // pathological cycle terminates without affecting correctness (each
+        // alias resolves at most once into `factory_bindings`).
+        let max_iters = pending_aliases.len() + 1;
+        for _ in 0..max_iters {
+            let mut changed = false;
+            for (caller, callee) in &pending_aliases {
+                if factory_bindings.contains_key(caller) {
+                    continue;
+                }
+                if let Some(bindings) = factory_bindings.get(callee).cloned() {
+                    factory_bindings.insert(caller.clone(), bindings);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        for (test_name, bindings) in factory_bindings {
+            for (fixture_name, type_name) in bindings {
+                self.member_accesses.push(MemberAccess {
+                    object: format!(
+                        "{}{}:{}",
+                        crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
+                        test_name,
+                        fixture_name,
+                    ),
+                    member: type_name,
+                });
+            }
+        }
+    }
+
     /// Resolve `const x = ID.METHOD()` factory call candidates into
     /// `binding_target_names` entries. Runs after the full AST walk so the
     /// `local_class_exports` and `imports` maps are populated regardless of
@@ -663,6 +773,7 @@ impl ModuleInfoExtractor {
         self.record_exported_instance_bindings();
         self.resolve_object_binding_candidates();
         self.resolve_factory_call_candidates();
+        self.resolve_playwright_factory_call_definitions();
         self.resolve_bound_member_accesses();
         self.map_local_signature_refs_to_exports();
         self.apply_side_effect_registrations();
@@ -718,6 +829,7 @@ impl ModuleInfoExtractor {
         self.record_exported_instance_bindings();
         self.resolve_object_binding_candidates();
         self.resolve_factory_call_candidates();
+        self.resolve_playwright_factory_call_definitions();
         self.resolve_bound_member_accesses();
         self.map_local_signature_refs_to_exports();
         self.apply_side_effect_registrations();

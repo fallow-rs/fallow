@@ -1,0 +1,6 @@
+{
+  "name": "issue-491-playwright-fixture-helper-function",
+  "devDependencies": {
+    "@playwright/test": "^1.0.0"
+  }
+}

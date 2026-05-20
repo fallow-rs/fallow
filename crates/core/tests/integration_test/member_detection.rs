@@ -235,6 +235,36 @@ fn playwright_nested_fixture_pom_methods_are_credited_from_tests() {
 }
 
 #[test]
+fn playwright_helper_function_fixture_pom_methods_are_credited() {
+    let root = fixture_path("issue-491-playwright-fixture-helper-function");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&"LoginActions.openLogin".to_string()),
+        "LoginActions.openLogin should be credited through the helper-function fixture (appTest()()), found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"AdminActions.openAdmin".to_string()),
+        "AdminActions.openAdmin should be credited through nested destructuring on the helper-function fixture, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&"LoginActions.unusedLoginOnly".to_string()),
+        "genuinely unused POM methods should still be reported, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&"AdminActions.unusedAdminOnly".to_string()),
+        "genuinely unused POM methods should still be reported, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
 fn playwright_fixture_teardown_credits_factory_getter_member_usage() {
     let root = fixture_path("issue-386-playwright-fixture-teardown");
     let config = create_config(root);
