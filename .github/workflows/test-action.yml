@@ -391,7 +391,7 @@ jobs:
         run: |
           COMMENTS=$(gh api \
             "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
-            --jq '[.[] | select(.body | contains("<!-- fallow-results -->"))] | length')
+            --jq '[.[] | select(.body | contains("<!-- fallow-id: fallow-results -->"))] | length')
           if [ "$COMMENTS" -eq 0 ]; then
             echo "::error::Expected a fallow PR comment but found none"
             exit 1
