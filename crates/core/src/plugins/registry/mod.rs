@@ -11,8 +11,9 @@ pub(crate) mod builtin;
 mod helpers;
 
 use helpers::{
-    check_has_config_file, discover_config_files, prepare_config_pattern, process_config_result,
-    process_external_plugins, process_static_patterns,
+    check_has_config_file, discover_config_files, is_external_plugin_active,
+    prepare_config_pattern, process_config_result, process_external_plugins,
+    process_static_patterns,
 };
 
 // ESLint is included because each workspace owns its own eslint.config.{mjs,js,...}
@@ -174,6 +175,9 @@ impl PluginRegistry {
         // Without these, tsconfig extends chains break and import resolution fails.
         check_meta_framework_prerequisites(&active, root);
 
+        // Silent-fail diagnostics for the plugin system (#479).
+        self.emit_silent_fail_diagnostics(&active, &all_deps, root, discovered_files);
+
         // Phase 2: Collect static patterns from active plugins
         for plugin in &active {
             process_static_patterns(*plugin, root, &mut result);
@@ -262,7 +266,12 @@ impl PluginRegistry {
                                 deps = plugin_result.referenced_dependencies.len(),
                                 "resolved config"
                             );
-                            process_config_result(plugin.name(), plugin_result, &mut result);
+                            process_config_result(
+                                plugin.name(),
+                                plugin_result,
+                                &mut result,
+                                Some(abs_path),
+                            );
                         }
                     }
                 }
@@ -294,39 +303,25 @@ impl PluginRegistry {
                             deps = plugin_result.referenced_dependencies.len(),
                             "resolved config (filesystem fallback)"
                         );
-                        process_config_result(plugin.name(), plugin_result, &mut result);
+                        process_config_result(
+                            plugin.name(),
+                            plugin_result,
+                            &mut result,
+                            Some(abs_path),
+                        );
                     }
                 }
             }
         }
 
-        // Phase 4: Package.json inline config fallback
-        // For plugins that define `package_json_config_key()`, check if the root
-        // package.json contains that key and no standalone config file was found.
-        for plugin in &active {
-            if let Some(key) = plugin.package_json_config_key()
-                && !check_has_config_file(*plugin, &config_matchers, &relative_files)
-            {
-                // Try to extract the key from package.json
-                let pkg_path = root.join("package.json");
-                if let Ok(content) = std::fs::read_to_string(&pkg_path)
-                    && let Ok(json) = serde_json::from_str::<serde_json::Value>(&content)
-                    && let Some(config_value) = json.get(key)
-                {
-                    let config_json = serde_json::to_string(config_value).unwrap_or_default();
-                    let fake_path = root.join(format!("{key}.config.json"));
-                    let plugin_result = plugin.resolve_config(&fake_path, &config_json, root);
-                    if !plugin_result.is_empty() {
-                        tracing::debug!(
-                            plugin = plugin.name(),
-                            key = key,
-                            "resolved inline package.json config"
-                        );
-                        process_config_result(plugin.name(), plugin_result, &mut result);
-                    }
-                }
-            }
-        }
+        // Phase 4: Package.json inline config fallback.
+        process_package_json_inline_configs(
+            &active,
+            &config_matchers,
+            &relative_files,
+            root,
+            &mut result,
+        );
 
         result
     }
@@ -376,6 +371,11 @@ impl PluginRegistry {
                 .join(", "),
             "active plugins"
         );
+
+        // Silent-fail diagnostics (#479); the shared dedupe set means the
+        // same external plugin's enabler typo or pattern collision only warns
+        // once per process even when this fast path runs per workspace.
+        self.emit_silent_fail_diagnostics(&active, &all_deps, root, &workspace_files);
 
         process_external_plugins(
             &self.external_plugins,
@@ -433,7 +433,12 @@ impl PluginRegistry {
                                 deps = plugin_result.referenced_dependencies.len(),
                                 "resolved config"
                             );
-                            process_config_result(plugin.name(), plugin_result, &mut result);
+                            process_config_result(
+                                plugin.name(),
+                                plugin_result,
+                                &mut result,
+                                Some(abs_path),
+                            );
                         }
                     }
                 }
@@ -475,7 +480,12 @@ impl PluginRegistry {
                         deps = plugin_result.referenced_dependencies.len(),
                         "resolved config (workspace filesystem fallback)"
                     );
-                    process_config_result(plugin.name(), plugin_result, &mut result);
+                    process_config_result(
+                        plugin.name(),
+                        plugin_result,
+                        &mut result,
+                        Some(abs_path),
+                    );
                 }
             }
         }
@@ -510,6 +520,277 @@ impl PluginRegistry {
 impl Default for PluginRegistry {
     fn default() -> Self {
         Self::new(vec![])
+    }
+}
+
+impl PluginRegistry {
+    /// Collect the active subset of external plugins, run the silent-fail
+    /// diagnostics (#479), and emit one `tracing::warn!` per finding (dedup'd
+    /// across analysis passes via [`plugin_warn_dedupe`]).
+    ///
+    /// Called from both `run_with_search_roots` (top-level) and
+    /// `run_workspace_fast` (per-workspace) so a typo'd enabler or pattern
+    /// collision surfaces regardless of which entry point dispatched the
+    /// analysis.
+    fn emit_silent_fail_diagnostics(
+        &self,
+        active: &[&dyn Plugin],
+        all_deps: &[String],
+        root: &Path,
+        discovered_files: &[PathBuf],
+    ) {
+        let active_external: Vec<&ExternalPluginDef> = self
+            .external_plugins
+            .iter()
+            .filter(|ext| is_external_plugin_active(ext, all_deps, root, discovered_files))
+            .collect();
+        let mut diagnostics = detect_pattern_collisions(active, &active_external);
+        diagnostics.extend(detect_enabler_typos(&self.external_plugins, all_deps));
+        emit_plugin_diagnostics(&diagnostics);
+    }
+}
+
+/// Process-wide dedupe key cache for plugin-system diagnostic warnings.
+///
+/// Combined-mode runs `PluginRegistry::run_with_search_roots` three times
+/// (check + dupes + health) per analysis, so a naive warn would triple-emit
+/// every diagnostic. Each warn helper builds a unique key, inserts it here,
+/// and only emits when the key was previously absent.
+fn plugin_warn_dedupe() -> &'static std::sync::Mutex<FxHashSet<String>> {
+    static WARNED: std::sync::OnceLock<std::sync::Mutex<FxHashSet<String>>> =
+        std::sync::OnceLock::new();
+    WARNED.get_or_init(|| std::sync::Mutex::new(FxHashSet::default()))
+}
+
+/// Insert `key` into the dedupe set and return `true` when it was newly
+/// inserted (caller should emit). Returns `true` on a poisoned mutex so
+/// over-warning beats swallowing.
+fn should_warn(key: String) -> bool {
+    plugin_warn_dedupe()
+        .lock()
+        .map_or(true, |mut set| set.insert(key))
+}
+
+/// Structured diagnostic surfaced by the silent-fail plugin checks (#479).
+///
+/// Returned by [`detect_pattern_collisions`] and [`detect_enabler_typos`] so
+/// unit tests can assert on the findings without standing up a tracing
+/// subscriber. The runtime path calls [`emit_plugin_diagnostics`] to convert
+/// each variant into one `tracing::warn!` line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PluginDiagnostic {
+    /// Two or more plugins declared an identical `config_patterns` entry.
+    PatternCollision {
+        pattern: String,
+        owners: Vec<String>,
+    },
+    /// An external plugin enabler does not match any project dependency, but
+    /// at least one Levenshtein-close dep name exists.
+    EnablerTypo {
+        plugin: String,
+        enabler: String,
+        suggestion: String,
+    },
+}
+
+/// Detect plugins whose `config_patterns` collide byte-for-byte.
+///
+/// Detection is byte-equal on the pattern string. Overlapping but non-identical
+/// globs (e.g. `vite.config.{ts,js}` vs `vite.config.ts`) require pattern
+/// intersection logic and are intentionally out of scope; there are no known
+/// collisions in the built-in plugin set. The warning's purpose is to surface
+/// USER-AUTHORED collisions between external plugins or between an external
+/// plugin and a built-in, so the user can disambiguate by editing one side.
+///
+/// Precedence rule when two plugins claim the same pattern: the one registered
+/// first wins. For built-in plugins, registration order is defined in
+/// [`builtin::create_builtin_plugins`]. External plugins (file-loaded plus
+/// inline `framework[]`) run AFTER built-ins, so they cannot displace a
+/// built-in's `resolve_config` result for the same file.
+pub(crate) fn detect_pattern_collisions(
+    builtin_active: &[&dyn Plugin],
+    external_active: &[&ExternalPluginDef],
+) -> Vec<PluginDiagnostic> {
+    use rustc_hash::FxHashMap;
+
+    // Owners are stored as a set per pattern so a plugin that legitimately
+    // lists the same pattern twice in its own `config_patterns` (rare but
+    // legal) does not look like a self-vs-self collision.
+    let mut pattern_owners: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
+
+    for plugin in builtin_active {
+        for pat in plugin.config_patterns() {
+            pattern_owners
+                .entry((*pat).to_string())
+                .or_default()
+                .insert(plugin.name().to_string());
+        }
+    }
+    for ext in external_active {
+        for pat in &ext.config_patterns {
+            pattern_owners
+                .entry(pat.clone())
+                .or_default()
+                .insert(ext.name.clone());
+        }
+    }
+
+    let mut findings: Vec<PluginDiagnostic> = pattern_owners
+        .into_iter()
+        .filter_map(|(pattern, owners)| {
+            if owners.len() < 2 {
+                None
+            } else {
+                let mut owners: Vec<String> = owners.into_iter().collect();
+                owners.sort_unstable();
+                Some(PluginDiagnostic::PatternCollision { pattern, owners })
+            }
+        })
+        .collect();
+    findings.sort_unstable_by(|a, b| match (a, b) {
+        (
+            PluginDiagnostic::PatternCollision { pattern: ap, .. },
+            PluginDiagnostic::PatternCollision { pattern: bp, .. },
+        ) => ap.cmp(bp),
+        _ => std::cmp::Ordering::Equal,
+    });
+    findings
+}
+
+/// Detect external plugins whose enablers do not match any project dependency
+/// AND at least one enabler is a plausible typo of a real dep.
+///
+/// Scope:
+/// - Only external plugins (file-loaded plus inline `framework[]`). Built-in
+///   plugins' enablers are hard-coded so cannot be misspelled.
+/// - Skip plugins with a `detection` block: detection is the rich-logic path
+///   and false negatives there are not enabler typos.
+/// - Skip plugins with empty `enablers` (no signal to validate against).
+/// - Stay silent when no Levenshtein-close dep exists: the plugin may
+///   legitimately not apply to this project.
+///
+/// Matches the established #467 / #510 pattern: tracing-warn with a `did you
+/// mean` suggestion at the call site. No exit non-zero, no new CLI flag.
+pub(crate) fn detect_enabler_typos(
+    external_plugins: &[ExternalPluginDef],
+    all_deps: &[String],
+) -> Vec<PluginDiagnostic> {
+    let mut findings = Vec::new();
+
+    for ext in external_plugins {
+        if ext.detection.is_some() || ext.enablers.is_empty() {
+            continue;
+        }
+
+        let any_match = ext.enablers.iter().any(|enabler| {
+            if enabler.ends_with('/') {
+                all_deps.iter().any(|d| d.starts_with(enabler))
+            } else {
+                all_deps.iter().any(|d| d == enabler)
+            }
+        });
+        if any_match {
+            continue;
+        }
+
+        for enabler in &ext.enablers {
+            let candidates = all_deps.iter().map(String::as_str);
+            let Some(suggestion) = fallow_config::levenshtein::closest_match(enabler, candidates)
+            else {
+                continue;
+            };
+
+            findings.push(PluginDiagnostic::EnablerTypo {
+                plugin: ext.name.clone(),
+                enabler: enabler.clone(),
+                suggestion: suggestion.to_string(),
+            });
+        }
+    }
+
+    findings
+}
+
+/// Emit one `tracing::warn!` per finding, dedup'd against the process-wide
+/// `plugin_warn_dedupe` set so combined-mode does not triple-warn.
+fn emit_plugin_diagnostics(findings: &[PluginDiagnostic]) {
+    for finding in findings {
+        match finding {
+            PluginDiagnostic::PatternCollision { pattern, owners } => {
+                let key = format!("collision::{pattern}::{owners:?}");
+                if !should_warn(key) {
+                    continue;
+                }
+                let winner = &owners[0];
+                let others = owners[1..].join(", ");
+                tracing::warn!(
+                    "plugin config_patterns collision: '{pattern}' is claimed \
+                     by plugins [{joined}]; '{winner}' runs first \
+                     (registration order), others ({others}) follow. Rename \
+                     one of the patterns or remove the duplicate plugin to \
+                     make resolution explicit.",
+                    joined = owners.join(", "),
+                );
+            }
+            PluginDiagnostic::EnablerTypo {
+                plugin,
+                enabler,
+                suggestion,
+            } => {
+                let key = format!("enabler::{plugin}::{enabler}");
+                if !should_warn(key) {
+                    continue;
+                }
+                tracing::warn!(
+                    "plugin '{plugin}' enabler '{enabler}' does not match any \
+                     dependency in package.json; did you mean '{suggestion}'? \
+                     The plugin will not activate.",
+                );
+            }
+        }
+    }
+}
+
+/// Phase 4 of `PluginRegistry::run_with_search_roots`: for any active plugin
+/// that supports inline package.json configuration via
+/// [`Plugin::package_json_config_key`], read the root `package.json`, extract
+/// the relevant key, and feed the result through `resolve_config`.
+fn process_package_json_inline_configs(
+    active: &[&dyn Plugin],
+    config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
+    relative_files: &[(PathBuf, String)],
+    root: &Path,
+    result: &mut AggregatedPluginResult,
+) {
+    for plugin in active {
+        let Some(key) = plugin.package_json_config_key() else {
+            continue;
+        };
+        if check_has_config_file(*plugin, config_matchers, relative_files) {
+            continue;
+        }
+        let pkg_path = root.join("package.json");
+        let Ok(content) = std::fs::read_to_string(&pkg_path) else {
+            continue;
+        };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
+            continue;
+        };
+        let Some(config_value) = json.get(key) else {
+            continue;
+        };
+        let config_json = serde_json::to_string(config_value).unwrap_or_default();
+        let fake_path = root.join(format!("{key}.config.json"));
+        let plugin_result = plugin.resolve_config(&fake_path, &config_json, root);
+        if plugin_result.is_empty() {
+            continue;
+        }
+        tracing::debug!(
+            plugin = plugin.name(),
+            key = key,
+            "resolved inline package.json config"
+        );
+        process_config_result(plugin.name(), plugin_result, result, Some(&pkg_path));
     }
 }
 

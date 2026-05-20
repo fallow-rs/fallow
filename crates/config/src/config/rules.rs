@@ -441,59 +441,17 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "misconfigured-dependency-override",
 ];
 
-/// Levenshtein edit distance between two ASCII-leaning strings.
-///
-/// Uses two `Vec<usize>` rows so the working set stays bounded; rule names are
-/// short (max ~33 chars) so allocation cost is negligible at config-load time.
-fn levenshtein(a: &str, b: &str) -> usize {
-    let a_bytes = a.as_bytes();
-    let b_bytes = b.as_bytes();
-    let (a_len, b_len) = (a_bytes.len(), b_bytes.len());
-
-    if a_len == 0 {
-        return b_len;
-    }
-    if b_len == 0 {
-        return a_len;
-    }
-
-    let mut prev: Vec<usize> = (0..=b_len).collect();
-    let mut curr: Vec<usize> = vec![0; b_len + 1];
-
-    for i in 1..=a_len {
-        curr[0] = i;
-        for j in 1..=b_len {
-            let cost = usize::from(a_bytes[i - 1] != b_bytes[j - 1]);
-            curr[j] = (prev[j] + 1) // deletion
-                .min(curr[j - 1] + 1) // insertion
-                .min(prev[j - 1] + cost); // substitution
-        }
-        std::mem::swap(&mut prev, &mut curr);
-    }
-
-    prev[b_len]
-}
-
 /// Find the closest known rule name to `input` when it is plausibly a typo.
 ///
-/// Returns the best match when the Levenshtein distance is at most 2 AND
-/// the input is long enough that the match isn't coincidental
-/// (`input.len() / 2 > distance`). Returns `None` for completely novel
-/// strings where a suggestion would be misleading.
+/// Thin wrapper over [`crate::levenshtein::closest_match`] that scopes the
+/// candidate set to [`KNOWN_RULE_NAMES`] and returns a `'static` reference so
+/// the suggestion can be embedded in tracing warnings without allocation.
 #[must_use]
 pub fn closest_known_rule_name(input: &str) -> Option<&'static str> {
     let input_lower = input.to_ascii_lowercase();
-    let mut best: Option<(&'static str, usize)> = None;
-
-    for &candidate in KNOWN_RULE_NAMES {
-        let d = levenshtein(&input_lower, candidate);
-        if best.is_none_or(|(_, b_dist)| d < b_dist) {
-            best = Some((candidate, d));
-        }
-    }
-
-    best.filter(|&(_, d)| d > 0 && d <= 2 && input_lower.len() / 2 > d)
-        .map(|(name, _)| name)
+    let candidates = KNOWN_RULE_NAMES.iter().copied();
+    let suggestion = crate::levenshtein::closest_match(&input_lower, candidates)?;
+    KNOWN_RULE_NAMES.iter().copied().find(|&c| c == suggestion)
 }
 
 /// An unknown key found inside a `rules` (or `overrides[].rules`) object.

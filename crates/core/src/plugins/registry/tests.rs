@@ -7,6 +7,22 @@ use fallow_config::{
 use helpers::{check_plugin_detection, discover_config_files, process_config_result};
 use rustc_hash::FxHashSet;
 
+fn make_external(name: &str, enablers: &[&str], config_patterns: &[&str]) -> ExternalPluginDef {
+    ExternalPluginDef {
+        schema: None,
+        name: name.to_string(),
+        detection: None,
+        enablers: enablers.iter().map(|s| (*s).to_string()).collect(),
+        entry_points: Vec::new(),
+        entry_point_role: fallow_config::EntryPointRole::Support,
+        config_patterns: config_patterns.iter().map(|s| (*s).to_string()).collect(),
+        always_used: Vec::new(),
+        tooling_dependencies: Vec::new(),
+        used_exports: Vec::new(),
+        used_class_members: Vec::new(),
+    }
+}
+
 /// Build a dependency object from names for JSON deserialization.
 fn deps_json(names: &[&str]) -> serde_json::Value {
     let map: serde_json::Map<String, serde_json::Value> = names
@@ -960,7 +976,7 @@ fn process_config_result_merges_all_fields() {
         fixture_patterns: vec![],
         scss_include_paths: vec![],
     };
-    process_config_result("test-plugin", config_result, &mut aggregated);
+    process_config_result("test-plugin", config_result, &mut aggregated, None);
 
     assert_eq!(aggregated.entry_patterns.len(), 1);
     assert_eq!(aggregated.entry_patterns[0].0, "src/routes/**/*.ts");
@@ -1018,7 +1034,7 @@ fn process_config_result_preserves_scoped_used_class_member_rules() {
         ..PluginResult::default()
     };
 
-    process_config_result("test-plugin", config_result, &mut aggregated);
+    process_config_result("test-plugin", config_result, &mut aggregated, None);
 
     assert_eq!(
         aggregated.used_class_members,
@@ -1061,8 +1077,8 @@ fn process_config_result_accumulates_across_multiple_calls() {
         scss_include_paths: vec![],
     };
 
-    process_config_result("plugin-a", result1, &mut aggregated);
-    process_config_result("plugin-b", result2, &mut aggregated);
+    process_config_result("plugin-a", result1, &mut aggregated, None);
+    process_config_result("plugin-b", result2, &mut aggregated, None);
 
     // Verify entry patterns are tagged with the correct plugin name
     assert_eq!(aggregated.entry_patterns.len(), 2);
@@ -1123,7 +1139,7 @@ fn process_config_result_path_aliases_override_existing_prefixes() {
         ..Default::default()
     };
 
-    process_config_result("nuxt", config_result, &mut aggregated);
+    process_config_result("nuxt", config_result, &mut aggregated, None);
 
     let tilde_aliases: Vec<_> = aggregated
         .path_aliases
@@ -1170,7 +1186,7 @@ fn process_config_result_replace_entry_patterns_removes_static_defaults() {
         ..Default::default()
     };
 
-    process_config_result("vitest", config_result, &mut aggregated);
+    process_config_result("vitest", config_result, &mut aggregated, None);
 
     // Static vitest patterns should be replaced by the config pattern
     let vitest_patterns: Vec<_> = aggregated
@@ -1220,7 +1236,7 @@ fn process_config_result_replace_used_export_rules_removes_static_defaults() {
         ..Default::default()
     };
 
-    process_config_result("tanstack-router", config_result, &mut aggregated);
+    process_config_result("tanstack-router", config_result, &mut aggregated, None);
 
     let tanstack_rules: Vec<_> = aggregated
         .used_exports
@@ -1249,7 +1265,7 @@ fn process_config_result_replace_entry_patterns_noop_when_empty() {
         ..Default::default()
     };
 
-    process_config_result("vitest", config_result, &mut aggregated);
+    process_config_result("vitest", config_result, &mut aggregated, None);
 
     assert_eq!(
         aggregated.entry_patterns.len(),
@@ -1274,7 +1290,7 @@ fn process_config_result_replace_used_export_rules_noop_when_empty() {
         ..Default::default()
     };
 
-    process_config_result("tanstack-router", config_result, &mut aggregated);
+    process_config_result("tanstack-router", config_result, &mut aggregated, None);
 
     assert_eq!(aggregated.used_exports.len(), 1);
     assert_eq!(
@@ -2279,7 +2295,7 @@ fn process_static_patterns_accumulates_across_plugins() {
 fn process_config_result_empty_result_is_noop() {
     let mut aggregated = AggregatedPluginResult::default();
     let empty = PluginResult::default();
-    process_config_result("empty-plugin", empty, &mut aggregated);
+    process_config_result("empty-plugin", empty, &mut aggregated, None);
 
     assert!(aggregated.entry_patterns.is_empty());
     assert!(aggregated.referenced_dependencies.is_empty());
@@ -2822,5 +2838,194 @@ fn run_with_storybook_config_extracts_addons() {
             .iter()
             .any(|(p, _)| p.contains("stories")),
         "storybook config should extract stories as entry patterns"
+    );
+}
+
+// ── #479: silent-fail plugin diagnostics ─────────────────────
+
+#[test]
+fn pattern_collision_detects_identical_external_patterns() {
+    let a = make_external("plugin-a", &["acme"], &["custom.config.js"]);
+    let b = make_external("plugin-b", &["acme"], &["custom.config.js"]);
+    let actives = [&a, &b];
+    let findings = detect_pattern_collisions(&[], &actives[..]);
+
+    assert_eq!(findings.len(), 1);
+    match &findings[0] {
+        PluginDiagnostic::PatternCollision { pattern, owners } => {
+            assert_eq!(pattern, "custom.config.js");
+            assert_eq!(owners.len(), 2);
+            assert!(owners.contains(&"plugin-a".to_string()));
+            assert!(owners.contains(&"plugin-b".to_string()));
+        }
+        other @ PluginDiagnostic::EnablerTypo { .. } => {
+            panic!("expected PatternCollision, got {other:?}")
+        }
+    }
+}
+
+#[test]
+fn pattern_collision_no_finding_when_patterns_disjoint() {
+    let a = make_external("plugin-a", &["acme"], &["a.config.js"]);
+    let b = make_external("plugin-b", &["acme"], &["b.config.js"]);
+    let actives = [&a, &b];
+    let findings = detect_pattern_collisions(&[], &actives[..]);
+    assert!(findings.is_empty(), "disjoint patterns must not collide");
+}
+
+#[test]
+fn pattern_collision_no_finding_for_single_owner() {
+    let a = make_external("plugin-a", &["acme"], &["custom.config.js"]);
+    let actives = [&a];
+    let findings = detect_pattern_collisions(&[], &actives[..]);
+    assert!(findings.is_empty());
+}
+
+#[test]
+fn pattern_collision_no_false_positive_for_self_repeated_pattern() {
+    // A single plugin legitimately listing the same pattern twice in its
+    // own `config_patterns` is not a collision; owners are deduped per
+    // pattern so the finding only fires when two DISTINCT plugins clash.
+    let a = make_external(
+        "plugin-a",
+        &["acme"],
+        &["custom.config.js", "custom.config.js"],
+    );
+    let actives = [&a];
+    let findings = detect_pattern_collisions(&[], &actives[..]);
+    assert!(
+        findings.is_empty(),
+        "single plugin repeating a pattern must not trigger a self-collision"
+    );
+}
+
+#[test]
+fn enabler_typo_warns_with_suggestion() {
+    let plugin = make_external("my-vue", &["@vue/cor"], &[]);
+    let deps = vec!["@vue/core".to_string(), "react".to_string()];
+    let findings = detect_enabler_typos(std::slice::from_ref(&plugin), &deps);
+
+    assert_eq!(findings.len(), 1);
+    match &findings[0] {
+        PluginDiagnostic::EnablerTypo {
+            plugin,
+            enabler,
+            suggestion,
+        } => {
+            assert_eq!(plugin, "my-vue");
+            assert_eq!(enabler, "@vue/cor");
+            assert_eq!(suggestion, "@vue/core");
+        }
+        other @ PluginDiagnostic::PatternCollision { .. } => {
+            panic!("expected EnablerTypo, got {other:?}")
+        }
+    }
+}
+
+#[test]
+fn enabler_no_close_match_stays_silent() {
+    let plugin = make_external("acme", &["acme-magic"], &[]);
+    let deps = vec!["react".to_string(), "vue".to_string()];
+    let findings = detect_enabler_typos(std::slice::from_ref(&plugin), &deps);
+    assert!(
+        findings.is_empty(),
+        "no Levenshtein-close dep so no suggestion"
+    );
+}
+
+#[test]
+fn enabler_with_detection_skips_check() {
+    let mut plugin = make_external("with-detection", &["bogus"], &[]);
+    plugin.detection = Some(PluginDetection::Any { conditions: vec![] });
+    let deps = vec!["react".to_string()];
+    let findings = detect_enabler_typos(std::slice::from_ref(&plugin), &deps);
+    assert!(
+        findings.is_empty(),
+        "detection-mode plugin must not produce enabler warnings"
+    );
+}
+
+#[test]
+fn enabler_matches_dep_no_warning() {
+    let plugin = make_external("my-vue", &["@vue/core"], &[]);
+    let deps = vec!["@vue/core".to_string()];
+    let findings = detect_enabler_typos(std::slice::from_ref(&plugin), &deps);
+    assert!(findings.is_empty(), "exact match should not warn");
+}
+
+#[test]
+fn enabler_empty_enablers_skipped() {
+    let plugin = make_external("no-enablers", &[], &[]);
+    let deps = vec!["react".to_string()];
+    let findings = detect_enabler_typos(std::slice::from_ref(&plugin), &deps);
+    assert!(findings.is_empty());
+}
+
+#[test]
+fn enabler_prefix_match_skips_check() {
+    // Trailing-slash enabler matches any dep starting with that prefix.
+    let plugin = make_external("scope-plugin", &["@scope/"], &[]);
+    let deps = vec!["@scope/utils".to_string()];
+    let findings = detect_enabler_typos(std::slice::from_ref(&plugin), &deps);
+    assert!(
+        findings.is_empty(),
+        "prefix enabler matches any dep with that prefix"
+    );
+}
+
+#[test]
+fn process_config_result_strips_invalid_regex_patterns() {
+    let mut aggregated = AggregatedPluginResult::default();
+    let rule = PathRule::new("src/**/*.ts")
+        .with_excluded_regexes(["valid\\.ts$", "[unclosed"]) // second is invalid
+        .with_excluded_segment_regexes(["valid_seg", "(also_invalid"]);
+
+    let config_result = PluginResult {
+        entry_patterns: vec![rule],
+        ..Default::default()
+    };
+    process_config_result(
+        "test-plugin",
+        config_result,
+        &mut aggregated,
+        Some(Path::new("/proj/test.config.js")),
+    );
+
+    assert_eq!(aggregated.entry_patterns.len(), 1);
+    let (kept, _name) = &aggregated.entry_patterns[0];
+    assert_eq!(
+        kept.exclude_regexes,
+        vec!["valid\\.ts$".to_string()],
+        "invalid path regex should be stripped"
+    );
+    assert_eq!(
+        kept.exclude_segment_regexes,
+        vec!["valid_seg".to_string()],
+        "invalid segment regex should be stripped"
+    );
+}
+
+#[test]
+fn process_config_result_strips_invalid_regex_in_used_exports() {
+    let mut aggregated = AggregatedPluginResult::default();
+    let rule = UsedExportRule {
+        path: PathRule::new("src/**/*.ts").with_excluded_regexes(["[unclosed"]),
+        exports: vec!["default".to_string()],
+    };
+
+    let config_result = PluginResult {
+        used_exports: vec![rule],
+        ..Default::default()
+    };
+    process_config_result("test-plugin", config_result, &mut aggregated, None);
+
+    assert_eq!(aggregated.used_exports.len(), 1);
+    assert!(
+        aggregated.used_exports[0]
+            .rule
+            .path
+            .exclude_regexes
+            .is_empty(),
+        "invalid regex on used_exports rule should be stripped"
     );
 }

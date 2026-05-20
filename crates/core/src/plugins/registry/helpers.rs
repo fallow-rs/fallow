@@ -115,6 +115,32 @@ pub fn process_static_patterns(
     }
 }
 
+/// Determine whether an external plugin activates against the given project.
+///
+/// Shared between [`process_external_plugins`] and the collision-warning
+/// helper in `registry::mod` so both paths agree on activation semantics.
+pub fn is_external_plugin_active(
+    ext: &ExternalPluginDef,
+    all_deps: &[String],
+    root: &Path,
+    discovered_files: &[PathBuf],
+) -> bool {
+    if let Some(detection) = &ext.detection {
+        let all_dep_refs: Vec<&str> = all_deps.iter().map(String::as_str).collect();
+        check_plugin_detection(detection, &all_dep_refs, root, discovered_files)
+    } else if !ext.enablers.is_empty() {
+        ext.enablers.iter().any(|enabler| {
+            if enabler.ends_with('/') {
+                all_deps.iter().any(|d| d.starts_with(enabler))
+            } else {
+                all_deps.iter().any(|d| d == enabler)
+            }
+        })
+    } else {
+        false
+    }
+}
+
 /// Process external plugin definitions, checking activation and aggregating patterns.
 pub fn process_external_plugins(
     external_plugins: &[ExternalPluginDef],
@@ -123,21 +149,8 @@ pub fn process_external_plugins(
     discovered_files: &[PathBuf],
     result: &mut AggregatedPluginResult,
 ) {
-    let all_dep_refs: Vec<&str> = all_deps.iter().map(String::as_str).collect();
     for ext in external_plugins {
-        let is_active = if let Some(detection) = &ext.detection {
-            check_plugin_detection(detection, &all_dep_refs, root, discovered_files)
-        } else if !ext.enablers.is_empty() {
-            ext.enablers.iter().any(|enabler| {
-                if enabler.ends_with('/') {
-                    all_deps.iter().any(|d| d.starts_with(enabler))
-                } else {
-                    all_deps.iter().any(|d| d == enabler)
-                }
-            })
-        } else {
-            false
-        };
+        let is_active = is_external_plugin_active(ext, all_deps, root, discovered_files);
         if is_active {
             result.active_plugins.push(ext.name.clone());
             result
@@ -299,13 +312,74 @@ fn expand_brace_pattern(pattern: &str) -> Vec<String> {
     expanded
 }
 
+/// Eagerly validate the user-supplied exclude regexes attached to a
+/// `PathRule`, dropping any that fail to compile and emitting one enriched
+/// `tracing::warn!` per invalid pattern.
+///
+/// The originating plugin and the source config file are surfaced in the
+/// warning so the user can locate the typo. Matches the #467 / #510 precedent:
+/// load continues with the invalid pattern stripped, no exit non-zero.
+fn validate_path_rule_regexes(
+    rule: &mut crate::plugins::PathRule,
+    plugin_name: &str,
+    config_path: Option<&Path>,
+) {
+    rule.exclude_regexes
+        .retain(|pattern| match regex::Regex::new(pattern) {
+            Ok(_) => true,
+            Err(err) => {
+                let loc = config_path
+                    .map(|p| format!(" in {}", p.display()))
+                    .unwrap_or_default();
+                tracing::warn!(
+                    "plugin '{plugin_name}'{loc}: invalid excluded regex \
+                     '{pattern}' for entry pattern '{rule_pattern}': {err}; \
+                     the pattern will be ignored.",
+                    rule_pattern = rule.pattern,
+                );
+                false
+            }
+        });
+    rule.exclude_segment_regexes
+        .retain(|pattern| match regex::Regex::new(pattern) {
+            Ok(_) => true,
+            Err(err) => {
+                let loc = config_path
+                    .map(|p| format!(" in {}", p.display()))
+                    .unwrap_or_default();
+                tracing::warn!(
+                    "plugin '{plugin_name}'{loc}: invalid excluded segment \
+                     regex '{pattern}' for entry pattern '{rule_pattern}': \
+                     {err}; the pattern will be ignored.",
+                    rule_pattern = rule.pattern,
+                );
+                false
+            }
+        });
+}
+
 /// Merge a `PluginResult` from config parsing into the aggregated result.
+///
+/// `config_path` is the source config file the plugin parsed (when known).
+/// It is only used to enrich `tracing::warn!` messages emitted by
+/// [`validate_path_rule_regexes`] so users can find their typo. Tests and
+/// inline package.json fallbacks may pass `None`.
 pub fn process_config_result(
     plugin_name: &str,
-    plugin_result: PluginResult,
+    mut plugin_result: PluginResult,
     result: &mut AggregatedPluginResult,
+    config_path: Option<&Path>,
 ) {
     let pname = plugin_name.to_string();
+
+    // Eager regex validation for user-authored patterns extracted by the
+    // plugin from the source config file. See #479.
+    for rule in &mut plugin_result.entry_patterns {
+        validate_path_rule_regexes(rule, plugin_name, config_path);
+    }
+    for rule in &mut plugin_result.used_exports {
+        validate_path_rule_regexes(&mut rule.path, plugin_name, config_path);
+    }
     // When the config explicitly defines entry patterns or used-export rules,
     // treat it as a full override of that plugin's static defaults instead of
     // layering both sets together.
