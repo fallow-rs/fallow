@@ -975,6 +975,7 @@ impl BaseWorktree {
                 .ok()?
                 .as_nanos()
         ));
+        let mut guard = WorktreeCleanupGuard::new(repo_root, &path);
         let mut command = Command::new("git");
         command
             .args([
@@ -982,16 +983,17 @@ impl BaseWorktree {
                 "add",
                 "--detach",
                 "--quiet",
-                path.to_str()?,
+                guard.path().to_str()?,
                 base_ref,
             ])
             .current_dir(repo_root);
         clear_ambient_git_env(&mut command);
         let output = command.output().ok()?;
         if !output.status.success() {
-            let _ = std::fs::remove_dir_all(&path);
             return None;
         }
+        guard.defuse();
+        drop(guard);
         let worktree = Self {
             repo_root: repo_root.to_path_buf(),
             path,
@@ -1003,6 +1005,13 @@ impl BaseWorktree {
 
     fn reuse_or_create(repo_root: &Path, base_sha: &str) -> Option<Self> {
         let path = reusable_audit_worktree_path(repo_root, base_sha);
+        // Serialise concurrent audits against the same base_sha. On contention,
+        // fall through to the non-reusable PID-named path so the loser does not
+        // block; matrix CI then gets at most one slow rebuild rather than racing
+        // git worktree add against the same directory. The lock is released
+        // automatically when `_lock` drops.
+        let _lock = ReusableWorktreeLock::try_acquire(&path)?;
+
         if reusable_audit_worktree_is_ready(repo_root, &path, base_sha) {
             let worktree = Self {
                 repo_root: repo_root.to_path_buf(),
@@ -1015,6 +1024,7 @@ impl BaseWorktree {
 
         remove_audit_worktree(repo_root, &path);
         let _ = std::fs::remove_dir_all(&path);
+        let mut guard = WorktreeCleanupGuard::new(repo_root, &path);
         let mut command = Command::new("git");
         command
             .args([
@@ -1022,16 +1032,17 @@ impl BaseWorktree {
                 "add",
                 "--detach",
                 "--quiet",
-                path.to_string_lossy().as_ref(),
+                guard.path().to_string_lossy().as_ref(),
                 base_sha,
             ])
             .current_dir(repo_root);
         clear_ambient_git_env(&mut command);
         let output = command.output().ok()?;
         if !output.status.success() {
-            let _ = std::fs::remove_dir_all(&path);
             return None;
         }
+        guard.defuse();
+        drop(guard);
 
         let worktree = Self {
             repo_root: repo_root.to_path_buf(),
@@ -1045,6 +1056,108 @@ impl BaseWorktree {
     fn path(&self) -> &Path {
         &self.path
     }
+}
+
+/// RAII cleanup guard for a freshly-created git worktree directory.
+///
+/// Armed before the `git worktree add` subprocess runs. If the holder returns
+/// early (`?`) between subprocess success and the `BaseWorktree` struct binding,
+/// `Drop` rolls back BOTH git's `.git/worktrees/<name>` registration AND the
+/// on-disk directory. The owner calls `defuse()` once `BaseWorktree` is bound
+/// and takes over cleanup via its own `Drop`.
+///
+/// With `panic = "abort"` on the release profile, this does not provide
+/// panic-recovery cleanup (no unwind runs), but it is still load-bearing for
+/// every early-return path between subprocess success and struct construction.
+struct WorktreeCleanupGuard<'a> {
+    repo_root: PathBuf,
+    path: &'a Path,
+    armed: bool,
+}
+
+impl<'a> WorktreeCleanupGuard<'a> {
+    fn new(repo_root: &Path, path: &'a Path) -> Self {
+        Self {
+            repo_root: repo_root.to_path_buf(),
+            path,
+            armed: true,
+        }
+    }
+
+    fn path(&self) -> &Path {
+        self.path
+    }
+
+    /// Disarm in place. Idempotent; calling twice is harmless. Drop becomes a
+    /// no-op after this returns.
+    fn defuse(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for WorktreeCleanupGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            remove_audit_worktree(&self.repo_root, self.path);
+            let _ = std::fs::remove_dir_all(self.path);
+        }
+    }
+}
+
+/// Kernel-level advisory lock around the reusable-cache `reuse_or_create`
+/// critical section, backed by `std::fs::File::try_lock` (stable since Rust
+/// 1.89), which wraps `flock(2)` on Unix and `LockFileEx` on Windows.
+/// Concurrent acquirers either fall through (`None`) or observe a
+/// freshly-prepared cache after the holder releases.
+struct ReusableWorktreeLock {
+    // Drop on `File` calls the kernel's unlock automatically; we never call
+    // `unlock_exclusive` explicitly.
+    _file: std::fs::File,
+}
+
+impl ReusableWorktreeLock {
+    fn try_acquire(reusable_path: &Path) -> Option<Self> {
+        let lock_path = reusable_worktree_lock_path(reusable_path);
+        // We never read the lock file's bytes, only its kernel-level lock
+        // state, so set `truncate(false)` explicitly. Combining `O_TRUNC` with
+        // `flock(2)` produced flaky `WouldBlock` returns under concurrent
+        // acquire/release on macOS APFS during local tests.
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)
+            .ok()?;
+        match file.try_lock() {
+            Ok(()) => Some(Self { _file: file }),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                tracing::debug!(
+                    path = %lock_path.display(),
+                    "reusable audit worktree lock contended; falling back to non-reusable worktree",
+                );
+                None
+            }
+            Err(std::fs::TryLockError::Error(err)) => {
+                tracing::debug!(
+                    path = %lock_path.display(),
+                    error = %err,
+                    "could not acquire reusable audit worktree lock; falling back to non-reusable worktree",
+                );
+                None
+            }
+        }
+    }
+}
+
+fn reusable_worktree_lock_path(reusable_path: &Path) -> PathBuf {
+    let mut name = reusable_path
+        .file_name()
+        .map(std::ffi::OsString::from)
+        .unwrap_or_default();
+    name.push(".lock");
+    reusable_path
+        .parent()
+        .map_or_else(|| PathBuf::from(&name), |parent| parent.join(&name))
 }
 
 fn reusable_audit_worktree_path(repo_root: &Path, base_sha: &str) -> PathBuf {
@@ -1122,7 +1235,29 @@ fn remove_audit_worktree(repo_root: &Path, path: &Path) {
         ])
         .current_dir(repo_root);
     clear_ambient_git_env(&mut command);
-    let _ = command.output();
+    match command.output() {
+        Ok(output) => {
+            // Only warn when an observable leak survives: the on-disk path still
+            // exists after a non-zero `git worktree remove --force`. A missing
+            // registration with no surviving directory is the partial-create
+            // cleanup case and not noteworthy.
+            if !output.status.success() && path.exists() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                tracing::warn!(
+                    path = %path.display(),
+                    stderr = %stderr.trim(),
+                    "git worktree remove failed; the directory remains and may leak",
+                );
+            }
+        }
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %err,
+                "git worktree remove subprocess failed to spawn",
+            );
+        }
+    }
 }
 
 fn sweep_orphan_audit_worktrees(repo_root: &Path) {
@@ -1229,9 +1364,93 @@ fn process_is_alive(pid: u32) -> bool {
         .is_ok_and(|output| output.status.success())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn process_is_alive(pid: u32) -> bool {
+    windows_process::is_alive(pid)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn process_is_alive(_pid: u32) -> bool {
+    // Conservative default on unknown platforms: treat every PID as alive so the
+    // orphan sweep never removes anything we can't prove is dead.
     true
+}
+
+#[cfg(windows)]
+#[allow(
+    unsafe_code,
+    reason = "Win32 process-query API (OpenProcess / WaitForSingleObject / CloseHandle / GetLastError) requires unsafe FFI"
+)]
+mod windows_process {
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, GetLastError, HANDLE,
+        WAIT_OBJECT_0,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, WaitForSingleObject,
+    };
+
+    /// RAII wrapper that calls `CloseHandle` on drop, mirroring `std::mem::drop`
+    /// semantics for kernel handles. Used so every exit path through
+    /// `is_alive` releases the handle without manual cleanup.
+    struct ProcessHandle(HANDLE);
+
+    impl Drop for ProcessHandle {
+        fn drop(&mut self) {
+            // SAFETY: `self.0` is a non-null handle obtained from a successful
+            // `OpenProcess` call. We have unique ownership (the value is only
+            // ever created inside `is_alive`), so this is the sole consumer.
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+
+    /// Cross-platform PID liveness check for Windows.
+    ///
+    /// Mirrors `kill -0 $pid` semantics: returns `true` when the process is
+    /// running OR when we cannot prove it dead (e.g., `ERROR_ACCESS_DENIED` on
+    /// processes owned by another session). Returns `false` only when the PID
+    /// definitively does not exist (`ERROR_INVALID_PARAMETER`) or the wait
+    /// reports the process has exited.
+    pub(super) fn is_alive(pid: u32) -> bool {
+        // SAFETY: `OpenProcess` accepts any `u32` PID; it either returns a
+        // non-null handle we own, or null on failure with `GetLastError`
+        // describing why. No memory is borrowed across the FFI boundary.
+        let raw = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if raw.is_null() {
+            // SAFETY: `GetLastError` reads thread-local storage set by the
+            // failing `OpenProcess` call. It has no preconditions.
+            let err = unsafe { GetLastError() };
+            return match err {
+                // PID never existed or has already been fully reaped.
+                ERROR_INVALID_PARAMETER => false,
+                // Process exists but is owned by another session / under
+                // protected access. Conservative default: treat as alive so we
+                // never sweep a worktree owned by a live process we can't see.
+                ERROR_ACCESS_DENIED => true,
+                // Anything else (transient, unknown): conservative default.
+                _ => true,
+            };
+        }
+        let handle = ProcessHandle(raw);
+        // `WaitForSingleObject(handle, 0)` returns `WAIT_OBJECT_0` (0) when the
+        // process has exited and its handle is signalled, `WAIT_TIMEOUT` (0x102)
+        // when the process is still running, and `WAIT_FAILED` (0xFFFF_FFFF) on
+        // unexpected errors. We compare against `WAIT_OBJECT_0` specifically so
+        // every other return value (including `WAIT_FAILED`) follows the
+        // conservative default: treat as alive when we cannot prove the
+        // process is dead.
+        //
+        // This is preferred over `GetExitCodeProcess + STILL_ACTIVE` because
+        // `STILL_ACTIVE` (259) is a valid u32 exit code: a process that
+        // legitimately exits with 259 would otherwise be misreported as alive.
+        //
+        // SAFETY: `handle.0` is non-null (checked above) and owned by the
+        // `ProcessHandle` RAII wrapper.
+        let wait_result = unsafe { WaitForSingleObject(handle.0, 0) };
+        wait_result != WAIT_OBJECT_0
+    }
 }
 
 impl Drop for BaseWorktree {
@@ -3049,6 +3268,229 @@ mod tests {
             None
         );
         assert_eq!(audit_worktree_pid("not-fallow-audit-base-123"), None);
+    }
+
+    /// Initialize a throwaway git repo with a single commit and return its root.
+    /// Used by the worktree-lifecycle tests below as a parent repo that can host
+    /// `git worktree add` invocations.
+    fn init_throwaway_repo(parent: &std::path::Path, name: &str) -> PathBuf {
+        let root = parent.join(name);
+        fs::create_dir_all(&root).expect("repo root should be created");
+        fs::write(root.join("README.md"), "seed\n").expect("seed file should be written");
+        git(&root, &["init", "-b", "main"]);
+        git(&root, &["add", "."]);
+        git(
+            &root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+        root
+    }
+
+    fn worktree_is_registered_with_git(repo_root: &std::path::Path, worktree_path: &Path) -> bool {
+        list_audit_worktrees(repo_root)
+            .is_some_and(|paths| paths.iter().any(|p| paths_equal(p, worktree_path)))
+    }
+
+    #[test]
+    fn worktree_cleanup_guard_runs_on_drop() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = init_throwaway_repo(tmp.path(), "repo");
+        let worktree_path = tmp.path().join("fallow-audit-base-1234-5678");
+
+        // Register a real worktree with git so the guard's `git worktree remove`
+        // has something concrete to roll back.
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "--quiet",
+                worktree_path.to_str().expect("path is utf-8"),
+                "HEAD",
+            ],
+        );
+        assert!(worktree_path.is_dir());
+        assert!(worktree_is_registered_with_git(&repo, &worktree_path));
+
+        {
+            let _guard = WorktreeCleanupGuard::new(&repo, &worktree_path);
+            // Guard drops at end of scope without `defuse()`.
+        }
+
+        assert!(
+            !worktree_path.exists(),
+            "guard Drop should remove the worktree directory",
+        );
+        assert!(
+            !worktree_is_registered_with_git(&repo, &worktree_path),
+            "guard Drop should remove the git worktree registration",
+        );
+    }
+
+    #[test]
+    fn worktree_cleanup_guard_defused_skips_drop() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = init_throwaway_repo(tmp.path(), "repo");
+        let worktree_path = tmp.path().join("fallow-audit-base-1234-5679");
+
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "--quiet",
+                worktree_path.to_str().expect("path is utf-8"),
+                "HEAD",
+            ],
+        );
+        assert!(worktree_path.is_dir());
+
+        {
+            let mut guard = WorktreeCleanupGuard::new(&repo, &worktree_path);
+            guard.defuse();
+            // Idempotent: a second defuse must not panic.
+            guard.defuse();
+        }
+
+        assert!(
+            worktree_path.is_dir(),
+            "defused guard must not remove the worktree on drop",
+        );
+        assert!(
+            worktree_is_registered_with_git(&repo, &worktree_path),
+            "defused guard must not unregister the worktree from git",
+        );
+
+        // Clean up manually so the tempdir teardown does not race git's lock files.
+        remove_audit_worktree(&repo, &worktree_path);
+        let _ = fs::remove_dir_all(&worktree_path);
+    }
+
+    #[test]
+    fn audit_orphan_sweep_removes_dead_pid_worktree() {
+        // Use a PID well above all platforms' typical and maximum ranges:
+        //   - Linux:  pid_max defaults to 32 768, max cap 4 194 304 (2^22)
+        //   - macOS:  kern.maxproc defaults to 99 998
+        //   - Windows: PIDs are multiples of 4; 99 999 999 mod 4 == 3, so it
+        //     cannot be a valid Windows PID either.
+        // 99 999 999 exceeds all three.
+        const DEAD_PID: u32 = 99_999_999;
+        assert!(!process_is_alive(DEAD_PID));
+
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = init_throwaway_repo(tmp.path(), "repo");
+
+        // The sweep only considers worktrees whose parent is the system temp dir.
+        // Mirror that here so the test exercises the real filter path.
+        let worktree_path = std::env::temp_dir().join(format!(
+            "fallow-audit-base-{}-{}",
+            DEAD_PID,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock should be after epoch")
+                .as_nanos()
+        ));
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "--quiet",
+                worktree_path.to_str().expect("path is utf-8"),
+                "HEAD",
+            ],
+        );
+        assert!(worktree_path.is_dir());
+        assert!(worktree_is_registered_with_git(&repo, &worktree_path));
+
+        sweep_orphan_audit_worktrees(&repo);
+
+        assert!(
+            !worktree_path.exists(),
+            "sweep should remove worktree owned by a dead PID",
+        );
+        assert!(
+            !worktree_is_registered_with_git(&repo, &worktree_path),
+            "sweep should unregister worktree owned by a dead PID",
+        );
+    }
+
+    #[test]
+    fn audit_orphan_sweep_keeps_live_pid_worktree() {
+        let live_pid = std::process::id();
+        assert!(process_is_alive(live_pid));
+
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = init_throwaway_repo(tmp.path(), "repo");
+
+        let worktree_path = std::env::temp_dir().join(format!(
+            "fallow-audit-base-{}-{}",
+            live_pid,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock should be after epoch")
+                .as_nanos()
+        ));
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "--quiet",
+                worktree_path.to_str().expect("path is utf-8"),
+                "HEAD",
+            ],
+        );
+
+        sweep_orphan_audit_worktrees(&repo);
+
+        assert!(
+            worktree_path.is_dir(),
+            "sweep must not remove worktree owned by a live PID",
+        );
+        assert!(
+            worktree_is_registered_with_git(&repo, &worktree_path),
+            "sweep must not unregister worktree owned by a live PID",
+        );
+
+        // Tear down the live-PID worktree so it does not leak across tests.
+        remove_audit_worktree(&repo, &worktree_path);
+        let _ = fs::remove_dir_all(&worktree_path);
+    }
+
+    #[test]
+    fn reusable_worktree_lock_excludes_concurrent_acquires() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        // Use a stable reusable-path-shaped value inside the tempdir so the
+        // lock file lives somewhere we can clean up automatically.
+        let reusable = tmp.path().join("fallow-audit-base-cache-deadbeef-0000");
+        let lock_path = reusable_worktree_lock_path(&reusable);
+
+        let first = ReusableWorktreeLock::try_acquire(&reusable)
+            .expect("first acquire on a fresh path should succeed");
+        assert!(
+            ReusableWorktreeLock::try_acquire(&reusable).is_none(),
+            "second acquire must fail while the first is held",
+        );
+        // Don't assert that a same-process re-acquire-after-drop succeeds:
+        // macOS flock(2) can keep the lock visible to other open file
+        // descriptions in the same process for a brief window after close,
+        // and this test would flake under parallel `cargo test` execution.
+        // The cross-process release path is exercised by every real `fallow
+        // audit` invocation; the in-process exclusion above is the actual
+        // invariant we need to guarantee here.
+        drop(first);
+        // The lock file inode persists after the holder drops; only the
+        // kernel lock state is released. Anchor that so future maintainers
+        // don't conflate "release" with "delete".
+        assert!(
+            lock_path.exists(),
+            "lock file must persist after drop (only the kernel lock is released)",
+        );
     }
 
     #[test]

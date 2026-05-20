@@ -92,6 +92,9 @@ insta = { version = "1", features = ["yaml"] }
 proptest = "1"
 tempfile = "3"
 
+# Windows-only Win32 bindings (process query for audit orphan sweep)
+windows-sys = { version = "0.61", features = ["Win32_System_Threading", "Win32_Foundation"] }
+
 [workspace.lints.clippy]
 # Lint groups (priority -1 so individual overrides take precedence)
 all = { level = "warn", priority = -1 }

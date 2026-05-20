@@ -89,6 +89,9 @@ similar = { version = "3", default-features = false, features = ["text"] }
 # release binary.
 schemars = { workspace = true, optional = true }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
+
 [lib]
 name = "fallow_cli"
 path = "src/lib.rs"
