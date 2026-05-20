@@ -15,7 +15,7 @@
 //! This subcommand is a paid-tier workflow. It runs only when the user
 //! invokes it explicitly; no other fallow command touches the network.
 
-use std::fmt::Write as _;
+use std::fmt::{self, Write as _};
 use std::path::Path;
 use std::process::{Command, ExitCode};
 
@@ -30,7 +30,7 @@ use colored::Colorize as _;
 
 use crate::api::{
     ErrorEnvelope, NETWORK_EXIT_CODE, ResponseBodyReader, actionable_error_hint,
-    api_agent_with_timeout, api_url,
+    api_agent_with_timeout, api_url, sanitize_network_error,
 };
 
 /// Log prefix used on every human-facing line from this subcommand.
@@ -64,7 +64,7 @@ const EXIT_SERVER_ERROR: u8 = 13;
 const SUPPORTED_EXTENSIONS: &[&str] = &["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
 
 /// Arguments for `fallow coverage upload-inventory`.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct UploadInventoryArgs {
     /// Explicit API key. Overrides `$FALLOW_API_KEY`.
     pub api_key: Option<String>,
@@ -95,6 +95,24 @@ pub struct UploadInventoryArgs {
     /// Soft-fail on upload errors: print the warning but return exit code 0.
     /// The default is to fail loud (exit nonzero) for any upload error.
     pub ignore_upload_errors: bool,
+}
+
+// Manual `Debug` so `tracing::debug!(?args)` / `dbg!(args)` / unwrap-on-Err
+// formatting cannot bleed the API key into stderr.
+impl fmt::Debug for UploadInventoryArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UploadInventoryArgs")
+            .field("api_key", &self.api_key.as_ref().map(|_| "***"))
+            .field("api_endpoint", &self.api_endpoint)
+            .field("project_id", &self.project_id)
+            .field("git_sha", &self.git_sha)
+            .field("allow_dirty", &self.allow_dirty)
+            .field("exclude_paths", &self.exclude_paths)
+            .field("path_prefix", &self.path_prefix)
+            .field("dry_run", &self.dry_run)
+            .field("ignore_upload_errors", &self.ignore_upload_errors)
+            .finish()
+    }
 }
 
 /// Dispatch `fallow coverage upload-inventory`.
@@ -705,7 +723,9 @@ fn upload(
         .post(&url)
         .header("Authorization", &format!("Bearer {api_key}"))
         .send_json(payload)
-        .map_err(|err| UploadError::Network(format!("network error: {err}")))?;
+        .map_err(|err| {
+            UploadError::Network(sanitize_network_error(&format!("network error: {err}")))
+        })?;
 
     let status = response.status().as_u16();
     if matches!(status, 200 | 201) {
@@ -881,6 +901,34 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use tempfile::TempDir;
+
+    #[test]
+    fn upload_inventory_args_debug_masks_api_key() {
+        // Future `tracing::debug!(?args)` or `dbg!(args)` calls must not leak
+        // the bearer token through stderr.
+        let args = UploadInventoryArgs {
+            api_key: Some("fallow_live_secret_token_value".to_owned()),
+            api_endpoint: Some("https://api.fallow.cloud".to_owned()),
+            project_id: Some("acme/web".to_owned()),
+            ..UploadInventoryArgs::default()
+        };
+        let formatted = format!("{args:?}");
+        assert!(
+            !formatted.contains("fallow_live_secret_token_value"),
+            "api_key leaked through Debug: {formatted}"
+        );
+        assert!(
+            formatted.contains("api_key: Some(\"***\")"),
+            "expected explicit redaction marker, got: {formatted}"
+        );
+        // None case must remain distinguishable from "set but redacted".
+        let bare = UploadInventoryArgs::default();
+        let formatted_bare = format!("{bare:?}");
+        assert!(
+            formatted_bare.contains("api_key: None"),
+            "expected None for unset api_key, got: {formatted_bare}"
+        );
+    }
 
     #[test]
     fn parse_git_remote_https_with_dot_git() {

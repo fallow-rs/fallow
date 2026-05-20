@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use fallow_config::OutputFormat;
 use serde_json::Value;
 
-use crate::api::{ResponseBodyReader, api_agent};
+use crate::api::{ResponseBodyReader, api_agent, sanitize_network_error};
 use crate::error::emit_error;
 
 pub enum CiCommand {
@@ -752,7 +752,11 @@ where
                 }
                 return read_json_response(&mut response, provider);
             }
-            Err(e) => return Err(format!("{provider} request failed: {e}")),
+            Err(e) => {
+                return Err(sanitize_network_error(&format!(
+                    "{provider} request failed: {e}"
+                )));
+            }
         }
     }
 }

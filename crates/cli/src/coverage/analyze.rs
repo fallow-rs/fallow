@@ -1,5 +1,6 @@
 //! `fallow coverage analyze` implementation.
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::Instant;
@@ -25,7 +26,7 @@ use crate::health_types::{
 
 const RUNTIME_COVERAGE_SCHEMA_VERSION: &str = "1";
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct AnalyzeArgs {
     pub runtime_coverage: Option<PathBuf>,
     pub cloud: bool,
@@ -43,6 +44,31 @@ pub struct AnalyzeArgs {
     pub top: Option<usize>,
     pub blast_radius: bool,
     pub importance: bool,
+}
+
+// Manual `Debug` so `CoverageSubcommand::Analyze` formatting cannot expose a
+// CLI-provided API key through future trace/debug output.
+impl fmt::Debug for AnalyzeArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AnalyzeArgs")
+            .field("runtime_coverage", &self.runtime_coverage)
+            .field("cloud", &self.cloud)
+            .field("api_key", &self.api_key.as_ref().map(|_| "***"))
+            .field("api_endpoint", &self.api_endpoint)
+            .field("repo", &self.repo)
+            .field("project_id", &self.project_id)
+            .field("coverage_period", &self.coverage_period)
+            .field("environment", &self.environment)
+            .field("commit_sha", &self.commit_sha)
+            .field("production", &self.production)
+            .field("min_invocations_hot", &self.min_invocations_hot)
+            .field("min_observation_volume", &self.min_observation_volume)
+            .field("low_traffic_threshold", &self.low_traffic_threshold)
+            .field("top", &self.top)
+            .field("blast_radius", &self.blast_radius)
+            .field("importance", &self.importance)
+            .finish()
+    }
 }
 
 pub fn run(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
@@ -1084,6 +1110,28 @@ mod tests {
         let args = AnalyzeArgs::default();
         assert!(!args.cloud);
         assert!(args.runtime_coverage.is_none());
+    }
+
+    #[test]
+    fn analyze_args_debug_masks_api_key() {
+        let args = AnalyzeArgs {
+            cloud: true,
+            api_key: Some("fallow_live_secret_token_value".to_owned()),
+            api_endpoint: Some("https://api.fallow.cloud".to_owned()),
+            repo: Some("acme/web".to_owned()),
+            ..AnalyzeArgs::default()
+        };
+        let formatted = format!("{args:?}");
+        assert!(
+            !formatted.contains("fallow_live_secret_token_value"),
+            "api_key leaked through Debug: {formatted}"
+        );
+        assert!(
+            formatted.contains("api_key: Some(\"***\")"),
+            "expected explicit redaction marker, got: {formatted}"
+        );
+        assert!(formatted.contains("repo: Some(\"acme/web\")"));
+        assert!(format!("{:?}", AnalyzeArgs::default()).contains("api_key: None"));
     }
 
     #[test]

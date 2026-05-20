@@ -135,6 +135,110 @@ impl ResponseBodyReader for http::Response<ureq::Body> {
     }
 }
 
+/// Redact credential-bearing header substrings before surfacing a
+/// network-error message to the user.
+///
+/// `ureq`'s `Display` impl can include the outgoing request's headers on
+/// certain failure modes (TLS handshake errors, DNS errors, internal panics).
+/// Any `Authorization: Bearer <key>` or `PRIVATE-TOKEN: <token>` we set on the
+/// request would then bleed into stderr via `emit_error`, which lands in CI
+/// logs. Route every `format!("{err}")` against a ureq error through this
+/// helper to mask the secret before it reaches the user.
+///
+/// Token charset matches the JWT + fallow API-key alphabets
+/// (`A-Za-z0-9_.\-=`); the scan stops at the first byte outside that set so
+/// punctuation following the secret (e.g. `Bearer abc123.\n`) is preserved.
+pub fn sanitize_network_error(detail: &str) -> String {
+    let detail = redact_bearer_tokens(detail);
+    redact_header_token(&detail, "PRIVATE-TOKEN")
+}
+
+fn redact_bearer_tokens(detail: &str) -> String {
+    const BEARER: &str = "Bearer ";
+    const REDACTED: &str = "Bearer ***";
+
+    let bytes = detail.as_bytes();
+    let mut out = String::with_capacity(detail.len());
+    let mut cursor = 0;
+    while let Some(rel) = detail[cursor..].find(BEARER) {
+        let start = cursor + rel;
+        out.push_str(&detail[cursor..start]);
+        let token_start = start + BEARER.len();
+        let mut token_end = token_start;
+        while token_end < bytes.len() && is_token_byte(bytes[token_end]) {
+            token_end += 1;
+        }
+        if token_end == token_start {
+            // `Bearer` followed by no token character: preserve as-is and
+            // advance past the literal so we do not infinite-loop.
+            out.push_str(BEARER);
+            cursor = token_end;
+            continue;
+        }
+        out.push_str(REDACTED);
+        cursor = token_end;
+    }
+    out.push_str(&detail[cursor..]);
+    out
+}
+
+fn redact_header_token(detail: &str, header_name: &str) -> String {
+    let bytes = detail.as_bytes();
+    let header = header_name.as_bytes();
+    let mut out = String::with_capacity(detail.len());
+    let mut cursor = 0;
+    while let Some(start) = find_ascii_case_insensitive(bytes, cursor, header) {
+        out.push_str(&detail[cursor..start]);
+        let mut token_start = start + header.len();
+        while token_start < bytes.len() && matches!(bytes[token_start], b' ' | b'\t') {
+            token_start += 1;
+        }
+        if token_start >= bytes.len() || bytes[token_start] != b':' {
+            out.push_str(&detail[start..=start]);
+            cursor = start + 1;
+            continue;
+        }
+        token_start += 1;
+        while token_start < bytes.len() && matches!(bytes[token_start], b' ' | b'\t') {
+            token_start += 1;
+        }
+
+        let mut token_end = token_start;
+        while token_end < bytes.len() && is_token_byte(bytes[token_end]) {
+            token_end += 1;
+        }
+        if token_end == token_start {
+            out.push_str(&detail[start..token_start]);
+            cursor = token_start;
+            continue;
+        }
+        out.push_str(&detail[start..token_start]);
+        out.push_str("***");
+        cursor = token_end;
+    }
+    out.push_str(&detail[cursor..]);
+    out
+}
+
+fn find_ascii_case_insensitive(haystack: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || from >= haystack.len() {
+        return None;
+    }
+    haystack[from..]
+        .windows(needle.len())
+        .position(|window| {
+            window
+                .iter()
+                .zip(needle)
+                .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
+        })
+        .map(|offset| from + offset)
+}
+
+const fn is_token_byte(byte: u8) -> bool {
+    matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'.' | b'-' | b'=')
+}
+
 /// Format a non-2xx response into a user-facing error string.
 ///
 /// Tries to parse the body as an [`ErrorEnvelope`]. When the envelope has a
@@ -279,6 +383,76 @@ mod tests {
         };
         let message = http_status_message(&mut response, "trial");
         assert_eq!(message, "trial request failed with HTTP 502");
+    }
+
+    #[test]
+    fn sanitize_network_error_redacts_bearer_token() {
+        let input = "tls handshake failed; sent Authorization: Bearer fallow_live_abc123.def456";
+        let output = sanitize_network_error(input);
+        assert!(
+            output.ends_with("Bearer ***"),
+            "expected sanitized tail, got: {output}"
+        );
+        assert!(
+            !output.contains("fallow_live_abc123"),
+            "secret leaked: {output}"
+        );
+    }
+
+    #[test]
+    fn sanitize_network_error_redacts_multiple_bearer_tokens() {
+        let input = "first attempt: Bearer aaa.bbb retried as Bearer ccc.ddd";
+        let output = sanitize_network_error(input);
+        assert_eq!(output, "first attempt: Bearer *** retried as Bearer ***");
+    }
+
+    #[test]
+    fn sanitize_network_error_redacts_gitlab_private_token_header() {
+        let input = "GitLab request failed: PRIVATE-TOKEN: glpat-secret_token-123\nretry failed";
+        let output = sanitize_network_error(input);
+        assert_eq!(
+            output,
+            "GitLab request failed: PRIVATE-TOKEN: ***\nretry failed"
+        );
+        assert!(!output.contains("glpat-secret"));
+    }
+
+    #[test]
+    fn sanitize_network_error_redacts_private_token_header_case_insensitively() {
+        let input = "request headers: Private-Token:\tglpat.SECRET_123";
+        let output = sanitize_network_error(input);
+        assert_eq!(output, "request headers: Private-Token:\t***");
+    }
+
+    #[test]
+    fn sanitize_network_error_passes_through_when_no_bearer() {
+        let input = "connection refused (dns lookup failed for api.fallow.cloud)";
+        let output = sanitize_network_error(input);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn sanitize_network_error_preserves_trailing_punctuation_after_token() {
+        let input = "Bearer fallow_live_xyz, retry next.";
+        let output = sanitize_network_error(input);
+        assert_eq!(output, "Bearer ***, retry next.");
+    }
+
+    #[test]
+    fn sanitize_network_error_preserves_literal_bearer_when_no_token_follows() {
+        // `Bearer ` followed by a non-token byte (e.g. `@`) leaves the prefix
+        // untouched so we do not corrupt non-secret prose that mentions the
+        // literal `Bearer `.
+        let input = "Bearer @other";
+        let output = sanitize_network_error(input);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn sanitize_network_error_preserves_private_token_when_no_token_follows() {
+        let input = "PRIVATE-TOKEN: @not-a-token";
+        let output = sanitize_network_error(input);
+        assert_eq!(output, input);
     }
 
     // Env-var assertions run in one test to avoid interleaving with parallel

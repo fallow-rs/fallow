@@ -15,7 +15,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::api::{ResponseBodyReader, api_agent_with_timeout, api_url};
+use crate::api::{ResponseBodyReader, api_agent_with_timeout, api_url, sanitize_network_error};
 
 const LOG_PREFIX: &str = "fallow coverage upload-source-maps";
 const DEFAULT_ENDPOINT: &str = "https://api.fallow.cloud";
@@ -555,7 +555,7 @@ fn send_source_map(
         .header("Authorization", &format!("Bearer {api_key}"))
         .send_json(&payload)
         .map_err(|err| UploadAttemptError {
-            message: format!("network error: {err}"),
+            message: sanitize_network_error(&format!("network error: {err}")),
             retryable: true,
         })?;
 

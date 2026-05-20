@@ -3,17 +3,19 @@
 //! This is intentionally the only runtime-coverage module that talks to the
 //! network. Local `health --runtime-coverage` analysis stays disk-only.
 
-use std::fmt::Write as _;
+use std::fmt::{self, Write as _};
 
 use serde::Deserialize;
 
-use crate::api::{ErrorEnvelope, NETWORK_EXIT_CODE, api_agent_with_timeout, api_url};
+use crate::api::{
+    ErrorEnvelope, NETWORK_EXIT_CODE, api_agent_with_timeout, api_url, sanitize_network_error,
+};
 
 const CLOUD_CONNECT_TIMEOUT_SECS: u64 = 5;
 const CLOUD_TOTAL_TIMEOUT_SECS: u64 = 30;
 const RUNTIME_CONTEXT_FORMAT: &str = "fallow-cloud-runtime-v1";
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CloudRequest {
     pub api_key: String,
     pub api_endpoint: Option<String>,
@@ -22,6 +24,23 @@ pub struct CloudRequest {
     pub period_days: u16,
     pub environment: Option<String>,
     pub commit_sha: Option<String>,
+}
+
+// Manual `Debug` so any future `tracing::debug!`, `dbg!`, or `unwrap`-on-Err
+// with the `Debug` formatter does not leak the bearer token through
+// stderr. The derive would do; explicit redaction is unmissable.
+impl fmt::Debug for CloudRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CloudRequest")
+            .field("api_key", &"***")
+            .field("api_endpoint", &self.api_endpoint)
+            .field("repo", &self.repo)
+            .field("project_id", &self.project_id)
+            .field("period_days", &self.period_days)
+            .field("environment", &self.environment)
+            .field("commit_sha", &self.commit_sha)
+            .finish()
+    }
 }
 
 #[derive(Debug)]
@@ -202,7 +221,9 @@ pub fn fetch_runtime_context(request: &CloudRequest) -> Result<CloudRuntimeConte
         .header("Accept", "application/json")
         .header("Accept-Encoding", "identity")
         .call()
-        .map_err(|err| CloudError::Network(network_message(&format!("{err}"))))?;
+        .map_err(|err| {
+            CloudError::Network(network_message(&sanitize_network_error(&format!("{err}"))))
+        })?;
 
     let status = response.status().as_u16();
     if response.status().is_success() {
@@ -380,6 +401,35 @@ mod tests {
             validate_request(&req),
             Err(CloudError::Validation(_))
         ));
+    }
+
+    #[test]
+    fn cloud_request_debug_masks_api_key() {
+        // Future `tracing::debug!(?req)`, `dbg!(req)`, or unwrap-on-Err with
+        // the Debug formatter would surface the api_key in stderr. Mask at
+        // the type level so the next contributor cannot reintroduce it by
+        // accident.
+        let req = CloudRequest {
+            api_key: "fallow_live_secret_token_value".to_owned(),
+            api_endpoint: Some("https://api.fallow.cloud".to_owned()),
+            repo: "acme/web".to_owned(),
+            project_id: None,
+            period_days: 30,
+            environment: None,
+            commit_sha: None,
+        };
+        let formatted = format!("{req:?}");
+        assert!(
+            !formatted.contains("fallow_live_secret_token_value"),
+            "api_key leaked through Debug: {formatted}"
+        );
+        assert!(
+            formatted.contains("api_key: \"***\""),
+            "expected explicit redaction marker, got: {formatted}"
+        );
+        // Non-secret fields must still be inspectable so Debug stays useful.
+        assert!(formatted.contains("repo: \"acme/web\""));
+        assert!(formatted.contains("period_days: 30"));
     }
 
     #[test]

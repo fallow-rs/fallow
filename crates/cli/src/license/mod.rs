@@ -21,7 +21,9 @@ use fallow_license::{
 };
 use serde::Deserialize;
 
-use crate::api::{NETWORK_EXIT_CODE, api_agent, api_url, http_status_message};
+use crate::api::{
+    NETWORK_EXIT_CODE, api_agent, api_url, http_status_message, sanitize_network_error,
+};
 
 /// Ed25519 verification key for fallow license JWT validation.
 #[cfg(not(feature = "test-sidecar-key"))]
@@ -54,7 +56,7 @@ pub enum LicenseSubcommand {
 }
 
 /// Arguments for `fallow license activate`.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ActivateArgs {
     /// JWT passed directly as a positional argument.
     pub raw_jwt: Option<String>,
@@ -69,12 +71,26 @@ pub struct ActivateArgs {
     pub email: Option<String>,
 }
 
+// Manual `Debug` so a future `tracing::debug!(?args)` cannot leak the raw
+// license JWT through stderr. Same defensive principle as `CloudRequest`.
+impl std::fmt::Debug for ActivateArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActivateArgs")
+            .field("raw_jwt", &self.raw_jwt.as_ref().map(|_| "***"))
+            .field("from_file", &self.from_file)
+            .field("from_stdin", &self.from_stdin)
+            .field("trial", &self.trial)
+            .field("email", &self.email)
+            .finish()
+    }
+}
+
 #[derive(serde::Serialize)]
 struct TrialRequest<'a> {
     email: &'a str,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct JwtResponse {
     jwt: String,
     /// Optional ISO-8601 trial expiry timestamp returned by the backend for
@@ -282,7 +298,7 @@ pub fn activate_trial(email: &str) -> Result<LicenseStatus, String> {
     let mut response = api_agent()
         .post(&api_url("/v1/auth/license/trial"))
         .send_json(TrialRequest { email })
-        .map_err(|err| format!("failed to request a trial: {err}"))?;
+        .map_err(|err| sanitize_network_error(&format!("failed to request a trial: {err}")))?;
     if !response.status().is_success() {
         return Err(http_status_message(&mut response, "trial"));
     }
@@ -295,7 +311,9 @@ pub fn refresh_active_license() -> Result<LicenseStatus, String> {
         .post(&api_url("/v1/auth/license/refresh"))
         .header("Authorization", &format!("Bearer {current}"))
         .send_empty()
-        .map_err(|err| format!("failed to refresh the current license: {err}"))?;
+        .map_err(|err| {
+            sanitize_network_error(&format!("failed to refresh the current license: {err}"))
+        })?;
     if !response.status().is_success() {
         return Err(http_status_message(&mut response, "refresh"));
     }
@@ -420,6 +438,32 @@ fn print_status(status: &LicenseStatus) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activate_args_debug_masks_raw_jwt() {
+        // Symmetric with CloudRequest + UploadInventoryArgs Debug masking.
+        // The raw JWT is a credential; future `tracing::debug!(?args)` must
+        // not leak it to stderr.
+        let args = ActivateArgs {
+            raw_jwt: Some("eyJhbGciOiJFZERTQSJ9.secret_payload.sig".to_owned()),
+            email: Some("alice@example.com".to_owned()),
+            ..ActivateArgs::default()
+        };
+        let formatted = format!("{args:?}");
+        assert!(
+            !formatted.contains("secret_payload"),
+            "raw_jwt leaked through Debug: {formatted}"
+        );
+        assert!(
+            formatted.contains("raw_jwt: Some(\"***\")"),
+            "expected explicit redaction marker, got: {formatted}"
+        );
+        // None case stays distinguishable.
+        let bare = ActivateArgs::default();
+        assert!(format!("{bare:?}").contains("raw_jwt: None"));
+        // Non-secret fields stay inspectable.
+        assert!(formatted.contains("email: Some(\"alice@example.com\")"));
+    }
 
     #[test]
     fn read_jwt_prefers_raw_arg() {
