@@ -23,3 +23,7 @@ Paket = "Paket"
 Pn = "Pn"
 ot = "ot"
 Ot = "Ot"
+# Intentional misspellings in #467 phase 1 unknown-rule-name tests.
+# These mirror the typos the warn path is designed to catch.
+unsued = "unsued"
+dependnecy = "dependnecy"

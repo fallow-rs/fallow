@@ -378,6 +378,162 @@ pub struct PartialRulesConfig {
     pub misconfigured_dependency_overrides: Option<Severity>,
 }
 
+/// Every rule name accepted by `RulesConfig` deserialization, in kebab-case.
+///
+/// Includes both the canonical name produced by `#[serde(rename_all = "kebab-case")]`
+/// and every `#[serde(alias = ...)]` value. Used by
+/// [`find_unknown_rule_keys`] to detect typos in user-supplied configs and
+/// emit a `tracing::warn!` suggestion at config load time.
+///
+/// Keep in sync with the `#[serde]` attributes on `RulesConfig` and
+/// `PartialRulesConfig`; the `known_rule_names_count_matches_struct` test
+/// fails when the lists drift.
+pub const KNOWN_RULE_NAMES: &[&str] = &[
+    // canonical kebab-case names (rename_all = "kebab-case")
+    "unused-files",
+    "unused-exports",
+    "unused-types",
+    "private-type-leaks",
+    "unused-dependencies",
+    "unused-dev-dependencies",
+    "unused-optional-dependencies",
+    "unused-enum-members",
+    "unused-class-members",
+    "unresolved-imports",
+    "unlisted-dependencies",
+    "duplicate-exports",
+    "type-only-dependencies",
+    "test-only-dependencies",
+    "circular-dependencies",
+    "boundary-violation",
+    "coverage-gaps",
+    "feature-flags",
+    "stale-suppressions",
+    "unused-catalog-entries",
+    "empty-catalog-groups",
+    "unresolved-catalog-references",
+    "unused-dependency-overrides",
+    "misconfigured-dependency-overrides",
+    // serde aliases (singular forms, plus the `boundary-violations` legacy plural)
+    "unused-file",
+    "unused-export",
+    "unused-type",
+    "private-type-leak",
+    "unused-dependency",
+    "unused-dev-dependency",
+    "unused-optional-dependency",
+    "unused-enum-member",
+    "unused-class-member",
+    "unresolved-import",
+    "unlisted-dependency",
+    "duplicate-export",
+    "type-only-dependency",
+    "test-only-dependency",
+    "circular-dependency",
+    "boundary-violations",
+    "coverage-gap",
+    "feature-flag",
+    "stale-suppression",
+    "unused-catalog-entry",
+    "empty-catalog-group",
+    "unresolved-catalog-reference",
+    "unused-dependency-override",
+    "misconfigured-dependency-override",
+];
+
+/// Levenshtein edit distance between two ASCII-leaning strings.
+///
+/// Uses two `Vec<usize>` rows so the working set stays bounded; rule names are
+/// short (max ~33 chars) so allocation cost is negligible at config-load time.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+    let (a_len, b_len) = (a_bytes.len(), b_bytes.len());
+
+    if a_len == 0 {
+        return b_len;
+    }
+    if b_len == 0 {
+        return a_len;
+    }
+
+    let mut prev: Vec<usize> = (0..=b_len).collect();
+    let mut curr: Vec<usize> = vec![0; b_len + 1];
+
+    for i in 1..=a_len {
+        curr[0] = i;
+        for j in 1..=b_len {
+            let cost = usize::from(a_bytes[i - 1] != b_bytes[j - 1]);
+            curr[j] = (prev[j] + 1) // deletion
+                .min(curr[j - 1] + 1) // insertion
+                .min(prev[j - 1] + cost); // substitution
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[b_len]
+}
+
+/// Find the closest known rule name to `input` when it is plausibly a typo.
+///
+/// Returns the best match when the Levenshtein distance is at most 2 AND
+/// the input is long enough that the match isn't coincidental
+/// (`input.len() / 2 > distance`). Returns `None` for completely novel
+/// strings where a suggestion would be misleading.
+#[must_use]
+pub fn closest_known_rule_name(input: &str) -> Option<&'static str> {
+    let input_lower = input.to_ascii_lowercase();
+    let mut best: Option<(&'static str, usize)> = None;
+
+    for &candidate in KNOWN_RULE_NAMES {
+        let d = levenshtein(&input_lower, candidate);
+        if best.is_none_or(|(_, b_dist)| d < b_dist) {
+            best = Some((candidate, d));
+        }
+    }
+
+    best.filter(|&(_, d)| d > 0 && d <= 2 && input_lower.len() / 2 > d)
+        .map(|(name, _)| name)
+}
+
+/// An unknown key found inside a `rules` (or `overrides[].rules`) object.
+///
+/// Surfaced by [`find_unknown_rule_keys`] so the caller (config loader) can
+/// emit one `tracing::warn!` per entry without coupling the detection logic
+/// to a tracing subscriber.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownRuleKey {
+    /// Human-readable source label, e.g. `"rules"` or `"overrides[2].rules"`.
+    pub context: String,
+    /// The unknown key as it appeared in the user's config.
+    pub key: String,
+    /// Closest known rule name when one is within plausible-typo distance.
+    pub suggestion: Option<&'static str>,
+}
+
+/// Collect every unknown key from a `rules`-shaped JSON object.
+///
+/// Returns an empty `Vec` when `value` is not an object or every key is
+/// recognized (canonical kebab-case or a documented alias). Called from
+/// [`crate::config::parsing`] after `extends` merge and before
+/// `serde_json::from_value::<FallowConfig>`, so the warning lists keys from
+/// the final merged config rather than per-file partials.
+#[must_use]
+pub fn find_unknown_rule_keys(value: &serde_json::Value, context: &str) -> Vec<UnknownRuleKey> {
+    let Some(map) = value.as_object() else {
+        return Vec::new();
+    };
+
+    map.keys()
+        .filter(|key| !KNOWN_RULE_NAMES.contains(&key.as_str()))
+        .map(|key| UnknownRuleKey {
+            context: context.to_owned(),
+            key: key.clone(),
+            suggestion: closest_known_rule_name(key),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -630,6 +786,166 @@ mod tests {
             err.contains("unknown severity"),
             "Expected descriptive error, got: {err}"
         );
+    }
+
+    // ── Unknown-rule-name detection (issue #467 phase 1) ─────────────
+
+    #[test]
+    fn known_rule_names_count_matches_struct() {
+        // Drift guard. Bump both numbers together when adding a rule.
+        // 24 canonical kebab-case names + 24 aliases = 48 entries.
+        assert_eq!(KNOWN_RULE_NAMES.len(), 48);
+    }
+
+    #[test]
+    fn known_rule_names_has_no_duplicates() {
+        let mut sorted: Vec<&str> = KNOWN_RULE_NAMES.to_vec();
+        sorted.sort_unstable();
+        let original_len = sorted.len();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            original_len,
+            "KNOWN_RULE_NAMES contains a duplicate"
+        );
+    }
+
+    #[test]
+    fn every_known_rule_name_round_trips_through_partial() {
+        // Stronger drift guard than the count + canonical-coverage tests:
+        // every entry in KNOWN_RULE_NAMES must deserialize successfully via
+        // `PartialRulesConfig` and resolve to exactly one field. Catches the
+        // case where a developer renames an alias on the struct but forgets
+        // to update KNOWN_RULE_NAMES (the count test still passes; this one
+        // fails).
+        for &name in KNOWN_RULE_NAMES {
+            let json = format!(r#"{{"{name}": "warn"}}"#);
+            let partial: PartialRulesConfig = serde_json::from_str(&json)
+                .unwrap_or_else(|e| panic!("'{name}' should deserialize: {e}"));
+
+            let serialized = serde_json::to_value(&partial).unwrap();
+            let map = serialized.as_object().unwrap();
+            assert_eq!(
+                map.len(),
+                1,
+                "'{name}' should resolve to exactly one field, got: {map:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn known_rule_names_covers_every_struct_field() {
+        // Every canonical rule must serialize to a name in KNOWN_RULE_NAMES.
+        // Iterates the serialized form of a default RulesConfig (which emits
+        // canonical kebab-case for every field) and asserts each appears in
+        // the const list. Drift guard for adding a new field but forgetting
+        // to update KNOWN_RULE_NAMES.
+        let json = serde_json::to_value(RulesConfig::default()).unwrap();
+        let obj = json.as_object().unwrap();
+        for key in obj.keys() {
+            assert!(
+                KNOWN_RULE_NAMES.contains(&key.as_str()),
+                "field '{key}' is serialized but missing from KNOWN_RULE_NAMES"
+            );
+        }
+    }
+
+    #[test]
+    fn closest_known_rule_name_suggests_for_obvious_typo() {
+        assert_eq!(
+            closest_known_rule_name("unsued-files"),
+            Some("unused-files")
+        );
+        assert_eq!(
+            closest_known_rule_name("circular-dependnecy"),
+            Some("circular-dependency")
+        );
+        assert_eq!(
+            closest_known_rule_name("unused-dep"),
+            None,
+            "too short for a confident suggestion"
+        );
+    }
+
+    #[test]
+    fn closest_known_rule_name_returns_none_for_novel_input() {
+        assert_eq!(closest_known_rule_name("totally-fabricated"), None);
+        assert_eq!(closest_known_rule_name("foo"), None);
+    }
+
+    #[test]
+    fn closest_known_rule_name_is_case_insensitive() {
+        assert_eq!(
+            closest_known_rule_name("UNSUED-FILES"),
+            Some("unused-files")
+        );
+    }
+
+    #[test]
+    fn closest_known_rule_name_returns_none_for_exact_match() {
+        // A match with distance 0 is not a typo, so no suggestion.
+        assert_eq!(closest_known_rule_name("unused-files"), None);
+    }
+
+    #[test]
+    fn find_unknown_rule_keys_flags_typo() {
+        let v = serde_json::json!({
+            "unsued-files": "warn",
+            "unused-exports": "off",
+        });
+        let unknown = find_unknown_rule_keys(&v, "rules");
+        assert_eq!(unknown.len(), 1);
+        assert_eq!(unknown[0].key, "unsued-files");
+        assert_eq!(unknown[0].context, "rules");
+        assert_eq!(unknown[0].suggestion, Some("unused-files"));
+    }
+
+    #[test]
+    fn find_unknown_rule_keys_passes_aliases() {
+        let v = serde_json::json!({
+            "unused-file": "warn",
+            "circular-dependency": "off",
+            "boundary-violations": "warn",
+        });
+        let unknown = find_unknown_rule_keys(&v, "rules");
+        assert!(
+            unknown.is_empty(),
+            "documented aliases must not flag as unknown: {unknown:?}"
+        );
+    }
+
+    #[test]
+    fn find_unknown_rule_keys_returns_multiple_typos() {
+        let v = serde_json::json!({
+            "unsued-files": "warn",
+            "circular-dependnecy": "off",
+        });
+        let unknown = find_unknown_rule_keys(&v, "rules");
+        assert_eq!(unknown.len(), 2);
+    }
+
+    #[test]
+    fn find_unknown_rule_keys_carries_context() {
+        let v = serde_json::json!({ "unsued-files": "warn" });
+        let unknown = find_unknown_rule_keys(&v, "overrides[2].rules");
+        assert_eq!(unknown[0].context, "overrides[2].rules");
+    }
+
+    #[test]
+    fn find_unknown_rule_keys_empty_when_not_object() {
+        let v = serde_json::json!(null);
+        assert!(find_unknown_rule_keys(&v, "rules").is_empty());
+
+        let v = serde_json::json!([1, 2, 3]);
+        assert!(find_unknown_rule_keys(&v, "rules").is_empty());
+    }
+
+    #[test]
+    fn find_unknown_rule_keys_no_suggestion_for_novel_name() {
+        let v = serde_json::json!({ "totally-fabricated-rule": "warn" });
+        let unknown = find_unknown_rule_keys(&v, "rules");
+        assert_eq!(unknown.len(), 1);
+        assert_eq!(unknown[0].suggestion, None);
     }
 
     // ── PartialRulesConfig deserialization ───────────────────────────
