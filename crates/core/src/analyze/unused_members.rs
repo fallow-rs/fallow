@@ -264,7 +264,8 @@ impl IgnoreDecoratorSet {
     /// Returns true when `decorator_path` matches any ignore-list entry under
     /// the dual matching rule. An empty `decorator_path` (the silent fallback
     /// for decorators whose expression is not an identifier ladder) never
-    /// matches.
+    /// matches. Side effect: marks every matching entry as seen for the
+    /// end-of-run `warn_unmatched` report.
     fn matches(&self, decorator_path: &str) -> bool {
         if decorator_path.is_empty() {
             return false;
@@ -284,6 +285,31 @@ impl IgnoreDecoratorSet {
             }
         }
         false
+    }
+
+    /// Mark every entry matching `decorator_path` as seen, without returning
+    /// the predicate result. Used during the pre-pass over all class-member
+    /// decorators (including those on members that never reach the skip
+    /// predicate because they were already credited as used). Without this,
+    /// the `warn_unmatched` report falsely flags entries whose decorators
+    /// only appear on used members. Caught 2026-05-20 by /fallow-review.
+    fn record_seen(&self, decorator_path: &str) {
+        if decorator_path.is_empty() {
+            return;
+        }
+        let leftmost = decorator_path
+            .split_once('.')
+            .map_or(decorator_path, |(head, _)| head);
+        for entry in &self.entries {
+            let hit = if entry.is_dotted {
+                entry.raw == decorator_path
+            } else {
+                entry.raw == leftmost
+            };
+            if hit {
+                entry.matched.store(true, Ordering::Relaxed);
+            }
+        }
     }
 
     fn warn_unmatched(&self) {
@@ -1139,6 +1165,26 @@ pub fn find_unused_members(
     let mut unused_class_members = Vec::new();
     let allowlist = ClassMemberAllowlist::from_rules(user_class_member_allowlist);
     let ignore_decorators = IgnoreDecoratorSet::from_config(ignore_decorators);
+
+    // Pre-pass: mark every ignore-decorator entry as seen against every
+    // decorator name in the codebase, regardless of whether the decorated
+    // member ever reaches the skip predicate. Without this, the per-member
+    // path that calls `ignore_decorators.matches(...)` is short-circuited
+    // for members already credited as used (external access, this.* access,
+    // suppressed, etc.), so an entry whose decorator appears only on USED
+    // decorated members would falsely surface in the end-of-run
+    // `warn_unmatched` report.
+    if !ignore_decorators.is_empty() {
+        for module in &graph.modules {
+            for export in &module.exports {
+                for member in &export.members {
+                    for decorator in &member.decorator_names {
+                        ignore_decorators.record_seen(decorator);
+                    }
+                }
+            }
+        }
+    }
 
     let mut class_heritage_by_export: FxHashMap<ExportKey, (Option<String>, Vec<String>)> =
         FxHashMap::default();
@@ -2188,6 +2234,42 @@ mod tests {
             &[],
         );
         assert!(class_members.is_empty());
+    }
+
+    #[test]
+    fn ignore_decorator_set_record_seen_marks_entries() {
+        // Direct test of the pre-pass primitive. After `record_seen("step")`,
+        // the `@step` entry is considered matched even when no skip predicate
+        // has been evaluated yet, so the end-of-run `warn_unmatched` report
+        // does not falsely flag it. Caught 2026-05-20 by /fallow-review.
+        let set = IgnoreDecoratorSet::from_config(&["@step".to_string()]);
+        assert!(!set.entries[0].matched.load(Ordering::Relaxed));
+        set.record_seen("step");
+        assert!(
+            set.entries[0].matched.load(Ordering::Relaxed),
+            "record_seen should mark a bare-name entry as seen on a matching decorator path"
+        );
+    }
+
+    #[test]
+    fn ignore_decorator_set_dotted_record_seen_distinct_from_bare() {
+        // `record_seen("decorators.log")` marks a dotted entry but does NOT
+        // mark a sibling dotted entry `decorators.audit`. Pins the dual-match
+        // semantics for the pre-pass primitive. Caught 2026-05-20 by
+        // /fallow-review (extends the false-warn regression coverage).
+        let set = IgnoreDecoratorSet::from_config(&[
+            "decorators.log".to_string(),
+            "decorators.audit".to_string(),
+        ]);
+        set.record_seen("decorators.log");
+        assert!(
+            set.entries[0].matched.load(Ordering::Relaxed),
+            "decorators.log entry should be marked seen by an exact dotted match"
+        );
+        assert!(
+            !set.entries[1].matched.load(Ordering::Relaxed),
+            "decorators.audit entry must NOT be marked seen by record_seen('decorators.log')"
+        );
     }
 
     #[test]
