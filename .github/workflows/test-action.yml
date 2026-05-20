@@ -382,6 +382,7 @@ jobs:
           format: json
           fail-on-issues: false
           comment: true
+          comment-id: action-smoke-test
 
       - name: Verify comment was posted
         env:
@@ -391,9 +392,23 @@ jobs:
         run: |
           COMMENTS=$(gh api \
             "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
-            --jq '[.[] | select(.body | contains("<!-- fallow-id: fallow-results -->"))] | length')
+            --jq '[.[] | select(.body | contains("<!-- fallow-id: action-smoke-test -->"))] | length')
           if [ "$COMMENTS" -eq 0 ]; then
             echo "::error::Expected a fallow PR comment but found none"
             exit 1
           fi
           echo "Found $COMMENTS fallow comment(s)"
+
+      - name: Clean up smoke-test comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.body | contains("<!-- fallow-id: action-smoke-test -->")) | .id' |
+            while read -r COMMENT_ID; do
+              [ -n "$COMMENT_ID" ] || continue
+              gh api --method DELETE "repos/${GH_REPO}/issues/comments/${COMMENT_ID}"
+            done
