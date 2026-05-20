@@ -13,34 +13,22 @@ set -e
 # children fall back to discovering the repo from their own cwd.
 unset GIT_DIR GIT_WORK_TREE
 
-echo "=== Pre-push CI check ==="
+echo "=== Pre-push fast guard ==="
 
-# Quick checks first (fail fast)
 echo "→ cargo fmt"
 cargo fmt --all -- --check
 
 echo "→ cargo clippy"
 cargo clippy --workspace --all-targets -- -D warnings
 
-echo "→ cargo test"
-cargo test --workspace --all-targets
+# Test, doc, and miri intentionally moved to CI on PRs.
+# CI runs them on Linux runners which are free for public repos
+# (macOS and Windows count against the org Actions quota at
+# 10x / 2x multipliers, so we keep those off the local chain too;
+# they live in CI matrices that are budget-tuned separately).
+# If you want to run the full suite locally before opening a PR:
+#   cargo test --workspace --all-targets
+#   RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
+#   rustup run nightly cargo miri test -p fallow-types --lib --tests
 
-echo "→ cargo doc (rustdoc warnings)"
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items 2>&1 | tail -1
-
-# Miri on fast crates (~10s) — skip if nightly/miri not installed.
-# Use `rustup run nightly cargo miri` consistently rather than mixing with
-# `cargo +nightly`. The `+toolchain` shorthand only works when `cargo` resolves
-# to rustup's proxy (~/.cargo/bin/cargo); on machines where Homebrew's bare
-# cargo wins the PATH lookup, `cargo +nightly` errors with `no such command:
-# +nightly`. `rustup run` is identical in effect and works regardless of which
-# `cargo` is first in PATH.
-if rustup run nightly cargo miri --version &>/dev/null; then
-    echo "→ miri (types + graph)"
-    rustup run nightly cargo miri test -p fallow-types --lib --tests
-    rustup run nightly cargo miri test -p fallow-graph --lib --tests -- --skip proptests
-else
-    echo "→ miri (skipped: nightly or miri not installed)"
-fi
-
-echo "=== All checks passed ==="
+echo "=== Done (~1 min). CI handles test, doc, miri on the PR ==="

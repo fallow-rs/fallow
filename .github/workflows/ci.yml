@@ -245,7 +245,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # PR runs ubuntu only (fast feedback, free for public repos).
+        # Push to main runs the full matrix as a pre-release safety net.
+        # macOS minutes are 10x quota multiplier on GitHub Free org plans;
+        # Windows is 2x. The April 2026 quota overshoot was driven by this
+        # matrix running on every PR push.
+        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]') || fromJSON('["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/setup-rust
