@@ -1,21 +1,22 @@
 name: Binary Size
 
 on:
-  # Temporarily disabled to conserve CI minutes; run locally or via workflow_dispatch.
-  # push:
-  #   branches: [main]
-  #   paths:
-  #     - 'crates/**/*.rs'
-  #     - 'Cargo.toml'
-  #     - 'Cargo.lock'
-  #     - '.github/workflows/bloat.yml'
-  # pull_request:
-  #   branches: [main]
-  #   paths:
-  #     - 'crates/**/*.rs'
-  #     - 'Cargo.toml'
-  #     - 'Cargo.lock'
-  #     - '.github/workflows/bloat.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/bloat.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/bloat.yml'
   workflow_dispatch:
 
 concurrency:

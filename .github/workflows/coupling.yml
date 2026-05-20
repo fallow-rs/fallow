@@ -1,23 +1,24 @@
 name: Module Coupling
 
 on:
-  # Temporarily disabled to conserve CI minutes; run locally or via workflow_dispatch.
-  # push:
-  #   branches: [main]
-  #   paths:
-  #     - 'crates/**/*.rs'
-  #     - 'Cargo.toml'
-  #     - 'Cargo.lock'
-  #     - '.github/workflows/coupling.yml'
-  #     - '.github/scripts/coupling-check.py'
-  # pull_request:
-  #   branches: [main]
-  #   paths:
-  #     - 'crates/**/*.rs'
-  #     - 'Cargo.toml'
-  #     - 'Cargo.lock'
-  #     - '.github/workflows/coupling.yml'
-  #     - '.github/scripts/coupling-check.py'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/coupling.yml'
+      - '.github/scripts/coupling-check.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/coupling.yml'
+      - '.github/scripts/coupling-check.py'
   workflow_dispatch:
 
 concurrency:

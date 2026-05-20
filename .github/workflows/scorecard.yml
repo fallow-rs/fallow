@@ -1,12 +1,11 @@
 name: Scorecard
 
 on:
-  # Temporarily disabled to conserve CI minutes; run locally or via workflow_dispatch.
-  # branch_protection_rule:
-  # schedule:
-  #   - cron: '15 6 * * 1'
-  # push:
-  #   branches: [main]
+  branch_protection_rule:
+  schedule:
+    - cron: '15 6 * * 1'
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions: {}

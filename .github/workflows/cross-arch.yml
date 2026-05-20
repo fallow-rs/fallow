@@ -1,12 +1,21 @@
 name: Cross-Architecture
 
 on:
-  # Temporarily disabled to conserve CI minutes; run locally or via workflow_dispatch.
-  # pull_request:
-  #   paths: ['crates/**', '.github/workflows/cross-arch.yml']
-  # push:
-  #   branches: [main]
-  #   paths: ['crates/**', '.github/workflows/cross-arch.yml']
+  pull_request:
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/cross-arch.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/cross-arch.yml'
   workflow_dispatch:
 
 concurrency:

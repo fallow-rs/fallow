@@ -1,21 +1,24 @@
 name: Ecosystem CI
 
 on:
-  # Temporarily disabled to conserve CI minutes; run locally or via workflow_dispatch.
-  # push:
-  #   branches: [main]
-  #   paths:
-  #     - 'crates/**/*.rs'
-  #     - 'Cargo.toml'
-  #     - 'Cargo.lock'
-  #     - '.github/workflows/ecosystem.yml'
-  # pull_request:
-  #   branches: [main]
-  #   paths:
-  #     - 'crates/**/*.rs'
-  #     - 'Cargo.toml'
-  #     - 'Cargo.lock'
-  #     - '.github/workflows/ecosystem.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'tests/ecosystem/**'
+      - '.github/workflows/ecosystem.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'tests/ecosystem/**'
+      - '.github/workflows/ecosystem.yml'
   workflow_dispatch:
 
 concurrency:

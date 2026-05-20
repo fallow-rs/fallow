@@ -1,10 +1,9 @@
 name: Conformance
 
 on:
-  # Temporarily disabled to conserve CI minutes; run locally or via workflow_dispatch.
-  # schedule:
-  #   # Run daily at 06:00 UTC
-  #   - cron: '0 6 * * *'
+  schedule:
+    # Run daily at 06:00 UTC
+    - cron: '0 6 * * *'
   workflow_dispatch:
 
 concurrency:
