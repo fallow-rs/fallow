@@ -141,6 +141,101 @@ impl ExternalPluginDef {
     pub fn json_schema() -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(ExternalPluginDef)).unwrap_or_default()
     }
+
+    /// Validate all user-supplied glob patterns on this plugin definition,
+    /// including patterns nested inside `detection` combinators (`all` / `any`).
+    ///
+    /// Pattern names use the same `framework[].<field>` notation used by
+    /// inline plugin definitions in `FallowConfig::validate_user_globs` so the
+    /// user sees consistent field paths whether the plugin is inline or
+    /// loaded from `.fallow/plugins/` / `fallow-plugin-*.{toml,json,jsonc}`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a non-empty `Vec` of
+    /// [`GlobValidationError`](crate::config::glob_validation::GlobValidationError)
+    /// when any pattern is rejected.
+    pub fn validate_user_globs(
+        &self,
+    ) -> Result<(), Vec<crate::config::glob_validation::GlobValidationError>> {
+        use crate::config::glob_validation::{compile_user_glob, validate_user_globs};
+
+        let mut errors = Vec::new();
+        validate_user_globs(&self.entry_points, "framework[].entryPoints", &mut errors);
+        validate_user_globs(&self.always_used, "framework[].alwaysUsed", &mut errors);
+        validate_user_globs(
+            &self.config_patterns,
+            "framework[].configPatterns",
+            &mut errors,
+        );
+        for used in &self.used_exports {
+            if let Err(e) = compile_user_glob(&used.pattern, "framework[].usedExports[].pattern") {
+                errors.push(e);
+            }
+        }
+        if let Some(detection) = &self.detection {
+            validate_detection_user_globs(detection, "framework[].detection", &mut errors);
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+}
+
+/// Recursively validate `FileExists.pattern` fields inside a `PluginDetection`
+/// tree. `All` and `Any` combinators recurse into their nested conditions.
+fn validate_detection_user_globs(
+    detection: &PluginDetection,
+    field: &'static str,
+    errors: &mut Vec<crate::config::glob_validation::GlobValidationError>,
+) {
+    match detection {
+        PluginDetection::Dependency { .. } => {}
+        PluginDetection::FileExists { pattern } => {
+            if let Err(e) = crate::config::glob_validation::compile_user_glob(pattern, field) {
+                errors.push(e);
+            }
+        }
+        PluginDetection::All { conditions } | PluginDetection::Any { conditions } => {
+            for condition in conditions {
+                validate_detection_user_globs(condition, field, errors);
+            }
+        }
+    }
+}
+
+/// Discover external plugin definitions AND validate their user-supplied glob
+/// patterns. Accumulates all errors across all loaded plugins so the user sees
+/// every problem in one run.
+///
+/// Discovery is identical to [`discover_external_plugins`]; this wrapper adds
+/// the per-plugin glob validation step required for security
+/// (see issue #463: `framework[].detection.fileExists.pattern` reaches
+/// `glob::glob` on disk via `root.join(pattern)`, so a `..` segment loaded
+/// from `.fallow/plugins/` would be a real path traversal).
+///
+/// # Errors
+///
+/// Returns the list of validation errors when any discovered plugin contains
+/// a rejected pattern. The CLI surfaces these with exit code 2.
+pub fn discover_and_validate_external_plugins(
+    root: &Path,
+    config_plugin_paths: &[String],
+) -> Result<Vec<ExternalPluginDef>, Vec<crate::config::glob_validation::GlobValidationError>> {
+    let plugins = discover_external_plugins(root, config_plugin_paths);
+    let mut errors = Vec::new();
+    for plugin in &plugins {
+        if let Err(mut plugin_errors) = plugin.validate_user_globs() {
+            errors.append(&mut plugin_errors);
+        }
+    }
+    if errors.is_empty() {
+        Ok(plugins)
+    } else {
+        Err(errors)
+    }
 }
 
 /// Detect plugin format from file extension.

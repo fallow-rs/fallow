@@ -296,19 +296,18 @@ impl FallowConfig {
         no_cache: bool,
         quiet: bool,
     ) -> ResolvedConfig {
+        // User-supplied patterns are validated by `FallowConfig::load`
+        // (issue #463). Configs constructed in-code (tests, defaults) bypass
+        // load and are assumed to use valid patterns; an invalid pattern here
+        // surfaces as a panic, which is correct for a programming error.
         let mut ignore_builder = GlobSetBuilder::new();
         for pattern in &self.ignore_patterns {
-            match Glob::new(pattern) {
-                Ok(glob) => {
-                    ignore_builder.add(glob);
-                }
-                Err(e) => {
-                    tracing::warn!("invalid ignore glob pattern '{pattern}': {e}");
-                }
-            }
+            ignore_builder.add(
+                Glob::new(pattern).expect("ignorePatterns entry was validated at config load time"),
+            );
         }
 
-        // Default ignores
+        // Default ignores (hardcoded, known-good patterns).
         // Note: `build/` is only ignored at the project root (not `**/build/**`)
         // because nested `build/` directories like `test/build/` may contain source files.
         let default_ignores = [
@@ -321,9 +320,7 @@ impl FallowConfig {
             "**/*.min.mjs",
         ];
         for pattern in &default_ignores {
-            if let Ok(glob) = Glob::new(pattern) {
-                ignore_builder.add(glob);
-            }
+            ignore_builder.add(Glob::new(pattern).expect("default ignore pattern is valid"));
         }
 
         let compiled_ignore_patterns = ignore_builder.build().unwrap_or_default();
@@ -420,12 +417,10 @@ impl FallowConfig {
                 let matchers: Vec<globset::GlobMatcher> = o
                     .files
                     .iter()
-                    .filter_map(|pattern| match Glob::new(pattern) {
-                        Ok(glob) => Some(glob.compile_matcher()),
-                        Err(e) => {
-                            tracing::warn!("invalid override glob pattern '{pattern}': {e}");
-                            None
-                        }
+                    .map(|pattern| {
+                        Glob::new(pattern)
+                            .expect("overrides[].files pattern was validated at config load time")
+                            .compile_matcher()
                     })
                     .collect();
                 if matchers.is_empty() {
@@ -441,44 +436,31 @@ impl FallowConfig {
 
         // Compile `ignoreExports` once at resolve time so both `find_unused_exports`
         // and `find_duplicate_exports` can read pre-built matchers from
-        // `ResolvedConfig` instead of re-compiling per call. Invalid globs warn
-        // once here, replacing the previous "warn-on-every-detector-call" path.
+        // `ResolvedConfig`. Patterns were validated at config load time.
         let compiled_ignore_exports: Vec<CompiledIgnoreExportRule> = self
             .ignore_exports
             .iter()
-            .filter_map(|rule| match Glob::new(&rule.file) {
-                Ok(g) => Some(CompiledIgnoreExportRule {
-                    matcher: g.compile_matcher(),
-                    exports: rule.exports.clone(),
-                }),
-                Err(e) => {
-                    tracing::warn!("invalid ignoreExports pattern '{}': {e}", rule.file);
-                    None
-                }
+            .map(|rule| CompiledIgnoreExportRule {
+                matcher: Glob::new(&rule.file)
+                    .expect("ignoreExports[].file was validated at config load time")
+                    .compile_matcher(),
+                exports: rule.exports.clone(),
             })
             .collect();
 
         let compiled_ignore_catalog_references: Vec<CompiledIgnoreCatalogReferenceRule> = self
             .ignore_catalog_references
             .iter()
-            .filter_map(|rule| {
-                let consumer_matcher = match &rule.consumer {
-                    Some(pattern) => match Glob::new(pattern) {
-                        Ok(g) => Some(g.compile_matcher()),
-                        Err(e) => {
-                            tracing::warn!(
-                                "invalid ignoreCatalogReferences consumer glob '{pattern}': {e}"
-                            );
-                            return None;
-                        }
-                    },
-                    None => None,
-                };
-                Some(CompiledIgnoreCatalogReferenceRule {
-                    package: rule.package.clone(),
-                    catalog: rule.catalog.clone(),
-                    consumer_matcher,
-                })
+            .map(|rule| CompiledIgnoreCatalogReferenceRule {
+                package: rule.package.clone(),
+                catalog: rule.catalog.clone(),
+                consumer_matcher: rule.consumer.as_ref().map(|pattern| {
+                    Glob::new(pattern)
+                        .expect(
+                            "ignoreCatalogReferences[].consumer was validated at config load time",
+                        )
+                        .compile_matcher()
+                }),
             })
             .collect();
 
@@ -1279,7 +1261,12 @@ mod tests {
     // ── Override resolution edge cases ───────────────────────────────
 
     #[test]
-    fn resolve_override_with_invalid_glob_skipped() {
+    #[should_panic(expected = "validated at config load time")]
+    fn resolve_panics_on_unvalidated_invalid_override_glob() {
+        // Per issue #463, overrides[].files are validated by
+        // FallowConfig::load before reaching resolve(). A program that
+        // constructs a config in-code with an invalid pattern has skipped
+        // that validation; resolve() asserts the invariant by panicking.
         let mut config = make_config(false);
         config.overrides = vec![ConfigOverride {
             files: vec!["[invalid".to_string()],
@@ -1288,17 +1275,12 @@ mod tests {
                 ..Default::default()
             },
         }];
-        let resolved = config.resolve(
+        let _ = config.resolve(
             PathBuf::from("/project"),
             OutputFormat::Human,
             1,
             true,
             true,
-        );
-        // Invalid glob should be skipped, so no overrides should be compiled
-        assert!(
-            resolved.overrides.is_empty(),
-            "override with invalid glob should be skipped"
         );
     }
 

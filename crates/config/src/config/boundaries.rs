@@ -896,7 +896,9 @@ impl BoundaryConfig {
     }
 
     /// Resolve into compiled form with pre-built glob matchers.
-    /// Invalid glob patterns are logged and skipped.
+    ///
+    /// User patterns were validated at config load time
+    /// (see `FallowConfig::validate_user_globs`).
     #[must_use]
     pub fn resolve(&self) -> ResolvedBoundaryConfig {
         let zones = self
@@ -906,16 +908,10 @@ impl BoundaryConfig {
                 let matchers = zone
                     .patterns
                     .iter()
-                    .filter_map(|pattern| match Glob::new(pattern) {
-                        Ok(glob) => Some(glob.compile_matcher()),
-                        Err(e) => {
-                            tracing::warn!(
-                                "invalid boundary zone glob pattern '{}' in zone '{}': {e}",
-                                pattern,
-                                zone.name
-                            );
-                            None
-                        }
+                    .map(|pattern| {
+                        Glob::new(pattern)
+                            .expect("boundaries.zones[].patterns was validated at config load time")
+                            .compile_matcher()
                     })
                     .collect();
                 let root = zone.root.as_deref().map(normalize_zone_root);
@@ -3273,7 +3269,12 @@ allow = ["db"]
     // ── Zone with invalid glob ──────────────────────────────────────
 
     #[test]
-    fn resolve_skips_invalid_zone_glob() {
+    #[should_panic(expected = "validated at config load time")]
+    fn resolve_panics_on_unvalidated_invalid_zone_glob() {
+        // Per issue #463, boundaries.zones[].patterns are validated by
+        // FallowConfig::load before reaching resolve(). A program that
+        // constructs a config in-code with an invalid pattern has skipped
+        // that validation; resolve() asserts the invariant by panicking.
         let config = BoundaryConfig {
             preset: None,
             zones: vec![BoundaryZone {
@@ -3284,9 +3285,6 @@ allow = ["db"]
             }],
             rules: vec![],
         };
-        let resolved = config.resolve();
-        // Zone exists but has no valid matchers, so no file can be classified into it
-        assert!(!resolved.is_empty());
-        assert_eq!(resolved.classify_zone("anything.ts"), None);
+        let _ = config.resolve();
     }
 }

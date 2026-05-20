@@ -1867,17 +1867,16 @@ fn collect_large_functions(
 }
 
 /// Build a glob set from health ignore patterns.
+///
+/// User patterns were validated at config load time
+/// (see `FallowConfig::validate_user_globs`).
 fn build_ignore_set(patterns: &[String]) -> globset::GlobSet {
     let mut builder = globset::GlobSetBuilder::new();
     for pattern in patterns {
-        match globset::Glob::new(pattern) {
-            Ok(glob) => {
-                builder.add(glob);
-            }
-            Err(e) => {
-                eprintln!("Warning: Invalid health ignore pattern '{pattern}': {e}");
-            }
-        }
+        builder.add(
+            globset::Glob::new(pattern)
+                .expect("health.ignore pattern was validated at config load time"),
+        );
     }
     builder
         .build()
@@ -2636,12 +2635,14 @@ mod tests {
     }
 
     #[test]
-    fn build_ignore_set_skips_invalid_patterns() {
-        // "[invalid" is not a valid glob — should be skipped, not panic
+    #[should_panic(expected = "validated at config load time")]
+    fn build_ignore_set_panics_on_unvalidated_invalid_pattern() {
+        // Per issue #463, user globs are validated by FallowConfig::load
+        // before reaching this function. A program that constructs a config
+        // in-code with an invalid pattern has skipped that validation and
+        // is in an unrecoverable state.
         let patterns = vec!["[invalid".to_string(), "*.js".to_string()];
-        let set = build_ignore_set(&patterns);
-        // The valid pattern should still work
-        assert!(set.is_match(Path::new("foo.js")));
+        let _ = build_ignore_set(&patterns);
     }
 
     fn make_finding(name: &str, exceeded: ExceededThreshold) -> ComplexityViolation {

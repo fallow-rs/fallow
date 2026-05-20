@@ -479,27 +479,19 @@ fn build_ignore_set(config: &DuplicatesConfig) -> Option<IgnoreSet> {
 
     if config.ignore_defaults {
         for pattern in DUPES_DEFAULT_IGNORES {
-            match Glob::new(pattern) {
-                Ok(glob) => {
-                    defaults.push((*pattern, glob.compile_matcher()));
-                    builder.add(glob);
-                }
-                Err(e) => {
-                    tracing::warn!("Invalid default duplication ignore pattern '{pattern}': {e}");
-                }
-            }
+            let glob = Glob::new(pattern).expect("default duplication ignore pattern is valid");
+            defaults.push((*pattern, glob.compile_matcher()));
+            builder.add(glob);
         }
     }
 
+    // User patterns were validated at config load time
+    // (see FallowConfig::validate_user_globs).
     for pattern in &config.ignore {
-        match Glob::new(pattern) {
-            Ok(glob) => {
-                builder.add(glob);
-            }
-            Err(e) => {
-                tracing::warn!("Invalid duplication ignore pattern '{pattern}': {e}");
-            }
-        }
+        builder.add(
+            Glob::new(pattern)
+                .expect("duplicates.ignore pattern was validated at config load time"),
+        );
     }
 
     builder.build().ok().map(|all| IgnoreSet { all, defaults })

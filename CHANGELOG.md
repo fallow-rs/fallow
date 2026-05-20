@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`fallow` now exits with code 2 at config load when a glob pattern is invalid, absolute, or contains a `..` segment.** Affected config fields: `entry`, `ignorePatterns`, `dynamicallyLoaded`, `duplicates.ignore`, `health.ignore`, `overrides[].files`, `ignoreExports[].file`, `ignoreCatalogReferences[].consumer`, `boundaries.zones[].{patterns, root, autoDiscover}`, every glob-bearing field on inline `framework[]` plugin definitions, and every glob-bearing field on external plugin files discovered from `.fallow/plugins/`, root-level `fallow-plugin-*.{toml,json,jsonc}`, or the `plugins:` config list (including `detection.fileExists.pattern` and nested `all` / `any` combinators). Before, invalid patterns silently no-op'd or warn-and-skipped, so a typo in `entry` could leave a user wondering why nothing was being analyzed. After, fallow lists every offending field + pattern in one go and tells you what to type instead. Closes the path-traversal surface flagged for malicious configs shipped via PR on misconfigured CI runners. Configs that ran with silently-dropped patterns must be fixed to upgrade; the dropped patterns were never doing what their author intended. (Closes [#463](https://github.com/fallow-rs/fallow/issues/463).)
+
 ## [2.76.0] - 2026-05-19
 
 ### Deprecated

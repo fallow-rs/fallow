@@ -668,20 +668,135 @@ impl FallowConfig {
     /// Supports `extends` for config inheritance. Extended configs are loaded
     /// and deep-merged before this config's values are applied.
     ///
+    /// User-supplied glob patterns (`entry`, `ignorePatterns`,
+    /// `dynamicallyLoaded`, `duplicates.ignore`, `health.ignore`,
+    /// `boundaries.zones[].patterns`, `overrides[].files`,
+    /// `ignoreExports[].file`, `ignoreCatalogReferences[].consumer`) are
+    /// validated against absolute paths, `..` traversal segments, and invalid
+    /// glob syntax. Loading fails loud on any rejection so silent no-match
+    /// configs surface to the user. See issue #463.
+    ///
     /// # Errors
     ///
-    /// Returns an error when the config file cannot be read, merged, or deserialized.
+    /// Returns an error when the config file cannot be read, merged, or
+    /// deserialized, or when any user-supplied glob pattern is rejected.
     pub fn load(path: &Path) -> Result<Self, miette::Report> {
         let mut visited = FxHashSet::default();
         let merged = resolve_extends(path, &mut visited, 0)?;
 
-        serde_json::from_value(merged).map_err(|e| {
+        let config: Self = serde_json::from_value(merged).map_err(|e| {
             miette::miette!(
                 "Failed to deserialize config from {}: {}",
                 path.display(),
                 e
             )
-        })
+        })?;
+
+        // Surface validation errors as a bullet list. The outer wrapper in
+        // `find_and_load` / `runtime_support::load_config_for_analysis` is
+        // responsible for prefixing the file path so the path appears exactly
+        // once in the rendered error.
+        config.validate_user_globs().map_err(|errors| {
+            let joined = errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n  - ");
+            miette::miette!("invalid config:\n  - {}", joined)
+        })?;
+
+        Ok(config)
+    }
+
+    /// Validate all user-supplied glob patterns and directory paths in this config.
+    ///
+    /// Accumulates errors from every glob- or path-bearing field so the user
+    /// sees ALL offending values in one run rather than fixing them one at a
+    /// time.
+    ///
+    /// Covered glob fields: `entry`, `ignorePatterns`, `dynamicallyLoaded`,
+    /// `duplicates.ignore`, `health.ignore`, `overrides[].files`,
+    /// `ignoreExports[].file`, `ignoreCatalogReferences[].consumer`,
+    /// `boundaries.zones[].patterns`, plus every glob-bearing field on
+    /// inline `framework[]` plugin definitions (entry points, always-used,
+    /// config patterns, used-exports patterns, and `fileExists` detection
+    /// patterns; the last reaches `glob::glob` on disk so a `..` segment
+    /// there is a real path traversal).
+    ///
+    /// Covered directory-path fields: `boundaries.zones[].root` and
+    /// `boundaries.zones[].autoDiscover`. These are literal paths (not
+    /// globs), so only the absolute-path + traversal checks apply.
+    ///
+    /// # Errors
+    ///
+    /// Returns a non-empty `Vec` of
+    /// [`glob_validation::GlobValidationError`](super::glob_validation::GlobValidationError)
+    /// when any field contains a rejected value.
+    pub fn validate_user_globs(
+        &self,
+    ) -> Result<(), Vec<super::glob_validation::GlobValidationError>> {
+        use super::glob_validation::{
+            compile_user_glob, validate_user_globs, validate_user_path, validate_user_paths,
+        };
+
+        let mut errors = Vec::new();
+
+        validate_user_globs(&self.entry, "entry", &mut errors);
+        validate_user_globs(&self.ignore_patterns, "ignorePatterns", &mut errors);
+        validate_user_globs(&self.dynamically_loaded, "dynamicallyLoaded", &mut errors);
+        validate_user_globs(&self.duplicates.ignore, "duplicates.ignore", &mut errors);
+        validate_user_globs(&self.health.ignore, "health.ignore", &mut errors);
+
+        for override_entry in &self.overrides {
+            validate_user_globs(&override_entry.files, "overrides[].files", &mut errors);
+        }
+
+        for rule in &self.ignore_exports {
+            if let Err(e) = compile_user_glob(&rule.file, "ignoreExports[].file") {
+                errors.push(e);
+            }
+        }
+
+        for rule in &self.ignore_catalog_references {
+            if let Some(consumer) = &rule.consumer
+                && let Err(e) = compile_user_glob(consumer, "ignoreCatalogReferences[].consumer")
+            {
+                errors.push(e);
+            }
+        }
+
+        for zone in &self.boundaries.zones {
+            validate_user_globs(&zone.patterns, "boundaries.zones[].patterns", &mut errors);
+            if let Some(root) = &zone.root
+                && let Err(e) = validate_user_path(root, "boundaries.zones[].root")
+            {
+                errors.push(e);
+            }
+            validate_user_paths(
+                &zone.auto_discover,
+                "boundaries.zones[].autoDiscover",
+                &mut errors,
+            );
+        }
+
+        // Inline framework plugins. Shares validation logic with external
+        // plugin files loaded from `.fallow/plugins/` / `fallow-plugin-*`
+        // (see `ExternalPluginDef::validate_user_globs`), so an inline
+        // `framework[]` block and a file-loaded plugin get identical checks.
+        // The `detection.fileExists.pattern` field is the security-critical
+        // case because it reaches `glob::glob` on disk via `root.join(pattern)`
+        // in `crates/core/src/plugins/registry/helpers.rs`.
+        for plugin in &self.framework {
+            if let Err(mut plugin_errors) = plugin.validate_user_globs() {
+                errors.append(&mut plugin_errors);
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 
     /// Find the config file path without loading it.

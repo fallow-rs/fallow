@@ -156,17 +156,35 @@ pub fn load_config_for_analysis(
         }
     };
 
-    Ok(match user_config {
+    let final_config = match user_config {
         Some(mut config) => {
             let production =
                 production_override.unwrap_or_else(|| config.production.for_analysis(analysis));
             config.production = production.into();
-            config.resolve(root.to_path_buf(), output, threads, no_cache, quiet)
+            config
         }
         None => FallowConfig {
             production: production_override.unwrap_or(false).into(),
             ..FallowConfig::default()
-        }
-        .resolve(root.to_path_buf(), output, threads, no_cache, quiet),
-    })
+        },
+    };
+
+    // Issue #463: validate user-supplied glob patterns on EXTERNAL plugin files
+    // loaded from `.fallow/plugins/` / `fallow-plugin-*` / config-listed paths.
+    // Inline `framework[]` blocks are already validated by `FallowConfig::load`.
+    // The external-plugin step runs here because plugins are root-dependent and
+    // `load` does not know the project root.
+    if let Err(errors) =
+        fallow_config::discover_and_validate_external_plugins(root, &final_config.plugins)
+    {
+        let joined = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n  - ");
+        let msg = format!("invalid external plugin definition:\n  - {joined}");
+        return Err(crate::error::emit_error(&msg, 2, output));
+    }
+
+    Ok(final_config.resolve(root.to_path_buf(), output, threads, no_cache, quiet))
 }

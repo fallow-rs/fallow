@@ -2272,37 +2272,19 @@ mod tests {
         );
     }
 
-    // -- compiled_ignore_exports: invalid glob handled gracefully --
+    // -- compiled_ignore_exports: invalid glob is rejected at config load --
 
     #[test]
-    fn unused_exports_invalid_ignore_glob_skipped() {
-        let mut graph = build_graph(&[
-            ("/tmp/test/src/entry.ts", true),
-            ("/tmp/test/src/utils.ts", false),
-        ]);
-        graph.modules[1].set_reachable(true);
-        graph.modules[1].exports = vec![make_export("foo", 10, 20)];
-
-        // Invalid glob pattern with unclosed bracket
-        let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
+    #[should_panic(expected = "validated at config load time")]
+    fn unused_exports_panics_on_unvalidated_invalid_ignore_glob() {
+        // Per issue #463, ignoreExports[].file is validated by
+        // FallowConfig::load before reaching resolve(). A test that
+        // constructs a config in-code with an invalid pattern has skipped
+        // that validation; resolve() asserts the invariant by panicking.
+        let _ = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
             file: "[invalid".to_string(),
             exports: vec!["*".to_string()],
         }]);
-        let suppressions = SuppressionContext::empty();
-        // Should not panic — invalid globs are silently skipped
-        let (exports, _, _stale) = find_unused_exports(
-            &graph,
-            &[],
-            &config,
-            None,
-            &suppressions,
-            &FxHashMap::default(),
-        );
-        assert_eq!(
-            exports.len(),
-            1,
-            "invalid glob should be skipped, export still reported"
-        );
     }
 
     // -- is_export_ignored: config wildcard match --

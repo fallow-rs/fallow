@@ -435,13 +435,16 @@ fn discover_entry_points_with_warnings_impl(
         .collect();
 
     // 1. Manual entries from config — batch all patterns into a single GlobSet
-    // for O(files) matching instead of O(patterns × files).
+    // for O(files) matching instead of O(patterns × files). Patterns were
+    // validated at config load time (see FallowConfig::validate_user_globs);
+    // any compile failure here is a bug.
     {
         let mut builder = globset::GlobSetBuilder::new();
         for pattern in &config.entry_patterns {
-            if let Ok(glob) = globset::Glob::new(pattern) {
-                builder.add(glob);
-            }
+            builder.add(
+                globset::Glob::new(pattern)
+                    .expect("entry pattern was validated at config load time"),
+            );
         }
         if let Ok(glob_set) = builder.build()
             && !glob_set.is_empty()
@@ -920,11 +923,14 @@ pub fn discover_dynamically_loaded_entry_points(
         return Vec::new();
     }
 
+    // Patterns were validated at config load time (see
+    // FallowConfig::validate_user_globs); any compile failure here is a bug.
     let mut builder = globset::GlobSetBuilder::new();
     for pattern in &config.dynamically_loaded {
-        if let Ok(glob) = globset::Glob::new(pattern) {
-            builder.add(glob);
-        }
+        builder.add(
+            globset::Glob::new(pattern)
+                .expect("dynamicallyLoaded pattern was validated at config load time"),
+        );
     }
     let Ok(glob_set) = builder.build() else {
         return Vec::new();

@@ -2,6 +2,7 @@ mod boundaries;
 mod duplicates_config;
 mod flags;
 mod format;
+pub mod glob_validation;
 mod health;
 mod parsing;
 mod resolution;

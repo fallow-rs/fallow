@@ -417,6 +417,123 @@ fn nonexistent_root_exits_2() {
 }
 
 #[test]
+fn config_with_traversal_glob_exits_2() {
+    // Issue #463: config-sourced glob patterns with `..` segments are
+    // rejected at load time with exit 2 instead of silently no-op'ing.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{ "entry": ["../escape/**"] }"#,
+    )
+    .expect("write config");
+
+    let output = run_fallow_in_root("check", root, &["--quiet"]);
+    assert_eq!(
+        output.code, 2,
+        "traversal glob in config should exit 2, stderr: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("entry") && output.stderr.contains("../escape/**"),
+        "stderr should mention the offending field + pattern, got: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn config_with_invalid_glob_exits_2() {
+    // Issue #463: invalid glob syntax now fails loud at load time instead
+    // of being silently dropped.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{ "ignorePatterns": ["[unclosed"] }"#,
+    )
+    .expect("write config");
+
+    let output = run_fallow_in_root("check", root, &["--quiet"]);
+    assert_eq!(
+        output.code, 2,
+        "invalid glob syntax in config should exit 2, stderr: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("ignorePatterns") && output.stderr.contains("[unclosed"),
+        "stderr should mention the offending field + pattern, got: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn external_plugin_file_traversal_glob_exits_2() {
+    // Issue #463 second BLOCK: external plugin files loaded from
+    // `.fallow/plugins/` (NOT inline `framework[]` in the main config)
+    // also reach `glob::glob` on disk via their `fileExists.pattern`.
+    // The validation must run on those too, not just on the inline path.
+    // Mirrors codex's reproducer: `.fallow/plugins/leak.json` with a
+    // traversal-bearing detection pattern.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
+    std::fs::create_dir_all(root.join(".fallow").join("plugins")).expect("mk .fallow/plugins/");
+    std::fs::write(
+        root.join(".fallow").join("plugins").join("leak.json"),
+        r#"{
+            "name": "leaky-plugin",
+            "detection": { "type": "fileExists", "pattern": "../secret-marker" }
+        }"#,
+    )
+    .expect("write plugin");
+
+    let output = run_fallow_in_root("check", root, &["--quiet"]);
+    assert_eq!(
+        output.code, 2,
+        "external plugin with traversal glob should exit 2, stderr: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("framework[].detection")
+            && output.stderr.contains("../secret-marker"),
+        "stderr should mention the offending field + pattern, got: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn fallow_plugin_root_file_traversal_glob_exits_2() {
+    // Issue #463: `fallow-plugin-*` files at the project root are also
+    // auto-discovered (third discovery source after `plugins:` and
+    // `.fallow/plugins/`). Same validation must apply.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
+    std::fs::write(
+        root.join("fallow-plugin-leak.json"),
+        r#"{
+            "name": "leaky-root-plugin",
+            "entryPoints": ["../entry/**"]
+        }"#,
+    )
+    .expect("write plugin");
+
+    let output = run_fallow_in_root("check", root, &["--quiet"]);
+    assert_eq!(
+        output.code, 2,
+        "fallow-plugin-* root file with traversal glob should exit 2, stderr: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("framework[].entryPoints") && output.stderr.contains("../entry/**"),
+        "stderr should mention the offending field + pattern, got: {}",
+        output.stderr
+    );
+}
+
+#[test]
 fn no_package_json_returns_empty_results() {
     let output = run_fallow(
         "check",
