@@ -12,6 +12,116 @@ use fallow_core::results::AnalysisResults;
 
 use crate::diagnostics::FIRST_LINE_RANGE;
 
+/// Return true if `c` is a JS / TS identifier character.
+///
+/// Covers the ASCII identifier set (`[A-Za-z0-9_$]`) plus the non-ASCII
+/// alphabetic / numeric code points that JS allows in identifier names
+/// (CJK ideographs, Cyrillic, Arabic, etc.). `char::is_alphanumeric` is a
+/// strong approximation of the spec's `XID_Start` / `XID_Continue` for
+/// the purposes of bounded identifier matching: comparing a candidate
+/// identifier to the cached export name remains byte-equality, so the
+/// match still distinguishes `日本` from `日本語`.
+fn is_ident_char(c: char) -> bool {
+    matches!(c, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_' | '$')
+        || (!c.is_ascii() && c.is_alphanumeric())
+}
+
+/// Extract the leading identifier from `s`. Returns the prefix of `s`
+/// containing identifier characters (empty if `s` does not start with an
+/// identifier character).
+fn leading_identifier(s: &str) -> &str {
+    let end = s
+        .char_indices()
+        .find(|(_, c)| !is_ident_char(*c))
+        .map_or(s.len(), |(i, _)| i);
+    &s[..end]
+}
+
+/// Iteratively strip leading declaration and modifier keywords (each
+/// followed by whitespace) from `s`. After this returns, `s` should begin
+/// with the declared identifier in well-formed source.
+///
+/// The set of keywords stripped covers the prefix shape of every named
+/// `export <decl>` form fallow's analyzer reports as an unused export:
+/// `const`, `let`, `var`, `function`, `function*`, `class`, `type`,
+/// `interface`, `enum`, `namespace`, plus the modifier keywords `async`,
+/// `abstract`, and `declare`. Anything beyond this prefix is the identifier
+/// (or its parse-truncated leading bytes).
+fn strip_declaration_keywords(s: &str) -> &str {
+    const KEYWORDS: &[&str] = &[
+        // Modifiers (can layer in any order, e.g. `async function`,
+        // `abstract class`, `declare const`).
+        "async ",
+        "abstract ",
+        "declare ",
+        // Declaration keywords.
+        "const ",
+        "let ",
+        "var ",
+        // Generator functions need the explicit `function* ` variant
+        // BEFORE the plain `function ` strip so we don't leave the `*`
+        // behind.
+        "function* ",
+        "function ",
+        "class ",
+        "type ",
+        "interface ",
+        "enum ",
+        "namespace ",
+    ];
+    let mut cur = s.trim_start();
+    loop {
+        let mut changed = false;
+        for keyword in KEYWORDS {
+            if let Some(rest) = cur.strip_prefix(keyword) {
+                cur = rest.trim_start();
+                changed = true;
+                break;
+            }
+        }
+        if !changed {
+            return cur;
+        }
+    }
+}
+
+/// Verify the live document line at `line_content` actually declares
+/// `expected_name` as a top-level export after the `prefix` is stripped.
+///
+/// This is the load-bearing re-validation for `build_remove_export_actions`.
+/// A weaker "identifier appears anywhere on the line" check would still
+/// accept lines like `export const bar = foo;` for a cached finding on
+/// `foo`, silently producing an edit that strips `export ` from `bar`.
+/// The declaration-shape check rejects that: after stripping `export `
+/// and the `const ` keyword, the leading identifier is `bar`, not `foo`.
+///
+/// Returns `false` for re-export forms (`export { ... }` / `export { ... }
+/// from ...;`). The existing `remove unused export` action does not
+/// produce a valid edit for those shapes (removing `export ` from
+/// `export { foo };` leaves a `{ foo };` block-expression statement), so
+/// the conservative outcome is to suppress the action entirely until the
+/// re-export path gets its own dedicated handler.
+fn declares_export_name(line_content: &str, prefix: &str, expected_name: &str) -> bool {
+    if expected_name.is_empty() {
+        return false;
+    }
+    let trimmed = line_content.trim_start();
+    let Some(after_prefix) = trimmed.strip_prefix(prefix) else {
+        return false;
+    };
+    let after_prefix = after_prefix.trim_start();
+
+    // Re-export form: `{ ... }`. Conservative: suppress the action.
+    if after_prefix.starts_with('{') {
+        return false;
+    }
+
+    // Declaration form: strip the leading declaration/modifier keywords,
+    // then the next identifier must match the cached export name.
+    let after_keywords = strip_declaration_keywords(after_prefix);
+    leading_identifier(after_keywords) == expected_name
+}
+
 /// Build quick-fix code actions for unused exports (remove the `export` keyword).
 #[expect(
     clippy::disallowed_types,
@@ -75,6 +185,40 @@ pub fn build_remove_export_actions(
                 continue;
             };
 
+            // Re-validate the live document line against the cached finding
+            // before producing a destructive edit. AnalysisResults are
+            // computed at did_save time; the user may edit in memory before
+            // requesting a code action, so the line at export_line in
+            // file_lines may no longer hold the declaration the cache
+            // points at.
+            //
+            // The check verifies the line declares the cached identifier
+            // as a named top-level export (e.g. `export const foo = 1;`,
+            // `export function foo() {}`, `export class foo {}`) by
+            // stripping the export prefix + any declaration / modifier
+            // keywords and comparing the next leading identifier against
+            // the cached name. This rejects the corruption case where a
+            // stale finding for `foo` would otherwise produce an edit on
+            // `export const bar = foo;` (stripping `export ` from `bar`).
+            //
+            // `export default ...` declarations use the synthetic export
+            // name `"default"`, which is part of the prefix and never
+            // appears as an identifier in the post-prefix source. The
+            // prefix-presence check above is the re-validation for that
+            // shape; skip the declaration check (the action's edit
+            // removes only the prefix, which is the entire user-visible
+            // export marker, so semantic mismatches between the cached
+            // default and a reshaped default line are still bounded).
+            if prefix != "export default "
+                && !declares_export_name(line_content, prefix, &export.export_name)
+            {
+                continue;
+            }
+
+            // CodeAction.title is rendered as plain text in VS Code, Helix,
+            // and Neovim; markdown metacharacters render literally. Do NOT
+            // escape here; the user would see backslashes in the command
+            // palette.
             let title = format!("Remove unused export `{}`", export.export_name);
             let mut changes = HashMap::new();
 
@@ -115,6 +259,12 @@ pub fn build_remove_export_actions(
                     },
                     severity: Some(DiagnosticSeverity::HINT),
                     source: Some("fallow".to_string()),
+                    // `Diagnostic.message` is plain text per the LSP spec.
+                    // Do NOT markdown-escape here: VS Code renders it
+                    // verbatim in the Problems panel, and the published
+                    // diagnostic in `diagnostics/unused.rs` is plain too.
+                    // Mismatching the message strings breaks VS Code's
+                    // "Fix all in file" correlation.
                     message: format!("{msg_prefix} '{}' is unused", export.export_name),
                     tags: Some(vec![DiagnosticTag::UNNECESSARY]),
                     ..Default::default()
@@ -1922,5 +2072,309 @@ mod tests {
             &[],
         );
         assert!(actions.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Stale-line re-validation
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn build_remove_export_actions_skips_stale_line() {
+        // Cached finding says line 0 is `export foo`; live document has been
+        // edited to `const foo = 1;`. The action would otherwise delete the
+        // leading `const ` characters as if they were `export `. The prefix
+        // check already covers this case (no `export ` prefix found), but
+        // we assert it here to lock the behavior.
+        let root = test_root();
+        let file = root.join("src/utils.ts");
+        let uri = Url::from_file_path(&file).unwrap();
+        let mut results = AnalysisResults::default();
+        results.unused_exports.push(make_unused_export(
+            &file, "foo", 1, // 1-based
+            7,
+        ));
+        // Live line at index 0 has no `export ` prefix.
+        let lines = vec!["const foo = 1;"];
+        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        assert!(
+            actions.is_empty(),
+            "expected zero actions when live line lacks export prefix",
+        );
+    }
+
+    #[test]
+    fn build_remove_export_actions_skips_substring_collision() {
+        // Cached finding says line 0 has unused `export foo`. Live document
+        // now shows `export const foobar = 1;`. A bare `contains` would
+        // match `foo` inside `foobar` and produce a code action that
+        // strips the `export ` prefix from an unrelated declaration,
+        // silently making `foobar` non-exported. Declaration-shape
+        // matching must reject this.
+        let root = test_root();
+        let file = root.join("src/utils.ts");
+        let uri = Url::from_file_path(&file).unwrap();
+        let mut results = AnalysisResults::default();
+        results.unused_exports.push(make_unused_export(
+            &file, "foo", 1, // 1-based
+            7,
+        ));
+        let lines = vec!["export const foobar = 1;"];
+        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        assert!(
+            actions.is_empty(),
+            "expected zero actions when cached name only matches as a substring",
+        );
+    }
+
+    #[test]
+    fn build_remove_export_actions_skips_value_reference_collision() {
+        // The Codex-caught corruption case from #480 re-review: cached
+        // finding says line 0 has unused `export foo`. Live document now
+        // shows `export const bar = foo;` (the user reshaped the line so
+        // `foo` is referenced as a VALUE, not the declared name). A
+        // loose identifier-bounded `contains` would still match `foo`
+        // with non-identifier characters on both sides and silently
+        // strip `export ` from `bar`. The declaration-shape check
+        // rejects this because the declared name is `bar`, not `foo`.
+        let root = test_root();
+        let file = root.join("src/utils.ts");
+        let uri = Url::from_file_path(&file).unwrap();
+        let mut results = AnalysisResults::default();
+        results.unused_exports.push(make_unused_export(
+            &file, "foo", 1, // 1-based
+            7,
+        ));
+        let lines = vec!["export const bar = foo;"];
+        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        assert!(
+            actions.is_empty(),
+            "expected zero actions when cached name appears as a value, not a declaration",
+        );
+    }
+
+    #[test]
+    fn build_remove_export_actions_skips_reexport_block() {
+        // Re-export forms produce an invalid edit when `export ` is
+        // stripped (`{ foo } from './bar';` is a syntax error). The
+        // declaration-shape check conservatively suppresses the action
+        // for these shapes.
+        let root = test_root();
+        let file = root.join("src/utils.ts");
+        let uri = Url::from_file_path(&file).unwrap();
+        let mut results = AnalysisResults::default();
+        results.unused_exports.push(make_unused_export(
+            &file, "foo", 1, // 1-based
+            9,
+        ));
+        let lines = vec!["export { foo } from './bar';"];
+        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        assert!(
+            actions.is_empty(),
+            "expected zero actions on re-export blocks (action's output would be a syntax error)",
+        );
+    }
+
+    #[test]
+    fn build_remove_export_actions_accepts_matching_live_line() {
+        // Positive case: live line still matches the cached finding.
+        let root = test_root();
+        let file = root.join("src/utils.ts");
+        let uri = Url::from_file_path(&file).unwrap();
+        let mut results = AnalysisResults::default();
+        results.unused_exports.push(make_unused_export(
+            &file, "foo", 1, // 1-based
+            7,
+        ));
+        let lines = vec!["export const foo = 1;"];
+        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        assert_eq!(
+            actions.len(),
+            1,
+            "expected one action when live line still matches the cached finding",
+        );
+    }
+
+    #[test]
+    fn declares_export_name_accepts_simple_declarations() {
+        assert!(declares_export_name(
+            "export const foo = 1;",
+            "export ",
+            "foo"
+        ));
+        assert!(declares_export_name(
+            "export let foo = 1;",
+            "export ",
+            "foo"
+        ));
+        assert!(declares_export_name(
+            "export var foo = 1;",
+            "export ",
+            "foo"
+        ));
+        assert!(declares_export_name(
+            "export function foo() {}",
+            "export ",
+            "foo"
+        ));
+        assert!(declares_export_name(
+            "export function* foo() {}",
+            "export ",
+            "foo",
+        ));
+        assert!(declares_export_name(
+            "export async function foo() {}",
+            "export ",
+            "foo",
+        ));
+        assert!(declares_export_name(
+            "export class foo {}",
+            "export ",
+            "foo"
+        ));
+        assert!(declares_export_name(
+            "export abstract class foo {}",
+            "export ",
+            "foo",
+        ));
+        assert!(declares_export_name(
+            "export type foo = string;",
+            "export ",
+            "foo",
+        ));
+        assert!(declares_export_name(
+            "export interface foo {}",
+            "export ",
+            "foo",
+        ));
+        assert!(declares_export_name("export enum foo {}", "export ", "foo"));
+        assert!(declares_export_name(
+            "export namespace foo {}",
+            "export ",
+            "foo",
+        ));
+        assert!(declares_export_name(
+            "export declare const foo: number;",
+            "export ",
+            "foo",
+        ));
+        // Leading indentation is fine.
+        assert!(declares_export_name(
+            "    export const foo = 1;",
+            "export ",
+            "foo"
+        ));
+    }
+
+    #[test]
+    fn declares_export_name_rejects_value_reference_collision() {
+        // The Codex BLOCK case: stale finding for `foo`, live line has
+        // `foo` as a VALUE on the right-hand side of a different
+        // declaration. The action would otherwise strip `export ` from
+        // `bar` and silently un-export it.
+        assert!(!declares_export_name(
+            "export const bar = foo;",
+            "export ",
+            "foo",
+        ));
+        assert!(!declares_export_name(
+            "export function bar() { return foo; }",
+            "export ",
+            "foo",
+        ));
+        // Substring collision: cached `foo`, live `foobar` declaration.
+        assert!(!declares_export_name(
+            "export const foobar = 1;",
+            "export ",
+            "foo",
+        ));
+        // Same-prefix sibling: cached `foo`, live `Foo` (case-sensitive).
+        assert!(!declares_export_name(
+            "export class Foo {}",
+            "export ",
+            "foo"
+        ));
+        // Missing prefix entirely.
+        assert!(!declares_export_name("const foo = 1;", "export ", "foo"));
+        // Empty needle.
+        assert!(!declares_export_name(
+            "export const foo = 1;",
+            "export ",
+            ""
+        ));
+    }
+
+    #[test]
+    fn declares_export_name_rejects_reexport_blocks() {
+        // Re-export forms produce an invalid edit when `export ` is
+        // stripped (`{ foo }` is a useless block-expression statement,
+        // and `{ foo } from './x';` is a syntax error). Conservative:
+        // suppress the action.
+        assert!(!declares_export_name("export { foo };", "export ", "foo",));
+        assert!(!declares_export_name(
+            "export { foo } from './bar';",
+            "export ",
+            "foo",
+        ));
+        assert!(!declares_export_name(
+            "export { type foo } from './bar';",
+            "export ",
+            "foo",
+        ));
+        assert!(!declares_export_name(
+            "export { foo as bar };",
+            "export ",
+            "foo",
+        ));
+    }
+
+    #[test]
+    fn declares_export_name_handles_multibyte_identifiers() {
+        // CJK / Cyrillic identifiers are legal JS identifiers and pass
+        // through unchanged in `leading_identifier` (which walks by char
+        // and stops at the first non-ASCII-ident char).
+        assert!(declares_export_name(
+            "export const 日本 = 1;",
+            "export ",
+            "日本",
+        ));
+        // Substring of a multibyte identifier still fails the equality.
+        assert!(!declares_export_name(
+            "export const 日本語 = 1;",
+            "export ",
+            "日本",
+        ));
+    }
+
+    #[test]
+    fn leading_identifier_handles_basic_shapes() {
+        assert_eq!(leading_identifier("foo"), "foo");
+        assert_eq!(leading_identifier("foo bar"), "foo");
+        assert_eq!(leading_identifier("foo()"), "foo");
+        assert_eq!(leading_identifier("foo = 1"), "foo");
+        assert_eq!(leading_identifier(""), "");
+        assert_eq!(leading_identifier("123foo"), "123foo");
+        assert_eq!(leading_identifier("_foo"), "_foo");
+        assert_eq!(leading_identifier("$foo"), "$foo");
+        // Non-identifier leader returns empty.
+        assert_eq!(leading_identifier(" foo"), "");
+        assert_eq!(leading_identifier("{foo}"), "");
+    }
+
+    #[test]
+    fn strip_declaration_keywords_handles_modifier_stacks() {
+        // Each call returns the byte slice AFTER the modifier + keyword
+        // stack with leading whitespace already trimmed.
+        assert_eq!(strip_declaration_keywords("const foo = 1"), "foo = 1");
+        assert_eq!(strip_declaration_keywords("function foo()"), "foo()");
+        assert_eq!(strip_declaration_keywords("function* foo()"), "foo()");
+        assert_eq!(strip_declaration_keywords("async function foo()"), "foo()",);
+        assert_eq!(strip_declaration_keywords("abstract class Foo"), "Foo",);
+        assert_eq!(
+            strip_declaration_keywords("declare const foo: number"),
+            "foo: number",
+        );
+        // No keyword present: returns the trimmed input unchanged.
+        assert_eq!(strip_declaration_keywords("foo bar"), "foo bar");
+        assert_eq!(strip_declaration_keywords("    foo"), "foo");
     }
 }

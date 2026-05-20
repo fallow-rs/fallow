@@ -2,6 +2,7 @@ mod code_actions;
 mod code_lens;
 mod diagnostics;
 mod hover;
+mod markdown;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};

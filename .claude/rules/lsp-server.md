@@ -8,9 +8,14 @@ paths:
 Key modules:
 - `main.rs` — LSP server setup, `LanguageServer` trait impl, event handling
 - `diagnostics/` — Diagnostic generation: `mod.rs` (dispatch), `unused.rs`, `structural.rs`, `quality.rs`
-- `code_actions.rs` — Quick-fix and refactor code actions
+- `code_actions/` — Quick-fix and refactor code actions
 - `code_lens.rs` — Reference count Code Lens above export declarations
 - `hover.rs` — Hover information showing export usage, unused status, and duplicate block locations
+- `markdown.rs` — `format_inline_code(value)` helper for embedding user-controlled identifiers (export names, member names, import specifiers, file paths) into hover `MarkupKind::Markdown` bodies. Wraps the value in a CommonMark inline code span with a backtick-fence length one greater than the longest backtick run in the value (with space padding when the value starts or ends with a backtick). Inside the code span CommonMark suppresses every inline construct (links, emphasis, images, command URIs), so the value renders verbatim and cannot leak markdown syntax. Every interpolation into hover MarkupContent must go through this helper. `Diagnostic.message` is plain text per the LSP spec and must NOT be markdown-escaped: VS Code's "Fix all in file" correlation matches the published diagnostic by `range + message + code` equality, and escaping breaks the match.
+
+## Code-action staleness re-validation
+
+`build_remove_export_actions` re-validates the live document line at `export_line` against the cached `AnalysisResults` before producing a destructive `TextEdit`. A `did_change` between `did_save` (which triggered analysis) and `code_action` could leave the cached line referring to text the user has reshaped in memory. The check uses `contains_identifier_bounded` (helper in the same file) to require non-identifier characters on both sides of the cached export name in the post-prefix substring, defeating substring collisions like cached `foo` matching live `foobar`. `export default` declarations are special-cased: their synthetic export name `"default"` is part of the prefix string and never appears in the post-prefix source, so the prefix check (which already runs) is the validation. `build_remove_catalog_entry_actions` and `build_remove_empty_catalog_group_actions` have equivalent validation via `line_matches_catalog_key`. `build_delete_file_actions` is a whole-file delete with no line dependency.
 
 ## initializationOptions
 - `issueTypes` (object): per-issue-type toggles using kebab-case keys, mapped to diagnostic codes by `DIAGNOSTIC_ISSUE_TYPES`. Disabled types are filtered out before publishing. The same catalog is exposed to editor clients through the custom `fallow/issueTypes` request so UI labels and fallback lists can stay in sync with LSP-emitted diagnostics.

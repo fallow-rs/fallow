@@ -6,6 +6,8 @@ use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Posi
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 
+use crate::markdown::format_inline_code;
+
 /// Build hover information for a position in a file.
 ///
 /// Returns a hover with markdown content describing:
@@ -113,8 +115,8 @@ fn check_unused_export(
             }
 
             let value = format!(
-                "**fallow**: {kind_label} `{}` is not imported by any other file.",
-                export.export_name
+                "**fallow**: {kind_label} {} is not imported by any other file.",
+                format_inline_code(&export.export_name),
             );
 
             return Some(Hover {
@@ -174,8 +176,9 @@ fn check_used_export(
         };
 
         let mut value = format!(
-            "**fallow**: Export `{}` is used by {} {ref_word}",
-            usage.export_name, usage.reference_count,
+            "**fallow**: Export {} is used by {} {ref_word}",
+            format_inline_code(&usage.export_name),
+            usage.reference_count,
         );
 
         // List up to 10 reference locations
@@ -188,7 +191,8 @@ fn check_used_export(
                     || loc.path.display().to_string(),
                     |name| name.to_string_lossy().into_owned(),
                 );
-                let _ = write!(value, "- `{display_path}` line {}", loc.line);
+                let display_path = format_inline_code(&display_path);
+                let _ = write!(value, "- {display_path} line {}", loc.line);
                 if i < usage.reference_locations.len().min(10) - 1 {
                     value.push('\n');
                 }
@@ -258,9 +262,13 @@ fn check_unused_member(
                 continue;
             }
 
+            // Embed the full `parent.member` reference as a single code
+            // span so backtick / link characters in either name cannot
+            // break out. `format_inline_code` handles the fence.
+            let qualified = format!("{}.{}", member.parent_name, member.member_name);
             let value = format!(
-                "**fallow**: {kind_label} `{}.{}` is never used outside its declaration.",
-                member.parent_name, member.member_name
+                "**fallow**: {kind_label} {} is never used outside its declaration.",
+                format_inline_code(&qualified),
             );
 
             return Some(Hover {
@@ -310,9 +318,9 @@ fn check_unresolved_import(
         }
 
         let value = format!(
-            "**fallow**: Cannot resolve import `{}`. The module may be missing, misspelled, \
+            "**fallow**: Cannot resolve import {}. The module may be missing, misspelled, \
              or not installed.",
-            import.import.specifier
+            format_inline_code(&import.import.specifier),
         );
 
         return Some(Hover {
@@ -391,9 +399,10 @@ fn check_duplication(
                         || other.file.display().to_string(),
                         |name| name.to_string_lossy().into_owned(),
                     );
+                    let display_path = format_inline_code(&display_path);
                     let _ = write!(
                         value,
-                        "- `{display_path}` lines {}-{}",
+                        "- {display_path} lines {}-{}",
                         other.start_line, other.end_line
                     );
                     if i < others.len().min(10) - 1 {
@@ -736,6 +745,7 @@ mod tests {
 
         let hover = build_hover(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
+        // The specifier renders verbatim inside a CommonMark code span.
         assert!(value.contains("./missing-module"));
         assert!(value.contains("Cannot resolve"));
     }
@@ -1075,14 +1085,14 @@ mod tests {
         let hover = build_hover(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("15 files"));
-        // Should list first 10 files
+        // Should list first 10 files (rendered verbatim inside code spans).
         for i in 1..=10 {
             assert!(
                 value.contains(&format!("file{i}.ts")),
                 "Expected file{i}.ts in hover, got: {value}",
             );
         }
-        // Should NOT list files 11-15 inline
+        // Should NOT list files 11-15 inline.
         assert!(!value.contains("file11.ts"));
         // Should show "... and 5 more"
         assert!(
@@ -1121,7 +1131,7 @@ mod tests {
 
         let hover = build_hover(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
-        // All 10 should be listed
+        // All 10 should be listed (rendered verbatim inside code spans).
         for i in 1..=10 {
             assert!(value.contains(&format!("ref{i}.ts")));
         }
@@ -1293,7 +1303,7 @@ mod tests {
         let hover = build_hover(&results, &duplication, &path_main, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("12 other instances"));
-        // Should only list first 10 and truncate
+        // Should only list first 10 (rendered verbatim inside code spans).
         for i in 1..=10 {
             assert!(
                 value.contains(&format!("dup{i}.ts")),
@@ -1340,6 +1350,83 @@ mod tests {
         let value = markup_value(&hover);
         // Unused export check runs before used export check
         assert!(value.contains("not imported"));
+    }
+
+    #[test]
+    fn hover_on_unused_export_neutralizes_link_injection() {
+        // A crafted export name that would render as a markdown link if
+        // it leaked outside a code span. JS / TS allow arbitrary identifier
+        // characters inside backtick-quoted property names and dynamically
+        // computed exports, so a hostile dependency or a crafted PR can
+        // reach this code path. The fix embeds the value inside a
+        // CommonMark inline code span (no escapes), where link syntax is
+        // inert.
+        let root = test_root();
+        let path = root.join("src/utils.ts");
+        let crafted = "[click](command:vscode.open?evil)";
+        let mut results = AnalysisResults::default();
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: path.clone(),
+                export_name: crafted.to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 0,
+            character: 1,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+
+        // The value renders inside a single-backtick code span. The
+        // `](command:` substring is between backticks, so no CommonMark
+        // renderer treats it as a link. The literal characters are
+        // preserved verbatim (no visible backslashes).
+        assert!(value.contains("`[click](command:vscode.open?evil)`"));
+    }
+
+    #[test]
+    fn hover_on_unused_export_with_backtick_in_name_uses_escalated_fence() {
+        // Backtick-injection probe. A naive `format!("`{}`", name)` would
+        // close the code span and let the trailing payload render as a
+        // link. `format_inline_code` picks a longer fence to keep the
+        // value verbatim inside.
+        let root = test_root();
+        let path = root.join("src/utils.ts");
+        let crafted = "evil`](command:foo)";
+        let mut results = AnalysisResults::default();
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: path.clone(),
+                export_name: crafted.to_string(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 0,
+            character: 1,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+
+        // Outer fence is two backticks; inner content is verbatim.
+        assert!(value.contains("``evil`](command:foo)``"));
+        // The double-backtick + `](command:` pattern that would close the
+        // span and start a link must NOT appear together.
+        assert!(!value.contains("``](command:"));
     }
 
     #[test]
