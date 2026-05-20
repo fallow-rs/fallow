@@ -1,4 +1,4 @@
-use super::common::{create_config, fixture_path};
+use super::common::{create_config, create_config_with_ignore_decorators, fixture_path};
 
 // ── Enum/class members integration ─────────────────────────────
 
@@ -500,5 +500,133 @@ fn typed_binding_through_nullable_unions_credits_class_methods() {
     assert!(
         unused.contains(&"Aggregate.unusedMethod".to_string()),
         "Aggregate.unusedMethod should still be flagged as unused, found unused: {unused:?}"
+    );
+}
+
+// ── ignoreDecorators (issue #471) ──────────────────────────────
+
+#[test]
+fn ignore_decorators_unlocks_only_listed_decorators() {
+    let root = fixture_path("ignore-decorators-mixed");
+    let config = create_config_with_ignore_decorators(root, vec!["@step".to_string()]);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+
+    // @step is in the ignore list; decoratedOnly has only @step, so it gets
+    // checked normally and surfaces as unused.
+    assert!(
+        unused.contains(&"Demo.decoratedOnly".to_string()),
+        "decoratedOnly carries only @step and should be reported, found: {unused:?}"
+    );
+    // plainUnused has no decorators; the existing detector reports it.
+    assert!(
+        unused.contains(&"Demo.plainUnused".to_string()),
+        "plainUnused has no decorators and should be reported, found: {unused:?}"
+    );
+    // mixed has @step AND @Inject; @Inject is not in the ignore list, so the
+    // conservative skip still applies.
+    assert!(
+        !unused.contains(&"Demo.mixed".to_string()),
+        "mixed carries a non-ignored @Inject and must stay skipped, found: {unused:?}"
+    );
+    // frameworkOnly has only @Inject (not ignored); stays skipped.
+    assert!(
+        !unused.contains(&"Demo.frameworkOnly".to_string()),
+        "frameworkOnly carries only the non-ignored @Inject and must stay skipped, found: {unused:?}"
+    );
+    // actuallyUsed is called from entry.ts; never surfaces as unused regardless.
+    assert!(
+        !unused.contains(&"Demo.actuallyUsed".to_string()),
+        "actuallyUsed is called from entry and must not be reported, found: {unused:?}"
+    );
+}
+
+#[test]
+fn ignore_decorators_dotted_entry_matches_exact_path() {
+    let root = fixture_path("ignore-decorators-namespaced");
+    let config = create_config_with_ignore_decorators(root, vec!["decorators.log".to_string()]);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+
+    // @decorators.log matches the dotted entry; loggedMethod is checked.
+    assert!(
+        unused.contains(&"Demo.loggedMethod".to_string()),
+        "loggedMethod's @decorators.log matches the dotted entry and the method should be reported, found: {unused:?}"
+    );
+    // @decorators.audit does NOT match the dotted entry; auditedMethod stays skipped.
+    assert!(
+        !unused.contains(&"Demo.auditedMethod".to_string()),
+        "auditedMethod's @decorators.audit is not in the ignore list and must stay skipped, found: {unused:?}"
+    );
+    // plainMethod has no decorators; reported as unused normally.
+    assert!(
+        unused.contains(&"Demo.plainMethod".to_string()),
+        "plainMethod has no decorators and should be reported, found: {unused:?}"
+    );
+}
+
+#[test]
+fn ignore_decorators_bare_entry_collapses_namespace() {
+    let root = fixture_path("ignore-decorators-namespaced");
+    let config = create_config_with_ignore_decorators(root, vec!["decorators".to_string()]);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+
+    // Bare "decorators" matches the leftmost segment of every @decorators.*
+    // path, so both decorated methods are checked.
+    assert!(
+        unused.contains(&"Demo.loggedMethod".to_string()),
+        "loggedMethod's @decorators.log should match bare entry 'decorators', found: {unused:?}"
+    );
+    assert!(
+        unused.contains(&"Demo.auditedMethod".to_string()),
+        "auditedMethod's @decorators.audit should match bare entry 'decorators', found: {unused:?}"
+    );
+}
+
+#[test]
+fn ignore_decorators_applies_to_declaring_class_only() {
+    // class Page { @step run() {} }; class AdminPage extends Page {}.
+    // entry.ts references AdminPage only. With @step in the ignore list, the
+    // declaring class's @step-decorated method is checked: Page.run should
+    // surface as unused. AdminPage has no own members; the gate has nothing to
+    // do with the child.
+    let root = fixture_path("ignore-decorators-inheritance");
+    let config = create_config_with_ignore_decorators(root, vec!["@step".to_string()]);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+
+    assert!(
+        unused.contains(&"Page.run".to_string()),
+        "Page.run carries only @step and should be reported on the declaring class, found: {unused:?}"
+    );
+    // AdminPage has zero members of its own; the gate is irrelevant for it.
+    let admin_findings: Vec<&String> = unused
+        .iter()
+        .filter(|entry| entry.starts_with("AdminPage."))
+        .collect();
+    assert!(
+        admin_findings.is_empty(),
+        "AdminPage has no own members; no findings should be attributed to it, found: {admin_findings:?}"
     );
 }

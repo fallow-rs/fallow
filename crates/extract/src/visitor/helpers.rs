@@ -515,11 +515,17 @@ pub fn extract_class_members(class: &Class<'_>, is_angular_class: bool) -> Vec<M
                             && is_instance_returning_static_method(method, class_name);
                         let is_self_returning = !method.r#static
                             && is_self_returning_instance_method(method, class_name);
+                        let decorator_names = method
+                            .decorators
+                            .iter()
+                            .map(|d| decorator_path(&d.expression))
+                            .collect();
                         members.push(MemberInfo {
                             name: name_str,
                             kind: MemberKind::ClassMethod,
                             span: method.span,
                             has_decorator: !method.decorators.is_empty(),
+                            decorator_names,
                             is_instance_returning_static,
                             is_self_returning,
                         });
@@ -539,11 +545,17 @@ pub fn extract_class_members(class: &Class<'_>, is_angular_class: bool) -> Vec<M
                                 .value
                                 .as_ref()
                                 .is_some_and(is_angular_signal_initializer));
+                    let decorator_names = prop
+                        .decorators
+                        .iter()
+                        .map(|d| decorator_path(&d.expression))
+                        .collect();
                     members.push(MemberInfo {
                         name: name.to_string(),
                         kind: MemberKind::ClassProperty,
                         span: prop.span,
                         has_decorator,
+                        decorator_names,
                         is_instance_returning_static: false,
                         is_self_returning: false,
                     });
@@ -895,6 +907,36 @@ fn extract_nullable_union_name(union: &oxc_ast::ast::TSUnionType<'_>) -> Option<
         }
     }
     found
+}
+
+/// Extract the dotted identifier path of a decorator expression.
+///
+/// Handles the shapes a class-member decorator can take:
+/// - `@Foo` (`Identifier`) becomes `"Foo"`.
+/// - `@Foo("arg")` (`CallExpression` wrapping `Identifier`) becomes `"Foo"`.
+/// - `@ns.Foo` (`StaticMemberExpression`) becomes `"ns.Foo"`.
+/// - `@ns.Foo("arg")` becomes `"ns.Foo"`.
+/// - `@a.b.c` becomes `"a.b.c"`.
+/// - Parenthesized variants are unwrapped recursively.
+///
+/// Returns an empty string for anything else (computed members, conditional
+/// expressions, etc.); the predicate treats empty entries as never-matching,
+/// so members carrying such decorators retain the conservative skip behavior.
+pub(super) fn decorator_path(expr: &Expression<'_>) -> String {
+    match expr {
+        Expression::Identifier(id) => id.name.to_string(),
+        Expression::StaticMemberExpression(member) => {
+            let object = decorator_path(&member.object);
+            if object.is_empty() {
+                String::new()
+            } else {
+                format!("{}.{}", object, member.property.name)
+            }
+        }
+        Expression::CallExpression(call) => decorator_path(&call.callee),
+        Expression::ParenthesizedExpression(paren) => decorator_path(&paren.expression),
+        _ => String::new(),
+    }
 }
 
 fn extract_static_expression_name(expr: &Expression<'_>) -> Option<String> {

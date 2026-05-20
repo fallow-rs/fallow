@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **New `ignoreDecorators` config option lets you opt specific decorators out of the default `unused-class-members` skip-all-decorated behavior.** Before, every class member carrying any decorator was skipped to avoid false positives on framework-managed members (NestJS `@Get()`, Angular `@Input()`, TypeORM `@Column()`). After, a class library can list non-reflective utility decorators (Playwright `@step`, internal `@measure`, `@log`, etc.) so methods decorated with ONLY those names are checked for usage like undecorated methods. Conservative semantics: a method carrying any decorator NOT in the list stays skipped, so a `@step` + `@Inject` combination is still treated as framework-managed.
+
+  ```jsonc
+  // .fallowrc.json
+  {
+    "ignoreDecorators": ["@step"]
+  }
+  ```
+
+  Matching rule: entries containing `.` (`"decorators.log"`) match the full dotted path; bare entries (`"step"` or `"decorators"`) match the leftmost segment, so a single bare `"decorators"` entry collapses an entire `@decorators.*` namespace. Both `"@step"` and `"step"` round-trip equivalently (a leading `@` is stripped before matching). Unmatched entries (a decorator name in the config that never appears in the analyzed codebase) emit a one-time `tracing::warn!` at end of run, mirroring the existing `usedClassMembers` behavior. The default empty list preserves today's skip-all behavior, so existing NestJS / Angular / TypeORM projects see no change. The first run after enabling this option will surface new `unused-class-members` findings on members previously hidden by the unconditional skip. The extraction cache (`CACHE_VERSION` bumped from 84 to 85) invalidates automatically on upgrade so users with warm `.fallow/cache` directories get the fix without manual clearing. Thanks [@vethman](https://github.com/vethman) for the report. (Closes [#471](https://github.com/fallow-rs/fallow/issues/471).)
+
 ### Security
 
 - **`npm install fallow` and the `fallow-rs/fallow` GitHub Action now verify Ed25519 signatures and GitHub Release SHA-256 digests on every platform binary before running it.** Each `@fallow-cli/<platform>` npm package ships `.sig` files alongside its `fallow`, `fallow-lsp`, and `fallow-mcp` binaries (produced at release time by the workflow's Ed25519 signing step). The npm postinstall script verifies all three signatures using a public key embedded in `npm/fallow/scripts/verify-binary.js`, then fetches the matching GitHub Release `asset.digest` and compares the binary SHA-256. A tampered binary aborts the install with exit code 1 and a structured `fallow: binary verification failed: ... (sig-invalid|sig-missing|binary-missing|digest-mismatch|digest-unavailable)` message. The GitHub Action installer (`action/scripts/install.sh`) installs with `--ignore-scripts`, then runs the verifier from the checked-out Action code instead of from the just-installed npm package, so CI runners do not execute package lifecycle scripts before verification. npm release publishing now hard-fails if `npm publish --provenance` fails. Set `FALLOW_SKIP_BINARY_VERIFY=1` only when deliberately replacing the published binary (source builds, airgapped registries, signed mirror repacks); see `SECURITY.md` for the public key fingerprint and the manual out-of-band verification recipe. (Closes [#465](https://github.com/fallow-rs/fallow/issues/465).)

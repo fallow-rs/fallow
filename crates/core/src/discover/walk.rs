@@ -829,6 +829,7 @@ mod tests {
                 ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(
                 ),
                 used_class_members: vec![],
+                ignore_decorators: vec![],
                 duplicates: DuplicatesConfig::default(),
                 health: HealthConfig::default(),
                 rules: RulesConfig::default(),

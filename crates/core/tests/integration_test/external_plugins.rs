@@ -17,6 +17,7 @@ fn external_plugin_config(root: &std::path::Path) -> fallow_config::ResolvedConf
         ignore_dependency_overrides: vec![],
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
+        ignore_decorators: vec![],
         duplicates: fallow_config::DuplicatesConfig::default(),
         health: fallow_config::HealthConfig::default(),
         rules: RulesConfig::default(),

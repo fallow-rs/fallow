@@ -386,6 +386,7 @@ pub fn find_dead_code_full(
                                     &suppressions,
                                     &line_offsets_by_file,
                                     &user_class_members,
+                                    &config.ignore_decorators,
                                 );
                                 if config.rules.unused_enum_members != Severity::Off {
                                     results.unused_enum_members = enum_members

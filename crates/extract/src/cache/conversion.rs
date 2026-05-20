@@ -76,6 +76,7 @@ pub fn cached_to_module_opts(
                     kind: m.kind,
                     span: Span::new(m.span_start, m.span_end),
                     has_decorator: m.has_decorator,
+                    decorator_names: m.decorator_names.clone(),
                     is_instance_returning_static: m.is_instance_returning_static,
                     is_self_returning: m.is_self_returning,
                 })
@@ -260,6 +261,7 @@ pub fn module_to_cached(
                         span_start: m.span.start,
                         span_end: m.span.end,
                         has_decorator: m.has_decorator,
+                        decorator_names: m.decorator_names.clone(),
                         is_instance_returning_static: m.is_instance_returning_static,
                         is_self_returning: m.is_self_returning,
                     })

@@ -91,6 +91,13 @@
       "$ref": "#/$defs/IgnoreExportsUsedInFileConfig",
       "default": false
     },
+    "ignoreDecorators": {
+      "description": "Decorators that fallow should NOT treat as evidence of reflective use.\nMembers carrying only these decorators are checked for usage as if they\nwere undecorated. Members carrying any decorator NOT in this list stay\nskipped (frameworks like NestJS, Angular, TypeORM rely on reflection so\nthe conservative default is to keep skipping).\n\nMatching rule: entries containing `.` (e.g. `\"decorators.log\"`) match\nthe full dotted path of a decorator. Bare entries (e.g. `\"step\"` or\n`\"decorators\"`) match the leftmost segment; a bare `\"decorators\"` entry\nthus collapses every `@decorators.*` decorator. Both `\"@step\"` and\n`\"step\"` round-trip equivalently (a leading `@` is stripped before\nmatching).\n\nEntries that never match a decorator in the analyzed codebase produce\na one-time warning at end of run, mirroring the existing\n`usedClassMembers` warn-on-unmatched-pattern behavior. See issue #471.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "usedClassMembers": {
       "description": "Class member method/property rules that should never be flagged as\nunused. Supports plain member names for global suppression and scoped\nobjects with `extends` / `implements` constraints for framework-invoked\nmethods that should only be suppressed on matching classes.",
       "type": "array",

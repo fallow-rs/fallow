@@ -7,7 +7,7 @@ use bitcode::{Decode, Encode};
 use crate::MemberKind;
 
 /// Cache version, bump when the cache format or cached extraction semantics change.
-pub(super) const CACHE_VERSION: u32 = 84;
+pub(super) const CACHE_VERSION: u32 = 85;
 
 /// Duplication token cache version — bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -242,6 +242,10 @@ pub struct CachedMember {
     pub span_end: u32,
     /// Whether this member has decorators.
     pub has_decorator: bool,
+    /// Full dotted path of each decorator (e.g. `step`, `ns.foo`).
+    /// Empty for undecorated members and decorators with non-identifier
+    /// expressions.
+    pub decorator_names: Vec<String>,
     /// True when this is a static method that returns a fresh instance of
     /// the class: body returns `new this()` / `new <SameClassName>()`, or the
     /// declared return type matches the class name. Treated as a factory.

@@ -1,0 +1,4 @@
+{
+  "name": "ignore-decorators-namespaced",
+  "main": "src/entry.ts"
+}

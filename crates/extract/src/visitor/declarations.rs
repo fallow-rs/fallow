@@ -108,6 +108,7 @@ impl ModuleInfoExtractor {
                             kind: MemberKind::EnumMember,
                             span: member.span,
                             has_decorator: false,
+                            decorator_names: Vec::new(),
                             is_instance_returning_static: false,
                             is_self_returning: false,
                         })
@@ -192,6 +193,7 @@ impl ModuleInfoExtractor {
                         kind: MemberKind::NamespaceMember,
                         span: id.span,
                         has_decorator: false,
+                        decorator_names: Vec::new(),
                         is_instance_returning_static: false,
                         is_self_returning: false,
                     });
@@ -205,6 +207,7 @@ impl ModuleInfoExtractor {
                             kind: MemberKind::NamespaceMember,
                             span: id.span,
                             has_decorator: false,
+                            decorator_names: Vec::new(),
                             is_instance_returning_static: false,
                             is_self_returning: false,
                         });
@@ -218,6 +221,7 @@ impl ModuleInfoExtractor {
                         kind: MemberKind::NamespaceMember,
                         span: id.span,
                         has_decorator: false,
+                        decorator_names: Vec::new(),
                         is_instance_returning_static: false,
                         is_self_returning: false,
                     });
@@ -229,6 +233,7 @@ impl ModuleInfoExtractor {
                     kind: MemberKind::NamespaceMember,
                     span: enumd.id.span,
                     has_decorator: false,
+                    decorator_names: Vec::new(),
                     is_instance_returning_static: false,
                     is_self_returning: false,
                 });
@@ -239,6 +244,7 @@ impl ModuleInfoExtractor {
                     kind: MemberKind::NamespaceMember,
                     span: iface.id.span,
                     has_decorator: false,
+                    decorator_names: Vec::new(),
                     is_instance_returning_static: false,
                     is_self_returning: false,
                 });
@@ -249,6 +255,7 @@ impl ModuleInfoExtractor {
                     kind: MemberKind::NamespaceMember,
                     span: alias.id.span,
                     has_decorator: false,
+                    decorator_names: Vec::new(),
                     is_instance_returning_static: false,
                     is_self_returning: false,
                 });
@@ -260,6 +267,7 @@ impl ModuleInfoExtractor {
                         kind: MemberKind::NamespaceMember,
                         span: id.span,
                         has_decorator: false,
+                        decorator_names: Vec::new(),
                         is_instance_returning_static: false,
                         is_self_returning: false,
                     });
@@ -270,6 +278,7 @@ impl ModuleInfoExtractor {
                         kind: MemberKind::NamespaceMember,
                         span: lit.span,
                         has_decorator: false,
+                        decorator_names: Vec::new(),
                         is_instance_returning_static: false,
                         is_self_returning: false,
                     });

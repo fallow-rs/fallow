@@ -377,9 +377,18 @@ pub struct MemberInfo {
     pub span: Span,
     /// Whether this member has decorators (e.g., `@Column()`, `@Inject()`).
     /// Decorated members are used by frameworks at runtime and should not be
-    /// flagged as unused class members.
+    /// flagged as unused class members, unless every decorator on the member
+    /// is opted out via `FallowConfig.ignore_decorators`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub has_decorator: bool,
+    /// Full dotted path of each decorator on this member, in source order.
+    /// `@step("x")` stores `"step"`; `@ns.foo` stores `"ns.foo"`. Empty for
+    /// undecorated members, Angular signal-initializer properties (which set
+    /// `has_decorator` without a literal decorator AST node), and decorators
+    /// whose expression is not an identifier ladder (the entry is the empty
+    /// string in that case, treated as never-matching by the predicate).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub decorator_names: Vec<String>,
     /// True when this is a static class method that returns a fresh instance
     /// of the same class: either via `return new this()` / `return new
     /// <SameClassName>()` in the body's last statement, or via a declared

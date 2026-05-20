@@ -1,0 +1,4 @@
+{
+  "name": "ignore-decorators-mixed",
+  "main": "src/entry.ts"
+}

@@ -238,6 +238,25 @@ pub struct FallowConfig {
     #[serde(default)]
     pub ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig,
 
+    /// Decorators that fallow should NOT treat as evidence of reflective use.
+    /// Members carrying only these decorators are checked for usage as if they
+    /// were undecorated. Members carrying any decorator NOT in this list stay
+    /// skipped (frameworks like NestJS, Angular, TypeORM rely on reflection so
+    /// the conservative default is to keep skipping).
+    ///
+    /// Matching rule: entries containing `.` (e.g. `"decorators.log"`) match
+    /// the full dotted path of a decorator. Bare entries (e.g. `"step"` or
+    /// `"decorators"`) match the leftmost segment; a bare `"decorators"` entry
+    /// thus collapses every `@decorators.*` decorator. Both `"@step"` and
+    /// `"step"` round-trip equivalently (a leading `@` is stripped before
+    /// matching).
+    ///
+    /// Entries that never match a decorator in the analyzed codebase produce
+    /// a one-time warning at end of run, mirroring the existing
+    /// `usedClassMembers` warn-on-unmatched-pattern behavior. See issue #471.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore_decorators: Vec<String>,
+
     /// Class member method/property rules that should never be flagged as
     /// unused. Supports plain member names for global suppression and scoped
     /// objects with `extends` / `implements` constraints for framework-invoked

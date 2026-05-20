@@ -189,6 +189,62 @@ fn class_decorated_members_tracked() {
         !plain.has_decorator,
         "plain should have has_decorator = false"
     );
+    assert_eq!(
+        get_users.decorator_names,
+        vec!["Get".to_string()],
+        "getUsers decorator path should be captured as 'Get'"
+    );
+    assert_eq!(
+        create_user.decorator_names,
+        vec!["Post".to_string()],
+        "createUser decorator path should be captured as 'Post'"
+    );
+    assert!(
+        plain.decorator_names.is_empty(),
+        "plain has no decorators; decorator_names should be empty"
+    );
+}
+
+#[test]
+fn class_decorator_path_shapes() {
+    // Exercise the five decorator AST shapes the visitor must handle: bare
+    // identifier, call expression, namespaced static-member, namespaced
+    // static-member call, and multi-level static-member chain. Issue #471.
+    let info = parse_source(
+        r"export class Demo {
+            @Bare
+            bare() {}
+            @Call('arg')
+            call() {}
+            @ns.namespaced
+            namespaced() {}
+            @ns.namespaced_call('arg')
+            namespacedCall() {}
+            @a.b.c
+            multiLevel() {}
+        }",
+    );
+    let demo = &info.exports[0];
+    let by_name = |name: &str| {
+        demo.members
+            .iter()
+            .find(|m| m.name == name)
+            .unwrap_or_else(|| panic!("{name} should be in members"))
+    };
+    assert_eq!(by_name("bare").decorator_names, vec!["Bare".to_string()]);
+    assert_eq!(by_name("call").decorator_names, vec!["Call".to_string()]);
+    assert_eq!(
+        by_name("namespaced").decorator_names,
+        vec!["ns.namespaced".to_string()]
+    );
+    assert_eq!(
+        by_name("namespacedCall").decorator_names,
+        vec!["ns.namespaced_call".to_string()]
+    );
+    assert_eq!(
+        by_name("multiLevel").decorator_names,
+        vec!["a.b.c".to_string()]
+    );
 }
 
 #[test]
@@ -216,6 +272,12 @@ fn class_decorated_properties_tracked() {
         .find(|m| m.name == "undecorated")
         .expect("undecorated should be in members");
     assert!(!undecorated.has_decorator);
+    assert!(undecorated.decorator_names.is_empty());
+    assert_eq!(
+        name_prop.decorator_names,
+        vec!["Column".to_string()],
+        "Column-decorated property should capture the decorator name"
+    );
 }
 
 #[test]

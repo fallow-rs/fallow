@@ -1,0 +1,4 @@
+{
+  "name": "ignore-decorators-inheritance",
+  "main": "src/entry.ts"
+}

@@ -249,6 +249,11 @@ pub struct ResolvedConfig {
     /// Union of top-level config and active plugin contributions; merged during
     /// config resolution so analysis code reads a single list.
     pub used_class_members: Vec<UsedClassMemberRule>,
+    /// Decorator paths the user has opted out of the default skip-all-decorated
+    /// behavior for `unused-class-members`. See `FallowConfig::ignore_decorators`
+    /// for matching semantics. Passed through unchanged from the user config
+    /// (no glob compilation; small set, linear scan at the call site).
+    pub ignore_decorators: Vec<String>,
     pub duplicates: DuplicatesConfig,
     pub health: HealthConfig,
     pub rules: RulesConfig,
@@ -488,6 +493,7 @@ impl FallowConfig {
             compiled_ignore_dependency_overrides,
             ignore_exports_used_in_file: self.ignore_exports_used_in_file,
             used_class_members: self.used_class_members,
+            ignore_decorators: self.ignore_decorators,
             duplicates: self.duplicates,
             health: self.health,
             rules,
@@ -576,6 +582,7 @@ mod tests {
             ignore_dependency_overrides: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
+            ignore_decorators: vec![],
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
@@ -620,6 +627,7 @@ mod tests {
             ignore_dependency_overrides: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
+            ignore_decorators: vec![],
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
@@ -677,6 +685,7 @@ mod tests {
             ignore_dependency_overrides: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
+            ignore_decorators: vec![],
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
@@ -747,6 +756,7 @@ mod tests {
             ignore_dependency_overrides: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
+            ignore_decorators: vec![],
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
@@ -853,6 +863,7 @@ mod tests {
             ignore_dependency_overrides: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
+            ignore_decorators: vec![],
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
@@ -910,6 +921,7 @@ mod tests {
             ignore_dependency_overrides: vec![],
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
+            ignore_decorators: vec![],
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),

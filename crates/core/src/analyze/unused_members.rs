@@ -210,6 +210,94 @@ fn compile_member_pattern(member: &str) -> Option<GlobMatcher> {
         .map(|glob| glob.compile_matcher())
 }
 
+/// User-supplied decorator names that should NOT count as evidence of
+/// reflective use. Built from `FallowConfig::ignore_decorators`.
+///
+/// Matching rule: entries containing `.` match the full dotted path of a
+/// decorator (e.g. `"decorators.log"` matches `@decorators.log` but not
+/// `@decorators.audit`). Bare entries match the leftmost segment of the path
+/// (e.g. `"decorators"` matches `@decorators.log` AND `@decorators.audit`;
+/// `"step"` matches `@step` and `@step("x")`). Both `"@step"` and `"step"`
+/// round-trip equivalently because a leading `@` is stripped at construction.
+///
+/// Each entry tracks whether it matched at least one decorator during the
+/// run; unmatched entries surface as a `tracing::warn!` at end of run,
+/// mirroring `ClassMemberAllowlist::warn_unmatched_patterns`.
+struct IgnoreDecoratorSet {
+    entries: Vec<IgnoreDecoratorEntry>,
+}
+
+struct IgnoreDecoratorEntry {
+    /// Original user-provided string (after `@` strip + trim). Used in the
+    /// unmatched-pattern warning so the message echoes the user's input.
+    raw: String,
+    /// Whether the entry contains `.` (dotted = exact-path match; bare =
+    /// leftmost-segment match).
+    is_dotted: bool,
+    matched: AtomicBool,
+}
+
+impl IgnoreDecoratorSet {
+    fn from_config(ignore_decorators: &[String]) -> Self {
+        let entries = ignore_decorators
+            .iter()
+            .filter_map(|raw| {
+                let trimmed = raw.trim();
+                let normalized = trimmed.strip_prefix('@').unwrap_or(trimmed);
+                if normalized.is_empty() {
+                    return None;
+                }
+                Some(IgnoreDecoratorEntry {
+                    raw: normalized.to_string(),
+                    is_dotted: normalized.contains('.'),
+                    matched: AtomicBool::new(false),
+                })
+            })
+            .collect();
+        Self { entries }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Returns true when `decorator_path` matches any ignore-list entry under
+    /// the dual matching rule. An empty `decorator_path` (the silent fallback
+    /// for decorators whose expression is not an identifier ladder) never
+    /// matches.
+    fn matches(&self, decorator_path: &str) -> bool {
+        if decorator_path.is_empty() {
+            return false;
+        }
+        let leftmost = decorator_path
+            .split_once('.')
+            .map_or(decorator_path, |(head, _)| head);
+        for entry in &self.entries {
+            let hit = if entry.is_dotted {
+                entry.raw == decorator_path
+            } else {
+                entry.raw == leftmost
+            };
+            if hit {
+                entry.matched.store(true, Ordering::Relaxed);
+                return true;
+            }
+        }
+        false
+    }
+
+    fn warn_unmatched(&self) {
+        for entry in &self.entries {
+            if !entry.matched.load(Ordering::Relaxed) {
+                tracing::warn!(
+                    "ignoreDecorators entry '{}' did not match any decorator in the analyzed codebase; remove if no longer needed",
+                    entry.raw
+                );
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ExportKey {
     file_id: FileId,
@@ -1045,10 +1133,12 @@ pub fn find_unused_members(
     suppressions: &SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
     user_class_member_allowlist: &[UsedClassMemberRule],
+    ignore_decorators: &[String],
 ) -> (Vec<UnusedMember>, Vec<UnusedMember>) {
     let mut unused_enum_members = Vec::new();
     let mut unused_class_members = Vec::new();
     let allowlist = ClassMemberAllowlist::from_rules(user_class_member_allowlist);
+    let ignore_decorators = IgnoreDecoratorSet::from_config(ignore_decorators);
 
     let mut class_heritage_by_export: FxHashMap<ExportKey, (Option<String>, Vec<String>)> =
         FxHashMap::default();
@@ -1408,11 +1498,29 @@ pub fn find_unused_members(
                         continue;
                     }
 
-                    // Skip decorated class members — decorators like @Column(), @ApiProperty(),
-                    // @Inject() etc. indicate runtime usage by frameworks (NestJS, TypeORM,
-                    // class-validator, class-transformer). These members are accessed
-                    // reflectively and should never be flagged as unused.
-                    if member.has_decorator {
+                    // Skip decorated class members. Decorators like @Column(),
+                    // @ApiProperty(), @Inject() indicate runtime usage by
+                    // frameworks (NestJS, TypeORM, class-validator,
+                    // class-transformer). These members are accessed
+                    // reflectively and should not be flagged as unused.
+                    //
+                    // Users can opt specific decorators out of this skip via
+                    // FallowConfig.ignore_decorators (issue #471). A member
+                    // whose every decorator path is in the ignore set is
+                    // checked normally; any non-ignored decorator restores
+                    // the conservative skip. Members where `has_decorator` is
+                    // true but `decorator_names` is empty (Angular signal
+                    // initializer properties, which set the boolean without
+                    // a literal decorator AST node) always skip; there is no
+                    // name to match against the ignore set.
+                    if member.has_decorator
+                        && (member.decorator_names.is_empty()
+                            || ignore_decorators.is_empty()
+                            || member
+                                .decorator_names
+                                .iter()
+                                .any(|name| !ignore_decorators.matches(name)))
+                    {
                         continue;
                     }
 
@@ -1483,6 +1591,7 @@ pub fn find_unused_members(
     }
 
     allowlist.warn_unmatched_patterns();
+    ignore_decorators.warn_unmatched();
 
     (unused_enum_members, unused_class_members)
 }
@@ -1548,6 +1657,7 @@ mod tests {
             kind,
             span: Span::new(10, 20),
             has_decorator: false,
+            decorator_names: Vec::new(),
             is_instance_returning_static: false,
             is_self_returning: false,
         }
@@ -1627,6 +1737,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &[],
+            &[],
         );
         assert!(enum_members.is_empty());
         assert!(class_members.is_empty());
@@ -1652,6 +1763,7 @@ mod tests {
             &[],
             &SuppressionContext::empty(),
             &FxHashMap::default(),
+            &[],
             &[],
         );
         assert_eq!(enum_members.len(), 2);
@@ -1706,6 +1818,7 @@ mod tests {
             &[],
             &SuppressionContext::empty(),
             &FxHashMap::default(),
+            &[],
             &[],
         );
         // Only Inactive should be unused
@@ -1792,6 +1905,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &[],
+            &[],
         );
 
         assert_eq!(enum_members.len(), 1, "{enum_members:?}");
@@ -1859,6 +1973,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &[],
+            &[],
         );
 
         assert_eq!(class_members.len(), 1, "{class_members:?}");
@@ -1923,6 +2038,7 @@ mod tests {
             &[],
             &SuppressionContext::empty(),
             &FxHashMap::default(),
+            &[],
             &[],
         );
 
@@ -1991,6 +2107,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &[],
+            &[],
         );
 
         assert_eq!(enum_members.len(), 1, "{enum_members:?}");
@@ -2037,6 +2154,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &[],
+            &[],
         );
         assert!(enum_members.is_empty());
         assert!(class_members.is_empty());
@@ -2053,6 +2171,7 @@ mod tests {
                 kind: MemberKind::ClassProperty,
                 span: Span::new(10, 20),
                 has_decorator: true, // @Column() etc.
+                decorator_names: vec!["Column".to_string()],
                 is_instance_returning_static: false,
                 is_self_returning: false,
             }],
@@ -2065,6 +2184,7 @@ mod tests {
             &[],
             &SuppressionContext::empty(),
             &FxHashMap::default(),
+            &[],
             &[],
         );
         assert!(class_members.is_empty());
@@ -2090,6 +2210,7 @@ mod tests {
             &[],
             &SuppressionContext::empty(),
             &FxHashMap::default(),
+            &[],
             &[],
         );
         // Only customMethod should be flagged
@@ -2117,6 +2238,7 @@ mod tests {
             &[],
             &SuppressionContext::empty(),
             &FxHashMap::default(),
+            &[],
             &[],
         );
         assert_eq!(class_members.len(), 1);
@@ -2153,6 +2275,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &allowlist,
+            &[],
         );
         assert_eq!(
             class_members.len(),
@@ -2190,6 +2313,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &allowlist,
+            &[],
         );
         assert_eq!(
             class_members.len(),
@@ -2234,6 +2358,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &allowlist,
+            &[],
         );
         assert_eq!(enum_members.len(), 1);
         assert_eq!(enum_members[0].member_name, "refresh");
@@ -2271,6 +2396,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &allowlist,
+            &[],
         );
 
         assert_eq!(class_members.len(), 1);
@@ -2320,6 +2446,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &allowlist,
+            &[],
         );
         assert_eq!(
             class_members.len(),
@@ -2381,6 +2508,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &allowlist,
+            &[],
         );
 
         assert_eq!(class_members.len(), 1);
@@ -2418,6 +2546,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &[],
+            &[],
         );
         // Only unused_prop should be flagged (label is accessed via this)
         assert_eq!(class_members.len(), 1);
@@ -2442,6 +2571,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &[],
+            &[],
         );
         // Member analysis skipped because export itself is unreferenced
         assert!(enum_members.is_empty());
@@ -2464,6 +2594,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &[],
+            &[],
         );
         assert!(enum_members.is_empty());
         assert!(class_members.is_empty());
@@ -2484,6 +2615,7 @@ mod tests {
             &[],
             &SuppressionContext::empty(),
             &FxHashMap::default(),
+            &[],
             &[],
         );
         assert!(enum_members.is_empty());
@@ -2506,6 +2638,7 @@ mod tests {
             &[],
             &SuppressionContext::empty(),
             &FxHashMap::default(),
+            &[],
             &[],
         );
         assert_eq!(enum_members.len(), 1);
@@ -2532,6 +2665,7 @@ mod tests {
             &[],
             &SuppressionContext::empty(),
             &FxHashMap::default(),
+            &[],
             &[],
         );
         assert!(enum_members.is_empty());
@@ -2594,6 +2728,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &[],
+            &[],
         );
         // Only unusedMethod should be flagged; greet is used via instance access
         assert_eq!(class_members.len(), 1);
@@ -2633,6 +2768,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &[],
+            &[],
         );
         // Both enum members should be flagged — `this` access doesn't apply to enums
         assert_eq!(enum_members.len(), 2);
@@ -2661,6 +2797,7 @@ mod tests {
             &[],
             &SuppressionContext::empty(),
             &FxHashMap::default(),
+            &[],
             &[],
         );
         assert_eq!(enum_members.len(), 1);
@@ -2713,6 +2850,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &[],
+            &[],
         );
         // S.Active maps back to Status.Active, so only Inactive is unused
         assert_eq!(enum_members.len(), 1);
@@ -2762,6 +2900,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &[],
+            &[],
         );
         // MyEnum.X maps to default.X, so only Y is unused
         assert_eq!(enum_members.len(), 1);
@@ -2790,8 +2929,15 @@ mod tests {
         supp_map.insert(FileId(1), &supps);
         let suppressions = SuppressionContext::from_map(supp_map);
 
-        let (enum_members, _) =
-            find_unused_members(&graph, &[], &[], &suppressions, &FxHashMap::default(), &[]);
+        let (enum_members, _) = find_unused_members(
+            &graph,
+            &[],
+            &[],
+            &suppressions,
+            &FxHashMap::default(),
+            &[],
+            &[],
+        );
         assert!(
             enum_members.is_empty(),
             "suppressed enum member should not be flagged"
@@ -2819,8 +2965,15 @@ mod tests {
         supp_map.insert(FileId(1), &supps);
         let suppressions = SuppressionContext::from_map(supp_map);
 
-        let (_, class_members) =
-            find_unused_members(&graph, &[], &[], &suppressions, &FxHashMap::default(), &[]);
+        let (_, class_members) = find_unused_members(
+            &graph,
+            &[],
+            &[],
+            &suppressions,
+            &FxHashMap::default(),
+            &[],
+            &[],
+        );
         assert!(
             class_members.is_empty(),
             "suppressed class member should not be flagged"
@@ -2867,6 +3020,7 @@ mod tests {
             &[],
             &SuppressionContext::empty(),
             &FxHashMap::default(),
+            &[],
             &[],
         );
         // Object.values(S) maps S→Status, so all members of Status should be considered used
@@ -2924,6 +3078,7 @@ mod tests {
             &[],
             &SuppressionContext::empty(),
             &FxHashMap::default(),
+            &[],
             &[],
         );
         // Only unusedMethod should be flagged; doWork is used via this.service.doWork()
@@ -3022,6 +3177,7 @@ mod tests {
             &modules,
             &SuppressionContext::empty(),
             &FxHashMap::default(),
+            &[],
             &[],
         );
 
@@ -3146,6 +3302,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &[],
+            &[],
         );
 
         let unused_names: FxHashSet<String> = class_members
@@ -3232,6 +3389,7 @@ mod tests {
             &SuppressionContext::empty(),
             &FxHashMap::default(),
             &[],
+            &[],
         );
 
         let unused_members: FxHashSet<(String, String)> = class_members
@@ -3280,6 +3438,7 @@ mod tests {
             &[],
             &SuppressionContext::empty(),
             &FxHashMap::default(),
+            &[],
             &[],
         );
         assert!(enum_members.is_empty());
