@@ -2854,9 +2854,34 @@ fn pattern_collision_detects_identical_external_patterns() {
     match &findings[0] {
         PluginDiagnostic::PatternCollision { pattern, owners } => {
             assert_eq!(pattern, "custom.config.js");
-            assert_eq!(owners.len(), 2);
-            assert!(owners.contains(&"plugin-a".to_string()));
-            assert!(owners.contains(&"plugin-b".to_string()));
+            // Order is REGISTRATION ORDER, not alphabetical: the first
+            // registered plugin appears first and wins Phase 3a precedence.
+            assert_eq!(
+                owners,
+                &vec!["plugin-a".to_string(), "plugin-b".to_string()]
+            );
+        }
+        other @ PluginDiagnostic::EnablerTypo { .. } => {
+            panic!("expected PatternCollision, got {other:?}")
+        }
+    }
+}
+
+#[test]
+fn pattern_collision_owners_in_registration_order_not_alphabetical() {
+    // "z-plugin" is registered FIRST; it should appear first in owners so
+    // the warning's "winner = owners[0]" matches reality even though
+    // alphabetic order would put "a-plugin" first.
+    let z = make_external("z-plugin", &["acme"], &["custom.config.js"]);
+    let a = make_external("a-plugin", &["acme"], &["custom.config.js"]);
+    let actives = [&z, &a];
+    let findings = detect_pattern_collisions(&[], &actives[..]);
+
+    assert_eq!(findings.len(), 1);
+    match &findings[0] {
+        PluginDiagnostic::PatternCollision { owners, .. } => {
+            assert_eq!(owners[0], "z-plugin");
+            assert_eq!(owners[1], "a-plugin");
         }
         other @ PluginDiagnostic::EnablerTypo { .. } => {
             panic!("expected PatternCollision, got {other:?}")

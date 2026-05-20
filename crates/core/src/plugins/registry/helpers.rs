@@ -334,7 +334,8 @@ fn validate_path_rule_regexes(
                 tracing::warn!(
                     "plugin '{plugin_name}'{loc}: invalid excluded regex \
                      '{pattern}' for entry pattern '{rule_pattern}': {err}; \
-                     the pattern will be ignored.",
+                     the pattern will be ignored. A future release may reject \
+                     invalid regex patterns at config load.",
                     rule_pattern = rule.pattern,
                 );
                 false
@@ -350,7 +351,8 @@ fn validate_path_rule_regexes(
                 tracing::warn!(
                     "plugin '{plugin_name}'{loc}: invalid excluded segment \
                      regex '{pattern}' for entry pattern '{rule_pattern}': \
-                     {err}; the pattern will be ignored.",
+                     {err}; the pattern will be ignored. A future release \
+                     may reject invalid regex patterns at config load.",
                     rule_pattern = rule.pattern,
                 );
                 false

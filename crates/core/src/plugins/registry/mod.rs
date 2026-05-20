@@ -613,36 +613,45 @@ pub(crate) fn detect_pattern_collisions(
 ) -> Vec<PluginDiagnostic> {
     use rustc_hash::FxHashMap;
 
-    // Owners are stored as a set per pattern so a plugin that legitimately
-    // lists the same pattern twice in its own `config_patterns` (rare but
-    // legal) does not look like a self-vs-self collision.
-    let mut pattern_owners: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
+    // Owners are stored as a Vec to preserve REGISTRATION ORDER: owners[0]
+    // is the plugin that wins Phase 3a config matching, and the warning text
+    // names it as the winner. A `FxHashSet` is held alongside to dedupe a
+    // single plugin that legitimately lists the same pattern twice in its
+    // own `config_patterns` (rare but legal) so it does not look like a
+    // self-vs-self collision.
+    let mut pattern_owners: FxHashMap<String, (Vec<String>, FxHashSet<String>)> =
+        FxHashMap::default();
+
+    let record = |pattern_owners: &mut FxHashMap<_, (Vec<String>, FxHashSet<String>)>,
+                  pattern: String,
+                  name: String| {
+        let (list, seen) = pattern_owners.entry(pattern).or_default();
+        if seen.insert(name.clone()) {
+            list.push(name);
+        }
+    };
 
     for plugin in builtin_active {
         for pat in plugin.config_patterns() {
-            pattern_owners
-                .entry((*pat).to_string())
-                .or_default()
-                .insert(plugin.name().to_string());
+            record(
+                &mut pattern_owners,
+                (*pat).to_string(),
+                plugin.name().to_string(),
+            );
         }
     }
     for ext in external_active {
         for pat in &ext.config_patterns {
-            pattern_owners
-                .entry(pat.clone())
-                .or_default()
-                .insert(ext.name.clone());
+            record(&mut pattern_owners, pat.clone(), ext.name.clone());
         }
     }
 
     let mut findings: Vec<PluginDiagnostic> = pattern_owners
         .into_iter()
-        .filter_map(|(pattern, owners)| {
+        .filter_map(|(pattern, (owners, _seen))| {
             if owners.len() < 2 {
                 None
             } else {
-                let mut owners: Vec<String> = owners.into_iter().collect();
-                owners.sort_unstable();
                 Some(PluginDiagnostic::PatternCollision { pattern, owners })
             }
         })
@@ -724,11 +733,12 @@ fn emit_plugin_diagnostics(findings: &[PluginDiagnostic]) {
                 let winner = &owners[0];
                 let others = owners[1..].join(", ");
                 tracing::warn!(
-                    "plugin config_patterns collision: '{pattern}' is claimed \
-                     by plugins [{joined}]; '{winner}' runs first \
-                     (registration order), others ({others}) follow. Rename \
-                     one of the patterns or remove the duplicate plugin to \
-                     make resolution explicit.",
+                    "plugin config_patterns collision: identical pattern \
+                     '{pattern}' is claimed by plugins [{joined}]; '{winner}' \
+                     runs first (registration order), others ({others}) \
+                     follow. Rename one of the patterns or remove the \
+                     duplicate plugin to make resolution explicit. A future \
+                     release may reject identical-pattern collisions.",
                     joined = owners.join(", "),
                 );
             }
@@ -744,7 +754,8 @@ fn emit_plugin_diagnostics(findings: &[PluginDiagnostic]) {
                 tracing::warn!(
                     "plugin '{plugin}' enabler '{enabler}' does not match any \
                      dependency in package.json; did you mean '{suggestion}'? \
-                     The plugin will not activate.",
+                     The plugin will not activate. A future release may reject \
+                     unmatched enablers.",
                 );
             }
         }
