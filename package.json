@@ -7,6 +7,6 @@
   },
   "devDependencies": {
     "@commitlint/cli": "21.0.1",
-    "@commitlint/config-conventional": "20.5.3"
+    "@commitlint/config-conventional": "21.0.1"
   }
 }
