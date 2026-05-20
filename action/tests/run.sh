@@ -95,24 +95,24 @@ JSON
 
 OUT=$(INPUT_ROOT="$INSTALL_TMP/pinned" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
 assert_contains "$OUT" "Using fallow version from" "install: reads package.json pin"
-assert_contains "$OUT" "DRY RUN: npm install -g fallow@2.7.3" "install: installs project pin"
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@2.7.3" "install: installs project pin"
 
 OUT=$(INPUT_ROOT="$INSTALL_TMP/range" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
-assert_contains "$OUT" "DRY RUN: npm install -g fallow@^2.52.0" "install: supports package.json semver range"
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@^2.52.0" "install: supports package.json semver range"
 
 OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" FALLOW_VERSION="2.52.0 - 2.53.0" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
-assert_contains "$OUT" "DRY RUN: npm install -g fallow@2.52.0 - 2.53.0" "install: supports npm hyphen ranges"
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@2.52.0 - 2.53.0" "install: supports npm hyphen ranges"
 
 OUT=$(INPUT_ROOT="$INSTALL_TMP/pinned" FALLOW_VERSION="latest" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
 assert_contains "$OUT" "Using fallow version from action input: latest" "install: explicit version wins"
-assert_contains "$OUT" "DRY RUN: npm install -g fallow" "install: explicit latest installs latest"
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "install: explicit latest installs latest"
 
 OUT=$(INPUT_ROOT="$INSTALL_TMP/unsafe" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
 assert_contains "$OUT" "Ignoring unsupported fallow package.json spec" "install: warns on unsupported package spec"
-assert_contains "$OUT" "DRY RUN: npm install -g fallow" "install: unsupported package spec falls back to latest"
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "install: unsupported package spec falls back to latest"
 
 OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
-assert_contains "$OUT" "DRY RUN: npm install -g fallow" "install: no package spec falls back to latest"
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "install: no package spec falls back to latest"
 
 OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" FALLOW_VERSION="file:../fallow" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
 cmd_status=$?
@@ -129,6 +129,208 @@ if [ "$cmd_status" -ne 0 ]; then
   pass "install: rejects dash-prefixed extra args in spec"
 else
   fail "install: rejects dash-prefixed extra args in spec" "expected non-zero exit"
+fi
+
+# --- Binary verification integration ---
+#
+# Exercises the same verifier path used by install.sh against a controlled
+# fake `node_modules/fallow` tree.
+# We can't sign with the production key from a test, so we override the
+# verifier with a test keypair via the verifyFn knob. The goal is to prove
+# that bad signatures produce a non-zero exit, that good signatures
+# produce a zero exit, and that the SKIP_ENV escape hatch is honored.
+
+VERIFY_TMP=$(mktemp -d)
+trap 'rm -rf "$INSTALL_TMP" "$VERIFY_TMP"' EXIT
+
+PLATFORM_PKG=$(node -e "
+const { getPlatformPackage } = require('$DIR/../../npm/fallow/scripts/platform-package');
+let pkg;
+if (process.platform !== 'linux') {
+  pkg = getPlatformPackage(process.platform, process.arch);
+} else {
+  let lib;
+  try { lib = require('detect-libc').familySync(); } catch {}
+  pkg = getPlatformPackage(process.platform, process.arch, lib);
+}
+console.log(pkg);
+" 2>&1)
+
+if [ -z "$PLATFORM_PKG" ] || [ "$PLATFORM_PKG" = "null" ]; then
+  echo "  (skipping binary verification tests on unsupported platform $(node -e 'console.log(process.platform + \"-\" + process.arch)'))"
+else
+  # Build a fake `node_modules/fallow` tree with our scripts and a fake
+  # platform package. Use a generated keypair, sign the binaries with it,
+  # and have the test invocation override the embedded production key.
+  mkdir -p "$VERIFY_TMP/node_modules/fallow/scripts"
+  mkdir -p "$VERIFY_TMP/node_modules/$PLATFORM_PKG"
+  cp "$DIR/../../npm/fallow/scripts/verify-binary.js" "$VERIFY_TMP/node_modules/fallow/scripts/"
+  cp "$DIR/../../npm/fallow/scripts/platform-package.js" "$VERIFY_TMP/node_modules/fallow/scripts/"
+
+  # Generate a keypair, write three binaries, sign them. Also write a
+  # minimal package.json so require.resolve('@fallow-cli/<platform>/package.json')
+  # succeeds.
+  node -e "
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
+const der = publicKey.export({ format: 'der', type: 'spki' });
+const rawPub = der.subarray(der.length - 32);
+const dir = '$VERIFY_TMP/node_modules/$PLATFORM_PKG';
+fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: '$PLATFORM_PKG', version: '0.0.0' }));
+const ext = process.platform === 'win32' ? '.exe' : '';
+for (const base of ['fallow', 'fallow-lsp', 'fallow-mcp']) {
+  const bin = path.join(dir, base + ext);
+  const data = Buffer.from('mock ' + base);
+  fs.writeFileSync(bin, data);
+  fs.writeFileSync(bin + '.sig', crypto.sign(null, data, privateKey));
+}
+fs.writeFileSync('$VERIFY_TMP/testkey.bin', rawPub);
+fs.writeFileSync('$VERIFY_TMP/testkey.pem', privateKey.export({ format: 'pem', type: 'pkcs8' }));
+"
+
+  # Good sig + digest + override key -> ok=true via test injections.
+  GOOD=$(cd "$VERIFY_TMP" && node -e "
+const fs = require('node:fs');
+const crypto = require('node:crypto');
+const rawPub = fs.readFileSync('$VERIFY_TMP/testkey.bin');
+const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binary');
+(async () => {
+  const result = await verifyInstalled({
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
+    digestProvider: ({ binaryPath }) => crypto.createHash('sha256').update(fs.readFileSync(binaryPath)).digest('hex'),
+  });
+  if (!result.ok) { console.error('FAIL: ' + result.code + ': ' + result.message); process.exit(1); }
+  console.log('OK ' + result.package);
+})().catch((err) => { console.error(err.message); process.exit(1); });
+" 2>&1)
+  good_status=$?
+  if [ "$good_status" -eq 0 ]; then
+    pass "install verify: good signatures succeed"
+  else
+    fail "install verify: good signatures succeed" "exit $good_status, output: $GOOD"
+  fi
+
+  # Corrupt the fallow-lsp sig and confirm verifyInstalled returns a failure.
+  ext=""
+  if [ "$(node -p 'process.platform')" = "win32" ]; then ext=".exe"; fi
+  node -e "
+const fs = require('node:fs');
+const p = '$VERIFY_TMP/node_modules/$PLATFORM_PKG/fallow-lsp${ext}.sig';
+const sig = fs.readFileSync(p);
+sig[0] ^= 0xff;
+fs.writeFileSync(p, sig);
+"
+
+  BAD=$(cd "$VERIFY_TMP" && node -e "
+const fs = require('node:fs');
+const crypto = require('node:crypto');
+const rawPub = fs.readFileSync('$VERIFY_TMP/testkey.bin');
+const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binary');
+(async () => {
+  const result = await verifyInstalled({
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
+    digestProvider: ({ binaryPath }) => crypto.createHash('sha256').update(fs.readFileSync(binaryPath)).digest('hex'),
+  });
+  if (result.ok) { console.error('FAIL: expected ok=false'); process.exit(2); }
+  console.log('FAILED ' + result.code + ' ' + (result.binary || ''));
+  process.exit(1);
+})().catch((err) => { console.error(err.message); process.exit(2); });
+" 2>&1)
+  bad_status=$?
+  if [ "$bad_status" -eq 1 ]; then
+    pass "install verify: bad signature aborts with non-zero exit"
+  else
+    fail "install verify: bad signature aborts with non-zero exit" "exit $bad_status, output: $BAD"
+  fi
+  assert_contains "$BAD" "FAILED sig-invalid" "install verify: bad signature reports sig-invalid"
+  assert_contains "$BAD" "fallow-lsp" "install verify: bad signature names the offending binary"
+
+  node -e "
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const privateKey = crypto.createPrivateKey(fs.readFileSync('$VERIFY_TMP/testkey.pem', 'utf8'));
+const bin = '$VERIFY_TMP/node_modules/$PLATFORM_PKG/fallow-lsp${ext}';
+fs.writeFileSync(bin + '.sig', crypto.sign(null, fs.readFileSync(bin), privateKey));
+"
+
+  DIGEST_BAD=$(cd "$VERIFY_TMP" && node -e "
+const fs = require('node:fs');
+const crypto = require('node:crypto');
+const rawPub = fs.readFileSync('$VERIFY_TMP/testkey.bin');
+const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binary');
+(async () => {
+  const result = await verifyInstalled({
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
+    digestProvider: ({ binaryPath }) => {
+      const digest = crypto.createHash('sha256').update(fs.readFileSync(binaryPath)).digest('hex');
+      return /fallow-mcp/.test(binaryPath) ? '0'.repeat(64) : digest;
+    },
+  });
+  if (result.ok) { console.error('FAIL: expected ok=false'); process.exit(2); }
+  console.log('FAILED ' + result.code + ' ' + (result.binary || ''));
+  process.exit(1);
+})().catch((err) => { console.error(err.message); process.exit(2); });
+" 2>&1)
+  digest_bad_status=$?
+  if [ "$digest_bad_status" -eq 1 ]; then
+    pass "install verify: digest mismatch aborts with non-zero exit"
+  else
+    fail "install verify: digest mismatch aborts with non-zero exit" "exit $digest_bad_status, output: $DIGEST_BAD"
+  fi
+  assert_contains "$DIGEST_BAD" "FAILED digest-mismatch" "install verify: digest mismatch reports digest-mismatch"
+  assert_contains "$DIGEST_BAD" "fallow-mcp" "install verify: digest mismatch names the offending binary"
+
+  # sig-missing: binary present, .sig file absent (partial-deploy scenario,
+  # most likely real-world failure mode after a botched release).
+  rm -f "$VERIFY_TMP/node_modules/$PLATFORM_PKG/fallow-mcp${ext}.sig"
+  MISSING=$(cd "$VERIFY_TMP" && node -e "
+const fs = require('node:fs');
+const crypto = require('node:crypto');
+const rawPub = fs.readFileSync('$VERIFY_TMP/testkey.bin');
+const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binary');
+(async () => {
+  const result = await verifyInstalled({
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
+    digestProvider: ({ binaryPath }) => crypto.createHash('sha256').update(fs.readFileSync(binaryPath)).digest('hex'),
+  });
+  if (result.ok) { console.error('FAIL: expected ok=false'); process.exit(2); }
+  console.log('FAILED ' + result.code + ' ' + (result.binary || ''));
+  process.exit(1);
+})().catch((err) => { console.error(err.message); process.exit(2); });
+" 2>&1)
+  missing_status=$?
+  if [ "$missing_status" -eq 1 ]; then
+    pass "install verify: missing .sig file aborts with non-zero exit"
+  else
+    fail "install verify: missing .sig file aborts with non-zero exit" "exit $missing_status, output: $MISSING"
+  fi
+  assert_contains "$MISSING" "FAILED sig-missing" "install verify: missing .sig reports sig-missing"
+  assert_contains "$MISSING" "fallow-mcp" "install verify: missing .sig names the offending binary"
+
+  # Restore a valid-length .sig so the skip-env test sees an otherwise
+  # intact-but-wrong setup.
+  node -e "
+const fs = require('node:fs');
+fs.writeFileSync('$VERIFY_TMP/node_modules/$PLATFORM_PKG/fallow-mcp${ext}.sig', Buffer.alloc(64));
+"
+
+  # FALLOW_SKIP_BINARY_VERIFY=1 with intact-but-wrong setup short-circuits.
+  SKIP=$(cd "$VERIFY_TMP" && FALLOW_SKIP_BINARY_VERIFY=1 node -e "
+const { verifyInstalled } = require('fallow/scripts/verify-binary');
+(async () => {
+  const result = await verifyInstalled();
+  console.log(JSON.stringify(result));
+})().catch((err) => { console.error(err.message); process.exit(1); });
+" 2>&1)
+  skip_status=$?
+  if [ "$skip_status" -eq 0 ]; then
+    pass "install verify: FALLOW_SKIP_BINARY_VERIFY short-circuits"
+  else
+    fail "install verify: FALLOW_SKIP_BINARY_VERIFY short-circuits" "exit $skip_status, output: $SKIP"
+  fi
+  assert_contains "$SKIP" "skipped" "install verify: skip env reports skipped=true"
 fi
 
 echo ""

@@ -15,7 +15,10 @@
   ],
   "files": [
     "fallow.exe",
+    "fallow.exe.sig",
     "fallow-lsp.exe",
-    "fallow-mcp.exe"
+    "fallow-lsp.exe.sig",
+    "fallow-mcp.exe",
+    "fallow-mcp.exe.sig"
   ]
 }

@@ -64,7 +64,8 @@
   ],
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
-    "test:platform": "node --test scripts/platform-package.test.js"
+    "test:platform": "node --test scripts/platform-package.test.js",
+    "test:verify": "node --test scripts/verify-binary.test.js"
   },
   "dependencies": {
     "detect-libc": "2.1.2"

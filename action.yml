@@ -60,7 +60,7 @@ inputs:
     description: 'Save current results as a baseline file'
     required: false
   version:
-    description: 'Fallow version override. When omitted, the action uses the project package.json fallow dependency spec if present, otherwise latest.'
+    description: 'Fallow version override. When omitted, the action uses the project package.json fallow dependency spec if present, otherwise latest. Pin a current fallow version so Ed25519 + SHA-256 binary verification can run.'
     required: false
     default: ''
   args:

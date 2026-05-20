@@ -21,7 +21,7 @@ is_safe_version_spec() {
   local safe_re='^[0-9A-Za-z.*~^<>=| -]+$'
   # Accept semver versions and ranges, while rejecting protocols, paths, and
   # package aliases such as file:, link:, workspace:, git URLs, or /tmp/foo.
-    [[ "$spec" =~ $start_re ]] &&
+  [[ "$spec" =~ $start_re ]] &&
     [[ "$spec" =~ $safe_re ]] &&
     [[ ! "$spec" =~ : ]] &&
     [[ ! "$spec" =~ / ]] &&
@@ -85,11 +85,43 @@ else
 fi
 
 if [ "${FALLOW_INSTALL_DRY_RUN:-}" = "true" ]; then
-  echo "DRY RUN: npm install -g ${install_arg}"
+  echo "DRY RUN: npm install -g --ignore-scripts ${install_arg}"
   exit 0
 fi
 
-npm install -g "$install_arg"
+npm install -g --ignore-scripts "$install_arg"
+
+# Verify with code bundled in the checked-out Action, not code from the
+# installed npm package. This keeps CI runners from executing untrusted package
+# lifecycle scripts before the binary signature + digest checks complete.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+action_root="${GITHUB_ACTION_PATH:-$(cd "$script_dir/../.." && pwd)}"
+verify_script="$action_root/npm/fallow/scripts/verify-binary.js"
+global_root="$(npm root -g)"
+if [ ! -f "$verify_script" ]; then
+  echo "::error::Verifier script not found at ${verify_script}; cannot verify fallow binaries"
+  exit 1
+fi
+
+ACTION_VERIFY_SCRIPT="$verify_script" FALLOW_VERIFY_RESOLVE_FROM="$global_root" node <<'NODE'
+(async () => {
+  const { verifyInstalled, SKIP_ENV } = require(process.env.ACTION_VERIFY_SCRIPT);
+  const result = await verifyInstalled({ resolveFrom: process.env.FALLOW_VERIFY_RESOLVE_FROM });
+  if (result.skipped) {
+    console.log('::warning::Binary verification skipped because ' + SKIP_ENV + ' is set. Only use this when deliberately replacing the published binary.');
+    process.exit(0);
+  }
+  if (!result.ok) {
+    const where = result.binary ? ' ' + result.binary : '';
+    console.error('::error::fallow binary verification failed' + where + ' (' + result.code + '): ' + result.message);
+    process.exit(1);
+  }
+  console.log('Verified Ed25519 signatures and SHA-256 digests on fallow binaries (package ' + result.package + '@' + result.version + ')');
+})().catch((err) => {
+  console.error('::error::fallow binary verification failed (internal-error): ' + err.message);
+  process.exit(1);
+});
+NODE
 
 installed_version="$(fallow --version 2>/dev/null || echo 'unknown version')"
 echo "Installed fallow ${installed_version}"

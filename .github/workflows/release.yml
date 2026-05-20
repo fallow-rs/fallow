@@ -321,6 +321,23 @@ jobs:
             node .github/scripts/verify-binary.mjs "$bin" "${bin}.sig"
           done
 
+      # Stage signatures next to the release binaries so the "Upload npm binary"
+      # step below carries them into the npm-<platform> artifact alongside each
+      # binary. The platform packages then ship `<binary>.sig` next to each
+      # `<binary>`, which lets `npm/fallow/scripts/postinstall.js` and the
+      # GitHub Action installer verify Ed25519 signatures before they
+      # cross-check SHA-256 against the GitHub Release asset digest. Refs #465.
+      - name: Stage signatures next to release binaries (for npm packaging)
+        shell: bash
+        run: |
+          ext=""
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            ext=".exe"
+          fi
+          cp "fallow-${{ matrix.npm_dir }}${ext}.sig"     "target/${{ matrix.target }}/release/${{ matrix.binary }}.sig"
+          cp "fallow-lsp-${{ matrix.npm_dir }}${ext}.sig" "target/${{ matrix.target }}/release/${{ matrix.lsp_binary }}.sig"
+          cp "fallow-mcp-${{ matrix.npm_dir }}${ext}.sig" "target/${{ matrix.target }}/release/${{ matrix.mcp_binary }}.sig"
+
       - name: Upload CLI artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -351,8 +368,11 @@ jobs:
           name: npm-${{ matrix.npm_dir }}
           path: |
             target/${{ matrix.target }}/release/${{ matrix.binary }}
+            target/${{ matrix.target }}/release/${{ matrix.binary }}.sig
             target/${{ matrix.target }}/release/${{ matrix.lsp_binary }}
+            target/${{ matrix.target }}/release/${{ matrix.lsp_binary }}.sig
             target/${{ matrix.target }}/release/${{ matrix.mcp_binary }}
+            target/${{ matrix.target }}/release/${{ matrix.mcp_binary }}.sig
 
       - name: Upload NAPI addon
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -764,11 +784,8 @@ jobs:
               continue
             fi
             if ! npm publish "$file" --access public --provenance --ignore-scripts; then
-              echo "  Provenance publish failed, retrying without provenance..."
-              if ! npm publish "$file" --access public --ignore-scripts; then
-                echo "::error::Failed to publish $name@$version"
-                FAILED=1
-              fi
+              echo "::error::Failed to publish $name@$version with npm provenance"
+              FAILED=1
             fi
             index=$((index + 1))
           done < tarballs/manifest.tsv
