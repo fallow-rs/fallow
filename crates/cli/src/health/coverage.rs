@@ -773,7 +773,12 @@ fn build_request(
             })
             .collect();
         files.push(StaticFile {
-            path: relative.to_string_lossy().into_owned(),
+            // Sidecar wire format uses forward-slash paths regardless of
+            // host OS so a Windows-hosted CLI run interoperates with a
+            // sidecar (or downstream consumer) on a different machine.
+            // Matches the existing convention in `report::ci::diff_filter`
+            // and `crates/cli/src/health/mod.rs::relative_to_root`.
+            path: relative.to_string_lossy().replace('\\', "/"),
             functions,
         });
     }
