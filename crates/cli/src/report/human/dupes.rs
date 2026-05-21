@@ -237,7 +237,7 @@ pub(in crate::report) fn build_duplication_human_lines(
                 .files
                 .iter()
                 .map(|f| {
-                    let path_str = relative_path(f, root).display().to_string();
+                    let path_str = crate::report::format_display_path(f, root);
                     format_path(&path_str)
                 })
                 .collect();

@@ -858,7 +858,7 @@ fn render_findings(
 
     let mut last_file = String::new();
     for finding in &report.findings {
-        let file_str = relative_path(&finding.path, root).display().to_string();
+        let file_str = crate::report::format_display_path(&finding.path, root);
         if file_str != last_file {
             lines.push(format!("  {}", format_path(&file_str)));
             last_file = file_str;
