@@ -564,8 +564,10 @@ mod tests {
 
     #[test]
     fn classes_inside_multi_line_media_query() {
-        // Multi-line preludes must work: `[^;{]` in the at-rule strip regex
-        // includes newlines.
+        // Body classes still extract when the `@media` prelude spans multiple
+        // lines. `@media` is not in the at-rule prelude allowlist, so the new
+        // strip never fires here; this test guards the pre-existing scanner
+        // behavior, not the new regex.
         let names =
             export_names("@media\n  screen and (min-width: 600px)\n{\n  .real { color: red; }\n}");
         assert_eq!(names, vec!["real"]);
@@ -588,6 +590,14 @@ mod tests {
         // The block body still scans for real classes; only the prelude is
         // stripped.
         let names = export_names("@layer foo.bar { .root { color: red; } }");
+        assert_eq!(names, vec!["root"]);
+    }
+
+    #[test]
+    fn at_layer_multiline_prelude_keeps_body_classes() {
+        // `[^;{]` in the at-rule prelude regex includes newlines, so layer
+        // names split across lines are stripped just like single-line ones.
+        let names = export_names("@layer\n  foo.bar\n{ .root { color: red; } }");
         assert_eq!(names, vec!["root"]);
     }
 
