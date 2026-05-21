@@ -87,6 +87,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
                 "total_fixed": 0,
                 "skipped": 0,
                 "skipped_content_changed": 0,
+                "skipped_mixed_line_endings": 0,
             })) {
                 Ok(json) => println!("{json}"),
                 Err(e) => {
@@ -190,14 +191,14 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     let catalog_skipped = catalog_summary.skipped + empty_catalog_summary.skipped;
     let catalog_comment_lines_removed = catalog_summary.comment_lines_removed;
 
-    // Materialize hash-mismatch skip records on BOTH the dry-run and
-    // apply paths: the fixers' `read_source_with_hash_check` calls push
-    // to `plan.skipped()` regardless of dry_run, and the acceptance
-    // criterion is that dry-run surfaces hash mismatches without writes.
-    // The skip records appear in the same `fixes` array the JSON renderer
-    // serializes, so consumers see one stream.
-    let content_changed_records = build_skipped_records(opts.root, plan.skipped(), opts.quiet);
-    fixes.extend(content_changed_records.iter().cloned());
+    // Materialize hash-mismatch + mixed-EOL skip records on BOTH the dry-run
+    // and apply paths: the fixers' `read_source_with_hash_check` calls push
+    // to `plan.skipped()` regardless of dry_run, and the acceptance criterion
+    // is that dry-run surfaces both kinds of skips without writes. The skip
+    // records appear in the same `fixes` array the JSON renderer serializes,
+    // so consumers see one stream.
+    let plan_skip_records = build_skipped_records(opts.root, plan.skipped(), opts.quiet);
+    fixes.extend(plan_skip_records.iter().cloned());
 
     // Commit the batched plan: stage every queued write, then promote.
     // Stage failure leaves every target file at its original content; rename
@@ -216,11 +217,22 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     // correlation hint, not part of the public JSON contract.
     strip_target_sidechannel(&mut fixes);
 
-    let content_changed_count = content_changed_records.len();
+    let content_changed_count = plan_skip_records
+        .iter()
+        .filter(|r| {
+            r.get("skip_reason").and_then(serde_json::Value::as_str) == Some("content_changed")
+        })
+        .count();
+    let mixed_line_endings_count = plan_skip_records
+        .iter()
+        .filter(|r| {
+            r.get("skip_reason").and_then(serde_json::Value::as_str) == Some("mixed_line_endings")
+        })
+        .count();
     if commit_outcome.had_failures() {
         had_write_error = true;
     }
-    if content_changed_count > 0 {
+    if content_changed_count > 0 || mixed_line_endings_count > 0 {
         had_write_error = true;
     }
 
@@ -235,9 +247,10 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
             .count();
         // The legacy `skipped` counter pre-dates #454 and meant "catalog /
         // YAML fix skipped due to consumer / multi-doc / line-out-of-range
-        // guard". Hash-mismatch skips carry the same `skipped: true` flag
-        // for consumer convenience but are counted separately via
-        // `skipped_content_changed`; exclude them here so the existing
+        // guard". Hash-mismatch + mixed-EOL skips carry the same
+        // `skipped: true` flag for consumer convenience but are counted
+        // separately via `skipped_content_changed` /
+        // `skipped_mixed_line_endings`; exclude them here so the existing
         // counter keeps its prior meaning.
         let skipped_count = fixes
             .iter()
@@ -246,9 +259,9 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
                     .get("skipped")
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
-                let is_content_changed = f.get("skip_reason").and_then(serde_json::Value::as_str)
-                    == Some("content_changed");
-                is_skipped && !is_content_changed
+                let reason = f.get("skip_reason").and_then(serde_json::Value::as_str);
+                let is_plan_skip = matches!(reason, Some("content_changed" | "mixed_line_endings"));
+                is_skipped && !is_plan_skip
             })
             .count();
         match serde_json::to_string_pretty(&serde_json::json!({
@@ -257,6 +270,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
             "total_fixed": applied_count,
             "skipped": skipped_count,
             "skipped_content_changed": content_changed_count,
+            "skipped_mixed_line_endings": mixed_line_endings_count,
         })) {
             Ok(json) => println!("{json}"),
             Err(e) => {
@@ -272,6 +286,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
             catalog_skipped,
             catalog_comment_lines_removed,
             content_changed_count,
+            mixed_line_endings_count,
         );
     }
 
@@ -381,6 +396,7 @@ fn emit_human_summary(
     catalog_skipped: usize,
     catalog_comment_lines_removed: usize,
     content_changed_count: usize,
+    mixed_line_endings_count: usize,
 ) {
     if dry_run {
         eprintln!("Dry run complete. No files were modified.");
@@ -429,6 +445,16 @@ fn emit_human_summary(
         };
         eprintln!(
             "Skipped {content_changed_count} {files_word} that changed since `fallow check` ran. Re-run `fallow fix` to refresh the analysis."
+        );
+    }
+    if mixed_line_endings_count > 0 {
+        let files_word = if mixed_line_endings_count == 1 {
+            "file"
+        } else {
+            "files"
+        };
+        eprintln!(
+            "Skipped {mixed_line_endings_count} {files_word} with mixed CRLF/LF line endings. Normalize each file (`dos2unix <path>` or `git config core.autocrlf input` + re-checkout) before re-running.",
         );
     }
 }

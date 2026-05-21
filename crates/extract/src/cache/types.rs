@@ -7,7 +7,14 @@ use bitcode::{Decode, Encode};
 use crate::MemberKind;
 
 /// Cache version, bump when the cache format or cached extraction semantics change.
-pub(super) const CACHE_VERSION: u32 = 88;
+///
+/// Bumped to 89 for issue #475: extraction now strips a leading UTF-8 BOM
+/// before hashing and computing line offsets, so pre-fix entries whose source
+/// included a BOM carry hashes over the wrong byte sequence and would
+/// fast-path into stale `member_accesses` / `exports` for any BOM-bearing
+/// file. The bump invalidates user caches once on upgrade; subsequent runs
+/// are warm.
+pub(super) const CACHE_VERSION: u32 = 89;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

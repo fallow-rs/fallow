@@ -124,11 +124,10 @@ pub(super) fn apply_enum_member_fixes(
     fixes: &mut Vec<serde_json::Value>,
 ) {
     for (path, file_members) in members_by_file {
-        let Some((content, line_ending)) = read_source_with_hash_check(root, path, hashes, plan)
-        else {
+        let Some((content, meta)) = read_source_with_hash_check(root, path, hashes, plan) else {
             continue;
         };
-        let lines: Vec<&str> = content.split(line_ending).collect();
+        let lines: Vec<&str> = content.split(meta.line_ending).collect();
 
         let mut member_fixes: Vec<EnumMemberFix> = Vec::new();
         for member in file_members {
@@ -242,7 +241,7 @@ pub(super) fn apply_enum_member_fixes(
                 new_lines.remove(idx);
             }
 
-            stage_fixed_content(plan, path, &new_lines, line_ending, &content);
+            stage_fixed_content(plan, path, &new_lines, &meta, &content);
 
             // Optimistic `applied: true`; orchestrator flips to false on
             // commit failure for this target path via the __target sidechannel.

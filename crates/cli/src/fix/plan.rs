@@ -33,12 +33,21 @@ pub(super) enum SkipReason {
     /// during the in-process analysis. Applying offsets computed against
     /// the analyzed bytes would land them on the wrong source.
     ContentChanged,
+    /// The file mixes CRLF and bare-LF line endings. The fix pipeline
+    /// detects line endings by presence check then splits / joins on the
+    /// detected style; on a mixed file that would silently rewrite to the
+    /// wrong offsets. The skip is NOT self-healing: re-running `fallow fix`
+    /// does not clear it. The user (or agent) must normalize the file (e.g.
+    /// `dos2unix <path>`, `git config core.autocrlf input`, prettier with
+    /// `endOfLine: lf`) before re-running. Issue #475.
+    MixedLineEndings,
 }
 
 impl SkipReason {
     pub(super) fn as_wire_str(self) -> &'static str {
         match self {
             Self::ContentChanged => "content_changed",
+            Self::MixedLineEndings => "mixed_line_endings",
         }
     }
 
@@ -46,6 +55,10 @@ impl SkipReason {
         match self {
             Self::ContentChanged => format!(
                 "Skipping {}: file content changed since `fallow check` ran. Re-run `fallow fix` to refresh the analysis first.",
+                path.display(),
+            ),
+            Self::MixedLineEndings => format!(
+                "Skipping {}: file has mixed CRLF/LF line endings. Normalize with `dos2unix` or set `git config core.autocrlf input`, then re-run `fallow fix`.",
                 path.display(),
             ),
         }
@@ -128,7 +141,30 @@ impl FixPlan {
 
     /// Record that a file was skipped. The orchestrator uses this to
     /// surface a clear diagnostic and set a non-zero exit code.
+    ///
+    /// Deduped on `(path, reason)`: every per-issue-type fixer
+    /// (`apply_export_fixes`, `apply_enum_member_fixes`,
+    /// `apply_catalog_entry_fixes`, etc.) calls
+    /// `read_source_with_hash_check` independently for files that carry
+    /// findings of its issue type, and any precondition failure (hash
+    /// mismatch, mixed CRLF/LF) lands here on every invocation. Without
+    /// the dedupe, one mixed-EOL file with both an unused export AND an
+    /// unused enum member would surface as TWO `fixes[]` entries and a
+    /// `skipped_mixed_line_endings: 2` envelope counter for what is
+    /// structurally one file. The orchestrator comment in
+    /// `build_skipped_records` and the user-facing reminder line both
+    /// document "one entry per skipped file" semantics; this dedupe
+    /// preserves that contract regardless of how many fixer invocations
+    /// produce the same skip. Caught 2026-05-21 by codex parallel
+    /// /fallow-review on issue #475.
     pub(super) fn skip(&mut self, path: PathBuf, reason: SkipReason) {
+        if self
+            .skipped
+            .iter()
+            .any(|existing| existing.path == path && existing.reason == reason)
+        {
+            return;
+        }
         self.skipped.push(SkippedFile { path, reason });
     }
 
@@ -271,21 +307,38 @@ pub(super) fn read_source_with_hash_check(
     path: &Path,
     hashes: &CapturedHashes,
     plan: &mut FixPlan,
-) -> Option<(String, &'static str)> {
+) -> Option<(String, super::io::EncodingMetadata)> {
     // Cross-fixer composition: prefer the in-plan staged content over a
     // disk read. Staged bytes are internal and always valid UTF-8 (every
     // fixer produces text via `String::into_bytes`); a UTF-8 failure here
-    // would indicate a programmer error, not a user-facing bug.
+    // would indicate a programmer error, not a user-facing bug. Run the
+    // staged bytes through the SAME classifier as the disk path so the
+    // `had_bom` flag survives a cross-fixer round trip: the first fixer's
+    // `stage_fixed_content` re-prepended the BOM bytes when `had_bom` was
+    // true, and a second fixer reading the same path must rebuild the
+    // metadata from those bytes (otherwise the second `stage_fixed_content`
+    // would drop the BOM via last-write-wins). See issue #475.
     if let Some(staged) = plan.staged_content(path) {
-        let content = String::from_utf8(staged.to_vec()).ok()?;
-        let line_ending = if content.contains("\r\n") {
-            "\r\n"
-        } else {
-            "\n"
+        let raw = String::from_utf8(staged.to_vec()).ok()?;
+        // Mixed-EOL is impossible on staged bytes because the prior staging
+        // joined uniformly, but we run the same classifier for symmetry. If
+        // it ever errs, surface as a skip so the regression is visible.
+        return match super::io::classify_source(&raw) {
+            Ok((content, meta)) => Some((content, meta)),
+            Err(super::io::EncodingError::MixedLineEndings { .. }) => {
+                plan.skip(path.to_path_buf(), SkipReason::MixedLineEndings);
+                None
+            }
         };
-        return Some((content, line_ending));
     }
-    let (content, line_ending) = super::io::read_source(root, path)?;
+    let read_result = match super::io::read_source(root, path) {
+        Ok(opt) => opt,
+        Err(super::io::EncodingError::MixedLineEndings { .. }) => {
+            plan.skip(path.to_path_buf(), SkipReason::MixedLineEndings);
+            return None;
+        }
+    };
+    let (content, meta) = read_result?;
     if let Some(&expected) = hashes.get(path) {
         let actual = xxhash_rust::xxh3::xxh3_64(content.as_bytes());
         if actual != expected {
@@ -293,25 +346,41 @@ pub(super) fn read_source_with_hash_check(
             return None;
         }
     }
-    Some((content, line_ending))
+    Some((content, meta))
 }
 
-/// Join modified lines, preserve the original trailing newline, and stage
-/// the result on `plan`. Replaces the `write_fixed_content` direct-write
-/// shape with a queued one; the orchestrator commits the plan after all
-/// fixers have run.
+/// Join modified lines, preserve the original trailing newline, re-prepend
+/// the UTF-8 BOM when the source had one, and stage the result on `plan`.
+/// Replaces the `write_fixed_content` direct-write shape with a queued one;
+/// the orchestrator commits the plan after all fixers have run.
+///
+/// `original_content` is the post-BOM-strip view returned by
+/// `read_source_with_hash_check`; the BOM bytes are reconstructed here on
+/// the wire from `meta.had_bom` so the round-trip preserves whatever the
+/// source file had on disk. Issue #475.
 pub(super) fn stage_fixed_content(
     plan: &mut FixPlan,
     path: &Path,
     lines: &[String],
-    line_ending: &str,
+    meta: &super::io::EncodingMetadata,
     original_content: &str,
 ) {
-    let mut result = lines.join(line_ending);
-    if original_content.ends_with(line_ending) && !result.ends_with(line_ending) {
-        result.push_str(line_ending);
+    let mut result = lines.join(meta.line_ending);
+    if original_content.ends_with(meta.line_ending) && !result.ends_with(meta.line_ending) {
+        result.push_str(meta.line_ending);
     }
-    plan.stage(path.to_path_buf(), result.into_bytes());
+    let bytes = if meta.had_bom {
+        // UTF-8 BOM is three bytes (`EF BB BF`); reserve exactly to avoid
+        // a reallocation on the prepend.
+        let bom_bytes = "\u{FEFF}".as_bytes();
+        let mut buf = Vec::with_capacity(result.len() + bom_bytes.len());
+        buf.extend_from_slice(bom_bytes);
+        buf.extend_from_slice(result.as_bytes());
+        buf
+    } else {
+        result.into_bytes()
+    };
+    plan.stage(path.to_path_buf(), bytes);
 }
 
 #[cfg(test)]
@@ -569,5 +638,217 @@ mod tests {
         let path = dir.path().join("config.json");
         fallow_config::atomic_write(&path, b"{}").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{}");
+    }
+
+    // -- Issue #475: BOM round-trip + mixed-EOL skip ------------------------
+
+    #[test]
+    fn skip_deduplicates_repeat_entries_for_same_path_and_reason() {
+        // Codex parallel /fallow-review BLOCK on issue #475: every
+        // per-issue-type fixer (`apply_export_fixes`, `apply_enum_member_fixes`,
+        // `apply_catalog_entry_fixes`) calls `read_source_with_hash_check`
+        // independently for files that carry findings of its issue type. If
+        // a file has both an unused export AND an unused enum member AND
+        // mixed CRLF/LF line endings, BOTH fixers hit the precondition
+        // failure and push a skip. Without dedupe, the user sees two
+        // identical fixes[] entries and a misleading
+        // `skipped_mixed_line_endings: 2` for what is structurally one file.
+        let mut plan = FixPlan::new();
+        let path = PathBuf::from("/tmp/mixed.ts");
+        plan.skip(path.clone(), SkipReason::MixedLineEndings);
+        plan.skip(path.clone(), SkipReason::MixedLineEndings);
+        plan.skip(path.clone(), SkipReason::MixedLineEndings);
+        assert_eq!(
+            plan.skipped().len(),
+            1,
+            "multiple skip calls for the same (path, reason) must dedupe to one entry",
+        );
+        // A different reason on the same path is a distinct skip: leave it.
+        plan.skip(path, SkipReason::ContentChanged);
+        assert_eq!(
+            plan.skipped().len(),
+            2,
+            "distinct reasons on the same path stay separate",
+        );
+        // A different path with an already-seen reason is also distinct.
+        plan.skip(PathBuf::from("/tmp/other.ts"), SkipReason::MixedLineEndings);
+        assert_eq!(plan.skipped().len(), 3);
+    }
+
+    #[test]
+    fn read_source_with_hash_check_skips_on_mixed_line_endings() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("mixed.ts");
+        std::fs::write(&file, "a\r\nb\nc\r\n").unwrap();
+        let mut hashes = CapturedHashes::default();
+        // Captured hash will not match because read_source returns Err
+        // BEFORE the hash check; the file must still skip with the mixed
+        // EOL reason, not with content-changed.
+        hashes.insert(file.clone(), 0xDEAD_BEEF);
+
+        let mut plan = FixPlan::new();
+        let result = read_source_with_hash_check(dir.path(), &file, &hashes, &mut plan);
+        assert!(result.is_none(), "mixed-EOL file must be skipped");
+        assert_eq!(plan.skipped().len(), 1);
+        assert_eq!(plan.skipped()[0].path, file);
+        assert_eq!(plan.skipped()[0].reason, SkipReason::MixedLineEndings);
+    }
+
+    #[test]
+    fn read_source_with_hash_check_dedupes_mixed_eol_across_two_fixer_calls() {
+        // Codex parallel /fallow-review reproduction: a single mixed-EOL
+        // file that carries findings for multiple per-issue-type fixers
+        // (e.g. an unused export AND an unused enum member) gets two
+        // calls into `read_source_with_hash_check`, one per fixer. Each
+        // call hits the mixed-EOL precondition and tries to push a skip.
+        // The orchestrator's user-facing reporting promises "one entry
+        // per skipped file"; only the dedupe in `FixPlan::skip` upholds
+        // that contract. Without the dedupe, `fixes[]` carries two
+        // identical `mixed_line_endings` entries and the JSON envelope's
+        // `skipped_mixed_line_endings` counter reads 2 for one file.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("mixed.ts");
+        std::fs::write(&file, "a\r\nb\nc\r\n").unwrap();
+        let hashes = CapturedHashes::default();
+
+        let mut plan = FixPlan::new();
+
+        // First fixer (e.g. apply_export_fixes) calls read_source_with_hash_check.
+        let first = read_source_with_hash_check(dir.path(), &file, &hashes, &mut plan);
+        assert!(first.is_none(), "first fixer call must skip");
+
+        // Second fixer (e.g. apply_enum_member_fixes) hits the SAME file.
+        let second = read_source_with_hash_check(dir.path(), &file, &hashes, &mut plan);
+        assert!(second.is_none(), "second fixer call must also skip");
+
+        // Despite two skip pushes, the contract is "one entry per skipped file".
+        assert_eq!(
+            plan.skipped().len(),
+            1,
+            "two fixers hitting the same mixed-EOL file must produce ONE skip entry, not two",
+        );
+        assert_eq!(plan.skipped()[0].reason, SkipReason::MixedLineEndings);
+    }
+
+    #[test]
+    fn skip_reason_mixed_line_endings_wire_value_is_stable() {
+        // Downstream JSON consumers gate on this string; flag rename bombs
+        // at PR-review time.
+        assert_eq!(
+            SkipReason::MixedLineEndings.as_wire_str(),
+            "mixed_line_endings"
+        );
+    }
+
+    #[test]
+    fn stage_fixed_content_preserves_bom_on_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("bom.ts");
+        // BOM + LF source.
+        let body = "export const a = 1;\nexport const b = 2;\n";
+        std::fs::write(&file, format!("\u{FEFF}{body}")).unwrap();
+
+        let mut plan = FixPlan::new();
+        // Read via the canonical entry to capture BOM metadata.
+        let (content, meta) = crate::fix::io::read_source(dir.path(), &file)
+            .unwrap()
+            .unwrap();
+        assert!(meta.had_bom, "preconditions: read must flag had_bom = true");
+        assert_eq!(
+            content.as_str(),
+            body,
+            "post-strip content must omit the BOM"
+        );
+
+        // Pretend a fixer removed the second line.
+        let new_lines: Vec<String> = vec!["export const a = 1;".to_owned()];
+        stage_fixed_content(&mut plan, &file, &new_lines, &meta, &content);
+
+        let outcome = plan.commit();
+        assert!(outcome.failed.is_empty(), "commit must succeed");
+
+        // The on-disk bytes must start with the BOM bytes (`EF BB BF`).
+        let on_disk = std::fs::read(&file).unwrap();
+        assert_eq!(
+            &on_disk[..3],
+            &[0xEF, 0xBB, 0xBF],
+            "BOM must be re-prepended on round-trip; got {:?}",
+            &on_disk[..on_disk.len().min(8)],
+        );
+        // And the rest must be the new content plus the original trailing newline.
+        let rest = std::str::from_utf8(&on_disk[3..]).unwrap();
+        assert_eq!(rest, "export const a = 1;\n");
+    }
+
+    #[test]
+    fn staged_content_round_trip_through_second_fixer_preserves_bom() {
+        // Load-bearing test per panel feedback (Maeve, tech lead). Two
+        // fixers stage on the same BOM-bearing file in sequence: the first
+        // fixer's `stage_fixed_content` re-prepends the BOM; the second
+        // fixer reads via `read_source_with_hash_check` which routes
+        // through the `staged_content` fast path, must re-detect the BOM
+        // on the staged bytes via `classify_source`, propagate
+        // `had_bom = true` on its returned `EncodingMetadata`, and the
+        // second `stage_fixed_content` must re-prepend the BOM again.
+        // After commit, on-disk bytes must STILL start with the BOM.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("bom-multi.ts");
+        let body = "line a\nline b\nline c\n";
+        std::fs::write(&file, format!("\u{FEFF}{body}")).unwrap();
+        let mut hashes = CapturedHashes::default();
+        hashes.insert(file.clone(), xxhash_rust::xxh3::xxh3_64(body.as_bytes()));
+
+        let mut plan = FixPlan::new();
+
+        // First fixer: remove `line b`.
+        let (first_content, first_meta) =
+            read_source_with_hash_check(dir.path(), &file, &hashes, &mut plan).unwrap();
+        assert!(first_meta.had_bom);
+        let first_new_lines: Vec<String> =
+            vec!["line a".to_owned(), "line c".to_owned(), String::new()];
+        stage_fixed_content(
+            &mut plan,
+            &file,
+            &first_new_lines,
+            &first_meta,
+            &first_content,
+        );
+
+        // Second fixer: read again; MUST see the BOM re-prepended on the
+        // staged bytes via the staged_content fast path, and MUST flag
+        // had_bom = true on the returned metadata.
+        let (second_content, second_meta) =
+            read_source_with_hash_check(dir.path(), &file, &hashes, &mut plan).unwrap();
+        assert!(
+            second_meta.had_bom,
+            "second fixer must re-detect BOM from staged bytes; had_bom dropped silently",
+        );
+        assert!(
+            !second_content.starts_with('\u{FEFF}'),
+            "second fixer content must be post-BOM-strip",
+        );
+        // Mutate `line a` -> `edited a`.
+        let second_new_lines: Vec<String> =
+            vec!["edited a".to_owned(), "line c".to_owned(), String::new()];
+        stage_fixed_content(
+            &mut plan,
+            &file,
+            &second_new_lines,
+            &second_meta,
+            &second_content,
+        );
+
+        // Commit and confirm BOM survives both round-trips.
+        let outcome = plan.commit();
+        assert!(outcome.failed.is_empty());
+        let on_disk = std::fs::read(&file).unwrap();
+        assert_eq!(
+            &on_disk[..3],
+            &[0xEF, 0xBB, 0xBF],
+            "BOM must survive both fixers' round trips; got {:?}",
+            &on_disk[..on_disk.len().min(8)],
+        );
+        let rest = std::str::from_utf8(&on_disk[3..]).unwrap();
+        assert_eq!(rest, "edited a\nline c\n");
     }
 }

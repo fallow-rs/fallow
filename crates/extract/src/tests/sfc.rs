@@ -1167,3 +1167,48 @@ type Props = { href?: string; content?: string };
         info.unused_import_bindings
     );
 }
+
+/// Issue #475: a `.vue` file with a leading UTF-8 BOM must produce the same
+/// `<script>` body line numbers as the same file without the BOM. The BOM is
+/// stripped by `parse_source_to_module` before the SFC dispatcher sees the
+/// source, so byte-range slicing of the `<script>` block lines up the same
+/// way in both runs. Tech-lead Maeve flagged this as the one corner the plan
+/// did not explicitly trace.
+#[test]
+fn sfc_vue_with_leading_bom_produces_same_script_line_numbers_as_without_bom() {
+    let body = "<script lang=\"ts\">\n\
+                import { ref } from 'vue';\n\
+                export const counter = ref(0);\n\
+                </script>\n\
+                <template><div>{{ counter }}</div></template>\n";
+    let with_bom = format!("\u{FEFF}{body}");
+
+    let plain = parse_sfc(body, "Comp.vue");
+    let bom = parse_sfc(&with_bom, "Comp.vue");
+
+    assert_eq!(
+        plain.exports.len(),
+        bom.exports.len(),
+        "BOM must not change the export count",
+    );
+    let plain_counter = plain
+        .exports
+        .iter()
+        .find(|e| e.name.matches_str("counter"))
+        .expect("plain Vue source exports `counter`");
+    let bom_counter = bom
+        .exports
+        .iter()
+        .find(|e| e.name.matches_str("counter"))
+        .expect("BOM-bearing Vue source exports `counter`");
+    assert_eq!(
+        (plain_counter.span.start, plain_counter.span.end),
+        (bom_counter.span.start, bom_counter.span.end),
+        "Vue `<script>` body byte span must be identical with or without leading BOM",
+    );
+    assert_eq!(
+        plain.imports.len(),
+        bom.imports.len(),
+        "BOM must not change the import count",
+    );
+}

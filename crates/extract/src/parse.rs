@@ -40,6 +40,13 @@ pub fn parse_source_to_module(
     content_hash: u64,
     need_complexity: bool,
 ) -> ModuleInfo {
+    // Defense in depth: production entry points (`parse_single_file_cached`,
+    // `parse_single_file`, `parse_from_content`) already strip the BOM before
+    // hashing and before this call, so the strip here is a no-op on the hot
+    // path. Out-of-tree callers (fuzzers, integration fixtures, future
+    // embedders) that construct source manually still get the same alignment
+    // guarantee with no extra work. Issue #475.
+    let source = crate::strip_bom(source);
     if is_sfc_file(path) {
         return parse_sfc_to_module(file_id, path, source, content_hash, need_complexity);
     }

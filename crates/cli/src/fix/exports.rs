@@ -136,11 +136,10 @@ pub(super) fn apply_export_fixes(
     fixes: &mut Vec<serde_json::Value>,
 ) {
     for (path, file_exports) in exports_by_file {
-        let Some((content, line_ending)) = read_source_with_hash_check(root, path, hashes, plan)
-        else {
+        let Some((content, meta)) = read_source_with_hash_check(root, path, hashes, plan) else {
             continue;
         };
-        let lines: Vec<&str> = content.split(line_ending).collect();
+        let lines: Vec<&str> = content.split(meta.line_ending).collect();
 
         let mut line_fixes: Vec<ExportFix> = Vec::new();
         for export in file_exports {
@@ -286,7 +285,7 @@ pub(super) fn apply_export_fixes(
                 new_lines.remove(idx);
             }
 
-            stage_fixed_content(plan, path, &new_lines, line_ending, &content);
+            stage_fixed_content(plan, path, &new_lines, &meta, &content);
 
             // Optimistic: queued for commit. Orchestrator flips `applied`
             // to false post-commit if the rename failed for this path.

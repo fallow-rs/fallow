@@ -68,8 +68,7 @@ pub(super) fn apply_catalog_entry_fixes(
 
     for (relative_path, file_entries) in by_path {
         let absolute = root.join(relative_path);
-        let Some((content, line_ending)) =
-            read_source_with_hash_check(root, &absolute, hashes, plan)
+        let Some((content, meta)) = read_source_with_hash_check(root, &absolute, hashes, plan)
         else {
             // Skip silently when the workspace file is unreadable or escapes
             // the root: matches the existing pattern in enum_members/deps.
@@ -95,7 +94,7 @@ pub(super) fn apply_catalog_entry_fixes(
             continue;
         }
 
-        let lines: Vec<&str> = content.split(line_ending).collect();
+        let lines: Vec<&str> = content.split(meta.line_ending).collect();
 
         // Compute the line range for each entry and split into "remove" vs
         // "skip" buckets.
@@ -204,9 +203,9 @@ pub(super) fn apply_catalog_entry_fixes(
         }
         rewrite_empty_catalog_parents(&mut new_lines, &parent_header_indices, &deduped);
 
-        let mut new_content = new_lines.join(line_ending);
-        if content.ends_with(line_ending) && !new_content.ends_with(line_ending) {
-            new_content.push_str(line_ending);
+        let mut new_content = new_lines.join(meta.line_ending);
+        if content.ends_with(meta.line_ending) && !new_content.ends_with(meta.line_ending) {
+            new_content.push_str(meta.line_ending);
         }
 
         // Reparse-validate (panel P1.7). If the post-edit content fails to
@@ -227,7 +226,10 @@ pub(super) fn apply_catalog_entry_fixes(
         // Pre-stage YAML reparse-validation above ensures we never queue
         // a syntactically broken document; rename-time errors are reported
         // per-path by the orchestrator.
-        plan.stage(absolute.clone(), new_content.into_bytes());
+        plan.stage(
+            absolute.clone(),
+            super::io::bytes_with_optional_bom(new_content, &meta),
+        );
 
         for (range, entry) in &deduped {
             let mut record = remove_record(entry, range, true, relative_path);
@@ -273,8 +275,7 @@ pub(super) fn apply_empty_catalog_group_fixes(
 
     for (relative_path, file_groups) in by_path {
         let absolute = root.join(relative_path);
-        let Some((content, line_ending)) =
-            read_source_with_hash_check(root, &absolute, hashes, plan)
+        let Some((content, meta)) = read_source_with_hash_check(root, &absolute, hashes, plan)
         else {
             continue;
         };
@@ -293,7 +294,7 @@ pub(super) fn apply_empty_catalog_group_fixes(
             continue;
         }
 
-        let lines: Vec<&str> = content.split(line_ending).collect();
+        let lines: Vec<&str> = content.split(meta.line_ending).collect();
         let mut to_remove: Vec<(usize, &EmptyCatalogGroup)> = Vec::new();
         for group in &file_groups {
             let line_idx = group.line.saturating_sub(1) as usize;
@@ -339,9 +340,9 @@ pub(super) fn apply_empty_catalog_group_fixes(
             new_lines.remove(*line_idx);
         }
 
-        let mut new_content = new_lines.join(line_ending);
-        if content.ends_with(line_ending) && !new_content.ends_with(line_ending) {
-            new_content.push_str(line_ending);
+        let mut new_content = new_lines.join(meta.line_ending);
+        if content.ends_with(meta.line_ending) && !new_content.ends_with(meta.line_ending) {
+            new_content.push_str(meta.line_ending);
         }
 
         if serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&new_content).is_err() {
@@ -353,7 +354,10 @@ pub(super) fn apply_empty_catalog_group_fixes(
             continue;
         }
 
-        plan.stage(absolute.clone(), new_content.into_bytes());
+        plan.stage(
+            absolute.clone(),
+            super::io::bytes_with_optional_bom(new_content, &meta),
+        );
 
         for (line_idx, group) in &to_remove {
             let mut record = remove_group_record(group, *line_idx, true, relative_path);

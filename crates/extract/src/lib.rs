@@ -93,6 +93,26 @@ pub const FLUENT_CHAIN_SENTINEL: &str = "__fallow_fluent_chain__:";
 
 use parse::parse_source_to_module;
 
+/// Leading UTF-8 byte order mark codepoint.
+///
+/// Windows editors (Notepad, older VS settings, some IDE plugins) emit a UTF-8
+/// BOM at the start of source files. fallow's contract is "UTF-8 with or
+/// without BOM; line offsets are computed against the post-BOM view; the BOM,
+/// if present on input, is preserved on output by `fallow fix`."
+const BOM_CHAR: char = '\u{FEFF}';
+
+/// Strip the leading UTF-8 BOM if present.
+///
+/// Called at every file-read entry point in this crate so the rest of the
+/// pipeline (content hash, `compute_line_offsets`, oxc parser, downstream
+/// analyses) sees a consistent post-BOM view. Mirrors the
+/// `fallow_config` layer (`config_writer.rs::BOM`) so config-shaped sources
+/// and source-code-shaped sources are processed symmetrically. See issue #475.
+#[must_use]
+pub(crate) fn strip_bom(source: &str) -> &str {
+    source.strip_prefix(BOM_CHAR).unwrap_or(source)
+}
+
 /// Parse all files in parallel, extracting imports and exports.
 /// Uses the cache to skip reparsing files whose content hasn't changed.
 ///
@@ -171,7 +191,12 @@ fn parse_single_file_cached(
     }
 
     // Slow path: read file content and compute content hash.
-    let source = std::fs::read_to_string(&file.path).ok()?;
+    // Strip the UTF-8 BOM, if present, before hashing AND before parsing so
+    // the content hash, `compute_line_offsets`, and the oxc parser all see
+    // the same byte sequence. Without this, hash matches that depend on
+    // BOM presence would silently miss the cache. Issue #475.
+    let raw = std::fs::read_to_string(&file.path).ok()?;
+    let source = strip_bom(&raw);
     let content_hash = xxhash_rust::xxh3::xxh3_64(source.as_bytes());
 
     // Check cache by content hash (handles touch/save-without-change)
@@ -192,7 +217,7 @@ fn parse_single_file_cached(
     Some(parse_source_to_module(
         file.id,
         &file.path,
-        &source,
+        source,
         content_hash,
         need_complexity,
     ))
@@ -211,12 +236,15 @@ fn mtime_secs(metadata: &std::fs::Metadata) -> u64 {
 /// Parse a single file and extract module information (without complexity).
 #[must_use]
 pub fn parse_single_file(file: &DiscoveredFile) -> Option<ModuleInfo> {
-    let source = std::fs::read_to_string(&file.path).ok()?;
+    // BOM strip before hash + parse so downstream offsets stay aligned with
+    // the parser's view. See `parse_single_file_cached` and issue #475.
+    let raw = std::fs::read_to_string(&file.path).ok()?;
+    let source = strip_bom(&raw);
     let content_hash = xxhash_rust::xxh3::xxh3_64(source.as_bytes());
     Some(parse_source_to_module(
         file.id,
         &file.path,
-        &source,
+        source,
         content_hash,
         false,
     ))
@@ -225,6 +253,10 @@ pub fn parse_single_file(file: &DiscoveredFile) -> Option<ModuleInfo> {
 /// Parse from in-memory content (for LSP, includes complexity).
 #[must_use]
 pub fn parse_from_content(file_id: FileId, path: &Path, content: &str) -> ModuleInfo {
+    // Editors normally strip a BOM before sending didOpen.text, but be
+    // defensive: an editor or test that hands us BOM-bearing content must
+    // produce the same offsets as the on-disk path. Issue #475.
+    let content = strip_bom(content);
     let content_hash = xxhash_rust::xxh3::xxh3_64(content.as_bytes());
     parse_source_to_module(file_id, path, content, content_hash, true)
 }
