@@ -627,7 +627,7 @@ pub fn find_dead_code_full(
     if config.rules.stale_suppressions != Severity::Off {
         results
             .stale_suppressions
-            .extend(suppressions.find_stale(graph));
+            .extend(suppressions.find_stale(graph, config));
     }
     results.suppression_count = suppressions.used_count();
 

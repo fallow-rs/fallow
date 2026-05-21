@@ -1,6 +1,9 @@
+use fallow_config::{PartialRulesConfig, Severity};
 use fallow_types::results::SuppressionOrigin;
 
-use super::common::{create_config, fixture_path};
+use super::common::{
+    create_config, create_config_with_overrides, create_config_with_rules, fixture_path,
+};
 
 #[test]
 fn stale_next_line_suppression_on_used_export() {
@@ -293,5 +296,130 @@ fn issue_449_close_typo_explanation_includes_levenshtein_hint() {
     assert!(
         explanation.contains("Did you mean 'unused-export'?"),
         "explanation should surface the Levenshtein hint for a close typo. Got: {explanation}"
+    );
+}
+
+// ── Issue #482: suppressions for OFF-severity rules are not stale ────────────
+
+/// utils.ts in the stale-suppressions fixture has
+/// `// fallow-ignore-next-line unused-export` on the USED export `usedHelper`.
+/// Today (rule ON) this surfaces as stale because the detector runs, the
+/// export is referenced, the suppression never matches, and find_stale flags
+/// it. With `rules.unused-exports = "off"` the detector skips emission
+/// entirely; the suppression documents intentional dormancy and must NOT
+/// surface as stale. See issue #482.
+#[test]
+fn stale_skipped_when_kind_severity_off() {
+    let root = fixture_path("stale-suppressions");
+    let config = create_config_with_rules(root, |r| {
+        r.unused_exports = Severity::Off;
+    });
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let stale_for_used_helper = results.stale_suppressions.iter().any(|s| {
+        s.path.ends_with("utils.ts")
+            && matches!(
+                &s.origin,
+                SuppressionOrigin::Comment {
+                    issue_kind: Some(k),
+                    ..
+                } if k == "unused-export"
+            )
+    });
+
+    assert!(
+        !stale_for_used_helper,
+        "expected no stale-suppression for `// fallow-ignore-next-line unused-export` \
+         when rules.unused-exports is OFF. Got: {:?}",
+        results.stale_suppressions
+    );
+}
+
+/// Verifies the BLANKET case is unaffected: `// fallow-ignore-next-line`
+/// (no kind) is not anchored to any specific dormant rule, so "nothing
+/// matched" still means genuinely stale, even when sibling kinds are OFF.
+#[test]
+fn blanket_marker_still_stale_when_other_kinds_off() {
+    let root = fixture_path("stale-suppressions");
+    let config = create_config_with_rules(root, |r| {
+        r.unused_exports = Severity::Off;
+    });
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    // utils.ts line 11 is the blanket `// fallow-ignore-next-line` above
+    // anotherUsedExport. With unused-exports OFF AND no other rule firing
+    // on that line, the blanket marker is still stale.
+    let stale_blanket = results.stale_suppressions.iter().any(|s| {
+        s.path.ends_with("utils.ts")
+            && matches!(
+                &s.origin,
+                SuppressionOrigin::Comment {
+                    issue_kind: None,
+                    ..
+                }
+            )
+    });
+
+    assert!(
+        stale_blanket,
+        "blanket suppression should still surface as stale when the kind list is empty"
+    );
+}
+
+/// Per-file `overrides.rules` must compose with the OFF-severity skip: a
+/// marker that is stale under the project-level rules can be exempted by
+/// a path-scoped override flipping the kind to OFF, and other files where
+/// the override does not match continue to surface stale findings.
+#[test]
+fn stale_respects_per_file_override_off() {
+    let root = fixture_path("stale-suppressions");
+    let config = create_config_with_overrides(
+        root,
+        vec![(
+            "**/utils.ts",
+            PartialRulesConfig {
+                unused_exports: Some(Severity::Off),
+                ..Default::default()
+            },
+        )],
+    );
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let stale_for_utils_unused_export = results.stale_suppressions.iter().any(|s| {
+        s.path.ends_with("utils.ts")
+            && matches!(
+                &s.origin,
+                SuppressionOrigin::Comment {
+                    issue_kind: Some(k),
+                    ..
+                } if k == "unused-export"
+            )
+    });
+
+    assert!(
+        !stale_for_utils_unused_export,
+        "utils.ts is covered by an override turning unused-exports OFF; \
+         no stale-suppression should be emitted for that kind. \
+         Got: {:?}",
+        results.stale_suppressions
+    );
+
+    // file-level.ts is NOT covered by the override; its `unused-file`
+    // suppression keeps surfacing as stale (file IS reachable). Confirms
+    // the override is scoped, not global.
+    let stale_for_file_level = results.stale_suppressions.iter().any(|s| {
+        s.path.ends_with("file-level.ts")
+            && matches!(
+                &s.origin,
+                SuppressionOrigin::Comment {
+                    issue_kind: Some(k),
+                    ..
+                } if k == "unused-file"
+            )
+    });
+
+    assert!(
+        stale_for_file_level,
+        "file-level.ts is not covered by the override; its unused-file marker should still be stale"
     );
 }

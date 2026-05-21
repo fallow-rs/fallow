@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use fallow_config::{ResolvedConfig, RulesConfig, Severity};
 use rustc_hash::FxHashMap;
 
 // Re-export types from fallow-types
@@ -12,6 +13,44 @@ use crate::discover::FileId;
 use crate::extract::ModuleInfo;
 use crate::graph::ModuleGraph;
 use crate::results::{StaleSuppression, SuppressionOrigin};
+
+/// Map an `IssueKind` to its corresponding severity in `RulesConfig`.
+///
+/// Exhaustive match by design: a new `IssueKind` variant triggers a compile
+/// error here, forcing the implementer to decide which `RulesConfig` field
+/// (if any) gates emission. Kinds that have no matching field
+/// (`CodeDuplication`, gated by the dupes command itself) return the
+/// non-Off value `Severity::Error`; in practice these kinds short-circuit
+/// earlier via `NON_CORE_KINDS` so the returned value is unobservable.
+fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
+    match kind {
+        IssueKind::UnusedFile => rules.unused_files,
+        IssueKind::UnusedExport => rules.unused_exports,
+        IssueKind::UnusedType => rules.unused_types,
+        IssueKind::PrivateTypeLeak => rules.private_type_leaks,
+        IssueKind::UnusedDependency => rules.unused_dependencies,
+        IssueKind::UnusedDevDependency => rules.unused_dev_dependencies,
+        IssueKind::UnusedEnumMember => rules.unused_enum_members,
+        IssueKind::UnusedClassMember => rules.unused_class_members,
+        IssueKind::UnresolvedImport => rules.unresolved_imports,
+        IssueKind::UnlistedDependency => rules.unlisted_dependencies,
+        IssueKind::DuplicateExport => rules.duplicate_exports,
+        IssueKind::CircularDependency => rules.circular_dependencies,
+        IssueKind::TypeOnlyDependency => rules.type_only_dependencies,
+        IssueKind::TestOnlyDependency => rules.test_only_dependencies,
+        IssueKind::BoundaryViolation => rules.boundary_violation,
+        IssueKind::CoverageGaps => rules.coverage_gaps,
+        IssueKind::FeatureFlag => rules.feature_flags,
+        IssueKind::StaleSuppression => rules.stale_suppressions,
+        IssueKind::PnpmCatalogEntry => rules.unused_catalog_entries,
+        IssueKind::EmptyCatalogGroup => rules.empty_catalog_groups,
+        IssueKind::UnresolvedCatalogReference => rules.unresolved_catalog_references,
+        IssueKind::UnusedDependencyOverride => rules.unused_dependency_overrides,
+        IssueKind::MisconfiguredDependencyOverride => rules.misconfigured_dependency_overrides,
+        // No corresponding rule. Short-circuited earlier via `NON_CORE_KINDS`.
+        IssueKind::Complexity | IssueKind::CodeDuplication => Severity::Error,
+    }
+}
 
 /// Issue kinds whose suppression is not checked via `SuppressionContext`
 /// in `find_dead_code_full`. Excludes CLI-side kinds (checked in health/flags
@@ -185,13 +224,25 @@ impl<'a> SuppressionContext<'a> {
     ///
     /// Skips suppression kinds that are checked in the CLI layer
     /// (complexity, coverage gaps, feature flags, code duplication)
-    /// to avoid false positives.
-    pub fn find_stale(&self, graph: &ModuleGraph) -> Vec<StaleSuppression> {
+    /// to avoid false positives. Also skips suppressions whose target kind
+    /// is disabled (`Severity::Off`) under the resolved rules for the
+    /// suppression's file, including per-file `overrides.rules`: the
+    /// detector never ran, so the suppression appears unconsumed, but is
+    /// not actually stale (it documents intentional dormancy and becomes
+    /// valid again the moment the rule is re-enabled). See issue #482.
+    pub fn find_stale(
+        &self,
+        graph: &ModuleGraph,
+        config: &ResolvedConfig,
+    ) -> Vec<StaleSuppression> {
         let mut stale = Vec::new();
 
         for (&file_id, supps) in &self.by_file {
             let used = &self.used[&file_id];
             let path = &graph.modules[file_id.0 as usize].path;
+            // Resolve rules once per file so per-file `overrides.rules`
+            // apply uniformly to all suppressions in this module.
+            let file_rules = config.resolve_rules_for_path(path);
 
             for (i, s) in supps.iter().enumerate() {
                 if used[i].load(Ordering::Relaxed) {
@@ -203,6 +254,17 @@ impl<'a> SuppressionContext<'a> {
                 // appear unconsumed, but are not actually stale.
                 if let Some(kind) = s.kind
                     && NON_CORE_KINDS.contains(&kind)
+                {
+                    continue;
+                }
+
+                // Skip suppressions whose target kind is disabled in the
+                // resolved rules for this file. Blanket suppressions
+                // (`s.kind == None`) are never skipped on this basis: the
+                // marker is not anchored to any specific dormant kind, so
+                // "nothing matched" still means genuinely stale.
+                if let Some(kind) = s.kind
+                    && severity_for_kind(&file_rules, kind) == Severity::Off
                 {
                     continue;
                 }
@@ -308,6 +370,39 @@ pub fn is_file_suppressed(suppressions: &[Suppression], kind: IssueKind) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn severity_for_kind_maps_every_core_kind_to_its_field() {
+        let rules = RulesConfig {
+            unused_exports: Severity::Warn,
+            unused_types: Severity::Off,
+            unresolved_imports: Severity::Error,
+            boundary_violation: Severity::Off,
+            ..RulesConfig::default()
+        };
+
+        assert_eq!(
+            severity_for_kind(&rules, IssueKind::UnusedExport),
+            Severity::Warn
+        );
+        assert_eq!(
+            severity_for_kind(&rules, IssueKind::UnusedType),
+            Severity::Off
+        );
+        assert_eq!(
+            severity_for_kind(&rules, IssueKind::UnresolvedImport),
+            Severity::Error
+        );
+        assert_eq!(
+            severity_for_kind(&rules, IssueKind::BoundaryViolation),
+            Severity::Off
+        );
+        // PrivateTypeLeak defaults to Off across the project.
+        assert_eq!(
+            severity_for_kind(&rules, IssueKind::PrivateTypeLeak),
+            Severity::Off
+        );
+    }
 
     #[test]
     fn issue_kind_from_str_all_variants() {
