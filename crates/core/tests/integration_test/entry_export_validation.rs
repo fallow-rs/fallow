@@ -62,7 +62,14 @@ fn entry_exports_detected_via_config_file_include_entry_exports() {
         .expect("config load")
         .expect("fixture has .fallowrc.json");
     assert!(loaded.include_entry_exports);
-    let config = loaded.resolve(root, fallow_config::OutputFormat::Human, 1, true, true);
+    let config = loaded.resolve(
+        root,
+        fallow_config::OutputFormat::Human,
+        1,
+        true,
+        true,
+        None,
+    );
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results

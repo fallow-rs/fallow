@@ -36,7 +36,7 @@ pub(super) use super::super::{
 
 /// Build a minimal ResolvedConfig for testing.
 pub(super) fn test_config(root: PathBuf) -> ResolvedConfig {
-    FallowConfig::default().resolve(root, OutputFormat::Human, 1, true, true)
+    FallowConfig::default().resolve(root, OutputFormat::Human, 1, true, true, None)
 }
 
 /// Build a PackageJson with specific dependency fields via JSON deserialization.

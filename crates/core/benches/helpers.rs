@@ -41,8 +41,9 @@ pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConf
         resolve: fallow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, no_cache, true)
+    .resolve(root, OutputFormat::Human, 4, no_cache, true, None)
 }
 
 /// Generate a synthetic project with `file_count` source files.

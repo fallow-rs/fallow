@@ -33,7 +33,7 @@ fn config_for_fixture(
         ignore_dependency_overrides: ignore,
         ..Default::default()
     }
-    .resolve(root, OutputFormat::Human, 4, true, true)
+    .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
 
 #[test]
@@ -132,8 +132,14 @@ snapshots:
     )
     .expect("write pnpm lockfile");
 
-    let config =
-        FallowConfig::default().resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true);
+    let config = FallowConfig::default().resolve(
+        root.to_path_buf(),
+        OutputFormat::Human,
+        4,
+        true,
+        true,
+        None,
+    );
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let actual: FxHashSet<&str> = results
@@ -234,7 +240,7 @@ fn severity_off_short_circuits() {
         rules,
         ..Default::default()
     }
-    .resolve(root, OutputFormat::Human, 4, true, true);
+    .resolve(root, OutputFormat::Human, 4, true, true, None);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
@@ -267,8 +273,14 @@ fn unused_overrides_carry_transitive_hint_on_every_shape() {
     )
     .expect("write yaml");
 
-    let config =
-        FallowConfig::default().resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true);
+    let config = FallowConfig::default().resolve(
+        root.to_path_buf(),
+        OutputFormat::Human,
+        4,
+        true,
+        true,
+        None,
+    );
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     assert_eq!(results.unused_dependency_overrides.len(), 2);

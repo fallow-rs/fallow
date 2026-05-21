@@ -45,8 +45,9 @@ pub fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
         resolve: fallow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, true, true)
+    .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
 
 pub fn create_config_with_cache(
@@ -84,8 +85,9 @@ pub fn create_config_with_cache(
         resolve: fallow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, false, true); // no_cache = false to enable caching
+    .resolve(root, OutputFormat::Human, 4, false, true, None); // no_cache = false to enable caching
     config.cache_dir = cache_dir;
     config
 }
@@ -127,8 +129,9 @@ where
         resolve: fallow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, true, true)
+    .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
 
 pub fn create_config_with_overrides(
@@ -173,8 +176,9 @@ pub fn create_config_with_overrides(
         resolve: fallow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, true, true)
+    .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
 
 pub fn create_config_with_ignore_decorators(
@@ -212,6 +216,7 @@ pub fn create_config_with_ignore_decorators(
         resolve: fallow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, true, true)
+    .resolve(root, OutputFormat::Human, 4, true, true, None)
 }

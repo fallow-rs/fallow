@@ -447,7 +447,7 @@ mod tests {
                 production: production.into(),
                 ..Default::default()
             }
-            .resolve(root, OutputFormat::Human, 1, true, true)
+            .resolve(root, OutputFormat::Human, 1, true, true, None)
         }
 
         /// Helper to collect discovered file names (relative to root) for assertions.
@@ -847,8 +847,9 @@ mod tests {
                 resolve: ResolveConfig::default(),
                 sealed: false,
                 include_entry_exports: false,
+                cache: fallow_config::CacheConfig::default(),
             }
-            .resolve(root, OutputFormat::Human, 1, true, true)
+            .resolve(root, OutputFormat::Human, 1, true, true, None)
         }
 
         #[test]

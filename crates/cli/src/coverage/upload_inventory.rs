@@ -405,6 +405,7 @@ fn load_resolved_config(root: &Path) -> Result<ResolvedConfig, UploadError> {
         threads,
         /* no_cache */ true,
         /* quiet */ true,
+        /* cache_max_size_mb */ None,
     ))
 }
 

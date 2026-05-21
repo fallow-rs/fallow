@@ -1049,6 +1049,7 @@ impl FallowConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CacheConfig;
     use crate::PackageJson;
     use crate::config::format::OutputFormat;
     use crate::config::rules::Severity;
@@ -1104,6 +1105,7 @@ ignoreDependencies = ["autoprefixer", "postcss"]
             4,
             true,
             true,
+            None,
         );
 
         // Default ignores should be compiled
@@ -1129,6 +1131,7 @@ ignoreDependencies = ["autoprefixer", "postcss"]
             4,
             false,
             true,
+            None,
         );
 
         assert!(resolved.ignore_patterns.is_match("src/foo.generated.ts"));
@@ -1146,6 +1149,7 @@ ignoreDependencies = ["autoprefixer", "postcss"]
             4,
             true,
             true,
+            None,
         );
         assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/project/.fallow"));
         assert!(resolved.no_cache);
@@ -2653,6 +2657,7 @@ minTokens = 100
             4,
             false,
             true,
+            None,
         );
         assert!(resolved.production);
         assert_eq!(resolved.rules.unused_dev_dependencies, Severity::Off);
@@ -2688,6 +2693,7 @@ minTokens = 100
     fn include_entry_exports_propagates_through_resolve() {
         let config = FallowConfig {
             include_entry_exports: true,
+            cache: CacheConfig::default(),
             ..Default::default()
         };
         let resolved = config.resolve(
@@ -2696,6 +2702,7 @@ minTokens = 100
             1,
             true,
             true,
+            None,
         );
         assert!(resolved.include_entry_exports);
     }

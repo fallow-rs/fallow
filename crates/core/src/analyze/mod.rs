@@ -831,6 +831,7 @@ mod tests {
                 1,
                 true,
                 true,
+                None,
             )
         }
 

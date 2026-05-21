@@ -474,6 +474,7 @@ mod tests {
             resolve: fallow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            cache: fallow_config::CacheConfig::default(),
         }
         .resolve(
             PathBuf::from("/project"),
@@ -481,6 +482,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         )
     }
 
@@ -762,6 +764,7 @@ mod tests {
             resolve: fallow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            cache: fallow_config::CacheConfig::default(),
             overrides: vec![fallow_config::ConfigOverride {
                 files: vec!["**/*.test.ts".to_string()],
                 rules: fallow_config::PartialRulesConfig {
@@ -776,6 +779,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         )
     }
 
@@ -810,6 +814,7 @@ mod tests {
             resolve: fallow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            cache: fallow_config::CacheConfig::default(),
             overrides: vec![fallow_config::ConfigOverride {
                 files: vec![pattern.to_string()],
                 rules: fallow_config::PartialRulesConfig {
@@ -824,6 +829,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         )
     }
 

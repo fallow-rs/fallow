@@ -705,7 +705,7 @@ fn analyze_full(
     let mut cache_store = if config.no_cache {
         None
     } else {
-        cache::CacheStore::load(&config.cache_dir)
+        cache::CacheStore::load(&config.cache_dir, config.cache_config_hash)
     };
 
     let parse_result = extract::parse_all_files(files, cache_store.as_ref(), need_complexity);
@@ -720,7 +720,16 @@ fn analyze_full(
     if !config.no_cache {
         let store = cache_store.get_or_insert_with(cache::CacheStore::new);
         update_cache(store, &modules, files);
-        if let Err(e) = store.save(&config.cache_dir) {
+        let cache_max_size_bytes = config
+            .cache_max_size_mb
+            .map_or(cache::DEFAULT_CACHE_MAX_SIZE, |mb| {
+                (mb as usize).saturating_mul(1024 * 1024)
+            });
+        if let Err(e) = store.save(
+            &config.cache_dir,
+            config.cache_config_hash,
+            cache_max_size_bytes,
+        ) {
             tracing::warn!("Failed to save cache: {e}");
         }
     }
@@ -1408,6 +1417,7 @@ pub fn config_for_project(
                     num_cpus(),
                     false,
                     true, // quiet: LSP/programmatic callers don't need progress bars
+                    None, // LSP/programmatic embedders use the default cache cap
                 ),
                 Some(path),
             )
@@ -1419,6 +1429,7 @@ pub fn config_for_project(
                 num_cpus(),
                 false,
                 true,
+                None,
             ),
             None,
         ),
@@ -1446,6 +1457,7 @@ pub(crate) fn default_config(root: &Path) -> ResolvedConfig {
                 num_cpus(),
                 false,
                 true,
+                None,
             )
         },
         |(config, _)| config,

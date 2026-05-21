@@ -168,7 +168,7 @@ mod tests {
             boundaries,
             ..Default::default()
         }
-        .resolve(root, OutputFormat::Human, 1, true, true)
+        .resolve(root, OutputFormat::Human, 1, true, true, None)
     }
 
     fn resolved_module(file_id: FileId, path: PathBuf) -> ResolvedModule {

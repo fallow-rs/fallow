@@ -239,6 +239,8 @@ mod tests {
             fix: fallow_config::FixConfig::default(),
             resolve: fallow_config::ResolveConfig::default(),
             include_entry_exports: false,
+            cache_max_size_mb: None,
+            cache_config_hash: 0,
         }
     }
 

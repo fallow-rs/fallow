@@ -200,7 +200,15 @@ pub fn load_config_for_analysis(
         return Err(crate::error::emit_error(&msg, 2, output));
     }
 
-    let resolved = final_config.resolve(root.to_path_buf(), output, threads, no_cache, quiet);
+    let cache_max_size_mb = resolve_cache_max_size_env();
+    let resolved = final_config.resolve(
+        root.to_path_buf(),
+        output,
+        threads,
+        no_cache,
+        quiet,
+        cache_max_size_mb,
+    );
 
     // Issue #473: discover workspaces here so any silent-fail in
     // crates/config/src/workspace/ surfaces with a typed diagnostic (and a
@@ -245,4 +253,16 @@ pub fn load_config_for_analysis(
 #[must_use]
 pub fn workspace_diagnostics_for(root: &Path) -> Vec<fallow_config::WorkspaceDiagnostic> {
     fallow_config::workspace_diagnostics_for(root)
+}
+
+/// Read `FALLOW_CACHE_MAX_SIZE` (megabytes) into `Option<u32>`, returning
+/// `None` when the env var is unset or fails to parse as a positive integer.
+/// Resolved here rather than as a clap flag because the cache cap is a
+/// platform/CI ergonomic concern, not an analysis input; an env var keeps
+/// it out of the `--help` surface (see ADR-009).
+fn resolve_cache_max_size_env() -> Option<u32> {
+    std::env::var("FALLOW_CACHE_MAX_SIZE")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+        .filter(|mb| *mb > 0)
 }

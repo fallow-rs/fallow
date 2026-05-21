@@ -7,10 +7,24 @@
 //! analysis pipeline. Eliminating these clones would require shared ownership
 //! (`Arc<str>`) across the entire extraction + analysis pipeline.
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use oxc_span::Span;
 
 use crate::ExportName;
 use fallow_types::extract::{NamespaceObjectAlias, VisibilityTag};
+
+/// Seconds-since-Unix-epoch from the wall clock, saturating to 0 if the
+/// system clock is set before the epoch. Used as the LRU bookkeeping
+/// timestamp on `CachedModule.last_access_secs`. Wall-clock (not monotonic)
+/// is the right source here because the value persists across process
+/// invocations.
+#[must_use]
+pub fn current_unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
 
 use super::types::{
     CachedDynamicImport, CachedDynamicImportPattern, CachedExport, CachedImport,
@@ -249,6 +263,7 @@ pub fn module_to_cached(
         content_hash: module.content_hash,
         mtime_secs,
         file_size,
+        last_access_secs: current_unix_seconds(),
         exports: module
             .exports
             .iter()

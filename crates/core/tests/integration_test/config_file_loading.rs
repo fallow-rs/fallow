@@ -162,7 +162,7 @@ fn toml_config_loads_and_applies_rules() {
     );
 
     // Resolve and run analysis to confirm the config is applied end-to-end
-    let resolved = loaded.resolve(root, OutputFormat::Human, 4, true, true);
+    let resolved = loaded.resolve(root, OutputFormat::Human, 4, true, true, None);
     let results = fallow_core::analyze(&resolved).expect("analysis should succeed");
 
     // orphan.ts is unused, so it should be detected (warn still detects, just doesn't fail CI)

@@ -51,8 +51,9 @@ fn create_boundary_config_with_entry(
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, true, true)
+    .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
 
 #[test]
@@ -203,8 +204,9 @@ fn no_violations_when_rule_is_off() {
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, true, true);
+    .resolve(root, OutputFormat::Human, 4, true, true, None);
 
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
     assert!(
@@ -257,8 +259,9 @@ fn preset_detects_boundary_violation() {
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, true, true);
+    .resolve(root, OutputFormat::Human, 4, true, true, None);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     // adapters/http.ts imports domain/user.ts directly — that's a violation
@@ -351,8 +354,9 @@ fn root_field_classifies_per_subtree() {
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, true, true);
+    .resolve(root, OutputFormat::Human, 4, true, true, None);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     // Same flat pattern `src/**` is disambiguated by `root`: ui matches
@@ -456,8 +460,9 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root.clone(), OutputFormat::Human, 4, true, true);
+    .resolve(root.clone(), OutputFormat::Human, 4, true, true, None);
     let flat_results = fallow_core::analyze(&flat_config).expect("analysis should succeed");
     assert!(
         flat_results.boundary_violations.is_empty(),
@@ -521,8 +526,9 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, true, true);
+    .resolve(root, OutputFormat::Human, 4, true, true, None);
     let scoped_results = fallow_core::analyze(&scoped_config).expect("analysis should succeed");
     assert_eq!(
         scoped_results.boundary_violations.len(),
@@ -651,8 +657,9 @@ fn bulletproof_preset_detects_violation() {
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, true, true);
+    .resolve(root, OutputFormat::Human, 4, true, true, None);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     // features/auth/login.ts imports from app/page.ts — features zone cannot
@@ -750,8 +757,9 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, true, true);
+    .resolve(root, OutputFormat::Human, 4, true, true, None);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     assert_eq!(

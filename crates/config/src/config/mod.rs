@@ -365,6 +365,36 @@ pub struct FallowConfig {
     /// this when set; otherwise the config value is used.
     #[serde(default)]
     pub include_entry_exports: bool,
+
+    /// Incremental cache tuning. Today the only knob is `maxSizeMb`, which
+    /// caps the on-disk cache and triggers LRU eviction during save. See
+    /// [`CacheConfig`].
+    #[serde(default, skip_serializing_if = "CacheConfig::is_default")]
+    pub cache: CacheConfig,
+}
+
+/// Incremental cache configuration.
+///
+/// Today only `maxSizeMb` is exposed. The env var `FALLOW_CACHE_MAX_SIZE`
+/// (also in MB) wins over this field when both are set. The default cap is
+/// 256 MB; values are interpreted as whole megabytes.
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CacheConfig {
+    /// Maximum on-disk cache size in megabytes. When the serialized cache
+    /// exceeds 80% of this cap during save, the oldest entries are evicted
+    /// down to 60% of the cap. Default: 256 MB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_size_mb: Option<u32>,
+}
+
+impl CacheConfig {
+    /// Whether the config carries no overrides (used to suppress serialization
+    /// of the `cache` field when the user has not customized it).
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.max_size_mb.is_none()
+    }
 }
 
 /// Analysis-specific production-mode selector.

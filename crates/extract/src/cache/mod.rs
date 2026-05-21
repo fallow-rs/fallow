@@ -11,9 +11,12 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use conversion::{cached_to_module, cached_to_module_opts, module_to_cached};
+pub use conversion::{
+    cached_to_module, cached_to_module_opts, current_unix_seconds, module_to_cached,
+};
 pub use store::CacheStore;
 pub use types::{
     CachedDynamicImport, CachedDynamicImportPattern, CachedExport, CachedImport, CachedMember,
-    CachedModule, CachedReExport, CachedRequireCall, CachedSuppression, DUPES_CACHE_VERSION,
+    CachedModule, CachedReExport, CachedRequireCall, CachedSuppression, DEFAULT_CACHE_MAX_SIZE,
+    DUPES_CACHE_VERSION,
 };

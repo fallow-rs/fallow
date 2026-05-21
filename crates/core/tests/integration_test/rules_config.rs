@@ -107,8 +107,9 @@ fn ignore_exports_wildcard() {
         resolve: fallow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, true, true);
+    .resolve(root, OutputFormat::Human, 4, true, true, None);
 
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
@@ -165,8 +166,9 @@ fn ignore_exports_specific() {
         resolve: fallow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, true, true);
+    .resolve(root, OutputFormat::Human, 4, true, true, None);
 
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
@@ -344,8 +346,9 @@ fn ignore_dependencies_config() {
         resolve: fallow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, true, true);
+    .resolve(root, OutputFormat::Human, 4, true, true, None);
 
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 

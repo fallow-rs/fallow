@@ -29,6 +29,7 @@ fn cache_store_insert_and_get() {
         content_hash: 42,
         mtime_secs: 0,
         file_size: 0,
+        last_access_secs: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],
@@ -65,6 +66,7 @@ fn cache_store_hash_mismatch_returns_none() {
         content_hash: 42,
         mtime_secs: 0,
         file_size: 0,
+        last_access_secs: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],
@@ -105,6 +107,7 @@ fn cache_store_overwrite_entry() {
         content_hash: 1,
         mtime_secs: 0,
         file_size: 0,
+        last_access_secs: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],
@@ -132,6 +135,7 @@ fn cache_store_overwrite_entry() {
         content_hash: 2,
         mtime_secs: 0,
         file_size: 0,
+        last_access_secs: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],
@@ -579,7 +583,7 @@ fn module_to_cached_roundtrip_members() {
 
 #[test]
 fn cache_load_nonexistent_returns_none() {
-    let result = CacheStore::load(Path::new("/nonexistent/path"));
+    let result = CacheStore::load(Path::new("/nonexistent/path"), 0);
     assert!(result.is_none());
 }
 
@@ -603,6 +607,7 @@ fn cache_save_and_load_roundtrip() {
         content_hash: 42,
         mtime_secs: 0,
         file_size: 0,
+        last_access_secs: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],
@@ -627,9 +632,9 @@ fn cache_save_and_load_roundtrip() {
         namespace_object_aliases: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
-    store.save(&dir).unwrap();
+    store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
 
-    let loaded = CacheStore::load(&dir);
+    let loaded = CacheStore::load(&dir, 0);
     assert!(loaded.is_some());
     let loaded = loaded.unwrap();
     assert_eq!(loaded.len(), 1);
@@ -650,6 +655,7 @@ fn cache_version_mismatch_returns_none() {
         content_hash: 42,
         mtime_secs: 0,
         file_size: 0,
+        last_access_secs: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],
@@ -674,10 +680,10 @@ fn cache_version_mismatch_returns_none() {
         namespace_object_aliases: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
-    store.save(&dir).unwrap();
+    store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
 
     // Verify the cache loads correctly before tampering
-    assert!(CacheStore::load(&dir).is_some());
+    assert!(CacheStore::load(&dir, 0).is_some());
 
     // Read raw bytes and modify the version field.
     // The version (CACHE_VERSION) is the first encoded field.
@@ -690,7 +696,7 @@ fn cache_version_mismatch_returns_none() {
     std::fs::write(&cache_file, &data).unwrap();
 
     // Loading should return None due to version mismatch
-    let result = CacheStore::load(&dir);
+    let result = CacheStore::load(&dir, 0);
     assert!(result.is_none());
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -748,6 +754,7 @@ fn get_by_path_only_returns_entry_regardless_of_hash() {
         content_hash: 42,
         mtime_secs: 0,
         file_size: 0,
+        last_access_secs: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],
@@ -799,6 +806,7 @@ fn retain_paths_removes_stale_entries() {
         content_hash: 1,
         mtime_secs: 0,
         file_size: 0,
+        last_access_secs: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],
@@ -856,6 +864,7 @@ fn retain_paths_with_empty_files_clears_cache() {
         content_hash: 1,
         mtime_secs: 0,
         file_size: 0,
+        last_access_secs: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],
@@ -893,6 +902,7 @@ fn get_by_metadata_returns_entry_on_match() {
         content_hash: 42,
         mtime_secs: 1000,
         file_size: 500,
+        last_access_secs: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],
@@ -930,6 +940,7 @@ fn get_by_metadata_returns_none_on_mtime_mismatch() {
         content_hash: 42,
         mtime_secs: 1000,
         file_size: 500,
+        last_access_secs: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],
@@ -969,6 +980,7 @@ fn get_by_metadata_returns_none_on_size_mismatch() {
         content_hash: 42,
         mtime_secs: 1000,
         file_size: 500,
+        last_access_secs: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],
@@ -1008,6 +1020,7 @@ fn get_by_metadata_returns_none_for_zero_mtime() {
         content_hash: 42,
         mtime_secs: 0,
         file_size: 500,
+        last_access_secs: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],
@@ -1765,4 +1778,190 @@ fn module_to_cached_roundtrip_member_decorators() {
     assert!(restored.exports[0].members[0].has_decorator);
     assert_eq!(restored.exports[0].members[0].span.start, 50);
     assert_eq!(restored.exports[0].members[0].span.end, 80);
+}
+
+/// Build a minimal `CachedModule` whose serialized size is roughly
+/// proportional to `payload_kb`. Used by the eviction tests to populate
+/// a store with predictable byte cost.
+fn synthetic_module(content_hash: u64, last_access_secs: u64, payload_kb: usize) -> CachedModule {
+    let payload = "a".repeat(payload_kb * 1024);
+    CachedModule {
+        content_hash,
+        mtime_secs: 0,
+        file_size: 0,
+        last_access_secs,
+        exports: vec![],
+        imports: vec![],
+        re_exports: vec![],
+        dynamic_imports: vec![],
+        require_calls: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![payload],
+        dynamic_import_patterns: vec![],
+        has_cjs_exports: false,
+        has_angular_component_template_url: false,
+        unused_import_bindings: vec![],
+        type_referenced_import_bindings: vec![],
+        value_referenced_import_bindings: vec![],
+        suppressions: vec![],
+        unknown_suppression_kinds: vec![],
+        line_offsets: vec![],
+        complexity: vec![],
+        flag_uses: vec![],
+        class_heritage: vec![],
+        local_type_declarations: Vec::new(),
+        public_signature_type_references: Vec::new(),
+        namespace_object_aliases: Vec::new(),
+    }
+}
+
+#[test]
+fn cache_save_no_eviction_when_under_threshold() {
+    let dir = test_cache_dir("no_evict");
+    let mut store = CacheStore::new();
+    for i in 0..10u64 {
+        store.insert(Path::new(&format!("file{i}.ts")), synthetic_module(i, i, 1));
+    }
+    // 256 MB cap, 10 small entries: no eviction expected.
+    store
+        .save(&dir, 42, DEFAULT_CACHE_MAX_SIZE)
+        .expect("save under threshold");
+
+    let loaded = CacheStore::load(&dir, 42).expect("load round-trip");
+    assert_eq!(loaded.len(), 10, "all 10 entries survive");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cache_save_evicts_when_over_threshold() {
+    let dir = test_cache_dir("evict_over_threshold");
+    let mut store = CacheStore::new();
+    // 50 entries, ~1 KB each, with increasing last_access_secs.
+    // Cap = 40 KB so the post-encode size sits well above the 32 KB trigger.
+    for i in 0..50u64 {
+        store.insert(Path::new(&format!("file{i}.ts")), synthetic_module(i, i, 1));
+    }
+    let cap = 40 * 1024;
+    store.save(&dir, 99, cap).expect("save with eviction");
+
+    let loaded = CacheStore::load(&dir, 99).expect("load after eviction");
+    // Some entries must have been evicted.
+    assert!(loaded.len() < 50, "eviction removed entries");
+    // Eviction order is ascending last_access_secs: the oldest (lowest i)
+    // entries should leave first. Confirm at least one tail entry stays
+    // and at least one head entry is gone.
+    let kept_max = (0..50u64)
+        .filter(|i| {
+            loaded
+                .get(&std::path::PathBuf::from(format!("file{i}.ts")), *i)
+                .is_some()
+        })
+        .max()
+        .expect("at least one entry remains");
+    let kept_min = (0..50u64)
+        .filter(|i| {
+            loaded
+                .get(&std::path::PathBuf::from(format!("file{i}.ts")), *i)
+                .is_some()
+        })
+        .min()
+        .expect("at least one entry remains");
+    assert_eq!(kept_max, 49, "newest entry survives eviction");
+    assert!(
+        kept_min > 0,
+        "oldest entry was evicted (kept_min = {kept_min})"
+    );
+
+    // Final on-disk size sits below the 60% target (24 KB), with slack for
+    // the bitcode envelope.
+    let on_disk = std::fs::read(dir.join("cache.bin")).unwrap();
+    assert!(
+        on_disk.len() < cap * 80 / 100,
+        "post-eviction size ({on_disk_kb} KB) < 80% of cap ({cap_kb} KB)",
+        on_disk_kb = on_disk.len() / 1024,
+        cap_kb = cap / 1024,
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cache_save_always_honors_cap_with_huge_entries() {
+    let dir = test_cache_dir("huge_entry_overshoot");
+    let mut store = CacheStore::new();
+    // One ~10 KB entry under a 1 KB cap. The single entry overshoots the
+    // cap; the store must persist it anyway (so the cache stays useful)
+    // and emit a `tracing::warn!` (not asserted directly here, since
+    // capturing tracing in unit tests requires an extra harness).
+    store.insert(Path::new("huge.ts"), synthetic_module(7, 0, 10));
+    store
+        .save(&dir, 5, 1024)
+        .expect("save honors cap with overshoot");
+
+    let loaded = CacheStore::load(&dir, 5).expect("load after overshoot save");
+    assert_eq!(loaded.len(), 1, "single entry preserved under overshoot");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cache_load_returns_none_on_config_hash_mismatch() {
+    let dir = test_cache_dir("config_hash_mismatch");
+    let mut store = CacheStore::new();
+    store.insert(Path::new("test.ts"), synthetic_module(1, 0, 1));
+    store
+        .save(&dir, 0xDEAD_BEEF, DEFAULT_CACHE_MAX_SIZE)
+        .expect("save with config_hash A");
+
+    // Load with a different config_hash: must be None.
+    assert!(
+        CacheStore::load(&dir, 0xCAFE_BABE).is_none(),
+        "mismatched config_hash invalidates cache"
+    );
+    // Same config_hash still round-trips.
+    assert!(
+        CacheStore::load(&dir, 0xDEAD_BEEF).is_some(),
+        "matching config_hash round-trips"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cache_load_round_trip_with_matching_config_hash() {
+    let dir = test_cache_dir("config_hash_roundtrip");
+    let mut store = CacheStore::new();
+    store.insert(Path::new("a.ts"), synthetic_module(1, 0, 1));
+    store.insert(Path::new("b.ts"), synthetic_module(2, 1, 1));
+    let hash = 0xABCD_1234_5678_9ABC_u64;
+    store
+        .save(&dir, hash, DEFAULT_CACHE_MAX_SIZE)
+        .expect("save with hash");
+
+    let loaded = CacheStore::load(&dir, hash).expect("load with matching hash");
+    assert_eq!(loaded.len(), 2);
+    assert!(loaded.get(Path::new("a.ts"), 1).is_some());
+    assert!(loaded.get(Path::new("b.ts"), 2).is_some());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cache_save_atomic_write_leaves_no_tmp_on_success() {
+    let dir = test_cache_dir("atomic_no_tmp");
+    let mut store = CacheStore::new();
+    store.insert(Path::new("test.ts"), synthetic_module(1, 0, 1));
+    store
+        .save(&dir, 0, DEFAULT_CACHE_MAX_SIZE)
+        .expect("save atomic");
+
+    // `cache.bin` exists, `cache.bin.tmp` does not.
+    assert!(dir.join("cache.bin").exists(), "cache.bin present");
+    assert!(
+        !dir.join("cache.bin.tmp").exists(),
+        "tmp file cleaned up after rename"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

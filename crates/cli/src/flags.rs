@@ -92,7 +92,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     let cache_store = if config.no_cache {
         None
     } else {
-        fallow_core::cache::CacheStore::load(&config.cache_dir)
+        fallow_core::cache::CacheStore::load(&config.cache_dir, config.cache_config_hash)
     };
     let parse_result = fallow_core::extract::parse_all_files(&files, cache_store.as_ref(), false);
 

@@ -31,7 +31,7 @@ fn config_for_fixture(
         ignore_dependency_overrides: vec![],
         ..Default::default()
     }
-    .resolve(root, OutputFormat::Human, 4, true, true)
+    .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
 
 #[test]
@@ -202,7 +202,7 @@ fn detector_skipped_when_severity_is_off() {
         rules,
         ..Default::default()
     }
-    .resolve(root, OutputFormat::Human, 4, true, true);
+    .resolve(root, OutputFormat::Human, 4, true, true, None);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
     assert!(
         results.unresolved_catalog_references.is_empty(),

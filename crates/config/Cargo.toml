@@ -27,6 +27,7 @@ rustc-hash = { workspace = true }
 tempfile = { workspace = true }
 tracing = { workspace = true }
 ureq = { workspace = true }
+xxhash-rust = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

@@ -230,6 +230,23 @@ pub struct ResolvedConfig {
     pub cache_dir: PathBuf,
     pub threads: usize,
     pub no_cache: bool,
+    /// Resolved on-disk cache cap in megabytes. `None` selects the default
+    /// (`fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE`, 256 MB). Computed
+    /// at the CLI layer as `FALLOW_CACHE_MAX_SIZE` env var (if set), else
+    /// `cache.maxSizeMb` in the config file. Stored in MB rather than
+    /// bytes so that the config crate has no dependency on
+    /// `fallow-extract`; the bytes resolution happens at the callsite
+    /// (`fallow_core::lib::analyze_full`).
+    pub cache_max_size_mb: Option<u32>,
+    /// Stable u64 hash of extraction-affecting config fields (currently the
+    /// active external plugin names + inline framework definition names).
+    /// Threaded into `CacheStore::load` and `CacheStore::save` so a config
+    /// change discards the stale cache without requiring a `CACHE_VERSION`
+    /// bump. See ADR-009 for the ingredient list and the contract for
+    /// adding new ingredients in the future. Zero when `no_cache` is set
+    /// (the bookkeeping is skipped to avoid unnecessary work when caching
+    /// is disabled).
+    pub cache_config_hash: u64,
     pub ignore_dependencies: Vec<String>,
     pub ignore_export_rules: Vec<IgnoreExportRule>,
     /// Pre-compiled glob matchers for `ignoreExports`.
@@ -291,8 +308,43 @@ pub struct ResolvedConfig {
     pub include_entry_exports: bool,
 }
 
+/// Compute the cache-invalidation hash over extraction-affecting config
+/// fields. See ADR-009 for the contract: this hash is stored in the cache
+/// header, and a mismatch on load discards the cache.
+///
+/// Today's ingredients (sorted for determinism across runs):
+/// - Active external plugin names. `discover_external_plugins` finalises the
+///   plugin set after merging inline `framework: [...]` definitions, so we
+///   hash the post-merge list.
+///
+/// **Adding a new ingredient.** Any new `ResolvedConfig` field that affects
+/// what extraction emits (e.g. a future "extract source-map references"
+/// toggle) MUST be folded into this hash, otherwise stale caches keep
+/// serving the old extraction output across the config change. The signal
+/// is "field affects extraction output bytes," not "field affects detection
+/// behavior" (detection-only fields like `entry`/`ignorePatterns` belong on
+/// the analysis layer, not in the cache key).
+fn compute_cache_config_hash(external_plugins: &[ExternalPluginDef]) -> u64 {
+    let mut names: Vec<&str> = external_plugins.iter().map(|p| p.name.as_str()).collect();
+    names.sort_unstable();
+    let mut hasher = xxhash_rust::xxh3::Xxh3::new();
+    for name in names {
+        // Length-prefix each name so `["ab", "c"]` and `["a", "bc"]` hash
+        // distinctly even though the concatenated bytes are identical.
+        hasher.update(&(name.len() as u32).to_le_bytes());
+        hasher.update(name.as_bytes());
+    }
+    hasher.digest()
+}
+
 impl FallowConfig {
     /// Resolve into a fully resolved config with compiled globs.
+    ///
+    /// `cache_max_size_mb` is the user's override for the cache cap (env var
+    /// or in-config `cache.maxSizeMb`). When `None`, the cap defaults to
+    /// `fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE` (256 MB). Env-var
+    /// precedence is resolved at the CLI layer, so the resolver itself only
+    /// sees the final value.
     pub fn resolve(
         self,
         root: PathBuf,
@@ -300,6 +352,7 @@ impl FallowConfig {
         threads: usize,
         no_cache: bool,
         quiet: bool,
+        cache_max_size_mb: Option<u32>,
     ) -> ResolvedConfig {
         // User-supplied patterns are validated by `FallowConfig::load`
         // (issue #463). Configs constructed in-code (tests, defaults) bypass
@@ -474,6 +527,25 @@ impl FallowConfig {
             })
             .collect();
 
+        // Resolve the cache cap. Env-var precedence is handled at the CLI
+        // layer (CLI passes either the env-var value or `None`), so here we
+        // just fall back to the in-config `cache.maxSizeMb`. The bytes
+        // conversion happens at the `CacheStore::save` callsite (in
+        // `fallow_core`), keeping `fallow-config` independent of
+        // `fallow-extract`.
+        let cache_max_size_mb = cache_max_size_mb.or(self.cache.max_size_mb);
+
+        // Compute the cache config hash. The hash invalidates the cache on
+        // user-driven config changes that affect extraction (currently:
+        // active external plugin names + inline framework definition
+        // names; see ADR-009 for the contract). Skipped under `no_cache`
+        // so the bookkeeping is zero-cost when caching is disabled.
+        let cache_config_hash = if no_cache {
+            0
+        } else {
+            compute_cache_config_hash(&external_plugins)
+        };
+
         ResolvedConfig {
             root,
             entry_patterns: self.entry,
@@ -482,6 +554,8 @@ impl FallowConfig {
             cache_dir,
             threads,
             no_cache,
+            cache_max_size_mb,
+            cache_config_hash,
             ignore_dependencies: self.ignore_dependencies,
             ignore_export_rules: self.ignore_exports,
             compiled_ignore_exports,
@@ -540,6 +614,7 @@ impl ResolvedConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CacheConfig;
     use crate::config::boundaries::BoundaryConfig;
     use crate::config::health::HealthConfig;
 
@@ -596,6 +671,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            cache: CacheConfig::default(),
         };
         let resolved = config.resolve(
             PathBuf::from("/project"),
@@ -603,6 +679,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         let rules = resolved.resolve_rules_for_path(Path::new("/project/src/foo.ts"));
         assert_eq!(rules.unused_files, Severity::Error);
@@ -647,6 +724,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            cache: CacheConfig::default(),
         };
         let resolved = config.resolve(
             PathBuf::from("/project"),
@@ -654,6 +732,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
 
         // Test file matches override
@@ -714,6 +793,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            cache: CacheConfig::default(),
         };
         let resolved = config.resolve(
             PathBuf::from("/project"),
@@ -721,6 +801,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
 
         // First override matches *.ts, second matches *.test.ts; second wins
@@ -777,6 +858,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            cache: CacheConfig::default(),
         };
         let resolved = config.resolve(
             PathBuf::from("/project"),
@@ -784,6 +866,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert_eq!(
             resolved.overrides.len(),
@@ -883,6 +966,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            cache: CacheConfig::default(),
         };
         for _ in 0..10 {
             let _ = build_config().resolve(
@@ -891,6 +975,7 @@ mod tests {
                 1,
                 true,
                 true,
+                None,
             );
         }
         // After 10 resolves the dedup state holds the warn key. Asking the
@@ -935,6 +1020,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            cache: CacheConfig::default(),
         }
     }
 
@@ -948,6 +1034,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert_eq!(
             resolved.rules.unused_dev_dependencies,
@@ -964,6 +1051,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert_eq!(
             resolved.rules.unused_optional_dependencies,
@@ -980,6 +1068,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         // Other rules should remain at their defaults
         assert_eq!(resolved.rules.unused_files, Severity::Error);
@@ -995,6 +1084,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert_eq!(
             resolved.rules.unused_dev_dependencies,
@@ -1012,6 +1102,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert!(resolved.production);
 
@@ -1021,6 +1112,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert!(!resolved2.production);
     }
@@ -1035,6 +1127,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert!(
             resolved
@@ -1056,6 +1149,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert!(resolved.ignore_patterns.is_match("dist/bundle.js"));
         assert!(
@@ -1073,6 +1167,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert!(
             resolved.ignore_patterns.is_match("build/output.js"),
@@ -1093,6 +1188,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert!(resolved.ignore_patterns.is_match("vendor/jquery.min.js"));
         assert!(resolved.ignore_patterns.is_match("lib/utils.min.mjs"));
@@ -1106,6 +1202,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert!(resolved.ignore_patterns.is_match(".git/objects/ab/123.js"));
     }
@@ -1118,6 +1215,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert!(
             resolved
@@ -1134,6 +1232,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert!(!resolved.ignore_patterns.is_match("src/index.ts"));
         assert!(
@@ -1156,6 +1255,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         // Custom pattern works
         assert!(
@@ -1179,6 +1279,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert_eq!(resolved.entry_patterns, vec!["src/**/*.ts", "lib/**/*.js"]);
     }
@@ -1193,6 +1294,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert_eq!(
             resolved.ignore_dependencies,
@@ -1208,6 +1310,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert_eq!(resolved.cache_dir, PathBuf::from("/my/project/.fallow"));
     }
@@ -1220,6 +1323,7 @@ mod tests {
             8,
             true,
             true,
+            None,
         );
         assert_eq!(resolved.threads, 8);
     }
@@ -1232,6 +1336,7 @@ mod tests {
             1,
             true,
             false,
+            None,
         );
         assert!(!resolved.quiet);
 
@@ -1241,6 +1346,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert!(resolved2.quiet);
     }
@@ -1253,6 +1359,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert!(resolved_no_cache.no_cache);
 
@@ -1262,6 +1369,7 @@ mod tests {
             1,
             false,
             true,
+            None,
         );
         assert!(!resolved_with_cache.no_cache);
     }
@@ -1289,6 +1397,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
     }
 
@@ -1308,6 +1417,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert!(
             resolved.overrides.is_empty(),
@@ -1340,6 +1450,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert_eq!(resolved.overrides.len(), 2);
     }
@@ -1373,6 +1484,7 @@ mod tests {
                 1,
                 true,
                 true,
+                None,
             )
         }
 
@@ -1430,6 +1542,7 @@ mod tests {
                     1,
                     true,
                     true,
+                    None,
                 );
                 prop_assert_eq!(
                     resolved.cache_dir, expected_cache,
@@ -1445,7 +1558,7 @@ mod tests {
                     OutputFormat::Human,
                     threads,
                     true,
-                    true,
+                    true, None,
                 );
                 prop_assert_eq!(
                     resolved.threads, threads,
@@ -1465,7 +1578,7 @@ mod tests {
                     OutputFormat::Human,
                     1,
                     true,
-                    true,
+                    true, None,
                 );
                 // Defaults should still be present (the custom pattern cannot
                 // match this path, so only the default **/node_modules/** can)
@@ -1491,6 +1604,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         // Preset should have been expanded into zones (no tsconfig → fallback to "src")
         assert_eq!(resolved.boundaries.zones.len(), 3);
@@ -1520,6 +1634,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         // User zone "domain" replaced preset zone "domain"
         assert_eq!(resolved.boundaries.zones.len(), 3);
@@ -1544,6 +1659,7 @@ mod tests {
             1,
             true,
             true,
+            None,
         );
         assert!(resolved.boundaries.is_empty());
     }

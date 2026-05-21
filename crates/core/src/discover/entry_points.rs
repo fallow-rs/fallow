@@ -1127,8 +1127,9 @@ mod tests {
             resolve: fallow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            cache: fallow_config::CacheConfig::default(),
         }
-        .resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true);
+        .resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true, None);
 
         let files = vec![
             DiscoveredFile {
@@ -1257,8 +1258,9 @@ mod tests {
             resolve: fallow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            cache: fallow_config::CacheConfig::default(),
         }
-        .resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true);
+        .resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true, None);
 
         let files = vec![
             DiscoveredFile {

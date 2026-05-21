@@ -856,6 +856,7 @@ dependencies = [
  "toml_edit",
  "tracing",
  "ureq",
+ "xxhash-rust",
 ]
 
 [[package]]

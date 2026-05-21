@@ -125,6 +125,7 @@ fn ignore_dependencies_config_filters_deps() {
         1,
         true,
         true,
+        None,
     );
 
     let (unused, _, _) = find_unused_dependencies(&graph, &pkg, &config, None, &[]);

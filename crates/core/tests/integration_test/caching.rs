@@ -21,6 +21,7 @@ fn cache_roundtrip() {
         content_hash: 12345,
         mtime_secs: 0,
         file_size: 0,
+        last_access_secs: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],
@@ -49,8 +50,10 @@ fn cache_roundtrip() {
     assert_eq!(store.len(), 1);
 
     // Save and reload
-    store.save(&temp_dir).unwrap();
-    let loaded = CacheStore::load(&temp_dir).unwrap();
+    store
+        .save(&temp_dir, 0, fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE)
+        .unwrap();
+    let loaded = CacheStore::load(&temp_dir, 0).unwrap();
     assert_eq!(loaded.len(), 1);
 
     // Correct hash -> hit
@@ -174,6 +177,7 @@ fn incremental_cache_prune_stale_entries() {
         content_hash: 1,
         mtime_secs: 0,
         file_size: 0,
+        last_access_secs: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],

@@ -7,14 +7,29 @@ use bitcode::{Decode, Encode};
 use crate::MemberKind;
 
 /// Cache version, bump when the cache format or cached extraction semantics change.
-pub(super) const CACHE_VERSION: u32 = 87;
+pub(super) const CACHE_VERSION: u32 = 88;
 
-/// Duplication token cache version — bump when duplicate tokenization,
+/// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
 pub const DUPES_CACHE_VERSION: u32 = 4;
 
-/// Maximum cache file size to deserialize (256 MB).
-pub(super) const MAX_CACHE_SIZE: usize = 256 * 1024 * 1024;
+/// Default maximum cache size (256 MB). Overridable per-project via
+/// `cache.maxSizeMb` in the config file or `FALLOW_CACHE_MAX_SIZE` env var.
+/// Also used as the hard ceiling on load-time deserialization as a defence
+/// against pathological on-disk files.
+pub const DEFAULT_CACHE_MAX_SIZE: usize = 256 * 1024 * 1024;
+
+/// Trigger LRU eviction when the serialized cache exceeds 80% of the cap.
+/// Basis points (1/100 of a percent) for integer arithmetic without floats.
+pub(super) const EVICTION_TRIGGER_BPS: usize = 8000;
+
+/// Evict down to 60% of the cap so subsequent saves leave headroom.
+pub(super) const EVICTION_TARGET_BPS: usize = 6000;
+
+/// Promote the eviction log from `debug!` to `info!` when at least 25% of
+/// entries are removed in a single save. Default-noise concerns mean
+/// small-turnover saves should not be visible without `RUST_LOG=debug`.
+pub(super) const EVICTION_SIGNIFICANT_BPS: usize = 2500;
 
 /// Import kind discriminant for `CachedImport`:
 /// 0 = Named, 1 = Default, 2 = Namespace, 3 = `SideEffect`.
@@ -33,6 +48,14 @@ pub struct CachedModule {
     pub mtime_secs: u64,
     /// File size in bytes for fast cache validation.
     pub file_size: u64,
+    /// Seconds-since-epoch at the time this entry was last WRITTEN
+    /// (first parse or content-change refresh). NOT updated on cache-hit
+    /// reads: `update_cache` already iterates every in-scope file every run,
+    /// so refreshing on read would collapse the LRU to "last run this file
+    /// was discovered" for every retained entry. With write-only refresh,
+    /// the LRU genuinely targets stale (in-scope-but-unchanged-for-many-runs)
+    /// entries. Used by `CacheStore::save` for write-time eviction ordering.
+    pub last_access_secs: u64,
     /// Exported symbols.
     pub exports: Vec<CachedExport>,
     /// Import specifiers.

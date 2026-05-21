@@ -164,6 +164,7 @@ fn type_only_dep_skips_ignored_deps() {
         1,
         true,
         true,
+        None,
     );
 
     let type_only = find_type_only_dependencies(&graph, &pkg, &config, &[]);

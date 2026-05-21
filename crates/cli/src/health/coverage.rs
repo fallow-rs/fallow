@@ -2586,7 +2586,7 @@ mod tests {
         .unwrap_or_else(|err| panic!("failed to write app.test.ts: {err}"));
 
         let config =
-            FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true);
+            FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None);
         let files = fallow_core::discover::discover_files(&config);
         let parse_result = fallow_core::extract::parse_all_files(&files, None, true);
         let modules = parse_result.modules;
