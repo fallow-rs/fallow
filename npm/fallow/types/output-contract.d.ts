@@ -4323,9 +4323,10 @@ comments: ReviewComment[]
  * extract a fallow-emitted fingerprint marker. Capture group 1 is the
  * fingerprint string (a bare 16-char hex hash for single-finding
  * comments, or `<kind>:<16-char-hex>` for compositions such as
- * `linecomp:` per-line aggregations). The pattern uses the `(?m)`
- * inline-multiline flag so it works in both Rust `regex` and JavaScript
- * ES2018 RegExp without flag-awareness on the consumer side.
+ * `merged:` for same-line collapsed comments). The pattern uses the
+ * `(?m)` inline-multiline flag so it works in both Rust `regex` and
+ * JavaScript ES2018 RegExp without flag-awareness on the consumer
+ * side.
  */
 marker_regex?: string
 meta: ReviewEnvelopeMeta
@@ -4344,10 +4345,16 @@ export interface ReviewEnvelopeSummary {
  */
 body: string
 /**
- * FNV-1a 64-bit hash (16 lowercase hex chars) of `body`. Stable across
- * runs that produce the same summary content. Consumers upsert the
- * sticky summary comment by matching this fingerprint against the
- * `marker_regex` extraction of every existing comment body.
+ * FNV-1a 64-bit hash (16 lowercase hex chars) of the summary body
+ * BEFORE the trailing fallow-fingerprint marker line is appended.
+ * (Computing the hash from the post-marker body would be circular:
+ * the marker contains the fingerprint, so the fingerprint cannot
+ * depend on the marker.) To reproduce from [`Self::body`], strip the
+ * line matching [`ReviewEnvelopeOutput::marker_regex`] together with
+ * its leading separator newlines and hash the remainder. Stable
+ * across runs that produce the same summary content; consumers
+ * upsert the sticky summary comment by matching this fingerprint
+ * against the marker_regex extraction of every existing comment body.
  */
 fingerprint: string
 }
@@ -4373,26 +4380,22 @@ body: string
  * reconcile-review` to detect carryover comments across PR revisions.
  * For single-finding comments the value is a bare 16-char hex FNV-1a
  * hash. For merged comments (multiple findings on the same path:line)
- * the value is `linecomp:<16-char hex>` keyed on `(path, line)` and is
- * stable across runs even when constituent findings change membership,
- * enabling update-in-place reconciliation that preserves reviewer
- * reply threads.
+ * the value is `merged:<16-char hex>` over the sorted constituent
+ * fingerprints, so the identity shifts whenever constituent findings
+ * change membership. Bundled wrappers and `fallow ci reconcile-review`
+ * dedupe on this primary fingerprint only; consumers wanting
+ * update-in-place reconciliation (preserving reviewer reply threads
+ * across content changes) implement their own identity tracking via
+ * `marker_regex`.
  */
 fingerprint: string
-/**
- * v1-style per-finding fingerprints contributing to this merged comment,
- * in stable sort order. Empty (omitted) when the comment represents a
- * single finding. Consumers detect content change by comparing this
- * array between runs while reusing the stable [`Self::fingerprint`].
- */
-constituent_fingerprints?: string[]
 /**
  * True when [`Self::body`] was truncated to fit a downstream provider's
  * note-size budget (today: 65,536 bytes). The body retains the closing
  * fallow-fingerprint marker so reconciliation continues to work after
  * truncation.
  *
- * **Co-presence invariant**: `truncated == true` always implies the body
+ * Co-presence invariant: `truncated == true` always implies the body
  * contains an inline `<!-- fallow-truncated -->` HTML marker and the
  * `> Body truncated by fallow.` blockquote breadcrumb, and vice versa.
  * All three signals are emitted together; consumers may use any one
@@ -4411,16 +4414,10 @@ body: string
 position: GitLabReviewPosition
 /**
  * Stable fingerprint for the comment. See
- * [`GitHubReviewComment::fingerprint`] for the single vs `linecomp:`
+ * [`GitHubReviewComment::fingerprint`] for the single vs `merged:`
  * shape contract; semantics are identical across providers.
  */
 fingerprint: string
-/**
- * v1-style per-finding fingerprints contributing to this merged comment,
- * in stable sort order. Empty (omitted) when the comment represents a
- * single finding.
- */
-constituent_fingerprints?: string[]
 /**
  * True when [`Self::body`] was truncated to fit GitLab's note-size
  * budget. See [`GitHubReviewComment::truncated`] for the full

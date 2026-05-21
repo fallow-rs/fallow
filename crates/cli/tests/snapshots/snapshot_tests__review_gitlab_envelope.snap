@@ -20,19 +20,14 @@ expression: json_str
       "fingerprint": "21be520b86ce0207"
     },
     {
-      "body": "**error** `fallow/unused-dependency`: Package 'lodash' is in dependencies but never imported\n\n**warn** `fallow/unused-dev-dependency`: Package 'jest' is in devDependencies but never imported\n\n**warn** `fallow/unused-optional-dependency`: Package 'fsevents' is in optionalDependencies but never imported\n\n<!-- fallow-fingerprint:v2: linecomp:9a18387f430bc48d -->",
+      "body": "**error** `fallow/unused-dependency`: Package 'lodash' is in dependencies but never imported\n\n**warn** `fallow/unused-dev-dependency`: Package 'jest' is in devDependencies but never imported\n\n**warn** `fallow/unused-optional-dependency`: Package 'fsevents' is in optionalDependencies but never imported\n\n<!-- fallow-fingerprint:v2: merged:37df0011a9d7ac87 -->",
       "position": {
         "position_type": "text",
         "old_path": "package.json",
         "new_path": "package.json",
         "new_line": 5
       },
-      "fingerprint": "linecomp:9a18387f430bc48d",
-      "constituent_fingerprints": [
-        "1d04d08d81daf650",
-        "2a4393b133ea1523",
-        "66616a09b329d842"
-      ]
+      "fingerprint": "merged:37df0011a9d7ac87"
     },
     {
       "body": "**warn** `fallow/type-only-dependency`: Package 'zod' is only imported via type-only imports \\(consider moving to devDependencies\\)\n\n<!-- fallow-fingerprint:v2: 34d2064787c07f45 -->",

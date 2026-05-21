@@ -52,17 +52,24 @@ pub fn summary_fingerprint(body: &str) -> String {
     fingerprint_hash(&[body])
 }
 
-/// Stable per-(path, line) fingerprint used by v2 same-line comment merging
-/// (issue #528). Returns `linecomp:<16-char hex>` so consumers can
-/// discriminate the merged shape from a single-finding fingerprint by string
-/// inspection, and the key stays stable even when constituent findings
-/// change membership across runs. The stability is what enables
-/// update-in-place reconciliation (PATCH the body, preserve reviewer reply
-/// threads) instead of delete-and-recreate on every membership change.
+/// Composite fingerprint for v2 same-line merged comments (issue #528).
+/// Hashes the sorted list of constituent per-finding fingerprints (joined
+/// by `:`) and prefixes the resulting 16-char FNV-1a hash with `merged:`
+/// so consumers can discriminate the merged shape from a single-finding
+/// fingerprint by string inspection. The hash changes when constituent
+/// findings change membership across runs; the bundled wrappers
+/// (`action/scripts/review.sh`, `ci/scripts/review.sh`) and
+/// `fallow ci reconcile-review` consume only the primary fingerprint, so
+/// content-change yielding a new fingerprint cleanly re-posts on the next
+/// run rather than silently keeping a stale body. External consumers that
+/// want update-in-place reconciliation implement their own identity
+/// tracking via `marker_regex`.
 #[must_use]
-pub fn linecomp_fingerprint(path: &str, line: u64) -> String {
-    let key = format!("{path}:{line}");
-    format!("linecomp:{}", fingerprint_hash(&[&key]))
+pub fn composite_fingerprint(constituents: &[&str]) -> String {
+    let mut sorted: Vec<&str> = constituents.to_vec();
+    sorted.sort_unstable();
+    let joined = sorted.join(":");
+    format!("merged:{}", fingerprint_hash(&[joined.as_str()]))
 }
 
 #[cfg(test)]
@@ -93,22 +100,20 @@ mod tests {
     }
 
     #[test]
-    fn linecomp_fingerprint_is_stable_per_path_line_pair() {
-        // Per-line key is independent of constituent findings; same
-        // (path, line) input yields the same hash, two different inputs
-        // yield different hashes. This is the load-bearing invariant that
-        // lets v2 consumers PATCH-in-place instead of delete-and-recreate
-        // when constituent findings change membership.
-        let a = linecomp_fingerprint("src/foo.ts", 42);
-        let b = linecomp_fingerprint("src/foo.ts", 42);
-        let c = linecomp_fingerprint("src/foo.ts", 43);
-        let d = linecomp_fingerprint("src/bar.ts", 42);
-        assert_eq!(a, b);
-        assert_ne!(a, c);
-        assert_ne!(a, d);
-        assert!(a.starts_with("linecomp:"));
-        // 9 chars prefix + 16 hex = 25 total.
-        assert_eq!(a.len(), 25);
+    fn composite_fingerprint_shifts_when_constituents_change() {
+        // Hash incorporates the sorted constituent fingerprints, so adding
+        // or removing one shifts the merged identity. Idempotent on equal
+        // input regardless of insertion order (sort stabilises it). The
+        // wire shape is `merged:<16-char hex>` so consumers can detect
+        // compositeness by prefix without re-hashing.
+        let three = composite_fingerprint(&["fp_a", "fp_b", "fp_c"]);
+        let drop_b = composite_fingerprint(&["fp_a", "fp_c"]);
+        let reordered = composite_fingerprint(&["fp_c", "fp_a", "fp_b"]);
+        assert_ne!(three, drop_b);
+        assert_eq!(three, reordered);
+        assert!(three.starts_with("merged:"));
+        // 7 chars prefix + 16 hex = 23 total.
+        assert_eq!(three.len(), 23);
     }
 
     #[test]

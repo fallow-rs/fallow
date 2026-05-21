@@ -21,13 +21,8 @@ expression: json_str
       "path": "package.json",
       "line": 5,
       "side": "RIGHT",
-      "body": "**error** `fallow/unused-dependency`: Package 'lodash' is in dependencies but never imported\n\n**warn** `fallow/unused-dev-dependency`: Package 'jest' is in devDependencies but never imported\n\n**warn** `fallow/unused-optional-dependency`: Package 'fsevents' is in optionalDependencies but never imported\n\n<!-- fallow-fingerprint:v2: linecomp:9a18387f430bc48d -->",
-      "fingerprint": "linecomp:9a18387f430bc48d",
-      "constituent_fingerprints": [
-        "1d04d08d81daf650",
-        "2a4393b133ea1523",
-        "66616a09b329d842"
-      ]
+      "body": "**error** `fallow/unused-dependency`: Package 'lodash' is in dependencies but never imported\n\n**warn** `fallow/unused-dev-dependency`: Package 'jest' is in devDependencies but never imported\n\n**warn** `fallow/unused-optional-dependency`: Package 'fsevents' is in optionalDependencies but never imported\n\n<!-- fallow-fingerprint:v2: merged:37df0011a9d7ac87 -->",
+      "fingerprint": "merged:37df0011a9d7ac87"
     },
     {
       "path": "package.json",

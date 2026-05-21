@@ -3,7 +3,7 @@ use std::process::ExitCode;
 use serde_json::Value;
 
 use super::diff_filter::DiffIndex;
-use super::fingerprint::{linecomp_fingerprint, summary_fingerprint};
+use super::fingerprint::{composite_fingerprint, summary_fingerprint};
 use super::pr_comment::{CiIssue, Provider, command_title, escape_md};
 use super::severity;
 use crate::output_envelope::{
@@ -202,9 +202,11 @@ fn group_by_path_line(issues: &[CiIssue]) -> Vec<Vec<&CiIssue>> {
 /// Render one comment from a group of 1+ issues that share the same
 /// `(path, line)`. Single-element groups produce the v1-shaped body
 /// (modulo the `:v2:` marker shape); multi-element groups stack each
-/// finding's `**label** \`rule\`: desc` paragraph and use a stable
-/// `linecomp:<...>` fingerprint that survives constituent membership
-/// changes across runs.
+/// finding's `**label** \`rule\`: desc` paragraph under a
+/// `merged:<16-char hash>` composite fingerprint over sorted constituent
+/// fingerprints. The composite identity shifts whenever the set of
+/// constituents changes, so consumers' skip-if-fingerprint-exists logic
+/// correctly re-posts on content change.
 fn render_merged_comment(
     provider: Provider,
     group: &[&CiIssue],
@@ -213,13 +215,11 @@ fn render_merged_comment(
 ) -> ReviewComment {
     assert!(!group.is_empty(), "group_by_path_line never yields empty");
     let representative = group[0];
-    let (fingerprint, constituent_fingerprints) = if group.len() == 1 {
-        (representative.fingerprint.clone(), Vec::new())
+    let fingerprint = if group.len() == 1 {
+        representative.fingerprint.clone()
     } else {
-        (
-            linecomp_fingerprint(&representative.path, representative.line),
-            group.iter().map(|i| i.fingerprint.clone()).collect(),
-        )
+        let constituents: Vec<&str> = group.iter().map(|i| i.fingerprint.as_str()).collect();
+        composite_fingerprint(&constituents)
     };
 
     // Build the rendered body content WITHOUT the trailing marker so the
@@ -262,7 +262,6 @@ fn render_merged_comment(
             side: GitHubReviewSide::Right,
             body,
             fingerprint,
-            constituent_fingerprints,
             truncated,
         }),
         Provider::Gitlab => {
@@ -291,7 +290,6 @@ fn render_merged_comment(
                 body,
                 position,
                 fingerprint,
-                constituent_fingerprints,
                 truncated,
             })
         }
@@ -447,15 +445,15 @@ mod tests {
         // Must work in Rust regex AND in JS via (?m) inline flag.
         assert!(regex.contains("(?m)"));
         // Pinned to exactly 16 hex chars (single hash form, optionally with
-        // a kind prefix like `linecomp:`).
+        // a kind prefix like `merged:`).
         assert!(regex.contains("[0-9a-f]{16}"));
         // Anchored start-of-line + end-of-line so user-pasted marker-like
         // strings inside larger comment bodies do not match.
         assert!(regex.starts_with("(?m)^"));
         assert!(regex.ends_with("\\s*$"));
         // Capture group 1 is the fingerprint. Optional kind prefix:
-        // `(?:[a-z]+:)?` lets `linecomp:<hex>`, `single:<hex>`, or bare
-        // `<hex>` match in the same group.
+        // `(?:[a-z]+:)?` lets `merged:<hex>` or bare `<hex>` match in the
+        // same group.
         assert!(regex.contains("((?:[a-z]+:)?[0-9a-f]{16})"));
     }
 
@@ -477,7 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn same_line_findings_merge_into_one_comment_with_linecomp_fingerprint() {
+    fn same_line_findings_merge_into_one_comment_with_composite_fingerprint() {
         let a = issue("fallow/unused-export", "minor", "src/foo.ts", 42, "fp_a");
         let b = issue("fallow/duplicate-export", "minor", "src/foo.ts", 42, "fp_b");
         let env = to_value(&render_review_envelope("check", Provider::Github, &[a, b]));
@@ -489,10 +487,11 @@ mod tests {
         let merged = &env["comments"][0];
         let fp = merged["fingerprint"].as_str().unwrap();
         assert!(
-            fp.starts_with("linecomp:"),
-            "merged comment fingerprint must start with linecomp:, got {fp}"
+            fp.starts_with("merged:"),
+            "merged comment fingerprint must start with merged:, got {fp}"
         );
-        assert_eq!(fp.len(), 25);
+        // 7 chars prefix + 16 hex = 23 total.
+        assert_eq!(fp.len(), 23);
         // Body carries both finding paragraphs and ONE marker.
         let body = merged["body"].as_str().unwrap();
         assert!(body.contains("fallow/unused-export"));
@@ -502,17 +501,16 @@ mod tests {
             1,
             "merged body must carry exactly one fingerprint marker"
         );
-        // Constituent fingerprints recorded for content-change detection.
-        let constituents = merged["constituent_fingerprints"]
-            .as_array()
-            .expect("constituent_fingerprints present");
-        assert_eq!(constituents.len(), 2);
-        assert!(constituents.iter().any(|v| v.as_str() == Some("fp_a")));
-        assert!(constituents.iter().any(|v| v.as_str() == Some("fp_b")));
+        // Constituent fingerprints are NOT emitted on the wire; the
+        // composite hash is the only identity signal.
+        assert!(
+            merged.get("constituent_fingerprints").is_none(),
+            "v2 hashed-composite design does not emit constituent_fingerprints"
+        );
     }
 
     #[test]
-    fn single_finding_keeps_v1_fingerprint_shape_with_no_constituents_field() {
+    fn single_finding_keeps_v1_fingerprint_shape() {
         let issues = vec![issue(
             "fallow/unused-file",
             "minor",
@@ -534,11 +532,10 @@ mod tests {
     }
 
     #[test]
-    fn linecomp_fingerprint_is_stable_when_constituents_change() {
-        // Issue #528 panel decision: the comment's fingerprint must stay
-        // stable across runs even when one constituent finding moves or
-        // drops, so consumer reconciliation PATCHes in place rather than
-        // deleting + recreating (which would lose reviewer reply threads).
+    fn composite_fingerprint_shifts_when_constituents_change() {
+        // Hashed-composite identity changes when constituents change, so
+        // the bundled wrappers' skip-if-fingerprint-exists logic correctly
+        // re-posts on content change. Idempotent on equal input.
         let a = issue("fallow/unused-export", "minor", "src/foo.ts", 42, "fp_a");
         let b = issue("fallow/duplicate-export", "minor", "src/foo.ts", 42, "fp_b");
         let c = issue("fallow/unused-type", "minor", "src/foo.ts", 42, "fp_c");
@@ -548,14 +545,9 @@ mod tests {
             &[a.clone(), b, c.clone()],
         ));
         let run2_drop_b = to_value(&render_review_envelope("check", Provider::Github, &[a, c]));
-        assert_eq!(
-            run1["comments"][0]["fingerprint"], run2_drop_b["comments"][0]["fingerprint"],
-            "primary fingerprint must stay stable when a constituent drops"
-        );
         assert_ne!(
-            run1["comments"][0]["constituent_fingerprints"],
-            run2_drop_b["comments"][0]["constituent_fingerprints"],
-            "constituent_fingerprints must reflect membership change"
+            run1["comments"][0]["fingerprint"], run2_drop_b["comments"][0]["fingerprint"],
+            "primary fingerprint must shift when a constituent drops"
         );
     }
 

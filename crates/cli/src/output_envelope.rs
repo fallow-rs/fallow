@@ -778,9 +778,10 @@ pub struct ReviewEnvelopeOutput {
     /// extract a fallow-emitted fingerprint marker. Capture group 1 is the
     /// fingerprint string (a bare 16-char hex hash for single-finding
     /// comments, or `<kind>:<16-char-hex>` for compositions such as
-    /// `linecomp:` per-line aggregations). The pattern uses the `(?m)`
-    /// inline-multiline flag so it works in both Rust `regex` and JavaScript
-    /// ES2018 RegExp without flag-awareness on the consumer side.
+    /// `merged:` for same-line collapsed comments). The pattern uses the
+    /// `(?m)` inline-multiline flag so it works in both Rust `regex` and
+    /// JavaScript ES2018 RegExp without flag-awareness on the consumer
+    /// side.
     #[serde(default = "default_marker_regex")]
     pub marker_regex: String,
     /// Envelope metadata block.
@@ -813,10 +814,16 @@ pub struct ReviewEnvelopeSummary {
     /// [`ReviewEnvelopeOutput::body`] field; the duplication is intentional
     /// so v1 consumers see no behavior change.
     pub body: String,
-    /// FNV-1a 64-bit hash (16 lowercase hex chars) of `body`. Stable across
-    /// runs that produce the same summary content. Consumers upsert the
-    /// sticky summary comment by matching this fingerprint against the
-    /// `marker_regex` extraction of every existing comment body.
+    /// FNV-1a 64-bit hash (16 lowercase hex chars) of the summary body
+    /// BEFORE the trailing fallow-fingerprint marker line is appended.
+    /// (Computing the hash from the post-marker body would be circular:
+    /// the marker contains the fingerprint, so the fingerprint cannot
+    /// depend on the marker.) To reproduce from [`Self::body`], strip the
+    /// line matching [`ReviewEnvelopeOutput::marker_regex`] together with
+    /// its leading separator newlines and hash the remainder. Stable
+    /// across runs that produce the same summary content; consumers
+    /// upsert the sticky summary comment by matching this fingerprint
+    /// against the marker_regex extraction of every existing comment body.
     pub fingerprint: String,
 }
 
@@ -883,23 +890,20 @@ pub struct GitHubReviewComment {
     /// reconcile-review` to detect carryover comments across PR revisions.
     /// For single-finding comments the value is a bare 16-char hex FNV-1a
     /// hash. For merged comments (multiple findings on the same path:line)
-    /// the value is `linecomp:<16-char hex>` keyed on `(path, line)` and is
-    /// stable across runs even when constituent findings change membership,
-    /// enabling update-in-place reconciliation that preserves reviewer
-    /// reply threads.
+    /// the value is `merged:<16-char hex>` over the sorted constituent
+    /// fingerprints, so the identity shifts whenever constituent findings
+    /// change membership. Bundled wrappers and `fallow ci reconcile-review`
+    /// dedupe on this primary fingerprint only; consumers wanting
+    /// update-in-place reconciliation (preserving reviewer reply threads
+    /// across content changes) implement their own identity tracking via
+    /// `marker_regex`.
     pub fingerprint: String,
-    /// v1-style per-finding fingerprints contributing to this merged comment,
-    /// in stable sort order. Empty (omitted) when the comment represents a
-    /// single finding. Consumers detect content change by comparing this
-    /// array between runs while reusing the stable [`Self::fingerprint`].
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub constituent_fingerprints: Vec<String>,
     /// True when [`Self::body`] was truncated to fit a downstream provider's
     /// note-size budget (today: 65,536 bytes). The body retains the closing
     /// fallow-fingerprint marker so reconciliation continues to work after
     /// truncation.
     ///
-    /// **Co-presence invariant**: `truncated == true` always implies the body
+    /// Co-presence invariant: `truncated == true` always implies the body
     /// contains an inline `<!-- fallow-truncated -->` HTML marker and the
     /// `> Body truncated by fallow.` blockquote breadcrumb, and vice versa.
     /// All three signals are emitted together; consumers may use any one
@@ -926,14 +930,9 @@ pub struct GitLabReviewComment {
     /// Position block describing where the comment attaches on the diff.
     pub position: GitLabReviewPosition,
     /// Stable fingerprint for the comment. See
-    /// [`GitHubReviewComment::fingerprint`] for the single vs `linecomp:`
+    /// [`GitHubReviewComment::fingerprint`] for the single vs `merged:`
     /// shape contract; semantics are identical across providers.
     pub fingerprint: String,
-    /// v1-style per-finding fingerprints contributing to this merged comment,
-    /// in stable sort order. Empty (omitted) when the comment represents a
-    /// single finding.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub constituent_fingerprints: Vec<String>,
     /// True when [`Self::body`] was truncated to fit GitLab's note-size
     /// budget. See [`GitHubReviewComment::truncated`] for the full
     /// co-presence invariant with the inline HTML marker and human
@@ -1025,11 +1024,13 @@ pub enum ReviewEnvelopeSchema {
     V1,
     /// Issue #528 evolution. Adds (1) the [`ReviewEnvelopeOutput::summary`]
     /// block, (2) [`ReviewEnvelopeOutput::marker_regex`], (3) same-line
-    /// `(path, line)` merging in `comments[]` with the stable
-    /// `linecomp:<...>` primary fingerprint and a
-    /// `constituent_fingerprints` array tracking per-finding membership,
-    /// (4) UTF-8-safe body truncation at the GitLab/GitHub note-size floor
-    /// (65,536 bytes) with paired `truncated: bool` + `<!-- fallow-truncated -->`
+    /// `(path, line)` merging in `comments[]` with a
+    /// `merged:<16-char hash>` primary fingerprint over sorted constituent
+    /// fingerprints (identity shifts whenever the set of constituents
+    /// changes, so the bundled skip-if-fingerprint-exists wrappers
+    /// correctly re-post on content change), (4) UTF-8-safe body
+    /// truncation at the GitLab/GitHub note-size floor (65,536 bytes)
+    /// with paired `truncated: bool` + `<!-- fallow-truncated -->`
     /// signals, (5) `:v2:`-namespaced marker shape
     /// (`<!-- fallow-fingerprint:v2: <fingerprint> -->`) preventing v1
     /// marker collision and user-paste spoofing, and (6) diff-aware

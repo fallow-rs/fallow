@@ -4790,7 +4790,7 @@
         },
         "marker_regex": {
           "type": "string",
-          "description": "Regex consumers run against every existing PR/MR comment body to\nextract a fallow-emitted fingerprint marker. Capture group 1 is the\nfingerprint string (a bare 16-char hex hash for single-finding\ncomments, or `<kind>:<16-char-hex>` for compositions such as\n`linecomp:` per-line aggregations). The pattern uses the `(?m)`\ninline-multiline flag so it works in both Rust `regex` and JavaScript\nES2018 RegExp without flag-awareness on the consumer side."
+          "description": "Regex consumers run against every existing PR/MR comment body to\nextract a fallow-emitted fingerprint marker. Capture group 1 is the\nfingerprint string (a bare 16-char hex hash for single-finding\ncomments, or `<kind>:<16-char-hex>` for compositions such as\n`merged:` for same-line collapsed comments). The pattern uses the\n`(?m)` inline-multiline flag so it works in both Rust `regex` and\nJavaScript ES2018 RegExp without flag-awareness on the consumer\nside."
         },
         "meta": {
           "description": "Envelope metadata block.",
@@ -4826,18 +4826,11 @@
         },
         "fingerprint": {
           "type": "string",
-          "description": "Stable fingerprint for the comment, used by `fallow ci\nreconcile-review` to detect carryover comments across PR revisions.\nFor single-finding comments the value is a bare 16-char hex FNV-1a\nhash. For merged comments (multiple findings on the same path:line)\nthe value is `linecomp:<16-char hex>` keyed on `(path, line)` and is\nstable across runs even when constituent findings change membership,\nenabling update-in-place reconciliation that preserves reviewer\nreply threads."
-        },
-        "constituent_fingerprints": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "v1-style per-finding fingerprints contributing to this merged comment,\nin stable sort order. Empty (omitted) when the comment represents a\nsingle finding. Consumers detect content change by comparing this\narray between runs while reusing the stable [`Self::fingerprint`]."
+          "description": "Stable fingerprint for the comment, used by `fallow ci\nreconcile-review` to detect carryover comments across PR revisions.\nFor single-finding comments the value is a bare 16-char hex FNV-1a\nhash. For merged comments (multiple findings on the same path:line)\nthe value is `merged:<16-char hex>` over the sorted constituent\nfingerprints, so the identity shifts whenever constituent findings\nchange membership. Bundled wrappers and `fallow ci reconcile-review`\ndedupe on this primary fingerprint only; consumers wanting\nupdate-in-place reconciliation (preserving reviewer reply threads\nacross content changes) implement their own identity tracking via\n`marker_regex`."
         },
         "truncated": {
           "type": "boolean",
-          "description": "True when [`Self::body`] was truncated to fit a downstream provider's\nnote-size budget (today: 65,536 bytes). The body retains the closing\nfallow-fingerprint marker so reconciliation continues to work after\ntruncation.\n\n**Co-presence invariant**: `truncated == true` always implies the body\ncontains an inline `<!-- fallow-truncated -->` HTML marker and the\n`> Body truncated by fallow.` blockquote breadcrumb, and vice versa.\nAll three signals are emitted together; consumers may use any one\n(the typed boolean is the authoritative machine-readable signal)."
+          "description": "True when [`Self::body`] was truncated to fit a downstream provider's\nnote-size budget (today: 65,536 bytes). The body retains the closing\nfallow-fingerprint marker so reconciliation continues to work after\ntruncation.\n\nCo-presence invariant: `truncated == true` always implies the body\ncontains an inline `<!-- fallow-truncated -->` HTML marker and the\n`> Body truncated by fallow.` blockquote breadcrumb, and vice versa.\nAll three signals are emitted together; consumers may use any one\n(the typed boolean is the authoritative machine-readable signal)."
         }
       },
       "required": [
@@ -4862,14 +4855,7 @@
         },
         "fingerprint": {
           "type": "string",
-          "description": "Stable fingerprint for the comment. See\n[`GitHubReviewComment::fingerprint`] for the single vs `linecomp:`\nshape contract; semantics are identical across providers."
-        },
-        "constituent_fingerprints": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "v1-style per-finding fingerprints contributing to this merged comment,\nin stable sort order. Empty (omitted) when the comment represents a\nsingle finding."
+          "description": "Stable fingerprint for the comment. See\n[`GitHubReviewComment::fingerprint`] for the single vs `merged:`\nshape contract; semantics are identical across providers."
         },
         "truncated": {
           "type": "boolean",
@@ -6807,7 +6793,7 @@
         {
           "type": "string",
           "const": "fallow-review-envelope/v2",
-          "description": "Issue #528 evolution. Adds (1) the [`ReviewEnvelopeOutput::summary`]\nblock, (2) [`ReviewEnvelopeOutput::marker_regex`], (3) same-line\n`(path, line)` merging in `comments[]` with the stable\n`linecomp:<...>` primary fingerprint and a\n`constituent_fingerprints` array tracking per-finding membership,\n(4) UTF-8-safe body truncation at the GitLab/GitHub note-size floor\n(65,536 bytes) with paired `truncated: bool` + `<!-- fallow-truncated -->`\nsignals, (5) `:v2:`-namespaced marker shape\n(`<!-- fallow-fingerprint:v2: <fingerprint> -->`) preventing v1\nmarker collision and user-paste spoofing, and (6) diff-aware\n`position.old_path` for renamed files on GitLab."
+          "description": "Issue #528 evolution. Adds (1) the [`ReviewEnvelopeOutput::summary`]\nblock, (2) [`ReviewEnvelopeOutput::marker_regex`], (3) same-line\n`(path, line)` merging in `comments[]` with a\n`merged:<16-char hash>` primary fingerprint over sorted constituent\nfingerprints (identity shifts whenever the set of constituents\nchanges, so the bundled skip-if-fingerprint-exists wrappers\ncorrectly re-post on content change), (4) UTF-8-safe body\ntruncation at the GitLab/GitHub note-size floor (65,536 bytes)\nwith paired `truncated: bool` + `<!-- fallow-truncated -->`\nsignals, (5) `:v2:`-namespaced marker shape\n(`<!-- fallow-fingerprint:v2: <fingerprint> -->`) preventing v1\nmarker collision and user-paste spoofing, and (6) diff-aware\n`position.old_path` for renamed files on GitLab."
         }
       ],
       "description": "Schema-version discriminator for the review envelope."
@@ -9219,7 +9205,7 @@
         },
         "fingerprint": {
           "type": "string",
-          "description": "FNV-1a 64-bit hash (16 lowercase hex chars) of `body`. Stable across\nruns that produce the same summary content. Consumers upsert the\nsticky summary comment by matching this fingerprint against the\n`marker_regex` extraction of every existing comment body."
+          "description": "FNV-1a 64-bit hash (16 lowercase hex chars) of the summary body\nBEFORE the trailing fallow-fingerprint marker line is appended.\n(Computing the hash from the post-marker body would be circular:\nthe marker contains the fingerprint, so the fingerprint cannot\ndepend on the marker.) To reproduce from [`Self::body`], strip the\nline matching [`ReviewEnvelopeOutput::marker_regex`] together with\nits leading separator newlines and hash the remainder. Stable\nacross runs that produce the same summary content; consumers\nupsert the sticky summary comment by matching this fingerprint\nagainst the marker_regex extraction of every existing comment body."
         }
       },
       "required": [

@@ -901,7 +901,7 @@ fn extract_marker(body: &str, marker: &str) -> Option<String> {
 /// return the literal `"v2:"` as the extracted fingerprint.
 ///
 /// Returns the raw fingerprint string with any kind prefix preserved
-/// (`linecomp:<hex>` stays `linecomp:<hex>`). Consumers match the returned
+/// (`merged:<hex>` stays `merged:<hex>`). Consumers match the returned
 /// string against the comment's `fingerprint` field verbatim.
 fn extract_fallow_fingerprint(body: &str) -> Option<String> {
     extract_marker(body, "fallow-fingerprint:v2:")
@@ -971,13 +971,13 @@ mod tests {
             .as_deref(),
             Some("abc1234567890def")
         );
-        // linecomp shape on merged comments.
+        // merged: shape on hashed-composite merged comments.
         assert_eq!(
             extract_fallow_fingerprint(
-                "**error**\n\n<!-- fallow-fingerprint:v2: linecomp:0123456789abcdef -->"
+                "**error**\n\n<!-- fallow-fingerprint:v2: merged:0123456789abcdef -->"
             )
             .as_deref(),
-            Some("linecomp:0123456789abcdef")
+            Some("merged:0123456789abcdef")
         );
     }
 
