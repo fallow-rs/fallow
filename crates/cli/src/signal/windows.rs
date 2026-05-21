@@ -19,11 +19,16 @@
 
 use std::io;
 
-use windows_sys::Win32::Foundation::BOOL;
+// `BOOL` moved from `Win32::Foundation` to `windows_sys::core` in
+// windows-sys 0.61 (matches the `SetConsoleCtrlHandler` signature
+// `add: windows_sys::core::BOOL -> windows_sys::core::BOOL`). The old
+// `Win32::Foundation::BOOL` path no longer resolves and broke the
+// Windows ARM64 native compile on every PR.
 use windows_sys::Win32::System::Console::{
     CTRL_BREAK_EVENT, CTRL_C_EVENT, CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT,
     SetConsoleCtrlHandler,
 };
+use windows_sys::core::BOOL;
 
 use super::handle_signal;
 

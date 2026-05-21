@@ -67,10 +67,12 @@ pub struct WorkspaceInfo {
 /// hard exits.
 ///
 /// This wrapper goes through the silent collector path that does NOT call
-/// [`emit_warn`]. Without that split, sibling callers in `core/src/lib.rs`
-/// (analyze) and `core/src/discover/mod.rs` (file discovery) would re-emit
-/// `tracing::warn!` on paths the user already excluded via `ignorePatterns`,
-/// because the back-compat wrapper has no access to the user's globset.
+/// `emit_warn` (private helper in `crates/config/src/workspace/diagnostics.rs`
+/// that does the `tracing::warn!` emission). Without that split, sibling
+/// callers in `core/src/lib.rs` (analyze) and `core/src/discover/mod.rs`
+/// (file discovery) would re-emit `tracing::warn!` on paths the user already
+/// excluded via `ignorePatterns`, because the back-compat wrapper has no
+/// access to the user's globset.
 #[must_use]
 pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
     collect_workspaces_and_diagnostics(root, &globset::GlobSet::empty())
