@@ -229,6 +229,11 @@ fn stage_one(target: &Path, content: &[u8]) -> std::io::Result<StagedEntry> {
     use std::io::Write;
     handle.write_all(content)?;
     handle.as_file().sync_all()?;
+    // Preserve the target's existing file mode on Unix. NamedTempFile creates
+    // the temp with 0600 by default; persisting directly would downgrade a
+    // target previously at 0644 (or any other mode) to owner-only, breaking
+    // shared workspaces and CI runners that rely on the existing read bit.
+    fallow_config::preserve_target_mode(handle.path(), &resolved);
     Ok(StagedEntry {
         handle,
         requested: target.to_path_buf(),
@@ -488,6 +493,32 @@ mod tests {
             "edited a\nline c\n",
             "both fixers' edits must compose into the final commit",
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn commit_preserves_target_file_mode() {
+        // Regression: NamedTempFile defaults to 0600. Without an explicit
+        // chmod step before persist, a target previously at 0644 would land
+        // at 0600 post-fix, silently downgrading the read bit for group +
+        // other. The commit MUST preserve the target's pre-existing mode.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("source.ts");
+        std::fs::write(&file, "original\n").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let mut plan = FixPlan::new();
+        plan.stage(file.clone(), b"rewritten\n".to_vec());
+        let outcome = plan.commit();
+        assert!(outcome.failed.is_empty());
+
+        let post_mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(
+            post_mode, 0o644,
+            "post-commit mode must match pre-commit mode, not the NamedTempFile default"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "rewritten\n");
     }
 
     #[cfg(unix)]

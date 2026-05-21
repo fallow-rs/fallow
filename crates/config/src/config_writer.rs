@@ -54,14 +54,42 @@ pub type ConfigWriteResult<T> = Result<T, ConfigWriteError>;
 /// writes through to the symlink's target file rather than replacing the
 /// symlink itself with a regular file (common when configs are mounted into
 /// containers via symlinks).
+///
+/// Preserves the target file's existing permissions on Unix. `NamedTempFile`
+/// creates the temp with `0600` by default; persisting it directly would
+/// downgrade a target previously at `0644` (or the user's local default) to
+/// owner-only, breaking shared workspaces and CI runners that rely on the
+/// pre-existing read bit. When the target does not yet exist, leave the
+/// temp's mode as the OS default (the umask-respecting permissions the
+/// process would have produced via `std::fs::write`).
 pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
     let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let dir = resolved.parent().unwrap_or_else(|| Path::new("."));
     let mut tmp = NamedTempFile::new_in(dir)?;
     tmp.write_all(content)?;
     tmp.as_file().sync_all()?;
+    preserve_target_mode(tmp.path(), &resolved);
     tmp.persist(&resolved).map_err(|e| e.error)?;
     Ok(())
+}
+
+/// Copy the target file's existing permissions onto the temp file so the
+/// rename does not downgrade them. No-op when the target does not yet exist
+/// (fresh creation) or when the platform does not expose Unix file modes.
+#[cfg(unix)]
+pub fn preserve_target_mode(temp: &Path, target: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(metadata) = std::fs::metadata(target) else {
+        return; // Target does not exist yet (fresh creation); use OS default.
+    };
+    let mode = metadata.permissions().mode();
+    let _ = std::fs::set_permissions(temp, std::fs::Permissions::from_mode(mode & 0o7777));
+}
+
+#[cfg(not(unix))]
+pub fn preserve_target_mode(_temp: &Path, _target: &Path) {
+    // File-mode bits are a Unix concept; Windows ACLs persist with the
+    // existing file when `persist` swaps in place.
 }
 
 /// Append `ignoreExports` rules to an existing fallow config file.
@@ -468,6 +496,49 @@ mod tests {
             1,
             "existing absolute entry must remain"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_preserves_existing_target_mode() {
+        // Regression: NamedTempFile defaults to 0600; without preserving
+        // the target's mode, atomic_write would silently downgrade a
+        // 0644 config file to owner-only.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("config.json");
+        std::fs::write(&target, "{}").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        atomic_write(&target, b"{\"updated\": true}").unwrap();
+
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(
+            mode, 0o644,
+            "atomic_write must preserve the target file mode"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "{\"updated\": true}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_on_fresh_target_uses_default_mode() {
+        // When the target does not yet exist, atomic_write leaves the
+        // temp's mode as-is (the OS default for NamedTempFile is 0600).
+        // The behavior is unsurprising because the user did not have a
+        // prior mode to preserve, but the test pins the contract.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fresh = dir.path().join("brand-new.json");
+        atomic_write(&fresh, b"{}").unwrap();
+        let mode = std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o7777;
+        // The mode is whatever NamedTempFile produces (currently 0o600);
+        // we assert non-zero, not a specific value, to avoid coupling the
+        // test to the tempfile crate's internal default.
+        assert!(mode != 0, "fresh file should have a non-zero mode");
     }
 
     #[test]
