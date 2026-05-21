@@ -6,7 +6,9 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::FallowConfig;
+use fallow_config::{FallowConfig, OutputFormat};
+
+use crate::error::emit_error;
 
 /// Exit code when no config file was found (only defaults are in effect).
 const EXIT_NO_CONFIG: u8 = 3;
@@ -21,7 +23,17 @@ const EXIT_NO_CONFIG: u8 = 3;
 /// When `explicit_config` is `Some`, that path is loaded directly (matching
 /// the global `--config` flag's semantics elsewhere in the CLI). Otherwise
 /// `find_and_load` walks up from `root` looking for a config file.
-pub fn run_config(root: &Path, explicit_config: Option<&Path>, path_only: bool) -> ExitCode {
+///
+/// `output` selects the error envelope: `OutputFormat::Json` emits structured
+/// `{"error": true, "message": ..., "exit_code": 2}` on stdout for failed
+/// loads (matching the rest of the CLI's error contract); other formats
+/// render to stderr.
+pub fn run_config(
+    root: &Path,
+    explicit_config: Option<&Path>,
+    path_only: bool,
+    output: OutputFormat,
+) -> ExitCode {
     let result = if let Some(path) = explicit_config {
         FallowConfig::load(path)
             .map(|c| Some((c, path.to_path_buf())))
@@ -32,6 +44,21 @@ pub fn run_config(root: &Path, explicit_config: Option<&Path>, path_only: bool) 
 
     match result {
         Ok(Some((config, path))) => {
+            // Mirror the contract the analysis path enforces: an invalid
+            // boundary configuration (unknown zone reference, redundant
+            // root-prefix) exits 2 at config load. Without this, `fallow config`
+            // happily prints a "loaded fine" view of a config that `fallow
+            // check` immediately rejects, producing a false signal during
+            // debug sessions. Surfaced by review of #468.
+            if let Err(errors) = config.validate_resolved_boundaries(root) {
+                let joined = errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n  - ");
+                let msg = format!("invalid boundary configuration:\n  - {joined}");
+                return emit_error(&msg, 2, output);
+            }
             if path_only {
                 println!("{}", path.display());
             } else {
@@ -39,8 +66,7 @@ pub fn run_config(root: &Path, explicit_config: Option<&Path>, path_only: bool) 
                 match serde_json::to_string_pretty(&config) {
                     Ok(json) => println!("{json}"),
                     Err(e) => {
-                        eprintln!("error: failed to serialize config: {e}");
-                        return ExitCode::from(2);
+                        return emit_error(&format!("failed to serialize config: {e}"), 2, output);
                     }
                 }
             }
@@ -53,10 +79,7 @@ pub fn run_config(root: &Path, explicit_config: Option<&Path>, path_only: bool) 
             // Empty stdout when --path is set; non-zero exit so scripts can detect.
             ExitCode::from(EXIT_NO_CONFIG)
         }
-        Err(e) => {
-            eprintln!("error: {e}");
-            ExitCode::from(2)
-        }
+        Err(e) => emit_error(&e, 2, output),
     }
 }
 
@@ -69,7 +92,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         // No config file in the directory.
-        let exit = run_config(dir.path(), None, false);
+        let exit = run_config(dir.path(), None, false, OutputFormat::Human);
         assert_eq!(
             format!("{exit:?}"),
             format!("{:?}", ExitCode::from(EXIT_NO_CONFIG))
@@ -85,7 +108,7 @@ mod tests {
             r#"{"entry": ["src/index.ts"]}"#,
         )
         .unwrap();
-        let exit = run_config(dir.path(), None, false);
+        let exit = run_config(dir.path(), None, false, OutputFormat::Human);
         assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::SUCCESS));
     }
 
@@ -94,7 +117,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(dir.path().join(".fallowrc.json"), "{}").unwrap();
-        let exit = run_config(dir.path(), None, true);
+        let exit = run_config(dir.path(), None, true, OutputFormat::Human);
         assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::SUCCESS));
     }
 
@@ -102,7 +125,7 @@ mod tests {
     fn run_config_path_only_no_file_returns_exit_3() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join(".git")).unwrap();
-        let exit = run_config(dir.path(), None, true);
+        let exit = run_config(dir.path(), None, true, OutputFormat::Human);
         assert_eq!(
             format!("{exit:?}"),
             format!("{:?}", ExitCode::from(EXIT_NO_CONFIG))
@@ -120,7 +143,7 @@ mod tests {
         let explicit = dir.path().join("explicit.json");
         std::fs::write(&explicit, r#"{"entry": ["src/explicit.ts"]}"#).unwrap();
 
-        let exit = run_config(dir.path(), Some(&explicit), true);
+        let exit = run_config(dir.path(), Some(&explicit), true, OutputFormat::Human);
         assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::SUCCESS));
     }
 
@@ -128,8 +151,31 @@ mod tests {
     fn run_config_explicit_config_missing_returns_error() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("does-not-exist.json");
-        let exit = run_config(dir.path(), Some(&missing), false);
+        let exit = run_config(dir.path(), Some(&missing), false, OutputFormat::Human);
         // Failure to load explicit config returns exit 2 (error), not exit 3 (no config).
+        assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::from(2)));
+    }
+
+    #[test]
+    fn run_config_rejects_unknown_boundary_zone_reference() {
+        // The CLI's `fallow config` subcommand must enforce the same
+        // hard-error contract as the analysis paths: a typo'd zone in
+        // `boundaries.rules[]` exits 2 instead of printing a "loaded fine"
+        // view of a config that `fallow check` then rejects. Surfaced by
+        // review of #468.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{
+                "boundaries": {
+                    "zones": [{ "name": "ui", "patterns": ["src/ui/**"] }],
+                    "rules": [{ "from": "ui", "allow": ["typo-zone"] }]
+                }
+            }"#,
+        )
+        .unwrap();
+        let exit = run_config(dir.path(), None, false, OutputFormat::Human);
         assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::from(2)));
     }
 }

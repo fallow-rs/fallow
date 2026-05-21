@@ -2210,7 +2210,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 })
             }
         },
-        Command::Config { path } => config::run_config(root, cli.config.as_deref(), path),
+        Command::Config { path } => config::run_config(root, cli.config.as_deref(), path, output),
         Command::List {
             entry_points,
             files,

@@ -18,10 +18,15 @@ pub struct ListOptions<'a> {
 }
 
 pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
+    // Thread the user-supplied `--format` through so config-load failures
+    // (including the boundary-validation gate in `runtime_support`) render
+    // as structured JSON when `--format json` is active. Previously hardcoded
+    // to `OutputFormat::Human`, which downgraded JSON callers to human-text
+    // errors on `list --boundaries --format json`. (Surfaced by review of #468.)
     let config = match load_config(
         opts.root,
         opts.config_path,
-        OutputFormat::Human,
+        opts.output,
         opts.no_cache,
         opts.threads,
         opts.production,
