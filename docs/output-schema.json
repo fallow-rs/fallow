@@ -570,13 +570,6 @@
           },
           "description": "Circular dependency chains detected in the module graph. Wrapped in\n[`CircularDependencyFinding`] so each entry carries a typed `actions`\narray natively."
         },
-        "re_export_cycles": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/ReExportCycleFinding"
-          },
-          "description": "Cycles or self-loops in the re-export edge subgraph (barrel files\nre-exporting from each other in a loop). Wrapped in\n[`ReExportCycleFinding`] so each entry carries a typed `actions`\narray natively (a `refactor-re-export-cycle` informational primary\nplus a `suppress-file` secondary; cycles are file-scoped so a single\nsuppression breaks the cycle)."
-        },
         "boundary_violations": {
           "type": "array",
           "items": {
@@ -880,13 +873,6 @@
             "$ref": "#/definitions/CircularDependencyFinding"
           },
           "description": "Circular dependency chains detected in the module graph. Wrapped in\n[`CircularDependencyFinding`] so each entry carries a typed `actions`\narray natively."
-        },
-        "re_export_cycles": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/ReExportCycleFinding"
-          },
-          "description": "Cycles or self-loops in the re-export edge subgraph (barrel files\nre-exporting from each other in a loop). Wrapped in\n[`ReExportCycleFinding`] so each entry carries a typed `actions`\narray natively (a `refactor-re-export-cycle` informational primary\nplus a `suppress-file` secondary; cycles are file-scoped so a single\nsuppression breaks the cycle)."
         },
         "boundary_violations": {
           "type": "array",
@@ -4626,10 +4612,6 @@
           "type": "integer",
           "description": "Cycles detected in the import graph."
         },
-        "re_export_cycles": {
-          "type": "integer",
-          "description": "Cycles or self-loops in the re-export edge subgraph (barrel files\nre-exporting from each other in a loop)."
-        },
         "boundary_violations": {
           "type": "integer",
           "description": "Imports that cross architecture boundary rules."
@@ -4793,7 +4775,11 @@
         },
         "body": {
           "type": "string",
-          "description": "Review summary body (rendered above per-line comments)."
+          "description": "Review summary body (rendered above per-line comments). Deprecated in\nv2 envelopes: prefer [`summary.body`](`ReviewEnvelopeSummary::body`),\nwhich is byte-identical to this field but carries a stable\nfingerprint for reconciliation. Kept on v2 emit so v1 consumers that\nonly look at `body` keep working."
+        },
+        "summary": {
+          "description": "Sticky summary block (v2). Always present on v2 emit. Consumers\nreconcile a single sticky PR/MR summary comment by\n[`ReviewEnvelopeSummary::fingerprint`] matching, then upsert\n[`ReviewEnvelopeSummary::body`] in place. Synthesized empty when\ndeserializing v1 historical input.",
+          "$ref": "#/definitions/ReviewEnvelopeSummary"
         },
         "comments": {
           "type": "array",
@@ -4801,6 +4787,10 @@
             "$ref": "#/definitions/ReviewComment"
           },
           "description": "Per-line comments. Each is either a [`GitHubReviewComment`] or a\n[`GitLabReviewComment`] depending on `meta.provider`."
+        },
+        "marker_regex": {
+          "type": "string",
+          "description": "Regex consumers run against every existing PR/MR comment body to\nextract a fallow-emitted fingerprint marker. Capture group 1 is the\nfingerprint string (a bare 16-char hex hash for single-finding\ncomments, or `<kind>:<16-char-hex>` for compositions such as\n`linecomp:` per-line aggregations). The pattern uses the `(?m)`\ninline-multiline flag so it works in both Rust `regex` and JavaScript\nES2018 RegExp without flag-awareness on the consumer side."
         },
         "meta": {
           "description": "Envelope metadata block.",
@@ -4836,7 +4826,18 @@
         },
         "fingerprint": {
           "type": "string",
-          "description": "Stable fingerprint for the comment, used by `fallow ci\nreconcile-review` to detect carryover comments across PR revisions."
+          "description": "Stable fingerprint for the comment, used by `fallow ci\nreconcile-review` to detect carryover comments across PR revisions.\nFor single-finding comments the value is a bare 16-char hex FNV-1a\nhash. For merged comments (multiple findings on the same path:line)\nthe value is `linecomp:<16-char hex>` keyed on `(path, line)` and is\nstable across runs even when constituent findings change membership,\nenabling update-in-place reconciliation that preserves reviewer\nreply threads."
+        },
+        "constituent_fingerprints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "v1-style per-finding fingerprints contributing to this merged comment,\nin stable sort order. Empty (omitted) when the comment represents a\nsingle finding. Consumers detect content change by comparing this\narray between runs while reusing the stable [`Self::fingerprint`]."
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "True when [`Self::body`] was truncated to fit a downstream provider's\nnote-size budget (today: 65,536 bytes). The body retains the closing\nfallow-fingerprint marker so reconciliation continues to work after\ntruncation. Pairs with the inline `<!-- fallow-truncated -->` HTML\nmarker and the human `... (truncated)` text."
         }
       },
       "required": [
@@ -4861,7 +4862,18 @@
         },
         "fingerprint": {
           "type": "string",
-          "description": "Stable fingerprint for the comment."
+          "description": "Stable fingerprint for the comment. See\n[`GitHubReviewComment::fingerprint`] for the single vs `linecomp:`\nshape contract; semantics are identical across providers."
+        },
+        "constituent_fingerprints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "v1-style per-finding fingerprints contributing to this merged comment,\nin stable sort order. Empty (omitted) when the comment represents a\nsingle finding."
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "True when [`Self::body`] was truncated to fit GitLab's note-size\nbudget. See [`GitHubReviewComment::truncated`]."
         }
       },
       "required": [
@@ -5253,13 +5265,6 @@
             "$ref": "#/definitions/CircularDependencyFinding"
           },
           "description": "Circular dependency chains detected in the module graph. Wrapped in\n[`CircularDependencyFinding`] so each entry carries a typed `actions`\narray natively."
-        },
-        "re_export_cycles": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/ReExportCycleFinding"
-          },
-          "description": "Cycles or self-loops in the re-export edge subgraph (barrel files\nre-exporting from each other in a loop). Wrapped in\n[`ReExportCycleFinding`] so each entry carries a typed `actions`\narray natively (a `refactor-re-export-cycle` informational primary\nplus a `suppress-file` secondary; cycles are file-scoped so a single\nsuppression breaks the cycle)."
         },
         "boundary_violations": {
           "type": "array",
@@ -5715,11 +5720,6 @@
           "type": "string",
           "const": "refactor-cycle",
           "description": "Break a circular dependency by refactoring imports."
-        },
-        {
-          "type": "string",
-          "const": "refactor-re-export-cycle",
-          "description": "Break a re-export cycle by removing an `export * from` (or\n`export { ... } from`) statement on any one member file. Re-export\ncycles are structurally always bugs (chain propagation through the\nloop is a no-op), so there is no auto-fix; the action is manual."
         },
         {
           "type": "string",
@@ -6772,7 +6772,7 @@
       "type": "object",
       "properties": {
         "schema": {
-          "description": "Envelope schema marker, always `fallow-review-envelope/v1`.",
+          "description": "Envelope schema marker. v2 emit always tags\n`fallow-review-envelope/v2`; v1 is recognized on deserialize for\nbackward-compat with historical envelopes captured before the v2\nmigration.",
           "$ref": "#/definitions/ReviewEnvelopeSchema"
         },
         "provider": {
@@ -6802,7 +6802,12 @@
         {
           "type": "string",
           "const": "fallow-review-envelope/v1",
-          "description": "First release of the review envelope format."
+          "description": "First release of the review envelope format. Historical only; no v1\nemit path remains on the current code. Retained on the enum so a\nfuture Deserialize derive can still parse v1 captures (e.g. from\ncommitted snapshots predating the issue #528 migration) without\nerroring on an unknown variant."
+        },
+        {
+          "type": "string",
+          "const": "fallow-review-envelope/v2",
+          "description": "Issue #528 evolution. Adds (1) the [`ReviewEnvelopeOutput::summary`]\nblock, (2) [`ReviewEnvelopeOutput::marker_regex`], (3) same-line\n`(path, line)` merging in `comments[]` with the stable\n`linecomp:<...>` primary fingerprint and a\n`constituent_fingerprints` array tracking per-finding membership,\n(4) UTF-8-safe body truncation at the GitLab/GitHub note-size floor\n(65,536 bytes) with paired `truncated: bool` + `<!-- fallow-truncated -->`\nsignals, (5) `:v2:`-namespaced marker shape\n(`<!-- fallow-fingerprint:v2: <fingerprint> -->`) preventing v1\nmarker collision and user-paste spoofing, and (6) diff-aware\n`position.old_path` for renamed files on GitLab."
         }
       ],
       "description": "Schema-version discriminator for the review envelope."
@@ -9205,60 +9210,23 @@
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."
     },
-    "ReExportCycleFinding": {
+    "ReviewEnvelopeSummary": {
       "type": "object",
       "properties": {
-        "files": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Files participating in the cycle, sorted lexicographically. For a\nself-loop, exactly one entry."
+        "body": {
+          "type": "string",
+          "description": "Markdown body of the summary. Byte-identical to the legacy top-level\n[`ReviewEnvelopeOutput::body`] field; the duplication is intentional\nso v1 consumers see no behavior change."
         },
-        "kind": {
-          "description": "Which structural shape this finding describes.",
-          "$ref": "#/definitions/ReExportCycleKind"
-        },
-        "actions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/IssueAction"
-          },
-          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
-        },
-        "introduced": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/AuditIntroduced"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        "fingerprint": {
+          "type": "string",
+          "description": "FNV-1a 64-bit hash (16 lowercase hex chars) of `body`. Stable across\nruns that produce the same summary content. Consumers upsert the\nsticky summary comment by matching this fingerprint against the\n`marker_regex` extraction of every existing comment body."
         }
       },
       "required": [
-        "files",
-        "kind",
-        "actions"
+        "body",
+        "fingerprint"
       ],
-      "description": "Wire-shape envelope for a [`ReExportCycle`] finding. Mirrors\n[`CircularDependencyFinding`]: flattens the bare finding and carries a\ntyped `actions` array (`refactor-re-export-cycle` informational primary\nplus `suppress-file` secondary; cycles are file-scoped so a single\nfile-level suppression on the alphabetically-first member breaks the\ncycle, and no `// fallow-ignore-next-line` form makes sense because the\ndiagnostic is anchored at line 1 col 0 of each member)."
-    },
-    "ReExportCycleKind": {
-      "oneOf": [
-        {
-          "type": "string",
-          "const": "multi-node",
-          "description": "Two or more barrel files re-export from each other in a loop\n(SCC of size >= 2)."
-        },
-        {
-          "type": "string",
-          "const": "self-loop",
-          "description": "A single barrel file re-exports from itself."
-        }
-      ],
-      "description": "Discriminator for [`ReExportCycle`]: which structural shape was detected."
+      "description": "Summary block on [`ReviewEnvelopeOutput`]. Always present on v2 emit;\n`serde(default)` keeps schemars from marking it required so a future\nDeserialize derivation against v1 historical input synthesizes an empty\nvalue rather than erroring."
     }
   }
 }

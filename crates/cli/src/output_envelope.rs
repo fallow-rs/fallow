@@ -758,13 +758,88 @@ pub struct ReviewEnvelopeOutput {
     /// GitHub review event. Omitted for GitLab.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event: Option<ReviewEnvelopeEvent>,
-    /// Review summary body (rendered above per-line comments).
+    /// Review summary body (rendered above per-line comments). Deprecated in
+    /// v2 envelopes: prefer [`summary.body`](`ReviewEnvelopeSummary::body`),
+    /// which is byte-identical to this field but carries a stable
+    /// fingerprint for reconciliation. Kept on v2 emit so v1 consumers that
+    /// only look at `body` keep working.
     pub body: String,
+    /// Sticky summary block (v2). Always present on v2 emit. Consumers
+    /// reconcile a single sticky PR/MR summary comment by
+    /// [`ReviewEnvelopeSummary::fingerprint`] matching, then upsert
+    /// [`ReviewEnvelopeSummary::body`] in place. Synthesized empty when
+    /// deserializing v1 historical input.
+    #[serde(default = "ReviewEnvelopeSummary::empty_default")]
+    pub summary: ReviewEnvelopeSummary,
     /// Per-line comments. Each is either a [`GitHubReviewComment`] or a
     /// [`GitLabReviewComment`] depending on `meta.provider`.
     pub comments: Vec<ReviewComment>,
+    /// Regex consumers run against every existing PR/MR comment body to
+    /// extract a fallow-emitted fingerprint marker. Capture group 1 is the
+    /// fingerprint string (a bare 16-char hex hash for single-finding
+    /// comments, or `<kind>:<16-char-hex>` for compositions such as
+    /// `linecomp:` per-line aggregations). The pattern uses the `(?m)`
+    /// inline-multiline flag so it works in both Rust `regex` and JavaScript
+    /// ES2018 RegExp without flag-awareness on the consumer side.
+    #[serde(default = "default_marker_regex")]
+    pub marker_regex: String,
     /// Envelope metadata block.
     pub meta: ReviewEnvelopeMeta,
+}
+
+/// Default for [`ReviewEnvelopeOutput::marker_regex`]. The canonical regex is
+/// stable across the v2 schema. Consumers that hardcode this string instead
+/// of reading the field stay correct until a v3 bump.
+#[must_use]
+pub fn default_marker_regex() -> String {
+    MARKER_REGEX_V2.to_owned()
+}
+
+/// Canonical v2 marker-regex literal. Mirrored by
+/// [`MARKER_PREFIX_V2`](`crate::report::ci::review::MARKER_PREFIX_V2`) on the
+/// render side; if you change one, change the other and refresh both
+/// snapshots.
+pub const MARKER_REGEX_V2: &str =
+    r"(?m)^<!-- fallow-fingerprint:v2: ((?:[a-z]+:)?[0-9a-f]{16}) -->\s*$";
+
+/// Summary block on [`ReviewEnvelopeOutput`]. Always present on v2 emit;
+/// `serde(default)` keeps schemars from marking it required so a future
+/// Deserialize derivation against v1 historical input synthesizes an empty
+/// value rather than erroring.
+#[derive(Debug, Clone, Serialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ReviewEnvelopeSummary {
+    /// Markdown body of the summary. Byte-identical to the legacy top-level
+    /// [`ReviewEnvelopeOutput::body`] field; the duplication is intentional
+    /// so v1 consumers see no behavior change.
+    pub body: String,
+    /// FNV-1a 64-bit hash (16 lowercase hex chars) of `body`. Stable across
+    /// runs that produce the same summary content. Consumers upsert the
+    /// sticky summary comment by matching this fingerprint against the
+    /// `marker_regex` extraction of every existing comment body.
+    pub fingerprint: String,
+}
+
+impl ReviewEnvelopeSummary {
+    /// Empty-default factory used by `#[serde(default = "...")]` on
+    /// [`ReviewEnvelopeOutput::summary`]. Returns a zero-body, zero-
+    /// fingerprint value so v1 historical inputs deserialize without
+    /// inventing fabricated content.
+    ///
+    /// Referenced from the `default = "ReviewEnvelopeSummary::empty_default"`
+    /// attribute on the field; serde's macro resolves it lazily at derive
+    /// time without registering a direct call site, so without the explicit
+    /// allow the function tripped `dead_code` until a Deserialize derive
+    /// pulls it in. schemars also reads the attribute to mark the field
+    /// non-required in the schema's `required[]`.
+    #[must_use]
+    #[allow(
+        dead_code,
+        reason = "referenced via serde default = \"...\" attr; no direct callsite until Deserialize is derived"
+    )]
+    pub fn empty_default() -> Self {
+        Self::default()
+    }
 }
 
 /// Singleton GitHub review-event marker.
@@ -806,7 +881,26 @@ pub struct GitHubReviewComment {
     pub body: String,
     /// Stable fingerprint for the comment, used by `fallow ci
     /// reconcile-review` to detect carryover comments across PR revisions.
+    /// For single-finding comments the value is a bare 16-char hex FNV-1a
+    /// hash. For merged comments (multiple findings on the same path:line)
+    /// the value is `linecomp:<16-char hex>` keyed on `(path, line)` and is
+    /// stable across runs even when constituent findings change membership,
+    /// enabling update-in-place reconciliation that preserves reviewer
+    /// reply threads.
     pub fingerprint: String,
+    /// v1-style per-finding fingerprints contributing to this merged comment,
+    /// in stable sort order. Empty (omitted) when the comment represents a
+    /// single finding. Consumers detect content change by comparing this
+    /// array between runs while reusing the stable [`Self::fingerprint`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub constituent_fingerprints: Vec<String>,
+    /// True when [`Self::body`] was truncated to fit a downstream provider's
+    /// note-size budget (today: 65,536 bytes). The body retains the closing
+    /// fallow-fingerprint marker so reconciliation continues to work after
+    /// truncation. Pairs with the inline `<!-- fallow-truncated -->` HTML
+    /// marker and the human `... (truncated)` text.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub truncated: bool,
 }
 
 /// Singleton side discriminator for [`GitHubReviewComment::side`].
@@ -826,8 +920,31 @@ pub struct GitLabReviewComment {
     pub body: String,
     /// Position block describing where the comment attaches on the diff.
     pub position: GitLabReviewPosition,
-    /// Stable fingerprint for the comment.
+    /// Stable fingerprint for the comment. See
+    /// [`GitHubReviewComment::fingerprint`] for the single vs `linecomp:`
+    /// shape contract; semantics are identical across providers.
     pub fingerprint: String,
+    /// v1-style per-finding fingerprints contributing to this merged comment,
+    /// in stable sort order. Empty (omitted) when the comment represents a
+    /// single finding.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub constituent_fingerprints: Vec<String>,
+    /// True when [`Self::body`] was truncated to fit GitLab's note-size
+    /// budget. See [`GitHubReviewComment::truncated`].
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub truncated: bool,
+}
+
+/// Helper for `skip_serializing_if = "is_false"` on `truncated` fields above.
+/// Serde calls `skip_serializing_if` with `&T`, so the reference signature
+/// is dictated by the trait and cannot be changed to pass-by-value.
+#[must_use]
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if requires fn(&T) -> bool"
+)]
+pub fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// `position` block inside [`GitLabReviewComment`]. Mirrors the GitLab
@@ -867,7 +984,10 @@ pub enum GitLabReviewPositionType {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReviewEnvelopeMeta {
-    /// Envelope schema marker, always `fallow-review-envelope/v1`.
+    /// Envelope schema marker. v2 emit always tags
+    /// `fallow-review-envelope/v2`; v1 is recognized on deserialize for
+    /// backward-compat with historical envelopes captured before the v2
+    /// migration.
     pub schema: ReviewEnvelopeSchema,
     /// Which provider this envelope is shaped for.
     pub provider: ReviewProvider,
@@ -881,9 +1001,30 @@ pub struct ReviewEnvelopeMeta {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum ReviewEnvelopeSchema {
-    /// First release of the review envelope format.
+    /// First release of the review envelope format. Historical only; no v1
+    /// emit path remains on the current code. Retained on the enum so a
+    /// future Deserialize derive can still parse v1 captures (e.g. from
+    /// committed snapshots predating the issue #528 migration) without
+    /// erroring on an unknown variant.
     #[serde(rename = "fallow-review-envelope/v1")]
+    #[allow(
+        dead_code,
+        reason = "kept for forward-compat with v1 historical inputs once Deserialize is derived"
+    )]
     V1,
+    /// Issue #528 evolution. Adds (1) the [`ReviewEnvelopeOutput::summary`]
+    /// block, (2) [`ReviewEnvelopeOutput::marker_regex`], (3) same-line
+    /// `(path, line)` merging in `comments[]` with the stable
+    /// `linecomp:<...>` primary fingerprint and a
+    /// `constituent_fingerprints` array tracking per-finding membership,
+    /// (4) UTF-8-safe body truncation at the GitLab/GitHub note-size floor
+    /// (65,536 bytes) with paired `truncated: bool` + `<!-- fallow-truncated -->`
+    /// signals, (5) `:v2:`-namespaced marker shape
+    /// (`<!-- fallow-fingerprint:v2: <fingerprint> -->`) preventing v1
+    /// marker collision and user-paste spoofing, and (6) diff-aware
+    /// `position.old_path` for renamed files on GitLab.
+    #[serde(rename = "fallow-review-envelope/v2")]
+    V2,
 }
 
 /// Review-envelope provider tag.

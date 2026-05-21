@@ -1,13 +1,16 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 1755
 expression: json_str
 ---
 {
-  "body": "### Fallow dead-code report\n\n22 inline findings selected for GitLab review.\n\n<!-- fallow-review -->",
+  "body": "### Fallow dead-code report\n\n19 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 34720cb0f38c2c4d -->",
+  "summary": {
+    "body": "### Fallow dead-code report\n\n19 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 34720cb0f38c2c4d -->",
+    "fingerprint": "34720cb0f38c2c4d"
+  },
   "comments": [
     {
-      "body": "**error** `fallow/misconfigured-dependency-override`: Override \\`@types/react@\\<\\<18\\` -\\> \\`18.0.0\\` is malformed: override key cannot be parsed\n\n<!-- fallow-fingerprint: 21be520b86ce0207 -->",
+      "body": "**error** `fallow/misconfigured-dependency-override`: Override \\`@types/react@\\<\\<18\\` -\\> \\`18.0.0\\` is malformed: override key cannot be parsed\n\n<!-- fallow-fingerprint:v2: 21be520b86ce0207 -->",
       "position": {
         "position_type": "text",
         "old_path": "package.json",
@@ -17,37 +20,22 @@ expression: json_str
       "fingerprint": "21be520b86ce0207"
     },
     {
-      "body": "**error** `fallow/unused-dependency`: Package 'lodash' is in dependencies but never imported\n\n<!-- fallow-fingerprint: 1d04d08d81daf650 -->",
+      "body": "**error** `fallow/unused-dependency`: Package 'lodash' is in dependencies but never imported\n\n**warn** `fallow/unused-dev-dependency`: Package 'jest' is in devDependencies but never imported\n\n**warn** `fallow/unused-optional-dependency`: Package 'fsevents' is in optionalDependencies but never imported\n\n<!-- fallow-fingerprint:v2: linecomp:9a18387f430bc48d -->",
       "position": {
         "position_type": "text",
         "old_path": "package.json",
         "new_path": "package.json",
         "new_line": 5
       },
-      "fingerprint": "1d04d08d81daf650"
+      "fingerprint": "linecomp:9a18387f430bc48d",
+      "constituent_fingerprints": [
+        "1d04d08d81daf650",
+        "2a4393b133ea1523",
+        "66616a09b329d842"
+      ]
     },
     {
-      "body": "**warn** `fallow/unused-dev-dependency`: Package 'jest' is in devDependencies but never imported\n\n<!-- fallow-fingerprint: 2a4393b133ea1523 -->",
-      "position": {
-        "position_type": "text",
-        "old_path": "package.json",
-        "new_path": "package.json",
-        "new_line": 5
-      },
-      "fingerprint": "2a4393b133ea1523"
-    },
-    {
-      "body": "**warn** `fallow/unused-optional-dependency`: Package 'fsevents' is in optionalDependencies but never imported\n\n<!-- fallow-fingerprint: 66616a09b329d842 -->",
-      "position": {
-        "position_type": "text",
-        "old_path": "package.json",
-        "new_path": "package.json",
-        "new_line": 5
-      },
-      "fingerprint": "66616a09b329d842"
-    },
-    {
-      "body": "**warn** `fallow/type-only-dependency`: Package 'zod' is only imported via type-only imports \\(consider moving to devDependencies\\)\n\n<!-- fallow-fingerprint: 34d2064787c07f45 -->",
+      "body": "**warn** `fallow/type-only-dependency`: Package 'zod' is only imported via type-only imports \\(consider moving to devDependencies\\)\n\n<!-- fallow-fingerprint:v2: 34d2064787c07f45 -->",
       "position": {
         "position_type": "text",
         "old_path": "package.json",
@@ -57,7 +45,7 @@ expression: json_str
       "fingerprint": "34d2064787c07f45"
     },
     {
-      "body": "**warn** `fallow/test-only-dependency`: Package 'msw' is only imported by test files \\(consider moving to devDependencies\\)\n\n<!-- fallow-fingerprint: ebc538b211ef05f5 -->",
+      "body": "**warn** `fallow/test-only-dependency`: Package 'msw' is only imported by test files \\(consider moving to devDependencies\\)\n\n<!-- fallow-fingerprint:v2: ebc538b211ef05f5 -->",
       "position": {
         "position_type": "text",
         "old_path": "package.json",
@@ -67,7 +55,7 @@ expression: json_str
       "fingerprint": "ebc538b211ef05f5"
     },
     {
-      "body": "**error** `fallow/unresolved-catalog-reference`: Package 'old-react' is referenced via \\`catalog:react17\\` but catalog 'react17' does not declare it; \\`pnpm install\\` will fail \\(available in: react18\\)\n\n<!-- fallow-fingerprint: 3b583c29be84724a -->",
+      "body": "**error** `fallow/unresolved-catalog-reference`: Package 'old-react' is referenced via \\`catalog:react17\\` but catalog 'react17' does not declare it; \\`pnpm install\\` will fail \\(available in: react18\\)\n\n<!-- fallow-fingerprint:v2: 3b583c29be84724a -->",
       "position": {
         "position_type": "text",
         "old_path": "packages/app/package.json",
@@ -77,7 +65,7 @@ expression: json_str
       "fingerprint": "3b583c29be84724a"
     },
     {
-      "body": "**warn** `fallow/unused-catalog-entry`: Catalog entry 'is-even' is not referenced by any workspace package\n\n<!-- fallow-fingerprint: 01c68b8e65ee42b9 -->",
+      "body": "**warn** `fallow/unused-catalog-entry`: Catalog entry 'is-even' is not referenced by any workspace package\n\n<!-- fallow-fingerprint:v2: 01c68b8e65ee42b9 -->",
       "position": {
         "position_type": "text",
         "old_path": "pnpm-workspace.yaml",
@@ -87,7 +75,7 @@ expression: json_str
       "fingerprint": "01c68b8e65ee42b9"
     },
     {
-      "body": "**warn** `fallow/unused-dependency-override`: Override \\`axios\\` forces version \\`^1.6.0\\` but \\`axios\\` is not declared by any workspace package or resolved in pnpm-lock.yaml \\(may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth\\)\n\n<!-- fallow-fingerprint: 9e455c649fd184fe -->",
+      "body": "**warn** `fallow/unused-dependency-override`: Override \\`axios\\` forces version \\`^1.6.0\\` but \\`axios\\` is not declared by any workspace package or resolved in pnpm-lock.yaml \\(may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth\\)\n\n<!-- fallow-fingerprint:v2: 9e455c649fd184fe -->",
       "position": {
         "position_type": "text",
         "old_path": "pnpm-workspace.yaml",
@@ -97,7 +85,7 @@ expression: json_str
       "fingerprint": "9e455c649fd184fe"
     },
     {
-      "body": "**warn** `fallow/empty-catalog-group`: Catalog group 'react17' has no entries\n\n<!-- fallow-fingerprint: 03506bd5a376e100 -->",
+      "body": "**warn** `fallow/empty-catalog-group`: Catalog group 'react17' has no entries\n\n<!-- fallow-fingerprint:v2: 03506bd5a376e100 -->",
       "position": {
         "position_type": "text",
         "old_path": "pnpm-workspace.yaml",
@@ -107,7 +95,7 @@ expression: json_str
       "fingerprint": "03506bd5a376e100"
     },
     {
-      "body": "**warn** `fallow/unused-catalog-entry`: Catalog entry 'old-thing' \\(catalog 'legacy'\\) is not referenced by any workspace package\n\n<!-- fallow-fingerprint: 2d5072d3451b44dd -->",
+      "body": "**warn** `fallow/unused-catalog-entry`: Catalog entry 'old-thing' \\(catalog 'legacy'\\) is not referenced by any workspace package\n\n<!-- fallow-fingerprint:v2: 2d5072d3451b44dd -->",
       "position": {
         "position_type": "text",
         "old_path": "pnpm-workspace.yaml",
@@ -117,7 +105,7 @@ expression: json_str
       "fingerprint": "2d5072d3451b44dd"
     },
     {
-      "body": "**error** `fallow/circular-dependency`: Circular dependency: src/a.ts → src/b.ts\n\n<!-- fallow-fingerprint: 405f0abed155920d -->",
+      "body": "**error** `fallow/circular-dependency`: Circular dependency: src/a.ts → src/b.ts\n\n<!-- fallow-fingerprint:v2: 405f0abed155920d -->",
       "position": {
         "position_type": "text",
         "old_path": "src/a.ts",
@@ -127,17 +115,7 @@ expression: json_str
       "fingerprint": "405f0abed155920d"
     },
     {
-      "body": "**warn** `fallow/re-export-cycle`: Re-export cycle: src/api/index.ts \\<-\\> src/api/internal/index.ts\n\n<!-- fallow-fingerprint: 3b15e7a61f99e1df -->",
-      "position": {
-        "position_type": "text",
-        "old_path": "src/api/index.ts",
-        "new_path": "src/api/index.ts",
-        "new_line": 1
-      },
-      "fingerprint": "3b15e7a61f99e1df"
-    },
-    {
-      "body": "**error** `fallow/unresolved-import`: Import './missing-module' could not be resolved\n\n<!-- fallow-fingerprint: 231a7ed9e16a19a6 -->",
+      "body": "**error** `fallow/unresolved-import`: Import './missing-module' could not be resolved\n\n<!-- fallow-fingerprint:v2: 231a7ed9e16a19a6 -->",
       "position": {
         "position_type": "text",
         "old_path": "src/app.ts",
@@ -147,7 +125,7 @@ expression: json_str
       "fingerprint": "231a7ed9e16a19a6"
     },
     {
-      "body": "**error** `fallow/unlisted-dependency`: Package 'chalk' is imported but not listed in package.json\n\n<!-- fallow-fingerprint: 2ef210a41606f3aa -->",
+      "body": "**error** `fallow/unlisted-dependency`: Package 'chalk' is imported but not listed in package.json\n\n<!-- fallow-fingerprint:v2: 2ef210a41606f3aa -->",
       "position": {
         "position_type": "text",
         "old_path": "src/cli.ts",
@@ -157,7 +135,7 @@ expression: json_str
       "fingerprint": "2ef210a41606f3aa"
     },
     {
-      "body": "**error** `fallow/duplicate-export`: Export 'Config' appears in multiple modules\n\n<!-- fallow-fingerprint: da73cab5c65b029d -->",
+      "body": "**error** `fallow/duplicate-export`: Export 'Config' appears in multiple modules\n\n<!-- fallow-fingerprint:v2: da73cab5c65b029d -->",
       "position": {
         "position_type": "text",
         "old_path": "src/config.ts",
@@ -167,7 +145,7 @@ expression: json_str
       "fingerprint": "da73cab5c65b029d"
     },
     {
-      "body": "**error** `fallow/unused-file`: File is not reachable from any entry point\n\n<!-- fallow-fingerprint: e3912cb6bb9b0212 -->\n\n> Run `fallow fix --files` or delete this file.",
+      "body": "**error** `fallow/unused-file`: File is not reachable from any entry point\n\n> Run `fallow fix --files` or delete this file.\n\n<!-- fallow-fingerprint:v2: e3912cb6bb9b0212 -->",
       "position": {
         "position_type": "text",
         "old_path": "src/dead.ts",
@@ -177,7 +155,7 @@ expression: json_str
       "fingerprint": "e3912cb6bb9b0212"
     },
     {
-      "body": "**error** `fallow/unused-enum-member`: Enum member 'Status.Deprecated' is never referenced\n\n<!-- fallow-fingerprint: 090d4d65832bf868 -->",
+      "body": "**error** `fallow/unused-enum-member`: Enum member 'Status.Deprecated' is never referenced\n\n<!-- fallow-fingerprint:v2: 090d4d65832bf868 -->",
       "position": {
         "position_type": "text",
         "old_path": "src/enums.ts",
@@ -187,7 +165,7 @@ expression: json_str
       "fingerprint": "090d4d65832bf868"
     },
     {
-      "body": "**error** `fallow/unused-class-member`: Class member 'UserService.legacyMethod' is never referenced\n\n<!-- fallow-fingerprint: 25579ea7b6940453 -->",
+      "body": "**error** `fallow/unused-class-member`: Class member 'UserService.legacyMethod' is never referenced\n\n<!-- fallow-fingerprint:v2: 25579ea7b6940453 -->",
       "position": {
         "position_type": "text",
         "old_path": "src/service.ts",
@@ -197,7 +175,7 @@ expression: json_str
       "fingerprint": "25579ea7b6940453"
     },
     {
-      "body": "**error** `fallow/unused-type`: Type export 'OldType' is never imported by other modules\n\n<!-- fallow-fingerprint: deb0e9de35cc06d9 -->",
+      "body": "**error** `fallow/unused-type`: Type export 'OldType' is never imported by other modules\n\n<!-- fallow-fingerprint:v2: deb0e9de35cc06d9 -->",
       "position": {
         "position_type": "text",
         "old_path": "src/types.ts",
@@ -207,7 +185,7 @@ expression: json_str
       "fingerprint": "deb0e9de35cc06d9"
     },
     {
-      "body": "**error** `fallow/duplicate-export`: Export 'Config' appears in multiple modules\n\n<!-- fallow-fingerprint: cc6a09c8dc227321 -->",
+      "body": "**error** `fallow/duplicate-export`: Export 'Config' appears in multiple modules\n\n<!-- fallow-fingerprint:v2: cc6a09c8dc227321 -->",
       "position": {
         "position_type": "text",
         "old_path": "src/types.ts",
@@ -217,7 +195,7 @@ expression: json_str
       "fingerprint": "cc6a09c8dc227321"
     },
     {
-      "body": "**error** `fallow/unused-export`: Export 'helperFn' is never imported by other modules\n\n<!-- fallow-fingerprint: ebe2360218821412 -->",
+      "body": "**error** `fallow/unused-export`: Export 'helperFn' is never imported by other modules\n\n<!-- fallow-fingerprint:v2: ebe2360218821412 -->",
       "position": {
         "position_type": "text",
         "old_path": "src/utils.ts",
@@ -227,8 +205,9 @@ expression: json_str
       "fingerprint": "ebe2360218821412"
     }
   ],
+  "marker_regex": "(?m)^<!-- fallow-fingerprint:v2: ((?:[a-z]+:)?[0-9a-f]{16}) -->\\s*$",
   "meta": {
-    "schema": "fallow-review-envelope/v1",
+    "schema": "fallow-review-envelope/v2",
     "provider": "gitlab"
   }
 }

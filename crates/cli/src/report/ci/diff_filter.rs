@@ -45,6 +45,14 @@ pub struct DiffIndex {
     added_lines: FxHashMap<String, FxHashSet<u64>>,
     touched_files: FxHashSet<String>,
     added_line_count: usize,
+    /// `head_path -> base_path` pairs for renames in the diff. Populated by
+    /// parsing `rename from <old>` and `rename to <new>` extended-header
+    /// lines that git diff emits between the `diff --git` line and the
+    /// `--- a/...` / `+++ b/...` body. Consumed by
+    /// `crates/cli/src/report/ci/review.rs` to populate GitLab's
+    /// `position.old_path` with the base-side filename, which the GitLab
+    /// API requires when anchoring an inline comment on a renamed file.
+    rename_pairs: FxHashMap<String, String>,
 }
 
 impl DiffIndex {
@@ -54,8 +62,33 @@ impl DiffIndex {
         let mut current_file: Option<String> = None;
         let mut new_line = 0_u64;
         let mut warned_overflow = false;
+        // `rename from <old>` always precedes `rename to <new>` in git's
+        // extended-header block. Track the most-recent `from` so the
+        // subsequent `to` can pair them. Reset on every new `diff --git`
+        // header so an unpaired `from` in one block does not bleed into
+        // the next file's pair.
+        let mut pending_rename_from: Option<String> = None;
 
         for line in diff.lines() {
+            if line.starts_with("diff --git ") {
+                pending_rename_from = None;
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("rename from ") {
+                pending_rename_from = Some(rest.to_owned());
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("rename to ") {
+                if let Some(from) = pending_rename_from.take() {
+                    index.rename_pairs.insert(rest.to_owned(), from);
+                    // A pure-rename diff (similarity 100%) has no `+++ b/`
+                    // line, so the touched-files set never records the new
+                    // path otherwise. Seed it here for the filter-side
+                    // `touches_file` check.
+                    index.touched_files.insert(rest.to_owned());
+                }
+                continue;
+            }
             if let Some(path) = line.strip_prefix("+++ b/") {
                 current_file = Some(path.to_string());
                 index.touched_files.insert(path.to_string());
@@ -96,6 +129,18 @@ impl DiffIndex {
         }
 
         index
+    }
+
+    /// Base-side path for a renamed file whose head-side path is
+    /// `head_path`. Returns `None` when `head_path` is not part of any
+    /// rename pair in the indexed diff (the common case: edits, additions,
+    /// deletions). Consumed by the review envelope formatter at
+    /// `crates/cli/src/report/ci/review.rs::render_comment` to populate the
+    /// GitLab `position.old_path` field for renamed files; without this the
+    /// inline comment fails to anchor in GitLab's position API.
+    #[must_use]
+    pub fn old_path_for(&self, head_path: &str) -> Option<&str> {
+        self.rename_pairs.get(head_path).map(String::as_str)
     }
 
     /// Count of `+` lines indexed across every file. Used by the
@@ -817,6 +862,55 @@ rename to src/new.ts
         assert!(!index.touches_file("src/old.ts"));
         assert!(index.range_overlaps_added("src/new.ts", 1, 5));
         assert!(!index.range_overlaps_added("src/old.ts", 1, 5));
+        // Issue #528: rename pair must be recorded so the review envelope
+        // can populate GitLab's position.old_path with the base-side path.
+        assert_eq!(index.old_path_for("src/new.ts"), Some("src/old.ts"));
+        assert_eq!(index.old_path_for("src/other.ts"), None);
+    }
+
+    #[test]
+    fn rename_only_diff_records_pair_and_seeds_touched_files() {
+        // Pure rename (100% similarity) has no content hunk and no
+        // `+++ b/` line. The rename pair must still land in the index, and
+        // the new path must show up in `touches_file` so downstream filters
+        // recognise it as part of the change set.
+        let diff = "\
+diff --git a/src/keep.ts b/src/moved.ts
+similarity index 100%
+rename from src/keep.ts
+rename to src/moved.ts
+";
+        let index = DiffIndex::from_unified_diff(diff);
+        assert_eq!(index.old_path_for("src/moved.ts"), Some("src/keep.ts"));
+        assert!(index.touches_file("src/moved.ts"));
+        assert!(!index.touches_file("src/keep.ts"));
+        assert_eq!(index.added_line_count(), 0);
+    }
+
+    #[test]
+    fn unpaired_rename_from_does_not_bleed_into_next_file() {
+        // Defensive: if a malformed diff has a `rename from` without a
+        // matching `rename to` (truncated input, hand-crafted patch), the
+        // pending `from` must be cleared at the next `diff --git` header so
+        // it cannot accidentally pair with a later block's `rename to`.
+        let diff = "\
+diff --git a/src/a.ts b/src/a.ts
+rename from src/dropped-from.ts
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1,1 +1,1 @@
+-old
++new
+diff --git a/src/b.ts b/src/c.ts
+rename from src/b.ts
+rename to src/c.ts
+";
+        let index = DiffIndex::from_unified_diff(diff);
+        // The well-formed pair lands.
+        assert_eq!(index.old_path_for("src/c.ts"), Some("src/b.ts"));
+        // The unpaired from does NOT leak into anything else.
+        assert_eq!(index.old_path_for("src/dropped-from.ts"), None);
+        assert_eq!(index.old_path_for("src/a.ts"), None);
     }
 
     #[test]

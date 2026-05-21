@@ -57,7 +57,7 @@ use fallow_cli::output_envelope::{
     GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition, GitLabReviewPositionType,
     GroupByMode, HealthOutput, ListBoundariesOutput, ReviewCheckConclusion, ReviewComment,
     ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema,
-    ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema,
+    ReviewEnvelopeSummary, ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema,
 };
 use fallow_cli::report::dupes_grouping::{
     AttributedCloneGroup, AttributedInstance, DuplicationGroup,
@@ -332,6 +332,7 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "HealthGroup",
         "HealthOutput",
         "ReviewEnvelopeOutput",
+        "ReviewEnvelopeSummary",
         "ReviewReconcileOutput",
         // crates/cli/src/output_envelope.rs - typed document root that
         // wraps the 11 object-shaped envelopes via `#[serde(untagged)]`.
@@ -676,6 +677,7 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<CodeClimateLocation>();
     let _ = generator.subschema_for::<CodeClimateLines>();
     let _ = generator.subschema_for::<ReviewEnvelopeOutput>();
+    let _ = generator.subschema_for::<ReviewEnvelopeSummary>();
     let _ = generator.subschema_for::<ReviewEnvelopeEvent>();
     let _ = generator.subschema_for::<ReviewComment>();
     let _ = generator.subschema_for::<GitHubReviewComment>();

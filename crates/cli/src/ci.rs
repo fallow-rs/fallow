@@ -273,7 +273,7 @@ fn load_github_state(
         }
         for comment in comments {
             let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
-            if let Some(fingerprint) = extract_marker(body, "fallow-fingerprint:") {
+            if let Some(fingerprint) = extract_fallow_fingerprint(body) {
                 state.fingerprints.insert(fingerprint.clone());
                 if let Some(id) = comment.get("id").and_then(Value::as_u64) {
                     state
@@ -372,7 +372,7 @@ query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
                 .flatten();
             for comment in comments {
                 let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
-                if let Some(fingerprint) = extract_marker(body, "fallow-fingerprint:") {
+                if let Some(fingerprint) = extract_fallow_fingerprint(body) {
                     state
                         .github_threads_by_fingerprint
                         .entry(fingerprint)
@@ -520,7 +520,7 @@ fn load_gitlab_state(
                 .flatten();
             for note in notes {
                 let body = note.get("body").and_then(Value::as_str).unwrap_or("");
-                if let Some(fingerprint) = extract_marker(body, "fallow-fingerprint:") {
+                if let Some(fingerprint) = extract_fallow_fingerprint(body) {
                     state.fingerprints.insert(fingerprint.clone());
                     state
                         .gitlab_discussions_by_fingerprint
@@ -894,6 +894,20 @@ fn extract_marker(body: &str, marker: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_owned())
 }
 
+/// Extract a fallow fingerprint from any v1 or v2 marker shape in `body`.
+/// v2 (`<!-- fallow-fingerprint:v2: <fp> -->`) wins over v1 because the v2
+/// marker's text also matches the v1 substring search, so the v2-first
+/// check has to run first or the v1 fallback would skip past `v2:` and
+/// return the literal `"v2:"` as the extracted fingerprint.
+///
+/// Returns the raw fingerprint string with any kind prefix preserved
+/// (`linecomp:<hex>` stays `linecomp:<hex>`). Consumers match the returned
+/// string against the comment's `fingerprint` field verbatim.
+fn extract_fallow_fingerprint(body: &str) -> Option<String> {
+    extract_marker(body, "fallow-fingerprint:v2:")
+        .or_else(|| extract_marker(body, "fallow-fingerprint:"))
+}
+
 /// Compute the idempotency marker for a (fingerprint, sha) pair. The marker
 /// is what we look up to decide whether a resolution comment for this
 /// fingerprint at this commit already exists, so re-runs of the workflow on
@@ -944,6 +958,55 @@ mod tests {
             )
             .as_deref(),
             Some("abc123")
+        );
+    }
+
+    #[test]
+    fn extracts_fingerprint_from_v2_marker() {
+        // v2 marker shape introduced in issue #528.
+        assert_eq!(
+            extract_fallow_fingerprint(
+                "**error**\n\n<!-- fallow-fingerprint:v2: abc1234567890def -->"
+            )
+            .as_deref(),
+            Some("abc1234567890def")
+        );
+        // linecomp shape on merged comments.
+        assert_eq!(
+            extract_fallow_fingerprint(
+                "**error**\n\n<!-- fallow-fingerprint:v2: linecomp:0123456789abcdef -->"
+            )
+            .as_deref(),
+            Some("linecomp:0123456789abcdef")
+        );
+    }
+
+    #[test]
+    fn extract_fallow_fingerprint_falls_back_to_v1_shape() {
+        // v1 historical marker. Reconcile-review must still recognize it
+        // during the migration window so consumers can re-process backlogs
+        // posted by older fallow versions.
+        assert_eq!(
+            extract_fallow_fingerprint("**error**\n\n<!-- fallow-fingerprint: abc123 -->")
+                .as_deref(),
+            Some("abc123")
+        );
+    }
+
+    #[test]
+    fn extract_fallow_fingerprint_does_not_match_unrelated_body() {
+        assert_eq!(extract_fallow_fingerprint("plain comment body"), None);
+        // A body that contains the literal "fallow-fingerprint:v2:" but no
+        // closing marker shape still returns the trimmed token, which is
+        // intentional: extract_marker is forgiving by design and the
+        // reconcile path treats any non-empty extraction as a potential
+        // match (consumers cross-check against the typed `fingerprint`
+        // field on their side to filter false positives). The dedicated
+        // anti-spoofing layer is `marker_regex` running on the consumer
+        // side, not this internal helper.
+        assert_eq!(
+            extract_fallow_fingerprint("fallow-fingerprint:v2: deadbeef").as_deref(),
+            Some("deadbeef")
         );
     }
 
