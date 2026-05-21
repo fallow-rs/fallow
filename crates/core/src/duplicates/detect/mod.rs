@@ -108,10 +108,18 @@ impl CloneDetector {
         let total_files = files.len();
         let total_lines: usize = files.iter().map(|f| f.file_tokens.line_count).sum();
         let total_tokens: usize = files.iter().map(|f| f.hashed_tokens.len()).sum();
+        // See shingle_filter::filter_to_focus_candidates for the rationale:
+        // normalise both sides through `dunce::simplified` so the Windows
+        // verbatim-vs-non-verbatim prefix mismatch does not silently mark
+        // every file as non-focus.
         let focus_file_ids = focus_files.map(|focus| {
+            let normalized: rustc_hash::FxHashSet<std::path::PathBuf> = focus
+                .iter()
+                .map(|p| dunce::simplified(p).to_path_buf())
+                .collect();
             files
                 .iter()
-                .map(|file| focus.contains(&file.path))
+                .map(|file| normalized.contains(dunce::simplified(&file.path)))
                 .collect::<Vec<_>>()
         });
 

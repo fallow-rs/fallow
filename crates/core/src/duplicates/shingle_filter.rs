@@ -14,8 +14,22 @@ pub(super) fn filter_to_focus_candidates(
     min_tokens: usize,
 ) {
     let window = min_tokens.clamp(1, DEFAULT_SHINGLE_TOKENS);
+    // Normalise both ends of the focus_files vs file.path comparison through
+    // `dunce::simplified` so the byte-level FxHashSet lookup compares equal
+    // when one side carries the Windows `\\?\` verbatim prefix and the other
+    // does not (common: focus_files entries come from `try_get_changed_files`
+    // joined onto a dunce-canonicalised toplevel, while file.path comes from
+    // a discovery walk of `opts.root` which the caller may have pre-canonicalised
+    // with `std::fs::canonicalize` to verbatim form on Windows). On POSIX
+    // dunce::simplified is a no-op.
+    let normalized_focus: FxHashSet<PathBuf> = focus_files
+        .iter()
+        .map(|p| dunce::simplified(p).to_path_buf())
+        .collect();
+    let path_is_focus =
+        |path: &std::path::Path| normalized_focus.contains(dunce::simplified(path));
     let mut focus_shingles = FxHashSet::default();
-    for file in files.iter().filter(|file| focus_files.contains(&file.path)) {
+    for file in files.iter().filter(|file| path_is_focus(&file.path)) {
         insert_shingles(&file.hashed_tokens, window, &mut focus_shingles);
     }
     if focus_shingles.is_empty() {
@@ -25,7 +39,7 @@ pub(super) fn filter_to_focus_candidates(
     let mut candidates_kept = 0usize;
     let mut candidates_skipped = 0usize;
     files.retain(|file| {
-        if focus_files.contains(&file.path) {
+        if path_is_focus(&file.path) {
             return true;
         }
         let keep = has_matching_shingle(&file.hashed_tokens, window, &focus_shingles);
