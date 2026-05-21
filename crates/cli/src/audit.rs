@@ -3827,10 +3827,12 @@ mod tests {
 
     #[test]
     fn reusable_cache_gc_preserves_lock_file_after_removal() {
-        // Locks invariant from panel BLOCK 1: the sweep MUST NOT delete the
-        // `.lock` file. If it did, a sibling acquirer holding a kernel flock
-        // on the now-unlinked inode could race with a later open(O_CREAT)
-        // that produces a fresh inode at the same path.
+        // Lock-file lifecycle invariant: the sweep MUST NOT delete the
+        // `.lock` file. If it did, a sibling acquirer holding a kernel
+        // flock on the now-unlinked inode could race with a later
+        // `open(O_CREAT)` that produces a fresh inode at the same path,
+        // letting two processes hold "the lock" concurrently on
+        // different inodes.
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let repo = init_throwaway_repo(tmp.path(), "repo-gc-lockfile");
         let worktree_path = make_reusable_path("gc-lockfile");
@@ -3857,7 +3859,7 @@ mod tests {
         );
         assert!(
             lock_path.exists(),
-            "sweep MUST NOT delete the `.lock` file (panel BLOCK 1)",
+            "sweep MUST NOT delete the `.lock` file (lock-lifecycle invariant)",
         );
         let _ = fs::remove_file(&lock_path);
         cleanup_reusable_worktree(&repo, &worktree_path);
