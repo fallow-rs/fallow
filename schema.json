@@ -1690,6 +1690,15 @@
             "string",
             "null"
           ]
+        },
+        "cacheMaxAgeDays": {
+          "description": "Maximum age (in days since last reuse or fresh create) of a persistent\nreusable base-snapshot worktree cache entry. Older entries are removed\nat the top of the next `fallow audit` invocation. The env var\n`FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` wins over this field. Unset on both\nsides defaults to 30 days. Setting either source to `0` disables the\nsweep entirely (escape hatch for CI runners that prune caches\nout-of-band). Invalid env var values (non-integer, negative) silently\nfall back to this field / default rather than failing the audit.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
         }
       }
     },
