@@ -1304,19 +1304,22 @@ fn sweep_old_reusable_caches(repo_root: &Path, max_age: Duration, quiet: bool) {
             continue;
         };
         remove_audit_worktree(repo_root, &path);
-        match std::fs::remove_dir_all(&path) {
-            Ok(()) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        let dir_removed = match std::fs::remove_dir_all(&path) {
+            Ok(()) => true,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => true,
             Err(err) => {
                 tracing::warn!(
                     path = %path.display(),
                     error = %err,
                     "failed to remove stale reusable audit worktree directory; entry may leak",
                 );
+                false
             }
-        }
+        };
         let _ = std::fs::remove_file(&sidecar);
-        removed += 1;
+        if dir_removed {
+            removed += 1;
+        }
     }
     if removed == 0 {
         return;
