@@ -618,20 +618,81 @@ mod tests {
         );
     }
 
-    // -- Rules with unknown (non-knip) keys are silently ignored ------------
+    // -- Rules / exclude / include with unknown (non-knip) keys WARN -------
+    //
+    // See issue #457: silent drops violated the loud-failure principle the
+    // rest of the migrator follows.
 
     #[test]
-    fn migrate_knip_rules_unknown_key_not_in_unmappable_silently_ignored() {
+    fn migrate_knip_rules_unknown_key_warns() {
         let knip: serde_json::Value =
             serde_json::from_str(r#"{"rules": {"completelyUnknownRule": "warn"}}"#).unwrap();
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
-        // Not in KNIP_RULE_MAP and not in KNIP_UNMAPPABLE_ISSUE_TYPES -> silently ignored
-        assert!(warnings.is_empty());
-        // rules map might be empty so no "rules" key
+        // Not in KNIP_RULE_MAP, so no rules entry is emitted.
         assert!(!config.contains_key("rules"));
+        // But the user must know their rule was dropped.
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].field, "rules.completelyUnknownRule");
+        assert!(warnings[0].message.contains("unknown knip issue type"));
+        assert!(
+            warnings[0]
+                .suggestion
+                .as_deref()
+                .unwrap_or("")
+                .contains("docs.fallow.tools/migration/from-knip")
+        );
+    }
+
+    #[test]
+    fn migrate_knip_exclude_unknown_key_warns() {
+        let knip: serde_json::Value =
+            serde_json::from_str(r#"{"exclude": ["totallyMadeUp"]}"#).unwrap();
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].field, "exclude.totallyMadeUp");
+        assert!(warnings[0].message.contains("unknown knip issue type"));
+        assert!(warnings[0].suggestion.is_some());
+    }
+
+    #[test]
+    fn migrate_knip_include_unknown_key_warns() {
+        let knip: serde_json::Value =
+            serde_json::from_str(r#"{"include": ["files", "madeUp"]}"#).unwrap();
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        // "files" is mapped, "madeUp" is completely unknown -> exactly one
+        // warning, scoped to the unknown name.
+        let unknown_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.message.contains("unknown knip issue type"))
+            .collect();
+        assert_eq!(unknown_warnings.len(), 1);
+        assert_eq!(unknown_warnings[0].field, "include.madeUp");
+    }
+
+    #[test]
+    fn migrate_knip_documented_unmappable_keeps_existing_message() {
+        // Regression check: documented-unmappable rule names still get the
+        // existing message (and no suggestion). Only completely-unknown keys
+        // get the new docs-pointer.
+        let knip: serde_json::Value =
+            serde_json::from_str(r#"{"rules": {"binaries": "warn"}}"#).unwrap();
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].field, "rules.binaries");
+        assert!(warnings[0].message.contains("no fallow equivalent"));
+        assert!(warnings[0].suggestion.is_none());
     }
 
     // -- Combined complex migration -----------------------------------------

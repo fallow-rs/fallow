@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-use super::MigrationResult;
+use super::{MigrationResult, source_head};
 
 pub(super) fn generate_jsonc(result: &MigrationResult) -> String {
     let mut output = String::new();
@@ -13,7 +13,15 @@ pub(super) fn generate_jsonc(result: &MigrationResult) -> String {
         .config
         .as_object()
         .expect("config is always an Object");
-    let source_comment = result.sources.join(", ");
+    // Strip internal tool tags (`(knip config)`, `(jscpd config)`, ...) from
+    // the comment so the committed config file does not carry implementation
+    // detail. See issue #457.
+    let source_comment = result
+        .sources
+        .iter()
+        .map(|s| source_head(s))
+        .collect::<Vec<_>>()
+        .join(", ");
     let _ = writeln!(output, "  // Migrated from {source_comment}");
 
     let mut entries: Vec<(&String, &serde_json::Value)> = obj.iter().collect();

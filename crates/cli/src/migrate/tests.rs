@@ -3,8 +3,9 @@ use super::jsonc::{generate_jsonc, indent_json_value};
 use super::knip::migrate_knip;
 use super::toml_gen::generate_toml;
 use super::{
-    MigrationResult, MigrationWarning, load_json_or_jsonc, migrate_auto_detect, migrate_from_file,
-    string_or_array, strip_trailing_commas,
+    MigrationResult, MigrationWarning, OutputFormat, load_json_or_jsonc, migrate_auto_detect,
+    migrate_from_file, should_emit_glob_caveat, source_head, string_or_array,
+    strip_trailing_commas,
 };
 
 fn empty_config() -> serde_json::Map<String, serde_json::Value> {
@@ -1254,4 +1255,221 @@ fn string_or_array_with_bool() {
 fn string_or_array_with_object() {
     let val = serde_json::json!({"key": "value"});
     assert!(string_or_array(&val).is_empty());
+}
+
+// -- Glob-drift caveat (#457) --------------------------------------------
+//
+// The caveat fires only when knip was a source AND the migrated config has
+// glob-shaped fields (`entry` or `ignorePatterns`). Jscpd-only migrations
+// and rules-only knip migrations should not see it.
+
+#[test]
+fn glob_caveat_emitted_for_knip_with_entry() {
+    let result = MigrationResult {
+        config: serde_json::json!({"entry": ["src/**"]}),
+        warnings: vec![],
+        sources: vec!["knip.json".to_string()],
+    };
+    assert!(should_emit_glob_caveat(&result));
+}
+
+#[test]
+fn glob_caveat_emitted_for_knip_with_ignore_patterns() {
+    let result = MigrationResult {
+        config: serde_json::json!({"ignorePatterns": ["dist/**"]}),
+        warnings: vec![],
+        sources: vec!["package.json (knip key)".to_string()],
+    };
+    assert!(should_emit_glob_caveat(&result));
+}
+
+#[test]
+fn glob_caveat_suppressed_for_knip_without_globs() {
+    // Rules-only knip migration: no entry, no ignorePatterns -> no caveat.
+    let result = MigrationResult {
+        config: serde_json::json!({"rules": {"unused-files": "warn"}}),
+        warnings: vec![],
+        sources: vec!["knip.json".to_string()],
+    };
+    assert!(!should_emit_glob_caveat(&result));
+}
+
+#[test]
+fn glob_caveat_suppressed_for_jscpd_only() {
+    // jscpd writes `duplicates`, never `entry` / `ignorePatterns`, and the
+    // source string contains "jscpd" not "knip".
+    let result = MigrationResult {
+        config: serde_json::json!({"duplicates": {"minTokens": 100}}),
+        warnings: vec![],
+        sources: vec![".jscpd.json".to_string()],
+    };
+    assert!(!should_emit_glob_caveat(&result));
+}
+
+#[test]
+fn glob_caveat_emitted_when_knip_and_jscpd_combine() {
+    // Combined migration with knip globs present: the caveat fires because
+    // knip is at least one of the sources.
+    let result = MigrationResult {
+        config: serde_json::json!({
+            "entry": ["src/**"],
+            "duplicates": {"minTokens": 100},
+        }),
+        warnings: vec![],
+        sources: vec!["knip.json".to_string(), ".jscpd.json".to_string()],
+    };
+    assert!(should_emit_glob_caveat(&result));
+}
+
+#[test]
+fn source_head_strips_tagged_suffix() {
+    // Plain filenames pass through unchanged.
+    assert_eq!(source_head("knip.json"), "knip.json");
+    assert_eq!(source_head("knip.jsonc"), "knip.jsonc");
+
+    // Standard tagged suffixes are stripped.
+    assert_eq!(source_head("package.json (knip key)"), "package.json");
+    assert_eq!(
+        source_head("/path/to/my-tool.jsonc (knip config)"),
+        "/path/to/my-tool.jsonc"
+    );
+    assert_eq!(
+        source_head("/path/to/my-tool.json (jscpd config)"),
+        "/path/to/my-tool.json"
+    );
+
+    // Project paths containing their own ` (...)` segment must be preserved
+    // because we strip only the TRAILING tagged suffix, not every ` (` we
+    // find. Without rsplit_once this returns "/path/to/react".
+    assert_eq!(
+        source_head("/path/to/react (v18)/knip.jsonc (knip config)"),
+        "/path/to/react (v18)/knip.jsonc"
+    );
+
+    // Unclosed paren is not a tag; the whole string is preserved.
+    assert_eq!(source_head("foo (bar"), "foo (bar");
+
+    // Empty input.
+    assert_eq!(source_head(""), "");
+}
+
+#[test]
+fn output_format_pick_auto_mirrors_jsonc_through_tagged_source() {
+    // Regression for the suffix-induced auto-mirror flip: a content-detected
+    // .jsonc source whose source string carries a " (knip config)" suffix
+    // must still trigger Jsonc auto-mirror. Before the OutputFormat::pick
+    // fix this returned Json. Issue #457.
+    let result = MigrationResult {
+        config: serde_json::json!({"entry": ["src/index.ts"]}),
+        warnings: vec![],
+        sources: vec!["/path/to/my-tool.jsonc (knip config)".to_string()],
+    };
+    assert_eq!(
+        OutputFormat::pick(false, false, &result),
+        OutputFormat::Jsonc
+    );
+}
+
+#[test]
+fn output_format_pick_does_not_mirror_jsonc_for_json_sources() {
+    // Negative: a plain .json content-detected source still picks Json.
+    let result = MigrationResult {
+        config: serde_json::json!({"entry": ["src/index.ts"]}),
+        warnings: vec![],
+        sources: vec!["/path/to/my-tool.json (knip config)".to_string()],
+    };
+    assert_eq!(
+        OutputFormat::pick(false, false, &result),
+        OutputFormat::Json
+    );
+}
+
+#[test]
+fn glob_caveat_emitted_when_content_detected_knip_from_custom_filename() {
+    // `--from /path/to/my-tool-config.json` whose filename does NOT contain
+    // "knip" but whose contents are knip-shaped goes through the
+    // content-detection branch of `migrate_from_file`. The source string must
+    // carry the "knip" marker so the glob caveat still fires. See issue #457.
+    let result = MigrationResult {
+        config: serde_json::json!({"entry": ["src/**"]}),
+        warnings: vec![],
+        sources: vec!["/path/to/my-tool-config.json (knip config)".to_string()],
+    };
+    assert!(should_emit_glob_caveat(&result));
+}
+
+// -- Knip vs fallow glob-equivalence contract (#457) ---------------------
+//
+// Knip and fallow use different glob engines (knip ships its own
+// micromatch-style matcher; fallow uses the `globset` crate). These tests
+// document the patterns where the two engines AGREE today. If a future knip
+// release diverges on any of them, the migrator's silent copy of
+// `entry` / `ignorePatterns` becomes incorrect and these tests should fail.
+//
+// We do not test patterns that are KNOWN to differ in semantics (negation
+// in `ignorePatterns`, certain POSIX character classes); those cases are
+// either documented as drift or live as deliberate gaps.
+
+fn matches_set(pattern: &str, paths: &[&str]) -> Vec<String> {
+    let matcher = globset::Glob::new(pattern)
+        .expect("pattern compiles under fallow's globset")
+        .compile_matcher();
+    paths
+        .iter()
+        .filter(|p| matcher.is_match(p))
+        .map(|p| (*p).to_string())
+        .collect()
+}
+
+#[test]
+fn knip_glob_equivalence_brace_expansion() {
+    // Brace expansion `{ts,tsx}` works in both engines and matches both
+    // alternatives.
+    let paths = &["src/foo.ts", "src/foo.tsx", "src/foo.js", "src/a/b.tsx"];
+    let matched = matches_set("src/**/*.{ts,tsx}", paths);
+    assert_eq!(matched, vec!["src/foo.ts", "src/foo.tsx", "src/a/b.tsx"]);
+}
+
+#[test]
+fn knip_glob_equivalence_double_star_cross_segment() {
+    // `**` matches across path segments in both engines, including zero
+    // segments at the root.
+    let paths = &["foo.ts", "a/foo.ts", "a/b/foo.ts", "foo.js"];
+    let matched = matches_set("**/foo.ts", paths);
+    assert_eq!(matched, vec!["foo.ts", "a/foo.ts", "a/b/foo.ts"]);
+}
+
+#[test]
+fn knip_glob_equivalence_double_star_at_directory_root() {
+    // `src/**` matches every descendant of `src/` in both engines.
+    let paths = &["src/a.ts", "src/a/b.ts", "src/a/b/c.ts", "lib/a.ts"];
+    let matched = matches_set("src/**", paths);
+    assert_eq!(matched, vec!["src/a.ts", "src/a/b.ts", "src/a/b/c.ts"]);
+}
+
+#[test]
+fn knip_glob_equivalence_ignore_patterns_no_negation() {
+    // Fallow's `ignorePatterns` does NOT honor leading `!` as negation;
+    // entries are matched literally. Knip's `ignore` does support negation.
+    //
+    // This is a DOCUMENTED drift: the migrator copies entries verbatim. If a
+    // user's knip config carries `ignore: ["!keep.ts"]`, the migrated
+    // `ignorePatterns` will not undo earlier matches; it will instead try to
+    // match a file literally named `!keep.ts`. The caveat banner in
+    // `run_migrate` warns the user to verify with `fallow check`.
+    let paths = &["keep.ts", "!keep.ts"];
+    let matched = matches_set("!keep.ts", paths);
+    assert_eq!(
+        matched,
+        vec!["!keep.ts"],
+        "fallow takes `!keep.ts` literally; knip would treat it as negation"
+    );
+}
+
+#[test]
+fn knip_glob_equivalence_question_mark_single_char() {
+    // `?` matches exactly one non-separator character in both engines.
+    let paths = &["a.ts", "ab.ts", "/ts"];
+    let matched = matches_set("?.ts", paths);
+    assert_eq!(matched, vec!["a.ts"]);
 }

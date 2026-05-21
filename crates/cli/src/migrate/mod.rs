@@ -64,12 +64,16 @@ impl OutputFormat {
         }
         // Auto-mirror: if any source we read was JSONC-named, default to .fallowrc.jsonc.
         // Sources is populated with bare filenames ("knip.jsonc"), full paths
-        // ("<dir>/knip.jsonc"), or `<file> (knip key)` / `<file> (jscpd key)`
-        // suffixed forms (only emitted for package.json embedded configs, which
-        // are always `.json`, never `.jsonc`). `ends_with(".jsonc")` is therefore
-        // sufficient and avoids matching a `.jsonc`-named parent directory in a
-        // user-supplied `--from` path.
-        if result.sources.iter().any(|s| s.ends_with(".jsonc")) {
+        // ("<dir>/knip.jsonc"), or `<file> (knip key)` / `<file> (jscpd key)` /
+        // `<file> (knip config)` / `<file> (jscpd config)` suffixed forms. Strip
+        // any " (...)" suffix before checking the extension so the
+        // content-detection branch (which appends the tool tag for downstream
+        // gates like the glob-drift caveat) does not break auto-mirror.
+        if result
+            .sources
+            .iter()
+            .any(|s| source_head(s).ends_with(".jsonc"))
+        {
             Self::Jsonc
         } else {
             Self::Json
@@ -154,18 +158,35 @@ pub fn run_migrate(
         eprintln!("Created {filename}");
     }
 
-    // Print source info
+    // Print source info, stripping any internal tool tag so the user sees
+    // the original filename and not the migrator's provenance marker. See
+    // issue #457.
     for source in &result.sources {
-        eprintln!("Migrated from: {source}");
+        eprintln!("Migrated from: {}", source_head(source));
     }
 
-    // Print warnings
+    // Print warnings (singular/plural-aware: a single typo'd rule is the
+    // most common count==1 case now that unknown rules warn loudly).
     if !result.warnings.is_empty() {
+        let count = result.warnings.len();
+        let header = if count == 1 { "Warning" } else { "Warnings" };
+        let noun = if count == 1 { "field" } else { "fields" };
         eprintln!();
-        eprintln!("Warnings ({} skipped fields):", result.warnings.len());
+        eprintln!("{header} ({count} skipped {noun}):");
         for warning in &result.warnings {
             eprintln!("  {warning}");
         }
+    }
+
+    // Glob-semantics caveat: knip and fallow use different glob engines, so
+    // migrated `entry` / `ignorePatterns` may match a slightly different file
+    // set than they did under knip. Single logical line so narrow terminals
+    // can soft-wrap. Issue #457.
+    if should_emit_glob_caveat(&result) {
+        eprintln!();
+        eprintln!(
+            "Note: knip and fallow use different glob engines; verify migrated entry / ignorePatterns with `fallow check` before relying on CI. See https://docs.fallow.tools/migration/from-knip"
+        );
     }
 
     ExitCode::SUCCESS
@@ -315,7 +336,10 @@ fn migrate_from_file(path: &Path) -> Result<MigrationResult, String> {
             || value.get("ignoreExportsUsedInFile").is_some()
         {
             migrate_knip(&value, &mut config, &mut warnings);
-            sources.push(path.display().to_string());
+            // Tag the source so `should_emit_glob_caveat` can detect knip
+            // provenance for `--from <custom-name>.json` paths whose
+            // filename does not contain "knip". Issue #457.
+            sources.push(format!("{} (knip config)", path.display()));
         }
         // If it has jscpd-like fields, treat as jscpd
         else if value.get("minTokens").is_some()
@@ -324,7 +348,7 @@ fn migrate_from_file(path: &Path) -> Result<MigrationResult, String> {
             || value.get("mode").is_some()
         {
             migrate_jscpd(&value, &mut config, &mut warnings);
-            sources.push(path.display().to_string());
+            sources.push(format!("{} (jscpd config)", path.display()));
         } else {
             return Err(format!(
                 "could not determine config format for {}",
@@ -422,6 +446,40 @@ fn comma_follows_json_value(bytes: &[u8], comma_index: usize) -> bool {
     };
 
     matches!(prev, b'"' | b'}' | b']' | b'0'..=b'9' | b'e' | b'l')
+}
+
+/// Strip any trailing ` (...)` suffix from a `MigrationResult.sources` entry,
+/// returning the original filename / path portion. The migrator appends
+/// `" (knip key)"`, `" (jscpd key)"`, `" (knip config)"`, or `" (jscpd config)"`
+/// to a source so downstream predicates can detect tool provenance, but
+/// extension-matching predicates (`OutputFormat::pick`'s `.jsonc` auto-mirror)
+/// and user-facing output must see the original filename. Uses `rsplit_once`
+/// so a project path containing its own ` (...)` segment (e.g.
+/// `/path/to/react (v18)/knip.jsonc`) is preserved correctly; the closing-paren
+/// guard rejects accidental matches on unbalanced text. See issue #457.
+fn source_head(s: &str) -> &str {
+    if let Some((head, tail)) = s.rsplit_once(" (")
+        && tail.ends_with(')')
+    {
+        return head;
+    }
+    s
+}
+
+/// Decide whether the migrate command should print a glob-semantics caveat
+/// after the warnings block. Emitted only when knip contributed to the
+/// migration AND the resulting config carries `entry` or `ignorePatterns`,
+/// since those are the only fields where knip's glob engine and fallow's
+/// `globset` can diverge. See issue #457.
+fn should_emit_glob_caveat(result: &MigrationResult) -> bool {
+    let knip_contributed = result.sources.iter().any(|s| s.contains("knip"));
+    if !knip_contributed {
+        return false;
+    }
+    let Some(obj) = result.config.as_object() else {
+        return false;
+    };
+    obj.contains_key("entry") || obj.contains_key("ignorePatterns")
 }
 
 /// Extract a string-or-array field as a `Vec<String>`.

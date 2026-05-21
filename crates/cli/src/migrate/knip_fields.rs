@@ -7,6 +7,38 @@ use super::{MigrationWarning, string_or_array};
 
 type JsonMap = Map<String, Value>;
 
+/// Docs URL surfaced as a suggestion when a knip rule key is completely
+/// unknown to fallow (typo, future knip rule, or an issue type the migrator
+/// has not yet catalogued). Users follow it to either fix the typo or report
+/// the missing mapping.
+pub(super) const MIGRATION_DOCS_URL: &str = "https://docs.fallow.tools/migration/from-knip";
+
+/// Emit a `MigrationWarning` for one rule-key-equivalent input that the
+/// migrator did not translate. Used by `migrate_rules`, `migrate_exclude`, and
+/// `migrate_include` so all three share the same documented-unmappable vs
+/// completely-unknown ladder. The diagnostic vocabulary mirrors the table
+/// name `KNIP_UNMAPPABLE_ISSUE_TYPES`: knip refers to these as issue types,
+/// not rule keys, so we use the same word in both branches.
+fn warn_unmapped_rule_key(context: &str, key: &str, warnings: &mut Vec<MigrationWarning>) {
+    if KNIP_UNMAPPABLE_ISSUE_TYPES.contains(&key) {
+        warnings.push(MigrationWarning {
+            source: "knip",
+            field: format!("{context}.{key}"),
+            message: format!("issue type `{key}` has no fallow equivalent"),
+            suggestion: None,
+        });
+    } else {
+        warnings.push(MigrationWarning {
+            source: "knip",
+            field: format!("{context}.{key}"),
+            message: format!("unknown knip issue type `{key}`; not migrated"),
+            suggestion: Some(format!(
+                "check for a typo or report the missing mapping at {MIGRATION_DOCS_URL}"
+            )),
+        });
+    }
+}
+
 /// Migrate a string-or-array field from knip to a fallow config field.
 pub(super) fn migrate_simple_field(
     obj: &JsonMap,
@@ -47,18 +79,15 @@ pub(super) fn migrate_rules(
         }
     }
 
-    // Warn about unmappable rule names
-    for (key, _) in rules_obj {
-        let is_mapped = KNIP_RULE_MAP.iter().any(|(k, _)| k == key);
-        let is_unmappable = KNIP_UNMAPPABLE_ISSUE_TYPES.contains(&key.as_str());
-        if !is_mapped && is_unmappable {
-            warnings.push(MigrationWarning {
-                source: "knip",
-                field: format!("rules.{key}"),
-                message: format!("issue type `{key}` has no fallow equivalent"),
-                suggestion: None,
-            });
+    // Warn about every key the migrator did not translate. Two shapes:
+    // documented-unmappable issue types reuse the existing message;
+    // completely-unknown keys (typo or future knip rule) get a docs-pointer
+    // suggestion so the user can fix the typo or report the missing mapping.
+    for key in rules_obj.keys() {
+        if KNIP_RULE_MAP.iter().any(|(k, _)| k == key) {
+            continue;
         }
+        warn_unmapped_rule_key("rules", key, warnings);
     }
 
     if !fallow_rules.is_empty() {
@@ -82,13 +111,8 @@ pub(super) fn migrate_exclude(
     for knip_name in excluded {
         if let Some((_, fallow_name)) = KNIP_RULE_MAP.iter().find(|(k, _)| k == knip_name) {
             rules_obj.insert((*fallow_name).to_string(), Value::String("off".to_string()));
-        } else if KNIP_UNMAPPABLE_ISSUE_TYPES.contains(&knip_name.as_str()) {
-            warnings.push(MigrationWarning {
-                source: "knip",
-                field: format!("exclude.{knip_name}"),
-                message: format!("issue type `{knip_name}` has no fallow equivalent"),
-                suggestion: None,
-            });
+        } else {
+            warn_unmapped_rule_key("exclude", knip_name, warnings);
         }
     }
 }
@@ -114,17 +138,12 @@ pub(super) fn migrate_include(
                 .or_insert_with(|| Value::String("off".to_string()));
         }
     }
-    // Warn about unmappable included types
+    // Warn about included types the migrator did not translate.
     for name in included {
-        let is_mapped = KNIP_RULE_MAP.iter().any(|(k, _)| k == name);
-        if !is_mapped && KNIP_UNMAPPABLE_ISSUE_TYPES.contains(&name.as_str()) {
-            warnings.push(MigrationWarning {
-                source: "knip",
-                field: format!("include.{name}"),
-                message: format!("issue type `{name}` has no fallow equivalent"),
-                suggestion: None,
-            });
+        if KNIP_RULE_MAP.iter().any(|(k, _)| k == name) {
+            continue;
         }
+        warn_unmapped_rule_key("include", name, warnings);
     }
 }
 
@@ -331,14 +350,24 @@ mod tests {
     }
 
     #[test]
-    fn rules_unknown_not_in_unmappable_silently_ignored() {
+    fn rules_unknown_key_warns_with_docs_suggestion() {
         let rules_val = json!({"totallyUnknown": "error"});
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_rules(&rules_val, &mut config, &mut warnings);
 
+        // No config emitted (unknown key has no fallow target).
         assert!(!config.contains_key("rules"));
-        assert!(warnings.is_empty());
+        // But the migration must NOT be silent: the user needs to know their
+        // rule was dropped. See issue #457.
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].field, "rules.totallyUnknown");
+        assert!(warnings[0].message.contains("unknown knip issue type"));
+        let suggestion = warnings[0].suggestion.as_deref().unwrap_or("");
+        assert!(
+            suggestion.contains("docs.fallow.tools/migration/from-knip"),
+            "expected docs URL in suggestion, got: {suggestion}"
+        );
     }
 
     #[test]
