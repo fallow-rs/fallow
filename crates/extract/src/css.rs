@@ -58,6 +58,20 @@ static CSS_NON_SELECTOR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r#"(?s)"[^"]*"|'[^']*'|url\([^)]*\)"#).expect("valid regex")
 });
 
+/// Regex to strip the prelude of `@layer` and `@import` at-rules before
+/// CSS-Modules class extraction. Matches the `@keyword` plus everything up to
+/// (but not including) the next `;` or `{`, so block bodies are preserved.
+///
+/// Narrow allowlist by design (issue #540): only at-rules whose preludes
+/// legitimately carry dot-separated identifiers without selector semantics are
+/// stripped. `@layer foo.bar` (CSS Cascading & Inheritance L5) lists layer
+/// names; `@import url("x.css") layer(theme.button)` carries a parenthesised
+/// layer reference. `@scope (.foo) to (.bar)` keeps its existing behavior
+/// because the prelude IS a selector list and `.foo` / `.bar` are real class
+/// references that the user may want to surface as exports.
+static CSS_AT_RULE_PRELUDE_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"@(?:layer|import)\b[^;{]*").expect("valid regex"));
+
 pub(crate) fn is_css_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
@@ -238,6 +252,11 @@ pub fn extract_css_imports(source: &str, is_scss: bool) -> Vec<String> {
 /// Extract class names from a CSS module file as named exports.
 pub fn extract_css_module_exports(source: &str) -> Vec<ExportInfo> {
     let cleaned = CSS_NON_SELECTOR_RE.replace_all(source, "");
+    // Strip `@layer` and `@import` preludes so dot-separated layer names
+    // (`@layer foo.bar`, `@import url("x.css") layer(theme.button)`) do not
+    // leak into the class-name scan. See `CSS_AT_RULE_PRELUDE_RE` for the
+    // allowlist rationale (issue #540).
+    let cleaned = CSS_AT_RULE_PRELUDE_RE.replace_all(&cleaned, "");
     let mut seen = rustc_hash::FxHashSet::default();
     let mut exports = Vec::new();
     for cap in CSS_CLASS_RE.captures_iter(&cleaned) {
@@ -541,6 +560,100 @@ mod tests {
         );
         assert!(names.contains(&"mobile-nav".to_string()));
         assert!(names.contains(&"desktop-nav".to_string()));
+    }
+
+    #[test]
+    fn classes_inside_multi_line_media_query() {
+        // Multi-line preludes must work: `[^;{]` in the at-rule strip regex
+        // includes newlines.
+        let names =
+            export_names("@media\n  screen and (min-width: 600px)\n{\n  .real { color: red; }\n}");
+        assert_eq!(names, vec!["real"]);
+    }
+
+    // ── Cascade layers (issue #540) ──────────────────────────────
+
+    #[test]
+    fn at_layer_statement_does_not_export() {
+        // `@layer foo.bar;` and `@layer foo.bar, foo.baz;` declare layer names,
+        // NOT class selectors. The dot is part of the layer-name grammar.
+        let names = export_names("@layer foo.bar;");
+        assert!(names.is_empty(), "got {names:?}");
+        let names = export_names("@layer foo.bar, foo.baz;");
+        assert!(names.is_empty(), "got {names:?}");
+    }
+
+    #[test]
+    fn at_layer_block_keeps_body_classes() {
+        // The block body still scans for real classes; only the prelude is
+        // stripped.
+        let names = export_names("@layer foo.bar { .root { color: red; } }");
+        assert_eq!(names, vec!["root"]);
+    }
+
+    #[test]
+    fn at_layer_with_nested_media_keeps_body() {
+        // Nested at-rules: the @layer prelude is stripped but the @media
+        // body still scans (the @media prelude is not in the allowlist and
+        // does not contain class-like tokens anyway).
+        let names =
+            export_names("@layer foo.bar { @media (max-width: 768px) { .real { color: red; } } }");
+        assert_eq!(names, vec!["real"]);
+    }
+
+    #[test]
+    fn at_import_with_layer_attribute_does_not_export() {
+        // `@import url("x.css") layer(theme.button);` carries a parenthesised
+        // layer reference in its prelude. After url() and string stripping the
+        // remaining text still contains `.button`; the @import prelude strip
+        // wipes it.
+        let names = export_names(r#"@import url("x.css") layer(theme.button);"#);
+        assert!(names.is_empty(), "got {names:?}");
+    }
+
+    #[test]
+    fn class_then_at_layer_does_not_leak_prelude() {
+        // The @layer prelude strip must match only the at-rule's own prelude,
+        // not consume the preceding `.outer` selector.
+        let names =
+            export_names(".outer { color: blue; } @layer foo.bar { .inner { color: red; } }");
+        assert_eq!(names, vec!["outer", "inner"]);
+    }
+
+    // ── No-regression contracts ──────────────────────────────────
+
+    #[test]
+    fn at_scope_keeps_selector_list_classes() {
+        // `@scope (.parent) to (.child) { ... }` puts a selector list in its
+        // prelude. `.parent` and `.child` are GENUINE class references; the
+        // narrow at-rule allowlist intentionally does NOT strip @scope so
+        // these still extract as exports (matching pre-fix behavior).
+        let names = export_names("@scope (.parent) to (.child) { .title { color: red; } }");
+        assert!(names.contains(&"parent".to_string()), "got {names:?}");
+        assert!(names.contains(&"child".to_string()), "got {names:?}");
+        assert!(names.contains(&"title".to_string()), "got {names:?}");
+    }
+
+    #[test]
+    fn at_keyframes_numeric_step_is_not_class() {
+        // `@keyframes` percentage selectors and CSS numeric literals like
+        // `scale(.5)` start with a digit after the dot. `CSS_CLASS_RE`'s
+        // first-char anchor (`[a-zA-Z_]`) already rejects them; this test
+        // locks down that contract so a future regex relaxation does not
+        // silently start extracting `5` as a class name.
+        let names = export_names(
+            "@keyframes slide { 0% { transform: scale(.5); } 100% { transform: scale(1); } }",
+        );
+        assert!(names.is_empty(), "got {names:?}");
+    }
+
+    #[test]
+    fn at_webkit_keyframes_keeps_body_classes() {
+        // Vendor-prefixed at-rules are NOT in the prelude-strip allowlist
+        // (their preludes are simple idents without dots, so stripping is not
+        // required). Body classes still extract normally.
+        let names = export_names("@-webkit-keyframes slide { 0% { } 100% { } } .real { }");
+        assert_eq!(names, vec!["real"]);
     }
 
     // ── Deduplication ────────────────────────────────────────────

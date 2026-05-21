@@ -540,3 +540,33 @@ fn css_module_ignores_classes_in_strings_and_urls() {
         "File extensions inside url() should be ignored"
     );
 }
+
+#[test]
+fn issue_540_nested_cascade_layers_do_not_export_sub_names() {
+    // Verbatim reproduction from issue #540. The CSS Modules parser previously
+    // tokenised the dot in `@layer foo.bar` as the start of a class selector
+    // and emitted phantom `bar` / `baz` exports. After the fix, only the
+    // actual `.root` and `.pressed` selectors inside the block bodies are
+    // extracted.
+    let info = parse_css_module(
+        "@layer foo;
+@layer foo.bar, foo.baz;
+
+@layer foo.bar {
+  .root { color: red; }
+}
+
+@layer foo.baz {
+  .pressed { color: blue; }
+}",
+    );
+    let named: Vec<String> = info
+        .exports
+        .iter()
+        .filter_map(|e| match &e.name {
+            ExportName::Named(n) => Some(n.clone()),
+            ExportName::Default => None,
+        })
+        .collect();
+    assert_eq!(named, vec!["root", "pressed"], "phantom exports leaked");
+}

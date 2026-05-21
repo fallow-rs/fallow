@@ -14,7 +14,13 @@ use crate::MemberKind;
 /// fast-path into stale `member_accesses` / `exports` for any BOM-bearing
 /// file. The bump invalidates user caches once on upgrade; subsequent runs
 /// are warm.
-pub(super) const CACHE_VERSION: u32 = 89;
+///
+/// Bumped to 90 for issue #540: CSS Modules class extraction now strips
+/// `@layer` and `@import` at-rule preludes before scanning class names, so
+/// pre-fix entries for `.module.css` files using nested cascade-layer syntax
+/// (`@layer foo.bar { ... }`) carry phantom `bar` / `baz` exports that the
+/// new scanner no longer produces.
+pub(super) const CACHE_VERSION: u32 = 90;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
