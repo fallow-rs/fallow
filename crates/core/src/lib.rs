@@ -156,12 +156,20 @@ fn update_cache(
     for module in modules {
         if let Some(file) = files.get(module.file_id.0 as usize) {
             let (mt, sz) = file_mtime_and_size(&file.path);
-            // If content hash matches, just refresh mtime/size if stale (e.g. `touch`ed file)
+            // If content hash matches, just refresh mtime/size if stale
+            // (e.g. `touch`ed file). Critically, preserve the existing
+            // `last_access_secs` instead of rebuilding the entry via
+            // `module_to_cached` (which would stamp the current epoch
+            // second and defeat the LRU). A metadata-only refresh is NOT
+            // a content change, so the entry's recency should not bump.
             if let Some(cached) = store.get_by_path_only(&file.path)
                 && cached.content_hash == module.content_hash
             {
                 if cached.mtime_secs != mt || cached.file_size != sz {
-                    store.insert(&file.path, cache::module_to_cached(module, mt, sz));
+                    let preserved_last_access = cached.last_access_secs;
+                    let mut refreshed = cache::module_to_cached(module, mt, sz);
+                    refreshed.last_access_secs = preserved_last_access;
+                    store.insert(&file.path, refreshed);
                 }
                 continue;
             }

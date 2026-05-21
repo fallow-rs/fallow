@@ -98,13 +98,20 @@ impl CacheStore {
         let initial_entries = self.entries.len();
         let mut encoded = bitcode::encode(self);
 
-        let trigger = max_size_bytes.saturating_mul(EVICTION_TRIGGER_BPS) / 10_000;
+        // Divide-first ordering keeps the multiplication from saturating at
+        // pathologically-large caps. At most 0.008% rounding error per
+        // operation, negligible for a soft size threshold.
+        let trigger = (max_size_bytes / 10_000).saturating_mul(EVICTION_TRIGGER_BPS);
         if encoded.len() > trigger {
-            let target = max_size_bytes.saturating_mul(EVICTION_TARGET_BPS) / 10_000;
+            let target = (max_size_bytes / 10_000).saturating_mul(EVICTION_TARGET_BPS);
             self.evict_lru_to_target(target);
             encoded = bitcode::encode(self);
             let evicted = initial_entries.saturating_sub(self.entries.len());
             let final_size = encoded.len();
+            // `initial_entries` is bounded by the file count, so
+            // `usize` saturation is not a concern here. Use the
+            // multiply-then-divide ordering so small caches (< 10k
+            // entries) still produce a non-zero significance threshold.
             let significant_evicted =
                 initial_entries.saturating_mul(EVICTION_SIGNIFICANT_BPS) / 10_000;
             if evicted >= significant_evicted && initial_entries > 0 {
