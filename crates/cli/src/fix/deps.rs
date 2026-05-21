@@ -4,23 +4,36 @@ use std::path::Path;
 use fallow_config::OutputFormat;
 use fallow_core::results::UnusedDependency;
 
-use super::io::atomic_write;
+use super::plan::{CapturedHashes, FixPlan};
 
-/// Apply dependency fixes to package.json files (root and workspace), returning JSON fix entries.
+/// Apply dependency fixes to package.json files (root and workspace),
+/// returning JSON fix entries.
+///
+/// Stages every per-file rewrite on `plan`; the orchestrator commits the
+/// plan after all fixers run, so a single stage failure in any fixer
+/// leaves the project untouched. `hashes` is accepted for signature
+/// uniformity across fixers; package.json files are NOT in the captured
+/// hash map (extract does not parse JSON), so the per-file hash check is
+/// a no-op for the dep fixer. The dep modify path re-reads + reparses
+/// each package.json before stage time, which is the natural safety net
+/// for this file kind (key lookup is self-validating; missing keys are a
+/// no-op fix).
 pub(super) fn apply_dependency_fixes(
     root: &Path,
     results: &fallow_core::results::AnalysisResults,
+    hashes: &CapturedHashes,
+    plan: &mut FixPlan,
     output: OutputFormat,
     dry_run: bool,
     fixes: &mut Vec<serde_json::Value>,
-) -> bool {
-    let mut had_write_error = false;
+) {
+    let _ = hashes; // see doc above
 
     if results.unused_dependencies.is_empty()
         && results.unused_dev_dependencies.is_empty()
         && results.unused_optional_dependencies.is_empty()
     {
-        return had_write_error;
+        return;
     }
 
     // Group all unused deps by their package.json path so we can batch edits per file
@@ -69,6 +82,7 @@ pub(super) fn apply_dependency_fixes(
                             "location": location,
                             "file": pkg_path.display().to_string(),
                             "applied": true,
+                            "__target": pkg_path.display().to_string(),
                         }));
                     }
                 }
@@ -78,21 +92,29 @@ pub(super) fn apply_dependency_fixes(
                 match serde_json::to_string_pretty(&pkg_value) {
                     Ok(new_json) => {
                         let pkg_content = new_json + "\n";
-                        if let Err(e) = atomic_write(pkg_path, pkg_content.as_bytes()) {
-                            had_write_error = true;
-                            eprintln!("Error: failed to write {}: {e}", pkg_path.display());
-                        }
+                        plan.stage(pkg_path.to_path_buf(), pkg_content.into_bytes());
                     }
                     Err(e) => {
-                        had_write_error = true;
+                        // Serialization failure is rare: package.json was
+                        // already parsed once into the same Value shape.
+                        // Surface as a per-path failure entry so the
+                        // orchestrator can flag it; we do NOT stage so
+                        // the commit step never sees a half-built buffer.
                         eprintln!("Error: failed to serialize {}: {e}", pkg_path.display());
+                        for entry in fixes.iter_mut() {
+                            let matches = entry
+                                .get("__target")
+                                .and_then(|v| v.as_str())
+                                .is_some_and(|t| t == pkg_path.display().to_string());
+                            if matches {
+                                entry["applied"] = serde_json::json!(false);
+                            }
+                        }
                     }
                 }
             }
         }
     }
-
-    had_write_error
 }
 
 fn queue_dependency_removal<'a>(
@@ -111,6 +133,27 @@ fn queue_dependency_removal<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Thin wrapper preserving the pre-#454 test API surface: builds a
+    /// FixPlan + CapturedHashes around `apply_dependency_fixes` and
+    /// commits, returning whether the commit produced any per-path
+    /// failure. Tests that assert no error path on the dry-run / no-op
+    /// case keep working unchanged.
+    fn run_fix_deps(
+        root: &Path,
+        results: &fallow_core::results::AnalysisResults,
+        output: OutputFormat,
+        dry_run: bool,
+        fixes: &mut Vec<serde_json::Value>,
+    ) -> bool {
+        let mut plan = FixPlan::new();
+        let hashes = CapturedHashes::default();
+        apply_dependency_fixes(root, results, &hashes, &mut plan, output, dry_run, fixes);
+        if dry_run {
+            return false;
+        }
+        !plan.commit().failed.is_empty()
+    }
 
     #[test]
     fn dependency_fix_dry_run_does_not_modify_package_json() {
@@ -133,7 +176,7 @@ mod tests {
         );
 
         let mut fixes = Vec::new();
-        apply_dependency_fixes(root, &results, OutputFormat::Json, true, &mut fixes);
+        run_fix_deps(root, &results, OutputFormat::Json, true, &mut fixes);
 
         // package.json should not change
         assert_eq!(std::fs::read_to_string(&pkg_path).unwrap(), original);
@@ -165,8 +208,7 @@ mod tests {
         );
 
         let mut fixes = Vec::new();
-        let had_error =
-            apply_dependency_fixes(root, &results, OutputFormat::Human, false, &mut fixes);
+        let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         assert!(!had_error);
         let content = std::fs::read_to_string(&pkg_path).unwrap();
@@ -200,8 +242,7 @@ mod tests {
         );
 
         let mut fixes = Vec::new();
-        let had_error =
-            apply_dependency_fixes(root, &results, OutputFormat::Human, false, &mut fixes);
+        let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         assert!(!had_error);
         assert!(fixes.is_empty());
@@ -218,8 +259,7 @@ mod tests {
         let root = dir.path();
         let results = fallow_core::results::AnalysisResults::default();
         let mut fixes = Vec::new();
-        let had_error =
-            apply_dependency_fixes(root, &results, OutputFormat::Human, false, &mut fixes);
+        let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
         assert!(!had_error);
         assert!(fixes.is_empty());
     }
@@ -247,8 +287,7 @@ mod tests {
         );
 
         let mut fixes = Vec::new();
-        let had_error =
-            apply_dependency_fixes(root, &results, OutputFormat::Human, false, &mut fixes);
+        let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         assert!(!had_error);
         let content = std::fs::read_to_string(&pkg_path).unwrap();
@@ -284,8 +323,7 @@ mod tests {
         );
 
         let mut fixes = Vec::new();
-        let had_error =
-            apply_dependency_fixes(root, &results, OutputFormat::Human, false, &mut fixes);
+        let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         assert!(!had_error);
         let content = std::fs::read_to_string(&pkg_path).unwrap();
@@ -327,8 +365,7 @@ mod tests {
         );
 
         let mut fixes = Vec::new();
-        let had_error =
-            apply_dependency_fixes(root, &results, OutputFormat::Human, false, &mut fixes);
+        let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         assert!(!had_error);
         let content = std::fs::read_to_string(&pkg_path).unwrap();
@@ -359,8 +396,7 @@ mod tests {
         );
 
         let mut fixes = Vec::new();
-        let had_error =
-            apply_dependency_fixes(root, &results, OutputFormat::Human, false, &mut fixes);
+        let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         assert!(!had_error);
         let content = std::fs::read_to_string(&pkg_path).unwrap();
@@ -389,8 +425,7 @@ mod tests {
         );
 
         let mut fixes = Vec::new();
-        let had_error =
-            apply_dependency_fixes(root, &results, OutputFormat::Human, false, &mut fixes);
+        let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         assert!(!had_error);
         // No fix was applied (dep not found)
@@ -417,7 +452,7 @@ mod tests {
         );
 
         let mut fixes = Vec::new();
-        apply_dependency_fixes(root, &results, OutputFormat::Human, true, &mut fixes);
+        run_fix_deps(root, &results, OutputFormat::Human, true, &mut fixes);
 
         // File should not be modified
         assert_eq!(std::fs::read_to_string(&pkg_path).unwrap(), original);
@@ -444,8 +479,7 @@ mod tests {
         );
 
         let mut fixes = Vec::new();
-        let had_error =
-            apply_dependency_fixes(root, &results, OutputFormat::Human, false, &mut fixes);
+        let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         // Invalid JSON: the let-chain fails, so this path is just skipped
         assert!(!had_error);
@@ -470,8 +504,7 @@ mod tests {
         );
 
         let mut fixes = Vec::new();
-        let had_error =
-            apply_dependency_fixes(root, &results, OutputFormat::Human, false, &mut fixes);
+        let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         assert!(!had_error);
         assert!(fixes.is_empty());
@@ -497,8 +530,7 @@ mod tests {
         );
 
         let mut fixes = Vec::new();
-        let had_error =
-            apply_dependency_fixes(root, &results, OutputFormat::Human, false, &mut fixes);
+        let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         assert!(!had_error);
         // No dependencies section -> no fix
@@ -528,7 +560,7 @@ mod tests {
         );
 
         let mut fixes = Vec::new();
-        apply_dependency_fixes(root, &results, OutputFormat::Human, false, &mut fixes);
+        run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         let content = std::fs::read_to_string(&pkg_path).unwrap();
         assert!(content.ends_with('\n'), "output should end with newline");

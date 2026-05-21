@@ -541,6 +541,141 @@ fn fix_catalog_issue_335_empties_parent_to_empty_map_not_null() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Issue #454: hash precondition + batch atomicity
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fix_json_envelope_carries_skipped_content_changed_count() {
+    // The orchestrator MUST surface the new envelope field even when
+    // every fixer ran cleanly; the count is 0 here but the field's
+    // presence is the contract that consumers (CI scripts, MCP tools)
+    // depend on.
+    let output = run_fallow(
+        "fix",
+        "basic-project",
+        &["--dry-run", "--format", "json", "--quiet"],
+    );
+    let json = parse_json(&output);
+    assert!(
+        json.get("skipped_content_changed").is_some(),
+        "fix envelope must include `skipped_content_changed` field: {}",
+        output.stdout,
+    );
+    assert_eq!(
+        json["skipped_content_changed"].as_u64(),
+        Some(0),
+        "no files should be skipped on a clean dry-run",
+    );
+}
+
+#[test]
+fn fix_round_trip_clears_targeted_findings() {
+    // Round-trip: apply fix on a fresh tmpdir, then re-run check, then
+    // assert the targeted unused-exports findings are gone and no new
+    // findings surfaced. Validates batch-atomic commit + the per-file
+    // edits land coherent enough that the next analysis passes.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"round-trip","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { kept } from './utils';\nconsole.log(kept);\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/utils.ts"),
+        "export const kept = 1;\nexport const stale = 2;\nexport const orphan = 3;\n",
+    )
+    .unwrap();
+
+    let fix = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    assert_eq!(
+        fix.code, 0,
+        "fix should exit 0 on a clean run; stderr: {}",
+        fix.stderr
+    );
+    let fix_json = parse_json(&fix);
+    let total_fixed = fix_json["total_fixed"].as_u64().unwrap_or(0);
+    assert!(total_fixed >= 2, "fix should remove both stale exports");
+
+    // Re-analyze; the same exports must NOT reappear, and no new
+    // findings should have been introduced by the rewrite.
+    let check = run_fallow_in_root("check", root, &["--format", "json", "--quiet"]);
+    let check_json = parse_json(&check);
+    let unused_exports = check_json["unused_exports"].as_array().map_or(0, Vec::len);
+    assert_eq!(
+        unused_exports, 0,
+        "fixed exports must not reappear; check output: {}",
+        check.stdout
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn fix_batch_aborts_when_a_target_directory_is_read_only() {
+    // Batch atomicity: when staging a write fails for one target, NO
+    // renames must have occurred. We make a sibling source file's parent
+    // directory read-only so the temp-file-in-same-dir stage fails for
+    // that path; the orchestrator must leave the OTHER, healthy source
+    // file untouched.
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src/sealed")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"batch-atomic","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    let entry = "import { kept } from './open/utils';\nimport { also } from './sealed/locked';\n\
+                 console.log(kept, also);\n";
+    std::fs::create_dir_all(root.join("src/open")).unwrap();
+    std::fs::write(root.join("src/index.ts"), entry).unwrap();
+    let open_original = "export const kept = 1;\nexport const stale = 2;\n";
+    std::fs::write(root.join("src/open/utils.ts"), open_original).unwrap();
+    let sealed_original = "export const also = 1;\nexport const sealed_stale = 2;\n";
+    std::fs::write(root.join("src/sealed/locked.ts"), sealed_original).unwrap();
+
+    // Seal the sealed/ directory so NamedTempFile::new_in() inside it fails.
+    // We chmod 0o555 (read+exec, no write) so the existing file is still
+    // readable but no new temp can be created beside it.
+    let sealed_dir = root.join("src/sealed");
+    let mut perms = std::fs::metadata(&sealed_dir).unwrap().permissions();
+    perms.set_mode(0o555);
+    std::fs::set_permissions(&sealed_dir, perms).unwrap();
+
+    let fix = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+
+    // Restore permissions before any assertion can panic and skip cleanup.
+    let mut restore = std::fs::metadata(&sealed_dir).unwrap().permissions();
+    restore.set_mode(0o755);
+    std::fs::set_permissions(&sealed_dir, restore).unwrap();
+
+    assert_eq!(
+        fix.code, 2,
+        "batch commit failure must surface as exit 2; stdout: {} stderr: {}",
+        fix.stdout, fix.stderr,
+    );
+    // Healthy file must be untouched (the batch aborted before any rename).
+    let post_open = std::fs::read_to_string(root.join("src/open/utils.ts")).unwrap();
+    assert_eq!(
+        post_open, open_original,
+        "healthy file must be untouched when a sibling file's stage failed",
+    );
+    let post_sealed = std::fs::read_to_string(root.join("src/sealed/locked.ts")).unwrap();
+    assert_eq!(
+        post_sealed, sealed_original,
+        "sealed file must be untouched (stage couldn't even land its temp)",
+    );
+}
+
 /// Helper: recursively copy a directory tree so we don't mutate the
 /// canonical fixture during the integration test.
 fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {

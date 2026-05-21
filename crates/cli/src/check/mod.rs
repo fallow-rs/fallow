@@ -465,6 +465,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
                 modules: None,
                 files: None,
                 script_used_packages: script_used_packages.clone(),
+                file_hashes: rustc_hash::FxHashMap::default(),
             });
             Some(crate::health::SharedParseData {
                 files,

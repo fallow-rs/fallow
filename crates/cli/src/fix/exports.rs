@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use fallow_config::OutputFormat;
 
 use super::enum_helpers::{EnumDeclarationRange, removable_exported_enum_range};
-use super::io::{read_source, write_fixed_content};
+use super::plan::{CapturedHashes, FixPlan, read_source_with_hash_check, stage_fixed_content};
 
 pub(super) struct ExportFix {
     line_idx: usize,
@@ -99,6 +99,7 @@ fn emit_dry_run_export_fix(relative: &Path, fix: &ExportFix) {
 fn push_export_fix_json(
     fixes: &mut Vec<serde_json::Value>,
     relative: &Path,
+    absolute: &Path,
     fix: &ExportFix,
     applied: Option<bool>,
 ) {
@@ -110,22 +111,33 @@ fn push_export_fix_json(
     });
     if let Some(applied) = applied {
         value["applied"] = serde_json::json!(applied);
+        // Sidechannel: orchestrator reads __target to correlate the entry
+        // with the absolute path the FixPlan committed (or failed). The
+        // field is stripped before the JSON is serialized to stdout.
+        value["__target"] = serde_json::json!(absolute.display().to_string());
     }
     fixes.push(value);
 }
 
 /// Apply export fixes to source files, returning JSON fix entries.
+///
+/// Stages every per-file rewrite on `plan` instead of writing directly;
+/// the orchestrator commits the plan after all fixers run, so a single
+/// stage failure in any fixer leaves the project untouched. Hash mismatch
+/// against `hashes` (captured during the in-process analysis read) marks
+/// the file as skipped instead of overwriting bytes the analysis never saw.
 pub(super) fn apply_export_fixes(
     root: &Path,
     exports_by_file: &FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedExport>>,
+    hashes: &CapturedHashes,
+    plan: &mut FixPlan,
     output: OutputFormat,
     dry_run: bool,
     fixes: &mut Vec<serde_json::Value>,
-) -> bool {
-    let mut had_write_error = false;
-
+) {
     for (path, file_exports) in exports_by_file {
-        let Some((content, line_ending)) = read_source(root, path) else {
+        let Some((content, line_ending)) = read_source_with_hash_check(root, path, hashes, plan)
+        else {
             continue;
         };
         let lines: Vec<&str> = content.split(line_ending).collect();
@@ -208,7 +220,7 @@ pub(super) fn apply_export_fixes(
                 if !matches!(output, OutputFormat::Json) {
                     emit_dry_run_export_fix(relative, fix);
                 }
-                push_export_fix_json(fixes, relative, fix, None);
+                push_export_fix_json(fixes, relative, path, fix, None);
             }
         } else {
             // Apply all fixes to a single in-memory copy
@@ -274,22 +286,15 @@ pub(super) fn apply_export_fixes(
                 new_lines.remove(idx);
             }
 
-            let success = match write_fixed_content(path, &new_lines, line_ending, &content) {
-                Ok(()) => true,
-                Err(e) => {
-                    had_write_error = true;
-                    eprintln!("Error: failed to write {}: {e}", relative.display());
-                    false
-                }
-            };
+            stage_fixed_content(plan, path, &new_lines, line_ending, &content);
 
+            // Optimistic: queued for commit. Orchestrator flips `applied`
+            // to false post-commit if the rename failed for this path.
             for fix in &line_fixes {
-                push_export_fix_json(fixes, relative, fix, Some(success));
+                push_export_fix_json(fixes, relative, path, fix, Some(true));
             }
         }
     }
-
-    had_write_error
 }
 
 #[cfg(test)]
@@ -309,6 +314,23 @@ mod tests {
         }
     }
 
+    /// Build a captured-hashes map containing the real on-disk hash of
+    /// each path that the test wants to consider "freshly analyzed".
+    /// Skipping paths that do not exist on disk keeps the helper compatible
+    /// with tests that exercise the missing-file path.
+    fn capture_hashes(paths: &[&Path]) -> CapturedHashes {
+        let mut hashes = CapturedHashes::default();
+        for path in paths {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                hashes.insert(
+                    path.to_path_buf(),
+                    xxhash_rust::xxh3::xxh3_64(content.as_bytes()),
+                );
+            }
+        }
+        hashes
+    }
+
     /// Run export fix for a single export. Returns (had_error, fixes).
     fn fix_single(
         root: &Path,
@@ -326,7 +348,14 @@ mod tests {
         let mut map: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
         map.insert(file.to_path_buf(), vec![&export]);
         let mut fixes = Vec::new();
-        let had_error = apply_export_fixes(root, &map, format, dry_run, &mut fixes);
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[file]);
+        apply_export_fixes(root, &map, &hashes, &mut plan, format, dry_run, &mut fixes);
+        let had_error = if dry_run {
+            false
+        } else {
+            !plan.commit().failed.is_empty()
+        };
         (had_error, fixes)
     }
 
@@ -477,13 +506,18 @@ mod tests {
         exports_by_file.insert(outside_file.clone(), vec![&export]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&outside_file]);
         apply_export_fixes(
             &root,
             &exports_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             false,
             &mut fixes,
         );
+        let _ = plan.commit();
 
         // File should be untouched and no fixes generated
         assert_eq!(std::fs::read_to_string(&outside_file).unwrap(), original);
@@ -521,13 +555,18 @@ mod tests {
         exports_by_file.insert(file.clone(), vec![&e1, &e2]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_export_fixes(
             root,
             &exports_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             false,
             &mut fixes,
         );
+        let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(
@@ -689,13 +728,18 @@ mod tests {
         exports_by_file.insert(file.clone(), vec![&e1, &e2]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_export_fixes(
             root,
             &exports_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             false,
             &mut fixes,
         );
+        let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(content, "export const kept = 1;\n");
@@ -715,13 +759,18 @@ mod tests {
         exports_by_file.insert(file.clone(), vec![&e1, &e2]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_export_fixes(
             root,
             &exports_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             false,
             &mut fixes,
         );
+        let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(content, "function foo() {}\n");
@@ -783,9 +832,13 @@ mod tests {
         exports_by_file.insert(file.clone(), vec![&export]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_export_fixes(
             root,
             &exports_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             true,
             &mut fixes,
@@ -869,13 +922,18 @@ mod tests {
         exports_by_file.insert(file.clone(), vec![&e1, &e2]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_export_fixes(
             root,
             &exports_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             false,
             &mut fixes,
         );
+        let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(content, "export const x = 1;\n");

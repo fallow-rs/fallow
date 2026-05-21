@@ -27,7 +27,7 @@ use fallow_core::results::{
     EmptyCatalogGroup, EmptyCatalogGroupFinding, UnusedCatalogEntry, UnusedCatalogEntryFinding,
 };
 
-use super::io::{atomic_write, read_source};
+use super::plan::{CapturedHashes, FixPlan, read_source_with_hash_check};
 
 /// Apply unused-catalog-entry fixes to `pnpm-workspace.yaml`.
 ///
@@ -36,10 +36,16 @@ use super::io::{atomic_write, read_source};
 /// `skipped_count` only counts entries that were intentionally not
 /// removed (hardcoded consumer, multi-doc YAML, line out of range); it
 /// does NOT count entries that produced a write error.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "fix-layer signatures match the orchestrator's call shape: root + entries + policy + (hashes, plan) for issue #454 batch atomicity + output/dry_run/fixes for the per-fixer wire"
+)]
 pub(super) fn apply_catalog_entry_fixes(
     root: &Path,
     entries: &[UnusedCatalogEntryFinding],
     preceding_comment_policy: CatalogPrecedingCommentPolicy,
+    hashes: &CapturedHashes,
+    plan: &mut FixPlan,
     output: OutputFormat,
     dry_run: bool,
     fixes: &mut Vec<serde_json::Value>,
@@ -62,9 +68,13 @@ pub(super) fn apply_catalog_entry_fixes(
 
     for (relative_path, file_entries) in by_path {
         let absolute = root.join(relative_path);
-        let Some((content, line_ending)) = read_source(root, &absolute) else {
+        let Some((content, line_ending)) =
+            read_source_with_hash_check(root, &absolute, hashes, plan)
+        else {
             // Skip silently when the workspace file is unreadable or escapes
             // the root: matches the existing pattern in enum_members/deps.
+            // Hash mismatch records itself on `plan.skipped()`; the
+            // orchestrator surfaces it.
             continue;
         };
 
@@ -213,14 +223,18 @@ pub(super) fn apply_catalog_entry_fixes(
             continue;
         }
 
-        if let Err(e) = atomic_write(&absolute, new_content.as_bytes()) {
-            summary.write_error = true;
-            eprintln!("Error: failed to write {}: {e}", relative_path.display());
-            continue;
-        }
+        // Stage the post-edit YAML for the orchestrator's batch commit.
+        // Pre-stage YAML reparse-validation above ensures we never queue
+        // a syntactically broken document; rename-time errors are reported
+        // per-path by the orchestrator.
+        plan.stage(absolute.clone(), new_content.into_bytes());
 
         for (range, entry) in &deduped {
-            fixes.push(remove_record(entry, range, true, relative_path));
+            let mut record = remove_record(entry, range, true, relative_path);
+            // Sidechannel so the orchestrator can flip `applied: false`
+            // post-commit if the rename for this absolute path fails.
+            record["__target"] = serde_json::json!(absolute.display().to_string());
+            fixes.push(record);
             let entry_idx = entry.line.saturating_sub(1) as usize;
             summary.comment_lines_removed += entry_idx.saturating_sub(range.start);
         }
@@ -238,6 +252,8 @@ pub(super) fn apply_catalog_entry_fixes(
 pub(super) fn apply_empty_catalog_group_fixes(
     root: &Path,
     groups: &[EmptyCatalogGroupFinding],
+    hashes: &CapturedHashes,
+    plan: &mut FixPlan,
     output: OutputFormat,
     dry_run: bool,
     fixes: &mut Vec<serde_json::Value>,
@@ -257,7 +273,9 @@ pub(super) fn apply_empty_catalog_group_fixes(
 
     for (relative_path, file_groups) in by_path {
         let absolute = root.join(relative_path);
-        let Some((content, line_ending)) = read_source(root, &absolute) else {
+        let Some((content, line_ending)) =
+            read_source_with_hash_check(root, &absolute, hashes, plan)
+        else {
             continue;
         };
 
@@ -335,14 +353,12 @@ pub(super) fn apply_empty_catalog_group_fixes(
             continue;
         }
 
-        if let Err(e) = atomic_write(&absolute, new_content.as_bytes()) {
-            summary.write_error = true;
-            eprintln!("Error: failed to write {}: {e}", relative_path.display());
-            continue;
-        }
+        plan.stage(absolute.clone(), new_content.into_bytes());
 
         for (line_idx, group) in &to_remove {
-            fixes.push(remove_group_record(group, *line_idx, true, relative_path));
+            let mut record = remove_group_record(group, *line_idx, true, relative_path);
+            record["__target"] = serde_json::json!(absolute.display().to_string());
+            fixes.push(record);
         }
         summary.applied += to_remove.len();
     }
@@ -792,6 +808,47 @@ mod tests {
         std::fs::write(&path, content).unwrap();
     }
 
+    /// Thin wrappers preserving the pre-#454 test API surface: build a
+    /// FixPlan + CapturedHashes around the entry-fix / group-fix call
+    /// and commit. Commit failures fold into `summary.write_error` so
+    /// pre-existing tests that assert on that field keep working.
+    fn run_catalog_entry_fix(
+        root: &Path,
+        entries: &[UnusedCatalogEntryFinding],
+        policy: CatalogPrecedingCommentPolicy,
+        output: OutputFormat,
+        dry_run: bool,
+        fixes: &mut Vec<serde_json::Value>,
+    ) -> CatalogFixSummary {
+        let mut plan = FixPlan::new();
+        let hashes = CapturedHashes::default();
+        let mut summary = apply_catalog_entry_fixes(
+            root, entries, policy, &hashes, &mut plan, output, dry_run, fixes,
+        );
+        if !dry_run && !plan.commit().failed.is_empty() {
+            summary.write_error = true;
+        }
+        summary
+    }
+
+    fn run_empty_catalog_group_fix(
+        root: &Path,
+        groups: &[EmptyCatalogGroupFinding],
+        output: OutputFormat,
+        dry_run: bool,
+        fixes: &mut Vec<serde_json::Value>,
+    ) -> CatalogFixSummary {
+        let mut plan = FixPlan::new();
+        let hashes = CapturedHashes::default();
+        let mut summary = apply_empty_catalog_group_fixes(
+            root, groups, &hashes, &mut plan, output, dry_run, fixes,
+        );
+        if !dry_run && !plan.commit().failed.is_empty() {
+            summary.write_error = true;
+        }
+        summary
+    }
+
     #[test]
     fn removes_empty_named_catalog_group_header_only() {
         let dir = tempfile::tempdir().unwrap();
@@ -800,13 +857,8 @@ mod tests {
         let groups = vec![make_group("react17", 2)];
         let mut fixes = Vec::new();
 
-        let summary = apply_empty_catalog_group_fixes(
-            dir.path(),
-            &groups,
-            OutputFormat::Json,
-            false,
-            &mut fixes,
-        );
+        let summary =
+            run_empty_catalog_group_fix(dir.path(), &groups, OutputFormat::Json, false, &mut fixes);
 
         assert!(!summary.write_error);
         assert_eq!(summary.applied, 1);
@@ -827,7 +879,7 @@ mod tests {
 
         let entries = vec![make_entry("is-even", "default", 3)];
         let mut fixes = Vec::new();
-        let summary = apply_catalog_entry_fixes(
+        let summary = run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -855,7 +907,7 @@ mod tests {
 
         let entries = vec![make_entry("react", "default", 3)];
         let mut fixes = Vec::new();
-        let summary = apply_catalog_entry_fixes(
+        let summary = run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -885,7 +937,7 @@ mod tests {
             vec![PathBuf::from("apps/web/package.json")],
         )];
         let mut fixes = Vec::new();
-        let summary = apply_catalog_entry_fixes(
+        let summary = run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -923,7 +975,7 @@ mod tests {
 
         let entries = vec![make_entry("is-even", "default", 2)];
         let mut fixes = Vec::new();
-        let summary = apply_catalog_entry_fixes(
+        let summary = run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -946,7 +998,7 @@ mod tests {
 
         let entries = vec![make_entry("react", "react17", 3)];
         let mut fixes = Vec::new();
-        let summary = apply_catalog_entry_fixes(
+        let summary = run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -968,7 +1020,7 @@ mod tests {
 
         let entries = vec![make_entry("is-even", "default", 3)];
         let mut fixes = Vec::new();
-        apply_catalog_entry_fixes(
+        run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -989,7 +1041,7 @@ mod tests {
 
         let entries = vec![make_entry("is-even", "default", 3)];
         let mut fixes = Vec::new();
-        let summary = apply_catalog_entry_fixes(
+        let summary = run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -1016,7 +1068,7 @@ mod tests {
 
         let entries = vec![make_entry("is-even", "default", 3)];
         let mut fixes = Vec::new();
-        let summary = apply_catalog_entry_fixes(
+        let summary = run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -1044,7 +1096,7 @@ mod tests {
 
         let entries = vec![make_entry("is-even", "default", 3)];
         let mut fixes = Vec::new();
-        apply_catalog_entry_fixes(
+        run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Always,
@@ -1070,7 +1122,7 @@ mod tests {
 
         let entries = vec![make_entry("is-even", "default", 3)];
         let mut fixes = Vec::new();
-        let summary = apply_catalog_entry_fixes(
+        let summary = run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -1099,7 +1151,7 @@ mod tests {
 
         let entries = vec![make_entry("is-even", "default", 3)];
         let mut fixes = Vec::new();
-        apply_catalog_entry_fixes(
+        run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Always,
@@ -1133,7 +1185,7 @@ mod tests {
 
         let entries = vec![make_entry("is-even", "default", 5)];
         let mut fixes = Vec::new();
-        apply_catalog_entry_fixes(
+        run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -1154,7 +1206,7 @@ mod tests {
 
         let entries = vec![make_entry("is-even", "default", 4)];
         let mut fixes = Vec::new();
-        apply_catalog_entry_fixes(
+        run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -1175,7 +1227,7 @@ mod tests {
 
         let entries = vec![make_entry("react", "react17", 4)];
         let mut fixes = Vec::new();
-        apply_catalog_entry_fixes(
+        run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -1196,7 +1248,7 @@ mod tests {
 
         let entries = vec![make_entry("is-even", "default", 4)];
         let mut fixes = Vec::new();
-        apply_catalog_entry_fixes(
+        run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Always,
@@ -1217,7 +1269,7 @@ mod tests {
 
         let entries = vec![make_entry("is-even", "default", 3)];
         let mut fixes = Vec::new();
-        apply_catalog_entry_fixes(
+        run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Never,
@@ -1241,7 +1293,7 @@ mod tests {
             make_entry("left-pad", "default", 4),
         ];
         let mut fixes = Vec::new();
-        let summary = apply_catalog_entry_fixes(
+        let summary = run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -1263,7 +1315,7 @@ mod tests {
 
         let entries = vec![make_entry("is-even", "default", 2)];
         let mut fixes = Vec::new();
-        let summary = apply_catalog_entry_fixes(
+        let summary = run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -1293,7 +1345,7 @@ mod tests {
         // line 99 is way past EOF (file has 3 lines including trailing newline)
         let entries = vec![make_entry("is-even", "default", 99)];
         let mut fixes = Vec::new();
-        let summary = apply_catalog_entry_fixes(
+        let summary = run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -1318,7 +1370,7 @@ mod tests {
 
         let entries = vec![make_entry("is-even", "default", 3)];
         let mut fixes = Vec::new();
-        apply_catalog_entry_fixes(
+        run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -1343,7 +1395,7 @@ mod tests {
 
         let entries = vec![make_entry("is-even", "default", 2)];
         let mut fixes = Vec::new();
-        apply_catalog_entry_fixes(
+        run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -1378,7 +1430,7 @@ mod tests {
             make_entry("react-dom", "react17", 4),
         ];
         let mut fixes = Vec::new();
-        apply_catalog_entry_fixes(
+        run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -1412,7 +1464,7 @@ mod tests {
 
         let entries = vec![make_entry("react", "react17", 3)];
         let mut fixes = Vec::new();
-        apply_catalog_entry_fixes(
+        run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,
@@ -1438,7 +1490,7 @@ mod tests {
 
         let entries = vec![make_entry("is-even", "default", 3)];
         let mut fixes = Vec::new();
-        apply_catalog_entry_fixes(
+        run_catalog_entry_fix(
             dir.path(),
             &entries,
             CatalogPrecedingCommentPolicy::Auto,

@@ -17,20 +17,6 @@ pub(super) fn read_source(root: &Path, path: &Path) -> Option<(String, &'static 
     Some((content, line_ending))
 }
 
-/// Join modified lines, preserve the original trailing newline, and atomically write the result.
-pub(super) fn write_fixed_content(
-    path: &Path,
-    lines: &[String],
-    line_ending: &str,
-    original_content: &str,
-) -> std::io::Result<()> {
-    let mut result = lines.join(line_ending);
-    if original_content.ends_with(line_ending) && !result.ends_with(line_ending) {
-        result.push_str(line_ending);
-    }
-    atomic_write(path, result.as_bytes())
-}
-
 pub(super) use fallow_config::atomic_write;
 
 #[cfg(test)]
@@ -153,65 +139,7 @@ mod tests {
         assert_eq!(ending, "\n"); // defaults to LF when no line endings found
     }
 
-    // -- write_fixed_content tests -------------------------------------------
-
-    #[test]
-    fn write_fixed_content_preserves_trailing_newline() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("test.ts");
-        let lines = vec!["line1".to_string(), "line2".to_string()];
-        let original = "line1\nline2\n";
-
-        write_fixed_content(&path, &lines, "\n", original).unwrap();
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(content, "line1\nline2\n");
-    }
-
-    #[test]
-    fn write_fixed_content_no_trailing_newline_when_original_has_none() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("test.ts");
-        let lines = vec!["line1".to_string(), "line2".to_string()];
-        let original = "line1\nline2";
-
-        write_fixed_content(&path, &lines, "\n", original).unwrap();
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(content, "line1\nline2");
-    }
-
-    #[test]
-    fn write_fixed_content_preserves_crlf_trailing_newline() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("test.ts");
-        let lines = vec!["line1".to_string(), "line2".to_string()];
-        let original = "line1\r\nline2\r\n";
-
-        write_fixed_content(&path, &lines, "\r\n", original).unwrap();
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(content, "line1\r\nline2\r\n");
-    }
-
-    #[test]
-    fn write_fixed_content_single_line() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("test.ts");
-        let lines = vec!["only line".to_string()];
-        let original = "only line\n";
-
-        write_fixed_content(&path, &lines, "\n", original).unwrap();
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(content, "only line\n");
-    }
-
-    #[test]
-    fn write_fixed_content_empty_lines() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("test.ts");
-        let lines: Vec<String> = vec![];
-        let original = "\n";
-
-        write_fixed_content(&path, &lines, "\n", original).unwrap();
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(content, "\n");
-    }
+    // The line-ending-preserving join logic that used to live in this
+    // module is now covered by plan.rs::stage_fixed_content + the
+    // per-fixer round-trip integration tests under crates/cli/tests/.
 }

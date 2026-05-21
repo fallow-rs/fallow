@@ -6,7 +6,7 @@ use fallow_config::OutputFormat;
 use super::enum_helpers::{
     EnumDeclarationRange, declares_exported_enum, removable_exported_enum_range,
 };
-use super::io::{read_source, write_fixed_content};
+use super::plan::{CapturedHashes, FixPlan, read_source_with_hash_check, stage_fixed_content};
 
 pub(super) struct EnumMemberFix {
     line_idx: usize,
@@ -117,14 +117,15 @@ fn detect_folded_enums(lines: &[&str], member_fixes: &[EnumMemberFix]) -> Vec<Fo
 pub(super) fn apply_enum_member_fixes(
     root: &Path,
     members_by_file: &FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedMember>>,
+    hashes: &CapturedHashes,
+    plan: &mut FixPlan,
     output: OutputFormat,
     dry_run: bool,
     fixes: &mut Vec<serde_json::Value>,
-) -> bool {
-    let mut had_write_error = false;
-
+) {
     for (path, file_members) in members_by_file {
-        let Some((content, line_ending)) = read_source(root, path) else {
+        let Some((content, line_ending)) = read_source_with_hash_check(root, path, hashes, plan)
+        else {
             continue;
         };
         let lines: Vec<&str> = content.split(line_ending).collect();
@@ -241,15 +242,11 @@ pub(super) fn apply_enum_member_fixes(
                 new_lines.remove(idx);
             }
 
-            let success = match write_fixed_content(path, &new_lines, line_ending, &content) {
-                Ok(()) => true,
-                Err(e) => {
-                    had_write_error = true;
-                    eprintln!("Error: failed to write {}: {e}", relative.display());
-                    false
-                }
-            };
+            stage_fixed_content(plan, path, &new_lines, line_ending, &content);
 
+            // Optimistic `applied: true`; orchestrator flips to false on
+            // commit failure for this target path via the __target sidechannel.
+            let target = path.display().to_string();
             for fix in &member_fixes {
                 if folded_parents.contains(fix.parent_name.as_str()) {
                     continue;
@@ -260,11 +257,12 @@ pub(super) fn apply_enum_member_fixes(
                     "line": fix.line_idx + 1,
                     "parent": fix.parent_name,
                     "name": fix.member_name,
-                    "applied": success,
+                    "applied": true,
+                    "__target": target,
                 }));
             }
             for fold in &folded {
-                if success && !matches!(output, OutputFormat::Json) {
+                if !matches!(output, OutputFormat::Json) {
                     eprintln!(
                         "Removed unused enum `{}` from {}; importers in other files will need cleanup, run your TypeScript build to find them.",
                         fold.parent_name,
@@ -276,13 +274,12 @@ pub(super) fn apply_enum_member_fixes(
                     "path": relative.display().to_string(),
                     "line": fold.decl_line + 1,
                     "name": fold.parent_name,
-                    "applied": success,
+                    "applied": true,
+                    "__target": target,
                 }));
             }
         }
     }
-
-    had_write_error
 }
 
 /// Remove a single member from a single-line enum like `enum Foo { A, B, C }`.
@@ -362,8 +359,37 @@ mod tests {
         let mut map: FxHashMap<PathBuf, Vec<&UnusedMember>> = FxHashMap::default();
         map.insert(file.to_path_buf(), vec![&member]);
         let mut fixes = Vec::new();
-        apply_enum_member_fixes(root, &map, OutputFormat::Human, dry_run, &mut fixes);
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[file]);
+        apply_enum_member_fixes(
+            root,
+            &map,
+            &hashes,
+            &mut plan,
+            OutputFormat::Human,
+            dry_run,
+            &mut fixes,
+        );
+        if !dry_run {
+            let _ = plan.commit();
+        }
         fixes
+    }
+
+    /// Helper mirrored from `exports.rs`. The fix tests need the
+    /// captured-hashes map to be populated for every file the test
+    /// considers freshly analyzed.
+    fn capture_hashes(paths: &[&Path]) -> CapturedHashes {
+        let mut hashes = CapturedHashes::default();
+        for path in paths {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                hashes.insert(
+                    path.to_path_buf(),
+                    xxhash_rust::xxh3::xxh3_64(content.as_bytes()),
+                );
+            }
+        }
+        hashes
     }
 
     #[test]
@@ -405,13 +431,18 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&m1, &m2]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(
             root,
             &members_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             false,
             &mut fixes,
         );
+        let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(content, "export enum Status {\n  Inactive,\n}\n");
@@ -431,13 +462,18 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&m1, &m2]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(
             root,
             &members_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             false,
             &mut fixes,
         );
+        let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(content, "\n");
@@ -523,7 +559,17 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&member]);
 
         let mut fixes = Vec::new();
-        apply_enum_member_fixes(root, &members_by_file, OutputFormat::Json, true, &mut fixes);
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
+        apply_enum_member_fixes(
+            root,
+            &members_by_file,
+            &hashes,
+            &mut plan,
+            OutputFormat::Json,
+            true,
+            &mut fixes,
+        );
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
         assert_eq!(fixes.len(), 1);
@@ -699,13 +745,18 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&m1, &m2]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(
             root,
             &members_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             false,
             &mut fixes,
         );
+        let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(content, "enum Status { A, C }\n");
@@ -794,16 +845,21 @@ mod tests {
 
         let member = make_enum_member(&file, "Status", "Active", 2);
         let mut members_by_file: FxHashMap<PathBuf, Vec<&UnusedMember>> = FxHashMap::default();
-        members_by_file.insert(file, vec![&member]);
+        members_by_file.insert(file.clone(), vec![&member]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(
             root,
             &members_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             false,
             &mut fixes,
         );
+        let _ = plan.commit();
 
         let path_str = fixes[0]["path"].as_str().unwrap().replace('\\', "/");
         assert_eq!(path_str, "src/status.ts");
@@ -822,9 +878,13 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&member]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(
             root,
             &members_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             true,
             &mut fixes,
@@ -849,13 +909,18 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&member]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(
             root,
             &members_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             false,
             &mut fixes,
         );
+        let _ = plan.commit();
 
         // line_idx=0 points to "enum Status { Active }" which contains "Active"
         // and has both { and }, so it's treated as single-line
@@ -879,13 +944,18 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&member]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(
             root,
             &members_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             false,
             &mut fixes,
         );
+        let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(
@@ -917,13 +987,18 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&m1]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(
             root,
             &members_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             false,
             &mut fixes,
         );
+        let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(
@@ -947,13 +1022,18 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&m1, &m2]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(
             root,
             &members_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             false,
             &mut fixes,
         );
+        let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(content, "\n");
@@ -979,13 +1059,18 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&m1, &m2]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(
             root,
             &members_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             false,
             &mut fixes,
         );
+        let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(
@@ -1009,9 +1094,13 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&m1, &m2]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(
             root,
             &members_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             true,
             &mut fixes,
@@ -1040,13 +1129,18 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&m1, &m2]);
 
         let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(
             root,
             &members_by_file,
+            &hashes,
+            &mut plan,
             OutputFormat::Human,
             false,
             &mut fixes,
         );
+        let _ = plan.commit();
 
         // Non-exported enum: fold does not fire, members removed individually.
         let content = std::fs::read_to_string(&file).unwrap();

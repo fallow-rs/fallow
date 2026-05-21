@@ -136,6 +136,15 @@ pub struct AnalysisOutput {
     /// trace tooling reads it so `trace_dependency` agrees with `unused-deps` on
     /// "used vs unused" instead of returning false-negatives for script-only deps.
     pub script_used_packages: rustc_hash::FxHashSet<String>,
+    /// xxh3 content hash of every parsed source file, keyed by absolute path.
+    /// Used by `fallow fix` to detect on-disk drift between the in-process
+    /// analysis read and the per-file write; if the file's current hash
+    /// differs from the captured value, the fix for that file is skipped
+    /// with a clear diagnostic and exit 2. The hash is the same value
+    /// extract/cache uses for cache invalidation, so a cached parse contributes
+    /// the same hash as a fresh parse. Roughly 8 bytes per file (negligible
+    /// memory cost even on 100k-file projects).
+    pub file_hashes: rustc_hash::FxHashMap<std::path::PathBuf, u64>,
 }
 
 /// Update cache: write freshly parsed modules and refresh stale mtime/size entries.
@@ -283,6 +292,22 @@ pub fn analyze_with_usages(config: &ResolvedConfig) -> Result<AnalysisResults, F
 )]
 pub fn analyze_with_trace(config: &ResolvedConfig) -> Result<AnalysisOutput, FallowError> {
     analyze_full(config, true, false, false, false)
+}
+
+/// Run the full analysis pipeline and return the full `AnalysisOutput`, including
+/// `file_hashes` (used by `fallow fix` to detect on-disk drift between analysis
+/// and per-file write). Graphs and modules are NOT retained; the only difference
+/// from `analyze` is that the caller can access `AnalysisOutput.file_hashes`.
+///
+/// # Errors
+///
+/// Returns an error if file discovery, parsing, or analysis fails.
+#[deprecated(
+    since = "2.76.0",
+    note = "fallow_core is internal; the CLI fix command uses this via the workspace path dependency. External embedders should use fallow_cli::programmatic::detect_dead_code. See docs/fallow-core-migration.md and ADR-008."
+)]
+pub fn analyze_with_file_hashes(config: &ResolvedConfig) -> Result<AnalysisOutput, FallowError> {
+    analyze_full(config, false, false, false, false)
 }
 
 /// Run the full analysis pipeline, retaining parsed modules and discovered files.
@@ -529,6 +554,15 @@ pub fn analyze_with_parse_result(
         total_ms,
     });
 
+    let file_hashes: rustc_hash::FxHashMap<std::path::PathBuf, u64> = modules
+        .iter()
+        .filter_map(|module| {
+            files
+                .get(module.file_id.0 as usize)
+                .map(|file| (file.path.clone(), module.content_hash))
+        })
+        .collect();
+
     Ok(AnalysisOutput {
         results: result,
         timings,
@@ -536,6 +570,7 @@ pub fn analyze_with_parse_result(
         modules: None,
         files: None,
         script_used_packages: plugin_result.script_used_packages.clone(),
+        file_hashes,
     })
 }
 
@@ -800,6 +835,15 @@ fn analyze_full(
         None
     };
 
+    let file_hashes: rustc_hash::FxHashMap<std::path::PathBuf, u64> = modules
+        .iter()
+        .filter_map(|module| {
+            files
+                .get(module.file_id.0 as usize)
+                .map(|file| (file.path.clone(), module.content_hash))
+        })
+        .collect();
+
     Ok(AnalysisOutput {
         results: result,
         timings,
@@ -811,6 +855,7 @@ fn analyze_full(
             None
         },
         script_used_packages: plugin_result.script_used_packages,
+        file_hashes,
     })
 }
 

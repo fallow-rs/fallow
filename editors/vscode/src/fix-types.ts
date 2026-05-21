@@ -48,6 +48,10 @@ export interface FixAction {
    *   refused to create `.fallowrc.json` inside a monorepo subpackage).
    * - `no_create_config` (`--no-create-config` was passed and no fallow
    *   config exists).
+   * - `content_changed` (#454: file's xxh3 content hash at fix time
+   *   differs from the hash captured during analysis; applying offsets
+   *   would land on bytes the analysis never saw). Re-run `fallow fix`
+   *   to refresh the analysis.
    */
   readonly skip_reason?: string;
   /**
@@ -62,5 +66,18 @@ export interface FallowFixResult {
   readonly dry_run: boolean;
   readonly fixes: ReadonlyArray<FixAction>;
   readonly total_fixed: number;
+  /**
+   * Count of fixer-logic skips (catalog `hardcoded_consumers`,
+   * `multi_document_yaml`, `line_out_of_range`, `monorepo_subpackage`,
+   * `no_create_config`). Semantics unchanged since pre-#454; disjoint
+   * from `skipped_content_changed`.
+   */
   readonly skipped?: number;
+  /**
+   * Count of files skipped because their xxh3 content hash at fix time
+   * differed from the hash captured during analysis (#454). Always
+   * present in the envelope; defaults to 0. A non-zero value means
+   * `fallow fix` exited 2; consumers re-run after refreshing analysis.
+   */
+  readonly skipped_content_changed?: number;
 }

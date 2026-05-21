@@ -1963,6 +1963,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: FxHashSet::default(),
+            file_hashes: rustc_hash::FxHashMap::default(),
         }
     }
 
