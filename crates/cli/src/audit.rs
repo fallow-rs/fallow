@@ -1020,10 +1020,7 @@ impl BaseWorktree {
             };
             materialize_base_dependency_context(repo_root, worktree.path());
             // Update the staleness signal so the age-based GC sweep does
-            // not nuke a frequently-reused cache. The fresh-create branch
-            // below intentionally does NOT touch: the pre-upgrade-grace
-            // path in `sweep_old_reusable_caches` will seed the sidecar
-            // on the next run if needed.
+            // not nuke a frequently-reused cache.
             touch_last_used(worktree.path());
             return Some(worktree);
         }
@@ -1056,6 +1053,12 @@ impl BaseWorktree {
             persistent: true,
         };
         materialize_base_dependency_context(repo_root, worktree.path());
+        // Stamp the sidecar at fresh-create time so the cache's age is
+        // measured from "first existence" rather than "first reuse". The
+        // sweep's sidecar-absent branch (`touch + skip`) is still
+        // load-bearing for pre-upgrade caches created before this
+        // feature shipped.
+        touch_last_used(worktree.path());
         Some(worktree)
     }
 
@@ -3858,6 +3861,58 @@ mod tests {
         );
         let _ = fs::remove_file(&lock_path);
         cleanup_reusable_worktree(&repo, &worktree_path);
+    }
+
+    #[test]
+    fn reuse_or_create_stamps_sidecar_on_fresh_create_and_age_threshold_applies() {
+        // Documented contract on `cache_max_age_days`: "Maximum age (in days
+        // since last reuse or fresh create)". This test pins both halves:
+        // (a) a fresh `reuse_or_create` writes the sidecar with a near-now
+        //     mtime, AND
+        // (b) backdating that sidecar past the threshold causes the next
+        //     sweep to actually remove the entry. Without (a), one-off
+        //     base SHAs would persist through the first sweep regardless
+        //     of age, contradicting the contract.
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = init_throwaway_repo(tmp.path(), "repo-fresh-create-stamp");
+        let base_sha = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
+
+        let worktree = BaseWorktree::reuse_or_create(&repo, &base_sha)
+            .expect("fresh reuse_or_create should succeed on a clean repo");
+        let cache_path = worktree.path().to_path_buf();
+        let sidecar = reusable_worktree_last_used_path(&cache_path);
+
+        assert!(
+            sidecar.exists(),
+            "fresh-create must write the sidecar so age is measured from now",
+        );
+        let initial_age = std::fs::metadata(&sidecar)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|mtime| SystemTime::now().duration_since(mtime).ok())
+            .expect("sidecar mtime should be readable and not in the future");
+        assert!(
+            initial_age < Duration::from_mins(1),
+            "fresh-create sidecar mtime should be near now(), got age {initial_age:?}",
+        );
+
+        // Drop the worktree handle so the persistent cache survives but we
+        // can mutate the sidecar.
+        drop(worktree);
+
+        // Backdate the sidecar past the threshold; sweep must now remove it.
+        write_sidecar_with_age(&cache_path, Duration::from_hours(31 * 24));
+        sweep_old_reusable_caches(&repo, Duration::from_hours(30 * 24), true);
+
+        assert!(
+            !cache_path.exists(),
+            "after backdating, sweep must remove the fresh-created cache",
+        );
+        assert!(
+            !sidecar.exists(),
+            "sweep should remove the sidecar alongside the cache dir",
+        );
+        cleanup_reusable_worktree(&repo, &cache_path);
     }
 
     #[test]
