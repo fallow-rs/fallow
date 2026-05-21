@@ -25,6 +25,7 @@ def dead_code_rows:
    [ (.dead_code.unlisted_dependencies // [])[] | {kind:"Unlisted dependency", location:first_import_site, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.duplicate_exports // [])[] | {kind:"Duplicate export", location:(.locations[:3] | map("`\(.path | rel_path):\(.line)`") | join(", ")), item:("`\(.export_name)`"), introduced:.introduced} ] +
    [ (.dead_code.circular_dependencies // [])[] | {kind:"Circular dependency", location:((.files // []) | map("`\(. | rel_path)`") | join(" -> ")), item:"cycle", introduced:.introduced} ] +
+   [ (.dead_code.re_export_cycles // [])[] | {kind:"Re-export cycle", location:((.files // []) | map("`\(. | rel_path)`") | join(" <-> ")), item:(.kind // "cycle"), introduced:.introduced} ] +
    [ (.dead_code.boundary_violations // [])[] | {kind:"Boundary violation", location:("`\(.from_path | rel_path):\(.line)`"), item:("\(.from_zone) -> \(.to_zone)"), introduced:.introduced} ] +
    [ (.dead_code.type_only_dependencies // [])[] | {kind:"Type-only dependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +
    [ (.dead_code.test_only_dependencies // [])[] | {kind:"Test-only dependency", location:path_line, item:("`\(.package_name)`"), introduced:.introduced} ] +

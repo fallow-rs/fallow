@@ -135,6 +135,7 @@ else
       (if (.check.unlisted_dependencies | length) > 0 then "| [Unlisted dependencies](\(docs("unlisted-dependencies"))) | \(.check.unlisted_dependencies | length) |" else null end),
       (if (.check.duplicate_exports | length) > 0 then "| [Duplicate exports](\(docs("duplicate-exports"))) | \(.check.duplicate_exports | length) |" else null end),
       (if (.check.circular_dependencies | length) > 0 then "| [Circular dependencies](\(docs("circular-dependencies"))) | \(.check.circular_dependencies | length) |" else null end),
+      (if ((.check.re_export_cycles // []) | length) > 0 then "| [Re-export cycles](\(docs("re-export-cycles"))) | \(.check.re_export_cycles | length) |" else null end),
       (if (.check.boundary_violations | length) > 0 then "| [Boundary violations](\(docs("boundary-violations"))) | \(.check.boundary_violations | length) |" else null end),
       (if (.check.type_only_dependencies | length) > 0 then "| [Type-only dependencies](\(docs("type-only-dependencies"))) | \(.check.type_only_dependencies | length) |" else null end),
       (if (.check.test_only_dependencies | length) > 0 then "| [Test-only dependencies](\(docs("test-only-dependencies"))) | \(.check.test_only_dependencies | length) |" else null end),

@@ -48,6 +48,7 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   { code: "type-only-dependency", label: "Type-Only Dependencies" },
   { code: "test-only-dependency", label: "Test-Only Dependencies" },
   { code: "circular-dependency", label: "Circular Dependencies" },
+  { code: "re-export-cycle", label: "Re-Export Cycles" },
   { code: "boundary-violation", label: "Boundary Violations" },
   { code: "stale-suppression", label: "Stale Suppressions" },
   { code: "unused-catalog-entry", label: "Unused Catalog Entries" },

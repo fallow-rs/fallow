@@ -20,6 +20,7 @@ export type IssueCategory =
   | "type-only-dependencies"
   | "test-only-dependencies"
   | "circular-dependencies"
+  | "re-export-cycles"
   | "boundary-violation"
   | "stale-suppressions"
   | "unused-catalog-entries"
@@ -43,6 +44,7 @@ export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "type-only-dependencies": "Type-Only Dependencies",
   "test-only-dependencies": "Test-Only Dependencies",
   "circular-dependencies": "Circular Dependencies",
+  "re-export-cycles": "Re-Export Cycles",
   "boundary-violation": "Boundary Violations",
   "stale-suppressions": "Stale Suppressions",
   "unused-catalog-entries": "Unused Catalog Entries",

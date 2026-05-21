@@ -161,6 +161,7 @@
             "type-only-dependencies": true,
             "test-only-dependencies": true,
             "circular-dependencies": true,
+            "re-export-cycles": true,
             "boundary-violation": true,
             "stale-suppressions": true,
             "unused-catalog-entries": true,
@@ -213,6 +214,9 @@
               "type": "boolean"
             },
             "circular-dependencies": {
+              "type": "boolean"
+            },
+            "re-export-cycles": {
               "type": "boolean"
             },
             "boundary-violation": {

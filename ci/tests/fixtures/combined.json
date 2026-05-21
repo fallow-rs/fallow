@@ -6,7 +6,7 @@
     "schema_version": 3,
     "version": "2.2.2",
     "elapsed_ms": 4,
-    "total_issues": 10,
+    "total_issues": 11,
     "unused_files": [],
     "unused_exports": [
       {
@@ -109,7 +109,34 @@
     "unused_catalog_entries": [],
     "unresolved_catalog_references": [],
     "unused_dependency_overrides": [],
-    "misconfigured_dependency_overrides": []
+    "misconfigured_dependency_overrides": [],
+    "re_export_cycles": [
+      {
+        "files": [
+          "src/api/index.ts",
+          "src/api/internal/index.ts"
+        ],
+        "kind": "multi-node",
+        "actions": [
+          {
+            "type": "fix",
+            "kind": "refactor-re-export-cycle",
+            "auto_fixable": false,
+            "description": "Remove one `export * from` statement on any one member to break the cycle"
+          },
+          {
+            "type": "suppress-file",
+            "kind": "suppress-file",
+            "auto_fixable": false,
+            "description": "Suppress with a file-level comment at the top of this file.",
+            "comment": "// fallow-ignore-file re-export-cycle"
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "re_export_cycles": 1
+    }
   },
   "dupes": {
     "clone_groups": [

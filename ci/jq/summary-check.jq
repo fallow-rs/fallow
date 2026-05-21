@@ -45,6 +45,7 @@ else
     table_row("Unlisted dependencies"; "unlisted_dependencies"; "unlisted-dependencies"),
     table_row("Duplicate exports"; "duplicate_exports"; "duplicate-exports"),
     table_row("Circular dependencies"; "circular_dependencies"; "circular-dependencies"),
+    table_row("Re-export cycles"; "re_export_cycles"; "re-export-cycles"),
     table_row("Boundary violations"; "boundary_violations"; "boundary-violations"),
     table_row("Type-only dependencies"; "type_only_dependencies"; "type-only-dependencies"),
     table_row("Test-only dependencies"; "test_only_dependencies"; "test-only-dependencies"),
@@ -95,6 +96,9 @@ else
   section("Circular dependencies"; "circular_dependencies";
     "Import cycles that can cause initialization failures and prevent tree-shaking.\n\n| Cycle | Length |\n|-------|-------:|\n";
     "| \(.files | join(" \u2192 ")) | \(.length) |") +
+  section("Re-export cycles"; "re_export_cycles";
+    "Barrel files that re-export from each other in a loop. Chain propagation through the loop is a no-op, so imports through any member may silently come up empty.\n\n| Cycle | Kind | Members |\n|-------|------|--------:|\n";
+    "| \(.files | map("`\(.)`") | join(" <-> ")) | \(.kind) | \(.files | length) |") +
   section("Boundary violations"; "boundary_violations";
     "Imports that cross defined architecture zone boundaries.\n\n| From | To | Zones |\n|------|-----|-------|\n";
     "| `\(.from_path):\(.line)` | `\(.to_path)` | \(.from_zone) \u2192 \(.to_zone) |") +

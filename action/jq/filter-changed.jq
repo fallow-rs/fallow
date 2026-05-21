@@ -27,6 +27,9 @@ def filter_check:
   (if .circular_dependencies then
     .circular_dependencies |= map(select(.files | any(in_changed)))
   else . end) |
+  (if .re_export_cycles then
+    .re_export_cycles |= map(select(.files | any(in_changed)))
+  else . end) |
   (if .boundary_violations then
     .boundary_violations |= map(select(.from_path | in_changed))
   else . end) |
@@ -61,6 +64,7 @@ def filter_check:
       (.unlisted_dependencies // [] | length) +
       (.duplicate_exports // [] | length) +
       (.circular_dependencies // [] | length) +
+      (.re_export_cycles // [] | length) +
       (.boundary_violations // [] | length) +
       (.type_only_dependencies // [] | length) +
       (.stale_suppressions // [] | length) +

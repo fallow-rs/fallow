@@ -164,7 +164,7 @@ export type IssueAction = (FixAction | SuppressLineAction | SuppressFileAction |
  * Discriminant string for [`FixAction`]. Kebab-case per the JSON output
  * contract.
  */
-export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override")
+export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override")
 /**
  * Singleton discriminant for [`SuppressLineAction`].
  */
@@ -233,6 +233,10 @@ export type DependencyLocation = ("dependencies" | "devDependencies" | "optional
  * ```
  */
 export type MemberKind = ("enum_member" | "class_method" | "class_property" | "namespace_member")
+/**
+ * Discriminator for [`ReExportCycle`]: which structural shape was detected.
+ */
+export type ReExportCycleKind = ("multi-node" | "self-loop")
 /**
  * The origin of a stale suppression: inline comment or JSDoc tag.
  */
@@ -821,6 +825,15 @@ test_only_dependencies?: TestOnlyDependencyFinding[]
  */
 circular_dependencies: CircularDependencyFinding[]
 /**
+ * Cycles or self-loops in the re-export edge subgraph (barrel files
+ * re-exporting from each other in a loop). Wrapped in
+ * [`ReExportCycleFinding`] so each entry carries a typed `actions`
+ * array natively (a `refactor-re-export-cycle` informational primary
+ * plus a `suppress-file` secondary; cycles are file-scoped so a single
+ * suppression breaks the cycle).
+ */
+re_export_cycles?: ReExportCycleFinding[]
+/**
  * Imports that cross architecture boundary rules. Wrapped in
  * [`BoundaryViolationFinding`] so each entry carries a typed `actions`
  * array natively.
@@ -983,6 +996,11 @@ test_only_dependencies: number
  * Cycles detected in the import graph.
  */
 circular_dependencies: number
+/**
+ * Cycles or self-loops in the re-export edge subgraph (barrel files
+ * re-exporting from each other in a loop).
+ */
+re_export_cycles?: number
 /**
  * Imports that cross architecture boundary rules.
  */
@@ -1724,6 +1742,33 @@ col: number
  * Whether this cycle crosses workspace package boundaries.
  */
 is_cross_package?: boolean
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for a [`ReExportCycle`] finding. Mirrors
+ * [`CircularDependencyFinding`]: flattens the bare finding and carries a
+ * typed `actions` array (`refactor-re-export-cycle` informational primary
+ * plus `suppress-file` secondary; cycles are file-scoped so a single
+ * file-level suppression on the alphabetically-first member breaks the
+ * cycle, and no `// fallow-ignore-next-line` form makes sense because the
+ * diagnostic is anchored at line 1 col 0 of each member).
+ */
+export interface ReExportCycleFinding {
+/**
+ * Files participating in the cycle, sorted lexicographically. For a
+ * self-loop, exactly one entry.
+ */
+files: string[]
+kind: ReExportCycleKind
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -5263,6 +5308,15 @@ test_only_dependencies?: TestOnlyDependencyFinding[]
  * array natively.
  */
 circular_dependencies: CircularDependencyFinding[]
+/**
+ * Cycles or self-loops in the re-export edge subgraph (barrel files
+ * re-exporting from each other in a loop). Wrapped in
+ * [`ReExportCycleFinding`] so each entry carries a typed `actions`
+ * array natively (a `refactor-re-export-cycle` informational primary
+ * plus a `suppress-file` secondary; cycles are file-scoped so a single
+ * suppression breaks the cycle).
+ */
+re_export_cycles?: ReExportCycleFinding[]
 /**
  * Imports that cross architecture boundary rules. Wrapped in
  * [`BoundaryViolationFinding`] so each entry carries a typed `actions`

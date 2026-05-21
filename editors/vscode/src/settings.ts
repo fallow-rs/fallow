@@ -21,6 +21,7 @@ export interface IssueTypeConfig {
   readonly "type-only-dependencies": boolean;
   readonly "test-only-dependencies": boolean;
   readonly "circular-dependencies": boolean;
+  readonly "re-export-cycles": boolean;
   readonly "boundary-violation": boolean;
   readonly "stale-suppressions": boolean;
   readonly "unused-catalog-entries": boolean;

@@ -44,6 +44,7 @@ export const getIssueTypes = (): IssueTypeConfig =>
     "type-only-dependencies": true,
     "test-only-dependencies": true,
     "circular-dependencies": true,
+    "re-export-cycles": true,
     "boundary-violation": true,
     "stale-suppressions": true,
     "unused-catalog-entries": true,

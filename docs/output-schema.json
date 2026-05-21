@@ -570,6 +570,13 @@
           },
           "description": "Circular dependency chains detected in the module graph. Wrapped in\n[`CircularDependencyFinding`] so each entry carries a typed `actions`\narray natively."
         },
+        "re_export_cycles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReExportCycleFinding"
+          },
+          "description": "Cycles or self-loops in the re-export edge subgraph (barrel files\nre-exporting from each other in a loop). Wrapped in\n[`ReExportCycleFinding`] so each entry carries a typed `actions`\narray natively (a `refactor-re-export-cycle` informational primary\nplus a `suppress-file` secondary; cycles are file-scoped so a single\nsuppression breaks the cycle)."
+        },
         "boundary_violations": {
           "type": "array",
           "items": {
@@ -873,6 +880,13 @@
             "$ref": "#/definitions/CircularDependencyFinding"
           },
           "description": "Circular dependency chains detected in the module graph. Wrapped in\n[`CircularDependencyFinding`] so each entry carries a typed `actions`\narray natively."
+        },
+        "re_export_cycles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReExportCycleFinding"
+          },
+          "description": "Cycles or self-loops in the re-export edge subgraph (barrel files\nre-exporting from each other in a loop). Wrapped in\n[`ReExportCycleFinding`] so each entry carries a typed `actions`\narray natively (a `refactor-re-export-cycle` informational primary\nplus a `suppress-file` secondary; cycles are file-scoped so a single\nsuppression breaks the cycle)."
         },
         "boundary_violations": {
           "type": "array",
@@ -4612,6 +4626,10 @@
           "type": "integer",
           "description": "Cycles detected in the import graph."
         },
+        "re_export_cycles": {
+          "type": "integer",
+          "description": "Cycles or self-loops in the re-export edge subgraph (barrel files\nre-exporting from each other in a loop)."
+        },
         "boundary_violations": {
           "type": "integer",
           "description": "Imports that cross architecture boundary rules."
@@ -5236,6 +5254,13 @@
           },
           "description": "Circular dependency chains detected in the module graph. Wrapped in\n[`CircularDependencyFinding`] so each entry carries a typed `actions`\narray natively."
         },
+        "re_export_cycles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReExportCycleFinding"
+          },
+          "description": "Cycles or self-loops in the re-export edge subgraph (barrel files\nre-exporting from each other in a loop). Wrapped in\n[`ReExportCycleFinding`] so each entry carries a typed `actions`\narray natively (a `refactor-re-export-cycle` informational primary\nplus a `suppress-file` secondary; cycles are file-scoped so a single\nsuppression breaks the cycle)."
+        },
         "boundary_violations": {
           "type": "array",
           "items": {
@@ -5690,6 +5715,11 @@
           "type": "string",
           "const": "refactor-cycle",
           "description": "Break a circular dependency by refactoring imports."
+        },
+        {
+          "type": "string",
+          "const": "refactor-re-export-cycle",
+          "description": "Break a re-export cycle by removing an `export * from` (or\n`export { ... } from`) statement on any one member file. Re-export\ncycles are structurally always bugs (chain propagation through the\nloop is a no-op), so there is no auto-fix; the action is manual."
         },
         {
           "type": "string",
@@ -9174,6 +9204,61 @@
         }
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."
+    },
+    "ReExportCycleFinding": {
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Files participating in the cycle, sorted lexicographically. For a\nself-loop, exactly one entry."
+        },
+        "kind": {
+          "description": "Which structural shape this finding describes.",
+          "$ref": "#/definitions/ReExportCycleKind"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "files",
+        "kind",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`ReExportCycle`] finding. Mirrors\n[`CircularDependencyFinding`]: flattens the bare finding and carries a\ntyped `actions` array (`refactor-re-export-cycle` informational primary\nplus `suppress-file` secondary; cycles are file-scoped so a single\nfile-level suppression on the alphabetically-first member breaks the\ncycle, and no `// fallow-ignore-next-line` form makes sense because the\ndiagnostic is anchored at line 1 col 0 of each member)."
+    },
+    "ReExportCycleKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "multi-node",
+          "description": "Two or more barrel files re-export from each other in a loop\n(SCC of size >= 2)."
+        },
+        {
+          "type": "string",
+          "const": "self-loop",
+          "description": "A single barrel file re-exports from itself."
+        }
+      ],
+      "description": "Discriminator for [`ReExportCycle`]: which structural shape was detected."
     }
   }
 }

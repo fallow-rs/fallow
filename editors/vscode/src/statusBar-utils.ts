@@ -18,6 +18,7 @@ export interface AnalysisCompleteParams {
   typeOnlyDependencies: number;
   testOnlyDependencies: number;
   circularDependencies: number;
+  reExportCycles: number;
   boundaryViolations: number;
   staleSuppressions: number;
   unusedCatalogEntries: number;
@@ -53,6 +54,7 @@ export const buildParamsFromCli = (
   typeOnlyDependencies: check?.type_only_dependencies?.length ?? 0,
   testOnlyDependencies: check?.test_only_dependencies?.length ?? 0,
   circularDependencies: check?.circular_dependencies?.length ?? 0,
+  reExportCycles: check?.re_export_cycles?.length ?? 0,
   boundaryViolations: check?.boundary_violations?.length ?? 0,
   staleSuppressions: check?.stale_suppressions?.length ?? 0,
   unusedCatalogEntries: check?.unused_catalog_entries?.length ?? 0,
@@ -139,6 +141,11 @@ const BREAKDOWN_LINES: ReadonlyArray<BreakdownLine> = [
     count: "circularDependencies",
     icon: "$(warning)",
     label: "circular dependencies",
+  },
+  {
+    count: "reExportCycles",
+    icon: "$(warning)",
+    label: "re-export cycles",
   },
   {
     count: "boundaryViolations",

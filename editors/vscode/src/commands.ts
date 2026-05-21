@@ -130,6 +130,7 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     type_only_dependencies: types["type-only-dependencies"] ? result.type_only_dependencies : [],
     test_only_dependencies: types["test-only-dependencies"] ? result.test_only_dependencies : [],
     circular_dependencies: types["circular-dependencies"] ? result.circular_dependencies : [],
+    re_export_cycles: types["re-export-cycles"] ? result.re_export_cycles : [],
     boundary_violations: types["boundary-violation"] ? result.boundary_violations : [],
     stale_suppressions: types["stale-suppressions"] ? result.stale_suppressions : [],
     unused_catalog_entries: types["unused-catalog-entries"]
@@ -166,6 +167,7 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     type_only_dependencies: filtered.type_only_dependencies?.length ?? 0,
     test_only_dependencies: filtered.test_only_dependencies?.length ?? 0,
     circular_dependencies: filtered.circular_dependencies?.length ?? 0,
+    re_export_cycles: filtered.re_export_cycles?.length ?? 0,
     boundary_violations: filtered.boundary_violations?.length ?? 0,
     stale_suppressions: filtered.stale_suppressions?.length ?? 0,
     unused_catalog_entries: filtered.unused_catalog_entries?.length ?? 0,

@@ -34,6 +34,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "type-only-dependencies": "symbol-interface",
   "test-only-dependencies": "beaker",
   "circular-dependencies": "sync",
+  "re-export-cycles": "sync-ignored",
   "boundary-violation": "symbol-namespace",
   "stale-suppressions": "trash",
   "unused-catalog-entries": "package",
@@ -59,6 +60,7 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
   "type-only-dependencies": "package",
   "test-only-dependencies": "beaker",
   "circular-dependencies": "sync",
+  "re-export-cycles": "sync-ignored",
   "boundary-violation": "symbol-namespace",
   "stale-suppressions": "trash",
   "unused-catalog-entries": "package",
@@ -323,6 +325,23 @@ export class DeadCodeTreeProvider
             c.line,
             c.col,
             "circular-dependencies"
+          )
+        )
+      );
+    }
+
+    if (this.result.re_export_cycles) {
+      addCategory(
+        "re-export-cycles",
+        this.result.re_export_cycles.map(
+          (c) => new IssueItem(
+            c.kind === "self-loop"
+              ? "Self-loop"
+              : `${c.files.length} files`,
+            c.files[0] ?? "",
+            1,
+            0,
+            "re-export-cycles"
           )
         )
       );
