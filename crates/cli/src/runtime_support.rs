@@ -186,5 +186,19 @@ pub fn load_config_for_analysis(
         return Err(crate::error::emit_error(&msg, 2, output));
     }
 
+    // Issue #468: validate boundary zone references and root-prefix conflicts
+    // AFTER preset and auto-discover expansion. Mirrors the upstream
+    // `discover_and_validate_external_plugins` pattern: both checks need the
+    // project root, both surface every offending entry in one rendered run.
+    if let Err(errors) = final_config.validate_resolved_boundaries(root) {
+        let joined = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n  - ");
+        let msg = format!("invalid boundary configuration:\n  - {joined}");
+        return Err(crate::error::emit_error(&msg, 2, output));
+    }
+
     Ok(final_config.resolve(root.to_path_buf(), output, threads, no_cache, quiet))
 }

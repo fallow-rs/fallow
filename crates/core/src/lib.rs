@@ -1312,6 +1312,21 @@ pub fn config_for_project(
                 .production
                 .for_analysis(fallow_config::ProductionAnalysis::DeadCode);
             config.production = dead_code_production.into();
+            // Issue #468: validate boundary zone references and root-prefix
+            // conflicts BEFORE resolve(). Mirrors the CLI's runtime_support
+            // wiring; LSP and programmatic embedders surface the same exit-2
+            // diagnostic via FallowError::config so editors / API consumers
+            // get a structured failure instead of analysis-time noise.
+            config
+                .validate_resolved_boundaries(root)
+                .map_err(|errors| {
+                    let joined = errors
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join("\n  - ");
+                    FallowError::config(format!("invalid boundary configuration:\n  - {joined}"))
+                })?;
             (
                 config.resolve(
                     root.to_path_buf(),

@@ -372,17 +372,13 @@ impl FallowConfig {
         // the parent name is flattened out of `zones[]`. Closes issue #373.
         let logical_groups = boundaries.expand_auto_discover(&root);
 
-        // Validate and compile architecture boundary config
-        let validation_errors = boundaries.validate_zone_references();
-        for (rule_idx, zone_name) in &validation_errors {
-            tracing::error!(
-                "boundary rule {} references undefined zone '{zone_name}'",
-                rule_idx
-            );
-        }
-        for message in boundaries.validate_root_prefixes() {
-            tracing::error!("{message}");
-        }
+        // Compile architecture boundary config. Validation errors
+        // (`validate_zone_references` + `validate_root_prefixes`) are surfaced
+        // via `FallowConfig::validate_resolved_boundaries` at config load
+        // time (issue #468); by the time `resolve()` runs they have already
+        // exited the process with exit code 2. Test fixtures that bypass the
+        // load path and construct configs in-code are responsible for keeping
+        // their zone references and root prefixes valid.
         let mut boundaries = boundaries.resolve();
         // `expand_auto_discover` is the only producer of `logical_groups`;
         // `resolve()` has no view of the pre-expansion state and leaves the

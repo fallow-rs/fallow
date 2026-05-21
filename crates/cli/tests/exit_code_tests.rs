@@ -623,3 +623,130 @@ fn combined_json_outside_git_repo_emits_single_document() {
         "combined report must not surface a top-level `error` key from a nested hotspot bail-out"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Issue #468: boundary configuration silent-fail patterns now exit 2 at load.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn config_with_unknown_boundary_zone_reference_exits_2() {
+    // A rule whose `from`/`allow`/`allowTypeOnly` names a zone that does NOT
+    // exist in `zones[]` used to log a `tracing::error!` and continue,
+    // producing a flood of false-positive boundary violations at analysis
+    // time. Now exits 2 at config load with every offending entry enumerated.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{
+            "boundaries": {
+                "zones": [{ "name": "ui", "patterns": ["src/ui/**"] }],
+                "rules": [
+                    {
+                        "from": "typo-from",
+                        "allow": ["typo-allow"],
+                        "allowTypeOnly": ["typo-type-only"]
+                    },
+                    {
+                        "from": "ui",
+                        "allow": ["another-typo"]
+                    }
+                ]
+            }
+        }"#,
+    )
+    .expect("write config");
+
+    let output = run_fallow_in_root("check", root, &["--quiet"]);
+    assert_eq!(
+        output.code, 2,
+        "unknown boundary zone reference should exit 2, stderr: {}",
+        output.stderr
+    );
+
+    // Every offending tuple should appear in one rendered diagnostic. Users
+    // fix all four in one edit instead of one-by-one.
+    let stderr = &output.stderr;
+    assert!(
+        stderr.contains("invalid boundary configuration"),
+        "stderr: {stderr}"
+    );
+    for name in ["typo-from", "typo-allow", "typo-type-only", "another-typo"] {
+        assert!(
+            stderr.contains(name),
+            "stderr should name every offending zone (`{name}`): {stderr}"
+        );
+    }
+}
+
+#[test]
+fn config_with_redundant_boundary_root_prefix_exits_2() {
+    // `boundaries.zones[].root` + a pattern that redundantly repeats the
+    // root double-prefixes the path at classify time and never matches. This
+    // used to log a `tracing::error!` and continue with a phantom-empty
+    // zone; now exits 2 at config load with the legacy
+    // FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX tag preserved for CI grep recipes.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{
+            "boundaries": {
+                "zones": [{
+                    "name": "ui",
+                    "patterns": ["packages/app/src/**"],
+                    "root": "packages/app/"
+                }],
+                "rules": []
+            }
+        }"#,
+    )
+    .expect("write config");
+
+    let output = run_fallow_in_root("check", root, &["--quiet"]);
+    assert_eq!(
+        output.code, 2,
+        "redundant root prefix should exit 2, stderr: {}",
+        output.stderr
+    );
+    let stderr = &output.stderr;
+    assert!(
+        stderr.contains("FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"),
+        "stderr should preserve the legacy tag for CI grep recipes: {stderr}"
+    );
+    assert!(stderr.contains("packages/app/src/**"), "stderr: {stderr}");
+}
+
+#[test]
+fn config_with_valid_boundaries_loads_cleanly() {
+    // Control: a boundary config whose every zone reference resolves and
+    // whose patterns do not redundantly prefix their root continues to load
+    // (no analysis sources here, so check exits 0 with zero findings).
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{
+            "boundaries": {
+                "zones": [
+                    { "name": "ui", "patterns": ["src/ui/**"] },
+                    { "name": "db", "patterns": ["src/db/**"] }
+                ],
+                "rules": [
+                    { "from": "ui", "allow": ["db"] }
+                ]
+            }
+        }"#,
+    )
+    .expect("write config");
+
+    let output = run_fallow_in_root("check", root, &["--quiet"]);
+    assert_eq!(
+        output.code, 0,
+        "valid boundary config should load (exit 0 with no sources), stderr: {}",
+        output.stderr
+    );
+}

@@ -977,6 +977,73 @@ impl FallowConfig {
     pub fn json_schema() -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(FallowConfig)).unwrap_or_default()
     }
+
+    /// Validate boundary zone references and zone-root-prefix conflicts AFTER
+    /// preset and auto-discover expansion.
+    ///
+    /// Runs the same expand sequence as [`FallowConfig::resolve`] (preset
+    /// expansion gated on tsconfig `rootDir`, then `expand_auto_discover`)
+    /// before invoking
+    /// [`BoundaryConfig::validate_zone_references`](super::boundaries::BoundaryConfig::validate_zone_references)
+    /// and
+    /// [`BoundaryConfig::validate_root_prefixes`](super::boundaries::BoundaryConfig::validate_root_prefixes),
+    /// so Bulletproof-style presets whose authored rule references logical
+    /// groups (`features`) still load cleanly.
+    ///
+    /// Call sites (`runtime_support::load_config_for_analysis` in the CLI,
+    /// `core::lib::config_for_project` for LSP and programmatic embedders)
+    /// surface every collected error in a single rendered diagnostic, then
+    /// exit with code 2. Previously these failures emitted `tracing::error!`
+    /// and continued, producing a flood of false-positive boundary violations
+    /// at analysis time (#468).
+    ///
+    /// `root` is the project root used by `expand_auto_discover` to scan for
+    /// child directories. Caller is responsible for passing the same root it
+    /// later hands to `resolve()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a non-empty `Vec<ZoneValidationError>` aggregating every
+    /// offending zone reference and redundant-root-prefix pattern; the empty
+    /// case becomes `Ok(())`.
+    pub fn validate_resolved_boundaries(
+        &self,
+        root: &Path,
+    ) -> Result<(), Vec<super::boundaries::ZoneValidationError>> {
+        use super::boundaries::ZoneValidationError;
+
+        // Clone the boundary section so this method stays non-consuming;
+        // resolve() takes `self` by value and runs the same expansion in-place.
+        let mut boundaries = self.boundaries.clone();
+        if boundaries.preset.is_some() {
+            // Mirror the source-root detection in `FallowConfig::resolve`:
+            // tsconfig.json's `rootDir` wins when it points at a relative,
+            // non-traversal subtree; otherwise default to `src`.
+            let source_root = crate::workspace::parse_tsconfig_root_dir(root)
+                .filter(|r| r != "." && !r.starts_with("..") && !Path::new(r).is_absolute())
+                .unwrap_or_else(|| "src".to_owned());
+            boundaries.expand(&source_root);
+        }
+        let _logical_groups = boundaries.expand_auto_discover(root);
+
+        let mut errors: Vec<ZoneValidationError> = boundaries
+            .validate_zone_references()
+            .into_iter()
+            .map(ZoneValidationError::UnknownZoneReference)
+            .collect();
+        errors.extend(
+            boundaries
+                .validate_root_prefixes()
+                .into_iter()
+                .map(ZoneValidationError::RedundantRootPrefix),
+        );
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3391,5 +3458,187 @@ minTokens = 100
 
         // Typo'd rule had no effect; unused_files stays at its default (Error).
         assert_eq!(config.rules.unused_files, Severity::Error);
+    }
+
+    // ── validate_resolved_boundaries (issue #468) ──────────────────────
+
+    #[test]
+    fn validate_resolved_boundaries_passes_on_valid_config() {
+        let dir = test_dir("boundaries-valid");
+        let config = FallowConfig {
+            boundaries: crate::BoundaryConfig {
+                preset: None,
+                zones: vec![
+                    crate::BoundaryZone {
+                        name: "ui".to_string(),
+                        patterns: vec!["src/components/**".to_string()],
+                        auto_discover: vec![],
+                        root: None,
+                    },
+                    crate::BoundaryZone {
+                        name: "db".to_string(),
+                        patterns: vec!["src/db/**".to_string()],
+                        auto_discover: vec![],
+                        root: None,
+                    },
+                ],
+                rules: vec![crate::BoundaryRule {
+                    from: "ui".to_string(),
+                    allow: vec!["db".to_string()],
+                    allow_type_only: vec![],
+                }],
+            },
+            ..FallowConfig::default()
+        };
+        config
+            .validate_resolved_boundaries(dir.path())
+            .expect("valid config should pass");
+    }
+
+    #[test]
+    fn validate_resolved_boundaries_aggregates_unknown_zone_refs() {
+        let dir = test_dir("boundaries-unknown-zones");
+        let config = FallowConfig {
+            boundaries: crate::BoundaryConfig {
+                preset: None,
+                zones: vec![crate::BoundaryZone {
+                    name: "ui".to_string(),
+                    patterns: vec!["src/ui/**".to_string()],
+                    auto_discover: vec![],
+                    root: None,
+                }],
+                rules: vec![
+                    crate::BoundaryRule {
+                        from: "typo-from".to_string(),
+                        allow: vec!["typo-allow".to_string()],
+                        allow_type_only: vec!["typo-type-only".to_string()],
+                    },
+                    crate::BoundaryRule {
+                        from: "ui".to_string(),
+                        allow: vec!["another-typo".to_string()],
+                        allow_type_only: vec![],
+                    },
+                ],
+            },
+            ..FallowConfig::default()
+        };
+
+        let errors = config
+            .validate_resolved_boundaries(dir.path())
+            .expect_err("invalid zone refs should fail");
+
+        assert_eq!(errors.len(), 4, "got: {errors:?}");
+
+        // Every rendered diagnostic carries the offending zone name AND the
+        // rule index so users editing a multi-rule config know which entry to
+        // edit. Verify by rendering and substring-checking each.
+        let rendered: Vec<String> = errors.iter().map(ToString::to_string).collect();
+        assert!(
+            rendered
+                .iter()
+                .any(|m| m.contains("typo-from") && m.contains("rules[0]") && m.contains("from"))
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|m| m.contains("typo-allow") && m.contains("rules[0]") && m.contains("allow"))
+        );
+        assert!(rendered.iter().any(|m| m.contains("typo-type-only")
+            && m.contains("rules[0]")
+            && m.contains("allowTypeOnly")));
+        assert!(
+            rendered.iter().any(|m| m.contains("another-typo")
+                && m.contains("rules[1]")
+                && m.contains("allow"))
+        );
+    }
+
+    #[test]
+    fn validate_resolved_boundaries_flags_redundant_root_prefix() {
+        let dir = test_dir("boundaries-redundant-prefix");
+        let config = FallowConfig {
+            boundaries: crate::BoundaryConfig {
+                preset: None,
+                zones: vec![crate::BoundaryZone {
+                    name: "ui".to_string(),
+                    patterns: vec!["packages/app/src/**".to_string()],
+                    auto_discover: vec![],
+                    root: Some("packages/app/".to_string()),
+                }],
+                rules: vec![],
+            },
+            ..FallowConfig::default()
+        };
+
+        let errors = config
+            .validate_resolved_boundaries(dir.path())
+            .expect_err("redundant root prefix should fail");
+        assert_eq!(errors.len(), 1, "got: {errors:?}");
+        // Display preserves the legacy FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX tag.
+        let rendered = errors[0].to_string();
+        assert!(rendered.contains("FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"));
+        assert!(rendered.contains("zone 'ui'"));
+    }
+
+    #[test]
+    fn validate_resolved_boundaries_aggregates_unknown_zones_and_root_prefixes() {
+        // One config, two distinct failure classes; the user should see both
+        // in a single diagnostic run instead of fixing one and re-running.
+        let dir = test_dir("boundaries-mixed-errors");
+        let config = FallowConfig {
+            boundaries: crate::BoundaryConfig {
+                preset: None,
+                zones: vec![crate::BoundaryZone {
+                    name: "ui".to_string(),
+                    patterns: vec!["packages/app/src/**".to_string()],
+                    auto_discover: vec![],
+                    root: Some("packages/app/".to_string()),
+                }],
+                rules: vec![crate::BoundaryRule {
+                    from: "ui".to_string(),
+                    allow: vec!["typo-zone".to_string()],
+                    allow_type_only: vec![],
+                }],
+            },
+            ..FallowConfig::default()
+        };
+        let errors = config
+            .validate_resolved_boundaries(dir.path())
+            .expect_err("mixed errors should fail");
+        assert_eq!(errors.len(), 2, "got: {errors:?}");
+        let rendered: Vec<String> = errors.iter().map(ToString::to_string).collect();
+        assert!(
+            rendered
+                .iter()
+                .any(|m| m.contains("typo-zone") && m.contains("rules[0]"))
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|m| m.contains("FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"))
+        );
+    }
+
+    #[test]
+    fn validate_resolved_boundaries_passes_on_bulletproof_preset() {
+        // Bulletproof's authored rule references the logical `features`
+        // group, which is replaced by concrete children only AFTER
+        // `expand_auto_discover` runs. Validation must execute the expansion
+        // first, otherwise the preset always looks like it references an
+        // undefined zone.
+        let dir = test_dir("boundaries-bulletproof");
+        // Create a stub `src/features/auth` child so auto-discover finds it.
+        std::fs::create_dir_all(dir.path().join("src/features/auth")).unwrap();
+        let config = FallowConfig {
+            boundaries: crate::BoundaryConfig {
+                preset: Some(crate::BoundaryPreset::Bulletproof),
+                zones: vec![],
+                rules: vec![],
+            },
+            ..FallowConfig::default()
+        };
+        config
+            .validate_resolved_boundaries(dir.path())
+            .expect("Bulletproof with discoverable features should pass");
     }
 }

@@ -1,10 +1,92 @@
 //! Architecture boundary zone and rule definitions.
 
+use std::fmt;
 use std::path::Path;
 
 use globset::Glob;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+/// Which zone-reference surface on a `BoundaryRule` carries an unknown name.
+///
+/// The diagnostic surfaces the kind so users editing a multi-field rule know
+/// whether to fix `from`, `allow`, or `allowTypeOnly`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZoneReferenceKind {
+    /// Rule's `from` field names an undefined zone.
+    From,
+    /// One entry in the rule's `allow` list names an undefined zone.
+    Allow,
+    /// One entry in the rule's `allowTypeOnly` list names an undefined zone.
+    AllowTypeOnly,
+}
+
+impl ZoneReferenceKind {
+    fn config_field(self) -> &'static str {
+        match self {
+            Self::From => "from",
+            Self::Allow => "allow",
+            Self::AllowTypeOnly => "allowTypeOnly",
+        }
+    }
+}
+
+/// One offending zone-name reference in a `boundaries.rules[]` entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownZoneRef {
+    /// Zero-based index into `boundaries.rules[]`.
+    pub rule_index: usize,
+    /// Which field on the rule carries the unknown name.
+    pub kind: ZoneReferenceKind,
+    /// The unknown zone name as authored.
+    pub zone_name: String,
+}
+
+/// One offending redundant-root-prefix pattern in a `boundaries.zones[]` entry.
+///
+/// Patterns are resolved relative to the zone `root`, so prefixing the pattern
+/// with the same root double-prefixes the path and never matches a real file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RedundantRootPrefix {
+    /// Name of the zone whose pattern redundantly includes its root.
+    pub zone_name: String,
+    /// The offending pattern as authored.
+    pub pattern: String,
+    /// The normalized root that the pattern redundantly repeats.
+    pub root: String,
+}
+
+/// Aggregated boundary-config validation error for `FallowConfig::validate_resolved_boundaries`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ZoneValidationError {
+    /// A `boundaries.rules[]` entry references a zone NOT present in
+    /// `boundaries.zones[]` (post-preset-expansion and post-auto-discover).
+    UnknownZoneReference(UnknownZoneRef),
+    /// A `boundaries.zones[].patterns[]` entry redundantly prefixes its
+    /// pattern with the zone `root`.
+    RedundantRootPrefix(RedundantRootPrefix),
+}
+
+impl fmt::Display for ZoneValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownZoneReference(err) => write!(
+                f,
+                "boundaries.rules[{}].{}: references undefined zone '{}'",
+                err.rule_index,
+                err.kind.config_field(),
+                err.zone_name,
+            ),
+            Self::RedundantRootPrefix(err) => write!(
+                f,
+                "FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX: zone '{}': pattern '{}' starts with the zone root '{}'. Patterns are now resolved relative to root; remove the redundant prefix from the pattern.",
+                err.zone_name, err.pattern, err.root,
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ZoneValidationError {}
 
 /// Built-in architecture presets.
 ///
@@ -829,12 +911,16 @@ impl BoundaryConfig {
     }
 
     /// Validate that no zone's pattern redundantly includes its `root`
-    /// prefix. Returns a list of error messages tagged with
-    /// `FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX`. Patterns are resolved
-    /// relative to the zone root, so prefixing the pattern with the same
-    /// root double-prefixes the path and never matches.
+    /// prefix. Patterns are resolved relative to the zone root, so prefixing
+    /// the pattern with the same root double-prefixes the path and never
+    /// matches.
+    ///
+    /// The rendered diagnostic carries the legacy
+    /// `FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX` tag via
+    /// [`ZoneValidationError`]'s `Display` impl, so CI logs grepping for the
+    /// old text continue to work.
     #[must_use]
-    pub fn validate_root_prefixes(&self) -> Vec<String> {
+    pub fn validate_root_prefixes(&self) -> Vec<RedundantRootPrefix> {
         let mut errors = Vec::new();
         for zone in &self.zones {
             let Some(raw_root) = zone.root.as_deref() else {
@@ -854,10 +940,11 @@ impl BoundaryConfig {
                     .strip_prefix("./")
                     .unwrap_or(&normalized_pattern);
                 if stripped.starts_with(&normalized) {
-                    errors.push(format!(
-                        "FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX: zone '{}': pattern '{}' starts with the zone root '{}'. Patterns are now resolved relative to root; remove the redundant prefix from the pattern.",
-                        zone.name, pattern, normalized
-                    ));
+                    errors.push(RedundantRootPrefix {
+                        zone_name: zone.name.clone(),
+                        pattern: pattern.clone(),
+                        root: normalized.clone(),
+                    });
                 }
             }
         }
@@ -865,30 +952,41 @@ impl BoundaryConfig {
     }
 
     /// Validate that all zone names referenced in rules are defined in `zones`.
-    /// Returns a list of (rule_index, undefined_zone_name) pairs.
     ///
     /// Walks every zone-reference surface on `BoundaryRule`: `from`, `allow`,
     /// and `allow_type_only`. An unknown zone in `allow_type_only` silently
     /// behaves as "not allowed" at runtime, so it MUST surface here for parity
     /// with the existing `allow`-side diagnostic.
     #[must_use]
-    pub fn validate_zone_references(&self) -> Vec<(usize, &str)> {
+    pub fn validate_zone_references(&self) -> Vec<UnknownZoneRef> {
         let zone_names: rustc_hash::FxHashSet<&str> =
             self.zones.iter().map(|z| z.name.as_str()).collect();
 
         let mut errors = Vec::new();
         for (i, rule) in self.rules.iter().enumerate() {
             if !zone_names.contains(rule.from.as_str()) {
-                errors.push((i, rule.from.as_str()));
+                errors.push(UnknownZoneRef {
+                    rule_index: i,
+                    kind: ZoneReferenceKind::From,
+                    zone_name: rule.from.clone(),
+                });
             }
             for allowed in &rule.allow {
                 if !zone_names.contains(allowed.as_str()) {
-                    errors.push((i, allowed.as_str()));
+                    errors.push(UnknownZoneRef {
+                        rule_index: i,
+                        kind: ZoneReferenceKind::Allow,
+                        zone_name: allowed.clone(),
+                    });
                 }
             }
             for allowed_type_only in &rule.allow_type_only {
                 if !zone_names.contains(allowed_type_only.as_str()) {
-                    errors.push((i, allowed_type_only.as_str()));
+                    errors.push(UnknownZoneRef {
+                        rule_index: i,
+                        kind: ZoneReferenceKind::AllowTypeOnly,
+                        zone_name: allowed_type_only.clone(),
+                    });
                 }
             }
         }
@@ -2169,7 +2267,9 @@ allow = ["db"]
         };
         let errors = config.validate_zone_references();
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].1, "nonexistent");
+        assert_eq!(errors[0].zone_name, "nonexistent");
+        assert_eq!(errors[0].kind, ZoneReferenceKind::From);
+        assert_eq!(errors[0].rule_index, 0);
     }
 
     #[test]
@@ -2190,7 +2290,8 @@ allow = ["db"]
         };
         let errors = config.validate_zone_references();
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].1, "nonexistent");
+        assert_eq!(errors[0].zone_name, "nonexistent");
+        assert_eq!(errors[0].kind, ZoneReferenceKind::Allow);
     }
 
     #[test]
@@ -2214,7 +2315,8 @@ allow = ["db"]
         };
         let errors = config.validate_zone_references();
         assert_eq!(errors.len(), 1, "got: {errors:?}");
-        assert_eq!(errors[0].1, "nonexistent_type_zone");
+        assert_eq!(errors[0].zone_name, "nonexistent_type_zone");
+        assert_eq!(errors[0].kind, ZoneReferenceKind::AllowTypeOnly);
     }
 
     #[test]
@@ -2504,20 +2606,23 @@ allow = ["db"]
         };
         let errors = config.validate_root_prefixes();
         assert_eq!(errors.len(), 1, "expected one redundant-prefix error");
+        assert_eq!(errors[0].zone_name, "ui");
+        assert_eq!(errors[0].pattern, "packages/app/src/**");
+        assert_eq!(errors[0].root, "packages/app/");
+        // Display preserves the legacy FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX
+        // tag so existing CI grep recipes continue to work.
+        let rendered = ZoneValidationError::RedundantRootPrefix(errors[0].clone()).to_string();
         assert!(
-            errors[0].contains("FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"),
-            "error should be tagged: {}",
-            errors[0]
+            rendered.contains("FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"),
+            "Display should carry legacy tag: {rendered}"
         );
         assert!(
-            errors[0].contains("zone 'ui'"),
-            "error should name the zone: {}",
-            errors[0]
+            rendered.contains("zone 'ui'"),
+            "Display rendering: {rendered}"
         );
         assert!(
-            errors[0].contains("packages/app/src/**"),
-            "error should quote the pattern: {}",
-            errors[0]
+            rendered.contains("packages/app/src/**"),
+            "Display rendering: {rendered}"
         );
     }
 

@@ -12,7 +12,8 @@ mod used_class_members;
 
 pub use boundaries::{
     AuthoredRule, BoundaryConfig, BoundaryPreset, BoundaryRule, BoundaryZone, LogicalGroup,
-    LogicalGroupStatus, ResolvedBoundaryConfig, ResolvedBoundaryRule, ResolvedZone,
+    LogicalGroupStatus, RedundantRootPrefix, ResolvedBoundaryConfig, ResolvedBoundaryRule,
+    ResolvedZone, UnknownZoneRef, ZoneReferenceKind, ZoneValidationError,
 };
 pub use duplicates_config::{
     DetectionMode, DuplicatesConfig, NormalizationConfig, ResolvedNormalization,
