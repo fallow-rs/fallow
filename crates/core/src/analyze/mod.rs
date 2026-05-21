@@ -2,6 +2,7 @@ mod boundary;
 pub mod feature_flags;
 mod package_json_utils;
 mod predicates;
+mod re_export_cycles;
 mod unused_catalog;
 mod unused_deps;
 mod unused_exports;
@@ -20,16 +21,17 @@ use crate::resolve::ResolvedModule;
 use fallow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
     EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding, PrivateTypeLeakFinding,
-    TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
+    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 
 use crate::results::{AnalysisResults, CircularDependency};
 use crate::suppress::IssueKind;
 
+use re_export_cycles::find_re_export_cycles;
 #[expect(
     deprecated,
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
@@ -235,6 +237,53 @@ fn find_circular_dependencies(
     dependencies
 }
 
+/// Thin wrapper around [`find_circular_dependencies`] that gates on
+/// `Severity::Off` and wraps the bare results in typed envelopes.
+/// Extracted from the rayon-join tree to keep nesting under the clippy
+/// `excessive_nesting` threshold (7).
+fn run_circular_dep_detector(
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    suppressions: &crate::suppress::SuppressionContext<'_>,
+    workspaces: &[fallow_config::WorkspaceInfo],
+) -> Vec<CircularDependencyFinding> {
+    if config.rules.circular_dependencies == Severity::Off {
+        return Vec::new();
+    }
+    find_circular_dependencies(graph, line_offsets_by_file, suppressions, workspaces)
+        .into_iter()
+        .map(CircularDependencyFinding::with_actions)
+        .collect()
+}
+
+/// Thin wrapper around [`re_export_cycles::find_re_export_cycles`] that gates
+/// on `Severity::Off`. Extracted alongside [`run_circular_dep_detector`].
+fn run_re_export_cycle_detector(
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+    suppressions: &crate::suppress::SuppressionContext<'_>,
+) -> Vec<ReExportCycleFinding> {
+    if config.rules.re_export_cycle == Severity::Off {
+        return Vec::new();
+    }
+    find_re_export_cycles(graph, suppressions)
+}
+
+/// Collect export usage counts for Code Lens (LSP feature). Skipped in CLI
+/// mode since the field is `#[serde(skip)]` in all output formats.
+fn run_export_usages_collector(
+    graph: &ModuleGraph,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    collect_usages: bool,
+) -> Vec<crate::results::ExportUsage> {
+    if collect_usages {
+        collect_export_usages(graph, line_offsets_by_file)
+    } else {
+        Vec::new()
+    }
+}
+
 /// Find all dead code, with optional resolved module data, plugin context, and workspace info.
 #[expect(
     deprecated,
@@ -305,7 +354,7 @@ pub fn find_dead_code_full(
             (member_results, dependency_results),
             (
                 (unresolved_imports, duplicate_exports),
-                (boundary_violations, (circular_dependencies, export_usages)),
+                (boundary_violations, (circular_dependencies, (re_export_cycles, export_usages))),
             ),
         ),
     ) = rayon::join(
@@ -541,29 +590,31 @@ pub fn find_dead_code_full(
                                 || {
                                     rayon::join(
                                         || {
-                                            if config.rules.circular_dependencies != Severity::Off {
-                                                find_circular_dependencies(
-                                                    graph,
-                                                    &line_offsets_by_file,
-                                                    &suppressions,
-                                                    workspaces,
-                                                )
-                                                .into_iter()
-                                                .map(CircularDependencyFinding::with_actions)
-                                                .collect::<Vec<_>>()
-                                            } else {
-                                                Vec::new()
-                                            }
+                                            run_circular_dep_detector(
+                                                graph,
+                                                config,
+                                                &line_offsets_by_file,
+                                                &suppressions,
+                                                workspaces,
+                                            )
                                         },
                                         || {
-                                            // Collect export usage counts for Code Lens (LSP
-                                            // feature). Skipped in CLI mode since the field is
-                                            // #[serde(skip)] in all output formats.
-                                            if collect_usages {
-                                                collect_export_usages(graph, &line_offsets_by_file)
-                                            } else {
-                                                Vec::new()
-                                            }
+                                            rayon::join(
+                                                || {
+                                                    run_re_export_cycle_detector(
+                                                        graph,
+                                                        config,
+                                                        &suppressions,
+                                                    )
+                                                },
+                                                || {
+                                                    run_export_usages_collector(
+                                                        graph,
+                                                        &line_offsets_by_file,
+                                                        collect_usages,
+                                                    )
+                                                },
+                                            )
                                         },
                                     )
                                 },
@@ -593,6 +644,7 @@ pub fn find_dead_code_full(
         duplicate_exports,
         boundary_violations,
         circular_dependencies,
+        re_export_cycles,
         export_usages,
         ..AnalysisResults::default()
     };

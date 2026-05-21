@@ -76,6 +76,11 @@ pub fn filter_to_workspaces(
         .circular_dependencies
         .retain(|c| c.cycle.files.iter().any(|f| any_under(f)));
 
+    // Re-export cycles: same workspace-scoping shape as circular deps.
+    results
+        .re_export_cycles
+        .retain(|c| c.cycle.files.iter().any(|f| any_under(f)));
+
     // Boundary violations: keep if the importing file is in a matched workspace
     results
         .boundary_violations
@@ -417,6 +422,13 @@ pub fn filter_results_by_diff(
     // the cycle itself spans every file in `files[]`.
     results
         .circular_dependencies
+        .retain(|c| c.cycle.files.iter().any(|f| touches_file(f)));
+
+    // Re-export cycles: same file-level treatment as circular deps; the
+    // diagnostic anchors at line 1 col 0 of each member so line-level
+    // diff matching would over-prune.
+    results
+        .re_export_cycles
         .retain(|c| c.cycle.files.iter().any(|f| touches_file(f)));
 
     // Boundary violations: drop when the importing source line is not in

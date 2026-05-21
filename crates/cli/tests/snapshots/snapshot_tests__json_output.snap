@@ -1,14 +1,15 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
+assertion_line: 254
 expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"CARGO_PKG_VERSION\")),\n\"\\\"version\\\": \\\"[VERSION]\\\"\",)"
 ---
 {
   "schema_version": 6,
   "version": "[VERSION]",
   "elapsed_ms": 42,
-  "total_issues": 20,
+  "total_issues": 21,
   "summary": {
-    "total_issues": 20,
+    "total_issues": 21,
     "unused_files": 1,
     "unused_exports": 1,
     "unused_types": 1,
@@ -22,6 +23,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     "type_only_dependencies": 1,
     "test_only_dependencies": 1,
     "circular_dependencies": 1,
+    "re_export_cycles": 1,
     "boundary_violations": 0,
     "stale_suppressions": 0,
     "unused_catalog_entries": 2,
@@ -385,6 +387,29 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
           "comment": "// fallow-ignore-next-line circular-dependency"
+        }
+      ]
+    }
+  ],
+  "re_export_cycles": [
+    {
+      "files": [
+        "src/api/index.ts",
+        "src/api/internal/index.ts"
+      ],
+      "kind": "multi-node",
+      "actions": [
+        {
+          "type": "refactor-re-export-cycle",
+          "auto_fixable": false,
+          "description": "Remove one `export * from` (or `export { ... } from`) statement on any one member to break the cycle",
+          "note": "Re-export cycles are structurally a no-op: chain propagation through the loop never reaches a terminating module, so imports from any member may silently come up empty."
+        },
+        {
+          "type": "suppress-file",
+          "auto_fixable": false,
+          "description": "Suppress with a file-level comment at the top of this file. One suppression breaks the cycle for all members (/project/src/api/internal/index.ts).",
+          "comment": "// fallow-ignore-file re-export-cycle"
         }
       ]
     }

@@ -577,6 +577,7 @@ mod tests {
             "fallow/unlisted-dependency",
             "fallow/duplicate-export",
             "fallow/circular-dependency",
+            "fallow/re-export-cycle",
             "fallow/boundary-violation",
             "fallow/stale-suppression",
             "fallow/private-type-leak",

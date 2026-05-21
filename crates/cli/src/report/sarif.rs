@@ -383,6 +383,29 @@ fn sarif_circular_dep_fields(
     }
 }
 
+fn sarif_re_export_cycle_fields(
+    cycle: &fallow_core::results::ReExportCycle,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    let chain: Vec<String> = cycle.files.iter().map(|p| relative_uri(p, root)).collect();
+    let first_uri = chain.first().map_or_else(String::new, Clone::clone);
+    let first_path = cycle.files.first().cloned();
+    let kind_tag = match cycle.kind {
+        fallow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
+        fallow_core::results::ReExportCycleKind::MultiNode => "",
+    };
+    SarifFields {
+        rule_id: "fallow/re-export-cycle",
+        level,
+        message: format!("Re-export cycle{}: {}", kind_tag, chain.join(" <-> ")),
+        uri: first_uri,
+        region: None,
+        source_path: first_path,
+        properties: None,
+    }
+}
+
 fn sarif_boundary_violation_fields(
     violation: &BoundaryViolation,
     root: &Path,
@@ -691,6 +714,11 @@ fn build_sarif_rules(rules: &RulesConfig) -> Vec<serde_json::Value> {
             rules.circular_dependencies,
         ),
         (
+            "fallow/re-export-cycle",
+            "Two or more barrel files re-export from each other in a loop",
+            rules.re_export_cycle,
+        ),
+        (
             "fallow/boundary-violation",
             "Import crosses an architecture boundary",
             rules.boundary_violation,
@@ -927,6 +955,18 @@ pub fn build_sarif(
                 &c.cycle,
                 root,
                 severity_to_sarif_level(rules.circular_dependencies),
+            )
+        },
+    );
+    push_sarif_results(
+        &mut sarif_results,
+        &results.re_export_cycles,
+        &mut snippets,
+        |c| {
+            sarif_re_export_cycle_fields(
+                &c.cycle,
+                root,
+                severity_to_sarif_level(rules.re_export_cycle),
             )
         },
     );
@@ -1595,7 +1635,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 22);
+        assert_eq!(rules.len(), 23);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -1613,6 +1653,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/unlisted-dependency"));
         assert!(rule_ids.contains(&"fallow/duplicate-export"));
         assert!(rule_ids.contains(&"fallow/circular-dependency"));
+        assert!(rule_ids.contains(&"fallow/re-export-cycle"));
         assert!(rule_ids.contains(&"fallow/boundary-violation"));
         assert!(rule_ids.contains(&"fallow/unused-catalog-entry"));
         assert!(rule_ids.contains(&"fallow/empty-catalog-group"));

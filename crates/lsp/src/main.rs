@@ -56,6 +56,7 @@ struct AnalysisCompleteParams {
     type_only_dependencies: usize,
     test_only_dependencies: usize,
     circular_dependencies: usize,
+    re_export_cycles: usize,
     boundary_violations: usize,
     stale_suppressions: usize,
     unused_catalog_entries: usize,
@@ -164,6 +165,11 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         config_key: Some("circular-dependencies"),
         code: "circular-dependency",
         label: "Circular Dependencies",
+    },
+    DiagnosticIssueType {
+        config_key: Some("re-export-cycles"),
+        code: "re-export-cycle",
+        label: "Re-Export Cycles",
     },
     DiagnosticIssueType {
         config_key: Some("boundary-violation"),
@@ -979,6 +985,7 @@ impl FallowLspServer {
                         type_only_dependencies: results.type_only_dependencies.len(),
                         test_only_dependencies: results.test_only_dependencies.len(),
                         circular_dependencies: results.circular_dependencies.len(),
+                        re_export_cycles: results.re_export_cycles.len(),
                         boundary_violations: results.boundary_violations.len(),
                         stale_suppressions: results.stale_suppressions.len(),
                         unused_catalog_entries: results.unused_catalog_entries.len(),
@@ -1286,6 +1293,10 @@ where
 /// correct combined view (no over- or under-reporting). All other types
 /// are deterministic per (path, position) so plain key-based dedup is
 /// sufficient.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one dedup-by-key block per issue type keeps each rule's identity key local; the line count grows linearly with new issue types and the structure is intentional"
+)]
 fn dedup_results(target: &mut AnalysisResults) {
     dedup_by_key_preserving_order(&mut target.unused_files, |f| f.file.path.clone());
     dedup_by_key_preserving_order(&mut target.unused_exports, |e| {
@@ -1367,6 +1378,17 @@ fn dedup_results(target: &mut AnalysisResults) {
         let mut files: Vec<_> = c.cycle.files.clone();
         files.sort();
         (files, c.cycle.length)
+    });
+    dedup_by_key_preserving_order(&mut target.re_export_cycles, |c| {
+        let mut files: Vec<_> = c.cycle.files.clone();
+        files.sort();
+        // Include the kind discriminant so a self-loop on a single file
+        // cannot collide with any future single-file multi-node shape.
+        let kind = match c.cycle.kind {
+            fallow_core::results::ReExportCycleKind::SelfLoop => 1u8,
+            fallow_core::results::ReExportCycleKind::MultiNode => 0u8,
+        };
+        (kind, files)
     });
     dedup_by_key_preserving_order(&mut target.boundary_violations, |v| {
         (
@@ -1481,6 +1503,7 @@ fn merge_results(target: &mut AnalysisResults, source: AnalysisResults) {
     target
         .circular_dependencies
         .extend(source.circular_dependencies);
+    target.re_export_cycles.extend(source.re_export_cycles);
     target
         .test_only_dependencies
         .extend(source.test_only_dependencies);

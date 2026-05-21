@@ -458,6 +458,48 @@ fn push_circular_dep_issues(
     }
 }
 
+fn push_re_export_cycle_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    cycles: &[fallow_types::output_dead_code::ReExportCycleFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if cycles.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in cycles {
+        let cycle = &entry.cycle;
+        let Some(first) = cycle.files.first() else {
+            continue;
+        };
+        let path = cc_path(first, root);
+        let chain: Vec<String> = cycle.files.iter().map(|f| cc_path(f, root)).collect();
+        let chain_str = chain.join(":");
+        let kind_token = match cycle.kind {
+            fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
+            fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
+        };
+        let kind_tag = match cycle.kind {
+            fallow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
+            fallow_core::results::ReExportCycleKind::MultiNode => "",
+        };
+        // Include `kind_token` in the fingerprint so self-loops cannot
+        // keyspace-collide with future single-file multi-node shapes (the
+        // same rationale as the baseline `re_export_cycle_key`).
+        let fp = fingerprint_hash(&["fallow/re-export-cycle", kind_token, &chain_str]);
+        issues.push(cc_issue(
+            "fallow/re-export-cycle",
+            &format!("Re-export cycle{}: {}", kind_tag, chain.join(" <-> ")),
+            level,
+            "Bug Risk",
+            &path,
+            None,
+            &fp,
+        ));
+    }
+}
+
 fn push_boundary_violation_issues(
     issues: &mut Vec<CodeClimateIssue>,
     violations: &[fallow_types::output_dead_code::BoundaryViolationFinding],
@@ -747,6 +789,10 @@ pub fn issues_to_value(issues: &[CodeClimateIssue]) -> serde_json::Value {
 /// per-issue shape against [`CodeClimateOutput`](
 /// crate::output_envelope::CodeClimateOutput).
 #[must_use]
+#[expect(
+    clippy::too_many_lines,
+    reason = "orchestration function: one push_<kind>_issues call per issue type, each one a flat 3-5 line block; splitting would just shuffle the same lines into helpers without aiding readability"
+)]
 pub fn build_codeclimate(
     results: &AnalysisResults,
     root: &Path,
@@ -854,6 +900,12 @@ pub fn build_codeclimate(
         &results.circular_dependencies,
         root,
         rules.circular_dependencies,
+    );
+    push_re_export_cycle_issues(
+        &mut issues,
+        &results.re_export_cycles,
+        root,
+        rules.re_export_cycle,
     );
     push_boundary_violation_issues(
         &mut issues,

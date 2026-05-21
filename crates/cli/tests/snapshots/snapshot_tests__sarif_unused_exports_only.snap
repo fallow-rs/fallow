@@ -1,5 +1,6 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
+assertion_line: 978
 expression: redact_sarif_version(&json_str)
 ---
 {
@@ -206,6 +207,19 @@ expression: redact_sarif_version(&json_str)
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#circular-dependencies",
               "defaultConfiguration": {
                 "level": "error"
+              }
+            },
+            {
+              "id": "fallow/re-export-cycle",
+              "shortDescription": {
+                "text": "Two or more barrel files re-export from each other in a loop"
+              },
+              "fullDescription": {
+                "text": "A barrel file re-exports from another barrel that ultimately re-exports back. When this happens, imports from any file in the loop may silently come up empty, because the re-export chain has no terminating module to resolve names against. To fix this: open any one file in the loop and remove the `export * from` (or `export { ... } from`) statement that points back into the cycle. Any single removal will break the cycle and restore working re-exports. A self-loop (a single barrel re-exporting from itself, often a rename leftover) is reported under the same rule with kind `self-loop`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#re-export-cycles",
+              "defaultConfiguration": {
+                "level": "warning"
               }
             },
             {

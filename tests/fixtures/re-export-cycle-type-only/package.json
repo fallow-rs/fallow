@@ -1,0 +1,4 @@
+{
+  "name": "re-export-cycle-type-only",
+  "main": "src/index.ts"
+}

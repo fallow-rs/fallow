@@ -228,6 +228,29 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         },
     );
 
+    // ── Re-export cycles ──
+    markdown_section(
+        &mut out,
+        &results.re_export_cycles,
+        "Re-export cycles",
+        |cycle| {
+            let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
+            let kind_tag = match cycle.cycle.kind {
+                fallow_core::results::ReExportCycleKind::SelfLoop => " *(self-loop)*",
+                fallow_core::results::ReExportCycleKind::MultiNode => "",
+            };
+            vec![format!(
+                "- {}{}",
+                chain
+                    .iter()
+                    .map(|s| format!("`{s}`"))
+                    .collect::<Vec<_>>()
+                    .join(" <-> "),
+                kind_tag
+            )]
+        },
+    );
+
     // ── Boundary violations ──
     markdown_section(
         &mut out,

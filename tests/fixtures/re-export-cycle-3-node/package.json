@@ -1,0 +1,4 @@
+{
+  "name": "re-export-cycle-3-node",
+  "main": "src/index.ts"
+}

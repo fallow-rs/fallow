@@ -1,5 +1,6 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
+assertion_line: 1561
 expression: json_str
 ---
 [
@@ -240,6 +241,22 @@ expression: json_str
       "path": "src/a.ts",
       "lines": {
         "begin": 3
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/re-export-cycle",
+    "description": "Re-export cycle: src/api/index.ts <-> src/api/internal/index.ts",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "minor",
+    "fingerprint": "3b15e7a61f99e1df",
+    "location": {
+      "path": "src/api/index.ts",
+      "lines": {
+        "begin": 1
       }
     }
   },

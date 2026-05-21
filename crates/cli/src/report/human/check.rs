@@ -1045,6 +1045,7 @@ fn build_structure_section(
 ) {
     let has_structure = !results.duplicate_exports.is_empty()
         || !results.circular_dependencies.is_empty()
+        || !results.re_export_cycles.is_empty()
         || !results.boundary_violations.is_empty();
     if !has_structure {
         return;
@@ -1062,6 +1063,13 @@ fn build_structure_section(
         lines,
         &results.circular_dependencies,
         severity_to_level(rules.circular_dependencies),
+        root,
+        total_issues,
+    );
+    build_re_export_cycles_section(
+        lines,
+        &results.re_export_cycles,
+        severity_to_level(rules.re_export_cycle),
         root,
         total_issues,
     );
@@ -1484,6 +1492,74 @@ fn build_circular_deps_section(
     }
 }
 
+/// Build re-export cycles section. Each finding renders one path-list block
+/// per member, sized as "Cycle (N files)" for multi-node SCCs or
+/// "Self-loop (1 file)" for the single-file self-re-export case. The fix
+/// hint sits on the second line; the docs link is appended after the path
+/// list (matches the SARIF helpUri target so users land on the same anchor
+/// from any surface).
+fn build_re_export_cycles_section(
+    lines: &mut Vec<String>,
+    items: &[fallow_types::output_dead_code::ReExportCycleFinding],
+    level: Level,
+    root: &Path,
+    total_issues: usize,
+) {
+    if items.is_empty() {
+        return;
+    }
+    let title = "Re-Export Cycles";
+    lines.push(build_section_header(title, items.len(), level));
+
+    let shown = items.len().min(MAX_FLAT_ITEMS);
+    for entry in &items[..shown] {
+        let cycle = &entry.cycle;
+        let first_path = cycle
+            .files
+            .first()
+            .map(|p| relative_path(p, root).display().to_string())
+            .unwrap_or_default();
+        lines.push(format!("  {}", format_path(&first_path)));
+        let header_line = match cycle.kind {
+            fallow_core::results::ReExportCycleKind::SelfLoop => "Self-loop (1 file):".to_string(),
+            fallow_core::results::ReExportCycleKind::MultiNode => {
+                format!("Cycle ({} files):", cycle.files.len())
+            }
+        };
+        lines.push(format!("    {}", header_line.dimmed()));
+        for path in &cycle.files {
+            let rel = relative_path(path, root).display().to_string();
+            lines.push(format!("      - {}", format_path(&rel)));
+        }
+        let fix_hint = match cycle.kind {
+            fallow_core::results::ReExportCycleKind::SelfLoop => {
+                "To fix: remove the `export * from './'` (or equivalent) inside this file."
+            }
+            fallow_core::results::ReExportCycleKind::MultiNode => {
+                "To fix: remove one `export * from` statement on any member file."
+            }
+        };
+        lines.push(format!("    {}", fix_hint.dimmed()));
+        lines.push(format!(
+            "    {}",
+            "https://fallow.tools/explanations/dead-code#re-export-cycles".dimmed()
+        ));
+        lines.push(String::new());
+    }
+    if items.len() > MAX_FLAT_ITEMS {
+        let remaining = items.len() - MAX_FLAT_ITEMS;
+        lines.push(format!(
+            "  {}",
+            truncation_hint(remaining, total_issues).dimmed()
+        ));
+        lines.push(String::new());
+    }
+    push_section_footer_with_count(lines, title, items.len());
+    if !lines.last().is_some_and(String::is_empty) {
+        lines.push(String::new());
+    }
+}
+
 /// Build boundary violations section grouped by importing file.
 fn build_boundary_violations_section(
     lines: &mut Vec<String>,
@@ -1870,6 +1946,7 @@ fn build_summary_footer(
         "test-only dependencies",
     );
     add(results.circular_dependencies.len(), "circular dependencies");
+    add(results.re_export_cycles.len(), "re-export cycles");
     add(results.boundary_violations.len(), "violations");
     add(results.stale_suppressions.len(), "stale suppressions");
 
@@ -1974,6 +2051,11 @@ pub(in crate::report) fn print_check_summary(
             "Circular dependencies",
             results.circular_dependencies.len(),
             severity_to_level(rules.circular_dependencies),
+        ),
+        (
+            "Re-export cycles",
+            results.re_export_cycles.len(),
+            severity_to_level(rules.re_export_cycle),
         ),
         (
             "Boundary violations",

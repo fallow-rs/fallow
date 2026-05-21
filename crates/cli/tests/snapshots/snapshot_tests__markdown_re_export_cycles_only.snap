@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+assertion_line: 1872
+expression: md
+---
+## Fallow: 2 issues found
+
+### Re-export cycles (2)
+
+- `src/api/index.ts` <-> `src/api/internal/index.ts`
+- `src/utils/index.ts` *(self-loop)*

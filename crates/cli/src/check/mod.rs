@@ -33,6 +33,7 @@ pub struct IssueFilters {
     pub unlisted_deps: bool,
     pub duplicate_exports: bool,
     pub circular_deps: bool,
+    pub re_export_cycles: bool,
     pub boundary_violations: bool,
     pub stale_suppressions: bool,
     pub unused_catalog_entries: bool,
@@ -55,6 +56,7 @@ impl IssueFilters {
             || self.unlisted_deps
             || self.duplicate_exports
             || self.circular_deps
+            || self.re_export_cycles
             || self.boundary_violations
             || self.stale_suppressions
             || self.unused_catalog_entries
@@ -111,6 +113,9 @@ impl IssueFilters {
         }
         if !self.circular_deps {
             results.circular_dependencies.clear();
+        }
+        if !self.re_export_cycles {
+            results.re_export_cycles.clear();
         }
         if !self.boundary_violations {
             results.boundary_violations.clear();
@@ -713,6 +718,7 @@ mod tests {
             unlisted_deps: false,
             duplicate_exports: false,
             circular_deps: false,
+            re_export_cycles: false,
             boundary_violations: false,
             stale_suppressions: false,
             unused_catalog_entries: false,
@@ -860,6 +866,7 @@ mod tests {
             |f| f.unlisted_deps = true,
             |f| f.duplicate_exports = true,
             |f| f.circular_deps = true,
+            |f| f.re_export_cycles = true,
             |f| f.boundary_violations = true,
         ];
         for setter in flags {
@@ -1086,6 +1093,7 @@ mod tests {
             unlisted_deps: true,
             duplicate_exports: true,
             circular_deps: true,
+            re_export_cycles: true,
             boundary_violations: true,
             stale_suppressions: true,
             unused_catalog_entries: true,

@@ -181,6 +181,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#circular-dependencies",
     },
     RuleDef {
+        id: "fallow/re-export-cycle",
+        category: "Architecture",
+        name: "Re-Export Cycles",
+        short: "Two or more barrel files re-export from each other in a loop",
+        full: "A barrel file re-exports from another barrel that ultimately re-exports back. When this happens, imports from any file in the loop may silently come up empty, because the re-export chain has no terminating module to resolve names against. To fix this: open any one file in the loop and remove the `export * from` (or `export { ... } from`) statement that points back into the cycle. Any single removal will break the cycle and restore working re-exports. A self-loop (a single barrel re-exporting from itself, often a rename leftover) is reported under the same rule with kind `self-loop`.",
+        docs_path: "explanations/dead-code#re-export-cycles",
+    },
+    RuleDef {
         id: "fallow/boundary-violation",
         category: "Architecture",
         name: "Boundary Violations",
@@ -1570,7 +1578,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 22);
+        assert_eq!(CHECK_RULES.len(), 23);
     }
 
     #[test]

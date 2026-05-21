@@ -1,0 +1,100 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+assertion_line: 1847
+expression: redact_version(&json_str)
+---
+{
+  "schema_version": 6,
+  "version": "[VERSION]",
+  "elapsed_ms": 0,
+  "total_issues": 2,
+  "summary": {
+    "total_issues": 2,
+    "unused_files": 0,
+    "unused_exports": 0,
+    "unused_types": 0,
+    "private_type_leaks": 0,
+    "unused_dependencies": 0,
+    "unused_enum_members": 0,
+    "unused_class_members": 0,
+    "unresolved_imports": 0,
+    "unlisted_dependencies": 0,
+    "duplicate_exports": 0,
+    "type_only_dependencies": 0,
+    "test_only_dependencies": 0,
+    "circular_dependencies": 0,
+    "re_export_cycles": 2,
+    "boundary_violations": 0,
+    "stale_suppressions": 0,
+    "unused_catalog_entries": 0,
+    "empty_catalog_groups": 0,
+    "unresolved_catalog_references": 0,
+    "unused_dependency_overrides": 0,
+    "misconfigured_dependency_overrides": 0
+  },
+  "unused_files": [],
+  "unused_exports": [],
+  "unused_types": [],
+  "private_type_leaks": [],
+  "unused_dependencies": [],
+  "unused_dev_dependencies": [],
+  "unused_optional_dependencies": [],
+  "unused_enum_members": [],
+  "unused_class_members": [],
+  "unresolved_imports": [],
+  "unlisted_dependencies": [],
+  "duplicate_exports": [],
+  "type_only_dependencies": [],
+  "test_only_dependencies": [],
+  "circular_dependencies": [],
+  "re_export_cycles": [
+    {
+      "files": [
+        "src/api/index.ts",
+        "src/api/internal/index.ts"
+      ],
+      "kind": "multi-node",
+      "actions": [
+        {
+          "type": "refactor-re-export-cycle",
+          "auto_fixable": false,
+          "description": "Remove one `export * from` (or `export { ... } from`) statement on any one member to break the cycle",
+          "note": "Re-export cycles are structurally a no-op: chain propagation through the loop never reaches a terminating module, so imports from any member may silently come up empty."
+        },
+        {
+          "type": "suppress-file",
+          "auto_fixable": false,
+          "description": "Suppress with a file-level comment at the top of this file. One suppression breaks the cycle for all members (/project/src/api/internal/index.ts).",
+          "comment": "// fallow-ignore-file re-export-cycle"
+        }
+      ]
+    },
+    {
+      "files": [
+        "src/utils/index.ts"
+      ],
+      "kind": "self-loop",
+      "actions": [
+        {
+          "type": "refactor-re-export-cycle",
+          "auto_fixable": false,
+          "description": "Remove one `export * from` (or `export { ... } from`) statement on any one member to break the cycle",
+          "note": "Re-export cycles are structurally a no-op: chain propagation through the loop never reaches a terminating module, so imports from any member may silently come up empty."
+        },
+        {
+          "type": "suppress-file",
+          "auto_fixable": false,
+          "description": "Suppress with a file-level comment at the top of this file. The cycle is a self-loop, so the suppression covers the entire finding.",
+          "comment": "// fallow-ignore-file re-export-cycle"
+        }
+      ]
+    }
+  ],
+  "boundary_violations": [],
+  "stale_suppressions": [],
+  "unused_catalog_entries": [],
+  "empty_catalog_groups": [],
+  "unresolved_catalog_references": [],
+  "unused_dependency_overrides": [],
+  "misconfigured_dependency_overrides": []
+}

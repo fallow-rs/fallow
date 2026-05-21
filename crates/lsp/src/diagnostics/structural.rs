@@ -81,6 +81,93 @@ pub fn push_circular_dep_diagnostics(
     }
 }
 
+pub fn push_re_export_cycle_diagnostics(
+    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for cycle in &results.re_export_cycles {
+        let chain: Vec<String> = cycle
+            .cycle
+            .files
+            .iter()
+            .map(|f| {
+                f.file_name().map_or_else(
+                    || f.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                )
+            })
+            .collect();
+        let (kind_label, fix_hint) = match cycle.cycle.kind {
+            fallow_core::results::ReExportCycleKind::SelfLoop => (
+                "Self-loop",
+                "Remove the `export * from './'` (or equivalent) inside this file.",
+            ),
+            fallow_core::results::ReExportCycleKind::MultiNode => (
+                "Cycle",
+                "Remove one `export * from` statement on any one member to break the cycle.",
+            ),
+        };
+        let message = format!(
+            "Re-export {} ({} file{}): {}. {}",
+            kind_label.to_ascii_lowercase(),
+            cycle.cycle.files.len(),
+            if cycle.cycle.files.len() == 1 {
+                ""
+            } else {
+                "s"
+            },
+            chain.join(" <-> "),
+            fix_hint
+        );
+
+        // Emit one Diagnostic per member file so jumping to ANY member lands
+        // on the cycle in the Problems panel. The diagnostic is anchored at
+        // line 1 col 0 because the cycle is file-scoped; per-edge anchoring
+        // is deferred (see issue #515 plan).
+        for (idx, member_path) in cycle.cycle.files.iter().enumerate() {
+            let Ok(uri) = Url::from_file_path(member_path) else {
+                continue;
+            };
+            let related_info: Vec<DiagnosticRelatedInformation> = cycle
+                .cycle
+                .files
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != idx)
+                .filter_map(|(_, other)| {
+                    let other_uri = Url::from_file_path(other).ok()?;
+                    let name = other.file_name().map_or_else(
+                        || other.display().to_string(),
+                        |n| n.to_string_lossy().into_owned(),
+                    );
+                    Some(DiagnosticRelatedInformation {
+                        location: Location {
+                            uri: other_uri,
+                            range: FIRST_LINE_RANGE,
+                        },
+                        message: format!("Other member: {name}"),
+                    })
+                })
+                .collect();
+
+            map.entry(uri).or_default().push(Diagnostic {
+                range: FIRST_LINE_RANGE,
+                severity: Some(DiagnosticSeverity::WARNING),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("re-export-cycle".to_string())),
+                code_description: doc_link("re-export-cycles"),
+                message: message.clone(),
+                related_information: if related_info.is_empty() {
+                    None
+                } else {
+                    Some(related_info)
+                },
+                ..Default::default()
+            });
+        }
+    }
+}
+
 pub fn push_boundary_violation_diagnostics(
     map: &mut FxHashMap<Url, Vec<Diagnostic>>,
     results: &AnalysisResults,

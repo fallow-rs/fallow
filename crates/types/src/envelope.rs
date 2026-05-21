@@ -116,6 +116,10 @@ pub struct CheckSummary {
     pub test_only_dependencies: usize,
     /// Cycles detected in the import graph.
     pub circular_dependencies: usize,
+    /// Cycles or self-loops in the re-export edge subgraph (barrel files
+    /// re-exporting from each other in a loop).
+    #[serde(default)]
+    pub re_export_cycles: usize,
     /// Imports that cross architecture boundary rules.
     pub boundary_violations: usize,
     /// Suppression comments that no longer match a finding.

@@ -1,11 +1,12 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
+assertion_line: 1729
 expression: output
 ---
 <!-- fallow-id: fallow-results -->
 ### Fallow dead-code report
 
-Found **21** findings.
+Found **22** findings.
 
 <details>
 <summary>Dead code (8)</summary>
@@ -44,11 +45,12 @@ Found **21** findings.
 </details>
 
 <details>
-<summary>Architecture (1)</summary>
+<summary>Architecture (2)</summary>
 
 | Severity | Rule | Location | Description |
 | --- | --- | --- | --- |
 | major | `fallow/circular-dependency` | `src/a.ts`:3 | Circular dependency: src/a.ts → src/b.ts |
+| minor | `fallow/re-export-cycle` | `src/api/index.ts`:1 | Re-export cycle: src/api/index.ts \<-\> src/api/internal/index.ts |
 
 </details>
 

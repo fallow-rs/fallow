@@ -247,6 +247,7 @@ fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         type_only_dependencies: results.type_only_dependencies.len(),
         test_only_dependencies: results.test_only_dependencies.len(),
         circular_dependencies: results.circular_dependencies.len(),
+        re_export_cycles: results.re_export_cycles.len(),
         boundary_violations: results.boundary_violations.len(),
         stale_suppressions: results.stale_suppressions.len(),
         unused_catalog_entries: results.unused_catalog_entries.len(),
@@ -424,9 +425,10 @@ fn suppression_kind_rank(kind: &str) -> usize {
         "unlisted-dependency" => 7,
         "duplicate-export" => 8,
         "circular-dependency" => 9,
-        "boundary-violation" => 10,
-        "code-duplication" => 11,
-        "complexity" => 12,
+        "re-export-cycle" => 10,
+        "boundary-violation" => 11,
+        "code-duplication" => 12,
+        "complexity" => 13,
         _ => usize::MAX,
     }
 }

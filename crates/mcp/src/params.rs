@@ -62,7 +62,8 @@ pub struct AnalyzeParams {
     /// Issue types to include. When set, only these types are reported.
     /// Valid values: unused-files, unused-exports, unused-types,
     /// private-type-leaks, unused-deps, unused-enum-members, unused-class-members, unresolved-imports,
-    /// unlisted-deps, duplicate-exports, circular-deps, boundary-violations,
+    /// unlisted-deps, duplicate-exports, circular-deps, re-export-cycles,
+    /// boundary-violations,
     /// stale-suppressions, unused-catalog-entries (catalog declares packages no
     /// consumer references; dead config), empty-catalog-groups (named pnpm
     /// catalog groups with no entries), unresolved-catalog-references

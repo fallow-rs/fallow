@@ -2,20 +2,20 @@
 pub use fallow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
     EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding, PrivateTypeLeakFinding,
-    TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
+    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 pub use fallow_types::results::{
     AnalysisResults, BoundaryViolation, CircularDependency, DependencyLocation,
     DependencyOverrideMisconfigReason, DependencyOverrideSource, DuplicateExport,
     DuplicateLocation, EmptyCatalogGroup, EntryPointSummary, ExportUsage, ImportSite,
-    MisconfiguredDependencyOverride, PrivateTypeLeak, ReferenceLocation, StaleSuppression,
-    SuppressionOrigin, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency,
-    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
-    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
+    MisconfiguredDependencyOverride, PrivateTypeLeak, ReExportCycle, ReExportCycleKind,
+    ReferenceLocation, StaleSuppression, SuppressionOrigin, TestOnlyDependency, TypeOnlyDependency,
+    UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
+    UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
 
 #[cfg(test)]

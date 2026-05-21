@@ -336,6 +336,10 @@ enum Command {
         #[arg(long)]
         circular_deps: bool,
 
+        /// Only report re-export cycles
+        #[arg(long)]
+        re_export_cycles: bool,
+
         /// Only report boundary violations
         #[arg(long)]
         boundary_violations: bool,
@@ -2190,6 +2194,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             unlisted_deps,
             duplicate_exports,
             circular_deps,
+            re_export_cycles,
             boundary_violations,
             stale_suppressions,
             unused_catalog_entries,
@@ -2218,6 +2223,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     unlisted_deps,
                     duplicate_exports,
                     circular_deps,
+                    re_export_cycles,
                     boundary_violations,
                     stale_suppressions,
                     unused_catalog_entries,

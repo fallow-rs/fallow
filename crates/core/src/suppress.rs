@@ -477,6 +477,7 @@ mod tests {
             IssueKind::UnresolvedCatalogReference,
             IssueKind::UnusedDependencyOverride,
             IssueKind::MisconfiguredDependencyOverride,
+            IssueKind::ReExportCycle,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -484,7 +485,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(26), None);
+        assert_eq!(IssueKind::from_discriminant(27), None);
     }
 
     #[test]

@@ -54,6 +54,12 @@ pub struct BaselineData {
     /// Circular dependency chains, keyed by sorted file paths joined with `->`.
     #[serde(default)]
     pub circular_dependencies: Vec<String>,
+    /// Re-export cycles, keyed by `kind:sorted_file_paths_joined_with_<->`
+    /// (where `kind` is `multi-node` or `self-loop`). The kind prefix keeps
+    /// self-loops from keyspace-colliding with future single-file multi-node
+    /// shapes.
+    #[serde(default)]
+    pub re_export_cycles: Vec<String>,
     /// Unused optional dependencies, keyed by `package.json:package_name`.
     /// Legacy bare `package_name` keys are still matched for back-compat
     /// with baselines saved by older fallow versions.
@@ -167,6 +173,11 @@ impl BaselineData {
                 .circular_dependencies
                 .iter()
                 .map(|c| circular_dep_key(&c.cycle, root))
+                .collect(),
+            re_export_cycles: results
+                .re_export_cycles
+                .iter()
+                .map(|c| re_export_cycle_key(&c.cycle, root))
                 .collect(),
             unused_optional_dependencies: results
                 .unused_optional_dependencies
@@ -283,6 +294,7 @@ impl BaselineData {
             + self.unused_dependencies.len()
             + self.unused_dev_dependencies.len()
             + self.circular_dependencies.len()
+            + self.re_export_cycles.len()
             + self.unused_optional_dependencies.len()
             + self.unused_enum_members.len()
             + self.unused_class_members.len()
@@ -326,6 +338,21 @@ fn circular_dep_key(dep: &fallow_core::results::CircularDependency, root: &Path)
     let mut paths: Vec<String> = dep.files.iter().map(|f| relative_path(f, root)).collect();
     paths.sort();
     paths.join("->")
+}
+
+/// Generate a stable key for a re-export cycle based on its discriminator
+/// kind plus sorted member paths. The `kind` prefix is mandatory: without
+/// it a self-loop on `src/foo.ts` would keyspace-collide with any future
+/// single-file multi-node shape, and the `--baseline new` filter would
+/// silently drop the new one as already-seen (panel catch #7).
+fn re_export_cycle_key(cycle: &fallow_core::results::ReExportCycle, root: &Path) -> String {
+    let kind = match cycle.kind {
+        fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
+        fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
+    };
+    let mut paths: Vec<String> = cycle.files.iter().map(|f| relative_path(f, root)).collect();
+    paths.sort();
+    format!("{kind}:{}", paths.join("<->"))
 }
 
 fn private_type_leak_key(leak: &fallow_core::results::PrivateTypeLeak, root: &Path) -> String {
@@ -418,6 +445,16 @@ pub fn filter_new_issues(
     results.circular_dependencies.retain(|c| {
         let key = circular_dep_key(&c.cycle, root);
         !baseline_circular.contains(key.as_str())
+    });
+
+    let baseline_re_export_cycles: FxHashSet<&str> = baseline
+        .re_export_cycles
+        .iter()
+        .map(String::as_str)
+        .collect();
+    results.re_export_cycles.retain(|c| {
+        let key = re_export_cycle_key(&c.cycle, root);
+        !baseline_re_export_cycles.contains(key.as_str())
     });
 
     let baseline_optional_deps: FxHashSet<&str> = baseline
@@ -1326,6 +1363,7 @@ mod tests {
             unused_dependencies: vec![],
             unused_dev_dependencies: vec![],
             circular_dependencies: vec![],
+            re_export_cycles: vec![],
             unused_optional_dependencies: vec![],
             unused_enum_members: vec![],
             unused_class_members: vec![],
@@ -1371,6 +1409,7 @@ mod tests {
             unused_dependencies: vec![],
             unused_dev_dependencies: vec![],
             circular_dependencies: vec![],
+            re_export_cycles: vec![],
             unused_optional_dependencies: vec![],
             unused_enum_members: vec![],
             unused_class_members: vec![],
@@ -1403,6 +1442,7 @@ mod tests {
             unused_dependencies: vec![],
             unused_dev_dependencies: vec![],
             circular_dependencies: vec![],
+            re_export_cycles: vec![],
             unused_optional_dependencies: vec![],
             unused_enum_members: vec![],
             unused_class_members: vec![],

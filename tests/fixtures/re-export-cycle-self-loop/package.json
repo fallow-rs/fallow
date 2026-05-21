@@ -1,0 +1,4 @@
+{
+  "name": "re-export-cycle-self-loop",
+  "main": "src/index.ts"
+}

@@ -131,6 +131,8 @@ mod issue_359_empty_catalog_group;
 mod issue_396_397_399_typeof_import_and_new_url;
 #[path = "integration_test/issue_463_glob_validation.rs"]
 mod issue_463_glob_validation;
+#[path = "integration_test/issue_515_re_export_cycles.rs"]
+mod issue_515_re_export_cycles;
 #[path = "integration_test/script_multiplexers.rs"]
 mod script_multiplexers;
 #[path = "integration_test/visibility_tags.rs"]

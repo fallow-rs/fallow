@@ -1,5 +1,6 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
+assertion_line: 679
 expression: redact_sarif_version(&json_str)
 ---
 {
@@ -204,6 +205,19 @@ expression: redact_sarif_version(&json_str)
                 "text": "A cycle in the module import graph. Circular dependencies cause undefined behavior with CommonJS (partial modules) and initialization ordering issues with ESM. Break cycles by extracting shared code."
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#circular-dependencies",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/re-export-cycle",
+              "shortDescription": {
+                "text": "Two or more barrel files re-export from each other in a loop"
+              },
+              "fullDescription": {
+                "text": "A barrel file re-exports from another barrel that ultimately re-exports back. When this happens, imports from any file in the loop may silently come up empty, because the re-export chain has no terminating module to resolve names against. To fix this: open any one file in the loop and remove the `export * from` (or `export { ... } from`) statement that points back into the cycle. Any single removal will break the cycle and restore working re-exports. A self-loop (a single barrel re-exporting from itself, often a rename leftover) is reported under the same rule with kind `self-loop`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#re-export-cycles",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -657,6 +671,26 @@ expression: redact_sarif_version(&json_str)
           "partialFingerprints": {
             "tools.fallow.fingerprint/v1": "464ecb8e77ea605f",
             "primaryLocationLineHash/v1": "464ecb8e77ea605f"
+          }
+        },
+        {
+          "ruleId": "fallow/re-export-cycle",
+          "level": "warning",
+          "message": {
+            "text": "Re-export cycle: src/api/index.ts <-> src/api/internal/index.ts"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/api/index.ts"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "3521b0160c2c9d9f",
+            "primaryLocationLineHash/v1": "3521b0160c2c9d9f"
           }
         },
         {

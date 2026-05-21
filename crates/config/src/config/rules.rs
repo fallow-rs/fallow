@@ -859,11 +859,12 @@ mod tests {
             aliases_found.push(alias.to_owned());
         }
 
-        // 24 alias attrs on RulesConfig + 24 on PartialRulesConfig = 48.
+        // 27 alias attrs on RulesConfig + 27 on PartialRulesConfig = 54.
+        // (24 + 24 base + 3 new aliases per struct on `re_export_cycle`).
         assert_eq!(
             aliases_found.len(),
-            48,
-            "expected 48 source-level alias attrs (24 per struct); got {}: {:?}",
+            54,
+            "expected 54 source-level alias attrs (27 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );
@@ -872,6 +873,37 @@ mod tests {
             assert!(
                 KNOWN_RULE_NAMES.contains(&alias.as_str()),
                 "serde alias '{alias}' is in rules.rs source but missing from KNOWN_RULE_NAMES"
+            );
+        }
+    }
+
+    #[test]
+    fn re_export_cycle_aliases_all_round_trip_to_the_same_field() {
+        // Panel catch #10 (Persona 8): pin every alias spelling of the new
+        // `re-export-cycle` rule so a future rename / typo of any of the four
+        // alias literals would fail this test instead of silently making the
+        // alias unmatched.
+        for alias in [
+            "re-export-cycle",
+            "re-export-cycles",
+            "reexport-cycle",
+            "reexport-cycles",
+        ] {
+            let json = format!(r#"{{"{alias}": "warn"}}"#);
+            let partial: PartialRulesConfig = serde_json::from_str(&json)
+                .unwrap_or_else(|e| panic!("'{alias}' should deserialize: {e}"));
+            assert_eq!(
+                partial.re_export_cycle,
+                Some(Severity::Warn),
+                "'{alias}' should set re_export_cycle to Warn"
+            );
+            // None of the four aliases should accidentally populate any other field.
+            let serialized = serde_json::to_value(&partial).unwrap();
+            let map = serialized.as_object().unwrap();
+            assert_eq!(
+                map.len(),
+                1,
+                "'{alias}' should resolve to exactly one field, got: {map:?}"
             );
         }
     }

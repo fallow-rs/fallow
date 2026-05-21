@@ -115,6 +115,7 @@ pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
     ("unlisted-deps", "--unlisted-deps"),
     ("duplicate-exports", "--duplicate-exports"),
     ("circular-deps", "--circular-deps"),
+    ("re-export-cycles", "--re-export-cycles"),
     ("boundary-violations", "--boundary-violations"),
     ("stale-suppressions", "--stale-suppressions"),
     ("unused-catalog-entries", "--unused-catalog-entries"),

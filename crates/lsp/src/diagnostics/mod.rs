@@ -48,6 +48,7 @@ pub fn build_diagnostics(
     quality::push_duplicate_export_diagnostics(&mut map, results);
     quality::push_duplication_diagnostics(&mut map, duplication);
     structural::push_circular_dep_diagnostics(&mut map, results);
+    structural::push_re_export_cycle_diagnostics(&mut map, results);
     structural::push_boundary_violation_diagnostics(&mut map, results);
     quality::push_stale_suppression_diagnostics(&mut map, results);
 

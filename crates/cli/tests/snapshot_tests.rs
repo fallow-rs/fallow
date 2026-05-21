@@ -155,6 +155,14 @@ fn sample_results(root: &Path) -> AnalysisResults {
                 is_cross_package: false,
             },
         ));
+    r.re_export_cycles
+        .push(ReExportCycleFinding::with_actions(ReExportCycle {
+            files: vec![
+                root.join("src/api/index.ts"),
+                root.join("src/api/internal/index.ts"),
+            ],
+            kind: ReExportCycleKind::MultiNode,
+        }));
     r.unused_catalog_entries.push(
         fallow_core::results::UnusedCatalogEntryFinding::with_actions(
             fallow_core::results::UnusedCatalogEntry {
@@ -1806,6 +1814,75 @@ fn compact_circular_deps_only_snapshot() {
         ));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_circular_deps_only", lines.join("\n"));
+}
+
+// ── Cross-format parity: re-export cycles ───────────────────────
+
+fn re_export_cycles_results(root: &Path) -> AnalysisResults {
+    let mut results = AnalysisResults::default();
+    results
+        .re_export_cycles
+        .push(ReExportCycleFinding::with_actions(ReExportCycle {
+            files: vec![
+                root.join("src/api/index.ts"),
+                root.join("src/api/internal/index.ts"),
+            ],
+            kind: ReExportCycleKind::MultiNode,
+        }));
+    results
+        .re_export_cycles
+        .push(ReExportCycleFinding::with_actions(ReExportCycle {
+            files: vec![root.join("src/utils/index.ts")],
+            kind: ReExportCycleKind::SelfLoop,
+        }));
+    results
+}
+
+#[test]
+fn json_re_export_cycles_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = re_export_cycles_results(&root);
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
+    insta::assert_snapshot!("json_re_export_cycles_only", redact_version(&json_str));
+}
+
+#[test]
+fn sarif_re_export_cycles_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = re_export_cycles_results(&root);
+    let sarif = build_sarif(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
+    insta::assert_snapshot!(
+        "sarif_re_export_cycles_only",
+        redact_sarif_version(&json_str)
+    );
+}
+
+#[test]
+fn compact_re_export_cycles_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = re_export_cycles_results(&root);
+    let lines = build_compact_lines(&results, &root);
+    insta::assert_snapshot!("compact_re_export_cycles_only", lines.join("\n"));
+}
+
+#[test]
+fn markdown_re_export_cycles_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = re_export_cycles_results(&root);
+    let md = build_markdown(&results, &root);
+    insta::assert_snapshot!("markdown_re_export_cycles_only", md);
+}
+
+#[test]
+fn codeclimate_re_export_cycles_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = re_export_cycles_results(&root);
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_re_export_cycles_only", json_str);
 }
 
 // ── Cross-format parity: type-only deps ─────────────────────────

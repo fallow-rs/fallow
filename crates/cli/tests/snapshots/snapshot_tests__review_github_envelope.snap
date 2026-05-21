@@ -1,10 +1,11 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
+assertion_line: 1742
 expression: json_str
 ---
 {
   "event": "COMMENT",
-  "body": "### Fallow dead-code report\n\n21 inline findings selected for GitHub review.\n\n<!-- fallow-review -->",
+  "body": "### Fallow dead-code report\n\n22 inline findings selected for GitHub review.\n\n<!-- fallow-review -->",
   "comments": [
     {
       "path": "package.json",
@@ -89,6 +90,13 @@ expression: json_str
       "side": "RIGHT",
       "body": "**error** `fallow/circular-dependency`: Circular dependency: src/a.ts → src/b.ts\n\n<!-- fallow-fingerprint: 405f0abed155920d -->",
       "fingerprint": "405f0abed155920d"
+    },
+    {
+      "path": "src/api/index.ts",
+      "line": 1,
+      "side": "RIGHT",
+      "body": "**warn** `fallow/re-export-cycle`: Re-export cycle: src/api/index.ts \\<-\\> src/api/internal/index.ts\n\n<!-- fallow-fingerprint: 3b15e7a61f99e1df -->",
+      "fingerprint": "3b15e7a61f99e1df"
     },
     {
       "path": "src/app.ts",

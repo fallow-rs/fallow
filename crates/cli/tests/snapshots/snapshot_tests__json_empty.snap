@@ -1,5 +1,6 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
+assertion_line: 263
 expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"CARGO_PKG_VERSION\")),\n\"\\\"version\\\": \\\"[VERSION]\\\"\",)"
 ---
 {
@@ -22,6 +23,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     "type_only_dependencies": 0,
     "test_only_dependencies": 0,
     "circular_dependencies": 0,
+    "re_export_cycles": 0,
     "boundary_violations": 0,
     "stale_suppressions": 0,
     "unused_catalog_entries": 0,
@@ -45,6 +47,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   "type_only_dependencies": [],
   "test_only_dependencies": [],
   "circular_dependencies": [],
+  "re_export_cycles": [],
   "boundary_violations": [],
   "stale_suppressions": [],
   "unused_catalog_entries": [],

@@ -131,6 +131,9 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
     if rules.circular_dependencies == Severity::Off {
         results.circular_dependencies.clear();
     }
+    if rules.re_export_cycle == Severity::Off {
+        results.re_export_cycles.clear();
+    }
     if rules.boundary_violation == Severity::Off {
         results.boundary_violations.clear();
     }
@@ -247,6 +250,7 @@ pub fn has_error_severity_issues(
         || (!has_overrides
             && rules.circular_dependencies == Severity::Error
             && !results.circular_dependencies.is_empty())
+        || (rules.re_export_cycle == Severity::Error && !results.re_export_cycles.is_empty())
         || (rules.boundary_violation == Severity::Error && !results.boundary_violations.is_empty())
         || (rules.unused_catalog_entries == Severity::Error
             && !results.unused_catalog_entries.is_empty())
@@ -304,6 +308,9 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     }
     if rules.circular_dependencies == Severity::Warn {
         rules.circular_dependencies = Severity::Error;
+    }
+    if rules.re_export_cycle == Severity::Warn {
+        rules.re_export_cycle = Severity::Error;
     }
     if rules.boundary_violation == Severity::Warn {
         rules.boundary_violation = Severity::Error;

@@ -1,9 +1,10 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
+assertion_line: 1755
 expression: json_str
 ---
 {
-  "body": "### Fallow dead-code report\n\n21 inline findings selected for GitLab review.\n\n<!-- fallow-review -->",
+  "body": "### Fallow dead-code report\n\n22 inline findings selected for GitLab review.\n\n<!-- fallow-review -->",
   "comments": [
     {
       "body": "**error** `fallow/misconfigured-dependency-override`: Override \\`@types/react@\\<\\<18\\` -\\> \\`18.0.0\\` is malformed: override key cannot be parsed\n\n<!-- fallow-fingerprint: 21be520b86ce0207 -->",
@@ -124,6 +125,16 @@ expression: json_str
         "new_line": 3
       },
       "fingerprint": "405f0abed155920d"
+    },
+    {
+      "body": "**warn** `fallow/re-export-cycle`: Re-export cycle: src/api/index.ts \\<-\\> src/api/internal/index.ts\n\n<!-- fallow-fingerprint: 3b15e7a61f99e1df -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/api/index.ts",
+        "new_path": "src/api/index.ts",
+        "new_line": 1
+      },
+      "fingerprint": "3b15e7a61f99e1df"
     },
     {
       "body": "**error** `fallow/unresolved-import`: Import './missing-module' could not be resolved\n\n<!-- fallow-fingerprint: 231a7ed9e16a19a6 -->",
