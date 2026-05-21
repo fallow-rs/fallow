@@ -360,7 +360,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
             .file
             .iter()
             .map(|p| {
-                if p.is_absolute() {
+                if crate::path_util::is_absolute_path_any_platform(p) {
                     p.clone()
                 } else {
                     opts.root.join(p)

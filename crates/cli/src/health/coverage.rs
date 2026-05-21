@@ -1272,7 +1272,9 @@ fn resolve_original_source_path(
         return Some(path);
     }
     let source_path = PathBuf::from(raw_source);
-    if source_path.is_absolute() || looks_like_windows_absolute_path(raw_source) {
+    if crate::path_util::is_absolute_path_any_platform(&source_path)
+        || crate::path_util::looks_like_windows_absolute_path(raw_source)
+    {
         return Some(source_path);
     }
     if Url::parse(raw_source).is_ok() {
@@ -1293,7 +1295,9 @@ fn resolve_source_map_base(generated_url: &str, source_map_url: Option<&str>) ->
         return path.parent().map(Path::to_path_buf);
     }
     let candidate = PathBuf::from(source_map_url);
-    if candidate.is_absolute() {
+    if crate::path_util::is_absolute_path_any_platform(&candidate)
+        || crate::path_util::looks_like_windows_absolute_path(source_map_url)
+    {
         return candidate.parent().map(Path::to_path_buf);
     }
     if Url::parse(source_map_url).is_ok() {
@@ -1314,15 +1318,9 @@ fn file_url_to_path(value: &str) -> Option<PathBuf> {
         };
     }
     let path = PathBuf::from(value);
-    (path.is_absolute() || looks_like_windows_absolute_path(value)).then_some(path)
-}
-
-fn looks_like_windows_absolute_path(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() >= 3
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b':'
-        && matches!(bytes[2], b'/' | b'\\')
+    (crate::path_util::is_absolute_path_any_platform(&path)
+        || crate::path_util::looks_like_windows_absolute_path(value))
+    .then_some(path)
 }
 
 fn resolve_virtual_source_path(value: &str, base_dir: &Path) -> Option<PathBuf> {

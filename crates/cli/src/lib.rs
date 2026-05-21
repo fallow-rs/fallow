@@ -89,6 +89,15 @@ pub mod output_envelope;
 /// Programmatic Rust API reused by the NAPI bindings.
 pub mod programmatic;
 
+/// Cross-platform path classification helpers (POSIX-style root + Windows
+/// drive prefix detection that `Path::is_absolute()` mis-classifies).
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse; `#[expect]` would be unfulfilled because the bin (not the lib) consumes these symbols"
+)]
+mod path_util;
+
 /// Shared Rayon pool configuration for all embedded analysis entry points.
 pub(crate) mod rayon_pool;
 

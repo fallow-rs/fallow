@@ -228,14 +228,25 @@ impl DiffIndex {
 /// Windows checkouts emit backslash-separated paths from `to_string_lossy`;
 /// the replace normalizes them so they compare equal to the forward-slash
 /// keys `git diff` writes.
+///
+/// Implementation note: `strip_prefix` is attempted first regardless of
+/// platform because [`std::path::Path::is_absolute`] mis-classifies
+/// POSIX-style absolute paths (`/project/...`) as relative on Windows.
+/// A `CiIssue.path` deserialized from JSON output on a Unix host and
+/// passed into a Windows-hosted post-processing step would otherwise
+/// silently leak through as "relative" and never get root-stripped.
 #[must_use]
 pub fn relative_to_diff_path(path: &Path, root: &Path) -> Option<String> {
-    let relative = if path.is_absolute() {
-        path.strip_prefix(root).ok()?
-    } else {
-        path
-    };
-    Some(relative.to_string_lossy().replace('\\', "/"))
+    if let Ok(stripped) = path.strip_prefix(root) {
+        return Some(stripped.to_string_lossy().replace('\\', "/"));
+    }
+    if crate::path_util::is_absolute_path_any_platform(path) {
+        // Absolute under either platform's conventions but outside `root`:
+        // unfilterable (different drive, traversal escape, sibling repo).
+        return None;
+    }
+    // Genuinely relative: pass through with separator normalization.
+    Some(path.to_string_lossy().replace('\\', "/"))
 }
 
 /// How a diff source was located. Tracked separately from the parsed

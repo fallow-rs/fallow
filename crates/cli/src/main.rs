@@ -32,6 +32,7 @@ mod list;
 mod migrate;
 mod output_dupes;
 mod output_envelope;
+mod path_util;
 mod rayon_pool;
 mod regression;
 mod report;
@@ -1514,14 +1515,14 @@ fn resolve_audit_baseline_path(
     let path = cli.map(std::path::Path::to_path_buf).or_else(|| {
         config.map(|p| {
             let path = PathBuf::from(p);
-            if path.is_absolute() {
+            if path_util::is_absolute_path_any_platform(&path) {
                 path
             } else {
                 root.join(path)
             }
         })
     })?;
-    if path.is_absolute() {
+    if path_util::is_absolute_path_any_platform(&path) {
         Some(path)
     } else {
         Some(root.join(path))
