@@ -968,6 +968,7 @@ version = "2.76.0"
 dependencies = [
  "fallow-config",
  "fallow-core",
+ "futures",
  "rustc-hash 2.1.2",
  "serde",
  "serde_json",

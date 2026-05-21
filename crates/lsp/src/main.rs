@@ -297,6 +297,24 @@ fn analyze_project_root(
     merge_duplication(merged_duplication, duplication);
 }
 
+/// Per-document state tracked by the LSP: the `version` integer supplied by
+/// the client on every `did_open` / `did_change` plus the latest text. The
+/// version is the load-bearing piece for the staleness check in
+/// `publish_collected_diagnostics`; see `.claude/rules/lsp-server.md` for the
+/// "diagnostic publish staleness" invariant.
+#[derive(Debug, Clone)]
+struct DocumentState {
+    version: i32,
+    text: String,
+}
+
+/// Per-URI version map captured at `run_analysis` entry, threaded through to
+/// `publish_collected_diagnostics` so it can drop per-URI publishes whose
+/// document has been edited during the analysis run. A type alias so future
+/// readers can grep for the snapshot's identity (it is also a stable seam
+/// for tests).
+type VersionSnapshot = FxHashMap<Url, i32>;
+
 fn initialization_config_path(opts: &serde_json::Value, root: Option<&Path>) -> Option<PathBuf> {
     let raw = opts.get("configPath").and_then(|v| v.as_str())?.trim();
     if raw.is_empty() {
@@ -323,7 +341,12 @@ struct FallowLspServer {
     previous_diagnostic_uris: Arc<RwLock<FxHashSet<Url>>>,
     last_analysis: Arc<Mutex<Instant>>,
     analysis_guard: Arc<tokio::sync::Mutex<()>>,
-    documents: Arc<RwLock<FxHashMap<Url, String>>>,
+    /// Per-URI document state tracked from `did_open` / `did_change` /
+    /// `did_close`. The `version` field is the LSP-supplied integer used by
+    /// `run_analysis` to snapshot the document state at analysis start and
+    /// by `publish_collected_diagnostics` to skip stale publishes; see
+    /// `.claude/rules/lsp-server.md` for the staleness invariant.
+    documents: Arc<RwLock<FxHashMap<Url, DocumentState>>>,
     /// Diagnostic codes to suppress (parsed from initializationOptions.issueTypes)
     disabled_diagnostic_codes: Arc<RwLock<FxHashSet<String>>>,
     /// Optional git ref from `initializationOptions.changedSince`. When set,
@@ -524,19 +547,29 @@ impl LanguageServer for FallowLspServer {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let TextDocumentItem {
+            uri, version, text, ..
+        } = params.text_document;
         self.documents
             .write()
             .await
-            .insert(params.text_document.uri, params.text_document.text);
+            .insert(uri, DocumentState { version, text });
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        // Store latest document text for code actions
+        // Store the latest document text alongside the version supplied by
+        // the client. Version is the load-bearing field for the staleness
+        // check in `publish_collected_diagnostics`. `TextDocumentSyncKind::FULL`
+        // ships the full text in one entry, so the last `content_changes`
+        // entry is the new full document.
         if let Some(change) = params.content_changes.into_iter().last() {
-            self.documents
-                .write()
-                .await
-                .insert(params.text_document.uri, change.text);
+            self.documents.write().await.insert(
+                params.text_document.uri,
+                DocumentState {
+                    version: params.text_document.version,
+                    text: change.text,
+                },
+            );
         }
     }
 
@@ -567,10 +600,10 @@ impl LanguageServer for FallowLspServer {
         // Read file content once for computing line positions and edit ranges.
         // Prefer in-memory document text (from did_open/did_change), fall back to disk.
         let documents = self.documents.read().await;
-        let file_content = documents
-            .get(uri)
-            .cloned()
-            .unwrap_or_else(|| std::fs::read_to_string(&file_path).unwrap_or_default());
+        let file_content = documents.get(uri).map_or_else(
+            || std::fs::read_to_string(&file_path).unwrap_or_default(),
+            |state| state.text.clone(),
+        );
         drop(documents);
         let file_lines: Vec<&str> = file_content.lines().collect();
 
@@ -763,6 +796,22 @@ impl FallowLspServer {
             return; // analysis already running
         };
 
+        // Capture the per-URI document-version snapshot ONCE at analysis
+        // entry, holding it across the `spawn_blocking` join. The blocking
+        // task does not need versions, so the snapshot stays in the async
+        // scope. The snapshot is the load-bearing input to the staleness
+        // check inside `publish_collected_diagnostics`: any URI whose live
+        // version advances past the snapshot during the analysis run has
+        // its publish skipped. See `.claude/rules/lsp-server.md` for the
+        // "diagnostic publish staleness" invariant.
+        let version_snapshot: VersionSnapshot = self
+            .documents
+            .read()
+            .await
+            .iter()
+            .map(|(uri, state)| (uri.clone(), state.version))
+            .collect();
+
         self.client
             .log_message(MessageType::INFO, "Running fallow analysis...")
             .await;
@@ -908,7 +957,8 @@ impl FallowLspServer {
                 let mut all_diagnostics =
                     diagnostics::build_diagnostics(&results, &duplication, &root);
                 attach_changed_since_data(&mut all_diagnostics, changed_since_for_data.as_deref());
-                self.publish_collected_diagnostics(all_diagnostics).await;
+                self.publish_collected_diagnostics(all_diagnostics, &version_snapshot)
+                    .await;
 
                 // Send summary stats to the client before storing results
                 self.client
@@ -960,6 +1010,33 @@ impl FallowLspServer {
         }
     }
 
+    /// Decide whether a URI is stale relative to a captured version snapshot.
+    ///
+    /// A URI is stale when the analysis ran against an older document state
+    /// than what the LSP currently knows about. Two conditions count:
+    ///   1. The URI was in the snapshot AND the live version advanced past it
+    ///      (strict `>` because equal versions mean the same document state).
+    ///   2. The URI was in the snapshot AND the live document is now absent
+    ///      (closed via `did_close` between snapshot and publish; we cannot
+    ///      prove the client still owns the document).
+    ///
+    /// URIs absent from the snapshot are NOT stale: they were never opened
+    /// via the LSP (e.g. unlisted-dependency diagnostics on a `package.json`
+    /// the user never opened) and no version race exists for them.
+    fn uri_is_stale(
+        uri: &Url,
+        snapshot: &VersionSnapshot,
+        live_versions: &FxHashMap<Url, i32>,
+    ) -> bool {
+        let Some(&snapshot_version) = snapshot.get(uri) else {
+            return false;
+        };
+        match live_versions.get(uri) {
+            Some(&live_version) => live_version > snapshot_version,
+            None => true,
+        }
+    }
+
     #[expect(
         clippy::significant_drop_tightening,
         reason = "RwLock guard scope is intentional"
@@ -967,14 +1044,43 @@ impl FallowLspServer {
     async fn publish_collected_diagnostics(
         &self,
         diagnostics_by_file: FxHashMap<Url, Vec<Diagnostic>>,
+        snapshot: &VersionSnapshot,
     ) {
         let disabled = self.disabled_diagnostic_codes.read().await;
 
-        // Collect the set of URIs we are publishing to
+        // Read the live per-URI versions ONCE at entry into a local map.
+        // Doing it once avoids holding `documents.read()` across each
+        // `publish_diagnostics().await` and pre-computes the values needed
+        // by the stale-clearing branch below (which must NOT acquire
+        // `documents.read()` while holding `cached_diagnostics.write()`,
+        // to keep lock ordering clean).
+        let live_versions: FxHashMap<Url, i32> = self
+            .documents
+            .read()
+            .await
+            .iter()
+            .map(|(uri, state)| (uri.clone(), state.version))
+            .collect();
+
+        // Collect the set of URIs we are publishing to (or skipping). Stale
+        // URIs ARE inserted into `new_uris` so the next-run stale-clearing
+        // loop does not erase last-valid diagnostics from the client while
+        // the user is still editing.
         let mut new_uris: FxHashSet<Url> = FxHashSet::default();
 
-        // Publish diagnostics for current results, filtering out disabled issue types
+        // Publish diagnostics for current results, filtering out disabled
+        // issue types and skipping stale URIs.
         for (uri, diags) in &diagnostics_by_file {
+            new_uris.insert(uri.clone());
+
+            if Self::uri_is_stale(uri, snapshot, &live_versions) {
+                // Skip publish AND cache update. The cache stays at its
+                // last-valid state; pull-model `textDocument/diagnostic`
+                // consumers continue to see consistent v(N) data even
+                // though the document is now at v(N+1).
+                continue;
+            }
+
             let filtered: Vec<Diagnostic> = if disabled.is_empty() {
                 diags.clone()
             } else {
@@ -990,11 +1096,13 @@ impl FallowLspServer {
                     .collect()
             };
 
-            // Track all URIs we publish to (even empty), so stale-clearing
-            // only fires for URIs that truly disappeared from results
-            new_uris.insert(uri.clone());
+            // Pass `Some(version)` when we have a snapshotted version for
+            // this URI so LSP 3.17 clients can use the standard
+            // PublishDiagnosticsParams.version slot to discard any
+            // already-superseded publish. URIs not in the snapshot (file
+            // never `did_open`'d via the LSP) get `None`.
             self.client
-                .publish_diagnostics(uri.clone(), filtered.clone(), None)
+                .publish_diagnostics(uri.clone(), filtered.clone(), snapshot.get(uri).copied())
                 .await;
 
             // Cache for pull-model requests (textDocument/diagnostic)
@@ -1004,18 +1112,29 @@ impl FallowLspServer {
                 .insert(uri.clone(), filtered);
         }
 
-        // Clear stale diagnostics: send empty arrays for URIs that had diagnostics
-        // in the previous run but not in this one
+        // Clear stale diagnostics: send empty arrays for URIs that had
+        // diagnostics in the previous run but not in this one. Skip the
+        // empty publish (and the cache eviction) for URIs that have
+        // themselves moved past the snapshot, so we do not erase
+        // last-valid diagnostics on the client while the user is editing.
         {
             let previous_uris = self.previous_diagnostic_uris.read().await;
             let mut cache = self.cached_diagnostics.write().await;
             for old_uri in previous_uris.iter() {
-                if !new_uris.contains(old_uri) {
-                    self.client
-                        .publish_diagnostics(old_uri.clone(), vec![], None)
-                        .await;
-                    cache.remove(old_uri);
+                if new_uris.contains(old_uri) {
+                    continue;
                 }
+                if Self::uri_is_stale(old_uri, snapshot, &live_versions) {
+                    // Keep the URI tracked so the next valid run can
+                    // either republish a fresh result or perform the
+                    // clear once the analysis catches up.
+                    new_uris.insert(old_uri.clone());
+                    continue;
+                }
+                self.client
+                    .publish_diagnostics(old_uri.clone(), vec![], snapshot.get(old_uri).copied())
+                    .await;
+                cache.remove(old_uri);
             }
         }
 
@@ -2442,5 +2561,266 @@ mod tests {
                 issue_type.code
             );
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // publish_collected_diagnostics: stale-publish guard (issue #450)
+    //
+    // The LSP captures a per-URI version snapshot at `run_analysis` entry
+    // and threads it into `publish_collected_diagnostics`. Any URI whose
+    // live document version has advanced past the snapshot (or that has
+    // been closed mid-run) is treated as STALE: its publish + cache update
+    // are skipped, but the URI is still tracked so the next-run stale
+    // clearer does not erase prior valid diagnostics from the client.
+    // -----------------------------------------------------------------------
+
+    async fn install_document(backend: &FallowLspServer, uri: &Url, version: i32, text: &str) {
+        backend.documents.write().await.insert(
+            uri.clone(),
+            DocumentState {
+                version,
+                text: text.to_string(),
+            },
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn publish_skips_uri_when_live_version_advanced_past_snapshot() {
+        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let backend = service.inner();
+
+        let uri = Url::parse("file:///stale.ts").unwrap();
+        install_document(backend, &uri, 1, "v1").await;
+        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+
+        // Simulate did_change landing between snapshot capture and publish.
+        install_document(backend, &uri, 2, "v2").await;
+
+        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        backend
+            .publish_collected_diagnostics(diags_by_file, &snapshot)
+            .await;
+
+        assert!(
+            !backend.cached_diagnostics.read().await.contains_key(&uri),
+            "stale URI must not be cached: the diagnostics belong to the pre-edit document"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn publish_emits_when_live_version_equals_snapshot() {
+        // Boundary case for the strict `>` comparison: equal versions are
+        // NOT stale; the analysis ran against exactly the document the
+        // client still holds.
+        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let backend = service.inner();
+
+        let uri = Url::parse("file:///fresh.ts").unwrap();
+        install_document(backend, &uri, 1, "v1").await;
+        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+
+        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        backend
+            .publish_collected_diagnostics(diags_by_file, &snapshot)
+            .await;
+
+        let cached_len = backend
+            .cached_diagnostics
+            .read()
+            .await
+            .get(&uri)
+            .map(Vec::len);
+        assert_eq!(
+            cached_len,
+            Some(1),
+            "equal versions are not stale; publish must reach the cache"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn publish_emits_when_uri_absent_from_snapshot() {
+        // Diagnostics on files the user never `did_open`'d via the LSP
+        // (e.g. unlisted-dependency findings on a package.json) must
+        // publish normally. The snapshot has nothing to say about them.
+        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let backend = service.inner();
+
+        let uri = Url::parse("file:///never-opened/package.json").unwrap();
+        let snapshot: VersionSnapshot = FxHashMap::default();
+
+        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        backend
+            .publish_collected_diagnostics(diags_by_file, &snapshot)
+            .await;
+
+        assert!(
+            backend.cached_diagnostics.read().await.contains_key(&uri),
+            "URIs absent from the snapshot are not subject to the staleness check"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn publish_skips_uri_when_closed_mid_run() {
+        // URI was in the snapshot (file was open when analysis started)
+        // but has since been removed from `documents` via did_close. We
+        // cannot prove the client still owns the document, so treat as
+        // stale and skip publish.
+        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let backend = service.inner();
+
+        let uri = Url::parse("file:///closed.ts").unwrap();
+        install_document(backend, &uri, 1, "v1").await;
+        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+
+        // Simulate did_close between snapshot capture and publish.
+        backend.documents.write().await.remove(&uri);
+
+        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        backend
+            .publish_collected_diagnostics(diags_by_file, &snapshot)
+            .await;
+
+        assert!(
+            !backend.cached_diagnostics.read().await.contains_key(&uri),
+            "closed-mid-run URI must skip publish + cache update"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn publish_threads_snapshot_version_to_client() {
+        // Drain the ClientSocket to inspect the actual JSON-RPC notification
+        // emitted by `publish_diagnostics`. Asserts that the LSP 3.17
+        // `version` slot carries the snapshot version (was always `None`
+        // before this change). Must drive `initialize` first because
+        // tower-lsp's `Client::send_notification` suppresses messages
+        // until the server state is `Initialized`.
+        use futures::StreamExt;
+
+        let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+
+        let initialize = Request::build("initialize")
+            .params(json!({"capabilities": {}}))
+            .id(1)
+            .finish();
+        service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialize)
+            .await
+            .expect("initialize call")
+            .expect("initialize response");
+
+        let backend = service.inner();
+
+        let uri = Url::parse("file:///versioned.ts").unwrap();
+        install_document(backend, &uri, 7, "v7").await;
+        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 7)).collect();
+
+        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        backend
+            .publish_collected_diagnostics(diags_by_file, &snapshot)
+            .await;
+
+        let mut socket = socket;
+        // The client emits each log_message + publish through the same
+        // socket stream. Drain until we find the publishDiagnostics
+        // notification (skip the initialized acks / log messages).
+        let request = loop {
+            let next = tokio::time::timeout(Duration::from_millis(500), socket.next())
+                .await
+                .expect("publishDiagnostics notification must arrive within timeout")
+                .expect("ClientSocket stream ended before yielding the notification");
+            if next.method() == "textDocument/publishDiagnostics" {
+                break next;
+            }
+        };
+
+        let params = request
+            .params()
+            .expect("publishDiagnostics carries params on every call");
+        assert_eq!(
+            params["version"],
+            serde_json::json!(7),
+            "version slot must carry the snapshot version, not None",
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stale_clearing_skips_uri_when_live_version_advanced() {
+        // Seed previous_diagnostic_uris with a URI by running a first
+        // publish, then run a second publish with empty diagnostics_by_file
+        // and a snapshot capturing the pre-edit version. The URI's live
+        // version has moved on; the stale-clearing branch must NOT emit
+        // an empty publish for it (which would erase last-valid diagnostics
+        // from the client) and must NOT evict the cached entry.
+        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let backend = service.inner();
+
+        let uri = Url::parse("file:///clearing.ts").unwrap();
+        install_document(backend, &uri, 1, "v1").await;
+        let snapshot_v1: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+
+        let mut first_run: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        first_run.insert(uri.clone(), vec![make_diagnostic()]);
+        backend
+            .publish_collected_diagnostics(first_run, &snapshot_v1)
+            .await;
+        assert!(
+            backend.cached_diagnostics.read().await.contains_key(&uri),
+            "precondition: first run must seed the cache",
+        );
+
+        // User edits the file between runs; live version is now 2 but the
+        // SECOND analysis ran against v1 (snapshot still v1).
+        install_document(backend, &uri, 2, "v2").await;
+
+        let empty: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        backend
+            .publish_collected_diagnostics(empty, &snapshot_v1)
+            .await;
+
+        assert!(
+            backend.cached_diagnostics.read().await.contains_key(&uri),
+            "stale URI must NOT be evicted by the stale-clearing branch \
+             when its live version has advanced past the snapshot"
+        );
+        assert!(
+            backend.previous_diagnostic_uris.read().await.contains(&uri),
+            "URI must remain tracked for the next-run stale-clearing pass",
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn publish_inserts_skipped_uri_into_new_uris() {
+        // Positive assertion guarding the load-bearing detail that even
+        // skipped (stale) URIs are inserted into `new_uris`. Without this,
+        // the next run's stale-clearing loop would treat the URI as
+        // "disappeared" and erase its last-valid diagnostics on the
+        // client. Detects a regression where a future refactor "fixes"
+        // the skip by also dropping the new_uris insertion.
+        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let backend = service.inner();
+
+        let uri = Url::parse("file:///tracked.ts").unwrap();
+        install_document(backend, &uri, 1, "v1").await;
+        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+        install_document(backend, &uri, 2, "v2").await;
+
+        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        backend
+            .publish_collected_diagnostics(diags_by_file, &snapshot)
+            .await;
+
+        assert!(
+            backend.previous_diagnostic_uris.read().await.contains(&uri),
+            "skipped stale URI must still be tracked in previous_diagnostic_uris",
+        );
     }
 }

@@ -24,6 +24,12 @@ rustc-hash = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 tower = { version = "0.5", default-features = false, features = ["util"] }
+# Needed by stale-publish tests to drain tower-lsp's ClientSocket
+# (server-to-client notification stream) and inspect the version slot
+# threaded through `publish_diagnostics`. tower-lsp itself depends on
+# futures = "0.3" for the same purpose; we mirror its feature set so we
+# do not pull a duplicate version.
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 
 [lints]
 workspace = true
