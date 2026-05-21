@@ -133,10 +133,7 @@
           }
         ]
       }
-    ],
-    "summary": {
-      "re_export_cycles": 1
-    }
+    ]
   },
   "dupes": {
     "clone_groups": [

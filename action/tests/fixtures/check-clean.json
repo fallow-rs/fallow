@@ -23,8 +23,5 @@
   "unresolved_catalog_references": [],
   "unused_dependency_overrides": [],
   "misconfigured_dependency_overrides": [],
-  "re_export_cycles": [],
-  "summary": {
-    "re_export_cycles": 0
-  }
+  "re_export_cycles": []
 }
