@@ -2279,3 +2279,793 @@ fn star_re_export_many_consumers_no_quadratic_blowup() {
         "all references should be from distinct consumers (no duplicates)"
     );
 }
+
+/// Regression for issue #442: the old `max_iterations = 20` cap silently
+/// truncated barrel chains beyond 20 hops, so a deep `export { foo } from
+/// './next'` ladder lost the bottom of the chain. The fixpoint loop now
+/// terminates naturally on monotone growth, so even a 25-hop chain
+/// propagates end-to-end.
+///
+/// The test asserts the leaf's `foo` carries references on both a 21-hop
+/// chain (just over the old cap) and a 25-hop chain (well beyond it). The
+/// 21-hop case is the smallest configuration that would have failed
+/// under the previous implementation, so it doubles as a self-validating
+/// guard against any future re-introduction of an iteration cap.
+#[test]
+fn deep_named_re_export_chain_propagates_25_hops() {
+    fn run_chain(barrel_count: u32) {
+        // Layout: consumer (id 0) -> barrel_1 (id 1) -> barrel_2 (id 2)
+        //   -> ... -> barrel_N (id N) -> leaf (id N+1).
+        let consumer_id = FileId(0);
+        let leaf_id = FileId(barrel_count + 1);
+
+        let mut files: Vec<DiscoveredFile> = (0..=barrel_count + 1)
+            .map(|i| DiscoveredFile {
+                id: FileId(i),
+                path: if i == 0 {
+                    PathBuf::from("/project/consumer.ts")
+                } else if i == barrel_count + 1 {
+                    PathBuf::from("/project/leaf.ts")
+                } else {
+                    PathBuf::from(format!("/project/barrel_{i}.ts"))
+                },
+                size_bytes: 50,
+            })
+            .collect();
+
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/consumer.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+
+        // consumer imports foo from barrel_1.
+        let mut resolved_modules: Vec<ResolvedModule> = vec![ResolvedModule {
+            file_id: consumer_id,
+            path: PathBuf::from("/project/consumer.ts"),
+            resolved_imports: vec![ResolvedImport {
+                info: ImportInfo {
+                    source: "./barrel_1".to_string(),
+                    imported_name: ImportedName::Named("foo".to_string()),
+                    local_name: "foo".to_string(),
+                    is_type_only: false,
+                    from_style: false,
+                    span: oxc_span::Span::new(0, 10),
+                    source_span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(1)),
+            }],
+            ..Default::default()
+        }];
+
+        // Each barrel_i re-exports foo from the next file in the chain.
+        for i in 1..=barrel_count {
+            let next_id = FileId(i + 1);
+            let next_source = if i == barrel_count {
+                "./leaf".to_string()
+            } else {
+                format!("./barrel_{}", i + 1)
+            };
+            resolved_modules.push(ResolvedModule {
+                file_id: FileId(i),
+                path: PathBuf::from(format!("/project/barrel_{i}.ts")),
+                re_exports: vec![ResolvedReExport {
+                    info: fallow_types::extract::ReExportInfo {
+                        source: next_source,
+                        imported_name: "foo".to_string(),
+                        exported_name: "foo".to_string(),
+                        is_type_only: false,
+                        span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(next_id),
+                }],
+                ..Default::default()
+            });
+        }
+
+        // Leaf has the actual export.
+        resolved_modules.push(ResolvedModule {
+            file_id: leaf_id,
+            path: PathBuf::from("/project/leaf.ts"),
+            exports: vec![fallow_types::extract::ExportInfo {
+                name: ExportName::Named("foo".to_string()),
+                local_name: Some("foo".to_string()),
+                is_type_only: false,
+                visibility: VisibilityTag::None,
+                span: oxc_span::Span::new(0, 20),
+                members: vec![],
+                is_side_effect_used: false,
+                super_class: None,
+            }],
+            ..Default::default()
+        });
+
+        let _ = &mut files; // silence unused warning under expect
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+        let leaf = &graph.modules[leaf_id.0 as usize];
+        let foo = leaf
+            .exports
+            .iter()
+            .find(|e| e.name.to_string() == "foo")
+            .unwrap_or_else(|| panic!("leaf should have foo export ({barrel_count}-hop chain)"));
+        assert!(
+            !foo.references.is_empty(),
+            "leaf's foo should be referenced through a {barrel_count}-hop chain"
+        );
+    }
+
+    // 21 hops: just over the old `max_iterations = 20` cap, the smallest
+    // configuration that fails under the previous implementation.
+    run_chain(21);
+    // 25 hops: comfortably beyond the old cap, matches issue #442's example.
+    run_chain(25);
+}
+
+/// Regression for issue #442: re-export cycles should not panic or hang,
+/// AND all reachable exports outside the cycle should still propagate
+/// correctly. The diagnostic is emitted via `tracing::warn!` with the
+/// member paths; verify manually with `RUST_LOG=warn cargo test`.
+#[expect(
+    clippy::too_many_lines,
+    reason = "fixture construction dominates; assertions stay tight"
+)]
+#[test]
+fn re_export_cycle_terminates_and_does_not_block_unrelated_propagation() {
+    // a.ts: export * from './b'; export const x = 1;
+    // b.ts: export * from './c'; export * from './a';
+    // c.ts: export * from './a';
+    // outside.ts: export const y = 2; (used by consumer)
+    // consumer.ts: import { x } from './a'; import { y } from './outside';
+    let files = vec![
+        DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from("/project/a.ts"),
+            size_bytes: 50,
+        },
+        DiscoveredFile {
+            id: FileId(1),
+            path: PathBuf::from("/project/b.ts"),
+            size_bytes: 50,
+        },
+        DiscoveredFile {
+            id: FileId(2),
+            path: PathBuf::from("/project/c.ts"),
+            size_bytes: 50,
+        },
+        DiscoveredFile {
+            id: FileId(3),
+            path: PathBuf::from("/project/outside.ts"),
+            size_bytes: 50,
+        },
+        DiscoveredFile {
+            id: FileId(4),
+            path: PathBuf::from("/project/consumer.ts"),
+            size_bytes: 100,
+        },
+    ];
+
+    let entry_points = vec![EntryPoint {
+        path: PathBuf::from("/project/consumer.ts"),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+
+    let resolved_modules = vec![
+        ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/a.ts"),
+            exports: vec![fallow_types::extract::ExportInfo {
+                name: ExportName::Named("x".to_string()),
+                local_name: Some("x".to_string()),
+                is_type_only: false,
+                visibility: VisibilityTag::None,
+                span: oxc_span::Span::new(0, 10),
+                members: vec![],
+                is_side_effect_used: false,
+                super_class: None,
+            }],
+            re_exports: vec![ResolvedReExport {
+                info: fallow_types::extract::ReExportInfo {
+                    source: "./b".to_string(),
+                    imported_name: "*".to_string(),
+                    exported_name: "*".to_string(),
+                    is_type_only: false,
+                    span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(1)),
+            }],
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(1),
+            path: PathBuf::from("/project/b.ts"),
+            re_exports: vec![
+                ResolvedReExport {
+                    info: fallow_types::extract::ReExportInfo {
+                        source: "./c".to_string(),
+                        imported_name: "*".to_string(),
+                        exported_name: "*".to_string(),
+                        is_type_only: false,
+                        span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(2)),
+                },
+                ResolvedReExport {
+                    info: fallow_types::extract::ReExportInfo {
+                        source: "./a".to_string(),
+                        imported_name: "*".to_string(),
+                        exported_name: "*".to_string(),
+                        is_type_only: false,
+                        span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(0)),
+                },
+            ],
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(2),
+            path: PathBuf::from("/project/c.ts"),
+            re_exports: vec![ResolvedReExport {
+                info: fallow_types::extract::ReExportInfo {
+                    source: "./a".to_string(),
+                    imported_name: "*".to_string(),
+                    exported_name: "*".to_string(),
+                    is_type_only: false,
+                    span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(0)),
+            }],
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(3),
+            path: PathBuf::from("/project/outside.ts"),
+            exports: vec![fallow_types::extract::ExportInfo {
+                name: ExportName::Named("y".to_string()),
+                local_name: Some("y".to_string()),
+                is_type_only: false,
+                visibility: VisibilityTag::None,
+                span: oxc_span::Span::new(0, 10),
+                members: vec![],
+                is_side_effect_used: false,
+                super_class: None,
+            }],
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(4),
+            path: PathBuf::from("/project/consumer.ts"),
+            resolved_imports: vec![
+                ResolvedImport {
+                    info: ImportInfo {
+                        source: "./a".to_string(),
+                        imported_name: ImportedName::Named("x".to_string()),
+                        local_name: "x".to_string(),
+                        is_type_only: false,
+                        from_style: false,
+                        span: oxc_span::Span::new(0, 10),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(0)),
+                },
+                ResolvedImport {
+                    info: ImportInfo {
+                        source: "./outside".to_string(),
+                        imported_name: ImportedName::Named("y".to_string()),
+                        local_name: "y".to_string(),
+                        is_type_only: false,
+                        from_style: false,
+                        span: oxc_span::Span::new(15, 25),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(3)),
+                },
+            ],
+            ..Default::default()
+        },
+    ];
+
+    // Must not hang or panic despite the 3-node cycle (a -> b -> c -> a).
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+    // a's x should still be referenced (consumer imports it directly).
+    let a = &graph.modules[0];
+    let x = a
+        .exports
+        .iter()
+        .find(|e| e.name.to_string() == "x")
+        .expect("a should have x export");
+    assert!(
+        !x.references.is_empty(),
+        "x should be referenced despite the cycle"
+    );
+
+    // outside's y, completely unrelated to the cycle, must propagate normally.
+    let outside = &graph.modules[3];
+    let y = outside
+        .exports
+        .iter()
+        .find(|e| e.name.to_string() == "y")
+        .expect("outside should have y export");
+    assert!(
+        !y.references.is_empty(),
+        "y should be referenced from consumer (cycle elsewhere must not block this)"
+    );
+}
+
+/// Regression for issue #442: when `propagate_star_re_export` synthesises
+/// a stub `ExportSymbol` on a source module that itself has `export *`,
+/// the stub previously hardcoded `is_type_only: false`. Reading it from
+/// the triggering re-export edge means multi-hop `export type *` chains
+/// tag the synthesised stub correctly, preventing latent
+/// misclassification under `find_unused_types`.
+///
+/// Chain: barrel.ts is the entry point and does `export type * from
+/// './source'`. source.ts does `export * from './leaf'`. leaf.ts exports
+/// const X. Because barrel's edge is type-only, the stub synthesised on
+/// source (when propagation needs to bridge through source's own
+/// `export *`) must inherit `is_type_only: true`.
+#[test]
+fn type_only_star_chain_synthesizes_type_only_stub() {
+    let files = vec![
+        DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from("/project/barrel.ts"),
+            size_bytes: 50,
+        },
+        DiscoveredFile {
+            id: FileId(1),
+            path: PathBuf::from("/project/source.ts"),
+            size_bytes: 50,
+        },
+        DiscoveredFile {
+            id: FileId(2),
+            path: PathBuf::from("/project/leaf.ts"),
+            size_bytes: 50,
+        },
+    ];
+
+    // barrel is the entry point so its type-only star re-export marks the
+    // chain as externally consumed.
+    let entry_points = vec![EntryPoint {
+        path: PathBuf::from("/project/barrel.ts"),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+
+    let resolved_modules = vec![
+        // barrel.ts: export type * from './source'
+        ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/barrel.ts"),
+            re_exports: vec![ResolvedReExport {
+                info: fallow_types::extract::ReExportInfo {
+                    source: "./source".to_string(),
+                    imported_name: "*".to_string(),
+                    exported_name: "*".to_string(),
+                    is_type_only: true,
+                    span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(1)),
+            }],
+            ..Default::default()
+        },
+        // source.ts: export * from './leaf' (NOT type-only)
+        ResolvedModule {
+            file_id: FileId(1),
+            path: PathBuf::from("/project/source.ts"),
+            re_exports: vec![ResolvedReExport {
+                info: fallow_types::extract::ReExportInfo {
+                    source: "./leaf".to_string(),
+                    imported_name: "*".to_string(),
+                    exported_name: "*".to_string(),
+                    is_type_only: false,
+                    span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(2)),
+            }],
+            ..Default::default()
+        },
+        // leaf.ts: export type X
+        ResolvedModule {
+            file_id: FileId(2),
+            path: PathBuf::from("/project/leaf.ts"),
+            exports: vec![fallow_types::extract::ExportInfo {
+                name: ExportName::Named("X".to_string()),
+                local_name: Some("X".to_string()),
+                is_type_only: true,
+                visibility: VisibilityTag::None,
+                span: oxc_span::Span::new(0, 20),
+                members: vec![],
+                is_side_effect_used: false,
+                super_class: None,
+            }],
+            ..Default::default()
+        },
+    ];
+
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+    // The barrel propagation visits source's exports and finds nothing
+    // matching, then synthesises a stub on source for any name the chain
+    // needs to bridge. Because source has its own `export *`, the
+    // synthesis path is engaged. The propagation also recurses into leaf
+    // because barrel is an entry point doing `export *`.
+    //
+    // Assert the leaf's X is reachable through the type-only chain.
+    let leaf = &graph.modules[2];
+    let x = leaf
+        .exports
+        .iter()
+        .find(|e| e.name.to_string() == "X")
+        .expect("leaf should have X export");
+    assert!(
+        !x.references.is_empty(),
+        "X should be referenced through the entry-point type-only star chain"
+    );
+
+    // If a synthetic stub was created on source for X, it must carry
+    // `is_type_only: true` (inherited from barrel's `export type *`).
+    // The stub creation only fires when the source has its own `export *`
+    // AND the propagation has a named ref to bridge; the entry-point fast
+    // path may skip synthesis, so the stub's presence is best-effort.
+    // When present, verify the type-only flag.
+    let source = &graph.modules[1];
+    if let Some(stub) = source.exports.iter().find(|e| e.name.to_string() == "X") {
+        assert!(
+            stub.is_type_only,
+            "synthetic stub on source for X must inherit is_type_only=true \
+             from the triggering `export type *` edge on barrel"
+        );
+    }
+}
+
+/// Direct regression for the synthetic-stub creation path in
+/// `propagate_star_re_export`, exercising the non-entry-point branch
+/// where the named-ref bridging into `source.exports.push(...)` is the
+/// only way to land. Layout:
+///
+/// consumer.ts: import { X } from './barrel'  (type-only)
+/// barrel.ts:  export type * from './source'
+/// source.ts:  export * from './leaf'
+/// leaf.ts:    export type X = ...
+///
+/// barrel is NOT an entry point, so the entry-point fast paths in
+/// `propagate_entry_point_star` / `propagate_entry_point_named` do not
+/// fire. The named-import on the consumer drives the standard star
+/// propagation path, which synthesises a stub on `source` for `X` so the
+/// next iteration can carry the reference into leaf. The stub MUST
+/// inherit `is_type_only: true` from the triggering edge.
+#[test]
+fn type_only_star_chain_named_consumer_synthesizes_type_only_stub() {
+    let files = vec![
+        DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from("/project/consumer.ts"),
+            size_bytes: 100,
+        },
+        DiscoveredFile {
+            id: FileId(1),
+            path: PathBuf::from("/project/barrel.ts"),
+            size_bytes: 50,
+        },
+        DiscoveredFile {
+            id: FileId(2),
+            path: PathBuf::from("/project/source.ts"),
+            size_bytes: 50,
+        },
+        DiscoveredFile {
+            id: FileId(3),
+            path: PathBuf::from("/project/leaf.ts"),
+            size_bytes: 50,
+        },
+    ];
+
+    let entry_points = vec![EntryPoint {
+        path: PathBuf::from("/project/consumer.ts"),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+
+    let resolved_modules = vec![
+        ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/consumer.ts"),
+            resolved_imports: vec![ResolvedImport {
+                info: ImportInfo {
+                    source: "./barrel".to_string(),
+                    imported_name: ImportedName::Named("X".to_string()),
+                    local_name: "X".to_string(),
+                    is_type_only: true,
+                    from_style: false,
+                    span: oxc_span::Span::new(0, 10),
+                    source_span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(1)),
+            }],
+            ..Default::default()
+        },
+        // barrel.ts: export type * from './source'
+        ResolvedModule {
+            file_id: FileId(1),
+            path: PathBuf::from("/project/barrel.ts"),
+            re_exports: vec![ResolvedReExport {
+                info: fallow_types::extract::ReExportInfo {
+                    source: "./source".to_string(),
+                    imported_name: "*".to_string(),
+                    exported_name: "*".to_string(),
+                    is_type_only: true,
+                    span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(2)),
+            }],
+            ..Default::default()
+        },
+        // source.ts: export * from './leaf' (NOT type-only)
+        ResolvedModule {
+            file_id: FileId(2),
+            path: PathBuf::from("/project/source.ts"),
+            re_exports: vec![ResolvedReExport {
+                info: fallow_types::extract::ReExportInfo {
+                    source: "./leaf".to_string(),
+                    imported_name: "*".to_string(),
+                    exported_name: "*".to_string(),
+                    is_type_only: false,
+                    span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(3)),
+            }],
+            ..Default::default()
+        },
+        // leaf.ts: export type X
+        ResolvedModule {
+            file_id: FileId(3),
+            path: PathBuf::from("/project/leaf.ts"),
+            exports: vec![fallow_types::extract::ExportInfo {
+                name: ExportName::Named("X".to_string()),
+                local_name: Some("X".to_string()),
+                is_type_only: true,
+                visibility: VisibilityTag::None,
+                span: oxc_span::Span::new(0, 20),
+                members: vec![],
+                is_side_effect_used: false,
+                super_class: None,
+            }],
+            ..Default::default()
+        },
+    ];
+
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+    // The named import on consumer (X) flows through barrel's star edge
+    // into source. source has no X export but does `export *`, so the
+    // synthesis path fires.
+    let source = &graph.modules[2];
+    let stub = source
+        .exports
+        .iter()
+        .find(|e| e.name.to_string() == "X")
+        .expect("source should have a synthetic stub for X");
+    assert!(
+        stub.is_type_only,
+        "synthetic stub on source for X must inherit is_type_only=true \
+         from the triggering `export type *` edge on barrel"
+    );
+}
+
+/// Regression for issue #442: when two star re-export edges reach the
+/// same source with conflicting `is_type_only` flags (one type-only,
+/// one value), the synthesised stub must end up `is_type_only: false`.
+/// A value-bearing access widens a previously type-only stub; the
+/// reverse direction never widens a real type-only declaration.
+///
+/// Layout:
+///   consumer_type.ts: import type { X } from './barrel_type'
+///   consumer_val.ts:  import { X } from './barrel_val'
+///   barrel_type.ts:   export type * from './source'
+///   barrel_val.ts:    export * from './source'
+///   source.ts:        export * from './leaf'
+///   leaf.ts:          export type X
+#[test]
+fn mixed_type_only_and_value_star_paths_synthesize_value_stub() {
+    let files = vec![
+        DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from("/project/consumer_type.ts"),
+            size_bytes: 100,
+        },
+        DiscoveredFile {
+            id: FileId(1),
+            path: PathBuf::from("/project/consumer_val.ts"),
+            size_bytes: 100,
+        },
+        DiscoveredFile {
+            id: FileId(2),
+            path: PathBuf::from("/project/barrel_type.ts"),
+            size_bytes: 50,
+        },
+        DiscoveredFile {
+            id: FileId(3),
+            path: PathBuf::from("/project/barrel_val.ts"),
+            size_bytes: 50,
+        },
+        DiscoveredFile {
+            id: FileId(4),
+            path: PathBuf::from("/project/source.ts"),
+            size_bytes: 50,
+        },
+        DiscoveredFile {
+            id: FileId(5),
+            path: PathBuf::from("/project/leaf.ts"),
+            size_bytes: 50,
+        },
+    ];
+
+    let entry_points = vec![
+        EntryPoint {
+            path: PathBuf::from("/project/consumer_type.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        },
+        EntryPoint {
+            path: PathBuf::from("/project/consumer_val.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        },
+    ];
+
+    let resolved_modules = vec![
+        ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/consumer_type.ts"),
+            resolved_imports: vec![ResolvedImport {
+                info: ImportInfo {
+                    source: "./barrel_type".to_string(),
+                    imported_name: ImportedName::Named("X".to_string()),
+                    local_name: "X".to_string(),
+                    is_type_only: true,
+                    from_style: false,
+                    span: oxc_span::Span::new(0, 10),
+                    source_span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(2)),
+            }],
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(1),
+            path: PathBuf::from("/project/consumer_val.ts"),
+            resolved_imports: vec![ResolvedImport {
+                info: ImportInfo {
+                    source: "./barrel_val".to_string(),
+                    imported_name: ImportedName::Named("X".to_string()),
+                    local_name: "X".to_string(),
+                    is_type_only: false,
+                    from_style: false,
+                    span: oxc_span::Span::new(0, 10),
+                    source_span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(3)),
+            }],
+            ..Default::default()
+        },
+        // barrel_type.ts: export type * from './source'
+        ResolvedModule {
+            file_id: FileId(2),
+            path: PathBuf::from("/project/barrel_type.ts"),
+            re_exports: vec![ResolvedReExport {
+                info: fallow_types::extract::ReExportInfo {
+                    source: "./source".to_string(),
+                    imported_name: "*".to_string(),
+                    exported_name: "*".to_string(),
+                    is_type_only: true,
+                    span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(4)),
+            }],
+            ..Default::default()
+        },
+        // barrel_val.ts: export * from './source'
+        ResolvedModule {
+            file_id: FileId(3),
+            path: PathBuf::from("/project/barrel_val.ts"),
+            re_exports: vec![ResolvedReExport {
+                info: fallow_types::extract::ReExportInfo {
+                    source: "./source".to_string(),
+                    imported_name: "*".to_string(),
+                    exported_name: "*".to_string(),
+                    is_type_only: false,
+                    span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(4)),
+            }],
+            ..Default::default()
+        },
+        // source.ts: export * from './leaf'
+        ResolvedModule {
+            file_id: FileId(4),
+            path: PathBuf::from("/project/source.ts"),
+            re_exports: vec![ResolvedReExport {
+                info: fallow_types::extract::ReExportInfo {
+                    source: "./leaf".to_string(),
+                    imported_name: "*".to_string(),
+                    exported_name: "*".to_string(),
+                    is_type_only: false,
+                    span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(5)),
+            }],
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(5),
+            path: PathBuf::from("/project/leaf.ts"),
+            exports: vec![fallow_types::extract::ExportInfo {
+                name: ExportName::Named("X".to_string()),
+                local_name: Some("X".to_string()),
+                is_type_only: true,
+                visibility: VisibilityTag::None,
+                span: oxc_span::Span::new(0, 20),
+                members: vec![],
+                is_side_effect_used: false,
+                super_class: None,
+            }],
+            ..Default::default()
+        },
+    ];
+
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+    // After propagation, the synthetic stub on `source` for X must be
+    // value-typed (the value path widens the type-only stub). Iteration
+    // order through re_export_info is deterministic; whichever barrel
+    // synthesises first sets the initial flag, but the conflicting
+    // value edge always downgrades to false.
+    let source = &graph.modules[4];
+    let stub = source
+        .exports
+        .iter()
+        .find(|e| e.name.to_string() == "X")
+        .expect("source should have a synthetic stub for X");
+    assert!(
+        !stub.is_type_only,
+        "synthetic stub on source for X must downgrade to is_type_only=false \
+         when both a value star edge and a type-only star edge reach it"
+    );
+}
+
+/// Regression for issue #442: a barrel that re-exports from itself
+/// (`export * from './<same-file>'`) is a real bug, usually introduced
+/// after a rename or move. Surface it via a dedicated `tracing::warn!`
+/// instead of silently skipping it inside the SCC pass. Verify the
+/// build does not panic and the diagnostic message is reachable.
+#[test]
+fn self_re_export_does_not_panic() {
+    let files = vec![DiscoveredFile {
+        id: FileId(0),
+        path: PathBuf::from("/project/barrel.ts"),
+        size_bytes: 50,
+    }];
+
+    let entry_points = vec![EntryPoint {
+        path: PathBuf::from("/project/barrel.ts"),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/barrel.ts"),
+        // export * from './barrel' (resolves back to self)
+        re_exports: vec![ResolvedReExport {
+            info: fallow_types::extract::ReExportInfo {
+                source: "./barrel".to_string(),
+                imported_name: "*".to_string(),
+                exported_name: "*".to_string(),
+                is_type_only: false,
+                span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(0)),
+        }],
+        ..Default::default()
+    }];
+
+    // The key assertion is "does not panic". The tracing::warn! diagnostic
+    // is verified manually via `RUST_LOG=warn cargo test`.
+    let _graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+}

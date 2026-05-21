@@ -18,14 +18,22 @@ use crate::graph::{Edge, ImportedName};
 /// matching export in the source module.
 ///
 /// Returns `true` if any new references were added.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "propagation context is hot-path; threading a struct here would \
+              cost an extra borrow per re-export edge in barrel-heavy monorepos"
+)]
 pub(in crate::graph) fn propagate_star_re_export(
     modules: &mut [ModuleNode],
     edges: &[Edge],
     edges_by_target: &rustc_hash::FxHashMap<FileId, Vec<usize>>,
     barrel_id: FileId,
     barrel_idx: usize,
+    source_id: FileId,
     source_idx: usize,
     entry_star_targets: &FxHashSet<FileId>,
+    triggering_is_type_only: bool,
+    synthetic_stubs: &mut FxHashSet<(FileId, String)>,
 ) -> bool {
     // Entry point barrels with star re-exports: all source exports are
     // transitively exposed to external consumers — mark them as used.
@@ -106,6 +114,21 @@ pub(in crate::graph) fn propagate_star_re_export(
             ExportName::Named(name.clone())
         };
         if let Some(export) = source.exports.iter_mut().find(|e| e.name == export_name) {
+            // Downgrade a synthetic type-only stub to value-only when a
+            // later value-bearing triggering edge reaches the same name.
+            // Real `export type Foo` declarations on the source are NOT
+            // tracked in `synthetic_stubs`, so they stay type-only.
+            // Without this, two star edges to the same source with
+            // conflicting `is_type_only` flags would freeze the stub at
+            // whatever flag the first-visited edge set, misclassifying
+            // the value-accessible variant under `find_unused_types`.
+            if !triggering_is_type_only
+                && export.is_type_only
+                && synthetic_stubs.contains(&(source_id, name.clone()))
+            {
+                export.is_type_only = false;
+                changed = true;
+            }
             // Use a HashSet for O(1) duplicate detection instead of O(n) linear scan.
             // Reference lists grow across iterations, making the linear check quadratic.
             existing_files.clear();
@@ -117,15 +140,23 @@ pub(in crate::graph) fn propagate_star_re_export(
                 }
             }
         } else if source_has_star_re_exports {
+            // The synthetic stub is a propagation bridge so the next
+            // iteration can carry references further down the chain.
+            // Read `is_type_only` from the triggering re-export edge so
+            // multi-hop `export type *` chains tag the stub correctly;
+            // without this, type-only star chains lose the flag at every
+            // synthesised hop, which previously misclassified some
+            // propagated entries under `find_unused_types`.
             source.exports.push(ExportSymbol {
                 name: export_name,
-                is_type_only: false,
+                is_type_only: triggering_is_type_only,
                 is_side_effect_used: false,
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 0),
                 references: refs.clone(),
                 members: Vec::new(),
             });
+            synthetic_stubs.insert((source_id, name.clone()));
             changed = true;
         }
     }
