@@ -209,6 +209,7 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
     handle_regression_and_summary(
         &mut max_exit,
         opts.quiet,
+        opts.root,
         check_result.as_ref(),
         dupes_result.as_ref(),
         health_result.as_ref(),
@@ -335,7 +336,7 @@ fn print_human_sections(
     // Orientation header: vital signs + analysis scope + start-here nudge
     if show_headers {
         if let Some(result) = health_result {
-            print_orientation_header(result, check_result);
+            print_orientation_header(result, check_result, opts.root);
         } else if let Some(result) = check_result {
             print_entry_point_summary(&result.results);
         }
@@ -409,6 +410,7 @@ fn print_human_sections(
 fn handle_regression_and_summary(
     max_exit: &mut u8,
     quiet: bool,
+    root: &std::path::Path,
     check_result: Option<&CheckResult>,
     dupes_result: Option<&DupesResult>,
     health_result: Option<&HealthResult>,
@@ -427,12 +429,13 @@ fn handle_regression_and_summary(
 
     // Summary on failure
     if *max_exit > 0 && !quiet {
-        print_failure_summary(check_result, dupes_result, health_result);
+        print_failure_summary(root, check_result, dupes_result, health_result);
     }
 }
 
 /// Print a summary line listing which analyses had failures.
 fn print_failure_summary(
+    root: &std::path::Path,
     check_result: Option<&CheckResult>,
     dupes_result: Option<&DupesResult>,
     health_result: Option<&HealthResult>,
@@ -466,17 +469,15 @@ fn print_failure_summary(
         }
     }
     if !parts.is_empty() {
-        // Repeat start-here nudge so it's visible at the bottom of scrolled output
+        // Repeat start-here nudge so it's visible at the bottom of scrolled output.
+        // Render workspace-relative paths (issue #547): bare basenames like
+        // `index.ts` are ambiguous in Nx / Angular / Rust-workspace layouts.
         let nudge = health_result
             .filter(|r| !r.report.targets.is_empty())
             .map(|r| {
                 // Prefer non-test/fixture target; skip nudge if all targets are noise
                 if let Some(top) = r.report.targets.iter().find(|t| !is_test_path(&t.path)) {
-                    let name = top
-                        .path
-                        .file_name()
-                        .map(|f| f.to_string_lossy().to_string())
-                        .unwrap_or_default();
+                    let name = report::format_display_path(&top.path, root);
                     format!(" \u{2014} start with {name}")
                 } else {
                     String::new()
@@ -881,7 +882,11 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
 ///
 /// Renders a compact one-or-two-line block at the top of combined mode output
 /// so users immediately see the project's vital signs and top refactoring target.
-fn print_orientation_header(health: &HealthResult, check: Option<&CheckResult>) {
+fn print_orientation_header(
+    health: &HealthResult,
+    check: Option<&CheckResult>,
+    root: &std::path::Path,
+) {
     // Vital signs line (skip when trend table is active — it replaces vital signs)
     if let Some(ref vs) = health.report.vital_signs
         && health.report.health_trend.is_none()
@@ -996,18 +1001,16 @@ fn print_orientation_header(health: &HealthResult, check: Option<&CheckResult>) 
                 .dimmed()
             );
         } else {
-            // Prefer non-test target; skip nudge if all targets are noise
+            // Prefer non-test target; skip nudge if all targets are noise.
+            // Render workspace-relative paths (issue #547): bare basenames
+            // like `index.ts` are ambiguous in monorepo layouts.
             if let Some(top) = health
                 .report
                 .targets
                 .iter()
                 .find(|t| !is_test_path(&t.path))
             {
-                let file_name = top
-                    .path
-                    .file_name()
-                    .map(|f| f.to_string_lossy().to_string())
-                    .unwrap_or_default();
+                let file_name = report::format_display_path(&top.path, root);
                 eprintln!(
                     "{}",
                     format!(

@@ -802,14 +802,16 @@ fn append_suppression_hints(lines: &mut Vec<String>, report: &crate::health_type
 /// so readers can see why the component ranks high without re-deriving the
 /// link from the JSON payload), `None` otherwise. Extracted from
 /// `render_findings` to keep that function under the SIG unit-size threshold.
+///
+/// Renders `template_path` workspace-relative (issue #547) so Angular
+/// projects with many `*.component.html` files unambiguously identify the
+/// template fallow scored.
 fn render_component_rollup_breakdown(
     finding: &crate::health_types::ComplexityViolation,
+    root: &Path,
 ) -> Option<String> {
     let rollup = finding.component_rollup.as_ref()?;
-    let template_basename = rollup.template_path.file_name().map_or_else(
-        || rollup.template_path.display().to_string(),
-        |name| name.to_string_lossy().into_owned(),
-    );
+    let template_display = crate::report::format_display_path(&rollup.template_path, root);
     Some(format!(
         "         {}",
         format!(
@@ -820,7 +822,7 @@ fn render_component_rollup_breakdown(
             rollup.class_worst_function,
             rollup.template_cyclomatic,
             rollup.template_cognitive,
-            template_basename,
+            template_display,
         )
         .dimmed(),
     ))
@@ -907,7 +909,7 @@ fn render_findings(
         ));
         // Line 2b: component rollup breakdown for synthetic <component>
         // findings.
-        if let Some(line) = render_component_rollup_breakdown(finding) {
+        if let Some(line) = render_component_rollup_breakdown(finding, root) {
             lines.push(line);
         }
         // Line 3: CRAP score. Only set on findings that exceeded the CRAP
@@ -929,10 +931,10 @@ fn render_findings(
                 Some(crate::health_types::CoverageSource::EstimatedComponentInherited)
             ) && let Some(ref owner) = finding.inherited_from
             {
-                let owner_display = owner.file_name().map_or_else(
-                    || owner.display().to_string(),
-                    |name| name.to_string_lossy().into_owned(),
-                );
+                // Workspace-relative so Angular projects with many
+                // `app.component.ts` files unambiguously identify the
+                // owning component (issue #547).
+                let owner_display = crate::report::format_display_path(owner, root);
                 format!("  (inherited from {owner_display})")
             } else {
                 String::new()
@@ -3701,5 +3703,113 @@ mod tests {
         assert!(text.contains("45.0"));
         assert!(text.contains("15.0"));
         assert!(text.contains("Hotspots (3 files)"));
+    }
+
+    // ── issue #547 path disambiguation regression tests ─────────────
+
+    #[test]
+    fn rollup_breakdown_renders_workspace_relative_template_path() {
+        // Angular monorepo: two `*.component.html` files share basenames. The
+        // pre-#547 rendering printed bare `payment-list.component.html`; the
+        // workspace-relative path resolves the ambiguity for both readers.
+        let root = PathBuf::from("/project");
+        let template =
+            root.join("apps/admin/src/app/payments/payment-list/payment-list.component.html");
+        let finding = crate::health_types::ComplexityViolation {
+            path: root.join("apps/admin/src/app/payments/payment-list/payment-list.component.ts"),
+            name: "<component>".to_string(),
+            line: 1,
+            col: 0,
+            cyclomatic: 25,
+            cognitive: 28,
+            line_count: 0,
+            param_count: 0,
+            exceeded: crate::health_types::ExceededThreshold::Both,
+            severity: crate::health_types::FindingSeverity::High,
+            crap: None,
+            coverage_pct: None,
+            coverage_tier: None,
+            coverage_source: None,
+            inherited_from: None,
+            component_rollup: Some(crate::health_types::ComponentRollup {
+                component: "PaymentListComponent".to_string(),
+                class_worst_function: "ngOnInit".to_string(),
+                class_cyclomatic: 12,
+                class_cognitive: 16,
+                template_path: template,
+                template_cyclomatic: 13,
+                template_cognitive: 12,
+            }),
+        };
+        let line = render_component_rollup_breakdown(&finding, &root)
+            .expect("rollup payload should render a breakdown line");
+        assert!(
+            line.contains("apps/admin/src/app/payments/payment-list/payment-list.component.html"),
+            "breakdown must include workspace-relative template path: {line}"
+        );
+        // Negative: bare basename must NOT be the rendered token. The
+        // basename happens to appear at the tail of the relative path; we
+        // assert the parent segments precede it.
+        assert!(
+            !line.contains(" payment-list.component.html"),
+            "bare basename token must not be the rendered template: {line}"
+        );
+    }
+
+    #[test]
+    fn inherited_from_renders_workspace_relative_owner_path() {
+        // Synthetic <template> finding with CRAP redirected from the owning
+        // component .ts. Pre-#547 the line said `(inherited from
+        // permissions.component.ts)`; with #547 it identifies the file
+        // unambiguously across Angular workspaces.
+        let root = PathBuf::from("/project");
+        let owner = root.join("apps/admin/src/app/auth/permissions/permissions.component.ts");
+        let template_path =
+            root.join("apps/admin/src/app/auth/permissions/permissions.component.html");
+        let report = crate::health_types::HealthReport {
+            findings: vec![
+                crate::health_types::ComplexityViolation {
+                    path: template_path,
+                    name: "<template>".to_string(),
+                    line: 1,
+                    col: 0,
+                    cyclomatic: 12,
+                    cognitive: 14,
+                    line_count: 0,
+                    param_count: 0,
+                    exceeded: crate::health_types::ExceededThreshold::Both,
+                    severity: crate::health_types::FindingSeverity::High,
+                    crap: Some(45.0),
+                    coverage_pct: None,
+                    coverage_tier: Some(crate::health_types::CoverageTier::Partial),
+                    coverage_source: Some(
+                        crate::health_types::CoverageSource::EstimatedComponentInherited,
+                    ),
+                    inherited_from: Some(owner),
+                    component_rollup: None,
+                }
+                .into(),
+            ],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 1,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let lines = build_health_human_lines(&report, &root);
+        let text = plain(&lines);
+        assert!(
+            text.contains(
+                "(inherited from apps/admin/src/app/auth/permissions/permissions.component.ts)"
+            ),
+            "inherited-from suffix must use workspace-relative path: {text}"
+        );
+        // Negative: the bare basename suffix is the pre-#547 form.
+        assert!(
+            !text.contains("(inherited from permissions.component.ts)"),
+            "bare basename suffix must not be rendered: {text}"
+        );
     }
 }

@@ -61,6 +61,23 @@ pub fn relative_path<'a>(path: &'a Path, root: &Path) -> &'a Path {
     path.strip_prefix(root).unwrap_or(path)
 }
 
+/// Format a path for human-facing display: project-relative when the path is
+/// under `root`, falling back to the full path otherwise. Always
+/// forward-slash-normalized so Windows backslashes do not leak into
+/// terminal output.
+///
+/// Use this for any human-output site that today renders bare `file_name()`,
+/// since bare basenames are ambiguous in Nx / Angular / Rust-workspace layouts
+/// where many files share names like `index.ts`, `mod.rs`, or
+/// `*.component.ts`. See issue #547.
+#[must_use]
+pub fn format_display_path(path: &Path, root: &Path) -> String {
+    relative_path(path, root)
+        .display()
+        .to_string()
+        .replace('\\', "/")
+}
+
 /// Split a path string into (directory, filename) for display.
 /// Directory includes the trailing `/`. If no directory, returns `("", filename)`.
 #[must_use]
@@ -787,6 +804,95 @@ mod tests {
             relative_path(path, root),
             Path::new("packages/ui/src/components/Button.tsx")
         );
+    }
+
+    // ── format_display_path ──────────────────────────────────────────
+
+    #[test]
+    fn format_display_path_returns_workspace_relative() {
+        let root = Path::new("/project");
+        let path = Path::new("/project/apps/server/src/index.ts");
+        assert_eq!(format_display_path(path, root), "apps/server/src/index.ts");
+    }
+
+    #[test]
+    fn format_display_path_collides_in_nx_layout_renders_full_relative() {
+        // Two Nx workspace packages with their own src/index.ts. Both render
+        // workspace-relative without any per-call collision logic; the reader
+        // disambiguates from the path itself.
+        let root = Path::new("/project");
+        let server = Path::new("/project/apps/server/src/index.ts");
+        let client = Path::new("/project/apps/client/src/index.ts");
+        assert_eq!(
+            format_display_path(server, root),
+            "apps/server/src/index.ts"
+        );
+        assert_eq!(
+            format_display_path(client, root),
+            "apps/client/src/index.ts"
+        );
+    }
+
+    #[test]
+    fn format_display_path_angular_component_renders_parent_directory() {
+        let root = Path::new("/project");
+        let path = Path::new(
+            "/project/apps/admin/src/app/payments/payment-list/payment-list.component.html",
+        );
+        assert_eq!(
+            format_display_path(path, root),
+            "apps/admin/src/app/payments/payment-list/payment-list.component.html"
+        );
+    }
+
+    #[test]
+    fn format_display_path_falls_back_to_full_path_when_root_does_not_prefix() {
+        // Mirrors relative_path behavior: if the path is not under root, we
+        // emit the path verbatim (still forward-slash normalized).
+        let root = Path::new("/other");
+        let path = Path::new("/project/src/utils.ts");
+        let rendered = format_display_path(path, root);
+        assert!(rendered.contains("project"));
+        assert!(rendered.ends_with("utils.ts"));
+        assert!(!rendered.contains('\\'));
+    }
+
+    #[test]
+    fn format_display_path_normalizes_backslashes_to_forward_slashes() {
+        // Simulate Windows-style absolute paths. Path::strip_prefix matches on
+        // OsStr segments, so we can use forward-slash root + backslash path
+        // segments only on Windows. On Unix the test verifies the replace step
+        // by feeding a path that contains literal backslashes.
+        let root = Path::new("/project");
+        let path = Path::new("/project/src/sub\\file.ts");
+        let rendered = format_display_path(path, root);
+        assert!(
+            !rendered.contains('\\'),
+            "backslashes must be normalized: {rendered}"
+        );
+    }
+
+    #[test]
+    fn format_display_path_handles_brackets_verbatim() {
+        // Unlike SARIF URIs, human-display paths preserve brackets so users see
+        // Next.js dynamic-route names as authored.
+        let root = Path::new("/project");
+        let path = Path::new("/project/app/[slug]/page.tsx");
+        assert_eq!(format_display_path(path, root), "app/[slug]/page.tsx");
+    }
+
+    #[test]
+    fn format_display_path_path_equals_root_returns_empty() {
+        let root = Path::new("/project");
+        let path = Path::new("/project");
+        assert_eq!(format_display_path(path, root), "");
+    }
+
+    #[test]
+    fn format_display_path_basename_only_when_path_is_at_root() {
+        let root = Path::new("/project");
+        let path = Path::new("/project/Cargo.toml");
+        assert_eq!(format_display_path(path, root), "Cargo.toml");
     }
 
     // ── relative_uri ─────────────────────────────────────────────────
