@@ -64,6 +64,24 @@ pub(crate) fn is_remote_url(src: &str) -> bool {
         || src.starts_with("data:")
 }
 
+/// Build-time template placeholders that aren't valid import specifiers and
+/// never resolve to a real file. Skip them at extraction time so they don't
+/// enter the import graph as unresolvable specifiers.
+///
+/// - `{{ ... }}` covers Handlebars (Ember `index.html`'s `{{rootURL}}`,
+///   `{{config.assetsPath}}`), Mustache (Jekyll, Hugo), Jinja2 (Pelican /
+///   11ty plugins), and pre-compiled Vue / Angular templates whose
+///   interpolation has leaked into a checked-in HTML scaffold.
+/// - `###...###` covers ember-cli blueprint scaffold placeholders
+///   (`###APPNAME###`, `###DUMMY###`) checked in as addon-fixture templates.
+///
+/// Neither shape is a legal URL or path character outside template engines,
+/// so the skip is generic across frameworks rather than gated on a plugin.
+/// Returns `true` for any `src` / `href` value that contains either marker.
+pub(crate) fn is_template_placeholder(value: &str) -> bool {
+    value.contains("{{") || value.contains("###")
+}
+
 /// Extract local (non-remote) asset references from HTML-like markup.
 ///
 /// Returns the raw `src`/`href` strings (trimmed, remote URLs filtered). Shared
@@ -77,7 +95,7 @@ pub(crate) fn collect_asset_refs(source: &str) -> Vec<String> {
     for cap in SCRIPT_SRC_RE.captures_iter(&stripped) {
         if let Some(m) = cap.get(1) {
             let src = m.as_str().trim();
-            if !src.is_empty() && !is_remote_url(src) {
+            if !src.is_empty() && !is_remote_url(src) && !is_template_placeholder(src) {
                 refs.push(src.to_string());
             }
         }
@@ -86,7 +104,7 @@ pub(crate) fn collect_asset_refs(source: &str) -> Vec<String> {
     for cap in LINK_HREF_RE.captures_iter(&stripped) {
         if let Some(m) = cap.get(2) {
             let href = m.as_str().trim();
-            if !href.is_empty() && !is_remote_url(href) {
+            if !href.is_empty() && !is_remote_url(href) && !is_template_placeholder(href) {
                 refs.push(href.to_string());
             }
         }
@@ -94,7 +112,7 @@ pub(crate) fn collect_asset_refs(source: &str) -> Vec<String> {
     for cap in LINK_HREF_REVERSE_RE.captures_iter(&stripped) {
         if let Some(m) = cap.get(1) {
             let href = m.as_str().trim();
-            if !href.is_empty() && !is_remote_url(href) {
+            if !href.is_empty() && !is_remote_url(href) && !is_template_placeholder(href) {
                 refs.push(href.to_string());
             }
         }
@@ -306,6 +324,65 @@ mod tests {
     fn skips_inline_script() {
         let info = parse_html_to_module(FileId(0), r#"<script>console.log("hello");</script>"#, 0);
         assert!(info.imports.is_empty());
+    }
+
+    #[test]
+    fn skips_handlebars_placeholder_in_script_src() {
+        // Ember `app/index.html` references assets via `{{rootURL}}` /
+        // `{{config.assetsPath}}`, which ember-cli rewrites at build time.
+        // The raw specifier is never a real path, so the HTML asset scanner
+        // must skip it instead of seeding an unresolvable import. Same for
+        // any other Handlebars/Mustache/Jinja2-using site that ships a
+        // checked-in `index.html` template.
+        let info = parse_html_to_module(
+            FileId(0),
+            r#"<script src="{{rootURL}}assets/app.js"></script>
+               <script src="{{config.assetsPath}}vendor.js"></script>"#,
+            0,
+        );
+        assert!(
+            info.imports.is_empty(),
+            "Handlebars-placeholder script srcs should not enter the import graph; got {:?}",
+            info.imports
+        );
+    }
+
+    #[test]
+    fn skips_handlebars_placeholder_in_link_href() {
+        // Same protection for stylesheet / modulepreload `href`s.
+        let info = parse_html_to_module(
+            FileId(0),
+            r#"<link rel="stylesheet" href="{{rootURL}}assets/app.css">"#,
+            0,
+        );
+        assert!(info.imports.is_empty());
+    }
+
+    #[test]
+    fn skips_ember_cli_blueprint_placeholder() {
+        // ember-cli blueprint scaffolds carry `###APPNAME###` / `###DUMMY###`
+        // placeholders in checked-in addon-fixture HTML.
+        let info = parse_html_to_module(
+            FileId(0),
+            r####"<script src="###APPNAME###/app.js"></script>"####,
+            0,
+        );
+        assert!(info.imports.is_empty());
+    }
+
+    #[test]
+    fn extracts_normal_specifier_alongside_placeholders() {
+        // Mixed-mode: a real specifier still extracts even when sibling
+        // specifiers contain template placeholders. Guards against the
+        // filter accidentally short-circuiting the whole scan.
+        let info = parse_html_to_module(
+            FileId(0),
+            r#"<script src="{{rootURL}}assets/app.js"></script>
+               <script src="./src/main.ts"></script>"#,
+            0,
+        );
+        assert_eq!(info.imports.len(), 1);
+        assert_eq!(info.imports[0].source, "./src/main.ts");
     }
 
     #[test]
