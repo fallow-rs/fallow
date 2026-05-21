@@ -1012,28 +1012,39 @@ impl FallowLspServer {
 
     /// Decide whether a URI is stale relative to a captured version snapshot.
     ///
-    /// A URI is stale when the analysis ran against an older document state
-    /// than what the LSP currently knows about. Two conditions count:
+    /// A URI is stale when we cannot prove that the analysis ran against the
+    /// same document state the LSP currently holds for that URI. Three
+    /// conditions count:
     ///   1. The URI was in the snapshot AND the live version advanced past it
-    ///      (strict `>` because equal versions mean the same document state).
+    ///      (strict `>`; equal versions mean the same document state). The
+    ///      user edited the file during the analysis run.
     ///   2. The URI was in the snapshot AND the live document is now absent
     ///      (closed via `did_close` between snapshot and publish; we cannot
     ///      prove the client still owns the document).
+    ///   3. The URI is absent from the snapshot BUT present in `live_versions`
+    ///      (opened via `did_open` between snapshot and publish; the analysis
+    ///      ran without seeing the buffer the client now holds, and we have
+    ///      no version to attach to the publish so the client cannot drop a
+    ///      mismatched payload server-to-client). The next analysis triggered
+    ///      by `did_save` will publish a fresh result with a version slot.
     ///
-    /// URIs absent from the snapshot are NOT stale: they were never opened
-    /// via the LSP (e.g. unlisted-dependency diagnostics on a `package.json`
-    /// the user never opened) and no version race exists for them.
+    /// Only URIs absent from BOTH the snapshot AND `live_versions` are NOT
+    /// stale: these are cross-file diagnostics anchored to files the user
+    /// never `did_open`'d via the LSP (e.g. `package.json` for unlisted
+    /// dependencies, `pnpm-workspace.yaml` for catalog references). No
+    /// version race exists for them.
     fn uri_is_stale(
         uri: &Url,
         snapshot: &VersionSnapshot,
         live_versions: &FxHashMap<Url, i32>,
     ) -> bool {
-        let Some(&snapshot_version) = snapshot.get(uri) else {
-            return false;
-        };
-        match live_versions.get(uri) {
-            Some(&live_version) => live_version > snapshot_version,
-            None => true,
+        match (snapshot.get(uri), live_versions.get(uri)) {
+            (Some(&snapshot_version), Some(&live_version)) => live_version > snapshot_version,
+            // (Some(_), None) closed-mid-run + (None, Some(_)) opened-mid-run.
+            // Both share the same "skip publish" outcome but for distinct
+            // reasons documented in the helper's doc comment.
+            (Some(_), None) | (None, Some(_)) => true,
+            (None, None) => false,
         }
     }
 
@@ -2640,10 +2651,12 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn publish_emits_when_uri_absent_from_snapshot() {
+    async fn publish_emits_when_uri_absent_from_snapshot_and_live() {
         // Diagnostics on files the user never `did_open`'d via the LSP
-        // (e.g. unlisted-dependency findings on a package.json) must
-        // publish normally. The snapshot has nothing to say about them.
+        // (e.g. unlisted-dependency findings on a `package.json`, catalog
+        // reference findings on a `pnpm-workspace.yaml`) must publish
+        // normally. With the URI absent from BOTH the snapshot AND the
+        // live `documents` map, no version race exists.
         let (service, _) = LspService::build(FallowLspServer::new).finish();
         let backend = service.inner();
 
@@ -2658,7 +2671,42 @@ mod tests {
 
         assert!(
             backend.cached_diagnostics.read().await.contains_key(&uri),
-            "URIs absent from the snapshot are not subject to the staleness check"
+            "URIs absent from BOTH snapshot AND live documents must publish",
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn publish_skips_uri_when_opened_mid_run() {
+        // URI was absent from the snapshot (file was not open via the LSP
+        // when analysis started) but is now present in live `documents`
+        // (did_open landed between snapshot capture and publish). The
+        // analysis ran without seeing this buffer; we have no version to
+        // attach to a publish so the client cannot drop a mismatched
+        // payload server-to-client. Skip until the next analysis cycle.
+        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let backend = service.inner();
+
+        let uri = Url::parse("file:///opened-mid-run.ts").unwrap();
+        let snapshot: VersionSnapshot = FxHashMap::default();
+
+        // Simulate did_open landing between snapshot capture and publish.
+        install_document(backend, &uri, 1, "v1").await;
+
+        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        backend
+            .publish_collected_diagnostics(diags_by_file, &snapshot)
+            .await;
+
+        assert!(
+            !backend.cached_diagnostics.read().await.contains_key(&uri),
+            "opened-mid-run URI must skip publish + cache update; analysis \
+             did not see this buffer and we cannot version-stamp the publish",
+        );
+        assert!(
+            backend.previous_diagnostic_uris.read().await.contains(&uri),
+            "skipped opened-mid-run URI must still be tracked in new_uris \
+             so the next-run stale-clearer does not fire an empty publish",
         );
     }
 
