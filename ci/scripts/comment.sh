@@ -18,6 +18,20 @@ AUTH_HEADER="PRIVATE-TOKEN: ${GITLAB_TOKEN}"
 
 API_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
 
+# Initialize two sidecar markers so downstream jobs always see definitive
+# values. GitLab CI lacks an equivalent of $GITHUB_OUTPUT; these greppable
+# text files serve the same role when added to `artifacts: paths:`.
+# `fallow-skip-reason.txt` stays `none` here because comment.sh ALWAYS posts
+# (even on dedup-lookup failure, where it may duplicate the summary note).
+# `fallow-dedup-lookup-failed.txt` captures the degraded state without
+# misleading consumers into thinking the post itself was skipped.
+printf 'none\n' > fallow-skip-reason.txt
+printf 'false\n' > fallow-dedup-lookup-failed.txt
+
+# Track mktemp files so an EXIT trap cleans them up on signal or early exit.
+_FALLOW_TMPS=()
+trap 'rm -f "${_FALLOW_TMPS[@]:-}"' EXIT
+
 curl_retry() {
   local attempts="${FALLOW_API_RETRIES:-3}"
   local delay="${FALLOW_API_RETRY_DELAY:-2}"
@@ -122,11 +136,24 @@ render_with_fallow() {
 if render_with_fallow pr-comment-gitlab fallow-mr-comment.md; then
   COMMENT_BODY=$(cat fallow-mr-comment.md)
   MARKER="<!-- fallow-id: ${FALLOW_COMMENT_ID:-fallow-results} -->"
-  EXISTING_NOTE_ID=$(curl_paginate \
-    --header "${AUTH_HEADER}" \
-    "${API_URL}?per_page=100" \
-    | MARKER="$MARKER" jq -r '.[] | select(.body | contains(env.MARKER)) | .id' \
-    | head -1) || true
+  # Summary-only path: dedup-lookup failure means we cannot find an
+  # existing MR comment. Post a fresh one anyway (duplicate is recoverable,
+  # missing summary is silently broken). Warning + sidecar artifact still
+  # surface the degradation for operators / downstream gates.
+  _LOOKUP_TMP=$(mktemp); _LOOKUP_ERR=$(mktemp)
+  _FALLOW_TMPS+=("$_LOOKUP_TMP" "$_LOOKUP_ERR")
+  if curl_paginate --header "${AUTH_HEADER}" "${API_URL}?per_page=100" \
+       > "$_LOOKUP_TMP" 2> "$_LOOKUP_ERR"; then
+    EXISTING_NOTE_ID=$(MARKER="$MARKER" jq -r '.[] | select(.body | contains(env.MARKER)) | .id' "$_LOOKUP_TMP" \
+      | head -1)
+  else
+    EXISTING_NOTE_ID=""
+    _STDERR_HEAD=$(head -3 "$_LOOKUP_ERR" | tr '\n' ' ')
+    echo "WARNING: fallow: failed to look up existing MR summary comment; posting a new one (may duplicate). stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, verify GITLAB_TOKEN scopes (api, read_api)." >&2
+    # Summary-only path: the post proceeds anyway, so do NOT flip
+    # fallow-skip-reason.txt. Mark dedup-lookup-failed instead.
+    printf 'true\n' > fallow-dedup-lookup-failed.txt
+  fi
 
   if [ -n "$EXISTING_NOTE_ID" ]; then
     curl_retry \

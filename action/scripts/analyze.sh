@@ -219,6 +219,13 @@ echo "changed_since=${INPUT_CHANGED_SINCE:-}" >> "$GITHUB_OUTPUT"
 # actions/checkout depth), git diff against the base SHA fails. We compute the
 # list here once — trying git first, then the GitHub API — and save it for reuse.
 
+# Initialize the API-failure marker unconditionally so downstream gates always
+# see a definitive value (false), regardless of whether changed-since was
+# requested. Without this, `if:` conditions using
+# `outputs.changed_files_unavailable == 'false'` as a positive signal see an
+# absent field instead of false when changed-since is not set.
+[ -n "${GITHUB_OUTPUT:-}" ] && echo "changed_files_unavailable=false" >> "$GITHUB_OUTPUT"
+
 if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
   _ROOT="${INPUT_ROOT:-.}"
   _CHANGED=""
@@ -234,16 +241,32 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
     _CHANGED=$(cd "$_ROOT" && git diff --name-only --relative "${INPUT_CHANGED_SINCE}" HEAD -- . 2>/dev/null || true)
   fi
 
-  # Last resort: GitHub API (works regardless of clone depth)
+  # Last resort: GitHub API (works regardless of clone depth).
+  # Distinguish API failure (rate limit, 5xx, expired token, missing
+  # permissions) from "no PR context" (no GH_TOKEN / PR_NUMBER / GH_REPO).
+  # On API failure, set `changed_files_unavailable=true` so downstream
+  # workflow steps can gate on the degraded state rather than silently
+  # running unscoped analysis. The existing shallow-clone warning below
+  # keeps its framing for the no-API-credentials case.
   if [ -z "$_CHANGED" ] && [ -n "${GH_TOKEN:-}" ] && [ -n "${PR_NUMBER:-}" ] && [ -n "${GH_REPO:-}" ]; then
-    _API_FILES=$(gh api --paginate "repos/${GH_REPO}/pulls/${PR_NUMBER}/files" --jq '.[].filename' 2>/dev/null || true)
-    if [ -n "$_API_FILES" ]; then
-      if [ "$_ROOT" != "." ]; then
-        # Strip root prefix — API returns repo-root-relative paths, fallow JSON uses root-relative
-        _CHANGED=$(echo "$_API_FILES" | sed -n "s|^${_ROOT}/||p")
-      else
-        _CHANGED="$_API_FILES"
+    _API_TMP=$(mktemp)
+    _API_ERR=$(mktemp)
+    trap 'rm -f "$_API_TMP" "$_API_ERR"' EXIT
+    if gh api --paginate "repos/${GH_REPO}/pulls/${PR_NUMBER}/files" --jq '.[].filename' \
+         > "$_API_TMP" 2> "$_API_ERR"; then
+      _API_FILES=$(cat "$_API_TMP")
+      if [ -n "$_API_FILES" ]; then
+        if [ "$_ROOT" != "." ]; then
+          # Strip root prefix; API returns repo-root-relative paths, fallow JSON uses root-relative.
+          _CHANGED=$(echo "$_API_FILES" | sed -n "s|^${_ROOT}/||p")
+        else
+          _CHANGED="$_API_FILES"
+        fi
       fi
+    else
+      _STDERR_HEAD=$(head -3 "$_API_ERR" | tr '\n' ' ')
+      echo "::warning::fallow: GitHub API call to list PR files failed; analysis will run against the full codebase, not just files changed in this PR. stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, check 'gh auth status' and repo permissions." >&2
+      [ -n "${GITHUB_OUTPUT:-}" ] && echo "changed_files_unavailable=true" >> "$GITHUB_OUTPUT"
     fi
   fi
 

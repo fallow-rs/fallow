@@ -9,6 +9,20 @@ set -euo pipefail
 : "${PR_NUMBER:?PR_NUMBER is required}"
 : "${GH_REPO:?GH_REPO is required}"
 
+# Initialize two markers so downstream gates always see definitive values.
+# `post_skipped_reason` stays `none` here because comment.sh ALWAYS posts a
+# summary (even on dedup-lookup failure, where it may duplicate). The
+# `dedup_lookup_failed` marker captures the degraded state without misleading
+# consumers into thinking the post itself was skipped.
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "post_skipped_reason=none" >> "$GITHUB_OUTPUT"
+  echo "dedup_lookup_failed=false" >> "$GITHUB_OUTPUT"
+fi
+
+# Track mktemp files so an EXIT trap cleans them up on signal or early exit.
+_FALLOW_TMPS=()
+trap 'rm -f "${_FALLOW_TMPS[@]:-}"' EXIT
+
 gh_api_retry() {
   local attempts="${FALLOW_API_RETRIES:-3}"
   local delay="${FALLOW_API_RETRY_DELAY:-2}"
@@ -82,11 +96,27 @@ render_with_fallow() {
 if render_with_fallow pr-comment-github fallow-pr-comment.md; then
   COMMENT_BODY=$(cat fallow-pr-comment.md)
   export MARKER="<!-- fallow-id: ${FALLOW_COMMENT_ID:-fallow-results} -->"
-  COMMENT_ID=$(gh_api_retry \
-    --paginate \
-    "repos/${GH_REPO}/issues/${PR_NUMBER}/comments?per_page=100" \
-    --jq '.[] | select(.body | contains(env.MARKER)) | .id' \
-    2>/dev/null | head -1 || true)
+  # Summary-only path: dedup-lookup failure means we cannot find an
+  # existing summary comment. Post a fresh one anyway (duplicate is
+  # collapsible; missing summary is silently broken). The warning + marker
+  # still fire so operators can detect the degraded state.
+  _LOOKUP_TMP=$(mktemp); _LOOKUP_ERR=$(mktemp)
+  _FALLOW_TMPS+=("$_LOOKUP_TMP" "$_LOOKUP_ERR")
+  if gh_api_retry \
+       --paginate \
+       "repos/${GH_REPO}/issues/${PR_NUMBER}/comments?per_page=100" \
+       --jq '.[] | select(.body | contains(env.MARKER)) | .id' \
+       > "$_LOOKUP_TMP" 2> "$_LOOKUP_ERR"; then
+    COMMENT_ID=$(head -1 "$_LOOKUP_TMP")
+  else
+    COMMENT_ID=""
+    _STDERR_HEAD=$(head -3 "$_LOOKUP_ERR" | tr '\n' ' ')
+    echo "::warning::fallow: failed to look up existing PR summary comment; posting a new one (may duplicate). stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, check 'gh auth status' and repo permissions." >&2
+    # Summary-only path: the post proceeds anyway, so do NOT flip
+    # post_skipped_reason. Use dedup_lookup_failed so consumers can detect
+    # the degraded state without misreading it as a skipped post.
+    [ -n "${GITHUB_OUTPUT:-}" ] && echo "dedup_lookup_failed=true" >> "$GITHUB_OUTPUT"
+  fi
 
   if [ -n "$COMMENT_ID" ]; then
     if ! gh_api_retry \

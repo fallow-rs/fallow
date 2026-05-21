@@ -286,6 +286,15 @@ outputs:
   gate:
     description: 'Audit gate that was applied (new-only/all). Empty when command is not audit.'
     value: ${{ steps.analyze.outputs.gate }}
+  changed-files-unavailable:
+    description: 'true when the analyze step could not enumerate PR-changed files (transient GitHub API failure, expired token, missing permissions); false on the happy path. Always emitted, regardless of whether changed-since was requested. Gate on this in downstream workflow steps to detect when analysis ran unscoped vs scoped.'
+    value: ${{ steps.analyze.outputs.changed_files_unavailable }}
+  post-skipped-reason:
+    description: 'Reason the Post review comments step skipped posting (pagination_failure / none). Set to pagination_failure only when the inline-review POST was actually aborted to avoid duplicate threads (multi-comment dedup lookup failed). Empty when the Post review comments step did not run.'
+    value: ${{ steps.review.outputs.post_skipped_reason }}
+  dedup-lookup-failed:
+    description: 'true when a dedup lookup failed on the Post PR comment or Post review comments step. Distinct from post-skipped-reason: the summary-only paths post a fresh comment anyway (potential duplicate) when their lookup fails, while the multi-comment review path aborts. Gate on this to detect either degraded state. Resolves to "true" if EITHER step reported a failure, "false" otherwise.'
+    value: ${{ (steps.review.outputs.dedup_lookup_failed == 'true' || steps.comment.outputs.dedup_lookup_failed == 'true') && 'true' || 'false' }}
 
 runs:
   using: 'composite'
@@ -442,6 +451,7 @@ runs:
         token: ${{ inputs.github-token }}
 
     - name: Post PR comment
+      id: comment
       if: >-
         inputs.comment == 'true' &&
         github.event_name == 'pull_request' &&
@@ -467,6 +477,7 @@ runs:
       run: bash ${{ github.action_path }}/action/scripts/comment.sh
 
     - name: Post review comments
+      id: review
       if: >-
         inputs.review-comments == 'true' &&
         github.event_name == 'pull_request' &&

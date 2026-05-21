@@ -930,6 +930,358 @@ else
 fi
 rm -rf "$ACTION_TYPED_WORK"
 
+# =========================================================================
+# API failure handling: changed-files marker + dedup-lookup abort
+# =========================================================================
+# Covers issue #470: silent gh api failures must surface as both a
+# structured GITHUB_OUTPUT marker AND a stderr ::warning::, never as
+# unscoped analysis or duplicate PR comments.
+
+echo ""
+echo "=== API failure handling (issue #470) ==="
+
+API_FAIL_WORK=$(mktemp -d)
+API_FAIL_BIN="$API_FAIL_WORK/bin"
+mkdir -p "$API_FAIL_BIN"
+SCRIPTS_DIR="$DIR/../scripts"
+
+# --- Test 1: analyze.sh emits changed_files_unavailable=true when gh api fails ---
+# Simulate a 500 from the GitHub API. The mock fails the gh api --paginate call
+# unconditionally; analyze.sh's git diff fallback also fails (no real git
+# history against the bogus SHA), so the script lands in the gh api branch.
+
+cat > "$API_FAIL_BIN/gh" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = "api" ]; then
+  echo "gh: HTTP 500: Internal Server Error (api.github.com/repos/owner/repo/pulls/123/files)" >&2
+  exit 1
+fi
+exit 0
+SH
+chmod +x "$API_FAIL_BIN/gh"
+
+API_FAIL_OUTPUT="$API_FAIL_WORK/github_output"
+: > "$API_FAIL_OUTPUT"
+API_FAIL_STDERR=$(cd "$API_FAIL_WORK" \
+  && PATH="$API_FAIL_BIN:$PATH" \
+  GITHUB_OUTPUT="$API_FAIL_OUTPUT" \
+  INPUT_ROOT="." \
+  INPUT_COMMAND="check" \
+  INPUT_FORMAT="json" \
+  INPUT_CHANGED_SINCE="0000000000000000000000000000000000000000" \
+  PR_NUMBER="123" \
+  GH_REPO="owner/repo" \
+  GH_TOKEN="test" \
+  FALLOW_API_RETRIES=1 \
+  FALLOW_API_RETRY_DELAY=0 \
+  bash "$SCRIPTS_DIR/analyze.sh" 2>&1 1>/dev/null) || true
+
+assert_contains "$(cat "$API_FAIL_OUTPUT")" "changed_files_unavailable=true" \
+  "analyze: emits changed_files_unavailable=true on gh api failure"
+assert_contains "$API_FAIL_STDERR" "GitHub API call to list PR files failed" \
+  "analyze: stderr names API failure mode (not shallow-clone)"
+assert_contains "$API_FAIL_STDERR" "gh auth status" \
+  "analyze: warning includes actionable hint (gh auth status)"
+
+# --- Test 2: analyze.sh emits changed_files_unavailable=false when gh api succeeds ---
+
+cat > "$API_FAIL_BIN/gh" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = "api" ]; then
+  printf 'src/a.ts\nsrc/b.ts\n'
+  exit 0
+fi
+exit 0
+SH
+chmod +x "$API_FAIL_BIN/gh"
+
+: > "$API_FAIL_OUTPUT"
+(cd "$API_FAIL_WORK" \
+  && PATH="$API_FAIL_BIN:$PATH" \
+  GITHUB_OUTPUT="$API_FAIL_OUTPUT" \
+  INPUT_ROOT="." \
+  INPUT_COMMAND="check" \
+  INPUT_FORMAT="json" \
+  INPUT_CHANGED_SINCE="0000000000000000000000000000000000000000" \
+  PR_NUMBER="123" \
+  GH_REPO="owner/repo" \
+  GH_TOKEN="test" \
+  FALLOW_API_RETRIES=1 \
+  FALLOW_API_RETRY_DELAY=0 \
+  bash "$SCRIPTS_DIR/analyze.sh" >/dev/null 2>&1) || true
+
+if grep -q '^changed_files_unavailable=false$' "$API_FAIL_OUTPUT" \
+    && ! grep -q '^changed_files_unavailable=true$' "$API_FAIL_OUTPUT"; then
+  pass "analyze: emits changed_files_unavailable=false on gh api success"
+else
+  fail "analyze: emits changed_files_unavailable=false on gh api success" \
+    "expected only =false, got: $(grep changed_files_unavailable "$API_FAIL_OUTPUT" || echo 'absent')"
+fi
+
+# --- Test 2b: analyze.sh emits changed_files_unavailable=false even without INPUT_CHANGED_SINCE ---
+# The marker must be unconditional so downstream `if:` gates can match on it
+# as a positive signal (== 'false') without seeing an absent-vs-false ambiguity.
+
+: > "$API_FAIL_OUTPUT"
+(cd "$API_FAIL_WORK" \
+  && PATH="$API_FAIL_BIN:$PATH" \
+  GITHUB_OUTPUT="$API_FAIL_OUTPUT" \
+  INPUT_ROOT="." \
+  INPUT_COMMAND="check" \
+  INPUT_FORMAT="json" \
+  bash "$SCRIPTS_DIR/analyze.sh" >/dev/null 2>&1) || true
+
+if grep -q '^changed_files_unavailable=false$' "$API_FAIL_OUTPUT"; then
+  pass "analyze: emits changed_files_unavailable=false even without INPUT_CHANGED_SINCE"
+else
+  fail "analyze: emits changed_files_unavailable=false even without INPUT_CHANGED_SINCE" \
+    "expected =false (unconditional init), got: $(grep changed_files_unavailable "$API_FAIL_OUTPUT" || echo 'absent')"
+fi
+
+# --- Test 3-5: review.sh dedup-lookup failure paths ---
+# Shared mock harness: fallow renders the typed envelope; gh fails on the
+# pulls/.../comments paginate (multi-comment dedup endpoint) and on the
+# issues/.../comments paginate (summary-only dedup endpoint), but succeeds
+# on every other gh api call (POST to reviews / comments / reconcile).
+
+api_fail_review_run() {
+  local label=$1
+  local exit_status_var=$2
+  local output_var=$3
+  local stderr_var=$4
+  local mock_zero=$5     # "1" for summary-only path, empty for multi-comment
+  local fail_mode=$6     # "5xx" or "4xx"
+  local stderr_msg
+  case "$fail_mode" in
+    5xx) stderr_msg="HTTP 502: Bad Gateway (api.github.com)" ;;
+    4xx) stderr_msg="HTTP 403: Forbidden (api.github.com)" ;;
+    *)   stderr_msg="HTTP 502: Bad Gateway" ;;
+  esac
+  cat > "$API_FAIL_BIN/gh" <<SH
+#!/usr/bin/env bash
+printf 'gh %s\n' "\$*" >> "\$MOCK_LOG"
+if [ "\${1:-}" = "api" ]; then
+  if printf '%s\n' "\$*" | grep -q -- '--paginate' && printf '%s\n' "\$*" | grep -qE 'pulls/[0-9]+/comments|issues/[0-9]+/comments'; then
+    echo "gh: ${stderr_msg}" >&2
+    exit 1
+  fi
+  exit 0
+fi
+SH
+  chmod +x "$API_FAIL_BIN/gh"
+
+  cat > "$API_FAIL_BIN/fallow" <<'SH'
+#!/usr/bin/env bash
+printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
+if [ "${1:-}" = "ci" ]; then
+  printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
+  exit 0
+fi
+format=""
+previous=""
+for arg in "$@"; do
+  if [ "$previous" = "--format" ]; then
+    format="$arg"; break
+  fi
+  previous="$arg"
+done
+if [ "$format" = "review-github" ]; then
+  if [ "${MOCK_ZERO_REVIEW:-}" = "1" ]; then
+    cat <<'JSON'
+{"event":"COMMENT","body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[],"meta":{"schema":"fallow-review-envelope/v1","provider":"github"}}
+JSON
+  else
+    cat <<'JSON'
+{"event":"COMMENT","body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[{"path":"src/a.ts","line":1,"side":"RIGHT","body":"**warn** `fallow/smoke`: smoke\n\n<!-- fallow-fingerprint: abc -->","fingerprint":"abc"}],"meta":{"schema":"fallow-review-envelope/v1","provider":"github"}}
+JSON
+  fi
+fi
+SH
+  chmod +x "$API_FAIL_BIN/fallow"
+
+  : > "$API_FAIL_OUTPUT"
+  : > "$API_FAIL_WORK/mock.log"
+  printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$API_FAIL_WORK/fallow-analysis-args.sh"
+  local _stderr _status
+  _stderr=$(cd "$API_FAIL_WORK" \
+    && PATH="$API_FAIL_BIN:$PATH" \
+    MOCK_LOG="$API_FAIL_WORK/mock.log" \
+    MOCK_ZERO_REVIEW="$mock_zero" \
+    GH_TOKEN="test" \
+    PR_NUMBER="123" \
+    GH_REPO="owner/repo" \
+    GITHUB_OUTPUT="$API_FAIL_OUTPUT" \
+    FALLOW_COMMAND="check" \
+    FALLOW_ROOT="." \
+    MAX_COMMENTS="5" \
+    FALLOW_API_RETRIES=1 \
+    FALLOW_API_RETRY_DELAY=0 \
+    bash "$SCRIPTS_DIR/review.sh" 2>&1 1>/dev/null)
+  _status=$?
+  printf -v "$exit_status_var" '%s' "$_status"
+  printf -v "$output_var" '%s' "$(cat "$API_FAIL_OUTPUT")"
+  printf -v "$stderr_var" '%s' "$_stderr"
+}
+
+# Test 3: multi-comment dedup path, page-2 5xx -> exit 0, no POST, marker set
+api_fail_review_run "multi-5xx" R3_STATUS R3_OUTPUT R3_STDERR "" "5xx"
+[ "$R3_STATUS" -eq 0 ] && pass "review.sh: multi-comment dedup-lookup 5xx failure exits 0" \
+  || fail "review.sh: multi-comment dedup-lookup 5xx failure exits 0" "got $R3_STATUS"
+assert_contains "$R3_OUTPUT" "post_skipped_reason=pagination_failure" \
+  "review.sh: emits post_skipped_reason=pagination_failure on dedup-lookup failure"
+assert_contains "$R3_STDERR" "skipping inline review to avoid duplicates" \
+  "review.sh: warning surfaces dedup-lookup skip"
+if cat "$API_FAIL_WORK/mock.log" 2>/dev/null | /usr/bin/grep -q "pulls/123/reviews"; then
+  fail "review.sh: no review POST after dedup-lookup failure" "review POST happened"
+else
+  pass "review.sh: no review POST after dedup-lookup failure"
+fi
+
+# Test 4: multi-comment dedup path, page-2 4xx -> exit 1
+api_fail_review_run "multi-4xx" R4_STATUS R4_OUTPUT R4_STDERR "" "4xx"
+[ "$R4_STATUS" -eq 1 ] && pass "review.sh: multi-comment dedup-lookup 4xx failure exits 1" \
+  || fail "review.sh: multi-comment dedup-lookup 4xx failure exits 1" "got $R4_STATUS"
+
+# Test 5: summary-only path posts anyway on dedup-lookup failure (Decision 3).
+# On this path we set dedup_lookup_failed=true but keep post_skipped_reason=none
+# because the post is NOT skipped (the summary is posted, possibly duplicating).
+api_fail_review_run "summary-5xx" R5_STATUS R5_OUTPUT R5_STDERR "1" "5xx"
+[ "$R5_STATUS" -eq 0 ] && pass "review.sh: summary-only path exits 0 on dedup-lookup failure" \
+  || fail "review.sh: summary-only path exits 0 on dedup-lookup failure" "got $R5_STATUS"
+assert_contains "$R5_STDERR" "posting a new one (may duplicate)" \
+  "review.sh: summary-only path warning explains duplicate-risk fallback"
+assert_contains "$R5_OUTPUT" "dedup_lookup_failed=true" \
+  "review.sh: summary-only dedup-lookup failure flips dedup_lookup_failed=true"
+if grep -q '^post_skipped_reason=pagination_failure$' <(echo "$R5_OUTPUT"); then
+  fail "review.sh: summary-only path does NOT set post_skipped_reason=pagination_failure" \
+    "post_skipped_reason should remain 'none' because the post still happens"
+else
+  pass "review.sh: summary-only path does NOT set post_skipped_reason=pagination_failure"
+fi
+if cat "$API_FAIL_WORK/mock.log" 2>/dev/null | /usr/bin/grep -qE "issues/123/comments .*--method POST"; then
+  pass "review.sh: summary-only path POSTs a new summary despite dedup-lookup failure"
+else
+  fail "review.sh: summary-only path POSTs a new summary despite dedup-lookup failure" \
+    "no POST to issues/123/comments observed"
+fi
+
+# Test 5b: retry-exhausted 429 must exit 0 (not 1). 429 looks like 4xx by
+# regex but is the rate-limited variant: transient even after retry exhaustion,
+# so escalating to a CI failure is wrong.
+cat > "$API_FAIL_BIN/gh" <<'SH'
+#!/usr/bin/env bash
+printf 'gh %s\n' "$*" >> "$MOCK_LOG"
+if [ "${1:-}" = "api" ]; then
+  if printf '%s\n' "$*" | grep -q -- '--paginate' && printf '%s\n' "$*" | grep -qE 'pulls/[0-9]+/comments'; then
+    echo "gh: HTTP 429: API rate limit exceeded (api.github.com)" >&2
+    exit 1
+  fi
+  exit 0
+fi
+SH
+chmod +x "$API_FAIL_BIN/gh"
+write_fallow_review_mock_inline() { :; }
+cat > "$API_FAIL_BIN/fallow" <<'SH'
+#!/usr/bin/env bash
+printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
+if [ "${1:-}" = "ci" ]; then
+  printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
+  exit 0
+fi
+format=""; previous=""
+for arg in "$@"; do
+  if [ "$previous" = "--format" ]; then format="$arg"; break; fi
+  previous="$arg"
+done
+if [ "$format" = "review-github" ]; then
+  cat <<'JSON'
+{"event":"COMMENT","body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[{"path":"src/a.ts","line":1,"side":"RIGHT","body":"**warn** `fallow/smoke`: smoke\n\n<!-- fallow-fingerprint: abc -->","fingerprint":"abc"}],"meta":{"schema":"fallow-review-envelope/v1","provider":"github"}}
+JSON
+fi
+SH
+chmod +x "$API_FAIL_BIN/fallow"
+
+: > "$API_FAIL_OUTPUT"
+: > "$API_FAIL_WORK/mock.log"
+R5B_STDERR=$(cd "$API_FAIL_WORK" \
+  && PATH="$API_FAIL_BIN:$PATH" \
+  MOCK_LOG="$API_FAIL_WORK/mock.log" \
+  GH_TOKEN=test PR_NUMBER=123 GH_REPO=owner/repo \
+  GITHUB_OUTPUT="$API_FAIL_OUTPUT" \
+  FALLOW_COMMAND=check FALLOW_ROOT=. MAX_COMMENTS=5 \
+  FALLOW_API_RETRIES=1 FALLOW_API_RETRY_DELAY=0 \
+  bash "$SCRIPTS_DIR/review.sh" 2>&1 1>/dev/null)
+R5B_STATUS=$?
+[ "$R5B_STATUS" -eq 0 ] \
+  && pass "review.sh: retry-exhausted 429 exits 0 (transient, not auth error)" \
+  || fail "review.sh: retry-exhausted 429 exits 0 (transient, not auth error)" "got $R5B_STATUS"
+
+# Test 6: comment.sh summary-only path posts anyway on dedup-lookup failure
+cat > "$API_FAIL_BIN/gh" <<'SH'
+#!/usr/bin/env bash
+printf 'gh %s\n' "$*" >> "$MOCK_LOG"
+if [ "${1:-}" = "api" ]; then
+  if printf '%s\n' "$*" | grep -q -- '--paginate' && printf '%s\n' "$*" | grep -q 'issues/123/comments'; then
+    echo "gh: HTTP 502: Bad Gateway" >&2
+    exit 1
+  fi
+  exit 0
+fi
+SH
+chmod +x "$API_FAIL_BIN/gh"
+
+cat > "$API_FAIL_BIN/fallow" <<'SH'
+#!/usr/bin/env bash
+printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
+format=""; previous=""
+for arg in "$@"; do
+  if [ "$previous" = "--format" ]; then format="$arg"; break; fi
+  previous="$arg"
+done
+if [ "$format" = "pr-comment-github" ]; then
+  cat <<'BODY'
+<!-- fallow-id: fallow-results -->
+### Fallow smoke
+
+Generated by fallow.
+BODY
+fi
+SH
+chmod +x "$API_FAIL_BIN/fallow"
+
+: > "$API_FAIL_OUTPUT"
+: > "$API_FAIL_WORK/mock.log"
+C6_STDERR=$(cd "$API_FAIL_WORK" \
+  && PATH="$API_FAIL_BIN:$PATH" \
+  MOCK_LOG="$API_FAIL_WORK/mock.log" \
+  GH_TOKEN="test" \
+  PR_NUMBER="123" \
+  GH_REPO="owner/repo" \
+  GITHUB_OUTPUT="$API_FAIL_OUTPUT" \
+  FALLOW_COMMAND="check" \
+  FALLOW_API_RETRIES=1 \
+  FALLOW_API_RETRY_DELAY=0 \
+  bash "$SCRIPTS_DIR/comment.sh" 2>&1 1>/dev/null) || true
+
+assert_contains "$(cat "$API_FAIL_OUTPUT")" "dedup_lookup_failed=true" \
+  "comment.sh: emits dedup_lookup_failed=true on dedup-lookup failure"
+if grep -q '^post_skipped_reason=pagination_failure$' "$API_FAIL_OUTPUT"; then
+  fail "comment.sh: does NOT set post_skipped_reason=pagination_failure" \
+    "post_skipped_reason should remain 'none' because comment.sh always posts"
+else
+  pass "comment.sh: does NOT set post_skipped_reason=pagination_failure"
+fi
+assert_contains "$C6_STDERR" "posting a new one (may duplicate)" \
+  "comment.sh: warning explains duplicate-risk fallback"
+if /usr/bin/grep -qE "issues/123/comments .*--method POST" "$API_FAIL_WORK/mock.log"; then
+  pass "comment.sh: POSTs a new summary despite dedup-lookup failure"
+else
+  fail "comment.sh: POSTs a new summary despite dedup-lookup failure" \
+    "no POST to issues/123/comments observed"
+fi
+
+rm -rf "$API_FAIL_WORK"
+
 # --- Pre-computed changed files (shallow clone fallback) tests ---
 
 echo ""

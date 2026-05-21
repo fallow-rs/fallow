@@ -671,6 +671,12 @@ variables:
     when: always
     paths:
       - fallow-results.json
+      # Sidecar markers written by comment.sh / review.sh on dedup-lookup
+      # failure. Downstream jobs gate on these to detect degraded posting
+      # state (greppable: `none` vs `pagination_failure` for skip-reason,
+      # `false` vs `true` for dedup-lookup-failed). See issue #470.
+      - fallow-skip-reason.txt
+      - fallow-dedup-lookup-failed.txt
     reports:
       codequality:
         - gl-code-quality-report.json

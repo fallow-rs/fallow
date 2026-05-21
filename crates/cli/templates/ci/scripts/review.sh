@@ -31,6 +31,27 @@ AUTH_HEADER="PRIVATE-TOKEN: ${GITLAB_TOKEN}"
 NOTES_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
 DISCUSSIONS_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/discussions"
 
+# Initialize two sidecar markers so downstream jobs always see definitive
+# values. GitLab CI lacks an equivalent of $GITHUB_OUTPUT for cross-job
+# propagation; these greppable text files serve the same role when added to
+# `artifacts: paths:`. `fallow-skip-reason.txt` is `pagination_failure` only
+# when the inline-review POST is actually skipped (multi-discussion abort);
+# `fallow-dedup-lookup-failed.txt` is `true` on any dedup-lookup failure
+# (including the summary-only path where we post a potential duplicate).
+#
+# IMPORTANT: comment.sh runs BEFORE review.sh in the default template
+# (ci/gitlab-ci.yml). If comment.sh hit its dedup-lookup failure path it
+# already wrote `true` to fallow-dedup-lookup-failed.txt; reinitializing
+# unconditionally here would clobber that value and hide the degraded
+# state from downstream jobs. Only initialize each marker when the file
+# does not already exist.
+[ -f fallow-skip-reason.txt ] || printf 'none\n' > fallow-skip-reason.txt
+[ -f fallow-dedup-lookup-failed.txt ] || printf 'false\n' > fallow-dedup-lookup-failed.txt
+
+# Track mktemp files so an EXIT trap cleans them up on signal or early exit.
+_FALLOW_TMPS=()
+trap 'rm -f "${_FALLOW_TMPS[@]:-}"' EXIT
+
 curl_retry() {
   local attempts="${FALLOW_API_RETRIES:-3}"
   local delay="${FALLOW_API_RETRY_DELAY:-2}"
@@ -177,11 +198,24 @@ if render_with_fallow review-gitlab fallow-review.json; then
   TOTAL=$(jq '.comments | length' fallow-review.json)
   if [ "$TOTAL" -eq 0 ]; then
     BODY=$(jq -r '.body' fallow-review.json)
-    EXISTING_NOTE_ID=$(curl_paginate \
-      --header "${AUTH_HEADER}" \
-      "${NOTES_URL}?per_page=100" \
-      | jq -r '.[] | select(.body | contains("<!-- fallow-review -->")) | .id' \
-      | head -1) || true
+    # Summary-only path: dedup-lookup failure means we cannot find an
+    # existing body note. Posting a fresh one (potential duplicate) beats
+    # a missing summary, which is silently broken from the MR author's
+    # view. The WARNING + sidecar artifact still surface the degradation.
+    _NOTE_LOOKUP_TMP=$(mktemp); _NOTE_LOOKUP_ERR=$(mktemp)
+    _FALLOW_TMPS+=("$_NOTE_LOOKUP_TMP" "$_NOTE_LOOKUP_ERR")
+    if curl_paginate --header "${AUTH_HEADER}" "${NOTES_URL}?per_page=100" \
+         > "$_NOTE_LOOKUP_TMP" 2> "$_NOTE_LOOKUP_ERR"; then
+      EXISTING_NOTE_ID=$(jq -r '.[] | select(.body | contains("<!-- fallow-review -->")) | .id' "$_NOTE_LOOKUP_TMP" \
+        | head -1)
+    else
+      EXISTING_NOTE_ID=""
+      _STDERR_HEAD=$(head -3 "$_NOTE_LOOKUP_ERR" | tr '\n' ' ')
+      echo "WARNING: fallow: failed to look up existing MR summary note; posting a new one (may duplicate). stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, verify GITLAB_TOKEN scopes (api, read_api)." >&2
+      # Summary-only path: the post proceeds anyway, so do NOT flip
+      # fallow-skip-reason.txt. Mark dedup-lookup-failed instead.
+      printf 'true\n' > fallow-dedup-lookup-failed.txt
+    fi
     if [ -n "$EXISTING_NOTE_ID" ]; then
       curl_retry \
         --header "${AUTH_HEADER}" \
@@ -205,10 +239,42 @@ if render_with_fallow review-gitlab fallow-review.json; then
     exit 0
   fi
 
-  EXISTING_FPS=$(curl_paginate --header "${AUTH_HEADER}" "${DISCUSSIONS_URL}?per_page=100" 2>/dev/null \
-    | jq -r '.[].notes[].body? // empty' \
-    | sed -n 's/.*fallow-fingerprint: \([^ ]*\) .*/\1/p' \
-    | jq -R -s 'split("\n") | map(select(length > 0))' || echo '[]')
+  # Multi-discussion dedup path: a failed lookup here means we cannot
+  # enumerate existing fingerprints, so posting any new inline discussions
+  # risks N duplicate threads. Abort the post step (skip reconcile_review
+  # for the same root-cause reason) and surface the failure as both a
+  # stderr warning and a sidecar artifact. 4xx is a configuration error
+  # and warrants a loud CI failure (exit 1); 5xx / 429 / network blips
+  # warrant exit 0 since a re-run may succeed.
+  _DEDUP_TMP=$(mktemp); _DEDUP_ERR=$(mktemp)
+  _FALLOW_TMPS+=("$_DEDUP_TMP" "$_DEDUP_ERR")
+  if curl_paginate --header "${AUTH_HEADER}" "${DISCUSSIONS_URL}?per_page=100" \
+       > "$_DEDUP_TMP" 2> "$_DEDUP_ERR"; then
+    EXISTING_FPS=$(jq -r '.[].notes[].body? // empty' "$_DEDUP_TMP" \
+      | sed -n 's/.*fallow-fingerprint: \([^ ]*\) .*/\1/p' \
+      | jq -R -s 'split("\n") | map(select(length > 0))')
+  else
+    _STDERR_HEAD=$(head -3 "$_DEDUP_ERR" | tr '\n' ' ')
+    echo "WARNING: fallow: failed to fetch existing MR discussions; skipping inline review to avoid duplicates. stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, verify GITLAB_TOKEN scopes (api, read_api)." >&2
+    printf 'pagination_failure\n' > fallow-skip-reason.txt
+    printf 'true\n' > fallow-dedup-lookup-failed.txt
+    # 4xx (auth, scope, permission) is a configuration error: a re-run
+    # will not help, so escalate to exit 1 for loud CI failure. Exclude
+    # 429 explicitly: it is the rate-limited variant and is transient
+    # even though curl_retry has already exhausted its budget. 5xx, 429,
+    # and network errors fall through to exit 0 (re-run may help).
+    # Note: ci/gitlab-ci.yml currently calls this script as
+    # `bash review.sh || echo "WARNING: ..."`, which swallows exit 1.
+    # Operators who want strict CI gating on 4xx should remove the
+    # `|| echo` from their gitlab-ci.yml, or gate on
+    # `fallow-skip-reason.txt` and `fallow-dedup-lookup-failed.txt`
+    # in a downstream job.
+    if grep -qE 'HTTP 4[0-9][0-9]|error: 4[0-9][0-9]' "$_DEDUP_ERR" \
+        && ! grep -qE 'HTTP 429|error: 429|rate.limit' "$_DEDUP_ERR"; then
+      exit 1
+    fi
+    exit 0
+  fi
   jq --argjson existing "${EXISTING_FPS:-[]}" '
     .comments |= map(select((.fingerprint as $fp | $existing | index($fp)) | not))
   ' fallow-review.json > fallow-review-new.json

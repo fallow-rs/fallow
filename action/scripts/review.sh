@@ -51,6 +51,21 @@ if [[ "${FALLOW_ROOT:-}" =~ \.\. ]]; then
   exit 2
 fi
 
+# Initialize two markers so downstream gates always see definitive values.
+# `post_skipped_reason` is only set to `pagination_failure` when we actually
+# skip POSTing (multi-comment dedup abort). `dedup_lookup_failed` is set to
+# `true` on any dedup-lookup failure, including the summary-only path where
+# we proceed and may post a duplicate.
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "post_skipped_reason=none" >> "$GITHUB_OUTPUT"
+  echo "dedup_lookup_failed=false" >> "$GITHUB_OUTPUT"
+fi
+
+# Track every mktemp file so an EXIT trap cleans them up on signal or early
+# exit. Avoids leaks when an abort path skips inline `rm -f`.
+_FALLOW_TMPS=()
+trap 'rm -f "${_FALLOW_TMPS[@]:-}"' EXIT
+
 render_with_fallow() {
   local format=$1
   local output=$2
@@ -107,11 +122,27 @@ if render_with_fallow review-github fallow-review.json; then
   TOTAL=$(jq '.comments | length' fallow-review.json)
   if [ "$TOTAL" -eq 0 ]; then
     BODY=$(jq -r '.body' fallow-review.json)
-    REVIEW_COMMENT_ID=$(gh_api_retry \
-      --paginate \
-      "repos/${GH_REPO}/issues/${PR_NUMBER}/comments?per_page=100" \
-      --jq '.[] | select(.body | contains("<!-- fallow-review -->")) | .id' \
-      2>/dev/null | head -1 || true)
+    # Summary-only path: a dedup-lookup failure here means we cannot tell
+    # whether a previous summary comment exists. Posting anyway (creating a
+    # duplicate) is less bad than not posting at all, since a missing
+    # summary is silently broken from the PR author's view while a duplicate
+    # is collapsible. The warning + post_skipped_reason marker still fire.
+    _REVIEW_LOOKUP_TMP=$(mktemp); _REVIEW_LOOKUP_ERR=$(mktemp)
+    _FALLOW_TMPS+=("$_REVIEW_LOOKUP_TMP" "$_REVIEW_LOOKUP_ERR")
+    if gh_api_retry --paginate \
+         "repos/${GH_REPO}/issues/${PR_NUMBER}/comments?per_page=100" \
+         --jq '.[] | select(.body | contains("<!-- fallow-review -->")) | .id' \
+         > "$_REVIEW_LOOKUP_TMP" 2> "$_REVIEW_LOOKUP_ERR"; then
+      REVIEW_COMMENT_ID=$(head -1 "$_REVIEW_LOOKUP_TMP")
+    else
+      REVIEW_COMMENT_ID=""
+      _STDERR_HEAD=$(head -3 "$_REVIEW_LOOKUP_ERR" | tr '\n' ' ')
+      echo "::warning::fallow: failed to look up existing summary comment; posting a new one (may duplicate). stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, check 'gh auth status' and repo permissions." >&2
+      # Summary-only path: the post proceeds anyway, so do NOT flip
+      # post_skipped_reason. Use dedup_lookup_failed so operators can still
+      # detect the degraded state without misreading it as a skipped post.
+      [ -n "${GITHUB_OUTPUT:-}" ] && echo "dedup_lookup_failed=true" >> "$GITHUB_OUTPUT"
+    fi
     if [ -n "$REVIEW_COMMENT_ID" ]; then
       gh_api_retry "repos/${GH_REPO}/issues/comments/${REVIEW_COMMENT_ID}" \
         --method PATCH \
@@ -129,9 +160,39 @@ if render_with_fallow review-github fallow-review.json; then
     exit 0
   fi
 
-  EXISTING_FPS=$(gh_api_retry --paginate "repos/${GH_REPO}/pulls/${PR_NUMBER}/comments?per_page=100" --jq '.[].body' 2>/dev/null \
-    | sed -n 's/.*fallow-fingerprint: \([^ ]*\) .*/\1/p' \
-    | jq -R -s 'split("\n") | map(select(length > 0))' || echo '[]')
+  # Multi-comment dedup path: a failed lookup here means we cannot
+  # enumerate existing fingerprints, so posting any new inline comments
+  # risks N duplicate threads. Abort the post step (skip reconcile_review
+  # for the same root-cause reason) and surface the failure as both a
+  # stderr warning and a structured output marker. 4xx is a configuration
+  # error and warrants a loud CI failure; 5xx / 429 / network blips warrant
+  # exit 0 since a re-run may succeed.
+  _DEDUP_TMP=$(mktemp); _DEDUP_ERR=$(mktemp)
+  _FALLOW_TMPS+=("$_DEDUP_TMP" "$_DEDUP_ERR")
+  if gh_api_retry --paginate \
+       "repos/${GH_REPO}/pulls/${PR_NUMBER}/comments?per_page=100" \
+       --jq '.[].body' \
+       > "$_DEDUP_TMP" 2> "$_DEDUP_ERR"; then
+    EXISTING_FPS=$(sed -n 's/.*fallow-fingerprint: \([^ ]*\) .*/\1/p' "$_DEDUP_TMP" \
+      | jq -R -s 'split("\n") | map(select(length > 0))')
+  else
+    _STDERR_HEAD=$(head -3 "$_DEDUP_ERR" | tr '\n' ' ')
+    echo "::warning::fallow: failed to fetch existing PR review comments; skipping inline review to avoid duplicates. stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, check 'gh auth status' and repo permissions." >&2
+    if [ -n "${GITHUB_OUTPUT:-}" ]; then
+      echo "post_skipped_reason=pagination_failure" >> "$GITHUB_OUTPUT"
+      echo "dedup_lookup_failed=true" >> "$GITHUB_OUTPUT"
+    fi
+    # 4xx (auth, scope, permission) is a configuration error: a re-run
+    # will not help, so escalate to exit 1 for loud CI failure. Exclude
+    # 429 explicitly: it is the rate-limited variant and is transient
+    # even though gh_api_retry has already exhausted its budget. 5xx,
+    # 429, and network errors fall through to exit 0 (re-run may help).
+    if grep -qE 'HTTP 4[0-9][0-9]|error: 4[0-9][0-9]' "$_DEDUP_ERR" \
+        && ! grep -qE 'HTTP 429|error: 429|rate.limit' "$_DEDUP_ERR"; then
+      exit 1
+    fi
+    exit 0
+  fi
   jq --argjson existing "${EXISTING_FPS:-[]}" '
     .comments |= map(select((.fingerprint as $fp | $existing | index($fp)) | not))
   ' fallow-review.json > fallow-review-new.json
