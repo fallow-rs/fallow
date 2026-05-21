@@ -4390,8 +4390,13 @@ constituent_fingerprints?: string[]
  * True when [`Self::body`] was truncated to fit a downstream provider's
  * note-size budget (today: 65,536 bytes). The body retains the closing
  * fallow-fingerprint marker so reconciliation continues to work after
- * truncation. Pairs with the inline `<!-- fallow-truncated -->` HTML
- * marker and the human `... (truncated)` text.
+ * truncation.
+ *
+ * **Co-presence invariant**: `truncated == true` always implies the body
+ * contains an inline `<!-- fallow-truncated -->` HTML marker and the
+ * `> Body truncated by fallow.` blockquote breadcrumb, and vice versa.
+ * All three signals are emitted together; consumers may use any one
+ * (the typed boolean is the authoritative machine-readable signal).
  */
 truncated?: boolean
 }
@@ -4418,7 +4423,9 @@ fingerprint: string
 constituent_fingerprints?: string[]
 /**
  * True when [`Self::body`] was truncated to fit GitLab's note-size
- * budget. See [`GitHubReviewComment::truncated`].
+ * budget. See [`GitHubReviewComment::truncated`] for the full
+ * co-presence invariant with the inline HTML marker and human
+ * blockquote breadcrumb.
  */
 truncated?: boolean
 }

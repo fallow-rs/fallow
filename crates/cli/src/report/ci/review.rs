@@ -39,12 +39,13 @@ const MARKER_SUFFIX_V2: &str = " -->";
 
 /// Human-readable truncation breadcrumb appended to the body when the
 /// rendered content exceeds [`MAX_COMMENT_BODY_BYTES`]. The HTML comment is
-/// machine-detectable; the text after it is a human-readable echo so PR
-/// reviewers see the truncation in the rendered Markdown. Three signals
-/// total (typed `truncated: bool` on the comment, this HTML marker, and the
-/// human text) so consumers don't need to choose a primary detection
-/// channel.
-const TRUNCATION_SUFFIX: &str = "\n\n<!-- fallow-truncated -->\n... (truncated)";
+/// machine-detectable; the blockquote that follows is a human-readable
+/// breadcrumb that reads as fallow speaking (matching the existing
+/// `> Run \`fallow fix --files\` or delete this file.` convention from the
+/// unused-file suggestion block). Three signals total (typed
+/// `truncated: bool` on the comment, this HTML marker, and the blockquote
+/// text) so consumers don't need to choose a primary detection channel.
+const TRUNCATION_SUFFIX: &str = "\n\n<!-- fallow-truncated -->\n> Body truncated by fallow.";
 
 #[must_use]
 pub fn render_review_envelope(
@@ -628,9 +629,10 @@ rename to src/new.ts
             body.contains("fallow-fingerprint:v2:"),
             "marker must be preserved under truncation"
         );
-        // Both the machine-detectable HTML marker and the human text appear.
+        // Both the machine-detectable HTML marker and the human blockquote
+        // breadcrumb appear.
         assert!(body.contains("<!-- fallow-truncated -->"));
-        assert!(body.contains("... (truncated)"));
+        assert!(body.contains("> Body truncated by fallow."));
         // Typed boolean is set so consumers don't have to string-match.
         assert_eq!(comment["truncated"], true);
         // Body bytes are valid UTF-8 (char-boundary truncation).

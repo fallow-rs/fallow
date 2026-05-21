@@ -4837,7 +4837,7 @@
         },
         "truncated": {
           "type": "boolean",
-          "description": "True when [`Self::body`] was truncated to fit a downstream provider's\nnote-size budget (today: 65,536 bytes). The body retains the closing\nfallow-fingerprint marker so reconciliation continues to work after\ntruncation. Pairs with the inline `<!-- fallow-truncated -->` HTML\nmarker and the human `... (truncated)` text."
+          "description": "True when [`Self::body`] was truncated to fit a downstream provider's\nnote-size budget (today: 65,536 bytes). The body retains the closing\nfallow-fingerprint marker so reconciliation continues to work after\ntruncation.\n\n**Co-presence invariant**: `truncated == true` always implies the body\ncontains an inline `<!-- fallow-truncated -->` HTML marker and the\n`> Body truncated by fallow.` blockquote breadcrumb, and vice versa.\nAll three signals are emitted together; consumers may use any one\n(the typed boolean is the authoritative machine-readable signal)."
         }
       },
       "required": [
@@ -4873,7 +4873,7 @@
         },
         "truncated": {
           "type": "boolean",
-          "description": "True when [`Self::body`] was truncated to fit GitLab's note-size\nbudget. See [`GitHubReviewComment::truncated`]."
+          "description": "True when [`Self::body`] was truncated to fit GitLab's note-size\nbudget. See [`GitHubReviewComment::truncated`] for the full\nco-presence invariant with the inline HTML marker and human\nblockquote breadcrumb."
         }
       },
       "required": [

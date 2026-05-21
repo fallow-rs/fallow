@@ -100,8 +100,13 @@ render_with_fallow() {
     echo "::warning::fallow render failed: $(jq -r '.message // "unknown error"' "$output")"
     return 1
   fi
+  # Accept both v1 (historical) and v2 (issue #528) schema markers so a
+  # consumer running an older bundled action against a newer fallow binary
+  # continues to render. Future-tolerant: any `fallow-review-envelope/v<N>`
+  # passes, on the assumption that the back-compat fields (`body`,
+  # `comments[].{path,line,side,body}`) remain in every future version.
   jq -e '
-    .meta.schema == "fallow-review-envelope/v1"
+    (.meta.schema | test("^fallow-review-envelope/v[0-9]+$"))
     and .meta.provider == "github"
     and (.body | type == "string")
     and (.body | contains("<!-- fallow-review -->"))
@@ -173,7 +178,18 @@ if render_with_fallow review-github fallow-review.json; then
        "repos/${GH_REPO}/pulls/${PR_NUMBER}/comments?per_page=100" \
        --jq '.[].body' \
        > "$_DEDUP_TMP" 2> "$_DEDUP_ERR"; then
-    EXISTING_FPS=$(sed -n 's/.*fallow-fingerprint: \([^ ]*\) .*/\1/p' "$_DEDUP_TMP" \
+    # Extract fingerprints from both v1 (`<!-- fallow-fingerprint: <fp> -->`)
+    # and v2 (`<!-- fallow-fingerprint:v2: <fp> -->`) marker shapes so dedup
+    # idempotency survives the issue #528 migration. v2 markers use the
+    # `:v2:` namespace; the v1 substring would otherwise capture `v2:` as the
+    # fingerprint instead of the actual hex string. Two sed expressions, sort
+    # -u to dedupe in case a single comment carries both markers (impossible
+    # by construction today, defensive).
+    EXISTING_FPS=$(sed -n \
+      -e 's/.*fallow-fingerprint:v2: \([^ ]*\) .*/\1/p' \
+      -e 's/.*fallow-fingerprint: \([^ ]*\) .*/\1/p' \
+      "$_DEDUP_TMP" \
+      | sort -u \
       | jq -R -s 'split("\n") | map(select(length > 0))')
   else
     _STDERR_HEAD=$(head -3 "$_DEDUP_ERR" | tr '\n' ' ')

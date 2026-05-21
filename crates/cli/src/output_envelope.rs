@@ -897,8 +897,13 @@ pub struct GitHubReviewComment {
     /// True when [`Self::body`] was truncated to fit a downstream provider's
     /// note-size budget (today: 65,536 bytes). The body retains the closing
     /// fallow-fingerprint marker so reconciliation continues to work after
-    /// truncation. Pairs with the inline `<!-- fallow-truncated -->` HTML
-    /// marker and the human `... (truncated)` text.
+    /// truncation.
+    ///
+    /// **Co-presence invariant**: `truncated == true` always implies the body
+    /// contains an inline `<!-- fallow-truncated -->` HTML marker and the
+    /// `> Body truncated by fallow.` blockquote breadcrumb, and vice versa.
+    /// All three signals are emitted together; consumers may use any one
+    /// (the typed boolean is the authoritative machine-readable signal).
     #[serde(default, skip_serializing_if = "is_false")]
     pub truncated: bool,
 }
@@ -930,14 +935,20 @@ pub struct GitLabReviewComment {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub constituent_fingerprints: Vec<String>,
     /// True when [`Self::body`] was truncated to fit GitLab's note-size
-    /// budget. See [`GitHubReviewComment::truncated`].
+    /// budget. See [`GitHubReviewComment::truncated`] for the full
+    /// co-presence invariant with the inline HTML marker and human
+    /// blockquote breadcrumb.
     #[serde(default, skip_serializing_if = "is_false")]
     pub truncated: bool,
 }
 
 /// Helper for `skip_serializing_if = "is_false"` on `truncated` fields above.
 /// Serde calls `skip_serializing_if` with `&T`, so the reference signature
-/// is dictated by the trait and cannot be changed to pass-by-value.
+/// is dictated by the trait and cannot be changed to pass-by-value. Uses
+/// `#[allow]` rather than `#[expect]` per `.claude/rules/code-quality.md`:
+/// `trivially_copy_pass_by_ref` is a pedantic lint that fires inconsistently
+/// across build configurations (lib vs bin), which would trigger
+/// `unfulfilled_lint_expectations` under `#[expect]`.
 #[must_use]
 #[allow(
     clippy::trivially_copy_pass_by_ref,
