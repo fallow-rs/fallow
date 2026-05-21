@@ -339,6 +339,7 @@ const BARE_DEAD_CODE_ALIASES = [
     parent: "MisconfiguredDependencyOverrideFinding",
   },
   { name: "PrivateTypeLeak", parent: "PrivateTypeLeakFinding" },
+  { name: "ReExportCycle", parent: "ReExportCycleFinding" },
   { name: "TestOnlyDependency", parent: "TestOnlyDependencyFinding" },
   { name: "TypeOnlyDependency", parent: "TypeOnlyDependencyFinding" },
   { name: "UnlistedDependency", parent: "UnlistedDependencyFinding" },

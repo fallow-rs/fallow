@@ -5627,6 +5627,16 @@ export type MisconfiguredDependencyOverride = MisconfiguredDependencyOverrideFin
 export type PrivateTypeLeak = PrivateTypeLeakFinding;
 
 /**
+ * Backwards-compat alias for the pre-#384 bare `ReExportCycle` name.
+ * The wire shape is byte-identical: `ReExportCycleFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `ReExportCycle` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `ReExportCycleFinding`.
+ */
+export type ReExportCycle = ReExportCycleFinding;
+
+/**
  * Backwards-compat alias for the pre-#384 bare `TestOnlyDependency` name.
  * The wire shape is byte-identical: `TestOnlyDependencyFinding` flattens the bare
  * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
