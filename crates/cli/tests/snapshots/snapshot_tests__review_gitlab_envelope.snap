@@ -3,10 +3,10 @@ source: crates/cli/tests/snapshot_tests.rs
 expression: json_str
 ---
 {
-  "body": "### Fallow dead-code report\n\n19 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 34720cb0f38c2c4d -->",
+  "body": "### Fallow dead-code report\n\n20 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 22b0002d1ab4db01 -->",
   "summary": {
-    "body": "### Fallow dead-code report\n\n19 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 34720cb0f38c2c4d -->",
-    "fingerprint": "34720cb0f38c2c4d"
+    "body": "### Fallow dead-code report\n\n20 inline findings selected for GitLab review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 22b0002d1ab4db01 -->",
+    "fingerprint": "22b0002d1ab4db01"
   },
   "comments": [
     {
@@ -110,6 +110,16 @@ expression: json_str
       "fingerprint": "405f0abed155920d"
     },
     {
+      "body": "**warn** `fallow/re-export-cycle`: Re-export cycle: src/api/index.ts \\<-\\> src/api/internal/index.ts\n\n<!-- fallow-fingerprint:v2: 3b15e7a61f99e1df -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/api/index.ts",
+        "new_path": "src/api/index.ts",
+        "new_line": 1
+      },
+      "fingerprint": "3b15e7a61f99e1df"
+    },
+    {
       "body": "**error** `fallow/unresolved-import`: Import './missing-module' could not be resolved\n\n<!-- fallow-fingerprint:v2: 231a7ed9e16a19a6 -->",
       "position": {
         "position_type": "text",
@@ -200,7 +210,8 @@ expression: json_str
       "fingerprint": "ebe2360218821412"
     }
   ],
-  "marker_regex": "(?m)^<!-- fallow-fingerprint:v2: ((?:[a-z]+:)?[0-9a-f]{16}) -->\\s*$",
+  "marker_regex": "^<!-- fallow-fingerprint:v2: ((?:[a-z]+:)?[0-9a-f]{16}) -->\\s*$",
+  "marker_regex_flags": "m",
   "meta": {
     "schema": "fallow-review-envelope/v2",
     "provider": "gitlab"

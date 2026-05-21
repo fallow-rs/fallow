@@ -4323,12 +4323,28 @@ comments: ReviewComment[]
  * extract a fallow-emitted fingerprint marker. Capture group 1 is the
  * fingerprint string (a bare 16-char hex hash for single-finding
  * comments, or `<kind>:<16-char-hex>` for compositions such as
- * `merged:` for same-line collapsed comments). The pattern uses the
- * `(?m)` inline-multiline flag so it works in both Rust `regex` and
- * JavaScript ES2018 RegExp without flag-awareness on the consumer
- * side.
+ * `merged:` for same-line collapsed comments).
+ *
+ * The pattern is anchored with `^` / `$` and relies on multiline
+ * matching to anchor at line boundaries inside a multi-line comment
+ * body. Multiline is NOT baked into the pattern via `(?m)` (which
+ * JavaScript RegExp rejects as `Invalid group`); instead the consumer
+ * passes [`Self::marker_regex_flags`] as the flags argument to its
+ * regex engine. JavaScript: `new RegExp(env.marker_regex,
+ * env.marker_regex_flags)`. Rust: `regex::RegexBuilder::new(pat)
+ * .multi_line(flags.contains('m')).build()` (or any equivalent).
  */
 marker_regex?: string
+/**
+ * Flags consumers pass alongside [`Self::marker_regex`] when
+ * constructing their regex engine. Currently always `"m"` (multiline
+ * so the anchored `^` / `$` match at every line boundary within a
+ * comment body). Emitting flags as a separate field instead of
+ * baking `(?m)` into the pattern keeps the wire compatible with
+ * JavaScript RegExp, which rejects inline flag groups outside a
+ * `(?flags:X)` grouping.
+ */
+marker_regex_flags?: string
 meta: ReviewEnvelopeMeta
 }
 /**

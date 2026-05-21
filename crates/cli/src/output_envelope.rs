@@ -778,12 +778,27 @@ pub struct ReviewEnvelopeOutput {
     /// extract a fallow-emitted fingerprint marker. Capture group 1 is the
     /// fingerprint string (a bare 16-char hex hash for single-finding
     /// comments, or `<kind>:<16-char-hex>` for compositions such as
-    /// `merged:` for same-line collapsed comments). The pattern uses the
-    /// `(?m)` inline-multiline flag so it works in both Rust `regex` and
-    /// JavaScript ES2018 RegExp without flag-awareness on the consumer
-    /// side.
+    /// `merged:` for same-line collapsed comments).
+    ///
+    /// The pattern is anchored with `^` / `$` and relies on multiline
+    /// matching to anchor at line boundaries inside a multi-line comment
+    /// body. Multiline is NOT baked into the pattern via `(?m)` (which
+    /// JavaScript RegExp rejects as `Invalid group`); instead the consumer
+    /// passes [`Self::marker_regex_flags`] as the flags argument to its
+    /// regex engine. JavaScript: `new RegExp(env.marker_regex,
+    /// env.marker_regex_flags)`. Rust: `regex::RegexBuilder::new(pat)
+    /// .multi_line(flags.contains('m')).build()` (or any equivalent).
     #[serde(default = "default_marker_regex")]
     pub marker_regex: String,
+    /// Flags consumers pass alongside [`Self::marker_regex`] when
+    /// constructing their regex engine. Currently always `"m"` (multiline
+    /// so the anchored `^` / `$` match at every line boundary within a
+    /// comment body). Emitting flags as a separate field instead of
+    /// baking `(?m)` into the pattern keeps the wire compatible with
+    /// JavaScript RegExp, which rejects inline flag groups outside a
+    /// `(?flags:X)` grouping.
+    #[serde(default = "default_marker_regex_flags")]
+    pub marker_regex_flags: String,
     /// Envelope metadata block.
     pub meta: ReviewEnvelopeMeta,
 }
@@ -796,12 +811,29 @@ pub fn default_marker_regex() -> String {
     MARKER_REGEX_V2.to_owned()
 }
 
+/// Default for [`ReviewEnvelopeOutput::marker_regex_flags`]. Always `"m"`
+/// today; emitted as a sibling field rather than baked into the regex
+/// because JavaScript RegExp rejects the standalone `(?m)` inline flag
+/// group with `SyntaxError: Invalid regular expression ... Invalid group`.
+#[must_use]
+pub fn default_marker_regex_flags() -> String {
+    MARKER_REGEX_FLAGS_V2.to_owned()
+}
+
 /// Canonical v2 marker-regex literal. Mirrored by
 /// [`MARKER_PREFIX_V2`](`crate::report::ci::review::MARKER_PREFIX_V2`) on the
 /// render side; if you change one, change the other and refresh both
-/// snapshots.
+/// snapshots. NO `(?m)` baked into the pattern; consumers pass
+/// [`MARKER_REGEX_FLAGS_V2`] as the second arg to their regex engine so
+/// the `^` / `$` anchors match at line boundaries inside a multi-line
+/// comment body. Pairing pattern + flags lets the wire stay compatible
+/// with both Rust's `regex` crate (via `RegexBuilder::multi_line(true)`)
+/// and JavaScript RegExp (`new RegExp(pat, "m")`).
 pub const MARKER_REGEX_V2: &str =
-    r"(?m)^<!-- fallow-fingerprint:v2: ((?:[a-z]+:)?[0-9a-f]{16}) -->\s*$";
+    r"^<!-- fallow-fingerprint:v2: ((?:[a-z]+:)?[0-9a-f]{16}) -->\s*$";
+
+/// Canonical v2 marker-regex flags. Paired with [`MARKER_REGEX_V2`].
+pub const MARKER_REGEX_FLAGS_V2: &str = "m";
 
 /// Summary block on [`ReviewEnvelopeOutput`]. Always present on v2 emit;
 /// `serde(default)` keeps schemars from marking it required so a future

@@ -10,7 +10,7 @@ use crate::output_envelope::{
     GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
     GitLabReviewPositionType, ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent,
     ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewEnvelopeSummary,
-    ReviewProvider, default_marker_regex,
+    ReviewProvider, default_marker_regex, default_marker_regex_flags,
 };
 use crate::report::emit_json;
 
@@ -115,6 +115,7 @@ pub fn render_review_envelope_with_diff(
             summary,
             comments,
             marker_regex: default_marker_regex(),
+            marker_regex_flags: default_marker_regex_flags(),
             meta: ReviewEnvelopeMeta {
                 schema: ReviewEnvelopeSchema::V2,
                 provider: ReviewProvider::Github,
@@ -127,6 +128,7 @@ pub fn render_review_envelope_with_diff(
             summary,
             comments,
             marker_regex: default_marker_regex(),
+            marker_regex_flags: default_marker_regex_flags(),
             meta: ReviewEnvelopeMeta {
                 schema: ReviewEnvelopeSchema::V2,
                 provider: ReviewProvider::Gitlab,
@@ -442,19 +444,26 @@ mod tests {
         let env = to_value(&render_review_envelope("check", Provider::Github, &issues));
         let regex = env["marker_regex"].as_str().expect("marker_regex present");
         assert_eq!(regex, MARKER_REGEX_V2);
-        // Must work in Rust regex AND in JS via (?m) inline flag.
-        assert!(regex.contains("(?m)"));
         // Pinned to exactly 16 hex chars (single hash form, optionally with
         // a kind prefix like `merged:`).
         assert!(regex.contains("[0-9a-f]{16}"));
-        // Anchored start-of-line + end-of-line so user-pasted marker-like
-        // strings inside larger comment bodies do not match.
-        assert!(regex.starts_with("(?m)^"));
+        // Anchored start-of-line + end-of-line. Consumers pass the flags
+        // field as the second arg to their regex engine so `^` / `$`
+        // match at line boundaries.
+        assert!(regex.starts_with('^'));
         assert!(regex.ends_with("\\s*$"));
+        // No `(?m)` baked into the pattern; JavaScript RegExp rejects
+        // standalone inline flag groups with `Invalid group`.
+        assert!(!regex.contains("(?m)"));
         // Capture group 1 is the fingerprint. Optional kind prefix:
         // `(?:[a-z]+:)?` lets `merged:<hex>` or bare `<hex>` match in the
         // same group.
         assert!(regex.contains("((?:[a-z]+:)?[0-9a-f]{16})"));
+        // Flags field carries "m" so anchored `^` / `$` work per-line.
+        let flags = env["marker_regex_flags"]
+            .as_str()
+            .expect("marker_regex_flags present");
+        assert_eq!(flags, "m");
     }
 
     #[test]

@@ -4,10 +4,10 @@ expression: json_str
 ---
 {
   "event": "COMMENT",
-  "body": "### Fallow dead-code report\n\n19 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 06bf55db1c35210d -->",
+  "body": "### Fallow dead-code report\n\n20 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 160e72a4b11ed241 -->",
   "summary": {
-    "body": "### Fallow dead-code report\n\n19 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 06bf55db1c35210d -->",
-    "fingerprint": "06bf55db1c35210d"
+    "body": "### Fallow dead-code report\n\n20 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 160e72a4b11ed241 -->",
+    "fingerprint": "160e72a4b11ed241"
   },
   "comments": [
     {
@@ -81,6 +81,13 @@ expression: json_str
       "fingerprint": "405f0abed155920d"
     },
     {
+      "path": "src/api/index.ts",
+      "line": 1,
+      "side": "RIGHT",
+      "body": "**warn** `fallow/re-export-cycle`: Re-export cycle: src/api/index.ts \\<-\\> src/api/internal/index.ts\n\n<!-- fallow-fingerprint:v2: 3b15e7a61f99e1df -->",
+      "fingerprint": "3b15e7a61f99e1df"
+    },
+    {
       "path": "src/app.ts",
       "line": 3,
       "side": "RIGHT",
@@ -144,7 +151,8 @@ expression: json_str
       "fingerprint": "ebe2360218821412"
     }
   ],
-  "marker_regex": "(?m)^<!-- fallow-fingerprint:v2: ((?:[a-z]+:)?[0-9a-f]{16}) -->\\s*$",
+  "marker_regex": "^<!-- fallow-fingerprint:v2: ((?:[a-z]+:)?[0-9a-f]{16}) -->\\s*$",
+  "marker_regex_flags": "m",
   "meta": {
     "schema": "fallow-review-envelope/v2",
     "provider": "github",
