@@ -802,7 +802,11 @@ fn can_reuse_current_as_base(
     // `opts.root` itself was passed un-canonical (typical in tests). Match
     // against both forms so the cache-artifact check works in either case.
     let cache_dir = opts.root.join(".fallow");
-    let canonical_cache_dir = cache_dir.canonicalize().ok();
+    // `dunce::canonicalize` strips Windows `\\?\` verbatim prefix so the
+    // `starts_with` checks below compare against a shape that matches the
+    // changed_files paths (which also flow through dunce-canonicalised
+    // `resolve_git_toplevel`). On POSIX dunce is identical to std.
+    let canonical_cache_dir = dunce::canonicalize(&cache_dir).ok();
     changed_files.iter().all(|path| {
         if is_fallow_cache_artifact(path, &cache_dir, canonical_cache_dir.as_deref()) {
             return true;
@@ -1354,7 +1358,9 @@ fn sweep_old_reusable_caches(repo_root: &Path, max_age: Duration, quiet: bool) {
 
 fn reusable_audit_worktree_path(repo_root: &Path, base_sha: &str) -> PathBuf {
     let repo_root = git_toplevel(repo_root).unwrap_or_else(|| repo_root.to_path_buf());
-    let repo_root = repo_root.canonicalize().unwrap_or(repo_root);
+    // `dunce::canonicalize` keeps the hash deterministic across Windows
+    // callers that pass verbatim-vs-non-verbatim shapes for the same repo.
+    let repo_root = dunce::canonicalize(&repo_root).unwrap_or(repo_root);
     let repo_hash = xxh3_64(repo_root.to_string_lossy().as_bytes());
     let sha_prefix = base_sha.get(..16).unwrap_or(base_sha);
     std::env::temp_dir().join(format!(
@@ -1380,7 +1386,9 @@ fn paths_equal(left: &Path, right: &Path) -> bool {
     if left == right {
         return true;
     }
-    match (left.canonicalize(), right.canonicalize()) {
+    // `dunce::canonicalize` strips Windows `\\?\` verbatim prefix so two
+    // paths that differ only in prefix shape compare equal.
+    match (dunce::canonicalize(left), dunce::canonicalize(right)) {
         (Ok(left), Ok(right)) => left == right,
         _ => false,
     }
@@ -1520,12 +1528,14 @@ fn path_is_inside_temp_dir(path: &Path) -> bool {
     if path.starts_with(&temp) {
         return true;
     }
-    let Ok(canonical_temp) = temp.canonicalize() else {
+    // `dunce::canonicalize` here AND on the path under test so a
+    // verbatim-vs-non-verbatim mismatch on Windows does not silently fail
+    // the `starts_with` check.
+    let Ok(canonical_temp) = dunce::canonicalize(&temp) else {
         return false;
     };
     path.starts_with(&canonical_temp)
-        || path
-            .canonicalize()
+        || dunce::canonicalize(path)
             .is_ok_and(|canonical_path| canonical_path.starts_with(canonical_temp))
 }
 
