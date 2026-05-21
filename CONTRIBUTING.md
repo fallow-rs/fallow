@@ -13,6 +13,17 @@ cargo build --workspace
 cargo test --workspace
 ```
 
+On Windows, enable symlink checkout support before cloning. If you already
+cloned the repo, enable it and check out the repo again:
+
+```bash
+git config --global core.symlinks true
+```
+
+The CLI's bundled GitLab CI templates under `crates/cli/templates/ci/` are
+symlinks to the canonical workspace sources under `ci/`. Cargo dereferences
+them when packaging the published crate.
+
 ## Development workflow
 
 ### Building
