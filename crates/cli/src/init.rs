@@ -1460,3 +1460,60 @@ mod tests {
         assert!(content.contains("apps/*"));
     }
 }
+
+#[cfg(test)]
+mod config_schema_drift {
+    //! Drift gate for the committed root `schema.json` (the JSON Schema for
+    //! `.fallowrc.json`). Mirrors the `docs/output-schema.json` drift gate in
+    //! `crates/cli/src/bin/schema_emit.rs` but is much simpler because
+    //! `schema.json` is fully derived from `FallowConfig::json_schema()` with
+    //! no hand-written sections to merge: the committed file is the literal
+    //! pretty-printed serde_json output of [`FallowConfig::json_schema`].
+    //!
+    //! On failure, regenerate via:
+    //!   cargo run --bin fallow -- config-schema > schema.json
+    //!
+    //! The CI `rust:` paths-filter at `.github/workflows/ci.yml` also matches
+    //! edits to `schema.json` directly, so a PR that only touches the
+    //! committed schema still triggers this test rather than slipping through
+    //! to a push-time failure on main.
+
+    use super::FallowConfig;
+
+    /// Embedded copy of the committed root `schema.json`. `include_str!`
+    /// paths must resolve INSIDE the crates.io tarball, which contains only
+    /// `crates/cli/`. The workspace root's `schema.json` is mirrored into
+    /// `crates/cli/schema.json` via a git symlink; `cargo package`
+    /// dereferences the symlink into a regular file inside the published
+    /// tarball, so both local dev and the published crate stay
+    /// self-contained. This mirrors the GitLab CI template bundling pattern
+    /// in `crates/cli/src/ci_template.rs`. Contributors edit
+    /// `<workspace>/schema.json` only; the symlink picks the new bytes up
+    /// automatically.
+    const COMMITTED: &str = include_str!("../schema.json");
+
+    #[test]
+    fn schema_json_in_sync_with_derived() {
+        let derived = FallowConfig::json_schema();
+        // `FallowConfig::json_schema()` wraps `serde_json::to_value(...)` with
+        // an `unwrap_or_default()`. If schemars ever produces a value that
+        // serde_json refuses to convert, the live CLI silently emits `null`
+        // and an unguarded `assert_eq!` between two `null`s would pass. Guard
+        // against that whole class of silent regression before comparing.
+        assert!(
+            derived.is_object(),
+            "FallowConfig::json_schema() did not produce a JSON object (got `{derived}`); \
+             schemars or serde_json may have regressed."
+        );
+
+        let committed: serde_json::Value =
+            serde_json::from_str(COMMITTED).expect("committed schema.json must parse as JSON");
+
+        assert_eq!(
+            committed, derived,
+            "\nschema.json drift detected.\n\
+             Regenerate: cargo run --bin fallow -- config-schema > schema.json\n\
+             Usually triggered by edits to #[derive(JsonSchema)] structs or /// docstrings in crates/config/.\n"
+        );
+    }
+}

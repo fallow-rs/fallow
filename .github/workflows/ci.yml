@@ -39,24 +39,32 @@ jobs:
         id: filter
         with:
           filters: |
-            # The `rust` filter gates the `check` job, which runs the
-            # `cargo test/clippy --features schema-emit` drift gate that catches
-            # Rust-source -> docs/output-schema.json divergence. JsonSchema-deriving
-            # structs are spread across multiple crates; keeping the filter at
-            # `crates/**` (rather than a narrower per-crate list) ensures edits to
-            # ANY of the following subtrees trigger the gate:
+            # The `rust` filter gates the `check` job, which runs two drift
+            # gates:
+            #   - `cargo test/clippy --features schema-emit` for the
+            #     Rust-source -> docs/output-schema.json chain (output schema)
+            #   - `cargo test --workspace --all-targets` (the existing step)
+            #     for the FallowConfig -> schema.json chain (config-input
+            #     schema, #440), via a `#[cfg(test)] mod config_schema_drift`
+            #     test in `crates/cli/src/init.rs`.
+            # JsonSchema-deriving structs are spread across multiple crates;
+            # keeping the filter at `crates/**` (rather than a narrower
+            # per-crate list) ensures edits to ANY of the following subtrees
+            # trigger the gate:
             #   - crates/types/src/                       (finding structs)
             #   - crates/core/src/duplicates/types.rs     (CloneFamily, CloneGroup, AttributedCloneGroup)
             #   - crates/cli/src/health_types/            (ComplexityViolation, HealthFinding, hotspots, refactoring, coverage)
             #   - crates/cli/src/output_envelope.rs       (FallowOutput enum + per-command envelopes)
-            # `docs/output-schema.json` is included so PR edits that ONLY touch
-            # the schema (without a matching Rust change) still trigger the
-            # drift gate on the PR rather than slipping through to a push-time
-            # failure on main. Refs #416.
+            #   - crates/config/src/config/              (FallowConfig + RulesConfig + presets, source of schema.json)
+            # Both `docs/output-schema.json` and `schema.json` are included so
+            # PR edits that ONLY touch a committed schema (without a matching
+            # Rust change) still trigger the drift gate on the PR rather than
+            # slipping through to a push-time failure on main. Refs #416, #440.
             rust:
               - 'crates/**'
               - 'tests/**'
               - 'docs/output-schema.json'
+              - 'schema.json'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'deny.toml'
@@ -80,6 +88,7 @@ jobs:
               - 'action/**'
             npm-package:
               - 'npm/fallow/**'
+              - 'schema.json'
               - '.github/workflows/ci.yml'
 
   check:
@@ -187,6 +196,11 @@ jobs:
       - name: Check npm package contents
         run: |
           cp schema.json npm/fallow/schema.json
+          # Document the cp invariant: npm/fallow/schema.json is the root
+          # schema.json verbatim. A future refactor that drops or moves the
+          # cp will fail loud here instead of silently shipping a stale
+          # schema to npm consumers. Refs #440.
+          diff schema.json npm/fallow/schema.json
           npm pack --dry-run --json ./npm/fallow > /tmp/fallow-pack.json
           node <<'NODE'
           const fs = require('fs');

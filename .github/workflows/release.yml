@@ -582,7 +582,13 @@ jobs:
       # themselves and refresh on every upgrade. See
       # https://github.com/fallow-rs/fallow/issues/275.
       - name: Bundle schema.json into fallow package
-        run: cp schema.json npm/fallow/schema.json
+        run: |
+          cp schema.json npm/fallow/schema.json
+          # Document the cp invariant: npm/fallow/schema.json is the root
+          # schema.json verbatim. A future refactor that drops or moves the
+          # cp will fail loud here instead of silently shipping a stale
+          # schema to npm consumers. Refs #440.
+          diff schema.json npm/fallow/schema.json
 
       - name: Pack tarballs
         run: |
