@@ -197,10 +197,28 @@ fn collect_git_paths(
     // against `toplevel` yields absolute paths that line up with what
     // `analyze_project` emits when given a canonical workspace root, even if
     // the LSP / CLI was invoked from a subdirectory.
+    //
+    // Windows-specific normalisation: `git diff --name-only` always emits
+    // forward-slashed paths (`src/legacy.ts`) regardless of OS. `PathBuf::join`
+    // on Windows appends with the native backslash separator without
+    // converting separators inside the appended segment, so the result is
+    // `C:\Users\...\Temp\test\src/legacy.ts` (mixed). File discovery via
+    // walkdir produces all-backslash paths. `FxHashSet::contains` compares
+    // bytes, not components, so the two forms mismatch and the focused
+    // duplicates / changed-since filters silently drop every finding.
+    // Convert forward slashes to backslashes inside the relative segment
+    // before joining so both sides land in native shape. On POSIX the
+    // segment is already in native form (forward slashes) so the conversion
+    // is a no-op.
+    #[cfg(windows)]
+    let normalise_segment = |line: &str| line.replace('/', "\\");
+    #[cfg(not(windows))]
+    let normalise_segment = |line: &str| line.to_owned();
+
     let files: FxHashSet<PathBuf> = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter(|line| !line.is_empty())
-        .map(|line| toplevel.join(line))
+        .map(|line| toplevel.join(normalise_segment(line)))
         .collect();
 
     Ok(files)

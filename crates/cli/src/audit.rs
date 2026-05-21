@@ -1525,18 +1525,29 @@ fn is_reusable_audit_worktree_path(path: &Path) -> bool {
 
 fn path_is_inside_temp_dir(path: &Path) -> bool {
     let temp = std::env::temp_dir();
-    if path.starts_with(&temp) {
+    // `dunce::simplified` strips Windows `\\?\` verbatim prefix WITHOUT any
+    // filesystem I/O, so this handles both verbatim and non-verbatim inputs
+    // (synthetic test paths, real canonical paths from std OR dunce) without
+    // requiring the path to actually exist on disk. The earlier
+    // `dunce::canonicalize` attempt failed for the synthetic test paths in
+    // `audit_worktree_helpers_filter_to_fallow_temp_prefix` because the
+    // worktree dirs are constructed in-memory and never written.
+    let simple_path = dunce::simplified(path);
+    let simple_temp = dunce::simplified(&temp);
+    if simple_path.starts_with(simple_temp) {
         return true;
     }
-    // `dunce::canonicalize` here AND on the path under test so a
-    // verbatim-vs-non-verbatim mismatch on Windows does not silently fail
-    // the `starts_with` check.
-    let Ok(canonical_temp) = dunce::canonicalize(&temp) else {
+    // Fallback for symlinked temp dirs: canonicalize via std::fs (POSIX
+    // resolves the symlink target; on Windows this also matches when path
+    // canonicalises to something under temp).
+    let Ok(canonical_temp) = std::fs::canonicalize(&temp) else {
         return false;
     };
-    path.starts_with(&canonical_temp)
-        || dunce::canonicalize(path)
-            .is_ok_and(|canonical_path| canonical_path.starts_with(canonical_temp))
+    let simple_canonical_temp = dunce::simplified(&canonical_temp);
+    simple_path.starts_with(simple_canonical_temp)
+        || std::fs::canonicalize(path).is_ok_and(|canonical_path| {
+            dunce::simplified(&canonical_path).starts_with(simple_canonical_temp)
+        })
 }
 
 fn audit_worktree_process_is_alive(path: &Path) -> bool {
