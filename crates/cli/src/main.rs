@@ -1686,31 +1686,6 @@ fn apply_ci_defaults(
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-fn build_regression_opts<'a>(
-    fail_on_regression: bool,
-    tolerance: regression::Tolerance,
-    regression_baseline: Option<&'a std::path::Path>,
-    save_regression_file: Option<&'a std::path::PathBuf>,
-    save_to_config: bool,
-    scoped: bool,
-    quiet: bool,
-) -> regression::RegressionOpts<'a> {
-    regression::RegressionOpts {
-        fail_on_regression,
-        tolerance,
-        regression_baseline_file: regression_baseline,
-        save_target: if let Some(path) = save_regression_file {
-            regression::SaveRegressionTarget::File(path)
-        } else if save_to_config {
-            regression::SaveRegressionTarget::Config
-        } else {
-            regression::SaveRegressionTarget::None
-        },
-        scoped,
-        quiet,
-    }
-}
-
 struct DispatchContext<'a> {
     cli: &'a Cli,
     root: &'a std::path::Path,
@@ -1752,15 +1727,21 @@ impl DispatchContext<'_> {
     }
 
     fn regression_opts(&self, scoped: bool) -> regression::RegressionOpts<'_> {
-        build_regression_opts(
-            self.cli.fail_on_regression,
-            self.tolerance,
-            self.cli.regression_baseline.as_deref(),
-            self.save_regression_file,
-            self.save_to_config,
+        regression::RegressionOpts {
+            fail_on_regression: self.cli.fail_on_regression,
+            tolerance: self.tolerance,
+            regression_baseline_file: self.cli.regression_baseline.as_deref(),
+            save_target: if let Some(path) = self.save_regression_file {
+                regression::SaveRegressionTarget::File(path)
+            } else if self.save_to_config {
+                regression::SaveRegressionTarget::Config
+            } else {
+                regression::SaveRegressionTarget::None
+            },
             scoped,
-            self.quiet,
-        )
+            quiet: self.quiet,
+            output: self.output,
+        }
     }
 }
 

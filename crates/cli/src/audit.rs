@@ -2532,6 +2532,7 @@ fn run_audit_check<'a>(
             save_target: crate::regression::SaveRegressionTarget::None,
             scoped: true,
             quiet: opts.quiet,
+            output: opts.output,
         },
         retain_modules_for_health,
         defer_performance: false,

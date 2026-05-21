@@ -449,6 +449,7 @@ fn build_check_options<'a>(
             save_target: crate::regression::SaveRegressionTarget::None,
             scoped: false,
             quiet: true,
+            output: fallow_config::OutputFormat::Json,
         },
         retain_modules_for_health: false,
         defer_performance: false,

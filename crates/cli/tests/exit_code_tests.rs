@@ -871,3 +871,72 @@ fn config_with_valid_boundaries_loads_cleanly() {
         output.stderr
     );
 }
+
+// ---------------------------------------------------------------------------
+// Regression-baseline schema_version validation (#451)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn regression_baseline_schema_mismatch_json_format_emits_structured_error_envelope() {
+    // `fallow check --regression-baseline <path> --fail-on-regression --format json --quiet`
+    // against a baseline whose schema_version does not match this build must:
+    //   1. exit 2 (load failure, distinct from exit 1 "regression detected")
+    //   2. emit the structured `{"error": true, "message": ..., "exit_code": 2}`
+    //      envelope on stdout, not a human-text error on stderr.
+    //   3. include the regenerate hint in the message so a CI consumer's log
+    //      surfaces a copy-pasteable next step.
+    // Locks the OutputFormat-threading path through RegressionOpts into
+    // load_regression_baseline.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::write(root.join("package.json"), r#"{"name":"test"}"#).expect("write package.json");
+
+    let baseline_path = root.join("stale-baseline.json");
+    std::fs::write(
+        &baseline_path,
+        r#"{
+  "schema_version": 99,
+  "fallow_version": "9.9.9",
+  "timestamp": "2030-01-01T00:00:00Z",
+  "check": {"total_issues": 0, "unused_files": 0}
+}"#,
+    )
+    .expect("write baseline");
+
+    let output = run_fallow_in_root(
+        "check",
+        root,
+        &[
+            "--regression-baseline",
+            baseline_path.to_str().expect("utf-8 baseline path"),
+            "--fail-on-regression",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(
+        output.code, 2,
+        "schema mismatch should exit 2, stderr: {}",
+        output.stderr
+    );
+
+    let parsed: serde_json::Value = serde_json::from_str(&output.stdout).unwrap_or_else(|e| {
+        panic!(
+            "stdout should be JSON envelope: {e}\nstdout: {}",
+            output.stdout
+        )
+    });
+    assert_eq!(parsed["error"], serde_json::Value::Bool(true));
+    assert_eq!(parsed["exit_code"], serde_json::Value::from(2));
+    let msg = parsed["message"]
+        .as_str()
+        .expect("message should be a string");
+    assert!(msg.contains("schema_version 99"), "msg: {msg}");
+    assert!(msg.contains("expects 1"), "msg: {msg}");
+    assert!(msg.contains("fallow 9.9.9"), "msg: {msg}");
+    assert!(
+        msg.contains("fallow check --save-regression-baseline"),
+        "msg should include regenerate command, msg: {msg}"
+    );
+}

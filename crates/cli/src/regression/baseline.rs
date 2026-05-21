@@ -39,6 +39,9 @@ pub struct RegressionOpts<'a> {
     /// Whether --changed-since or --workspace is active (makes counts incomparable).
     pub scoped: bool,
     pub quiet: bool,
+    /// Output format. Drives whether load errors are emitted as structured JSON on stdout
+    /// (for `--format json` CI consumers) or human text on stderr.
+    pub output: OutputFormat,
 }
 
 /// Check whether a path is likely gitignored by running `git check-ignore`.
@@ -386,34 +389,106 @@ fn update_toml_regression(content: &str, baseline: &fallow_config::RegressionBas
     }
 }
 
+/// Build the human-readable schema-version mismatch message. Factored out so
+/// tests can assert on the wording without capturing stderr.
+fn format_schema_mismatch_error(
+    path: &Path,
+    expected: u32,
+    actual: u32,
+    writer_version: &str,
+) -> String {
+    let path_display = path.display();
+    if actual == 0 {
+        format!(
+            "regression baseline '{path_display}' appears to predate schema versioning \
+             (schema_version is 0; this fallow build expects {expected}).\n\
+             The baseline was written by fallow {writer_version}.\n\
+             Regenerate it by running: fallow check --save-regression-baseline {path_display}"
+        )
+    } else {
+        format!(
+            "regression baseline '{path_display}' has schema_version {actual} but this fallow build expects {expected}.\n\
+             The baseline was written by fallow {writer_version}.\n\
+             Regenerate it by running: fallow check --save-regression-baseline {path_display}"
+        )
+    }
+}
+
+/// Build the message for a baseline missing `schema_version` entirely. Pre-versioning
+/// baselines (hand-edited or written by a very old fallow) hit this path; the raw
+/// serde error ("missing field `schema_version`") is unhelpful to a CI user.
+fn format_missing_schema_version_error(path: &Path) -> String {
+    let path_display = path.display();
+    let expected = REGRESSION_SCHEMA_VERSION;
+    format!(
+        "regression baseline '{path_display}' is missing the schema_version field; \
+         this fallow build expects schema_version {expected}.\n\
+         The baseline likely predates schema versioning or was hand-edited.\n\
+         Regenerate it by running: fallow check --save-regression-baseline {path_display}"
+    )
+}
+
 /// Load a regression baseline from disk.
+///
+/// Validates that `schema_version` matches `REGRESSION_SCHEMA_VERSION`. Mismatches
+/// (including baselines missing the field entirely) fail loud with an actionable
+/// regenerate hint rather than silently loading default-zero fields, which would
+/// mask real regressions.
 ///
 /// # Errors
 ///
-/// Returns an error if the file does not exist, cannot be read, or contains invalid JSON.
-pub fn load_regression_baseline(path: &Path) -> Result<RegressionBaseline, ExitCode> {
+/// Returns an error if the file does not exist, cannot be read, contains invalid
+/// JSON, or has a `schema_version` that does not match the current build's
+/// `REGRESSION_SCHEMA_VERSION`.
+pub fn load_regression_baseline(
+    path: &Path,
+    output: OutputFormat,
+) -> Result<RegressionBaseline, ExitCode> {
     let content = std::fs::read_to_string(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
-            eprintln!(
-                "Error: no regression baseline found at '{}'.\n\
-                 Run with --save-regression-baseline on your main branch to create one.",
-                path.display()
-            );
+            emit_error(
+                &format!(
+                    "no regression baseline found at '{}'.\n\
+                     Run with --save-regression-baseline on your main branch to create one.",
+                    path.display()
+                ),
+                2,
+                output,
+            )
         } else {
-            eprintln!(
-                "Error: failed to read regression baseline '{}': {e}",
-                path.display()
-            );
+            emit_error(
+                &format!(
+                    "failed to read regression baseline '{}': {e}",
+                    path.display()
+                ),
+                2,
+                output,
+            )
         }
-        ExitCode::from(2)
     })?;
-    serde_json::from_str(&content).map_err(|e| {
-        eprintln!(
-            "Error: failed to parse regression baseline '{}': {e}",
-            path.display()
+    let baseline: RegressionBaseline = serde_json::from_str(&content).map_err(|e| {
+        // Rewrite the cryptic "missing field `schema_version`" serde error into the
+        // same actionable regenerate hint a version mismatch would produce.
+        let message = if e.to_string().contains("missing field `schema_version`") {
+            format_missing_schema_version_error(path)
+        } else {
+            format!(
+                "failed to parse regression baseline '{}': {e}",
+                path.display()
+            )
+        };
+        emit_error(&message, 2, output)
+    })?;
+    if baseline.schema_version != REGRESSION_SCHEMA_VERSION {
+        let message = format_schema_mismatch_error(
+            path,
+            REGRESSION_SCHEMA_VERSION,
+            baseline.schema_version,
+            &baseline.fallow_version,
         );
-        ExitCode::from(2)
-    })
+        return Err(emit_error(&message, 2, output));
+    }
+    Ok(baseline)
 }
 
 /// Compare current check results against a regression baseline.
@@ -449,26 +524,30 @@ pub fn compare_check_regression(
     // Resolution order: explicit file > config section > error
     let baseline_counts: CheckCounts = if let Some(baseline_path) = opts.regression_baseline_file {
         // Explicit --regression-baseline <PATH>: load from file
-        let baseline = load_regression_baseline(baseline_path)?;
+        let baseline = load_regression_baseline(baseline_path, opts.output)?;
         let Some(counts) = baseline.check else {
-            eprintln!(
-                "Error: regression baseline '{}' has no check data",
-                baseline_path.display()
-            );
-            return Err(ExitCode::from(2));
+            return Err(emit_error(
+                &format!(
+                    "regression baseline '{}' has no check data",
+                    baseline_path.display()
+                ),
+                2,
+                opts.output,
+            ));
         };
         counts
     } else if let Some(config_baseline) = config_baseline {
         // Config-embedded baseline: read from .fallowrc.json / .fallowrc.jsonc / fallow.toml / .fallow.toml
         CheckCounts::from_config_baseline(config_baseline)
     } else {
-        eprintln!(
-            "Error: no regression baseline found.\n\
+        return Err(emit_error(
+            "no regression baseline found.\n\
              Either add a `regression.baseline` section to your config file\n\
              (run with --save-regression-baseline to generate it),\n\
-             or provide an explicit file via --regression-baseline <PATH>."
-        );
-        return Err(ExitCode::from(2));
+             or provide an explicit file via --regression-baseline <PATH>.",
+            2,
+            opts.output,
+        ));
     };
 
     let current_total = results.total_issues();
@@ -695,7 +774,7 @@ mod tests {
             OutputFormat::Human,
         )
         .unwrap();
-        let loaded = load_regression_baseline(&path).unwrap();
+        let loaded = load_regression_baseline(&path, OutputFormat::Human).unwrap();
 
         assert_eq!(loaded.schema_version, REGRESSION_SCHEMA_VERSION);
         let check = loaded.check.unwrap();
@@ -723,7 +802,7 @@ mod tests {
 
         save_regression_baseline(&path, dir.path(), Some(&counts), None, OutputFormat::Human)
             .unwrap();
-        let loaded = load_regression_baseline(&path).unwrap();
+        let loaded = load_regression_baseline(&path, OutputFormat::Human).unwrap();
 
         assert!(loaded.check.is_some());
         assert!(loaded.dupes.is_none());
@@ -747,7 +826,10 @@ mod tests {
 
     #[test]
     fn load_nonexistent_file_returns_error() {
-        let result = load_regression_baseline(Path::new("/tmp/nonexistent-baseline-12345.json"));
+        let result = load_regression_baseline(
+            Path::new("/tmp/nonexistent-baseline-12345.json"),
+            OutputFormat::Human,
+        );
         assert!(result.is_err());
     }
 
@@ -756,7 +838,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bad.json");
         std::fs::write(&path, "not valid json {{{").unwrap();
-        let result = load_regression_baseline(&path);
+        let result = load_regression_baseline(&path, OutputFormat::Human);
         assert!(result.is_err());
     }
 
@@ -935,6 +1017,7 @@ mod tests {
             save_target: SaveRegressionTarget::None,
             scoped,
             quiet: true,
+            output: OutputFormat::Human,
         }
     }
 
@@ -1177,5 +1260,119 @@ mod tests {
         };
         let outcome = compare_check_regression(&results, &opts, Some(&config_baseline)).unwrap();
         assert!(matches!(outcome, Some(RegressionOutcome::Pass { .. })));
+    }
+
+    // ── schema_version validation ──────────────────────────────────
+
+    fn write_baseline_with_schema_version(dir: &Path, version: u32) -> PathBuf {
+        let path = dir.join("baseline.json");
+        let body = format!(
+            r#"{{
+  "schema_version": {version},
+  "fallow_version": "3.0.0",
+  "timestamp": "2026-05-21T00:00:00Z",
+  "check": {{
+    "total_issues": 0,
+    "unused_files": 0
+  }}
+}}"#
+        );
+        std::fs::write(&path, body).unwrap();
+        path
+    }
+
+    #[test]
+    fn load_rejects_schema_version_too_high() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_baseline_with_schema_version(dir.path(), REGRESSION_SCHEMA_VERSION + 1);
+        let result = load_regression_baseline(&path, OutputFormat::Human);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_rejects_schema_version_zero_predates_versioning() {
+        // schema_version: 0 is the "baseline predates versioning" special case.
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_baseline_with_schema_version(dir.path(), 0);
+        let result = load_regression_baseline(&path, OutputFormat::Human);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_accepts_current_schema_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_baseline_with_schema_version(dir.path(), REGRESSION_SCHEMA_VERSION);
+        let loaded = load_regression_baseline(&path, OutputFormat::Human).unwrap();
+        assert_eq!(loaded.schema_version, REGRESSION_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn load_rewrites_missing_schema_version_field_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("baseline.json");
+        // Valid JSON, but the schema_version field is absent. Without the rewrite this
+        // would surface raw serde's "missing field `schema_version`" text.
+        std::fs::write(
+            &path,
+            r#"{
+  "fallow_version": "1.0.0",
+  "timestamp": "2026-05-21T00:00:00Z",
+  "check": {}
+}"#,
+        )
+        .unwrap();
+        let result = load_regression_baseline(&path, OutputFormat::Human);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn format_schema_mismatch_error_too_high() {
+        let msg =
+            format_schema_mismatch_error(Path::new("/repo/.fallow-baseline.json"), 1, 99, "3.0.0");
+        assert!(msg.contains("schema_version 99"));
+        assert!(msg.contains("expects 1"));
+        assert!(msg.contains("fallow 3.0.0"));
+        assert!(
+            msg.contains("fallow check --save-regression-baseline /repo/.fallow-baseline.json")
+        );
+        // No abbreviations, no "refresh"
+        assert!(!msg.to_lowercase().contains("refresh"));
+        // Stable token so CI log alerting can match on it
+        assert!(msg.contains("schema_version"));
+    }
+
+    #[test]
+    fn format_schema_mismatch_error_actual_zero_special_case() {
+        let msg =
+            format_schema_mismatch_error(Path::new("/repo/.fallow-baseline.json"), 1, 0, "2.0.0");
+        assert!(msg.contains("predate"));
+        assert!(msg.contains("fallow 2.0.0"));
+        assert!(
+            msg.contains("fallow check --save-regression-baseline /repo/.fallow-baseline.json")
+        );
+    }
+
+    #[test]
+    fn format_missing_schema_version_error_includes_regenerate_command() {
+        let msg = format_missing_schema_version_error(Path::new("/repo/baseline.json"));
+        assert!(msg.contains("missing the schema_version field"));
+        assert!(msg.contains("fallow check --save-regression-baseline /repo/baseline.json"));
+    }
+
+    #[test]
+    fn save_load_preserves_schema_version() {
+        // The save side always writes REGRESSION_SCHEMA_VERSION; loading back must
+        // accept the just-saved baseline.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("baseline.json");
+        let counts = CheckCounts {
+            total_issues: 1,
+            unused_files: 1,
+            ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
+        };
+        save_regression_baseline(&path, dir.path(), Some(&counts), None, OutputFormat::Human)
+            .unwrap();
+        let loaded = load_regression_baseline(&path, OutputFormat::Human).unwrap();
+        assert_eq!(loaded.schema_version, REGRESSION_SCHEMA_VERSION);
     }
 }
