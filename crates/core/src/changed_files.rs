@@ -165,7 +165,14 @@ pub fn resolve_git_toplevel(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
     }
 
     let path = PathBuf::from(trimmed);
-    Ok(path.canonicalize().unwrap_or(path))
+    // `dunce::canonicalize` strips Windows `\\?\` verbatim prefix; without
+    // this, every changed file emitted by `git diff --name-only` got joined
+    // onto a verbatim-prefixed toplevel, and downstream `strip_prefix`
+    // comparisons against an `opts.root` that does NOT carry the verbatim
+    // prefix silently mismatched. The focus-filter then dropped EVERY
+    // finding on Windows, breaking `fallow audit` and `--changed-since`.
+    // On POSIX `dunce::canonicalize` is identical to `std::fs::canonicalize`.
+    Ok(dunce::canonicalize(&path).unwrap_or(path))
 }
 
 fn collect_git_paths(

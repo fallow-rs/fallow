@@ -752,9 +752,11 @@ fn base_analysis_root(current_root: &Path, base_worktree_root: &Path) -> PathBuf
     let Some(git_root) = git_toplevel(current_root) else {
         return base_worktree_root.to_path_buf();
     };
-    let current_root = current_root
-        .canonicalize()
-        .unwrap_or_else(|_| current_root.to_path_buf());
+    // `dunce::canonicalize` strips Windows `\\?\` verbatim prefix so this
+    // current_root matches `git_root` (also dunce-canonicalised above) when
+    // `strip_prefix` walks the component graph.
+    let current_root =
+        dunce::canonicalize(current_root).unwrap_or_else(|_| current_root.to_path_buf());
     match current_root.strip_prefix(&git_root) {
         Ok(relative) => base_worktree_root.join(relative),
         Err(err) => {
@@ -851,7 +853,11 @@ fn git_toplevel(root: &Path) -> Option<PathBuf> {
         return None;
     }
     let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-    Some(path.canonicalize().unwrap_or(path))
+    // Mirror `fallow_core::changed_files::resolve_git_toplevel`: use
+    // `dunce::canonicalize` to strip Windows `\\?\` verbatim prefix so this
+    // canonical form matches the shape `opts.root` and finding paths use
+    // downstream. `std::fs::canonicalize` would diverge on Windows.
+    Some(dunce::canonicalize(&path).unwrap_or(path))
 }
 
 fn git_show_file(root: &Path, base_ref: &str, relative: &Path) -> Option<String> {
