@@ -929,10 +929,9 @@ fn install_sidecar(
             )
         };
 
-    let status = Command::new(program)
-        .args(args)
-        .current_dir(current_dir)
-        .status()
+    let mut command = Command::new(program);
+    command.args(args).current_dir(current_dir);
+    let status = crate::signal::scoped_child::status(&mut command)
         .map_err(|err| format!("failed to run {display_command}: {err}"))?;
 
     if !status.success() {
@@ -1344,14 +1343,14 @@ fn run_health_analysis(root: &Path, coverage_path: &Path) -> ExitCode {
         }
     };
 
-    let status = match Command::new(current_exe)
+    let mut command = Command::new(current_exe);
+    command
         .arg("health")
         .arg("--root")
         .arg(root)
         .arg("--runtime-coverage")
-        .arg(coverage_path)
-        .status()
-    {
+        .arg(coverage_path);
+    let status = match crate::signal::scoped_child::status(&mut command) {
         Ok(status) => status,
         Err(err) => {
             eprintln!("fallow coverage setup: failed to run health analysis: {err}");

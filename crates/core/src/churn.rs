@@ -5,11 +5,38 @@
 
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
+use std::sync::OnceLock;
 
 use serde::Serialize;
 
 use crate::git_env::clear_ambient_git_env;
+
+/// Function pointer signature used by `set_spawn_hook` to intercept the
+/// `git log --numstat` subprocess. Lets the CLI route long-running git
+/// log calls through its `ScopedChild` registry so SIGINT / SIGTERM
+/// reap the subprocess instead of leaving it running after the parent
+/// exits. See `crates/cli/src/signal/` and issue #477.
+pub type ChurnSpawnHook = fn(&mut Command) -> std::io::Result<Output>;
+
+static SPAWN_HOOK: OnceLock<ChurnSpawnHook> = OnceLock::new();
+
+/// Install a spawn-hook that wraps the `git log` subprocess. Idempotent;
+/// subsequent calls are no-ops. Called once from the CLI's `main()` to
+/// route through the signal registry; defaults to `Command::output`
+/// when not set so the function-pointer indirection stays free for tests
+/// and embedders that don't care.
+pub fn set_spawn_hook(hook: ChurnSpawnHook) {
+    let _ = SPAWN_HOOK.set(hook);
+}
+
+fn spawn_output(command: &mut Command) -> std::io::Result<Output> {
+    if let Some(hook) = SPAWN_HOOK.get() {
+        hook(command)
+    } else {
+        command.output()
+    }
+}
 
 /// Number of seconds in one day.
 const SECS_PER_DAY: f64 = 86_400.0;
@@ -422,7 +449,7 @@ fn analyze_churn_events(
         .current_dir(root);
     clear_ambient_git_env(&mut command);
 
-    let output = match command.output() {
+    let output = match spawn_output(&mut command) {
         Ok(o) => o,
         Err(e) => {
             tracing::warn!("hotspot analysis skipped: failed to run git: {e}");

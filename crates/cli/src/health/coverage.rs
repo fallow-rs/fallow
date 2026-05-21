@@ -1542,20 +1542,20 @@ fn run_sidecar(
 ) -> Result<Response, ExitCode> {
     verify_sidecar_signature(sidecar).map_err(|message| emit_error(&message, 4, output))?;
 
-    let mut child = Command::new(sidecar)
+    let mut command = Command::new(sidecar);
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|err| {
-            emit_error(
-                &format!("failed to spawn {}: {err}", sidecar.display()),
-                4,
-                output,
-            )
-        })?;
+        .stderr(Stdio::piped());
+    let mut child = crate::signal::ScopedChild::spawn(&mut command).map_err(|err| {
+        emit_error(
+            &format!("failed to spawn {}: {err}", sidecar.display()),
+            4,
+            output,
+        )
+    })?;
 
-    if let Some(mut stdin) = child.stdin.take() {
+    if let Some(mut stdin) = child.take_stdin() {
         if let Err(err) = serde_json::to_writer(&mut stdin, request) {
             return Err(emit_error(
                 &format!("failed to serialize sidecar request: {err}"),

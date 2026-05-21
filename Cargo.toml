@@ -79,7 +79,7 @@ fixedbitset = "0.5"
 
 # LSP
 tower-lsp = "0.20"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-std", "process", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-std", "process", "signal", "time"] }
 
 # File watching
 notify = "8"
@@ -92,8 +92,11 @@ insta = { version = "1", features = ["yaml"] }
 proptest = "1"
 tempfile = "3"
 
-# Windows-only Win32 bindings (process query for audit orphan sweep)
-windows-sys = { version = "0.61", features = ["Win32_System_Threading", "Win32_Foundation"] }
+# Windows-only Win32 bindings (process query for audit orphan sweep, console control handler for signals)
+windows-sys = { version = "0.61", features = ["Win32_System_Threading", "Win32_Foundation", "Win32_System_Console"] }
+
+# Signal handling (Unix-only; Windows uses windows-sys::SetConsoleCtrlHandler directly)
+signal-hook = { version = "0.4", default-features = false, features = ["iterator"] }
 
 [workspace.lints.clippy]
 # Lint groups (priority -1 so individual overrides take precedence)

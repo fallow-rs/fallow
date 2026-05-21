@@ -95,6 +95,10 @@ pub(crate) mod rayon_pool;
 /// Regression detection: baseline comparison and tolerance checking.
 pub mod regression;
 
+/// Process-wide signal handling and scoped child-process registry.
+/// See `signal/mod.rs` for the design rationale.
+pub mod signal;
+
 /// Report formatting utilities for analysis results.
 ///
 /// Exposed for snapshot testing of output formats.

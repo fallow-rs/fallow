@@ -38,6 +38,7 @@ mod report;
 mod runtime_support;
 mod schema;
 mod setup_hooks;
+mod signal;
 mod validate;
 mod vital_signs;
 mod watch;
@@ -1847,7 +1848,83 @@ fn resolve_production_modes(
 
 // ── Main ─────────────────────────────────────────────────────────
 
+/// Test-only helper invoked when `FALLOW_TEST_SIGNAL_HELPER=1` is set.
+/// Spawns `sleep 30` via the `ScopedChild` registry so the child is
+/// tracked by the signal handler, prints the child PID to stdout, then
+/// busy-waits on a small interval so a SIGINT/SIGTERM delivered to the
+/// parent fires the signal handler (which kills the child and exits
+/// 128+signum). Lives in main.rs (rather than tests/) because clap is
+/// already parsed below this point and we need to intercept before that.
+#[cfg(unix)]
+fn signal_test_helper() -> ExitCode {
+    use std::io::Write as _;
+    use std::process::Command;
+
+    let mut command = Command::new("sleep");
+    command.arg("30");
+    let child = match signal::ScopedChild::spawn(&mut command) {
+        Ok(c) => c,
+        Err(err) => {
+            let _ = writeln!(std::io::stderr(), "spawn sleep failed: {err}");
+            return ExitCode::from(2);
+        }
+    };
+    let pid = child.id();
+    // Print pid so the integration test can probe it.
+    let stdout = std::io::stdout();
+    let mut lock = stdout.lock();
+    let _ = writeln!(lock, "{pid}");
+    let _ = lock.flush();
+    drop(lock);
+    // The wait returns when the signal handler kills the inner sleep;
+    // after that, sleep extra so the signal-handler thread has time to
+    // call `std::process::exit(128 + signum)` before this helper
+    // returns ExitCode::SUCCESS. Without the trailing sleep the main
+    // thread races the listener and sometimes wins, producing exit 0
+    // instead of the expected 130/143.
+    let _ = child.wait_with_output();
+    std::thread::sleep(std::time::Duration::from_secs(5));
+    // If we reach here the signal handler never fired; the test will
+    // fail on the exit-code assertion.
+    ExitCode::SUCCESS
+}
+
+#[cfg(not(unix))]
+fn signal_test_helper() -> ExitCode {
+    // Windows test path goes through a different helper; integration
+    // tests are #[cfg(unix)]-gated.
+    ExitCode::from(2)
+}
+
 fn main() -> ExitCode {
+    // Install the SIGINT/SIGTERM (Unix) / SetConsoleCtrlHandler (Windows)
+    // handlers before any subprocess is spawned. Non-fatal: a failure here
+    // just means signal-driven child cleanup is unavailable for this run.
+    // Cross-ref: crates/cli/src/signal/mod.rs and issue #477.
+    if let Err(err) = signal::install_handlers() {
+        use std::io::Write as _;
+        let stderr = std::io::stderr();
+        let mut lock = stderr.lock();
+        let _ = writeln!(lock, "fallow: failed to install signal handlers: {err}");
+    }
+
+    // Route the `git log --numstat` subprocess in fallow-core's churn
+    // analyzer through the signal registry. Core stays cli-independent;
+    // the spawn-hook is a function-pointer install at startup.
+    fallow_core::churn::set_spawn_hook(signal::scoped_child::output);
+
+    // Test-only helper subcommand for integration testing the signal
+    // handlers (see crates/cli/tests/signal_tests.rs). Gated on an env
+    // var so it does not pollute the public CLI surface; not visible in
+    // --help, not parsed by clap. The helper spawns `sleep 30` via the
+    // ScopedChild registry, prints the child PID to stdout, then blocks
+    // until SIGINT/SIGTERM reaches our signal handler. Integration tests
+    // read the PID and send a signal to the parent; the signal handler
+    // kills the child and exits 130/143.
+    if std::env::var_os("FALLOW_TEST_SIGNAL_HELPER").is_some() {
+        return signal_test_helper();
+    }
+
     let mut cli = Cli::parse();
 
     // Auto-suffix the sticky-comment marker with the workspace name when

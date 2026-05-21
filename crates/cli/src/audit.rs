@@ -988,7 +988,7 @@ impl BaseWorktree {
             ])
             .current_dir(repo_root);
         clear_ambient_git_env(&mut command);
-        let output = command.output().ok()?;
+        let output = crate::signal::scoped_child::output(&mut command).ok()?;
         if !output.status.success() {
             return None;
         }
@@ -1037,7 +1037,7 @@ impl BaseWorktree {
             ])
             .current_dir(repo_root);
         clear_ambient_git_env(&mut command);
-        let output = command.output().ok()?;
+        let output = crate::signal::scoped_child::output(&mut command).ok()?;
         if !output.status.success() {
             return None;
         }
@@ -1235,7 +1235,7 @@ fn remove_audit_worktree(repo_root: &Path, path: &Path) {
         ])
         .current_dir(repo_root);
     clear_ambient_git_env(&mut command);
-    match command.output() {
+    match crate::signal::scoped_child::output(&mut command) {
         Ok(output) => {
             // Only warn when an observable leak survives: the on-disk path still
             // exists after a non-zero `git worktree remove --force`. A missing
@@ -1357,7 +1357,7 @@ fn audit_worktree_pid(name: &str) -> Option<u32> {
 }
 
 #[cfg(unix)]
-fn process_is_alive(pid: u32) -> bool {
+pub fn process_is_alive(pid: u32) -> bool {
     Command::new("kill")
         .args(["-0", &pid.to_string()])
         .output()
@@ -1365,12 +1365,12 @@ fn process_is_alive(pid: u32) -> bool {
 }
 
 #[cfg(windows)]
-fn process_is_alive(pid: u32) -> bool {
+pub fn process_is_alive(pid: u32) -> bool {
     windows_process::is_alive(pid)
 }
 
 #[cfg(not(any(unix, windows)))]
-fn process_is_alive(_pid: u32) -> bool {
+pub fn process_is_alive(_pid: u32) -> bool {
     // Conservative default on unknown platforms: treat every PID as alive so the
     // orphan sweep never removes anything we can't prove is dead.
     true

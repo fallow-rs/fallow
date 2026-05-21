@@ -161,6 +161,15 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
     use std::sync::mpsc;
     use std::time::Duration;
 
+    // Ensure the global signal handler is registered (idempotent if main
+    // already called this) and flip the handler into graceful mode so a
+    // SIGINT / SIGTERM only sets the shutdown flag; the watch loop polls
+    // the flag and returns cleanly with exit code 0. The RAII guard
+    // restores forceful-exit behavior for any subsequent CLI command run
+    // in the same process.
+    let _ = crate::signal::install_handlers();
+    let _graceful = crate::signal::GracefulModeGuard::new();
+
     let mut config = match load_config(
         opts.root,
         opts.config_path,
@@ -205,7 +214,11 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
     }
 
     loop {
-        match rx.recv() {
+        if crate::signal::is_shutting_down() {
+            eprintln!("Watch stopped.");
+            return ExitCode::SUCCESS;
+        }
+        match rx.recv_timeout(Duration::from_millis(200)) {
             Ok(Ok(events)) => {
                 let changed = collect_changed_paths(&events, opts.root);
                 if changed.is_empty() {
@@ -233,8 +246,11 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
             Ok(Err(e)) => {
                 eprintln!("Watch error: {e:?}");
             }
-            Err(e) => {
-                eprintln!("Channel error: {e}");
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // Loop back to check the shutdown flag.
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                eprintln!("Channel error: notify-debouncer sender disconnected");
                 return ExitCode::from(2);
             }
         }

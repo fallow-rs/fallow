@@ -7,7 +7,8 @@ mod markdown;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use tokio::sync::{Mutex, RwLock};
 use tower_lsp::jsonrpc::Result;
@@ -349,6 +350,14 @@ struct FallowLspServer {
     git_toplevel: Arc<RwLock<Option<PathBuf>>>,
     /// Cached diagnostics for pull-model support (textDocument/diagnostic)
     cached_diagnostics: Arc<RwLock<FxHashMap<Url, Vec<Diagnostic>>>>,
+    /// Set by `shutdown()`. `run_analysis` checks this at the top and
+    /// before publishing diagnostics so a closing client does not receive
+    /// spurious post-shutdown publishes. The 250ms grace on the
+    /// `analysis_guard` in `shutdown()` lets the current `spawn_blocking`
+    /// settle, but does NOT interrupt rayon work already in flight; that
+    /// work runs to completion on the blocking thread pool and its
+    /// results are dropped. See issue #477.
+    cancellation: Arc<AtomicBool>,
 }
 
 /// Build the `ServerCapabilities` advertised by `initialize`.
@@ -457,7 +466,18 @@ impl LanguageServer for FallowLspServer {
         self.run_analysis().await;
     }
 
+    /// Cooperative shutdown.
+    ///
+    /// Sets the `cancellation` flag so any in-flight `run_analysis`
+    /// short-circuits before publishing diagnostics, and awaits the
+    /// `analysis_guard` for up to 250ms so a freshly-started blocking
+    /// task can settle. NOTE: `tokio::task::spawn_blocking` is not
+    /// interruptible; rayon work already running on the blocking thread
+    /// pool continues to natural completion and its results are dropped.
+    /// The grace is for quiescence, not for cancellation. See issue #477.
     async fn shutdown(&self) -> Result<()> {
+        self.cancellation.store(true, Ordering::SeqCst);
+        let _ = tokio::time::timeout(Duration::from_millis(250), self.analysis_guard.lock()).await;
         Ok(())
     }
 
@@ -676,6 +696,7 @@ impl FallowLspServer {
             config_path: Arc::new(RwLock::new(None)),
             git_toplevel: Arc::new(RwLock::new(None)),
             cached_diagnostics: Arc::new(RwLock::new(FxHashMap::default())),
+            cancellation: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -727,6 +748,14 @@ impl FallowLspServer {
     }
 
     async fn run_analysis(&self) {
+        // Short-circuit any work post-shutdown. The cancellation flag
+        // remains set for the rest of the process lifetime; subsequent
+        // `did_save` deliveries are no-ops until tower-lsp's `exit`
+        // notification tears down the runtime.
+        if self.cancellation.load(Ordering::SeqCst) {
+            return;
+        }
+
         let root = self.root.read().await.clone();
         let Some(root) = root else { return };
 
@@ -848,6 +877,14 @@ impl FallowLspServer {
 
         match join_result {
             Ok((results, duplication, config_messages, changed_message)) => {
+                // Re-check the cancellation flag after the blocking task
+                // returns. The shutdown handler may have flipped it while
+                // the analysis was running; in that case skip publish so
+                // we don't push diagnostics into a closing client.
+                if self.cancellation.load(Ordering::SeqCst) {
+                    return;
+                }
+
                 // Surface which config was loaded for each project root so users
                 // can verify their config is picked up (addresses silent
                 // config-loss UX). Emitted from the async context after the
@@ -1414,6 +1451,41 @@ mod tests {
         assert!(caps.code_action_provider.is_some());
         assert!(caps.code_lens_provider.is_some());
         assert!(caps.hover_provider.is_some());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn shutdown_sets_cancellation_flag() {
+        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let backend = service.inner();
+        assert!(
+            !backend.cancellation.load(Ordering::SeqCst),
+            "cancellation flag must start cleared",
+        );
+        backend.shutdown().await.expect("shutdown returns Ok");
+        assert!(
+            backend.cancellation.load(Ordering::SeqCst),
+            "shutdown must flip the cancellation flag so subsequent did_save short-circuits",
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn run_analysis_short_circuits_after_shutdown() {
+        let (service, _) = LspService::build(FallowLspServer::new).finish();
+        let backend = service.inner();
+        // Set a workspace root so the flag check, not the missing-root
+        // check, is what causes the early return. Without a root the
+        // function returns before the cancellation gate fires and the
+        // test would be vacuous.
+        *backend.root.write().await = Some(std::env::temp_dir());
+        backend.shutdown().await.expect("shutdown returns Ok");
+        // run_analysis should return immediately without acquiring the
+        // analysis_guard. Verify by checking the guard is still free
+        // after the call.
+        backend.run_analysis().await;
+        assert!(
+            backend.analysis_guard.try_lock().is_ok(),
+            "analysis_guard must not be held after a cancelled run_analysis",
+        );
     }
 
     #[test]
