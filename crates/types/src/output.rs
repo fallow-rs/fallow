@@ -153,6 +153,11 @@ pub enum FixActionType {
     MoveToDev,
     /// Break a circular dependency by refactoring imports.
     RefactorCycle,
+    /// Break a re-export cycle by removing an `export * from` (or
+    /// `export { ... } from`) statement on any one member file. Re-export
+    /// cycles are structurally always bugs (chain propagation through the
+    /// loop is a no-op), so there is no auto-fix; the action is manual.
+    RefactorReExportCycle,
     /// Resolve a boundary violation by refactoring the import.
     RefactorBoundary,
     /// Convert an import statement to a type-only import (used by

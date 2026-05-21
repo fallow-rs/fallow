@@ -757,6 +757,7 @@ mod tests {
             unlisted_dependencies: 0,
             duplicate_exports: 1,
             circular_dependencies: 0,
+            re_export_cycles: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
             boundary_violations: 0,

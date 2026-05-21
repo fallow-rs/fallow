@@ -22,6 +22,7 @@ use fallow_types::discover::{DiscoveredFile, EntryPoint, FileId};
 use fallow_types::extract::ImportedName;
 
 // Re-export all public types so downstream sees the same API as before.
+pub use re_exports::GraphReExportCycle;
 pub use types::{ExportSymbol, ModuleNode, ReExportEdge, ReferenceKind, SymbolReference};
 
 /// True when the path's final component looks like a TypeScript declaration
@@ -69,6 +70,14 @@ pub struct ModuleGraph {
     pub reverse_deps: Vec<Vec<FileId>>,
     /// Precomputed: which modules have namespace imports (import * as ns).
     namespace_imported: FixedBitSet,
+    /// Re-export cycles and self-loops detected during Phase 4 chain
+    /// resolution. Each entry names the participating files (sorted
+    /// lexicographically) and a `is_self_loop` flag distinguishing
+    /// single-file self-re-exports from multi-node cycles. Populated by
+    /// `re_exports::find_re_export_cycles` and consumed by
+    /// `fallow_core::analyze::re_export_cycles::find_re_export_cycles` which
+    /// wraps each entry in a typed `ReExportCycleFinding`.
+    pub re_export_cycles: Vec<GraphReExportCycle>,
 }
 
 /// An edge in the module graph.
@@ -215,8 +224,12 @@ impl ModuleGraph {
             total_capacity,
         );
 
-        // Phase 4: Propagate references through re-export chains
-        graph.resolve_re_export_chains();
+        // Phase 4: Propagate references through re-export chains, and
+        // collect any re-export cycles (multi-node or self-loop) for the
+        // user-visible `re-export-cycle` finding type. The same Tarjan SCC
+        // pass still emits one `tracing::warn!` per cycle for RUST_LOG=warn
+        // operators; the returned vec is the structured surface.
+        graph.re_export_cycles = graph.resolve_re_export_chains();
 
         graph
     }

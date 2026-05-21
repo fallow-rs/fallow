@@ -4,6 +4,8 @@ mod propagate;
 #[cfg(test)]
 mod tests;
 
+use std::path::PathBuf;
+
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::discover::FileId;
@@ -11,6 +13,29 @@ use fallow_types::discover::FileId;
 use super::ModuleGraph;
 
 use propagate::{propagate_named_re_export, propagate_star_re_export};
+
+/// A re-export cycle or self-loop detected during Phase 4 chain resolution.
+///
+/// The graph-layer mirror of `fallow_types::results::ReExportCycle`. Kept in
+/// the graph crate so the types crate does not need a dependency arrow back
+/// into graph for the conversion; `fallow_core::analyze::re_export_cycles`
+/// performs the `GraphReExportCycle` to `ReExportCycle` mapping by reading
+/// `is_self_loop` and routing to the matching `ReExportCycleKind` variant.
+#[derive(Debug, Clone)]
+pub struct GraphReExportCycle {
+    /// Member files participating in the cycle, sorted lexicographically by
+    /// the `Path::display()` form (matches the existing diagnostic-output
+    /// sort). For a self-loop, exactly one entry.
+    pub files: Vec<PathBuf>,
+    /// Parallel array to `files`: the FileId for each member. Kept alongside
+    /// the paths so the core-layer detector can call
+    /// `suppressions.is_file_suppressed(id, IssueKind::ReExportCycle)`
+    /// without an extra path-to-FileId lookup.
+    pub file_ids: Vec<FileId>,
+    /// `true` for single-file self-re-exports (`export * from './'`), `false`
+    /// for multi-node strongly connected components.
+    pub is_self_loop: bool,
+}
 
 /// A single re-export edge collected from the module graph.
 ///
@@ -33,7 +58,12 @@ impl ModuleGraph {
     /// Resolve re-export chains: when module A re-exports from B,
     /// any reference to A's re-exported symbol should also count as a reference
     /// to B's original export (and transitively through the chain).
-    pub(super) fn resolve_re_export_chains(&mut self) {
+    ///
+    /// Returns the list of re-export cycles and self-loops detected during
+    /// the upfront Tarjan SCC pass. The caller stores this on the
+    /// `ModuleGraph` so the `re-export-cycle` finding type can surface them
+    /// to users instead of relying on `RUST_LOG=warn` (see issue #515).
+    pub(super) fn resolve_re_export_chains(&mut self) -> Vec<GraphReExportCycle> {
         let re_export_info: Vec<ReExportTuple> = self
             .modules
             .iter()
@@ -49,7 +79,7 @@ impl ModuleGraph {
             .collect();
 
         if re_export_info.is_empty() {
-            return;
+            return Vec::new();
         }
 
         // Surface re-export cycles up front via Tarjan SCC over the
@@ -58,7 +88,11 @@ impl ModuleGraph {
         // iteration cap hid these for years. Cycles still terminate
         // naturally via the dedup-by-`from_file` check inside each
         // propagation helper, so this pass is purely diagnostic.
-        warn_on_re_export_cycles(&self.modules, &re_export_info);
+        //
+        // The function also emits one `tracing::warn!` per cycle for
+        // operators running with `RUST_LOG=warn`; the returned vec is the
+        // structured surface consumed by the user-visible finding type.
+        let cycles = find_re_export_cycles(&self.modules, &re_export_info);
 
         // Precompute barrels that are transitively star-re-exported from entry points.
         // These get entry-point-like treatment: all source exports are marked used.
@@ -181,19 +215,26 @@ impl ModuleGraph {
                  https://github.com/fallow-rs/fallow/issues with the repro."
             );
         }
+
+        cycles
     }
 }
 
-/// Find SCCs of size >= 2 in the re-export subgraph and emit one
-/// `tracing::warn!` per cycle with the member file paths.
+/// Find SCCs of size >= 2 in the re-export subgraph and self-re-export
+/// edges, emit one `tracing::warn!` per cycle, AND return structured cycle
+/// data for the user-visible `re-export-cycle` finding type.
 ///
-/// Diagnostics are RUST_LOG-gated today; surfacing them as user-visible
-/// `AnalysisResults` findings is tracked as a follow-up so #442 stays
-/// scoped to the graph crate.
-fn warn_on_re_export_cycles(
+/// The `tracing::warn!` emissions remain unchanged from #442 (RUST_LOG=warn
+/// operators still see them). The returned `Vec<GraphReExportCycle>` is the
+/// structured surface that `fallow_core::analyze::re_export_cycles` consumes
+/// and wraps in typed `ReExportCycleFinding`s for end-user output. See
+/// issue #515.
+fn find_re_export_cycles(
     modules: &[super::types::ModuleNode],
     re_export_info: &[ReExportTuple],
-) {
+) -> Vec<GraphReExportCycle> {
+    let mut cycles: Vec<GraphReExportCycle> = Vec::new();
+
     // Collect unique nodes (FileIds appearing as either endpoint).
     let mut node_index: FxHashMap<FileId, usize> = FxHashMap::default();
     let mut nodes: Vec<FileId> = Vec::new();
@@ -209,7 +250,7 @@ fn warn_on_re_export_cycles(
 
     let n = nodes.len();
     if n == 0 {
-        return;
+        return cycles;
     }
 
     // Build adjacency list: barrel -> source. Dedup parallel edges (same
@@ -226,18 +267,28 @@ fn warn_on_re_export_cycles(
         if from == to {
             if seen_self_loop.insert(entry.barrel) {
                 let i = entry.barrel.0 as usize;
-                let path = if i < modules.len() {
-                    modules[i].path.display().to_string()
+                let (path_buf, path_display) = if i < modules.len() {
+                    let p = modules[i].path.clone();
+                    let d = p.display().to_string();
+                    (p, d)
                 } else {
-                    format!("<file id {i}>")
+                    (
+                        PathBuf::from(format!("<file id {i}>")),
+                        format!("<file id {i}>"),
+                    )
                 };
                 tracing::warn!(
-                    file = path.as_str(),
+                    file = path_display.as_str(),
                     "Re-export self-loop detected: this file re-exports from \
                      itself. Chain propagation is structurally a no-op for \
                      these edges. Inspect the barrel for an accidental \
                      `export * from './<this-file>'` after a rename or move."
                 );
+                cycles.push(GraphReExportCycle {
+                    files: vec![path_buf],
+                    file_ids: vec![entry.barrel],
+                    is_self_loop: true,
+                });
             }
             continue;
         }
@@ -253,20 +304,30 @@ fn warn_on_re_export_cycles(
         if scc.len() < 2 {
             continue;
         }
-        let mut paths: Vec<String> = scc
+        // Resolve each FileId to its PathBuf once. Sort by Path::display()
+        // string to match the existing diagnostic-output sort (also stable
+        // across platforms because PathBuf comparison is byte-wise).
+        let mut triples: Vec<(PathBuf, String, FileId)> = scc
             .iter()
             .map(|&idx| {
                 let file_id = nodes[idx];
                 let i = file_id.0 as usize;
                 if i < modules.len() {
-                    modules[i].path.display().to_string()
+                    let p = modules[i].path.clone();
+                    let d = p.display().to_string();
+                    (p, d, file_id)
                 } else {
-                    format!("<file id {i}>")
+                    let placeholder = format!("<file id {i}>");
+                    (PathBuf::from(&placeholder), placeholder, file_id)
                 }
             })
             .collect();
-        paths.sort();
-        let members = paths.join(" <-> ");
+        triples.sort_by(|a, b| a.1.cmp(&b.1));
+        let members = triples
+            .iter()
+            .map(|(_, d, _)| d.as_str())
+            .collect::<Vec<_>>()
+            .join(" <-> ");
         tracing::warn!(
             cycle_size = scc.len(),
             members = members.as_str(),
@@ -274,7 +335,22 @@ fn warn_on_re_export_cycles(
              for symbols on this barrel loop. Break the cycle to restore \
              full reachability analysis."
         );
+        let (files, file_ids) = triples.into_iter().fold(
+            (Vec::new(), Vec::new()),
+            |(mut paths, mut ids), (p, _, id)| {
+                paths.push(p);
+                ids.push(id);
+                (paths, ids)
+            },
+        );
+        cycles.push(GraphReExportCycle {
+            files,
+            file_ids,
+            is_self_loop: false,
+        });
     }
+
+    cycles
 }
 
 /// Iterative Tarjan's strongly connected components, returns SCCs that

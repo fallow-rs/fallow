@@ -37,10 +37,10 @@ use crate::output::{
 };
 use crate::results::{
     BoundaryViolation, CircularDependency, DependencyOverrideSource, DuplicateExport,
-    EmptyCatalogGroup, MisconfiguredDependencyOverride, PrivateTypeLeak, TestOnlyDependency,
-    TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport,
-    UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
-    UnusedMember,
+    EmptyCatalogGroup, MisconfiguredDependencyOverride, PrivateTypeLeak, ReExportCycle,
+    ReExportCycleKind, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency,
+    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
+    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -257,6 +257,93 @@ impl CircularDependencyFinding {
                 description: "Suppress with an inline comment above the line".to_string(),
                 comment: "// fallow-ignore-next-line circular-dependency".to_string(),
                 scope: None,
+            }),
+        ];
+        Self {
+            cycle,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`ReExportCycle`] finding. Mirrors
+/// [`CircularDependencyFinding`]: flattens the bare finding and carries a
+/// typed `actions` array (`refactor-re-export-cycle` informational primary
+/// plus `suppress-file` secondary; cycles are file-scoped so a single
+/// file-level suppression on the alphabetically-first member breaks the
+/// cycle, and no `// fallow-ignore-next-line` form makes sense because the
+/// diagnostic is anchored at line 1 col 0 of each member).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ReExportCycleFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub cycle: ReExportCycle,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl ReExportCycleFinding {
+    /// Build the wrapper from a raw [`ReExportCycle`].
+    ///
+    /// The `SuppressFile` action targets the alphabetically-first member
+    /// (`cycle.files[0]`; the `files` Vec is already sorted at graph layer);
+    /// for multi-node cycles the description names the other members so
+    /// consumers see context for why one file-level suppression suffices.
+    #[must_use]
+    pub fn with_actions(cycle: ReExportCycle) -> Self {
+        let other_members = if cycle.files.len() > 1 {
+            let rest: Vec<String> = cycle
+                .files
+                .iter()
+                .skip(1)
+                .map(|p| p.display().to_string())
+                .collect();
+            Some(rest.join(", "))
+        } else {
+            None
+        };
+        let suppress_description = match (&cycle.kind, other_members) {
+            (ReExportCycleKind::SelfLoop, _) => {
+                "Suppress with a file-level comment at the top of this file. \
+                 The cycle is a self-loop, so the suppression covers the entire finding."
+                    .to_string()
+            }
+            (ReExportCycleKind::MultiNode, Some(rest)) => format!(
+                "Suppress with a file-level comment at the top of this file. \
+                 One suppression breaks the cycle for all members ({rest})."
+            ),
+            (ReExportCycleKind::MultiNode, None) => {
+                "Suppress with a file-level comment at the top of this file.".to_string()
+            }
+        };
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::RefactorReExportCycle,
+                auto_fixable: false,
+                description: "Remove one `export * from` (or `export { ... } from`) \
+                              statement on any one member to break the cycle"
+                    .to_string(),
+                note: Some(
+                    "Re-export cycles are structurally a no-op: chain propagation through \
+                     the loop never reaches a terminating module, so imports from any member \
+                     may silently come up empty."
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressFile(SuppressFileAction {
+                kind: SuppressFileKind::SuppressFile,
+                auto_fixable: false,
+                description: suppress_description,
+                comment: "// fallow-ignore-file re-export-cycle".to_string(),
             }),
         ];
         Self {
@@ -1351,6 +1438,7 @@ mod position_0_invariants {
                 FixActionType::RemoveDuplicate => "remove-duplicate",
                 FixActionType::MoveToDev => "move-to-dev",
                 FixActionType::RefactorCycle => "refactor-cycle",
+                FixActionType::RefactorReExportCycle => "refactor-re-export-cycle",
                 FixActionType::RefactorBoundary => "refactor-boundary",
                 FixActionType::ExportType => "export-type",
                 FixActionType::RemoveCatalogEntry => "remove-catalog-entry",

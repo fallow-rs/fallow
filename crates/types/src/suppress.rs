@@ -45,6 +45,10 @@ pub enum IssueKind {
     CodeDuplication,
     /// A circular dependency chain.
     CircularDependency,
+    /// A cycle or self-loop in the re-export edge subgraph (barrel files
+    /// re-exporting from each other in a loop). Structurally always a bug:
+    /// chain propagation through the cycle is a no-op.
+    ReExportCycle,
     /// A production dependency only imported via type-only imports.
     TypeOnlyDependency,
     /// A production dependency only imported by test files.
@@ -92,6 +96,9 @@ impl IssueKind {
             "duplicate-export" => Some(Self::DuplicateExport),
             "code-duplication" => Some(Self::CodeDuplication),
             "circular-dependency" | "circular-dependencies" => Some(Self::CircularDependency),
+            "re-export-cycle" | "re-export-cycles" | "reexport-cycle" | "reexport-cycles" => {
+                Some(Self::ReExportCycle)
+            }
             "type-only-dependency" => Some(Self::TypeOnlyDependency),
             "test-only-dependency" => Some(Self::TestOnlyDependency),
             "boundary-violation" => Some(Self::BoundaryViolation),
@@ -143,6 +150,7 @@ impl IssueKind {
             Self::UnusedDependencyOverride => 23,
             Self::MisconfiguredDependencyOverride => 24,
             Self::EmptyCatalogGroup => 25,
+            Self::ReExportCycle => 26,
         }
     }
 
@@ -175,6 +183,7 @@ impl IssueKind {
             23 => Some(Self::UnusedDependencyOverride),
             24 => Some(Self::MisconfiguredDependencyOverride),
             25 => Some(Self::EmptyCatalogGroup),
+            26 => Some(Self::ReExportCycle),
             _ => None,
         }
     }
@@ -252,6 +261,10 @@ pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "code-duplication",
     "circular-dependency",
     "circular-dependencies",
+    "re-export-cycle",
+    "re-export-cycles",
+    "reexport-cycle",
+    "reexport-cycles",
     "type-only-dependency",
     "test-only-dependency",
     "boundary-violation",
@@ -474,7 +487,7 @@ mod tests {
     #[test]
     fn discriminant_out_of_range() {
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(26), None);
+        assert_eq!(IssueKind::from_discriminant(27), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -494,6 +507,7 @@ mod tests {
             IssueKind::DuplicateExport,
             IssueKind::CodeDuplication,
             IssueKind::CircularDependency,
+            IssueKind::ReExportCycle,
             IssueKind::TypeOnlyDependency,
             IssueKind::TestOnlyDependency,
             IssueKind::BoundaryViolation,
@@ -513,7 +527,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(26), None);
+        assert_eq!(IssueKind::from_discriminant(27), None);
     }
 
     // ── Discriminant uniqueness ─────────────────────────────────
@@ -534,6 +548,7 @@ mod tests {
             IssueKind::DuplicateExport,
             IssueKind::CodeDuplication,
             IssueKind::CircularDependency,
+            IssueKind::ReExportCycle,
             IssueKind::TypeOnlyDependency,
             IssueKind::TestOnlyDependency,
             IssueKind::BoundaryViolation,

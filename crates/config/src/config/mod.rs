@@ -625,6 +625,8 @@ pub struct RegressionBaseline {
     #[serde(default)]
     pub circular_dependencies: usize,
     #[serde(default)]
+    pub re_export_cycles: usize,
+    #[serde(default)]
     pub type_only_dependencies: usize,
     #[serde(default)]
     pub test_only_dependencies: usize,

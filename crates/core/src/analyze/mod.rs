@@ -885,6 +885,7 @@ mod tests {
                 duplicate_exports: Severity::Off,
                 type_only_dependencies: Severity::Off,
                 circular_dependencies: Severity::Off,
+                re_export_cycle: Severity::Off,
                 test_only_dependencies: Severity::Off,
                 boundary_violation: Severity::Off,
                 coverage_gaps: Severity::Off,

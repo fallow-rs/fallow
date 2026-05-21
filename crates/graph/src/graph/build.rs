@@ -316,6 +316,7 @@ impl ModuleGraph {
             test_entry_points: test_entry_point_ids.clone(),
             reverse_deps,
             namespace_imported: acc.namespace_imported,
+            re_export_cycles: Vec::new(),
         }
     }
 

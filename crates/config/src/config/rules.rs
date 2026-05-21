@@ -96,6 +96,13 @@ pub struct RulesConfig {
     pub test_only_dependencies: Severity,
     #[serde(default, alias = "circular-dependency")]
     pub circular_dependencies: Severity,
+    #[serde(
+        default = "Severity::default_warn",
+        alias = "re-export-cycles",
+        alias = "reexport-cycle",
+        alias = "reexport-cycles"
+    )]
+    pub re_export_cycle: Severity,
     #[serde(default, alias = "boundary-violations")]
     pub boundary_violation: Severity,
     #[serde(default, alias = "coverage-gap")]
@@ -137,6 +144,7 @@ impl Default for RulesConfig {
             type_only_dependencies: Severity::Warn,
             test_only_dependencies: Severity::Warn,
             circular_dependencies: Severity::Error,
+            re_export_cycle: Severity::Warn,
             boundary_violation: Severity::Error,
             coverage_gaps: Severity::Off,
             feature_flags: Severity::Off,
@@ -197,6 +205,9 @@ impl RulesConfig {
         }
         if let Some(s) = partial.circular_dependencies {
             self.circular_dependencies = s;
+        }
+        if let Some(s) = partial.re_export_cycle {
+            self.re_export_cycle = s;
         }
         if let Some(s) = partial.boundary_violation {
             self.boundary_violation = s;
@@ -324,6 +335,14 @@ pub struct PartialRulesConfig {
     pub circular_dependencies: Option<Severity>,
     #[serde(
         default,
+        alias = "re-export-cycles",
+        alias = "reexport-cycle",
+        alias = "reexport-cycles",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub re_export_cycle: Option<Severity>,
+    #[serde(
+        default,
         alias = "boundary-violations",
         skip_serializing_if = "Option::is_none"
     )]
@@ -405,6 +424,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "type-only-dependencies",
     "test-only-dependencies",
     "circular-dependencies",
+    "re-export-cycle",
     "boundary-violation",
     "coverage-gaps",
     "feature-flags",
@@ -430,6 +450,9 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "type-only-dependency",
     "test-only-dependency",
     "circular-dependency",
+    "re-export-cycles",
+    "reexport-cycle",
+    "reexport-cycles",
     "boundary-violations",
     "coverage-gap",
     "feature-flag",
@@ -536,6 +559,32 @@ mod tests {
         assert_eq!(rules.unused_types, Severity::Off);
         // Unset fields default to error
         assert_eq!(rules.unresolved_imports, Severity::Error);
+    }
+
+    #[test]
+    fn rules_re_export_cycle_default_is_warn() {
+        let rules = RulesConfig::default();
+        assert_eq!(rules.re_export_cycle, Severity::Warn);
+    }
+
+    #[test]
+    fn rules_deserialize_re_export_cycle_aliases() {
+        // All four token forms (canonical + three aliases) must round-trip.
+        for token in [
+            "re-export-cycle",
+            "re-export-cycles",
+            "reexport-cycle",
+            "reexport-cycles",
+        ] {
+            let json_str = format!(r#"{{ "{token}": "error" }}"#);
+            let rules: RulesConfig = serde_json::from_str(&json_str)
+                .unwrap_or_else(|e| panic!("alias {token} did not deserialize: {e}"));
+            assert_eq!(
+                rules.re_export_cycle,
+                Severity::Error,
+                "alias {token} should set re_export_cycle"
+            );
+        }
     }
 
     #[test]
@@ -698,6 +747,7 @@ mod tests {
             type_only_dependencies: Some(Severity::Off),
             test_only_dependencies: Some(Severity::Off),
             circular_dependencies: Some(Severity::Off),
+            re_export_cycle: Some(Severity::Off),
             boundary_violation: Some(Severity::Off),
             coverage_gaps: Some(Severity::Off),
             feature_flags: Some(Severity::Off),
@@ -752,7 +802,7 @@ mod tests {
     fn known_rule_names_count_matches_struct() {
         // Drift guard. Bump both numbers together when adding a rule.
         // 24 canonical kebab-case names + 24 aliases = 48 entries.
-        assert_eq!(KNOWN_RULE_NAMES.len(), 48);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 52);
     }
 
     #[test]

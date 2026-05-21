@@ -8,11 +8,11 @@ use crate::extract::MemberKind;
 use crate::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
     EmptyCatalogGroupFinding, MisconfiguredDependencyOverrideFinding, PrivateTypeLeakFinding,
-    TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
-    UnusedOptionalDependencyFinding, UnusedTypeFinding,
+    ReExportCycleFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
+    UnlistedDependencyFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
 use crate::suppress::{IssueKind, closest_known_kind_name};
@@ -120,6 +120,14 @@ pub struct AnalysisResults {
     /// [`CircularDependencyFinding`] so each entry carries a typed `actions`
     /// array natively.
     pub circular_dependencies: Vec<CircularDependencyFinding>,
+    /// Cycles or self-loops in the re-export edge subgraph (barrel files
+    /// re-exporting from each other in a loop). Wrapped in
+    /// [`ReExportCycleFinding`] so each entry carries a typed `actions`
+    /// array natively (a `refactor-re-export-cycle` informational primary
+    /// plus a `suppress-file` secondary; cycles are file-scoped so a single
+    /// suppression breaks the cycle).
+    #[serde(default)]
+    pub re_export_cycles: Vec<ReExportCycleFinding>,
     /// Imports that cross architecture boundary rules. Wrapped in
     /// [`BoundaryViolationFinding`] so each entry carries a typed `actions`
     /// array natively.
@@ -231,6 +239,7 @@ impl AnalysisResults {
             + self.type_only_dependencies.len()
             + self.test_only_dependencies.len()
             + self.circular_dependencies.len()
+            + self.re_export_cycles.len()
             + self.boundary_violations.len()
             + self.stale_suppressions.len()
             + self.unused_catalog_entries.len()
@@ -374,6 +383,9 @@ impl AnalysisResults {
                 .cmp(&b.cycle.files)
                 .then(a.cycle.length.cmp(&b.cycle.length))
         });
+
+        self.re_export_cycles
+            .sort_by(|a, b| a.cycle.files.cmp(&b.cycle.files));
 
         self.boundary_violations.sort_by(|a, b| {
             a.violation
@@ -943,6 +955,38 @@ pub struct CircularDependency {
     /// Whether this cycle crosses workspace package boundaries.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_cross_package: bool,
+}
+
+/// A cycle or self-loop in the re-export edge subgraph.
+///
+/// Detected by Tarjan SCC over `(barrel, source)` re-export edges in
+/// `crates/graph/src/graph/re_exports/`. A multi-node cycle is a strongly
+/// connected component of size >= 2; a self-loop is a barrel that re-exports
+/// from itself (often a rename leftover or accidental `export * from './'`).
+/// Both are structural bugs because chain propagation through the loop is a
+/// no-op: any symbol consumers think they are re-exporting through the cycle
+/// silently fails to resolve.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ReExportCycle {
+    /// Files participating in the cycle, sorted lexicographically. For a
+    /// self-loop, exactly one entry.
+    #[serde(serialize_with = "serde_path::serialize_vec")]
+    pub files: Vec<PathBuf>,
+    /// Which structural shape this finding describes.
+    pub kind: ReExportCycleKind,
+}
+
+/// Discriminator for [`ReExportCycle`]: which structural shape was detected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum ReExportCycleKind {
+    /// Two or more barrel files re-export from each other in a loop
+    /// (SCC of size >= 2).
+    MultiNode,
+    /// A single barrel file re-exports from itself.
+    SelfLoop,
 }
 
 /// An import that crosses an architecture boundary rule.

@@ -468,6 +468,14 @@ impl FallowConfig {
                         "overrides.rules.circular-dependency has no effect for files matching [{files}]: circular-dependency is an inter-file rule. Use a file-level `// fallow-ignore-file circular-dependency` comment in one participating file instead."
                     );
                 }
+                if o.rules.re_export_cycle.is_some()
+                    && record_inter_file_warn_seen("re-export-cycle", &o.files)
+                {
+                    let files = o.files.join(", ");
+                    tracing::warn!(
+                        "overrides.rules.re-export-cycle has no effect for files matching [{files}]: re-export-cycle is an inter-file rule (the cycle spans multiple barrels). Use a file-level `// fallow-ignore-file re-export-cycle` comment in one participating file instead, or set `rules.re-export-cycle: off` at the top level."
+                    );
+                }
                 let matchers: Vec<globset::GlobMatcher> = o
                     .files
                     .iter()
