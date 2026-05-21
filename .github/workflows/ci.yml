@@ -102,9 +102,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Temporarily reduced to ubuntu-only to conserve CI minutes (macOS is 10x multiplier).
-        # Run macos + windows locally before release.
-        os: [ubuntu-latest]
+        # PR runs ubuntu only (fast feedback, free for public repos).
+        # Push to main also runs windows-latest as a pre-release safety net so
+        # Windows path bugs (backslash separators, UNC paths, long-path `\\?\`,
+        # case insensitivity) surface before a release tag is cut rather than
+        # via user reports. Same structural pattern as the `zed` job below.
+        # macOS minutes are 10x quota multiplier on GitHub Free org plans;
+        # Windows is 2x. macOS coverage is via local pre-release runs.
+        # Refs #447.
+        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest", "windows-latest"]') || fromJSON('["ubuntu-latest"]') }}
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

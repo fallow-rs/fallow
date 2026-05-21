@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Internal
+
+- **The main Rust `Check` job now runs on Windows in addition to Linux on push to `main`.** PR runs stay ubuntu-only for fast feedback, but every push to `main` exercises the full test + clippy + fmt + NAPI build pipeline on `windows-latest` as a pre-release safety net. Before, `.github/workflows/ci.yml`'s `check` job was hard-coded to `ubuntu-latest` and Windows path bugs (backslash separators, UNC paths, long-path `\\?\` prefix, case insensitivity) only surfaced at release time or via user reports. The matrix mirrors the existing `zed` job's push-conditional pattern; macOS coverage continues to come from local pre-release runs (10x quota multiplier on the Free org plan vs 2x for Windows). (Closes [#447](https://github.com/fallow-rs/fallow/issues/447).)
+
 ## [2.77.0] - 2026-05-21
 
 ### Changed
