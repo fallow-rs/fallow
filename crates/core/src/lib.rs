@@ -179,6 +179,22 @@ fn update_cache(
     store.retain_paths(files);
 }
 
+/// Resolve `config.cache_max_size_mb` into bytes, falling back to the
+/// extract crate's `DEFAULT_CACHE_MAX_SIZE`. Lives at this layer (not on
+/// `ResolvedConfig`) because `fallow-config` does not depend on
+/// `fallow-extract`; the bytes conversion is owned by the cache callsite.
+/// Public so CLI subcommands that load the cache directly (`flags`,
+/// `health`, `coverage analyze`) can call it without re-deriving the
+/// same fallback policy.
+#[must_use]
+pub fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
+    config
+        .cache_max_size_mb
+        .map_or(cache::DEFAULT_CACHE_MAX_SIZE, |mb| {
+            (mb as usize).saturating_mul(1024 * 1024)
+        })
+}
+
 /// Extract mtime (seconds since epoch) and file size from a path.
 fn file_mtime_and_size(path: &std::path::Path) -> (u64, u64) {
     std::fs::metadata(path).map_or((0, 0), |m| {
@@ -710,10 +726,15 @@ fn analyze_full(
     // Stage 2: Parse all files in parallel and extract imports/exports
     let t = Instant::now();
     let pb = progress.stage_spinner(&format!("Parsing {} files...", files.len()));
+    let cache_max_size_bytes = resolve_cache_max_size_bytes(config);
     let mut cache_store = if config.no_cache {
         None
     } else {
-        cache::CacheStore::load(&config.cache_dir, config.cache_config_hash)
+        cache::CacheStore::load(
+            &config.cache_dir,
+            config.cache_config_hash,
+            cache_max_size_bytes,
+        )
     };
 
     let parse_result = extract::parse_all_files(files, cache_store.as_ref(), need_complexity);
@@ -728,11 +749,6 @@ fn analyze_full(
     if !config.no_cache {
         let store = cache_store.get_or_insert_with(cache::CacheStore::new);
         update_cache(store, &modules, files);
-        let cache_max_size_bytes = config
-            .cache_max_size_mb
-            .map_or(cache::DEFAULT_CACHE_MAX_SIZE, |mb| {
-                (mb as usize).saturating_mul(1024 * 1024)
-            });
         if let Err(e) = store.save(
             &config.cache_dir,
             config.cache_config_hash,

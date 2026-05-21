@@ -68,7 +68,7 @@ cargo run --bin fallow -- fix --dry-run      # Auto-fix preview
 - No `output` in config; output format is CLI-only via `--format`
 - Rules severity: `error` (fail CI, default) | `warn` (exit 0) | `off` (skip)
 - Inline suppression: `// fallow-ignore-next-line [issue-type]` and `// fallow-ignore-file [issue-type]`
-- Environment variables: `FALLOW_FORMAT`, `FALLOW_QUIET`, `FALLOW_BIN` (binary path for MCP)
+- Environment variables: `FALLOW_FORMAT`, `FALLOW_QUIET`, `FALLOW_BIN` (binary path for MCP), `FALLOW_CACHE_MAX_SIZE` (extraction cache cap in MB; default 256)
 - See `.claude/rules/code-quality.md` for clippy, size assertions, and CI hardening details
 
 ## Key design decisions

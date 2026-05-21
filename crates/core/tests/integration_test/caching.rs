@@ -53,7 +53,8 @@ fn cache_roundtrip() {
     store
         .save(&temp_dir, 0, fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE)
         .unwrap();
-    let loaded = CacheStore::load(&temp_dir, 0).unwrap();
+    let loaded =
+        CacheStore::load(&temp_dir, 0, fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE).unwrap();
     assert_eq!(loaded.len(), 1);
 
     // Correct hash -> hit

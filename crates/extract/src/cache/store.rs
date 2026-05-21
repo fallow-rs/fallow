@@ -40,23 +40,47 @@ impl CacheStore {
     ///
     /// Returns `None` when:
     /// - the file does not exist or cannot be read,
-    /// - the on-disk size exceeds the safety ceiling (`DEFAULT_CACHE_MAX_SIZE`),
-    /// - the on-disk version differs from the current `CACHE_VERSION` (emits a
-    ///   one-line `tracing::info!` so the user sees the one-time rebuild cost),
+    /// - the on-disk size exceeds the configured `max_size_bytes` (matches the
+    ///   user's `cache.maxSizeMb` / `FALLOW_CACHE_MAX_SIZE` setting, with the
+    ///   built-in `DEFAULT_CACHE_MAX_SIZE` as the lower bound so a misconfigured
+    ///   tiny cap cannot push a still-valid larger cache into discard),
+    /// - bitcode decoding fails or the decoded version differs from
+    ///   `CACHE_VERSION` (emits a one-line `tracing::info!` so the user sees the
+    ///   one-time rebuild cost; decode failure is the common case across
+    ///   `CACHE_VERSION` bumps because the on-disk schema changes shape and
+    ///   the new struct cannot deserialize the old bytes),
     /// - the on-disk `config_hash` differs from `expected_config_hash` (silent;
     ///   config changes are user-driven and routine, no log noise).
     #[must_use]
-    pub fn load(cache_dir: &Path, expected_config_hash: u64) -> Option<Self> {
+    pub fn load(
+        cache_dir: &Path,
+        expected_config_hash: u64,
+        max_size_bytes: usize,
+    ) -> Option<Self> {
         let cache_file = cache_dir.join("cache.bin");
         let data = std::fs::read(&cache_file).ok()?;
-        if data.len() > DEFAULT_CACHE_MAX_SIZE {
+        // Honour both the user's cap AND the built-in default so a
+        // misconfigured tiny cap (e.g. `FALLOW_CACHE_MAX_SIZE=1`) does NOT
+        // throw away a valid existing cache on the load path; the user's
+        // cap takes effect at the NEXT save via the eviction logic.
+        let safety_ceiling = max_size_bytes.max(DEFAULT_CACHE_MAX_SIZE);
+        if data.len() > safety_ceiling {
             tracing::warn!(
                 size_mb = data.len() / (1024 * 1024),
+                ceiling_mb = safety_ceiling / (1024 * 1024),
                 "Cache file exceeds safety ceiling, ignoring"
             );
             return None;
         }
-        let store: Self = bitcode::decode(&data).ok()?;
+        let store: Self = match bitcode::decode(&data) {
+            Ok(s) => s,
+            Err(_) => {
+                tracing::info!(
+                    "Cache format upgraded, rebuilding (one-time cost after version bump)"
+                );
+                return None;
+            }
+        };
         if store.version != CACHE_VERSION {
             tracing::info!("Cache format upgraded, rebuilding (one-time cost after version bump)");
             return None;

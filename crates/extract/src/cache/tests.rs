@@ -583,7 +583,7 @@ fn module_to_cached_roundtrip_members() {
 
 #[test]
 fn cache_load_nonexistent_returns_none() {
-    let result = CacheStore::load(Path::new("/nonexistent/path"), 0);
+    let result = CacheStore::load(Path::new("/nonexistent/path"), 0, DEFAULT_CACHE_MAX_SIZE);
     assert!(result.is_none());
 }
 
@@ -634,7 +634,7 @@ fn cache_save_and_load_roundtrip() {
     store.insert(Path::new("test.ts"), module);
     store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
 
-    let loaded = CacheStore::load(&dir, 0);
+    let loaded = CacheStore::load(&dir, 0, DEFAULT_CACHE_MAX_SIZE);
     assert!(loaded.is_some());
     let loaded = loaded.unwrap();
     assert_eq!(loaded.len(), 1);
@@ -683,7 +683,7 @@ fn cache_version_mismatch_returns_none() {
     store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
 
     // Verify the cache loads correctly before tampering
-    assert!(CacheStore::load(&dir, 0).is_some());
+    assert!(CacheStore::load(&dir, 0, DEFAULT_CACHE_MAX_SIZE).is_some());
 
     // Read raw bytes and modify the version field.
     // The version (CACHE_VERSION) is the first encoded field.
@@ -696,7 +696,7 @@ fn cache_version_mismatch_returns_none() {
     std::fs::write(&cache_file, &data).unwrap();
 
     // Loading should return None due to version mismatch
-    let result = CacheStore::load(&dir, 0);
+    let result = CacheStore::load(&dir, 0, DEFAULT_CACHE_MAX_SIZE);
     assert!(result.is_none());
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -1827,7 +1827,7 @@ fn cache_save_no_eviction_when_under_threshold() {
         .save(&dir, 42, DEFAULT_CACHE_MAX_SIZE)
         .expect("save under threshold");
 
-    let loaded = CacheStore::load(&dir, 42).expect("load round-trip");
+    let loaded = CacheStore::load(&dir, 42, DEFAULT_CACHE_MAX_SIZE).expect("load round-trip");
     assert_eq!(loaded.len(), 10, "all 10 entries survive");
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -1845,7 +1845,7 @@ fn cache_save_evicts_when_over_threshold() {
     let cap = 40 * 1024;
     store.save(&dir, 99, cap).expect("save with eviction");
 
-    let loaded = CacheStore::load(&dir, 99).expect("load after eviction");
+    let loaded = CacheStore::load(&dir, 99, DEFAULT_CACHE_MAX_SIZE).expect("load after eviction");
     // Some entries must have been evicted.
     assert!(loaded.len() < 50, "eviction removed entries");
     // Eviction order is ascending last_access_secs: the oldest (lowest i)
@@ -1899,7 +1899,8 @@ fn cache_save_always_honors_cap_with_huge_entries() {
         .save(&dir, 5, 1024)
         .expect("save honors cap with overshoot");
 
-    let loaded = CacheStore::load(&dir, 5).expect("load after overshoot save");
+    let loaded =
+        CacheStore::load(&dir, 5, DEFAULT_CACHE_MAX_SIZE).expect("load after overshoot save");
     assert_eq!(loaded.len(), 1, "single entry preserved under overshoot");
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -1916,12 +1917,12 @@ fn cache_load_returns_none_on_config_hash_mismatch() {
 
     // Load with a different config_hash: must be None.
     assert!(
-        CacheStore::load(&dir, 0xCAFE_BABE).is_none(),
+        CacheStore::load(&dir, 0xCAFE_BABE, DEFAULT_CACHE_MAX_SIZE).is_none(),
         "mismatched config_hash invalidates cache"
     );
     // Same config_hash still round-trips.
     assert!(
-        CacheStore::load(&dir, 0xDEAD_BEEF).is_some(),
+        CacheStore::load(&dir, 0xDEAD_BEEF, DEFAULT_CACHE_MAX_SIZE).is_some(),
         "matching config_hash round-trips"
     );
 
@@ -1939,10 +1940,62 @@ fn cache_load_round_trip_with_matching_config_hash() {
         .save(&dir, hash, DEFAULT_CACHE_MAX_SIZE)
         .expect("save with hash");
 
-    let loaded = CacheStore::load(&dir, hash).expect("load with matching hash");
+    let loaded =
+        CacheStore::load(&dir, hash, DEFAULT_CACHE_MAX_SIZE).expect("load with matching hash");
     assert_eq!(loaded.len(), 2);
     assert!(loaded.get(Path::new("a.ts"), 1).is_some());
     assert!(loaded.get(Path::new("b.ts"), 2).is_some());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cache_load_honors_user_max_size_above_default() {
+    // Regression: an earlier version of `load` gated on `DEFAULT_CACHE_MAX_SIZE`
+    // unconditionally, so a user setting `cache.maxSizeMb = 512` could write a
+    // 400 MB cache via `save` then have it silently discarded on the next run.
+    // The fix uses `max(max_size_bytes, DEFAULT_CACHE_MAX_SIZE)` as the load
+    // ceiling so user-supplied caps above the default actually take effect,
+    // and a misconfigured tiny cap does NOT discard a valid existing cache.
+    let dir = test_cache_dir("load_honors_user_max");
+    let mut store = CacheStore::new();
+    store.insert(Path::new("a.ts"), synthetic_module(1, 0, 1));
+    store
+        .save(&dir, 0, DEFAULT_CACHE_MAX_SIZE)
+        .expect("save under default");
+
+    // Tiny user cap (1 byte) does NOT discard the existing valid cache:
+    // the default acts as a floor on the load ceiling.
+    assert!(
+        CacheStore::load(&dir, 0, 1).is_some(),
+        "tiny user cap does not discard valid existing cache"
+    );
+
+    // User cap above the default also works (matches the cap the cache was
+    // saved under).
+    assert!(
+        CacheStore::load(&dir, 0, DEFAULT_CACHE_MAX_SIZE * 2).is_some(),
+        "user cap above default round-trips"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cache_load_returns_none_on_bitcode_decode_failure() {
+    // Regression: across a CACHE_VERSION bump the on-disk schema typically
+    // gains or removes fields, so bitcode cannot deserialize old bytes into
+    // the new struct shape. The old `load` only emitted the upgrade
+    // `tracing::info!` AFTER the decode succeeded, so the common
+    // upgrade path went silent. The fix emits the info log on EITHER
+    // decode failure OR version mismatch, since both indicate
+    // "on-disk file incompatible with this build."
+    let dir = test_cache_dir("decode_fail_info");
+    std::fs::create_dir_all(&dir).unwrap();
+    // Write deliberately-malformed bytes (cannot decode into any CacheStore
+    // shape). The `load` path must return `None` without panicking.
+    std::fs::write(dir.join("cache.bin"), b"not-a-valid-bitcode-payload").unwrap();
+    assert!(CacheStore::load(&dir, 0, DEFAULT_CACHE_MAX_SIZE).is_none());
 
     let _ = std::fs::remove_dir_all(&dir);
 }

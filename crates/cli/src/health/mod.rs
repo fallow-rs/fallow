@@ -216,7 +216,11 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     let cache = if config.no_cache {
         None
     } else {
-        fallow_core::cache::CacheStore::load(&config.cache_dir, config.cache_config_hash)
+        fallow_core::cache::CacheStore::load(
+            &config.cache_dir,
+            config.cache_config_hash,
+            fallow_core::resolve_cache_max_size_bytes(&config),
+        )
     };
     let t = Instant::now();
     let parse_result = fallow_core::extract::parse_all_files(&files, cache.as_ref(), true);

@@ -42,6 +42,7 @@ Key modules:
 - `FALLOW_FORMAT` — default output format
 - `FALLOW_QUIET` — suppress progress bars
 - `FALLOW_BIN` — binary path for MCP server
+- `FALLOW_CACHE_MAX_SIZE` — extraction cache (`.fallow/cache.bin`) cap in megabytes. Default 256. Wins over the `cache.maxSizeMb` config field. Resolved at `runtime_support::resolve_cache_max_size_env`; threaded into both `CacheStore::load` (size ceiling, `max(max_size_bytes, DEFAULT_CACHE_MAX_SIZE)` so a misconfigured tiny cap does NOT discard a valid existing cache) and `CacheStore::save` (eviction trigger). `--no-cache` short-circuits.
 - `FALLOW_COVERAGE` — path to Istanbul coverage data for accurate CRAP scores
 - `FALLOW_LICENSE` — license JWT (full string). First-class storage path; intended for shared CI runners.
 - `FALLOW_LICENSE_PATH` — file path containing the license JWT.

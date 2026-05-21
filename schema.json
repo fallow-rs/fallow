@@ -275,6 +275,10 @@
       "description": "Report unused exports in entry files instead of auto-marking them as\nused. Catches typos in framework exports (e.g. `meatdata` instead of\n`metadata`). The CLI flag `--include-entry-exports` (global) overrides\nthis when set; otherwise the config value is used.",
       "type": "boolean",
       "default": false
+    },
+    "cache": {
+      "description": "Incremental cache tuning. Today the only knob is `maxSizeMb`, which\ncaps the on-disk cache and triggers LRU eviction during save. See\n[`CacheConfig`].",
+      "$ref": "#/$defs/CacheConfig"
     }
   },
   "additionalProperties": false,
@@ -1703,6 +1707,22 @@
           "const": "all"
         }
       ]
+    },
+    "CacheConfig": {
+      "description": "Incremental cache configuration.\n\nToday only `maxSizeMb` is exposed. The env var `FALLOW_CACHE_MAX_SIZE`\n(also in MB) wins over this field when both are set. The default cap is\n256 MB; values are interpreted as whole megabytes.",
+      "type": "object",
+      "properties": {
+        "maxSizeMb": {
+          "description": "Maximum on-disk cache size in megabytes. When the serialized cache\nexceeds 80% of this cap during save, the oldest entries are evicted\ndown to 60% of the cap. Default: 256 MB.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
     }
   }
 }
