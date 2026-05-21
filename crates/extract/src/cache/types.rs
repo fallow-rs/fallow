@@ -20,7 +20,13 @@ use crate::MemberKind;
 /// pre-fix entries for `.module.css` files using nested cascade-layer syntax
 /// (`@layer foo.bar { ... }`) carry phantom `bar` / `baz` exports that the
 /// new scanner no longer produces.
-pub(super) const CACHE_VERSION: u32 = 90;
+///
+/// Bumped to 91 for issue #549: CSS Modules class extraction now records a
+/// real `Span` pointing at each class's declaration position in the source.
+/// Pre-fix cache entries for `.module.css` / `.module.scss` files carry
+/// `Span::default()` (start=0, end=0) on every export, which renders every
+/// finding at line:1 col:0; the new scanner produces real offsets.
+pub(super) const CACHE_VERSION: u32 = 91;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -249,26 +249,68 @@ pub fn extract_css_imports(source: &str, is_scss: bool) -> Vec<String> {
         .collect()
 }
 
+/// Mask every regex match in `src` with ASCII spaces (`0x20`) of equal byte
+/// length, so byte offsets in the returned string correspond 1:1 to byte
+/// offsets in the original.
+///
+/// Used to neutralise CSS comments, quoted strings, `url(...)`, and at-rule
+/// preludes before scanning for `.class` selectors, while preserving the
+/// original-source positions that callers need to populate `ExportInfo.span`
+/// (issue #549). The `regex` crate guarantees match boundaries respect UTF-8
+/// char boundaries, so the masked buffer is always valid UTF-8.
+fn mask_with_whitespace(src: &str, re: &regex::Regex) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut cursor = 0;
+    for m in re.find_iter(src) {
+        out.push_str(&src[cursor..m.start()]);
+        for _ in m.start()..m.end() {
+            out.push(' ');
+        }
+        cursor = m.end();
+    }
+    out.push_str(&src[cursor..]);
+    out
+}
+
 /// Extract class names from a CSS module file as named exports.
-pub fn extract_css_module_exports(source: &str) -> Vec<ExportInfo> {
-    let cleaned = CSS_NON_SELECTOR_RE.replace_all(source, "");
+///
+/// Each emitted [`ExportInfo`] carries a [`Span`] pointing at the bare class
+/// name in the ORIGINAL `source` (no leading dot), so downstream
+/// `compute_line_offsets` resolves the real declaration line and column
+/// instead of falling back to line:1 col:0 (issue #549).
+pub fn extract_css_module_exports(source: &str, is_scss: bool) -> Vec<ExportInfo> {
+    // Offset-preserving masking pipeline: each pass blanks matched bytes with
+    // ASCII spaces of equal byte length so capture offsets in the masked
+    // buffer index back into the original source. Order mirrors the legacy
+    // strip pipeline so the SEMANTIC set of class-name candidates is unchanged.
+    let mut masked = mask_with_whitespace(source, &CSS_COMMENT_RE);
+    if is_scss {
+        masked = mask_with_whitespace(&masked, &SCSS_LINE_COMMENT_RE);
+    }
+    masked = mask_with_whitespace(&masked, &CSS_NON_SELECTOR_RE);
     // Strip `@layer` and `@import` preludes so dot-separated layer names
     // (`@layer foo.bar`, `@import url("x.css") layer(theme.button)`) do not
     // leak into the class-name scan. See `CSS_AT_RULE_PRELUDE_RE` for the
     // allowlist rationale (issue #540).
-    let cleaned = CSS_AT_RULE_PRELUDE_RE.replace_all(&cleaned, "");
+    masked = mask_with_whitespace(&masked, &CSS_AT_RULE_PRELUDE_RE);
+
     let mut seen = rustc_hash::FxHashSet::default();
     let mut exports = Vec::new();
-    for cap in CSS_CLASS_RE.captures_iter(&cleaned) {
+    for cap in CSS_CLASS_RE.captures_iter(&masked) {
         if let Some(m) = cap.get(1) {
             let class_name = m.as_str().to_string();
             if seen.insert(class_name.clone()) {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "CSS files exceeding u32::MAX bytes are not a realistic input"
+                )]
+                let span = Span::new(m.start() as u32, m.end() as u32);
                 exports.push(ExportInfo {
                     name: ExportName::Named(class_name),
                     local_name: None,
                     is_type_only: false,
                     visibility: VisibilityTag::None,
-                    span: Span::default(),
+                    span,
                     members: Vec::new(),
                     is_side_effect_used: false,
                     super_class: None,
@@ -375,9 +417,12 @@ pub(crate) fn parse_css_to_module(
         });
     }
 
-    // For CSS module files, extract class names as named exports
+    // For CSS module files, extract class names as named exports. Pass the
+    // ORIGINAL source (not `stripped`); `extract_css_module_exports` runs its
+    // own offset-preserving masking so `ExportInfo.span` resolves to real
+    // line/col via `line_offsets` below.
     let exports = if is_css_module_file(path) {
-        extract_css_module_exports(&stripped)
+        extract_css_module_exports(source, is_scss)
     } else {
         Vec::new()
     };
@@ -416,7 +461,7 @@ mod tests {
 
     /// Helper to collect export names as strings from `extract_css_module_exports`.
     fn export_names(source: &str) -> Vec<String> {
-        extract_css_module_exports(source)
+        extract_css_module_exports(source, false)
             .into_iter()
             .filter_map(|e| match e.name {
                 ExportName::Named(n) => Some(n),
@@ -690,14 +735,24 @@ mod tests {
 
     #[test]
     fn ignores_classes_in_block_comments() {
-        // Note: extract_css_module_exports itself does NOT strip comments;
-        // comments are stripped in parse_css_to_module before calling it.
-        // But CSS_NON_SELECTOR_RE strips quoted strings. Testing the
-        // strip_css_comments + extract pipeline via the stripped source:
-        let stripped = strip_css_comments("/* .fake { } */ .real { }", false);
-        let names = export_names(&stripped);
+        // After issue #549, extract_css_module_exports masks comments itself
+        // (offset-preserving) so callers can pass the original source.
+        let names = export_names("/* .fake { } */ .real { }");
         assert!(!names.contains(&"fake".to_string()));
         assert!(names.contains(&"real".to_string()));
+    }
+
+    #[test]
+    fn ignores_classes_in_scss_line_comments() {
+        let exports = extract_css_module_exports("// .fake\n.real { }", true);
+        let names: Vec<_> = exports
+            .iter()
+            .filter_map(|e| match &e.name {
+                ExportName::Named(n) => Some(n.as_str()),
+                ExportName::Default => None,
+            })
+            .collect();
+        assert_eq!(names, vec!["real"]);
     }
 
     #[test]
@@ -1088,5 +1143,177 @@ mod tests {
         let body = r#"@use "./src/styles/global.scss";"#;
         let imports = extract_css_imports(body, true);
         assert_eq!(imports, vec!["./src/styles/global.scss"]);
+    }
+
+    // ── mask_with_whitespace (issue #549) ─────────────────────────
+
+    #[test]
+    fn mask_with_whitespace_preserves_byte_length() {
+        let src = "/* hello */ .foo { }";
+        let masked = mask_with_whitespace(src, &CSS_COMMENT_RE);
+        assert_eq!(masked.len(), src.len());
+        assert!(masked.is_char_boundary(src.len()));
+    }
+
+    #[test]
+    fn mask_with_whitespace_preserves_offsets_around_multibyte() {
+        // The block comment contains a multi-byte UTF-8 char (U+2713 CHECK MARK,
+        // 3 bytes). The mask replaces the 3 comment bytes with 3 ASCII spaces;
+        // the post-comment `.foo` selector keeps its original byte offset.
+        let src = "/* \u{2713} */ .foo { }";
+        let foo_offset = src.find(".foo").expect("`.foo` present");
+        let masked = mask_with_whitespace(src, &CSS_COMMENT_RE);
+        assert_eq!(masked.len(), src.len());
+        assert_eq!(masked.find(".foo"), Some(foo_offset));
+    }
+
+    // ── extract_css_module_exports span correctness (issue #549) ──
+
+    /// Resolve a span's start to (line, col) using the same primitives the
+    /// downstream pipeline uses in `crates/core/src/analyze/unused_exports.rs`.
+    fn span_line_col(source: &str, start: u32) -> (u32, u32) {
+        let offsets = fallow_types::extract::compute_line_offsets(source);
+        fallow_types::extract::byte_offset_to_line_col(&offsets, start)
+    }
+
+    #[test]
+    fn span_points_at_real_class_declaration_line() {
+        let source = "\n\n\n\n.foo { color: red; }\n";
+        let exports = extract_css_module_exports(source, false);
+        assert_eq!(exports.len(), 1);
+        let span = exports[0].span;
+        let (line, col) = span_line_col(source, span.start);
+        assert_eq!(line, 5, "`.foo` on line 5 must produce line 5, not line 1");
+        // col is a 0-based byte column. `.` sits at col 0; the bare identifier
+        // begins at col 1.
+        assert_eq!(
+            col, 1,
+            "column points at `f` in `.foo` (post-dot identifier)"
+        );
+        // Substring at the recorded span must equal the class name; otherwise
+        // the masking pipeline shifted offsets.
+        assert_eq!(
+            &source[span.start as usize..span.end as usize],
+            "foo",
+            "span range must slice to the class identifier in the original source"
+        );
+    }
+
+    #[test]
+    fn span_survives_multibyte_comment_prefix() {
+        // The check mark is 3 bytes in UTF-8. Even when the mask replaces a
+        // 3-byte char with 3 spaces, the post-comment `.foo` capture must
+        // land on a UTF-8 char boundary in the ORIGINAL source.
+        let source = "/* \u{2713} */\n.foo { }";
+        let exports = extract_css_module_exports(source, false);
+        assert_eq!(exports.len(), 1);
+        let span = exports[0].span;
+        assert!(
+            source.is_char_boundary(span.start as usize),
+            "span.start must lie on a UTF-8 char boundary"
+        );
+        assert_eq!(&source[span.start as usize..span.end as usize], "foo");
+    }
+
+    #[test]
+    fn span_skips_at_layer_prelude_dot_segments() {
+        // Regression for #540 plus #549: `@layer foo.bar` must not emit `bar`
+        // as an export, AND the body `.root` selector must land on `r` (line 2),
+        // not on the `b` in `bar` (line 1).
+        let source = "@layer foo.bar { }\n.root { }\n";
+        let exports = extract_css_module_exports(source, false);
+        let names: Vec<_> = exports
+            .iter()
+            .filter_map(|e| match &e.name {
+                ExportName::Named(n) => Some(n.as_str()),
+                ExportName::Default => None,
+            })
+            .collect();
+        assert_eq!(names, vec!["root"], "@layer sub-segments must not export");
+        let span = exports[0].span;
+        let (line, _col) = span_line_col(source, span.start);
+        assert_eq!(line, 2, "`.root` lives on line 2 of the original source");
+        assert_eq!(&source[span.start as usize..span.end as usize], "root");
+    }
+
+    #[test]
+    fn span_skips_classes_in_strings() {
+        let source = ".real { content: \".fake\"; }\n.also-real { }\n";
+        let exports = extract_css_module_exports(source, false);
+        let names: Vec<_> = exports
+            .iter()
+            .filter_map(|e| match &e.name {
+                ExportName::Named(n) => Some(n.as_str()),
+                ExportName::Default => None,
+            })
+            .collect();
+        assert_eq!(names, vec!["real", "also-real"]);
+        // Each surviving export's span must slice to its declared name.
+        for export in &exports {
+            let span = export.span;
+            let slice = &source[span.start as usize..span.end as usize];
+            match &export.name {
+                ExportName::Named(n) => assert_eq!(slice, n.as_str()),
+                ExportName::Default => unreachable!("CSS modules emit only named exports"),
+            }
+        }
+    }
+
+    #[test]
+    fn span_deduplicates_to_first_occurrence() {
+        let source = ".btn { color: red; }\n.btn { color: blue; }\n";
+        let exports = extract_css_module_exports(source, false);
+        assert_eq!(exports.len(), 1);
+        let (line, _col) = span_line_col(source, exports[0].span.start);
+        assert_eq!(
+            line, 1,
+            "first occurrence wins for deduplicated class names"
+        );
+    }
+
+    #[test]
+    fn span_inside_media_query() {
+        let source =
+            "@media (max-width: 768px) {\n  .mobile { display: block; }\n  .desktop { }\n}\n";
+        let exports = extract_css_module_exports(source, false);
+        let by_name: rustc_hash::FxHashMap<&str, oxc_span::Span> = exports
+            .iter()
+            .filter_map(|e| match &e.name {
+                ExportName::Named(n) => Some((n.as_str(), e.span)),
+                ExportName::Default => None,
+            })
+            .collect();
+        let mobile_line = span_line_col(source, by_name["mobile"].start).0;
+        let desktop_line = span_line_col(source, by_name["desktop"].start).0;
+        assert_eq!(mobile_line, 2);
+        assert_eq!(desktop_line, 3);
+    }
+
+    #[test]
+    fn at_layer_only_module_emits_no_exports() {
+        // A `.module.css` with only a cascade-layer declaration must not emit
+        // any exports (no body selectors, no class names).
+        let exports = extract_css_module_exports("@layer foo.bar, foo.baz;\n", false);
+        assert!(exports.is_empty());
+    }
+
+    #[test]
+    fn parse_css_to_module_resolves_real_line_offsets() {
+        // Integration test through the full parse_css_to_module pipeline.
+        // A `.module.css` finding's downstream line/col must reflect the real
+        // declaration position, not line 1.
+        let source = "\n\n\n\n.foo { color: red; }\n";
+        let info = parse_css_to_module(
+            fallow_types::discover::FileId(0),
+            Path::new("Component.module.css"),
+            source,
+            0,
+        );
+        assert_eq!(info.exports.len(), 1);
+        let (line, _col) = fallow_types::extract::byte_offset_to_line_col(
+            &info.line_offsets,
+            info.exports[0].span.start,
+        );
+        assert_eq!(line, 5, "downstream line must equal the source line");
     }
 }
