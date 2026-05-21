@@ -1,0 +1,18 @@
+[alias]
+ck = "check --workspace --all-targets"
+lint = "clippy --workspace --all-targets -- -D warnings"
+
+# Bump main-thread stack from the Windows default (1 MiB) to 16 MiB to
+# match `crates/cli/src/rayon_pool.rs::WORKER_STACK_SIZE`. Without this,
+# the fallow binary's main thread (the entry point of every CLI
+# invocation, including the subprocess fork from
+# `crates/cli/tests/audit_tests.rs`) overflows on deep recursive paths
+# (graph traversal, AST visitor, glob matching, git worktree
+# orchestration). POSIX hosts default to 8 MiB so the overflow only
+# ever manifests on Windows. /STACK reserves virtual address space
+# lazily (no runtime cost until the stack actually grows). Refs #556.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/STACK:16777216"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/STACK:16777216"]

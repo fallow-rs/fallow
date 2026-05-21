@@ -1,5 +1,9 @@
 target/
-.cargo/
+# Ignore everything in .cargo/ (credentials, local overrides) but track
+# the committed workspace config so target-specific rustflags (e.g.
+# Windows main-thread stack size) ship with the repo.
+.cargo/*
+!.cargo/config.toml
 node_modules/
 !tests/fixtures/bin-script-deps/node_modules/
 !tests/fixtures/css-package-subpath-import/node_modules/
