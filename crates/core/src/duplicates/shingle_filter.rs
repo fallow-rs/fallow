@@ -26,8 +26,7 @@ pub(super) fn filter_to_focus_candidates(
         .iter()
         .map(|p| dunce::simplified(p).to_path_buf())
         .collect();
-    let path_is_focus =
-        |path: &std::path::Path| normalized_focus.contains(dunce::simplified(path));
+    let path_is_focus = |path: &std::path::Path| normalized_focus.contains(dunce::simplified(path));
     let mut focus_shingles = FxHashSet::default();
     for file in files.iter().filter(|file| path_is_focus(&file.path)) {
         insert_shingles(&file.hashed_tokens, window, &mut focus_shingles);
