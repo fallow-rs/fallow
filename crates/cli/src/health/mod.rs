@@ -995,7 +995,7 @@ fn retain_hot_paths_in_change_scope(
         }
 
         if let Some(changed_files) = ctx.changed_files {
-            let absolute = if hot_path.path.is_absolute() {
+            let absolute = if crate::path_util::is_absolute_path_any_platform(&hot_path.path) {
                 hot_path.path.clone()
             } else {
                 ctx.root.join(&hot_path.path)
@@ -1025,13 +1025,21 @@ fn retain_hot_paths_in_change_scope(
 /// path traversal escape, etc.). Backslashes in the result are normalized
 /// to forward slashes so Windows checkouts compare against the same diff
 /// keys that `git diff` emits.
+///
+/// Implementation note: mirrors the strip_prefix-first shape of
+/// `report::ci::diff_filter::relative_to_diff_path` so POSIX-style
+/// absolute paths typed in cross-platform CI configs (or deserialized
+/// from JSON output authored on a Unix host) classify correctly on
+/// Windows where `Path::is_absolute()` would misclassify them as
+/// relative.
 fn relative_to_root(path: &std::path::Path, root: &std::path::Path) -> Option<String> {
-    let relative = if path.is_absolute() {
-        path.strip_prefix(root).ok()?
-    } else {
-        path
-    };
-    Some(relative.to_string_lossy().replace('\\', "/"))
+    if let Ok(stripped) = path.strip_prefix(root) {
+        return Some(stripped.to_string_lossy().replace('\\', "/"));
+    }
+    if crate::path_util::is_absolute_path_any_platform(path) {
+        return None;
+    }
+    Some(path.to_string_lossy().replace('\\', "/"))
 }
 
 /// Drop complexity findings whose function body span does NOT overlap any
