@@ -782,15 +782,16 @@ mod tests {
 
     #[test]
     fn staged_content_round_trip_through_second_fixer_preserves_bom() {
-        // Load-bearing test per panel feedback (Maeve, tech lead). Two
-        // fixers stage on the same BOM-bearing file in sequence: the first
-        // fixer's `stage_fixed_content` re-prepends the BOM; the second
-        // fixer reads via `read_source_with_hash_check` which routes
-        // through the `staged_content` fast path, must re-detect the BOM
-        // on the staged bytes via `classify_source`, propagate
-        // `had_bom = true` on its returned `EncodingMetadata`, and the
-        // second `stage_fixed_content` must re-prepend the BOM again.
-        // After commit, on-disk bytes must STILL start with the BOM.
+        // BOM-preservation invariant across the two-fixer staged-content
+        // round trip. Two fixers stage on the same BOM-bearing file in
+        // sequence: the first fixer's `stage_fixed_content` re-prepends
+        // the BOM; the second fixer reads via
+        // `read_source_with_hash_check` which routes through the
+        // `staged_content` fast path, must re-detect the BOM on the
+        // staged bytes via `classify_source`, propagate `had_bom = true`
+        // on its returned `EncodingMetadata`, and the second
+        // `stage_fixed_content` must re-prepend the BOM again. After
+        // commit, on-disk bytes must STILL start with the BOM.
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("bom-multi.ts");
         let body = "line a\nline b\nline c\n";
