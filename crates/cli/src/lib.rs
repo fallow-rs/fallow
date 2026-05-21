@@ -90,7 +90,7 @@ pub mod output_envelope;
 pub mod programmatic;
 
 /// Cross-platform path classification helpers (POSIX-style root + Windows
-/// drive prefix detection that `Path::is_absolute()` mis-classifies).
+/// drive prefix detection that `Path::is_absolute()` misclassifies).
 #[allow(
     dead_code,
     unused_imports,

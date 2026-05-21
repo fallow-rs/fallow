@@ -230,7 +230,7 @@ impl DiffIndex {
 /// keys `git diff` writes.
 ///
 /// Implementation note: `strip_prefix` is attempted first regardless of
-/// platform because [`std::path::Path::is_absolute`] mis-classifies
+/// platform because [`std::path::Path::is_absolute`] misclassifies
 /// POSIX-style absolute paths (`/project/...`) as relative on Windows.
 /// A `CiIssue.path` deserialized from JSON output on a Unix host and
 /// passed into a Windows-hosted post-processing step would otherwise
