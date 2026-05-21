@@ -537,6 +537,17 @@ pub struct AuditConfig {
     /// Path to the duplication baseline (produced by `fallow dupes --save-baseline`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dupes_baseline: Option<String>,
+
+    /// Maximum age (in days since last reuse or fresh create) of a persistent
+    /// reusable base-snapshot worktree cache entry. Older entries are removed
+    /// at the top of the next `fallow audit` invocation. The env var
+    /// `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` wins over this field. Unset on both
+    /// sides defaults to 30 days. Setting either source to `0` disables the
+    /// sweep entirely (escape hatch for CI runners that prune caches
+    /// out-of-band). Invalid env var values (non-integer, negative) silently
+    /// fall back to this field / default rather than failing the audit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_max_age_days: Option<u32>,
 }
 
 impl AuditConfig {
@@ -547,6 +558,7 @@ impl AuditConfig {
             && self.dead_code_baseline.is_none()
             && self.health_baseline.is_none()
             && self.dupes_baseline.is_none()
+            && self.cache_max_age_days.is_none()
     }
 }
 

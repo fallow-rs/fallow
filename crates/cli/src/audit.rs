@@ -3,10 +3,10 @@ use std::hash::{Hash, Hasher};
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use colored::Colorize;
-use fallow_config::{AuditGate, OutputFormat};
+use fallow_config::{AuditConfig, AuditGate, OutputFormat};
 use fallow_core::git_env::clear_ambient_git_env;
 use rustc_hash::FxHashSet;
 use xxhash_rust::xxh3::xxh3_64;
@@ -1019,6 +1019,12 @@ impl BaseWorktree {
                 persistent: true,
             };
             materialize_base_dependency_context(repo_root, worktree.path());
+            // Update the staleness signal so the age-based GC sweep does
+            // not nuke a frequently-reused cache. The fresh-create branch
+            // below intentionally does NOT touch: the pre-upgrade-grace
+            // path in `sweep_old_reusable_caches` will seed the sidecar
+            // on the next run if needed.
+            touch_last_used(worktree.path());
             return Some(worktree);
         }
 
@@ -1158,6 +1164,180 @@ fn reusable_worktree_lock_path(reusable_path: &Path) -> PathBuf {
     reusable_path
         .parent()
         .map_or_else(|| PathBuf::from(&name), |parent| parent.join(&name))
+}
+
+/// Default GC threshold for persistent reusable base-snapshot caches.
+const DEFAULT_AUDIT_CACHE_MAX_AGE_DAYS: u32 = 30;
+
+/// Env var that overrides `audit.cacheMaxAgeDays` from the config.
+const AUDIT_CACHE_MAX_AGE_ENV: &str = "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS";
+
+/// Sidecar filename suffix used to track last-use of a reusable worktree.
+const REUSABLE_LAST_USED_SUFFIX: &str = ".last-used";
+
+/// Sidecar path for the "last used" timestamp of a reusable cache entry.
+///
+/// Lives next to the cache directory (NOT inside it) so the sidecar is
+/// untouched by `git worktree add/remove` on the cache directory itself.
+fn reusable_worktree_last_used_path(reusable_path: &Path) -> PathBuf {
+    let mut name = reusable_path
+        .file_name()
+        .map(std::ffi::OsString::from)
+        .unwrap_or_default();
+    name.push(REUSABLE_LAST_USED_SUFFIX);
+    reusable_path
+        .parent()
+        .map_or_else(|| PathBuf::from(&name), |parent| parent.join(&name))
+}
+
+/// Stamp the sidecar `.last-used` file's mtime to now.
+///
+/// Called on every cache-hit reuse (and from the pre-upgrade-grace branch
+/// of the GC sweep) so the staleness signal stays current even when the
+/// cache directory itself is not mutated. Failures are surfaced at
+/// `warn!` so a persistent ENOSPC / read-only-tmp condition is visible at
+/// default `RUST_LOG=warn`; the caller does not abort the audit.
+fn touch_last_used(reusable_path: &Path) {
+    let last_used = reusable_worktree_last_used_path(reusable_path);
+    let result = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&last_used)
+        .and_then(|file| file.set_modified(SystemTime::now()));
+    if let Err(err) = result {
+        tracing::warn!(
+            path = %last_used.display(),
+            error = %err,
+            "failed to touch reusable audit worktree sidecar; staleness signal may not update",
+        );
+    }
+}
+
+/// Resolve the GC threshold for persistent reusable caches.
+///
+/// Precedence: `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` env var > `audit.cacheMaxAgeDays`
+/// config field > 30-day default. `0` from either source disables the sweep
+/// entirely (returns `None`). Invalid env values (non-integer) silently fall
+/// back to config / default; audits do not fail on a typo in a runner env var.
+fn resolve_cache_max_age(opts: &AuditOptions<'_>) -> Option<Duration> {
+    if let Ok(raw) = std::env::var(AUDIT_CACHE_MAX_AGE_ENV) {
+        if let Ok(days) = raw.trim().parse::<u32>() {
+            return days_to_duration(days);
+        }
+        tracing::debug!(
+            value = %raw,
+            "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS is not a valid u32; falling back to config/default",
+        );
+    }
+    if let Some(days) = load_audit_config(opts).and_then(|c| c.cache_max_age_days) {
+        return days_to_duration(days);
+    }
+    days_to_duration(DEFAULT_AUDIT_CACHE_MAX_AGE_DAYS)
+}
+
+fn days_to_duration(days: u32) -> Option<Duration> {
+    if days == 0 {
+        return None;
+    }
+    Some(Duration::from_secs(u64::from(days) * 86_400))
+}
+
+/// Load `AuditConfig` from `opts.config_path` (or auto-discover from
+/// `opts.root`) for GC-threshold resolution only. Errors silently fall
+/// back to `None`; the caller defaults to a 30-day window.
+fn load_audit_config(opts: &AuditOptions<'_>) -> Option<AuditConfig> {
+    if let Some(path) = opts.config_path {
+        return fallow_config::FallowConfig::load(path)
+            .ok()
+            .map(|config| config.audit);
+    }
+    fallow_config::FallowConfig::find_and_load(opts.root)
+        .ok()
+        .flatten()
+        .map(|(config, _path)| config.audit)
+}
+
+/// Remove persistent reusable base-snapshot worktree caches whose sidecar
+/// `.last-used` file is older than `max_age`.
+///
+/// Concurrency: each candidate is gated by [`ReusableWorktreeLock`] before
+/// removal, so an in-flight `fallow audit` mid-rebuild against the same
+/// cache entry will not be disturbed (the sweep skips on contention).
+///
+/// Pre-upgrade caches lacking a sidecar are NOT removed: instead the sweep
+/// seeds a fresh sidecar so the next invocation can age them from real
+/// last-use. Without this grace, the dir's own mtime (= creation date on
+/// POSIX) would wipe every legitimately-warm pre-upgrade cache on the
+/// first run after upgrade.
+///
+/// The `.lock` sidecar file is intentionally NOT deleted on removal: a
+/// racing acquirer of an unlinked-but-still-flocked inode plus a sibling
+/// `open(O_CREAT)` at the same path would produce two processes each
+/// holding a kernel flock on different inodes. Lock files are tens of
+/// bytes; leaking them is harmless.
+fn sweep_old_reusable_caches(repo_root: &Path, max_age: Duration, quiet: bool) {
+    let Some(worktrees) = list_audit_worktrees(repo_root) else {
+        return;
+    };
+    let now = SystemTime::now();
+    let mut removed: u32 = 0;
+    for path in worktrees {
+        if !is_reusable_audit_worktree_path(&path) {
+            continue;
+        }
+        let sidecar = reusable_worktree_last_used_path(&path);
+        let sidecar_mtime = std::fs::metadata(&sidecar)
+            .ok()
+            .and_then(|m| m.modified().ok());
+        let Some(mtime) = sidecar_mtime else {
+            touch_last_used(&path);
+            continue;
+        };
+        let Ok(age) = now.duration_since(mtime) else {
+            continue;
+        };
+        if age < max_age {
+            continue;
+        }
+        let Some(_lock) = ReusableWorktreeLock::try_acquire(&path) else {
+            continue;
+        };
+        remove_audit_worktree(repo_root, &path);
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %err,
+                    "failed to remove stale reusable audit worktree directory; entry may leak",
+                );
+            }
+        }
+        let _ = std::fs::remove_file(&sidecar);
+        removed += 1;
+    }
+    if removed == 0 {
+        return;
+    }
+    let mut command = Command::new("git");
+    command
+        .args(["worktree", "prune", "--expire=now"])
+        .current_dir(repo_root);
+    clear_ambient_git_env(&mut command);
+    let _ = command.output();
+    tracing::info!(
+        count = removed,
+        "reclaimed stale audit base-snapshot caches",
+    );
+    if !quiet {
+        let s = plural(removed as usize);
+        let _ = writeln!(
+            std::io::stderr(),
+            "fallow: reclaimed {removed} stale base-snapshot cache{s}",
+        );
+    }
 }
 
 fn reusable_audit_worktree_path(repo_root: &Path, base_sha: &str) -> PathBuf {
@@ -2308,6 +2488,15 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     let start = Instant::now();
 
     let base_ref = resolve_base_ref(opts)?;
+
+    // Age-based GC of persistent reusable base-snapshot caches. Runs on
+    // every invocation (not gated on whether this audit needs a real
+    // base snapshot) so disk-reclaim happens even when this run is fully
+    // cache-warm. Skipped entirely when the user sets
+    // `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS=0` or `audit.cacheMaxAgeDays = 0`.
+    if let Some(max_age) = resolve_cache_max_age(opts) {
+        sweep_old_reusable_caches(opts.root, max_age, opts.quiet);
+    }
 
     // Get changed files (hard error if it fails, unlike combined mode)
     let Some(changed_files) = crate::check::get_changed_files(opts.root, &base_ref) else {
@@ -3461,6 +3650,252 @@ mod tests {
         // Tear down the live-PID worktree so it does not leak across tests.
         remove_audit_worktree(&repo, &worktree_path);
         let _ = fs::remove_dir_all(&worktree_path);
+    }
+
+    /// Build a reusable-shaped worktree path inside the system tempdir
+    /// (so `is_reusable_audit_worktree_path` and `path_is_inside_temp_dir`
+    /// both match), uniquified by nanos so parallel tests do not collide.
+    fn make_reusable_path(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("fallow-audit-base-cache-{label}-{nanos:032x}"))
+    }
+
+    /// Register a worktree with the parent repo at `path` checked out at HEAD.
+    /// Mirrors what `BaseWorktree::reuse_or_create` does for the fresh-create
+    /// path so the GC sweep tests can build real cache entries.
+    fn register_reusable_worktree(repo: &Path, path: &Path) {
+        git(
+            repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "--quiet",
+                path.to_str().expect("path is utf-8"),
+                "HEAD",
+            ],
+        );
+    }
+
+    fn write_sidecar_with_age(path: &Path, age: Duration) {
+        let sidecar = reusable_worktree_last_used_path(path);
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&sidecar)
+            .expect("sidecar should open");
+        let when = SystemTime::now()
+            .checked_sub(age)
+            .expect("backdated time should fit in SystemTime");
+        file.set_modified(when)
+            .expect("set_modified should succeed");
+    }
+
+    /// Tear down a reusable worktree (git registration + dir + sidecar + lock)
+    /// regardless of which of those the test created. Idempotent.
+    fn cleanup_reusable_worktree(repo: &Path, path: &Path) {
+        remove_audit_worktree(repo, path);
+        let _ = fs::remove_dir_all(path);
+        let _ = fs::remove_file(reusable_worktree_last_used_path(path));
+        let _ = fs::remove_file(reusable_worktree_lock_path(path));
+    }
+
+    #[test]
+    fn reusable_cache_gc_removes_old_entry_with_backdated_sidecar() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = init_throwaway_repo(tmp.path(), "repo-gc-remove");
+        let worktree_path = make_reusable_path("gc-remove");
+        register_reusable_worktree(&repo, &worktree_path);
+        write_sidecar_with_age(&worktree_path, Duration::from_hours(31 * 24));
+
+        sweep_old_reusable_caches(&repo, Duration::from_hours(30 * 24), true);
+
+        assert!(
+            !worktree_path.exists(),
+            "sweep should remove worktree dir whose sidecar is older than the threshold",
+        );
+        assert!(
+            !worktree_is_registered_with_git(&repo, &worktree_path),
+            "sweep should unregister the worktree from git",
+        );
+        assert!(
+            !reusable_worktree_last_used_path(&worktree_path).exists(),
+            "sweep should remove the sidecar `.last-used` file alongside the worktree",
+        );
+        // Lock file may or may not exist; it is created only when
+        // `try_acquire` is called. We do NOT assert on it here.
+        cleanup_reusable_worktree(&repo, &worktree_path);
+    }
+
+    #[test]
+    fn reusable_cache_gc_keeps_fresh_entry() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = init_throwaway_repo(tmp.path(), "repo-gc-keep");
+        let worktree_path = make_reusable_path("gc-keep");
+        register_reusable_worktree(&repo, &worktree_path);
+        write_sidecar_with_age(&worktree_path, Duration::from_mins(1));
+
+        sweep_old_reusable_caches(&repo, Duration::from_hours(30 * 24), true);
+
+        assert!(
+            worktree_path.is_dir(),
+            "sweep must not remove a worktree whose sidecar is fresher than the threshold",
+        );
+        assert!(
+            worktree_is_registered_with_git(&repo, &worktree_path),
+            "sweep must not unregister a fresh worktree",
+        );
+        cleanup_reusable_worktree(&repo, &worktree_path);
+    }
+
+    #[test]
+    fn reusable_cache_gc_skips_locked_entry() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = init_throwaway_repo(tmp.path(), "repo-gc-locked");
+        let worktree_path = make_reusable_path("gc-locked");
+        register_reusable_worktree(&repo, &worktree_path);
+        write_sidecar_with_age(&worktree_path, Duration::from_hours(31 * 24));
+
+        // Hold the lock from this thread so the sweep's `try_acquire`
+        // observes contention and skips the entry. Drop after the sweep.
+        let lock = ReusableWorktreeLock::try_acquire(&worktree_path)
+            .expect("test should acquire the lock first");
+
+        sweep_old_reusable_caches(&repo, Duration::from_hours(30 * 24), true);
+
+        assert!(
+            worktree_path.is_dir(),
+            "sweep must skip a locked entry even when its sidecar is stale",
+        );
+        assert!(
+            worktree_is_registered_with_git(&repo, &worktree_path),
+            "sweep must not unregister a locked entry",
+        );
+        drop(lock);
+        cleanup_reusable_worktree(&repo, &worktree_path);
+    }
+
+    #[test]
+    fn reusable_cache_gc_grace_when_sidecar_absent() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = init_throwaway_repo(tmp.path(), "repo-gc-grace");
+        let worktree_path = make_reusable_path("gc-grace");
+        register_reusable_worktree(&repo, &worktree_path);
+        // No sidecar written. Backdate the dir's own mtime so that "fall back
+        // to dir mtime" would falsely trigger removal; the grace path must
+        // NOT consult dir mtime.
+        // (Skipping dir mtime backdate is fine: the implementation never
+        // reads it, so the assertion is structural: sidecar absent => keep.)
+        let sidecar = reusable_worktree_last_used_path(&worktree_path);
+        assert!(
+            !sidecar.exists(),
+            "test pre-condition: sidecar should not exist",
+        );
+
+        sweep_old_reusable_caches(&repo, Duration::from_hours(30 * 24), true);
+
+        assert!(
+            worktree_path.is_dir(),
+            "pre-upgrade grace: sidecar-absent entries must NOT be removed on first encounter",
+        );
+        assert!(
+            sidecar.exists(),
+            "pre-upgrade grace: sidecar must be seeded so the next run can age from real last-used",
+        );
+        let mtime = std::fs::metadata(&sidecar)
+            .and_then(|m| m.modified())
+            .expect("seeded sidecar should have a readable mtime");
+        let age = SystemTime::now()
+            .duration_since(mtime)
+            .unwrap_or(Duration::ZERO);
+        assert!(
+            age < Duration::from_mins(1),
+            "seeded sidecar mtime should be near `now()`, got age {age:?}",
+        );
+        cleanup_reusable_worktree(&repo, &worktree_path);
+    }
+
+    #[test]
+    fn reusable_cache_gc_preserves_lock_file_after_removal() {
+        // Locks invariant from panel BLOCK 1: the sweep MUST NOT delete the
+        // `.lock` file. If it did, a sibling acquirer holding a kernel flock
+        // on the now-unlinked inode could race with a later open(O_CREAT)
+        // that produces a fresh inode at the same path.
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = init_throwaway_repo(tmp.path(), "repo-gc-lockfile");
+        let worktree_path = make_reusable_path("gc-lockfile");
+        register_reusable_worktree(&repo, &worktree_path);
+        write_sidecar_with_age(&worktree_path, Duration::from_hours(31 * 24));
+        // Create the lock file by attempting (and immediately dropping) a lock.
+        // This mirrors the file shape `ReusableWorktreeLock::try_acquire`
+        // leaves behind under normal usage.
+        let lock_path = reusable_worktree_lock_path(&worktree_path);
+        drop(
+            ReusableWorktreeLock::try_acquire(&worktree_path)
+                .expect("test should acquire the lock"),
+        );
+        assert!(
+            lock_path.exists(),
+            "test pre-condition: lock file should exist before sweep",
+        );
+
+        sweep_old_reusable_caches(&repo, Duration::from_hours(30 * 24), true);
+
+        assert!(
+            !worktree_path.exists(),
+            "sweep should still remove the worktree directory",
+        );
+        assert!(
+            lock_path.exists(),
+            "sweep MUST NOT delete the `.lock` file (panel BLOCK 1)",
+        );
+        let _ = fs::remove_file(&lock_path);
+        cleanup_reusable_worktree(&repo, &worktree_path);
+    }
+
+    #[test]
+    fn days_to_duration_zero_disables() {
+        assert!(days_to_duration(0).is_none());
+        assert_eq!(days_to_duration(1), Some(Duration::from_hours(24)));
+        assert_eq!(days_to_duration(30), Some(Duration::from_hours(30 * 24)));
+    }
+
+    #[test]
+    fn reusable_worktree_last_used_path_lives_next_to_cache_dir() {
+        let cache_dir = std::env::temp_dir().join("fallow-audit-base-cache-abcd-1234");
+        let sidecar = reusable_worktree_last_used_path(&cache_dir);
+        assert_eq!(sidecar.parent(), cache_dir.parent());
+        assert_eq!(
+            sidecar.file_name().and_then(|s| s.to_str()),
+            Some("fallow-audit-base-cache-abcd-1234.last-used"),
+        );
+    }
+
+    #[test]
+    fn touch_last_used_creates_sidecar_if_missing() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let cache_dir = tmp.path().join("fallow-audit-base-cache-touchtest-0000");
+        fs::create_dir(&cache_dir).expect("cache dir should be created");
+        let sidecar = reusable_worktree_last_used_path(&cache_dir);
+        assert!(!sidecar.exists(), "sidecar should not exist before touch");
+
+        touch_last_used(&cache_dir);
+
+        assert!(sidecar.exists(), "touch should create the sidecar");
+        let mtime = fs::metadata(&sidecar)
+            .and_then(|m| m.modified())
+            .expect("sidecar should have an mtime");
+        let age = SystemTime::now()
+            .duration_since(mtime)
+            .unwrap_or(Duration::ZERO);
+        assert!(
+            age < Duration::from_mins(1),
+            "touched sidecar should be near `now()`",
+        );
     }
 
     #[test]
