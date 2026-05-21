@@ -1851,14 +1851,25 @@ fn resolve_production_modes(
 /// Test-only helper invoked when `FALLOW_TEST_SIGNAL_HELPER=1` is set.
 /// Spawns `sleep 30` via the `ScopedChild` registry so the child is
 /// tracked by the signal handler, prints the child PID to stdout, then
-/// busy-waits on a small interval so a SIGINT/SIGTERM delivered to the
-/// parent fires the signal handler (which kills the child and exits
-/// 128+signum). Lives in main.rs (rather than tests/) because clap is
-/// already parsed below this point and we need to intercept before that.
+/// busy-waits so a SIGINT/SIGTERM delivered to the parent fires the
+/// signal handler (which kills the child and exits 128+signum).
+///
+/// When `FALLOW_TEST_SIGNAL_HELPER_GRACEFUL=1` is also set, graceful
+/// mode is activated BEFORE spawning the child. In graceful mode the
+/// signal handler kills the child (proving drain runs unconditionally)
+/// but does NOT call `std::process::exit`, so the helper itself sees
+/// `wait_with_output` return and exits 0. This is the path the
+/// integration test asserts: graceful drain + clean exit. Lives in
+/// `main.rs` (not tests/) because clap is already parsed below and we
+/// need to intercept before that.
 #[cfg(unix)]
 fn signal_test_helper() -> ExitCode {
     use std::io::Write as _;
     use std::process::Command;
+
+    if std::env::var_os("FALLOW_TEST_SIGNAL_HELPER_GRACEFUL").is_some() {
+        signal::set_graceful_mode();
+    }
 
     let mut command = Command::new("sleep");
     command.arg("30");
@@ -1870,7 +1881,6 @@ fn signal_test_helper() -> ExitCode {
         }
     };
     let pid = child.id();
-    // Print pid so the integration test can probe it.
     let stdout = std::io::stdout();
     let mut lock = stdout.lock();
     let _ = writeln!(lock, "{pid}");
@@ -1881,11 +1891,14 @@ fn signal_test_helper() -> ExitCode {
     // call `std::process::exit(128 + signum)` before this helper
     // returns ExitCode::SUCCESS. Without the trailing sleep the main
     // thread races the listener and sometimes wins, producing exit 0
-    // instead of the expected 130/143.
+    // instead of the expected 130/143. In graceful mode the handler
+    // does NOT exit, so the helper exits 0 normally and the trailing
+    // sleep is a no-op-by-deadline.
     let _ = child.wait_with_output();
+    if std::env::var_os("FALLOW_TEST_SIGNAL_HELPER_GRACEFUL").is_some() {
+        return ExitCode::SUCCESS;
+    }
     std::thread::sleep(std::time::Duration::from_secs(5));
-    // If we reach here the signal handler never fired; the test will
-    // fail on the exit-code assertion.
     ExitCode::SUCCESS
 }
 
@@ -1912,6 +1925,13 @@ fn main() -> ExitCode {
     // analyzer through the signal registry. Core stays cli-independent;
     // the spawn-hook is a function-pointer install at startup.
     fallow_core::churn::set_spawn_hook(signal::scoped_child::output);
+
+    // Route the `git rev-parse` / `git diff` / `git ls-files`
+    // subprocesses in fallow-core's changed-files module the same way.
+    // These are short-running individually but they ARE spawned mid-
+    // analysis during `--changed-since` + watch sessions; without this
+    // hook a SIGINT during watch leaves them running.
+    fallow_core::changed_files::set_spawn_hook(signal::scoped_child::output);
 
     // Test-only helper subcommand for integration testing the signal
     // handlers (see crates/cli/tests/signal_tests.rs). Gated on an env

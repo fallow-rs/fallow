@@ -119,14 +119,24 @@ fn platform_install() -> std::io::Result<()> {
     Ok(())
 }
 
-/// Mark shutdown and (if not in graceful mode) drain the registry then
-/// exit. Invoked by the platform-specific handler thread.
+/// Mark shutdown, drain the registry (kills every registered child
+/// regardless of mode so in-flight subprocesses do not survive the
+/// signal), then either exit (default) or return for cooperative
+/// consumers in graceful mode (`fallow watch`).
+///
+/// Graceful mode MUST still drain children: watch's `analyze_and_
+/// report` spawns git subprocesses (via `fallow_core::changed_files`
+/// and `fallow_core::churn`) that need reaping mid-analysis. Without
+/// drain, a Ctrl+C during analysis would let the parent return from
+/// the inner pass only after every git child completed naturally,
+/// defeating the entire "Ctrl+C reaps in-flight git work" contract.
+/// Invoked by the platform-specific handler thread.
 fn handle_signal(exit_code: i32) {
     SHUTDOWN.store(true, Ordering::SeqCst);
+    registry::drain_and_kill();
     if GRACEFUL.load(Ordering::SeqCst) {
         return;
     }
-    registry::drain_and_kill();
     #[expect(
         clippy::exit,
         reason = "signal handler MUST terminate the process; that is the entire point of the path"

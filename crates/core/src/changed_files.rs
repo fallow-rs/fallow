@@ -14,11 +14,41 @@
 //! the entire import graph and can't be attributed to individual changed files.
 
 use std::path::{Path, PathBuf};
+use std::process::Output;
+use std::sync::OnceLock;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::duplicates::{DuplicationReport, DuplicationStats, families};
 use crate::results::AnalysisResults;
+
+/// Function pointer signature used by `set_spawn_hook` to intercept the
+/// short-running `git rev-parse` / `git diff` / `git ls-files` subprocesses
+/// this module spawns. Lets the CLI route those git children through its
+/// `ScopedChild` registry so a SIGINT delivered to the parent during
+/// watch mode (or any analysis) reaps them instead of letting them run
+/// to completion. See `crates/cli/src/signal/` and issue #477.
+pub type ChangedFilesSpawnHook = fn(&mut std::process::Command) -> std::io::Result<Output>;
+
+static SPAWN_HOOK: OnceLock<ChangedFilesSpawnHook> = OnceLock::new();
+
+/// Install a spawn-hook for this module's git subprocesses. Idempotent;
+/// subsequent calls are no-ops. Called once from the CLI's `main()` so
+/// long-running watch sessions reap pending git children on Ctrl+C.
+/// Defaults to `Command::output` when not set; the function-pointer
+/// indirection costs nothing for embedders and tests that don't install
+/// a hook.
+pub fn set_spawn_hook(hook: ChangedFilesSpawnHook) {
+    let _ = SPAWN_HOOK.set(hook);
+}
+
+fn spawn_output(command: &mut std::process::Command) -> std::io::Result<Output> {
+    if let Some(hook) = SPAWN_HOOK.get() {
+        hook(command)
+    } else {
+        command.output()
+    }
+}
 
 /// Validate a user-supplied git ref before passing it to `git diff`.
 ///
@@ -114,8 +144,7 @@ fn augment_git_failed(stderr: &str) -> String {
 /// absolute form matches what the analysis pipeline emits, regardless of
 /// whether the caller's `cwd` is the repo root or a subdirectory of it.
 pub fn resolve_git_toplevel(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
-    let output = git_command(cwd, &["rev-parse", "--show-toplevel"])
-        .output()
+    let output = spawn_output(&mut git_command(cwd, &["rev-parse", "--show-toplevel"]))
         .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
 
     if !output.status.success() {
@@ -144,8 +173,7 @@ fn collect_git_paths(
     toplevel: &Path,
     args: &[&str],
 ) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
-    let output = git_command(cwd, args)
-        .output()
+    let output = spawn_output(&mut git_command(cwd, args))
         .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
 
     if !output.status.success() {

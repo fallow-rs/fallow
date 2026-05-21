@@ -15,6 +15,17 @@
 //! transfer ownership for the wait while still letting the signal
 //! handler kill it. Storing the PID sidesteps the problem entirely:
 //! kill-by-PID is a side channel that does not interfere with wait.
+//!
+//! Known race (small window, low consequence): a child that completes
+//! naturally is reaped inside `wait_with_output` BEFORE we deregister
+//! its PID from the registry. If a signal arrives in the microseconds-
+//! wide window between `wait_with_output` returning and `deregister`
+//! running, the drain snapshots a now-recycled PID and sends `kill -9`
+//! to whatever process the kernel assigned that PID to. The window is
+//! small (one async-write to a Mutex), the consequence is one stray
+//! SIGKILL during shutdown, and recovery requires a more invasive
+//! design (an `Arc<Mutex<Option<Child>>>` shared with the registry).
+//! Documented here so future maintainers don't re-derive the trade-off.
 
 use std::io;
 use std::process::{Child, ChildStdin, Command, ExitStatus, Output, Stdio};

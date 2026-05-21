@@ -29,6 +29,8 @@ use std::time::{Duration, Instant};
 
 /// Spawn a child `fallow` binary in signal-helper mode and read the
 /// PID it prints to stdout. Returns the (child, inner PID) pair.
+/// Pass `graceful = true` to opt the helper into graceful-mode (no
+/// process::exit after drain).
 ///
 /// Killing + waiting the spawned fallow on PID-read failure is the
 /// caller's job: the caller of this function always reaps the returned
@@ -37,14 +39,17 @@ use std::time::{Duration, Instant};
 /// `zombie_processes` lint fires if the function has any return path
 /// that drops the Child handle without a visible `wait()`; we satisfy
 /// it by killing-and-waiting on the not-found path explicitly.
-fn spawn_signal_helper() -> (std::process::Child, u32) {
+fn spawn_signal_helper_with(graceful: bool) -> (std::process::Child, u32) {
     let fallow_bin = env!("CARGO_BIN_EXE_fallow");
-    let mut child = Command::new(fallow_bin)
+    let mut builder = Command::new(fallow_bin);
+    builder
         .env("FALLOW_TEST_SIGNAL_HELPER", "1")
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn fallow signal helper");
+        .stderr(Stdio::piped());
+    if graceful {
+        builder.env("FALLOW_TEST_SIGNAL_HELPER_GRACEFUL", "1");
+    }
+    let mut child = builder.spawn().expect("spawn fallow signal helper");
     let stdout = child.stdout.take().expect("piped stdout");
     let mut reader = BufReader::new(stdout);
     let mut line = String::new();
@@ -92,6 +97,10 @@ fn send_signal(pid: u32, signal: &str) {
     assert!(status.success(), "kill {signal} {pid} failed");
 }
 
+fn spawn_signal_helper() -> (std::process::Child, u32) {
+    spawn_signal_helper_with(false)
+}
+
 #[test]
 fn sigint_kills_registered_child_and_exits_130() {
     let (mut fallow, sleep_pid) = spawn_signal_helper();
@@ -136,6 +145,37 @@ fn sigterm_kills_registered_child_and_exits_143() {
     assert!(
         wait_for_pid_dead(sleep_pid, Duration::from_secs(5)),
         "inner sleep PID {sleep_pid} must be dead after the signal handler drains",
+    );
+}
+
+/// Watch-mode cooperative-shutdown contract: in graceful mode the
+/// signal handler MUST still drain registered children (so git / shell
+/// subprocesses spawned mid-analysis are reaped), but MUST NOT call
+/// `std::process::exit`; the helper returns cleanly with exit code 0.
+/// Regression coverage for the BLOCK from Codex's review of #477:
+/// without this, watch held SIGINT delivery until `analyze_and_report`
+/// completed naturally, defeating the entire "Ctrl+C reaps in-flight
+/// git work" contract.
+#[test]
+fn sigint_in_graceful_mode_drains_children_but_does_not_exit() {
+    let (mut fallow, sleep_pid) = spawn_signal_helper_with(true);
+    assert!(
+        !wait_for_pid_dead(sleep_pid, Duration::from_millis(100)),
+        "inner sleep PID {sleep_pid} should be alive after helper start"
+    );
+    send_signal(fallow.id(), "-INT");
+    let status = fallow
+        .wait_timeout_compat(Duration::from_secs(10))
+        .expect("graceful helper exits within 10s");
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "graceful mode must exit cleanly with code 0; got {:?}",
+        status.code(),
+    );
+    assert!(
+        wait_for_pid_dead(sleep_pid, Duration::from_secs(5)),
+        "inner sleep PID {sleep_pid} must still be drained in graceful mode (BLOCK regression)",
     );
 }
 
