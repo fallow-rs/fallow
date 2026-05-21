@@ -40,7 +40,9 @@ pub struct SdkPattern {
 #[serde(rename_all = "camelCase")]
 pub struct FlagsConfig {
     /// Additional SDK call patterns to detect as feature flags.
-    /// These are merged with the built-in patterns (LaunchDarkly, Statsig, Unleash, GrowthBook).
+    /// These are merged with the built-in patterns for common providers
+    /// including LaunchDarkly, Statsig, Unleash, GrowthBook, Split, PostHog,
+    /// Vercel Flags, ConfigCat, Flagsmith, Optimizely, and Eppo.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sdk_patterns: Vec<SdkPattern>,
 

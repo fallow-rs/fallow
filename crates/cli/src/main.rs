@@ -785,9 +785,9 @@ enum Command {
     /// Detect feature flag patterns in the codebase
     ///
     /// Identifies environment variable flags (process.env.FEATURE_*),
-    /// SDK calls (LaunchDarkly, Statsig, Unleash, GrowthBook), and
-    /// config object patterns (opt-in). Reports flag locations, detection
-    /// confidence, and cross-reference with dead code findings.
+    /// SDK calls from common providers, and config object patterns (opt-in).
+    /// Reports flag locations, detection confidence, and cross-reference
+    /// with dead code findings.
     Flags {
         /// Show only the top N flags
         #[arg(long)]

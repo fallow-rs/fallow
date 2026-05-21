@@ -2,7 +2,8 @@
 //!
 //! Detects three patterns:
 //! 1. **Environment variables**: `process.env.FEATURE_X`
-//! 2. **SDK calls**: `useFlag('name')`, `variation('name', false)`, etc.
+//! 2. **SDK calls**: `useFlag('name')`, `variation('name', false)`,
+//!    `flag({ key: 'name' })`, etc.
 //! 3. **Config objects**: `config.features.x` (opt-in, heuristic)
 //!
 //! Always extracted during parse (lightweight pattern matching on `MemberExpression`
@@ -13,6 +14,7 @@
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{FlagUse, FlagUseKind, byte_offset_to_line_col};
 
@@ -41,10 +43,36 @@ const BUILTIN_SDK_PATTERNS: &[(&str, usize, &str)] = &[
     ("getFeatureValue", 0, "GrowthBook"),
     // Split
     ("getTreatment", 0, "Split"),
+    // PostHog
+    ("useFeatureFlagEnabled", 0, "PostHog"),
+    ("useFeatureFlagPayload", 0, "PostHog"),
+    ("useFeatureFlagVariantKey", 0, "PostHog"),
+    ("getFeatureFlagPayload", 0, "PostHog"),
     // ConfigCat
     ("getValueAsync", 0, "ConfigCat"),
+    ("getValueDetailsAsync", 0, "ConfigCat"),
     // Flagsmith
     ("hasFeature", 0, "Flagsmith"),
+    // Optimizely
+    ("useDecision", 0, "Optimizely"),
+    ("getFeatureVariable", 0, "Optimizely"),
+    ("getFeatureVariableBoolean", 0, "Optimizely"),
+    ("getFeatureVariableString", 0, "Optimizely"),
+    ("getFeatureVariableInteger", 0, "Optimizely"),
+    ("getFeatureVariableDouble", 0, "Optimizely"),
+    ("getFeatureVariableJson", 0, "Optimizely"),
+    ("getFeatureVariableJSON", 0, "Optimizely"),
+    // Eppo
+    ("getStringAssignment", 0, "Eppo"),
+    ("getBooleanAssignment", 0, "Eppo"),
+    ("getNumericAssignment", 0, "Eppo"),
+    ("getIntegerAssignment", 0, "Eppo"),
+    ("getJSONAssignment", 0, "Eppo"),
+    ("getStringAssignmentDetails", 0, "Eppo"),
+    ("getBooleanAssignmentDetails", 0, "Eppo"),
+    ("getNumericAssignmentDetails", 0, "Eppo"),
+    ("getIntegerAssignmentDetails", 0, "Eppo"),
+    ("getJSONAssignmentDetails", 0, "Eppo"),
     // Shared: getValue is used by both ConfigCat and Flagsmith.
     // Attribution is best-effort when function names collide.
     ("getValue", 0, ""),
@@ -52,6 +80,9 @@ const BUILTIN_SDK_PATTERNS: &[(&str, usize, &str)] = &[
     ("useFeature", 0, ""),
     ("getFeatureFlag", 0, ""),
 ];
+
+const VERCEL_FLAGS_PROVIDER: &str = "Vercel Flags";
+const VERCEL_FLAGS_FUNCTIONS: &[&str] = &["flag", "evaluate"];
 
 /// Built-in environment variable prefixes that indicate feature flags.
 const BUILTIN_ENV_PREFIXES: &[&str] = &[
@@ -91,6 +122,10 @@ struct FlagVisitor<'a> {
     extra_env_prefixes: &'a [String],
     /// Whether to detect config object patterns (opt-in).
     config_object_heuristics: bool,
+    /// Local named imports from Vercel Flags packages: local name -> imported name.
+    vercel_flags_imports: FxHashMap<String, String>,
+    /// Namespace imports from Vercel Flags packages.
+    vercel_flags_namespaces: FxHashSet<String>,
 }
 
 impl<'a> FlagVisitor<'a> {
@@ -106,6 +141,8 @@ impl<'a> FlagVisitor<'a> {
             extra_sdk_patterns,
             extra_env_prefixes,
             config_object_heuristics,
+            vercel_flags_imports: FxHashMap::default(),
+            vercel_flags_namespaces: FxHashSet::default(),
         }
     }
 
@@ -140,6 +177,10 @@ impl<'a> FlagVisitor<'a> {
         let Some(func_name) = func_name else {
             return;
         };
+
+        if self.check_vercel_flags_call(call, guard) {
+            return;
+        }
 
         // Check built-in patterns
         for &(pattern_name, name_arg_idx, provider) in BUILTIN_SDK_PATTERNS {
@@ -184,6 +225,94 @@ impl<'a> FlagVisitor<'a> {
                     });
                 }
                 return;
+            }
+        }
+    }
+
+    fn check_vercel_flags_call(
+        &mut self,
+        call: &CallExpression<'_>,
+        guard: Option<(u32, u32)>,
+    ) -> bool {
+        let Some(imported_name) = self.vercel_flags_imported_name(call) else {
+            return false;
+        };
+
+        let flag_name = match imported_name {
+            "flag" => extract_object_string_property_arg(&call.arguments, 0, "key"),
+            "evaluate" => extract_string_arg(&call.arguments, 0),
+            _ => None,
+        };
+
+        let Some(flag_name) = flag_name else {
+            return false;
+        };
+
+        let (line, col) = byte_offset_to_line_col(self.line_offsets, call.span.start);
+        self.results.push(FlagUse {
+            flag_name,
+            kind: FlagUseKind::SdkCall,
+            line,
+            col,
+            guard_span_start: guard.map(|(s, _)| s),
+            guard_span_end: guard.map(|(_, e)| e),
+            sdk_name: Some(VERCEL_FLAGS_PROVIDER.to_string()),
+        });
+        true
+    }
+
+    fn vercel_flags_imported_name<'b>(&'b self, call: &'b CallExpression<'_>) -> Option<&'b str> {
+        match &call.callee {
+            Expression::Identifier(id) => self
+                .vercel_flags_imports
+                .get(id.name.as_str())
+                .map(String::as_str),
+            Expression::StaticMemberExpression(member) => {
+                let Expression::Identifier(object) = &member.object else {
+                    return None;
+                };
+                self.vercel_flags_namespaces
+                    .contains(object.name.as_str())
+                    .then_some(member.property.name.as_str())
+            }
+            _ => None,
+        }
+    }
+
+    fn collect_vercel_flags_imports(&mut self, program: &Program<'_>) {
+        for stmt in &program.body {
+            if let Statement::ImportDeclaration(decl) = stmt {
+                self.collect_vercel_flags_import(decl);
+            }
+        }
+    }
+
+    fn collect_vercel_flags_import(&mut self, decl: &ImportDeclaration<'_>) {
+        if !is_vercel_flags_source(decl.source.value.as_str()) || decl.import_kind.is_type() {
+            return;
+        }
+
+        let Some(specifiers) = &decl.specifiers else {
+            return;
+        };
+
+        for spec in specifiers {
+            match spec {
+                ImportDeclarationSpecifier::ImportSpecifier(specifier) => {
+                    if specifier.import_kind.is_type() {
+                        continue;
+                    }
+                    let imported_name = specifier.imported.name();
+                    if VERCEL_FLAGS_FUNCTIONS.contains(&imported_name.as_str()) {
+                        self.vercel_flags_imports
+                            .insert(specifier.local.name.to_string(), imported_name.to_string());
+                    }
+                }
+                ImportDeclarationSpecifier::ImportNamespaceSpecifier(specifier) => {
+                    self.vercel_flags_namespaces
+                        .insert(specifier.local.name.to_string());
+                }
+                ImportDeclarationSpecifier::ImportDefaultSpecifier(_) => {}
             }
         }
     }
@@ -234,6 +363,15 @@ impl<'a> FlagVisitor<'a> {
 }
 
 impl Visit<'_> for FlagVisitor<'_> {
+    fn visit_program(&mut self, program: &Program<'_>) {
+        self.collect_vercel_flags_imports(program);
+        walk::walk_program(self, program);
+    }
+
+    fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'_>) {
+        self.collect_vercel_flags_import(decl);
+    }
+
     fn visit_if_statement(&mut self, stmt: &IfStatement<'_>) {
         let guard = Some((stmt.span.start, stmt.span.end));
 
@@ -268,6 +406,13 @@ impl Visit<'_> for FlagVisitor<'_> {
         }
         walk::walk_member_expression(self, expr);
     }
+}
+
+fn is_vercel_flags_source(source: &str) -> bool {
+    source == "flags"
+        || source.starts_with("flags/")
+        || source == "@vercel/flags"
+        || source.starts_with("@vercel/flags/")
 }
 
 /// Check an expression (typically an if-test) for flag patterns.
@@ -342,6 +487,33 @@ fn extract_string_arg(args: &[Argument<'_>], index: usize) -> Option<String> {
             None
         }
     })
+}
+
+/// Extract a string property from an object argument at the given index.
+fn extract_object_string_property_arg(
+    args: &[Argument<'_>],
+    index: usize,
+    property_name: &str,
+) -> Option<String> {
+    let Some(Argument::ObjectExpression(obj)) = args.get(index) else {
+        return None;
+    };
+
+    for prop in &obj.properties {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+            continue;
+        };
+        if prop
+            .key
+            .static_name()
+            .is_some_and(|key| key.as_ref() == property_name)
+            && let Expression::StringLiteral(lit) = &prop.value
+        {
+            return Some(lit.value.to_string());
+        }
+    }
+
+    None
 }
 
 /// Extract config object access pattern: `obj.prop` where either name is a flag keyword.
@@ -494,6 +666,123 @@ mod tests {
     }
 
     #[test]
+    fn detects_posthog_hooks() {
+        let flags = extract_from_source(
+            "const enabled = useFeatureFlagEnabled('new-checkout');\n\
+             const payload = useFeatureFlagPayload('checkout-copy');\n\
+             const variant = useFeatureFlagVariantKey('pricing-test');",
+        );
+
+        let names: Vec<_> = flags.iter().map(|flag| flag.flag_name.as_str()).collect();
+        assert_eq!(names, ["new-checkout", "checkout-copy", "pricing-test"]);
+        assert!(
+            flags
+                .iter()
+                .all(|flag| flag.sdk_name.as_deref() == Some("PostHog"))
+        );
+    }
+
+    #[test]
+    fn detects_vercel_flags_object_key_and_core_evaluate_from_imports() {
+        let flags = extract_from_source(
+            "import { flag, evaluate as evalFlag } from 'flags/next';\n\
+             export const showSale = flag({ key: 'summer-sale', decide: () => false });\n\
+             const value = await evalFlag('show-new-feature', false);",
+        );
+
+        let names: Vec<_> = flags.iter().map(|flag| flag.flag_name.as_str()).collect();
+        assert_eq!(names, ["summer-sale", "show-new-feature"]);
+        assert!(
+            flags
+                .iter()
+                .all(|flag| flag.sdk_name.as_deref() == Some("Vercel Flags"))
+        );
+    }
+
+    #[test]
+    fn detects_vercel_flags_namespace_imports() {
+        let flags = extract_from_source(
+            "import * as vercelFlags from '@vercel/flags';\n\
+             const value = await vercelFlags.evaluate('show-new-feature', false);\n\
+             export const showSale = vercelFlags.flag({ key: 'summer-sale', decide: () => false });",
+        );
+
+        let names: Vec<_> = flags.iter().map(|flag| flag.flag_name.as_str()).collect();
+        assert_eq!(names, ["show-new-feature", "summer-sale"]);
+        assert!(
+            flags
+                .iter()
+                .all(|flag| flag.sdk_name.as_deref() == Some("Vercel Flags"))
+        );
+    }
+
+    #[test]
+    fn detects_vercel_flags_calls_before_import_declaration() {
+        let flags = extract_from_source(
+            "export const showSale = flag({ key: 'summer-sale', decide: () => false });\n\
+             import { flag } from 'flags/next';",
+        );
+
+        assert_eq!(flags.len(), 1);
+        assert_eq!(flags[0].flag_name, "summer-sale");
+        assert_eq!(flags[0].sdk_name.as_deref(), Some("Vercel Flags"));
+    }
+
+    #[test]
+    fn ignores_unimported_vercel_like_function_names() {
+        let flags = extract_from_source(
+            "function math() { return evaluate('2 + 2'); }\n\
+             function marker() { return flag({ key: 'ui-row' }); }",
+        );
+
+        assert!(flags.is_empty());
+    }
+
+    #[test]
+    fn detects_configcat_detail_evaluation() {
+        let flags = extract_from_source(
+            "const details = await client.getValueDetailsAsync('new-checkout', false);",
+        );
+        assert_eq!(flags.len(), 1);
+        assert_eq!(flags[0].flag_name, "new-checkout");
+        assert_eq!(flags[0].sdk_name.as_deref(), Some("ConfigCat"));
+    }
+
+    #[test]
+    fn detects_optimizely_decisions_and_variables() {
+        let flags = extract_from_source(
+            "const [decision] = useDecision('checkout-flow');\n\
+             const copy = optimizelyClient.getFeatureVariableString('checkout-flow', 'copy', userId, attrs);\n\
+             const json = optimizelyClient.getFeatureVariableJson('checkout-flow', 'json', userId, attrs);",
+        );
+
+        assert_eq!(flags.len(), 3);
+        assert!(flags.iter().all(|flag| flag.flag_name == "checkout-flow"));
+        assert!(
+            flags
+                .iter()
+                .all(|flag| flag.sdk_name.as_deref() == Some("Optimizely"))
+        );
+    }
+
+    #[test]
+    fn detects_eppo_typed_assignments() {
+        let flags = extract_from_source(
+            "const value = client.getBooleanAssignment('new-onboarding', subject, {}, false);\n\
+             const details = client.getStringAssignmentDetails('copy-test', subject, {}, 'control');\n\
+             const payload = client.getJSONAssignmentDetails('payload-test', subject, {}, {});",
+        );
+
+        let names: Vec<_> = flags.iter().map(|flag| flag.flag_name.as_str()).collect();
+        assert_eq!(names, ["new-onboarding", "copy-test", "payload-test"]);
+        assert!(
+            flags
+                .iter()
+                .all(|flag| flag.sdk_name.as_deref() == Some("Eppo"))
+        );
+    }
+
+    #[test]
     fn ignores_sdk_call_without_string_arg() {
         let flags = extract_from_source("useFlag(dynamicKey);");
         assert!(flags.is_empty());
@@ -559,6 +848,19 @@ mod tests {
         let flags = extract_flags(&parser_return.program, &line_offsets, &custom, &[], false);
         assert_eq!(flags.len(), 1);
         assert_eq!(flags[0].flag_name, "my-flag");
+        assert_eq!(flags[0].sdk_name.as_deref(), Some("Internal"));
+    }
+
+    #[test]
+    fn custom_sdk_pattern_can_use_vercel_object_function_name() {
+        let allocator = Allocator::default();
+        let source = "flag('internal-flag');";
+        let parser_return = Parser::new(&allocator, source, SourceType::tsx()).parse();
+        let line_offsets = fallow_types::extract::compute_line_offsets(source);
+        let custom = vec![("flag".to_string(), 0, "Internal".to_string())];
+        let flags = extract_flags(&parser_return.program, &line_offsets, &custom, &[], false);
+        assert_eq!(flags.len(), 1);
+        assert_eq!(flags[0].flag_name, "internal-flag");
         assert_eq!(flags[0].sdk_name.as_deref(), Some("Internal"));
     }
 

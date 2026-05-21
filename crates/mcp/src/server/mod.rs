@@ -243,7 +243,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Detect feature flag patterns in a TypeScript/JavaScript project. Identifies environment variable flags (process.env.FEATURE_*), SDK calls (LaunchDarkly, Statsig, Unleash, GrowthBook), and config object patterns. Returns flag locations, detection confidence, and cross-reference with dead code findings.",
+        description = "Detect feature flag patterns in a TypeScript/JavaScript project. Identifies environment variable flags (process.env.FEATURE_*), SDK calls from common providers, and config object patterns. Returns flag locations, detection confidence, and cross-reference with dead code findings.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn feature_flags(

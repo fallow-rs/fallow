@@ -26,7 +26,12 @@ use crate::MemberKind;
 /// Pre-fix cache entries for `.module.css` / `.module.scss` files carry
 /// `Span::default()` (start=0, end=0) on every export, which renders every
 /// finding at line:1 col:0; the new scanner produces real offsets.
-pub(super) const CACHE_VERSION: u32 = 91;
+///
+/// Bumped to 92 for issue #563: feature flag extraction recognizes additional
+/// built-in SDK providers (PostHog, Vercel Flags, Optimizely, Eppo, plus more
+/// ConfigCat surfaces) and Vercel `flag({ key: "..." })` object arguments, so
+/// pre-fix entries can carry stale `flag_uses`.
+pub(super) const CACHE_VERSION: u32 = 92;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

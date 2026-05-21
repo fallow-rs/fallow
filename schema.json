@@ -1142,7 +1142,7 @@
       "type": "object",
       "properties": {
         "sdkPatterns": {
-          "description": "Additional SDK call patterns to detect as feature flags.\nThese are merged with the built-in patterns (LaunchDarkly, Statsig, Unleash, GrowthBook).",
+          "description": "Additional SDK call patterns to detect as feature flags.\nThese are merged with the built-in patterns for common providers\nincluding LaunchDarkly, Statsig, Unleash, GrowthBook, Split, PostHog,\nVercel Flags, ConfigCat, Flagsmith, Optimizely, and Eppo.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/SdkPattern"
