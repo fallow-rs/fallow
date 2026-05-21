@@ -367,6 +367,13 @@ pub fn filter_results_by_changed_files(
         .circular_dependencies
         .retain(|c| c.cycle.files.iter().any(|f| changed_files.contains(f)));
 
+    // Re-export cycles: same file-level treatment as circular deps; the
+    // cycle is file-scoped so any member changing counts as touching the
+    // cycle.
+    results
+        .re_export_cycles
+        .retain(|c| c.cycle.files.iter().any(|f| changed_files.contains(f)));
+
     // Boundary violations: keep if the importing file changed
     results
         .boundary_violations

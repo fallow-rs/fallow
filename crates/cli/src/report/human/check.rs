@@ -1540,10 +1540,6 @@ fn build_re_export_cycles_section(
             }
         };
         lines.push(format!("    {}", fix_hint.dimmed()));
-        lines.push(format!(
-            "    {}",
-            "https://fallow.tools/explanations/dead-code#re-export-cycles".dimmed()
-        ));
         lines.push(String::new());
     }
     if items.len() > MAX_FLAT_ITEMS {

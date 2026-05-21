@@ -368,6 +368,103 @@ mod tests {
     }
 
     #[test]
+    fn re_export_cycle_multi_node_emits_one_diagnostic_per_member() {
+        use fallow_core::results::{ReExportCycle, ReExportCycleFinding, ReExportCycleKind};
+
+        let root = test_root();
+        let file_a = root.join("src/api/index.ts");
+        let file_b = root.join("src/api/internal/index.ts");
+
+        let mut results = AnalysisResults::default();
+        results
+            .re_export_cycles
+            .push(ReExportCycleFinding::with_actions(ReExportCycle {
+                files: vec![file_a.clone(), file_b.clone()],
+                kind: ReExportCycleKind::MultiNode,
+            }));
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        // Multi-node cycles emit ONE diagnostic per member file (unlike
+        // circular-dep which emits only on the first file). The rationale
+        // lives in `push_re_export_cycle_diagnostics`: jumping to any
+        // member should land the user on the cycle in the Problems panel.
+        let uri_a = Url::from_file_path(&file_a).unwrap();
+        let uri_b = Url::from_file_path(&file_b).unwrap();
+        assert_eq!(diags[&uri_a].len(), 1);
+        assert_eq!(diags[&uri_b].len(), 1);
+
+        let d = &diags[&uri_a][0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("re-export-cycle".to_string()))
+        );
+        assert!(d.message.contains("Re-export cycle"));
+        assert!(d.message.contains("2 files"));
+        assert!(d.message.contains("<->"));
+        assert!(
+            d.message
+                .contains("Remove one `export * from` statement on any one member"),
+            "multi-node message must carry the fix hint"
+        );
+
+        // Diagnostic anchors at line 1 col 0 (file-scoped).
+        assert_eq!(d.range.start.line, 0);
+        assert_eq!(d.range.start.character, 0);
+
+        // Code description = docs link.
+        let href = d
+            .code_description
+            .as_ref()
+            .expect("docs link should be present")
+            .href
+            .as_str();
+        assert!(
+            href.ends_with("#re-export-cycles"),
+            "expected docs anchor in helpUri, got {href}"
+        );
+
+        // Related information should point to other members (skip self).
+        let related = d.related_information.as_ref().unwrap();
+        assert_eq!(related.len(), 1);
+        assert_eq!(related[0].location.uri, uri_b);
+        assert!(related[0].message.contains("Other member"));
+    }
+
+    #[test]
+    fn re_export_cycle_self_loop_emits_self_loop_message_and_no_related_info() {
+        use fallow_core::results::{ReExportCycle, ReExportCycleFinding, ReExportCycleKind};
+
+        let root = test_root();
+        let file = root.join("src/utils/index.ts");
+
+        let mut results = AnalysisResults::default();
+        results
+            .re_export_cycles
+            .push(ReExportCycleFinding::with_actions(ReExportCycle {
+                files: vec![file.clone()],
+                kind: ReExportCycleKind::SelfLoop,
+            }));
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(&file).unwrap();
+        let d = &diags[&uri][0];
+        assert!(d.message.contains("Re-export self-loop"));
+        assert!(d.message.contains("1 file"));
+        assert!(!d.message.contains("1 files"), "self-loop must singularize");
+        assert!(
+            d.message.contains("Remove the `export * from './'`"),
+            "self-loop message must carry the self-loop fix hint"
+        );
+        // Single member: no related info needed.
+        assert!(d.related_information.is_none());
+    }
+
+    #[test]
     fn boundary_violation_produces_warning_with_zone_message() {
         let root = test_root();
         let from_file = root.join("src/feature/api.ts");

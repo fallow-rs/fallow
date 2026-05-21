@@ -1,7 +1,7 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 1864
+assertion_line: 1867
 expression: "lines.join(\"\\n\")"
 ---
-re-export-cycle:src/api/index.ts:1:0:src/api/index.ts <-> src/api/internal/index.ts
-re-export-cycle:src/utils/index.ts:1:0:src/utils/index.ts (self-loop)
+re-export-cycle:src/api/index.ts:src/api/index.ts <-> src/api/internal/index.ts
+re-export-cycle:src/utils/index.ts:src/utils/index.ts (self-loop)

@@ -1,6 +1,6 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 2035
+assertion_line: 2038
 expression: redact_version(&json_str)
 ---
 {
@@ -408,7 +408,7 @@ expression: redact_version(&json_str)
         {
           "type": "suppress-file",
           "auto_fixable": false,
-          "description": "Suppress with a file-level comment at the top of this file. One suppression breaks the cycle for all members (/project/src/api/internal/index.ts).",
+          "description": "Suppress with a file-level comment at the top of this file. One suppression on any member breaks the cycle for every member (see the sibling `files` array).",
           "comment": "// fallow-ignore-file re-export-cycle"
         }
       ]

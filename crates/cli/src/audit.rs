@@ -1733,6 +1733,10 @@ fn empty_catalog_group_key(item: &fallow_core::results::EmptyCatalogGroup, root:
     )
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one key-builder block per issue type keeps the audit-attribution key shape local and easy to audit; the count grows linearly with new issue types"
+)]
 fn dead_code_keys(
     results: &fallow_core::results::AnalysisResults,
     root: &Path,
@@ -1830,6 +1834,23 @@ fn dead_code_keys(
         files.sort();
         keys.insert(format!("circular-dependency:{}", files.join("|")));
     }
+    for item in &results.re_export_cycles {
+        // Prefix the audit-gate key with the kind discriminator so self-loops
+        // cannot keyspace-collide with future single-file multi-node shapes
+        // (panel catch #7; same rationale as `baseline.rs::re_export_cycle_key`).
+        let kind = match item.cycle.kind {
+            fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
+            fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
+        };
+        let mut files: Vec<String> = item
+            .cycle
+            .files
+            .iter()
+            .map(|path| relative_key_path(path, root))
+            .collect();
+        files.sort();
+        keys.insert(format!("re-export-cycle:{kind}:{}", files.join("|")));
+    }
     for item in &results.boundary_violations {
         keys.insert(format!(
             "boundary-violation:{}:{}:{}",
@@ -1879,6 +1900,10 @@ fn dead_code_keys(
     keys
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one retain block per issue type keeps the gate-filter local and grep-friendly; the count grows linearly with new issue types and parallels dead_code_keys"
+)]
 fn retain_introduced_dead_code(
     results: &mut fallow_core::results::AnalysisResults,
     root: &Path,
@@ -1985,6 +2010,20 @@ fn retain_introduced_dead_code(
             .collect();
         files.sort();
         keep(format!("circular-dependency:{}", files.join("|")))
+    });
+    results.re_export_cycles.retain(|item| {
+        let kind = match item.cycle.kind {
+            fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
+            fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
+        };
+        let mut files: Vec<String> = item
+            .cycle
+            .files
+            .iter()
+            .map(|path| relative_key_path(path, root))
+            .collect();
+        files.sort();
+        keep(format!("re-export-cycle:{kind}:{}", files.join("|")))
     });
     results.boundary_violations.retain(|item| {
         keep(format!(
@@ -2243,6 +2282,24 @@ fn annotate_dead_code_json(
                 .collect();
             files.sort();
             issue_was_introduced(&format!("circular-dependency:{}", files.join("|")), base)
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "re_export_cycles",
+        results.re_export_cycles.iter().map(|item| {
+            let kind = match item.cycle.kind {
+                fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
+                fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
+            };
+            let mut files: Vec<String> = item
+                .cycle
+                .files
+                .iter()
+                .map(|path| relative_key_path(path, root))
+                .collect();
+            files.sort();
+            issue_was_introduced(&format!("re-export-cycle:{kind}:{}", files.join("|")), base)
         }),
     );
     annotate_issue_array(

@@ -298,29 +298,22 @@ impl ReExportCycleFinding {
     /// consumers see context for why one file-level suppression suffices.
     #[must_use]
     pub fn with_actions(cycle: ReExportCycle) -> Self {
-        let other_members = if cycle.files.len() > 1 {
-            let rest: Vec<String> = cycle
-                .files
-                .iter()
-                .skip(1)
-                .map(|p| p.display().to_string())
-                .collect();
-            Some(rest.join(", "))
-        } else {
-            None
-        };
-        let suppress_description = match (&cycle.kind, other_members) {
-            (ReExportCycleKind::SelfLoop, _) => {
+        // The description is a path-free hint about the suppression's
+        // structural effect; the cycle's member list already ships in the
+        // sibling `files` field, so consumers can correlate without
+        // re-reading the description (and absolute paths cannot leak in
+        // here, which the wrapper has no root-prefix context to strip).
+        let suppress_description = match cycle.kind {
+            ReExportCycleKind::SelfLoop => {
                 "Suppress with a file-level comment at the top of this file. \
                  The cycle is a self-loop, so the suppression covers the entire finding."
                     .to_string()
             }
-            (ReExportCycleKind::MultiNode, Some(rest)) => format!(
+            ReExportCycleKind::MultiNode => {
                 "Suppress with a file-level comment at the top of this file. \
-                 One suppression breaks the cycle for all members ({rest})."
-            ),
-            (ReExportCycleKind::MultiNode, None) => {
-                "Suppress with a file-level comment at the top of this file.".to_string()
+                 One suppression on any member breaks the cycle for every member \
+                 (see the sibling `files` array)."
+                    .to_string()
             }
         };
         let actions = vec![

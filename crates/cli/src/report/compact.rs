@@ -133,8 +133,12 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
             fallow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
             fallow_core::results::ReExportCycleKind::MultiNode => "",
         };
+        // Re-export cycles are file-scoped; no useful line/col anchor (the
+        // diagnostic spans the whole file). Match `unlisted-dep:` /
+        // `duplicate-export:` shape (no line/col) rather than inventing a
+        // misleading `:1:0:` placeholder (cli-output-reviewer panel catch).
         lines.push(format!(
-            "re-export-cycle:{}:1:0:{}{}",
+            "re-export-cycle:{}:{}{}",
             first_file,
             chain.join(" <-> "),
             kind_tag

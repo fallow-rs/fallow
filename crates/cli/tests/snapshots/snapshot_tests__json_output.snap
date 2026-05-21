@@ -408,7 +408,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         {
           "type": "suppress-file",
           "auto_fixable": false,
-          "description": "Suppress with a file-level comment at the top of this file. One suppression breaks the cycle for all members (/project/src/api/internal/index.ts).",
+          "description": "Suppress with a file-level comment at the top of this file. One suppression on any member breaks the cycle for every member (see the sibling `files` array).",
           "comment": "// fallow-ignore-file re-export-cycle"
         }
       ]

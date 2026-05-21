@@ -250,6 +250,13 @@ pub fn has_error_severity_issues(
         || (!has_overrides
             && rules.circular_dependencies == Severity::Error
             && !results.circular_dependencies.is_empty())
+        // Note: re-export-cycle is intentionally NOT guarded by `!has_overrides`.
+        // Per-file `overrides.rules.re-export-cycle` is a no-op (the cycle spans
+        // multiple files; see `crates/config/src/config/resolution.rs` load-time
+        // warn). The file-scoped block above does not consult re_export_cycle,
+        // so adding the guard would silently mute re_export_cycle errors any
+        // time overrides exist for an unrelated rule. Keep the project-wide
+        // check unconditional.
         || (rules.re_export_cycle == Severity::Error && !results.re_export_cycles.is_empty())
         || (rules.boundary_violation == Severity::Error && !results.boundary_violations.is_empty())
         || (rules.unused_catalog_entries == Severity::Error
