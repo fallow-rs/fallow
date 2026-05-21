@@ -444,6 +444,13 @@ pub struct DupesOutput {
     /// is passed (always present in MCP responses).
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
+    /// Workspace-discovery diagnostics surfaced during config load
+    /// (issue #473). See [`CheckOutput::workspace_diagnostics`] for the full
+    /// contract; the same list is repeated on each top-level command's
+    /// envelope so single-command consumers see it without having to look at
+    /// a separate top-level field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
 }
 
 /// Envelope emitted by `fallow dead-code --format json` (plus the `check`
@@ -492,6 +499,15 @@ pub struct CheckOutput {
     /// is passed (always present in MCP responses).
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
+    /// Workspace-discovery diagnostics surfaced by
+    /// `discover_workspaces_with_diagnostics` (issue #473): malformed
+    /// declared-workspace `package.json`, glob matches with no `package.json`,
+    /// malformed `tsconfig.json`, missing tsconfig reference paths. Omitted
+    /// when empty so consumers on monorepos without discovery noise see no
+    /// new field. Pairing of `#[serde(default, skip_serializing_if = ...)]`
+    /// is required for schemars to mark the field non-required.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
 }
 
 /// Envelope emitted by `fallow dead-code --group-by ... --format json`.
@@ -596,6 +612,12 @@ pub struct HealthOutput {
     /// is passed (always present in MCP responses).
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
+    /// Workspace-discovery diagnostics surfaced during config load
+    /// (issue #473). Mirror of [`CheckOutput::workspace_diagnostics`] so
+    /// stand-alone `fallow health --format json` consumers see the same
+    /// signal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
 }
 
 /// Envelope emitted by `fallow explain <issue-type> --format json`.

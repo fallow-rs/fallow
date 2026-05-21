@@ -210,6 +210,7 @@ pub fn build_json_with_config_fixable(
         baseline: None,
         regression: None,
         meta: None,
+        workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
     };
 
     let mut output = serde_json::to_value(&envelope)?;
@@ -511,6 +512,7 @@ pub fn build_health_json(
         grouped_by: None,
         groups: None,
         meta: None,
+        workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
     };
     let mut output = serde_json::to_value(&envelope)?;
     let root_prefix = format!("{}/", root.display());
@@ -581,6 +583,7 @@ pub fn build_grouped_health_json(
         // walk the top-level map).
         groups: None,
         meta: None,
+        workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
     };
     let mut output = serde_json::to_value(&envelope)?;
     strip_root_prefix(&mut output, &root_prefix);
@@ -643,6 +646,7 @@ pub fn build_duplication_json(
         total_issues: None,
         groups: None,
         meta: None,
+        workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
     };
     let mut output = serde_json::to_value(&envelope)?;
     let root_prefix = format!("{}/", root.display());
@@ -715,6 +719,7 @@ pub fn build_grouped_duplication_json(
         // `clone_groups` / `clone_families`.
         groups: None,
         meta: None,
+        workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
     };
     let mut output = serde_json::to_value(&envelope)?;
     strip_root_prefix(&mut output, &root_prefix);
@@ -918,6 +923,7 @@ mod tests {
             grouped_by: None,
             groups: None,
             meta: None,
+            workspace_diagnostics: Vec::new(),
         };
         let mut output = serde_json::to_value(&envelope).expect("should serialize health envelope");
         strip_root_prefix(&mut output, "/project/");

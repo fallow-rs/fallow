@@ -662,6 +662,13 @@
             }
           ],
           "description": "`_meta` block with metric / rule definitions, emitted when `--explain`\nis passed (always present in MCP responses)."
+        },
+        "workspace_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceDiagnostic"
+          },
+          "description": "Workspace-discovery diagnostics surfaced by\n`discover_workspaces_with_diagnostics` (issue #473): malformed\ndeclared-workspace `package.json`, glob matches with no `package.json`,\nmalformed `tsconfig.json`, missing tsconfig reference paths. Omitted\nwhen empty so consumers on monorepos without discovery noise see no\nnew field. Pairing of `#[serde(default, skip_serializing_if = ...)]`\nis required for schemars to mark the field non-required."
         }
       },
       "required": [
@@ -1110,6 +1117,13 @@
             }
           ],
           "description": "`_meta` block with metric / rule definitions, emitted when `--explain`\nis passed (always present in MCP responses)."
+        },
+        "workspace_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceDiagnostic"
+          },
+          "description": "Workspace-discovery diagnostics surfaced during config load\n(issue #473). Mirror of [`CheckOutput::workspace_diagnostics`] so\nstand-alone `fallow health --format json` consumers see the same\nsignal."
         }
       },
       "required": [
@@ -2033,6 +2047,13 @@
             }
           ],
           "description": "`_meta` block with metric / rule definitions, emitted when `--explain`\nis passed (always present in MCP responses)."
+        },
+        "workspace_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceDiagnostic"
+          },
+          "description": "Workspace-discovery diagnostics surfaced during config load\n(issue #473). See [`CheckOutput::workspace_diagnostics`] for the full\ncontract; the same list is repeated on each top-level command's\nenvelope so single-command consumers see it without having to look at\na separate top-level field."
         }
       },
       "required": [
@@ -9053,6 +9074,106 @@
         }
       ],
       "description": "Singleton schema-version discriminator for [`CoverageAnalyzeOutput`].\nIndependent from the global [`SchemaVersion`] because the runtime\ncoverage envelope versions independently from the rest of the\nJSON contract."
+    },
+    "WorkspaceDiagnostic": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to the directory or file that triggered the diagnostic."
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable rendering derived from `kind` + `path`. Always ends\nwith a next-step hint."
+        }
+      },
+      "required": [
+        "path",
+        "message"
+      ],
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "undeclared-workspace"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "A directory contains `package.json` but is not declared as a workspace\nin `package.json` `workspaces`, `pnpm-workspace.yaml`, or\n`tsconfig.json` `references`. Surfaced by\n`find_undeclared_workspaces`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "string",
+              "description": "`serde_json` parse error text."
+            },
+            "kind": {
+              "type": "string",
+              "const": "malformed-package-json"
+            }
+          },
+          "required": [
+            "kind",
+            "error"
+          ],
+          "description": "A declared workspace's `package.json` failed to parse. The directory is\ndropped from discovery, but analysis still proceeds (degraded)."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "The glob pattern that matched the directory."
+            },
+            "kind": {
+              "type": "string",
+              "const": "glob-matched-no-package-json"
+            }
+          },
+          "required": [
+            "kind",
+            "pattern"
+          ],
+          "description": "A workspace glob pattern matched a directory that contains no\n`package.json`. Honors the extended skip list and `ignorePatterns`\nbefore emitting."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "string",
+              "description": "JSONC parse error text."
+            },
+            "kind": {
+              "type": "string",
+              "const": "malformed-tsconfig"
+            }
+          },
+          "required": [
+            "kind",
+            "error"
+          ],
+          "description": "`tsconfig.json` exists at the root but failed to parse. Project\nreferences cannot be discovered."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "tsconfig-reference-dir-missing"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "`tsconfig.json` lists a `references[].path` that does not point to an\nexisting directory."
+        }
+      ],
+      "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."
     }
   }
 }

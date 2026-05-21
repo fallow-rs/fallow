@@ -490,7 +490,7 @@ enum Command {
         path: bool,
     },
 
-    /// List discovered entry points and files
+    /// List discovered entry points, files, plugins, boundaries, and workspaces.
     List {
         /// Show entry points
         #[arg(long)]
@@ -507,7 +507,20 @@ enum Command {
         /// Show architecture boundary zones, rules, and per-zone file counts
         #[arg(long)]
         boundaries: bool,
+
+        /// Show monorepo workspaces and any workspace-discovery diagnostics
+        /// (malformed package.json, unreachable glob matches, missing
+        /// tsconfig references).
+        #[arg(long)]
+        workspaces: bool,
     },
+
+    /// Show monorepo workspaces and any workspace-discovery diagnostics.
+    ///
+    /// Equivalent to `fallow list --workspaces`. Use this dedicated form
+    /// when introspecting only the workspace topology (other `list`
+    /// sections stay hidden).
+    Workspaces,
 
     /// Find code duplication / clones across the project
     Dupes {
@@ -2192,11 +2205,38 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             }
         },
         Command::Config { path } => config::run_config(root, cli.config.as_deref(), path, output),
+        Command::Workspaces => {
+            // Equivalent to `fallow list --workspaces` with every other
+            // section toggled off. Implemented as a dedicated subcommand
+            // (instead of a clap alias on `List`) because aliases keep the
+            // surrounding flags at their defaults, which means `fallow
+            // workspaces` would otherwise trip `should_show_all` and emit
+            // the full `list` view alongside workspace data.
+            let production = match resolve_production_modes(cli, root, output, false, false, false)
+            {
+                Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::DeadCode),
+                Err(code) => return code,
+            };
+            list::run_list(&ListOptions {
+                root,
+                config_path: &cli.config,
+                output,
+                threads,
+                no_cache: cli.no_cache,
+                entry_points: false,
+                files: false,
+                plugins: false,
+                boundaries: false,
+                workspaces: true,
+                production,
+            })
+        }
         Command::List {
             entry_points,
             files,
             plugins,
             boundaries,
+            workspaces,
         } => {
             let production = match resolve_production_modes(cli, root, output, false, false, false)
             {
@@ -2213,6 +2253,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 files,
                 plugins,
                 boundaries,
+                workspaces,
                 production,
             })
         }

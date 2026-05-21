@@ -61,7 +61,14 @@ impl PackageJson {
     pub fn load(path: &std::path::Path) -> Result<Self, String> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-        serde_json::from_str(&content)
+        // Strip UTF-8 BOM if present (common in Windows-authored
+        // package.json files, and a deliberate vite test fixture).
+        // `parse_tsconfig_references` already does the same; without this
+        // symmetric step, a BOM-prefixed package.json surfaces as a
+        // false-positive `malformed-package-json` diagnostic on workspaces
+        // that pnpm/npm/yarn happily install.
+        let content = content.trim_start_matches('\u{FEFF}');
+        serde_json::from_str(content)
             .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))
     }
 

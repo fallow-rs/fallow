@@ -283,6 +283,48 @@ export type RegressionStatus = ("pass" | "exceeded" | "skipped")
  */
 export type RegressionToleranceKind = ("absolute" | "percentage")
 /**
+ * A diagnostic about a workspace-discovery candidate.
+ *
+ * The `message` field is a human-readable rendering derived from `kind`. It
+ * always ends with a concrete next step ("fix the JSON syntax", "remove from
+ * `workspaces`", "add to `ignorePatterns`") so first-time users have a path
+ * forward.
+ */
+export type WorkspaceDiagnostic = ({
+/**
+ * Path to the directory or file that triggered the diagnostic.
+ */
+path: string
+/**
+ * Human-readable rendering derived from `kind` + `path`. Always ends
+ * with a next-step hint.
+ */
+message: string
+} & WorkspaceDiagnostic1)
+export type WorkspaceDiagnostic1 = ({
+kind: "undeclared-workspace"
+} | {
+/**
+ * `serde_json` parse error text.
+ */
+error: string
+kind: "malformed-package-json"
+} | {
+/**
+ * The glob pattern that matched the directory.
+ */
+pattern: string
+kind: "glob-matched-no-package-json"
+} | {
+/**
+ * JSONC parse error text.
+ */
+error: string
+kind: "malformed-tsconfig"
+} | {
+kind: "tsconfig-reference-dir-missing"
+})
+/**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
  * emitted by the legacy `build_clone_group_actions` walker.
  */
@@ -846,6 +888,16 @@ regression?: (RegressionResult | null)
  * is passed (always present in MCP responses).
  */
 _meta?: (Meta | null)
+/**
+ * Workspace-discovery diagnostics surfaced by
+ * `discover_workspaces_with_diagnostics` (issue #473): malformed
+ * declared-workspace `package.json`, glob matches with no `package.json`,
+ * malformed `tsconfig.json`, missing tsconfig reference paths. Omitted
+ * when empty so consumers on monorepos without discovery noise see no
+ * new field. Pairing of `#[serde(default, skip_serializing_if = ...)]`
+ * is required for schemars to mark the field non-required.
+ */
+workspace_diagnostics?: WorkspaceDiagnostic[]
 }
 /**
  * Entry-point detection summary embedded in `CheckOutput` and the combined
@@ -4805,6 +4857,13 @@ groups?: (HealthGroup[] | null)
  * is passed (always present in MCP responses).
  */
 _meta?: (Meta | null)
+/**
+ * Workspace-discovery diagnostics surfaced during config load
+ * (issue #473). Mirror of [`CheckOutput::workspace_diagnostics`] so
+ * stand-alone `fallow health --format json` consumers see the same
+ * signal.
+ */
+workspace_diagnostics?: WorkspaceDiagnostic[]
 }
 /**
  * A health report scoped to a single group.
@@ -4959,6 +5018,14 @@ groups?: (DuplicationGroup[] | null)
  * is passed (always present in MCP responses).
  */
 _meta?: (Meta | null)
+/**
+ * Workspace-discovery diagnostics surfaced during config load
+ * (issue #473). See [`CheckOutput::workspace_diagnostics`] for the full
+ * contract; the same list is repeated on each top-level command's
+ * envelope so single-command consumers see it without having to look at
+ * a separate top-level field.
+ */
+workspace_diagnostics?: WorkspaceDiagnostic[]
 }
 /**
  * A single grouped duplication bucket. Per-group `stats` are dedup-aware and

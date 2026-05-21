@@ -14,6 +14,7 @@ pub struct ListOptions<'a> {
     pub files: bool,
     pub plugins: bool,
     pub boundaries: bool,
+    pub workspaces: bool,
     pub production: bool,
 }
 
@@ -110,6 +111,54 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
         None
     };
 
+    // Workspaces and their discovery diagnostics. When opted-in (or under
+    // show-all), call the diagnostics-aware discovery so users see the cause
+    // of "fallow doesn't see my package". A root package.json that fails to
+    // parse hard-exits with code 2 here, matching the validate-boundaries
+    // exit-code policy (issue #468). Also run the undeclared-workspace pass
+    // so the introspection command surfaces every diagnostic kind from the
+    // `WorkspaceDiagnosticKind` enum, not only the four config-load kinds
+    // that `discover_workspaces_with_diagnostics` produces.
+    let workspace_data = if opts.workspaces || show_all {
+        match fallow_config::discover_workspaces_with_diagnostics(
+            opts.root,
+            &config.ignore_patterns,
+        ) {
+            Ok((workspaces, mut diagnostics)) => {
+                // Append undeclared-workspace diagnostics, suppressing any
+                // path already carrying a load-time diagnostic (typically
+                // MalformedPackageJson; that directory IS declared, just
+                // dropped for being malformed, so re-flagging it as
+                // "undeclared" would mislead).
+                let undeclared = fallow_config::find_undeclared_workspaces_with_ignores(
+                    opts.root,
+                    &workspaces,
+                    &config.ignore_patterns,
+                );
+                let already_flagged: rustc_hash::FxHashSet<std::path::PathBuf> = diagnostics
+                    .iter()
+                    .map(|d| dunce::canonicalize(&d.path).unwrap_or_else(|_| d.path.clone()))
+                    .collect();
+                for diag in undeclared {
+                    let canonical =
+                        dunce::canonicalize(&diag.path).unwrap_or_else(|_| diag.path.clone());
+                    if !already_flagged.contains(&canonical) {
+                        diagnostics.push(diag);
+                    }
+                }
+                Some(WorkspaceData {
+                    workspaces,
+                    diagnostics,
+                })
+            }
+            Err(err) => {
+                return crate::error::emit_error(&err.to_string(), 2, opts.output);
+            }
+        }
+    } else {
+        None
+    };
+
     match opts.output {
         OutputFormat::Json => print_list_json(
             opts,
@@ -118,6 +167,7 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
             discovered.as_deref(),
             all_entry_points.as_deref(),
             boundary_data.as_ref(),
+            workspace_data.as_ref(),
         ),
         _ => {
             print_list_human(
@@ -127,6 +177,7 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
                 discovered.as_deref(),
                 all_entry_points.as_deref(),
                 boundary_data.as_ref(),
+                workspace_data.as_ref(),
             );
             ExitCode::SUCCESS
         }
@@ -138,7 +189,7 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
 /// When none of the specific flags is set, the command defaults to
 /// showing everything.
 const fn should_show_all(opts: &ListOptions<'_>) -> bool {
-    !opts.entry_points && !opts.files && !opts.plugins && !opts.boundaries
+    !opts.entry_points && !opts.files && !opts.plugins && !opts.boundaries && !opts.workspaces
 }
 
 /// Determine whether file discovery is needed.
@@ -164,6 +215,7 @@ fn print_list_json(
     discovered: Option<&[fallow_core::discover::DiscoveredFile]>,
     entry_points: Option<&[fallow_core::discover::EntryPoint]>,
     boundary_data: Option<&BoundaryData>,
+    workspace_data: Option<&WorkspaceData>,
 ) -> ExitCode {
     let mut result = serde_json::Map::new();
 
@@ -214,6 +266,46 @@ fn print_list_json(
         result.insert("boundaries".to_string(), boundary_data_to_json(bd));
     }
 
+    if let Some(ws) = workspace_data {
+        let ws_json: Vec<serde_json::Value> = ws
+            .workspaces
+            .iter()
+            .map(|w| {
+                let relative = w.root.strip_prefix(opts.root).unwrap_or(&w.root);
+                serde_json::json!({
+                    "name": w.name,
+                    "path": relative.display().to_string().replace('\\', "/"),
+                    "is_internal_dependency": w.is_internal_dependency,
+                })
+            })
+            .collect();
+        // Diagnostics serialize through their `Serialize` impl which emits the
+        // absolute `PathBuf`. Relativise via `strip_root_prefix` so the
+        // `path` and the rendered `message` text both line up with the rest
+        // of fallow's project-root-relative JSON convention. This mirrors
+        // what `build_json_with_config_fixable` (check / audit / combined)
+        // does for the same field.
+        let root_prefix = format!("{}/", opts.root.display());
+        let diag_json: Vec<serde_json::Value> = ws
+            .diagnostics
+            .iter()
+            .map(|d| {
+                let mut value = serde_json::to_value(d).unwrap_or(serde_json::Value::Null);
+                crate::report::strip_root_prefix(&mut value, &root_prefix);
+                value
+            })
+            .collect();
+        result.insert(
+            "workspace_count".to_string(),
+            serde_json::json!(ws_json.len()),
+        );
+        result.insert("workspaces".to_string(), serde_json::json!(ws_json));
+        result.insert(
+            "workspace_diagnostics".to_string(),
+            serde_json::json!(diag_json),
+        );
+    }
+
     match serde_json::to_string_pretty(&serde_json::Value::Object(result)) {
         Ok(json) => {
             println!("{json}");
@@ -234,6 +326,7 @@ fn print_list_human(
     discovered: Option<&[fallow_core::discover::DiscoveredFile]>,
     entry_points: Option<&[fallow_core::discover::EntryPoint]>,
     boundary_data: Option<&BoundaryData>,
+    workspace_data: Option<&WorkspaceData>,
 ) {
     if (opts.plugins || show_all)
         && let Some(pr) = plugin_result
@@ -265,6 +358,71 @@ fn print_list_human(
     if let Some(bd) = boundary_data {
         print_boundary_data_human(bd);
     }
+
+    if let Some(ws) = workspace_data {
+        // `opts.workspaces` true means the user typed `--workspaces` (or the
+        // `fallow workspaces` alias). `show_all` means the section is
+        // implicit. The explicit case prints "No workspaces declared
+        // (single-package project)." instead of silence; the implicit case
+        // stays quiet on empty.
+        print_workspace_data_human(opts.root, ws, opts.workspaces);
+    }
+}
+
+/// Human-mode render for the workspaces section.
+///
+/// When the user opted into `--workspaces` explicitly (or via the
+/// `fallow workspaces` alias), the renderer always emits SOMETHING so the
+/// user is not staring at silence on a non-monorepo. When the section is
+/// rendered as part of the implicit show-all default, an empty result stays
+/// silent to avoid noise on single-package projects.
+///
+/// The `explicit` flag distinguishes the two cases.
+fn print_workspace_data_human(root: &std::path::Path, ws: &WorkspaceData, explicit: bool) {
+    if ws.workspaces.is_empty() && ws.diagnostics.is_empty() {
+        if explicit {
+            eprintln!("No workspaces declared (single-package project).");
+        }
+        return;
+    }
+    if ws.workspaces.is_empty() {
+        eprintln!("No workspaces discovered.");
+    } else {
+        eprintln!("Discovered {} workspaces", ws.workspaces.len());
+        for w in &ws.workspaces {
+            let relative = w.root.strip_prefix(root).unwrap_or(&w.root);
+            let path_str = relative.display().to_string().replace('\\', "/");
+            let suffix = if w.is_internal_dependency {
+                " (internal dep)"
+            } else {
+                ""
+            };
+            println!("  {} -> {path_str}{suffix}", w.name);
+        }
+    }
+    if !ws.diagnostics.is_empty() {
+        eprintln!(
+            "{} workspace discovery diagnostic{}:",
+            ws.diagnostics.len(),
+            if ws.diagnostics.len() == 1 { "" } else { "s" }
+        );
+        // Render the kebab-case kind ONLY in the JSON envelope; the human
+        // surface stays human ("Dropped workspace 'packages/bad': ...")
+        // because the message itself already names the diagnostic in
+        // user-facing prose. Consumers that need to dispatch on `kind` use
+        // `--format json`.
+        for d in &ws.diagnostics {
+            eprintln!("  - {}", d.message);
+        }
+    }
+}
+
+/// View-model carrying discovered workspaces alongside any diagnostics
+/// produced during discovery (malformed package.json, unreachable glob
+/// matches, missing tsconfig references, undeclared workspaces).
+struct WorkspaceData {
+    workspaces: Vec<fallow_config::WorkspaceInfo>,
+    diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
 }
 
 // ── Boundary listing helpers ───────────────────────────────────
@@ -664,6 +822,7 @@ mod tests {
             files,
             plugins,
             boundaries,
+            workspaces: false,
             production: false,
         }
     }

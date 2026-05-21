@@ -33,7 +33,7 @@ pub use fallow_graph::graph;
 pub use fallow_graph::project;
 pub use fallow_graph::resolve;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use errors::FallowError;
@@ -243,12 +243,41 @@ fn warn_undeclared_workspaces(
     ignore_patterns: &globset::GlobSet,
     quiet: bool,
 ) {
-    if quiet {
+    let undeclared = find_undeclared_workspaces_with_ignores(root, workspaces_vec, ignore_patterns);
+    if undeclared.is_empty() {
         return;
     }
 
-    let undeclared = find_undeclared_workspaces_with_ignores(root, workspaces_vec, ignore_patterns);
-    if let Some(message) = format_undeclared_workspace_warning(root, &undeclared) {
+    // Filter out paths that ALREADY carry a config-load-time diagnostic
+    // (typically `MalformedPackageJson` from issue #473). A directory whose
+    // package.json failed to parse appears "undeclared" from the analyze
+    // pipeline's perspective because `discover_workspaces` silently dropped
+    // it, but the user IS declaring it; the malformed-package-json warning
+    // already names the path and explains the fix, so re-flagging it as
+    // "undeclared" actively misleads.
+    let existing = fallow_config::workspace_diagnostics_for(root);
+    let already_flagged: rustc_hash::FxHashSet<PathBuf> = existing
+        .iter()
+        .map(|d| dunce::canonicalize(&d.path).unwrap_or_else(|_| d.path.clone()))
+        .collect();
+    let undeclared: Vec<_> = undeclared
+        .into_iter()
+        .filter(|diag| {
+            let canonical = dunce::canonicalize(&diag.path).unwrap_or_else(|_| diag.path.clone());
+            !already_flagged.contains(&canonical)
+        })
+        .collect();
+    if undeclared.is_empty() {
+        return;
+    }
+
+    // Fold the surviving undeclared diagnostics into the shared registry so
+    // they appear in `workspace_diagnostics[]` on the JSON envelope and in
+    // `fallow list --workspaces`. Quiet mode still populates the registry
+    // (JSON consumers need the data) but skips the human warning.
+    fallow_config::append_workspace_diagnostics(root, undeclared.clone());
+
+    if !quiet && let Some(message) = format_undeclared_workspace_warning(root, &undeclared) {
         tracing::warn!("{message}");
     }
 }
@@ -1430,17 +1459,19 @@ fn num_cpus() -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        bucket_files_by_workspace, collect_config_search_roots, format_undeclared_workspace_warning,
+        bucket_files_by_workspace, collect_config_search_roots,
+        format_undeclared_workspace_warning, warn_undeclared_workspaces,
     };
     use std::path::{Path, PathBuf};
 
-    use fallow_config::WorkspaceDiagnostic;
+    use fallow_config::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
 
     fn diag(root: &Path, relative: &str) -> WorkspaceDiagnostic {
-        WorkspaceDiagnostic {
-            path: root.join(relative),
-            message: String::new(),
-        }
+        WorkspaceDiagnostic::new(
+            root,
+            root.join(relative),
+            WorkspaceDiagnosticKind::UndeclaredWorkspace,
+        )
     }
 
     #[test]
@@ -1558,6 +1589,75 @@ mod tests {
                 root.join("apps/api/src/server.ts"),
                 "src/server.ts".to_string()
             )]
+        );
+    }
+
+    #[test]
+    fn warn_undeclared_workspaces_suppresses_paths_already_flagged_as_malformed() {
+        // Regression test for the load-bearing dedup in
+        // `warn_undeclared_workspaces`: when a declared workspace's
+        // package.json is malformed, the discovery pass drops the directory
+        // and stashes `MalformedPackageJson` in the registry. The later
+        // undeclared-workspace pass would otherwise re-flag the SAME
+        // directory as "undeclared" (because it never made it into the
+        // `declared` Vec), confusing users who think the workspace is not
+        // declared when it actually is, just typo'd. This test asserts the
+        // pre-existing MalformedPackageJson entry suppresses the duplicate
+        // undeclared warning.
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let pkg_good = dir.path().join("packages").join("good");
+        let pkg_bad = dir.path().join("packages").join("bad");
+        std::fs::create_dir_all(&pkg_good).unwrap();
+        std::fs::create_dir_all(&pkg_bad).unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"workspaces": ["packages/*"]}"#,
+        )
+        .unwrap();
+        std::fs::write(pkg_good.join("package.json"), r#"{"name": "good"}"#).unwrap();
+        std::fs::write(pkg_bad.join("package.json"), r"{,").unwrap();
+
+        // Run discovery; in production `load_config_for_analysis` stashes
+        // the returned diagnostics into the registry, so this test mirrors
+        // that pattern by stashing manually.
+        let (workspaces, diagnostics) = fallow_config::discover_workspaces_with_diagnostics(
+            dir.path(),
+            &globset::GlobSet::empty(),
+        )
+        .expect("root package.json is valid");
+        assert_eq!(workspaces.len(), 1, "only the valid workspace discovers");
+        fallow_config::stash_workspace_diagnostics(dir.path(), diagnostics);
+
+        // Now run the undeclared pass via the public entry point. The
+        // registry should contain the MalformedPackageJson diagnostic but
+        // NOT an UndeclaredWorkspace for the same path.
+        warn_undeclared_workspaces(dir.path(), &workspaces, &globset::GlobSet::empty(), false);
+
+        let diagnostics = fallow_config::workspace_diagnostics_for(dir.path());
+        let mut malformed = 0;
+        let mut undeclared_for_bad = 0;
+        for diag in &diagnostics {
+            if matches!(
+                diag.kind,
+                WorkspaceDiagnosticKind::MalformedPackageJson { .. }
+            ) && diag.path.ends_with("bad")
+            {
+                malformed += 1;
+            }
+            if matches!(diag.kind, WorkspaceDiagnosticKind::UndeclaredWorkspace)
+                && diag.path.ends_with("bad")
+            {
+                undeclared_for_bad += 1;
+            }
+        }
+        assert_eq!(
+            malformed, 1,
+            "expected one MalformedPackageJson for packages/bad: {diagnostics:?}"
+        );
+        assert_eq!(
+            undeclared_for_bad, 0,
+            "warn_undeclared_workspaces must NOT re-flag a path that already \
+             carries MalformedPackageJson; got duplicates: {diagnostics:?}"
         );
     }
 }

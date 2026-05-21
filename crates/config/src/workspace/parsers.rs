@@ -1,36 +1,97 @@
 use std::path::{Path, PathBuf};
 
+use super::diagnostics::{
+    WorkspaceDiagnostic, WorkspaceDiagnosticKind, is_ignored_workspace_dir, is_skip_listed_dir,
+};
+
 /// Parse `tsconfig.json` at the project root and extract `references[].path` directories.
 ///
 /// Returns directories that exist on disk. tsconfig.json is JSONC (comments + trailing commas).
+///
+/// Test-only wrapper around [`parse_tsconfig_references_with_diagnostics`] that drops
+/// any emitted diagnostics. Production callers use the diagnostics-aware variant.
+#[cfg(test)]
 pub(super) fn parse_tsconfig_references(root: &Path) -> Vec<PathBuf> {
+    let mut diagnostics = Vec::new();
+    parse_tsconfig_references_with_diagnostics(root, &globset::GlobSet::empty(), &mut diagnostics)
+}
+
+/// Parse `tsconfig.json` at the project root and extract `references[].path` directories,
+/// surfacing parse errors and missing reference directories as workspace diagnostics.
+///
+/// Severity policy (mirrors what tsc itself does):
+/// - `tsconfig.json` missing: silent (many JS-only projects have none).
+/// - `tsconfig.json` exists but fails to parse as JSONC: emit
+///   [`WorkspaceDiagnosticKind::MalformedTsconfig`].
+/// - `references[].path` points to a directory that does not exist: emit
+///   [`WorkspaceDiagnosticKind::TsconfigReferenceDirMissing`], filtered through
+///   `ignore_patterns` so user-excluded paths stay quiet.
+pub(super) fn parse_tsconfig_references_with_diagnostics(
+    root: &Path,
+    ignore_patterns: &globset::GlobSet,
+    diagnostics: &mut Vec<WorkspaceDiagnostic>,
+) -> Vec<PathBuf> {
     let tsconfig_path = root.join("tsconfig.json");
     let Ok(content) = std::fs::read_to_string(&tsconfig_path) else {
+        // Missing tsconfig is not an error. Many JS-only projects have none.
         return Vec::new();
     };
 
     // Strip UTF-8 BOM if present (common in Windows-authored tsconfig files)
     let content = content.trim_start_matches('\u{FEFF}');
 
-    let Ok(value) = crate::jsonc::parse_to_value::<serde_json::Value>(content) else {
-        return Vec::new();
+    let value: serde_json::Value = match crate::jsonc::parse_to_value(content) {
+        Ok(v) => v,
+        Err(error) => {
+            let diag = WorkspaceDiagnostic::new(
+                root,
+                tsconfig_path,
+                WorkspaceDiagnosticKind::MalformedTsconfig {
+                    error: error.to_string(),
+                },
+            );
+            diagnostics.push(diag);
+            return Vec::new();
+        }
     };
 
     let Some(refs) = value.get("references").and_then(|v| v.as_array()) else {
         return Vec::new();
     };
 
-    refs.iter()
-        .filter_map(|r| {
-            r.get("path").and_then(|p| p.as_str()).map(|p| {
-                // strip_prefix removes exactly one leading "./" (unlike trim_start_matches
-                // which would strip repeatedly)
-                let cleaned = p.strip_prefix("./").unwrap_or(p);
-                root.join(cleaned)
-            })
-        })
-        .filter(|p| p.is_dir())
-        .collect()
+    let mut results = Vec::new();
+    for r in refs {
+        let Some(raw_path) = r.get("path").and_then(|p| p.as_str()) else {
+            continue;
+        };
+        // strip_prefix removes exactly one leading "./" (unlike trim_start_matches
+        // which would strip repeatedly).
+        let cleaned = raw_path.strip_prefix("./").unwrap_or(raw_path);
+        let candidate = root.join(cleaned);
+        if candidate.is_dir() {
+            results.push(candidate);
+            continue;
+        }
+
+        // Reference points to a missing directory. Filter through
+        // ignore_patterns so paths the user already excluded do not trigger
+        // a redundant diagnostic.
+        let relative = candidate
+            .strip_prefix(root)
+            .unwrap_or(candidate.as_path())
+            .to_path_buf();
+        if is_ignored_workspace_dir(&relative, ignore_patterns) {
+            continue;
+        }
+
+        let diag = WorkspaceDiagnostic::new(
+            root,
+            candidate,
+            WorkspaceDiagnosticKind::TsconfigReferenceDirMissing,
+        );
+        diagnostics.push(diag);
+    }
+    results
 }
 
 /// Parse `tsconfig.json` at the project root and extract `compilerOptions.rootDir`.
@@ -116,42 +177,141 @@ pub(super) fn strip_trailing_commas(input: &str) -> String {
 ///
 /// Returns `(original_path, canonical_path)` tuples so callers can skip redundant
 /// `canonicalize()` calls. Only directories containing a `package.json` are
-/// canonicalized — this avoids expensive syscalls on the many non-workspace
+/// canonicalized; this avoids expensive syscalls on the many non-workspace
 /// directories that globs like `packages/*` or `**` can match.
 ///
 /// `canonical_root` is pre-computed to avoid repeated `canonicalize()` syscalls.
+///
+/// Test-only wrapper around [`expand_workspace_glob_with_diagnostics`] that
+/// drops any glob-matched-no-package.json diagnostics. Production callers use
+/// the diagnostics-aware variant.
+#[cfg(test)]
 pub(super) fn expand_workspace_glob(
     root: &Path,
     pattern: &str,
     canonical_root: &Path,
 ) -> Vec<(PathBuf, PathBuf)> {
+    let mut diagnostics = Vec::new();
+    expand_workspace_glob_with_diagnostics(
+        root,
+        pattern,
+        pattern,
+        canonical_root,
+        &globset::GlobSet::empty(),
+        &mut diagnostics,
+    )
+}
+
+/// Diagnostics-aware variant of `expand_workspace_glob` (the test-only
+/// back-compat wrapper above).
+///
+/// Emits [`WorkspaceDiagnosticKind::GlobMatchedNoPackageJson`] when a glob match
+/// resolves to a directory that contains no `package.json`, with two filters
+/// applied first:
+/// 1. The directory's leaf name is checked against [`is_skip_listed_dir`]
+///    (build artifacts, tooling caches, hidden directories). pnpm/npm/yarn
+///    silently filter the same set; fallow follows suit.
+/// 2. The project-root-relative path is checked against `ignore_patterns`.
+///    User-excluded paths produce no diagnostic.
+///
+/// `raw_pattern` is the user-supplied glob (e.g. `packages/*`) and goes into the
+/// diagnostic's message; `expanded_pattern` is the normalized glob string used
+/// for matching (e.g. `packages/*` after trailing-slash expansion).
+pub(super) fn expand_workspace_glob_with_diagnostics(
+    root: &Path,
+    raw_pattern: &str,
+    expanded_pattern: &str,
+    canonical_root: &Path,
+    ignore_patterns: &globset::GlobSet,
+    diagnostics: &mut Vec<WorkspaceDiagnostic>,
+) -> Vec<(PathBuf, PathBuf)> {
     // For patterns with `**`, use a manual walk that prunes node_modules
     // during traversal. The glob crate walks into node_modules before
     // filtering, which is catastrophic with pnpm's deep symlink trees
     // (50,000+ entries for `packages/**/*` in starlight).
-    if pattern.contains("**") {
-        return expand_recursive_workspace_pattern(root, pattern, canonical_root);
+    if expanded_pattern.contains("**") {
+        return expand_recursive_workspace_pattern(
+            root,
+            raw_pattern,
+            expanded_pattern,
+            canonical_root,
+            ignore_patterns,
+            diagnostics,
+        );
     }
 
-    let full_pattern = root.join(pattern).to_string_lossy().to_string();
+    let full_pattern = root.join(expanded_pattern).to_string_lossy().to_string();
     match glob::glob(&full_pattern) {
-        Ok(paths) => paths
-            .filter_map(Result::ok)
-            .filter(|p| p.is_dir())
-            .filter(|p| !p.components().any(|c| c.as_os_str() == "node_modules"))
-            .filter(|p| p.join("package.json").exists())
-            .filter_map(|p| {
-                dunce::canonicalize(&p)
-                    .ok()
-                    .filter(|cp| cp.starts_with(canonical_root))
-                    .map(|cp| (p, cp))
-            })
-            .collect(),
+        Ok(paths) => {
+            let mut results = Vec::new();
+            for path in paths.filter_map(Result::ok) {
+                if !path.is_dir() {
+                    continue;
+                }
+                if path.components().any(|c| c.as_os_str() == "node_modules") {
+                    continue;
+                }
+                if path.join("package.json").exists() {
+                    if let Some(cp) = dunce::canonicalize(&path)
+                        .ok()
+                        .filter(|cp| cp.starts_with(canonical_root))
+                    {
+                        results.push((path, cp));
+                    }
+                    continue;
+                }
+                maybe_emit_glob_no_pkg_diag(root, raw_pattern, &path, ignore_patterns, diagnostics);
+            }
+            results
+        }
         Err(e) => {
-            tracing::warn!("invalid workspace glob pattern '{pattern}': {e}");
+            tracing::warn!("invalid workspace glob pattern '{raw_pattern}': {e}");
             Vec::new()
         }
     }
+}
+
+/// Emit a `glob-matched-no-package-json` diagnostic if the path is neither
+/// in the conventional skip list nor in the user `ignorePatterns`.
+///
+/// Path normalisation: macOS canonicalises `/tmp/<repo>` to
+/// `/private/tmp/<repo>`. If `root` was supplied as the canonical form (the
+/// CLI prints `/private/...` in `loaded config:` confirming this) but the
+/// `glob::glob` paths use the symlinked `/tmp/...` form, a naive
+/// `path.strip_prefix(root)` falls through to the full absolute path and the
+/// `ignorePatterns` check misses. Canonicalise both before stripping so the
+/// suppression contract holds end-to-end.
+fn maybe_emit_glob_no_pkg_diag(
+    root: &Path,
+    raw_pattern: &str,
+    path: &Path,
+    ignore_patterns: &globset::GlobSet,
+    diagnostics: &mut Vec<WorkspaceDiagnostic>,
+) {
+    let leaf = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if is_skip_listed_dir(&leaf) {
+        return;
+    }
+    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let canonical_path = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let relative = canonical_path
+        .strip_prefix(&canonical_root)
+        .unwrap_or(canonical_path.as_path())
+        .to_path_buf();
+    if is_ignored_workspace_dir(&relative, ignore_patterns) {
+        return;
+    }
+    let diag = WorkspaceDiagnostic::new(
+        root,
+        path.to_path_buf(),
+        WorkspaceDiagnosticKind::GlobMatchedNoPackageJson {
+            pattern: raw_pattern.to_string(),
+        },
+    );
+    diagnostics.push(diag);
 }
 
 /// Expand a recursive workspace glob pattern (containing `**`) by walking the
@@ -161,33 +321,57 @@ pub(super) fn expand_workspace_glob(
 /// inside `node_modules/` (catastrophic with pnpm's deep symlink trees).
 fn expand_recursive_workspace_pattern(
     root: &Path,
-    pattern: &str,
+    raw_pattern: &str,
+    expanded_pattern: &str,
     canonical_root: &Path,
+    ignore_patterns: &globset::GlobSet,
+    diagnostics: &mut Vec<WorkspaceDiagnostic>,
 ) -> Vec<(PathBuf, PathBuf)> {
-    let full_pattern = root.join(pattern).to_string_lossy().to_string();
+    let full_pattern = root.join(expanded_pattern).to_string_lossy().to_string();
     let Ok(matcher) = glob::Pattern::new(&full_pattern) else {
-        tracing::warn!("invalid workspace glob pattern '{pattern}'");
+        tracing::warn!("invalid workspace glob pattern '{raw_pattern}'");
         return Vec::new();
     };
 
     // Extract the base directory before the first `*` to avoid scanning from root
-    let base_dir = match pattern.find('*') {
-        Some(idx) => root.join(&pattern[..idx]),
-        None => root.join(pattern),
+    let base_dir = match expanded_pattern.find('*') {
+        Some(idx) => root.join(&expanded_pattern[..idx]),
+        None => root.join(expanded_pattern),
     };
 
     let mut results = Vec::new();
-    walk_workspace_dirs(&base_dir, &matcher, canonical_root, &mut results);
+    walk_workspace_dirs(
+        root,
+        &base_dir,
+        raw_pattern,
+        &matcher,
+        canonical_root,
+        ignore_patterns,
+        &mut results,
+        diagnostics,
+    );
     results
 }
 
 /// Recursively walk directories, skipping `node_modules` and `.git`, collecting
 /// directories that match the glob pattern and contain a `package.json`.
+///
+/// Glob-matched directories without `package.json` are surfaced as
+/// `glob-matched-no-package-json` diagnostics unless they are in the
+/// conventional skip list or covered by `ignore_patterns`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "internal recursion that threads diagnostic accumulator + ignore globset; refactoring into a context struct would obscure the recursive call site"
+)]
 fn walk_workspace_dirs(
+    root: &Path,
     dir: &Path,
+    raw_pattern: &str,
     matcher: &glob::Pattern,
     canonical_root: &Path,
+    ignore_patterns: &globset::GlobSet,
     results: &mut Vec<(PathBuf, PathBuf)>,
+    diagnostics: &mut Vec<WorkspaceDiagnostic>,
 ) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -202,16 +386,29 @@ fn walk_workspace_dirs(
         if name == "node_modules" || name == ".git" {
             continue;
         }
-        // Check if this directory matches the pattern and has package.json
-        if matcher.matches_path(&path)
-            && path.join("package.json").exists()
-            && let Ok(cp) = dunce::canonicalize(&path)
-            && cp.starts_with(canonical_root)
-        {
-            results.push((path.clone(), cp));
+        // Check if this directory matches the pattern.
+        if matcher.matches_path(&path) {
+            if path.join("package.json").exists() {
+                if let Ok(cp) = dunce::canonicalize(&path)
+                    && cp.starts_with(canonical_root)
+                {
+                    results.push((path.clone(), cp));
+                }
+            } else {
+                maybe_emit_glob_no_pkg_diag(root, raw_pattern, &path, ignore_patterns, diagnostics);
+            }
         }
         // Continue recursing into subdirectories
-        walk_workspace_dirs(&path, matcher, canonical_root, results);
+        walk_workspace_dirs(
+            root,
+            &path,
+            raw_pattern,
+            matcher,
+            canonical_root,
+            ignore_patterns,
+            results,
+            diagnostics,
+        );
     }
 }
 

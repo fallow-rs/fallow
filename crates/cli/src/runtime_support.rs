@@ -200,5 +200,49 @@ pub fn load_config_for_analysis(
         return Err(crate::error::emit_error(&msg, 2, output));
     }
 
-    Ok(final_config.resolve(root.to_path_buf(), output, threads, no_cache, quiet))
+    let resolved = final_config.resolve(root.to_path_buf(), output, threads, no_cache, quiet);
+
+    // Issue #473: discover workspaces here so any silent-fail in
+    // crates/config/src/workspace/ surfaces with a typed diagnostic (and a
+    // tracing::warn! per (root, kind, path)). A malformed ROOT package.json
+    // is unrecoverable; promote to exit 2 to match the boundary-validation
+    // exit-code policy above. The diagnostics that come back from this call
+    // stay in a process-wide registry keyed by canonical root so downstream
+    // renderers (check.rs, audit.rs, combined.rs, list.rs) can fold them
+    // into their JSON envelope and stderr summary without re-walking the
+    // workspace tree.
+    match fallow_config::discover_workspaces_with_diagnostics(root, &resolved.ignore_patterns) {
+        Ok((_, diagnostics)) => {
+            // Stash diagnostics so downstream JSON-envelope builders
+            // (`report::json::build_json*`, audit, combined) and the analyze
+            // pipeline's later `find_undeclared_workspaces_with_ignores`
+            // pass can fold their results into the same registry without
+            // re-walking the workspace tree. The registry lives in
+            // `fallow-config` so both crates can populate it without a
+            // cyclic dep.
+            fallow_config::stash_workspace_diagnostics(root, diagnostics.clone());
+            if !diagnostics.is_empty() && matches!(output, OutputFormat::Human) && !quiet {
+                eprintln!(
+                    "fallow: {} workspace discovery diagnostic{}. \
+                     Run `fallow list --workspaces` for detail.",
+                    diagnostics.len(),
+                    if diagnostics.len() == 1 { "" } else { "s" }
+                );
+            }
+        }
+        Err(err) => {
+            return Err(crate::error::emit_error(&err.to_string(), 2, output));
+        }
+    }
+
+    Ok(resolved)
+}
+
+/// Read the workspace-discovery diagnostics produced by the most recent
+/// `load_config_for_analysis` call for `root`. Thin re-export over
+/// [`fallow_config::workspace_diagnostics_for`] so call sites inside the
+/// CLI crate (`report::json::build_json*`) keep a stable module-local path.
+#[must_use]
+pub fn workspace_diagnostics_for(root: &Path) -> Vec<fallow_config::WorkspaceDiagnostic> {
+    fallow_config::workspace_diagnostics_for(root)
 }
