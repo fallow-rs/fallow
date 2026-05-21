@@ -267,7 +267,7 @@ pub(crate) fn parse_css_to_module(
     source: &str,
     content_hash: u64,
 ) -> ModuleInfo {
-    let suppressions = crate::suppress::parse_suppressions_from_source(source);
+    let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
     let is_scss = path
         .extension()
         .and_then(|e| e.to_str())
@@ -376,7 +376,8 @@ pub(crate) fn parse_css_to_module(
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         content_hash,
-        suppressions,
+        suppressions: parsed_suppressions.suppressions,
+        unknown_suppression_kinds: parsed_suppressions.unknown_kinds,
         unused_import_bindings: Vec::new(),
         type_referenced_import_bindings: Vec::new(),
         value_referenced_import_bindings: Vec::new(),

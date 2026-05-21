@@ -27,3 +27,6 @@ Ot = "Ot"
 # These mirror the typos the warn path is designed to catch.
 unsued = "unsued"
 dependnecy = "dependnecy"
+# Intentional misspelling in #449 unknown-suppression-kind tests.
+# `unsed-export` is the close-typo Levenshtein-suggestion fixture.
+unsed = "unsed"

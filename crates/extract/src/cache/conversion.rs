@@ -16,7 +16,8 @@ use super::types::{
     CachedDynamicImport, CachedDynamicImportPattern, CachedExport, CachedImport,
     CachedLocalTypeDeclaration, CachedMember, CachedModule, CachedNamespaceObjectAlias,
     CachedPublicSignatureTypeReference, CachedReExport, CachedRequireCall, CachedSuppression,
-    IMPORT_KIND_DEFAULT, IMPORT_KIND_NAMED, IMPORT_KIND_NAMESPACE, IMPORT_KIND_SIDE_EFFECT,
+    CachedUnknownSuppressionKind, IMPORT_KIND_DEFAULT, IMPORT_KIND_NAMED, IMPORT_KIND_NAMESPACE,
+    IMPORT_KIND_SIDE_EFFECT,
 };
 
 /// Reconstruct a [`ModuleInfo`](crate::ModuleInfo) from a [`CachedModule`].
@@ -164,6 +165,16 @@ pub fn cached_to_module_opts(
         })
         .collect();
 
+    let unknown_suppression_kinds = cached
+        .unknown_suppression_kinds
+        .iter()
+        .map(|u| fallow_types::suppress::UnknownSuppressionKind {
+            comment_line: u.comment_line,
+            is_file_level: u.is_file_level,
+            token: u.token.clone(),
+        })
+        .collect();
+
     ModuleInfo {
         file_id,
         exports,
@@ -178,6 +189,7 @@ pub fn cached_to_module_opts(
         has_angular_component_template_url: cached.has_angular_component_template_url,
         content_hash: cached.content_hash,
         suppressions,
+        unknown_suppression_kinds,
         unused_import_bindings: cached.unused_import_bindings.clone(),
         type_referenced_import_bindings: cached.type_referenced_import_bindings.clone(),
         value_referenced_import_bindings: cached.value_referenced_import_bindings.clone(),
@@ -354,6 +366,15 @@ pub fn module_to_cached(
                 kind: s
                     .kind
                     .map_or(0, crate::suppress::IssueKind::to_discriminant),
+            })
+            .collect(),
+        unknown_suppression_kinds: module
+            .unknown_suppression_kinds
+            .iter()
+            .map(|u| CachedUnknownSuppressionKind {
+                comment_line: u.comment_line,
+                is_file_level: u.is_file_level,
+                token: u.token.clone(),
             })
             .collect(),
         line_offsets: module.line_offsets.clone(),

@@ -430,6 +430,12 @@ OUT_CLEAN=$(jq -r -f "$JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
 assert_not_contains "$OUT_CLEAN" "WARNING" "clean: no warning"
 
+# Issue #449: kind_known: false renders "unknown kind \`token\`" in the table,
+# distinguishing it from a stale-but-known kind which renders just \`token\`.
+OUT_UNKNOWN_KIND_SUMMARY=$(jq '.unused_files = [] | .unused_exports = [] | .unused_types = [] | .unused_dependencies = [] | .unused_dev_dependencies = [] | .unused_optional_dependencies = [] | .unused_enum_members = [] | .unused_class_members = [] | .unresolved_imports = [] | .unlisted_dependencies = [] | .duplicate_exports = [] | .circular_dependencies = [] | .boundary_violations = [] | .type_only_dependencies = [] | .test_only_dependencies = [] | .unused_catalog_entries = [] | .empty_catalog_groups = [] | .unresolved_catalog_references = [] | .unused_dependency_overrides = [] | .misconfigured_dependency_overrides = [] | .private_type_leaks = [] | .stale_suppressions = [{"path": "src/utils.ts", "line": 1, "col": 0, "origin": {"type": "comment", "issue_kind": "complexity-typo", "is_file_level": false, "kind_known": false}}] | .total_issues = 1' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UNKNOWN_KIND_SUMMARY" 'unknown kind' "summary unknown kind: prefix renders"
+assert_contains "$OUT_UNKNOWN_KIND_SUMMARY" 'complexity-typo' "summary unknown kind: verbatim token renders"
+
 echo "  summary-dupes.jq:"
 OUT=$(jq -r -f "$JQ_DIR/summary-dupes.jq" "$FIXTURES/dupes.json" 2>&1)
 assert_valid_markdown "$OUT" "produces output"
@@ -731,6 +737,14 @@ assert_contains "$OUT" "legacy" "annotation includes empty catalog group name"
 
 OUT_CLEAN=$(jq -r -f "$JQ_DIR/annotations-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 [ -z "$OUT_CLEAN" ] && pass "clean: no annotations" || fail "clean: no annotations" "got output"
+
+# Issue #449: kind_known: false branch renders a typo-fix annotation rather
+# than the "no longer matches any active issue" copy used for stale-but-known.
+OUT_UNKNOWN_KIND=$(jq '.unused_files = [] | .unused_exports = [] | .unused_types = [] | .unused_dependencies = [] | .unused_dev_dependencies = [] | .unused_optional_dependencies = [] | .unused_enum_members = [] | .unused_class_members = [] | .unresolved_imports = [] | .unlisted_dependencies = [] | .duplicate_exports = [] | .circular_dependencies = [] | .boundary_violations = [] | .type_only_dependencies = [] | .test_only_dependencies = [] | .unused_catalog_entries = [] | .empty_catalog_groups = [] | .unresolved_catalog_references = [] | .unused_dependency_overrides = [] | .misconfigured_dependency_overrides = [] | .private_type_leaks = [] | .stale_suppressions = [{"path": "src/utils.ts", "line": 1, "col": 0, "origin": {"type": "comment", "issue_kind": "complexity-typo", "is_file_level": false, "kind_known": false}}] | .total_issues = 1' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_UNKNOWN_KIND" "Unknown suppression kind" "unknown kind: typo title"
+assert_contains "$OUT_UNKNOWN_KIND" "complexity-typo" "unknown kind: verbatim token in message"
+assert_contains "$OUT_UNKNOWN_KIND" "fallow-ignore-next-line" "unknown kind: directive type preserved"
+assert_contains "$OUT_UNKNOWN_KIND" "Fix the typo" "unknown kind: actionable next step"
 
 echo "  annotations-dupes.jq:"
 OUT=$(jq -r -f "$JQ_DIR/annotations-dupes.jq" "$FIXTURES/dupes.json" 2>&1)

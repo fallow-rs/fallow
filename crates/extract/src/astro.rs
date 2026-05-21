@@ -84,7 +84,7 @@ pub(crate) fn parse_astro_to_module(
     source: &str,
     content_hash: u64,
 ) -> ModuleInfo {
-    let suppressions = crate::suppress::parse_suppressions_from_source(source);
+    let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
     let line_offsets = fallow_types::extract::compute_line_offsets(source);
 
     let frontmatter = extract_astro_frontmatter(source);
@@ -106,7 +106,7 @@ pub(crate) fn parse_astro_to_module(
 
     extend_imports_from_template(&mut extractor.imports, template);
 
-    let mut info = extractor.into_module_info(file_id, content_hash, suppressions);
+    let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
     info.line_offsets = line_offsets;
     info
 }

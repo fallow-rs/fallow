@@ -1105,6 +1105,7 @@ mod tests {
                     comment_line: 1,
                     kind: Some(IssueKind::UnusedFile),
                 }],
+                unknown_suppression_kinds: vec![],
                 unused_import_bindings: vec![],
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],

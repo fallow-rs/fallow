@@ -106,7 +106,7 @@ else
     "| `\(.package_name)` |") +
   section("Stale suppressions"; "stale_suppressions";
     "Suppression comments or JSDoc tags that no longer match any active issue.\n\n| File | Line | Description |\n|------|-----:|-------------|\n";
-    "| `\(.path)` | \(.line) | \(if .origin.type == "jsdoc_tag" then "`@expected-unused` on `\(.origin.export_name)`" elif .origin.issue_kind then "`\(.origin.issue_kind)`" else "blanket" end) |") +
+    "| `\(.path)` | \(.line) | \(if .origin.type == "jsdoc_tag" then "`@expected-unused` on `\(.origin.export_name)`" elif (.origin.kind_known == false) then "unknown kind `\(.origin.issue_kind)`" elif .origin.issue_kind then "`\(.origin.issue_kind)`" else "blanket" end) |") +
   section("Unused catalog entries"; "unused_catalog_entries";
     "pnpm catalog entries not referenced by any workspace package.\n\n| Entry | Catalog | Location | Hardcoded consumers |\n|-------|---------|----------|---------------------|\n";
     "| `\(.entry_name)` | `\(.catalog_name)` | `\(.path):\(.line)` | \(if ((.hardcoded_consumers // []) | length) > 0 then (.hardcoded_consumers | map("`\(.)`") | join(", ")) else "" end) |") +

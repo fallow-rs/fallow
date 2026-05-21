@@ -641,6 +641,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         has_angular_component_template_url: false,
         content_hash: 0xDEAD_BEEF_CAFE_1234,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         unused_import_bindings: vec![],
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],

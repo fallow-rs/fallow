@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use rustc_hash::FxHashMap;
 
 // Re-export types from fallow-types
-pub use fallow_types::suppress::{IssueKind, Suppression};
+pub use fallow_types::suppress::{IssueKind, Suppression, UnknownSuppressionKind};
 
 // Re-export parsing functions from fallow-extract
 pub use fallow_extract::suppress::parse_suppressions_from_source;
@@ -52,6 +52,10 @@ const NON_CORE_KINDS: &[IssueKind] = &[
 pub struct SuppressionContext<'a> {
     by_file: FxHashMap<FileId, &'a [Suppression]>,
     used: FxHashMap<FileId, Vec<AtomicBool>>,
+    /// Suppression tokens that did not parse to any known `IssueKind`.
+    /// Emitted as `StaleSuppression` with `kind_known: false` in `find_stale`.
+    /// See issue #449.
+    unknown_kinds: FxHashMap<FileId, &'a [UnknownSuppressionKind]>,
 }
 
 impl<'a> SuppressionContext<'a> {
@@ -75,7 +79,17 @@ impl<'a> SuppressionContext<'a> {
             })
             .collect();
 
-        Self { by_file, used }
+        let unknown_kinds: FxHashMap<FileId, &[UnknownSuppressionKind]> = modules
+            .iter()
+            .filter(|m| !m.unknown_suppression_kinds.is_empty())
+            .map(|m| (m.file_id, m.unknown_suppression_kinds.as_slice()))
+            .collect();
+
+        Self {
+            by_file,
+            used,
+            unknown_kinds,
+        }
     }
 
     /// Build a suppression context from a pre-built map (for testing).
@@ -92,7 +106,11 @@ impl<'a> SuppressionContext<'a> {
                 )
             })
             .collect();
-        Self { by_file, used }
+        Self {
+            by_file,
+            used,
+            unknown_kinds: FxHashMap::default(),
+        }
     }
 
     /// Build an empty suppression context (for testing).
@@ -101,6 +119,7 @@ impl<'a> SuppressionContext<'a> {
         Self {
             by_file: FxHashMap::default(),
             used: FxHashMap::default(),
+            unknown_kinds: FxHashMap::default(),
         }
     }
 
@@ -230,6 +249,27 @@ impl<'a> SuppressionContext<'a> {
                     origin: SuppressionOrigin::Comment {
                         issue_kind: issue_kind_str,
                         is_file_level,
+                        kind_known: true,
+                    },
+                });
+            }
+        }
+
+        // Surface every unknown suppression token (typo, obsolete kind name, kind
+        // renamed in a newer fallow release) as a stale suppression. Without
+        // this, the entire marker would be silently discarded and the user
+        // would never learn the suppression was rejected. See issue #449.
+        for (&file_id, unknowns) in &self.unknown_kinds {
+            let path = &graph.modules[file_id.0 as usize].path;
+            for u in *unknowns {
+                stale.push(StaleSuppression {
+                    path: path.clone(),
+                    line: u.comment_line,
+                    col: 0,
+                    origin: SuppressionOrigin::Comment {
+                        issue_kind: Some(u.token.clone()),
+                        is_file_level: u.is_file_level,
+                        kind_known: false,
                     },
                 });
             }
@@ -353,7 +393,7 @@ mod tests {
     #[test]
     fn parse_file_wide_suppression() {
         let source = "// fallow-ignore-file\nexport const foo = 1;\n";
-        let suppressions = parse_suppressions_from_source(source);
+        let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
         assert!(suppressions[0].kind.is_none());
@@ -362,7 +402,7 @@ mod tests {
     #[test]
     fn parse_file_wide_suppression_with_kind() {
         let source = "// fallow-ignore-file unused-export\nexport const foo = 1;\n";
-        let suppressions = parse_suppressions_from_source(source);
+        let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
         assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
@@ -372,7 +412,7 @@ mod tests {
     fn parse_next_line_suppression() {
         let source =
             "import { x } from './x';\n// fallow-ignore-next-line\nexport const foo = 1;\n";
-        let suppressions = parse_suppressions_from_source(source);
+        let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 3); // suppresses line 3 (the export)
         assert!(suppressions[0].kind.is_none());
@@ -381,17 +421,22 @@ mod tests {
     #[test]
     fn parse_next_line_suppression_with_kind() {
         let source = "// fallow-ignore-next-line unused-export\nexport const foo = 1;\n";
-        let suppressions = parse_suppressions_from_source(source);
+        let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 2);
         assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
     }
 
     #[test]
-    fn parse_unknown_kind_ignored() {
+    fn parse_unknown_kind_surfaces_as_unknown() {
         let source = "// fallow-ignore-next-line typo-kind\nexport const foo = 1;\n";
-        let suppressions = parse_suppressions_from_source(source);
-        assert!(suppressions.is_empty());
+        let parsed = parse_suppressions_from_source(source);
+        // No known kinds on the marker, so no suppression is recorded.
+        assert!(parsed.suppressions.is_empty());
+        // The unknown token is preserved for downstream stale-suppression
+        // reporting (see issue #449).
+        assert_eq!(parsed.unknown_kinds.len(), 1);
+        assert_eq!(parsed.unknown_kinds[0].token, "typo-kind");
     }
 
     #[test]
@@ -481,7 +526,7 @@ mod tests {
         let allocator = Allocator::default();
         let parser_return = Parser::new(&allocator, source, SourceType::mjs()).parse();
 
-        let suppressions = parse_suppressions(&parser_return.program.comments, source);
+        let suppressions = parse_suppressions(&parser_return.program.comments, source).suppressions;
         assert_eq!(suppressions.len(), 2);
 
         // File-wide suppression
@@ -496,7 +541,7 @@ mod tests {
     #[test]
     fn parse_block_comment_suppression() {
         let source = "/* fallow-ignore-file */\nexport const foo = 1;\n";
-        let suppressions = parse_suppressions_from_source(source);
+        let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
         assert!(suppressions[0].kind.is_none());
@@ -572,7 +617,7 @@ mod tests {
     #[test]
     fn parse_multiple_next_line_suppressions() {
         let source = "// fallow-ignore-next-line unused-export\nexport const foo = 1;\n// fallow-ignore-next-line unused-type\nexport type Bar = string;\n";
-        let suppressions = parse_suppressions_from_source(source);
+        let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 2);
         assert_eq!(suppressions[0].line, 2);
         assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
@@ -583,7 +628,7 @@ mod tests {
     #[test]
     fn parse_code_duplication_suppression() {
         let source = "// fallow-ignore-file code-duplication\nexport const foo = 1;\n";
-        let suppressions = parse_suppressions_from_source(source);
+        let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
         assert_eq!(suppressions[0].kind, Some(IssueKind::CodeDuplication));
@@ -592,7 +637,7 @@ mod tests {
     #[test]
     fn parse_circular_dependency_suppression() {
         let source = "// fallow-ignore-file circular-dependency\nimport { x } from './x';\n";
-        let suppressions = parse_suppressions_from_source(source);
+        let suppressions = parse_suppressions_from_source(source).suppressions;
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 0);
         assert_eq!(suppressions[0].kind, Some(IssueKind::CircularDependency));

@@ -505,7 +505,7 @@ fn push_stale_suppression_issues(
         let fp = fingerprint_hash(&["fallow/stale-suppression", &path, &line_str]);
         issues.push(cc_issue(
             "fallow/stale-suppression",
-            &s.description(),
+            &s.display_message(),
             level,
             "Bug Risk",
             &path,

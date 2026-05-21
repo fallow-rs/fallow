@@ -1754,6 +1754,7 @@ mod tests {
             has_angular_component_template_url: false,
             content_hash: 0,
             suppressions: vec![],
+            unknown_suppression_kinds: vec![],
             unused_import_bindings: vec![],
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],

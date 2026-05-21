@@ -266,7 +266,7 @@ fn find_duplicates_inner(
                 (entry, suppressions)
             } else {
                 let source = std::fs::read_to_string(&file.path).ok()?;
-                let suppressions = suppress::parse_suppressions_from_source(&source);
+                let suppressions = suppress::parse_suppressions_from_source(&source).suppressions;
                 if suppress::is_file_suppressed(&suppressions, IssueKind::CodeDuplication) {
                     return None;
                 }

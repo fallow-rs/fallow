@@ -13,6 +13,10 @@ use fallow_types::output_dead_code::{
 /// Build an `AnalysisResults` populated with one issue of every type.
 ///
 /// Shared across all report format tests for consistency.
+#[expect(
+    clippy::too_many_lines,
+    reason = "flat one-of-each fixture; splitting would harm readability"
+)]
 pub fn sample_results(root: &Path) -> AnalysisResults {
     let mut r = AnalysisResults::default();
 
@@ -162,6 +166,7 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
         origin: SuppressionOrigin::Comment {
             issue_kind: Some("unused-exports".to_string()),
             is_file_level: false,
+            kind_known: false,
         },
     });
 

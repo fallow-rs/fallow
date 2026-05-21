@@ -319,6 +319,11 @@ assert_not_contains "$OUT" '!\[TIP\]' "no GitHub callout TIP"
 OUT_CLEAN=$(jq -r -f "$CI_JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
 
+# Issue #449: kind_known: false renders "unknown kind \`token\`" in the table.
+OUT_UNKNOWN_KIND_SUMMARY=$(jq '.unused_files = [] | .unused_exports = [] | .unused_types = [] | .unused_dependencies = [] | .unused_dev_dependencies = [] | .unused_optional_dependencies = [] | .unused_enum_members = [] | .unused_class_members = [] | .unresolved_imports = [] | .unlisted_dependencies = [] | .duplicate_exports = [] | .circular_dependencies = [] | .boundary_violations = [] | .type_only_dependencies = [] | .test_only_dependencies = [] | .unused_catalog_entries = [] | .empty_catalog_groups = [] | .unresolved_catalog_references = [] | .unused_dependency_overrides = [] | .misconfigured_dependency_overrides = [] | .private_type_leaks = [] | .stale_suppressions = [{"path": "src/utils.ts", "line": 1, "col": 0, "origin": {"type": "comment", "issue_kind": "complexity-typo", "is_file_level": false, "kind_known": false}}] | .total_issues = 1' "$FIXTURES/check.json" | jq -r -f "$CI_JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UNKNOWN_KIND_SUMMARY" 'unknown kind' "GitLab summary unknown kind: prefix renders"
+assert_contains "$OUT_UNKNOWN_KIND_SUMMARY" 'complexity-typo' "GitLab summary unknown kind: verbatim token renders"
+
 echo "  summary-health.jq (GitLab):"
 OUT=$(jq -r -f "$CI_JQ_DIR/summary-health.jq" "$FIXTURES/health.json" 2>&1)
 assert_valid_markdown "$OUT" "produces output"

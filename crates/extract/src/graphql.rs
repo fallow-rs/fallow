@@ -73,6 +73,7 @@ pub(crate) fn parse_graphql_to_module(
     source: &str,
     content_hash: u64,
 ) -> ModuleInfo {
+    let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
     ModuleInfo {
         file_id,
         exports: Vec::new(),
@@ -86,7 +87,8 @@ pub(crate) fn parse_graphql_to_module(
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         content_hash,
-        suppressions: crate::suppress::parse_suppressions_from_source(source),
+        suppressions: parsed_suppressions.suppressions,
+        unknown_suppression_kinds: parsed_suppressions.unknown_kinds,
         unused_import_bindings: Vec::new(),
         type_referenced_import_bindings: Vec::new(),
         value_referenced_import_bindings: Vec::new(),

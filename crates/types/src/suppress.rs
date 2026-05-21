@@ -211,6 +211,122 @@ pub struct Suppression {
     pub kind: Option<IssueKind>,
 }
 
+/// A suppression token that did not parse to any known `IssueKind`.
+///
+/// Emitted alongside `Suppression` when a `// fallow-ignore-*` marker contains
+/// a typo or an obsolete issue-kind name. The known tokens on the same marker
+/// are recorded as normal `Suppression` entries; this struct preserves the
+/// unknown token so the downstream `find_stale` pass can surface it as a
+/// `StaleSuppression` finding with `kind_known: false`. Without this, the
+/// entire suppression line would be discarded silently. See issue #449.
+#[derive(Debug, Clone)]
+pub struct UnknownSuppressionKind {
+    /// 1-based line where the suppression comment itself appears.
+    pub comment_line: u32,
+    /// Whether the marker was `fallow-ignore-file` (`true`) or
+    /// `fallow-ignore-next-line` (`false`).
+    pub is_file_level: bool,
+    /// The verbatim token from the marker that did not parse.
+    pub token: String,
+}
+
+/// Canonical kebab-case names accepted by `IssueKind::parse`, including
+/// documented plural aliases.
+///
+/// Used by `closest_known_kind_name` for Levenshtein "did you mean?" hints
+/// when a suppression marker carries an unknown token. Keep in sync with the
+/// `IssueKind::parse` match table above; the
+/// `issue_kind_parse_covers_known_names` test asserts every entry round-trips.
+pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
+    "unused-file",
+    "unused-export",
+    "unused-type",
+    "private-type-leak",
+    "unused-dependency",
+    "unused-dev-dependency",
+    "unused-enum-member",
+    "unused-class-member",
+    "unresolved-import",
+    "unlisted-dependency",
+    "duplicate-export",
+    "code-duplication",
+    "circular-dependency",
+    "circular-dependencies",
+    "type-only-dependency",
+    "test-only-dependency",
+    "boundary-violation",
+    "coverage-gaps",
+    "feature-flag",
+    "complexity",
+    "stale-suppression",
+    "unused-catalog-entry",
+    "unused-catalog-entries",
+    "empty-catalog-group",
+    "empty-catalog-groups",
+    "unresolved-catalog-reference",
+    "unresolved-catalog-references",
+    "unused-dependency-override",
+    "unused-dependency-overrides",
+    "misconfigured-dependency-override",
+    "misconfigured-dependency-overrides",
+];
+
+/// Levenshtein edit distance between two ASCII-leaning strings.
+///
+/// Local duplicate of the config-crate helper (see
+/// `crates/config/src/config/rules.rs::levenshtein`) so `fallow-types` can
+/// compute "did you mean?" suggestions for unknown suppression tokens without
+/// taking a dependency on `fallow-config`. Issue-kind names are short
+/// (max ~33 chars) so allocation cost is negligible.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+    let (a_len, b_len) = (a_bytes.len(), b_bytes.len());
+
+    if a_len == 0 {
+        return b_len;
+    }
+    if b_len == 0 {
+        return a_len;
+    }
+
+    let mut prev: Vec<usize> = (0..=b_len).collect();
+    let mut curr: Vec<usize> = vec![0; b_len + 1];
+
+    for i in 1..=a_len {
+        curr[0] = i;
+        for j in 1..=b_len {
+            let cost = usize::from(a_bytes[i - 1] != b_bytes[j - 1]);
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[b_len]
+}
+
+/// Find the closest known issue-kind name to `input` when it is plausibly a typo.
+///
+/// Returns the best match when the Levenshtein distance is at most 2 AND
+/// the input is long enough that the match is not coincidental
+/// (`input.len() / 2 > distance`). Returns `None` for completely novel
+/// strings where a suggestion would be misleading.
+#[must_use]
+pub fn closest_known_kind_name(input: &str) -> Option<&'static str> {
+    let input_lower = input.to_ascii_lowercase();
+    let mut best: Option<(&'static str, usize)> = None;
+
+    for &candidate in KNOWN_ISSUE_KIND_NAMES {
+        let d = levenshtein(&input_lower, candidate);
+        if best.is_none_or(|(_, b_dist)| d < b_dist) {
+            best = Some((candidate, d));
+        }
+    }
+
+    best.filter(|&(_, d)| d > 0 && d <= 2 && input_lower.len() / 2 > d)
+        .map(|(name, _)| name)
+}
+
 // Size assertions to prevent memory regressions.
 // `Suppression` is stored in a Vec per file; `IssueKind` appears in every suppression.
 const _: () = assert!(std::mem::size_of::<Suppression>() == 12);
@@ -472,5 +588,43 @@ mod tests {
         assert_eq!(s.line, 42);
         assert_eq!(s.comment_line, 41);
         assert_eq!(s.kind, Some(IssueKind::UnusedExport));
+    }
+
+    // ── KNOWN_ISSUE_KIND_NAMES drift guard + Levenshtein ─────────
+
+    #[test]
+    fn known_issue_kind_names_parses_each_entry() {
+        for &name in KNOWN_ISSUE_KIND_NAMES {
+            assert!(
+                IssueKind::parse(name).is_some(),
+                "KNOWN_ISSUE_KIND_NAMES contains '{name}' but IssueKind::parse rejects it"
+            );
+        }
+    }
+
+    #[test]
+    fn closest_known_kind_name_finds_near_misses() {
+        // Common typos
+        assert_eq!(
+            closest_known_kind_name("unused-exports"),
+            Some("unused-export")
+        );
+        assert_eq!(closest_known_kind_name("unused-files"), Some("unused-file"));
+        assert_eq!(closest_known_kind_name("complxity"), Some("complexity"));
+    }
+
+    #[test]
+    fn closest_known_kind_name_rejects_novel_strings() {
+        // Completely unrelated input should not produce a misleading suggestion.
+        assert_eq!(closest_known_kind_name("xyzzy"), None);
+        assert_eq!(closest_known_kind_name("foo"), None);
+        assert_eq!(closest_known_kind_name(""), None);
+    }
+
+    #[test]
+    fn closest_known_kind_name_skips_exact_match() {
+        // An exact match has distance 0 and is filtered (the caller should
+        // use IssueKind::parse for the recognized path).
+        assert_eq!(closest_known_kind_name("unused-export"), None);
     }
 }

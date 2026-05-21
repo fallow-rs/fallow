@@ -890,6 +890,45 @@ fn json_duplicate_exports_only_snapshot() {
     insta::assert_snapshot!("json_duplicate_exports_only", redact_version(&json_str));
 }
 
+#[test]
+fn json_stale_suppression_unknown_kind_snapshot() {
+    // Issue #449: lock the wire shape for the unknown-kind case. The
+    // `kind_known: false` field MUST appear on the wire so JSON / MCP / CI
+    // consumers can distinguish "typo / obsolete name" from "stale-but-known
+    // kind". The recognized-kind case keeps the prior shape because
+    // `skip_serializing_if = "is_true"` omits the field.
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    // Unknown kind: kind_known: false MUST be present.
+    results.stale_suppressions.push(StaleSuppression {
+        path: root.join("src/utils.ts"),
+        line: 1,
+        col: 0,
+        origin: SuppressionOrigin::Comment {
+            issue_kind: Some("complexity-typo".to_string()),
+            is_file_level: false,
+            kind_known: false,
+        },
+    });
+    // Recognized but stale: kind_known true is omitted on the wire.
+    results.stale_suppressions.push(StaleSuppression {
+        path: root.join("src/utils.ts"),
+        line: 10,
+        col: 0,
+        origin: SuppressionOrigin::Comment {
+            issue_kind: Some("unused-export".to_string()),
+            is_file_level: false,
+            kind_known: true,
+        },
+    });
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
+    insta::assert_snapshot!(
+        "json_stale_suppression_unknown_kind",
+        redact_version(&json_str)
+    );
+}
+
 // ── Per-issue-type SARIF snapshots ──────────────────────────────
 
 fn redact_sarif_version(json_str: &str) -> String {

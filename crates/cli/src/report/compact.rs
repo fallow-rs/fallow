@@ -142,7 +142,7 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
             "stale-suppression:{}:{}:{}",
             rel(&s.path),
             s.line,
-            s.description(),
+            s.display_message(),
         ));
     }
     for entry in &results.unused_catalog_entries {

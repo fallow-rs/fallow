@@ -15,7 +15,7 @@ use crate::output_dead_code::{
     UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 use crate::serde_path;
-use crate::suppress::IssueKind;
+use crate::suppress::{IssueKind, closest_known_kind_name};
 
 /// Summary of detected entry points, grouped by discovery source.
 ///
@@ -979,12 +979,53 @@ pub enum SuppressionOrigin {
         issue_kind: Option<String>,
         /// Whether this was a file-level suppression.
         is_file_level: bool,
+        /// Whether `issue_kind` parses to a known `IssueKind`. False when the
+        /// token is a typo or refers to a kind that was renamed or removed in
+        /// a newer fallow release. JSON consumers (CI annotations, MCP agents,
+        /// VS Code) branch on this to choose the right next-step text.
+        /// Omitted from the wire when `true` so producers that have not yet
+        /// adopted the field stay byte-compatible. See issue #449.
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        kind_known: bool,
     },
     /// An `@expected-unused` JSDoc tag on an export.
     JsdocTag {
         /// The name of the export that was tagged.
         export_name: String,
     },
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if takes a reference by contract"
+)]
+const fn is_true(b: &bool) -> bool {
+    *b
+}
+
+/// Default for `SuppressionOrigin::Comment.kind_known` when the field is
+/// absent from a deserialized payload, paired with `skip_serializing_if = is_true`
+/// so schemars marks the field non-required in the generated JSON Schema AND
+/// the absent case round-trips to the recognized-kind interpretation.
+/// Referenced by the always-emitted `#[serde(default = "default_true")]`
+/// attribute. Today `SuppressionOrigin` derives only `Serialize`, so serde
+/// itself never calls this; schemars (under the `schema` feature) reads the
+/// attribute textually to mark `kind_known` non-required. The `cfg_attr`
+/// applies `#[expect(dead_code)]` only on builds WITHOUT the `schema` feature
+/// (where the function is genuinely dead): under the feature schemars
+/// references it, the lint does not fire, and an unconditional `#[expect]`
+/// would be unfulfilled. The function stays un-gated so a future
+/// `Deserialize` derive on `SuppressionOrigin` does not produce a missing-
+/// function compile error on non-`schema` builds.
+#[cfg_attr(
+    not(feature = "schema"),
+    expect(
+        dead_code,
+        reason = "referenced via #[serde(default = ...)]; only consumed by schemars under the `schema` feature, dead on default builds today"
+    )
+)]
+const fn default_true() -> bool {
+    true
 }
 
 /// A suppression comment or JSDoc tag that no longer matches any issue.
@@ -1010,6 +1051,7 @@ impl StaleSuppression {
             SuppressionOrigin::Comment {
                 issue_kind,
                 is_file_level,
+                ..
             } => {
                 let directive = if *is_file_level {
                     "fallow-ignore-file"
@@ -1028,12 +1070,18 @@ impl StaleSuppression {
     }
 
     /// Produce an explanation of why this suppression is stale.
+    ///
+    /// For comment suppressions where `kind_known == false`, surfaces the
+    /// unknown token plus a Levenshtein "did you mean?" hint when one is
+    /// within edit distance 2. Other tokens on the same comment line still
+    /// apply normally (see issue #449).
     #[must_use]
     pub fn explanation(&self) -> String {
         match &self.origin {
             SuppressionOrigin::Comment {
                 issue_kind,
                 is_file_level,
+                kind_known,
             } => {
                 let scope = if *is_file_level {
                     "in this file"
@@ -1041,6 +1089,14 @@ impl StaleSuppression {
                     "on the next line"
                 };
                 match issue_kind {
+                    Some(kind) if !*kind_known => match closest_known_kind_name(kind) {
+                        Some(suggestion) => format!(
+                            "'{kind}' is not a recognized fallow issue kind. Did you mean '{suggestion}'? Other tokens on this line still apply."
+                        ),
+                        None => format!(
+                            "'{kind}' is not a recognized fallow issue kind. Other tokens on this line still apply."
+                        ),
+                    },
                     Some(kind) => format!("no {kind} issue found {scope}"),
                     None => format!("no issues found {scope}"),
                 }
@@ -1051,14 +1107,37 @@ impl StaleSuppression {
         }
     }
 
-    /// The suppressed `IssueKind`, if this was a comment suppression with a specific kind.
+    /// The suppressed `IssueKind`, if this was a comment suppression with a specific known kind.
+    ///
+    /// Returns `None` for unknown-kind comments (`kind_known == false`) and
+    /// for JSDoc tags.
     #[must_use]
     pub fn suppressed_kind(&self) -> Option<IssueKind> {
         match &self.origin {
-            SuppressionOrigin::Comment { issue_kind, .. } => {
-                issue_kind.as_deref().and_then(IssueKind::parse)
+            SuppressionOrigin::Comment {
+                issue_kind,
+                kind_known: true,
+                ..
+            } => issue_kind.as_deref().and_then(IssueKind::parse),
+            SuppressionOrigin::Comment { .. } | SuppressionOrigin::JsdocTag { .. } => None,
+        }
+    }
+
+    /// Per-format display message combining `description()` and `explanation()`
+    /// for the unknown-kind case so SARIF, CodeClimate, and compact consumers
+    /// surface the typo-fix copy and Levenshtein hint without needing to
+    /// branch on `origin.kind_known` themselves. Stale-but-known and JSDoc
+    /// origins keep the bare `description()` so existing wire bytes stay
+    /// unchanged. See issue #449.
+    #[must_use]
+    pub fn display_message(&self) -> String {
+        match &self.origin {
+            SuppressionOrigin::Comment {
+                kind_known: false, ..
+            } => format!("{} ({})", self.description(), self.explanation()),
+            SuppressionOrigin::Comment { .. } | SuppressionOrigin::JsdocTag { .. } => {
+                self.description()
             }
-            SuppressionOrigin::JsdocTag { .. } => None,
         }
     }
 }

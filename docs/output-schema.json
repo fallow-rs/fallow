@@ -5344,6 +5344,10 @@
               "type": "boolean",
               "description": "Whether this was a file-level suppression."
             },
+            "kind_known": {
+              "type": "boolean",
+              "description": "Whether `issue_kind` parses to a known `IssueKind`. False when the\ntoken is a typo or refers to a kind that was renamed or removed in\na newer fallow release. JSON consumers (CI annotations, MCP agents,\nVS Code) branch on this to choose the right next-step text.\nOmitted from the wire when `true` so producers that have not yet\nadopted the field stay byte-compatible. See issue #449."
+            },
             "type": {
               "type": "string",
               "const": "comment"

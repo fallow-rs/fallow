@@ -74,7 +74,7 @@ pub fn parse_source_to_module(
 
     // Parse suppression comments from AST comments initially;
     // re-parsed from retry comments below if JSX retry succeeds.
-    let mut suppressions =
+    let mut parsed_suppressions =
         crate::suppress::parse_suppressions(&parser_return.program.comments, source);
 
     // Extract imports/exports even if there are parse errors
@@ -151,7 +151,7 @@ pub fn parse_source_to_module(
             flag_uses =
                 crate::flags::extract_flags(&retry_return.program, &line_offsets, &[], &[], false);
             // Re-parse suppressions from the retry's comments (not the original failed parse)
-            suppressions =
+            parsed_suppressions =
                 crate::suppress::parse_suppressions(&retry_return.program.comments, source);
             // Apply visibility tags from the retry parse's comments (not the original failed parse)
             apply_jsdoc_visibility_tags(
@@ -184,7 +184,7 @@ pub fn parse_source_to_module(
         );
     }
 
-    let mut info = extractor.into_module_info(file_id, content_hash, suppressions);
+    let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
     info.unused_import_bindings = import_binding_usage.unused;
     info.type_referenced_import_bindings = import_binding_usage.type_referenced;
     info.value_referenced_import_bindings = import_binding_usage.value_referenced;

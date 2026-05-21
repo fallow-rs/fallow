@@ -49,6 +49,8 @@ def dependency_action(pkg):
   (.stale_suppressions[]? |
     if .origin.type == "jsdoc_tag" then
       "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Stale @expected-unused::The @expected-unused tag on '\(.origin.export_name | san)' is stale because the export is now used.\(nl)\(nl)Remove the @expected-unused tag."
+    elif (.origin.kind_known == false) then
+      "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unknown suppression kind::'\((.origin.issue_kind // "") | san)' is not a recognized fallow issue kind. Other tokens on this '\(if .origin.is_file_level then "fallow-ignore-file" else "fallow-ignore-next-line" end)' line still apply.\(nl)\(nl)Fix the typo or remove the unknown token."
     else
       "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Stale suppression::This '\(if .origin.is_file_level then "fallow-ignore-file" else "fallow-ignore-next-line" end)' comment\(if .origin.issue_kind then " for '\(.origin.issue_kind | san)'" else "" end) no longer matches any active issue.\(nl)\(nl)Remove the suppression comment to keep the codebase clean."
     end),

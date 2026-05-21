@@ -1,0 +1,4 @@
+{
+  "name": "issue-449-unknown-kind",
+  "main": "src/index.ts"
+}

@@ -11,7 +11,7 @@ use oxc_ast::ast::{
 use oxc_span::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::suppress::Suppression;
+use crate::suppress::ParsedSuppressions;
 use crate::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
     MemberAccess, MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
@@ -766,8 +766,12 @@ impl ModuleInfoExtractor {
         mut self,
         file_id: fallow_types::discover::FileId,
         content_hash: u64,
-        suppressions: Vec<Suppression>,
+        parsed: ParsedSuppressions,
     ) -> ModuleInfo {
+        let ParsedSuppressions {
+            suppressions,
+            unknown_kinds,
+        } = parsed;
         self.resolve_pending_local_export_specifiers();
         self.enrich_local_class_exports();
         self.record_exported_instance_bindings();
@@ -792,6 +796,7 @@ impl ModuleInfoExtractor {
             has_angular_component_template_url: self.has_angular_component_template_url,
             content_hash,
             suppressions,
+            unknown_suppression_kinds: unknown_kinds,
             unused_import_bindings: Vec::new(),
             type_referenced_import_bindings: Vec::new(),
             value_referenced_import_bindings: Vec::new(),

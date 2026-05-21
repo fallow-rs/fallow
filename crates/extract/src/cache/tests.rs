@@ -43,6 +43,7 @@ fn cache_store_insert_and_get() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
         flag_uses: vec![],
@@ -78,6 +79,7 @@ fn cache_store_hash_mismatch_returns_none() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
         flag_uses: vec![],
@@ -117,6 +119,7 @@ fn cache_store_overwrite_entry() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
         flag_uses: vec![],
@@ -143,6 +146,7 @@ fn cache_store_overwrite_entry() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
         flag_uses: vec![],
@@ -186,6 +190,7 @@ fn module_to_cached_roundtrip_named_export() {
         value_referenced_import_bindings: vec![],
         content_hash: 123,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -237,6 +242,7 @@ fn module_to_cached_roundtrip_side_effect_used_export() {
         value_referenced_import_bindings: vec![],
         content_hash: 789,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -285,6 +291,7 @@ fn module_to_cached_roundtrip_default_export() {
         value_referenced_import_bindings: vec![],
         content_hash: 456,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -356,6 +363,7 @@ fn module_to_cached_roundtrip_imports() {
         value_referenced_import_bindings: vec![],
         content_hash: 789,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -411,6 +419,7 @@ fn module_to_cached_roundtrip_re_exports() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -460,6 +469,7 @@ fn module_to_cached_roundtrip_dynamic_imports() {
         has_angular_component_template_url: false,
         content_hash: 0,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         unused_import_bindings: vec![],
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
@@ -545,6 +555,7 @@ fn module_to_cached_roundtrip_members() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -606,6 +617,7 @@ fn cache_save_and_load_roundtrip() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
         flag_uses: vec![],
@@ -652,6 +664,7 @@ fn cache_version_mismatch_returns_none() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
         flag_uses: vec![],
@@ -710,6 +723,7 @@ fn module_to_cached_roundtrip_type_only_import() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -748,6 +762,7 @@ fn get_by_path_only_returns_entry_regardless_of_hash() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
         flag_uses: vec![],
@@ -798,6 +813,7 @@ fn retain_paths_removes_stale_entries() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
         flag_uses: vec![],
@@ -854,6 +870,7 @@ fn retain_paths_with_empty_files_clears_cache() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
         flag_uses: vec![],
@@ -890,6 +907,7 @@ fn get_by_metadata_returns_entry_on_match() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
         flag_uses: vec![],
@@ -926,6 +944,7 @@ fn get_by_metadata_returns_none_on_mtime_mismatch() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
         flag_uses: vec![],
@@ -964,6 +983,7 @@ fn get_by_metadata_returns_none_on_size_mismatch() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
         flag_uses: vec![],
@@ -1002,6 +1022,7 @@ fn get_by_metadata_returns_none_for_zero_mtime() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
         flag_uses: vec![],
@@ -1049,6 +1070,7 @@ fn module_to_cached_stores_mtime_and_size() {
         value_referenced_import_bindings: vec![],
         content_hash: 42,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -1083,6 +1105,7 @@ fn module_to_cached_roundtrip_line_offsets() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![0, 15, 30, 45],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -1135,6 +1158,7 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
                 kind: Some(IssueKind::UnusedFile),
             },
         ],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -1154,6 +1178,65 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
     assert_eq!(restored.suppressions[1].kind, Some(IssueKind::UnusedExport));
     assert_eq!(restored.suppressions[2].line, 10);
     assert_eq!(restored.suppressions[2].kind, Some(IssueKind::UnusedFile));
+}
+
+#[test]
+fn module_to_cached_roundtrip_unknown_suppression_kinds() {
+    // Issue #449: ensure CachedUnknownSuppressionKind round-trips so warm
+    // caches surface the same stale-suppression diagnostics as cold runs.
+    use fallow_types::suppress::UnknownSuppressionKind;
+
+    let module = ModuleInfo {
+        file_id: FileId(0),
+        exports: vec![],
+        imports: vec![],
+        re_exports: vec![],
+        dynamic_imports: vec![],
+        require_calls: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        dynamic_import_patterns: vec![],
+        has_cjs_exports: false,
+        has_angular_component_template_url: false,
+        unused_import_bindings: vec![],
+        type_referenced_import_bindings: vec![],
+        value_referenced_import_bindings: vec![],
+        content_hash: 0,
+        suppressions: vec![],
+        unknown_suppression_kinds: vec![
+            UnknownSuppressionKind {
+                comment_line: 3,
+                is_file_level: false,
+                token: "complexity-typo".to_string(),
+            },
+            UnknownSuppressionKind {
+                comment_line: 7,
+                is_file_level: true,
+                token: "unsed-export".to_string(),
+            },
+        ],
+        line_offsets: vec![],
+        complexity: Vec::new(),
+        flag_uses: Vec::new(),
+        class_heritage: vec![],
+        local_type_declarations: Vec::new(),
+        public_signature_type_references: Vec::new(),
+        namespace_object_aliases: Vec::new(),
+    };
+
+    let cached = module_to_cached(&module, 0, 0);
+    let restored = cached_to_module(&cached, FileId(0));
+
+    assert_eq!(restored.unknown_suppression_kinds.len(), 2);
+    assert_eq!(restored.unknown_suppression_kinds[0].comment_line, 3);
+    assert!(!restored.unknown_suppression_kinds[0].is_file_level);
+    assert_eq!(
+        restored.unknown_suppression_kinds[0].token,
+        "complexity-typo"
+    );
+    assert_eq!(restored.unknown_suppression_kinds[1].comment_line, 7);
+    assert!(restored.unknown_suppression_kinds[1].is_file_level);
+    assert_eq!(restored.unknown_suppression_kinds[1].token, "unsed-export");
 }
 
 #[test]
@@ -1184,6 +1267,7 @@ fn module_to_cached_roundtrip_visibility() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -1227,6 +1311,7 @@ fn module_to_cached_roundtrip_visibility_internal() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -1270,6 +1355,7 @@ fn module_to_cached_roundtrip_visibility_beta() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -1313,6 +1399,7 @@ fn module_to_cached_roundtrip_visibility_alpha() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -1358,6 +1445,7 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -1401,6 +1489,7 @@ fn module_to_cached_roundtrip_unused_import_bindings() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -1448,6 +1537,7 @@ fn module_to_cached_roundtrip_complexity() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![
             FunctionComplexity {
@@ -1513,6 +1603,7 @@ fn module_to_cached_roundtrip_require_with_destructured() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -1559,6 +1650,7 @@ fn module_to_cached_roundtrip_dynamic_import_with_local() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -1604,6 +1696,7 @@ fn module_to_cached_roundtrip_source_span() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),
@@ -1656,6 +1749,7 @@ fn module_to_cached_roundtrip_member_decorators() {
         value_referenced_import_bindings: vec![],
         content_hash: 0,
         suppressions: vec![],
+        unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: Vec::new(),
         flag_uses: Vec::new(),

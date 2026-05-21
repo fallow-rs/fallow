@@ -1010,6 +1010,7 @@ mod tests {
             has_angular_component_template_url: false,
             content_hash: 0,
             suppressions: Vec::new(),
+            unknown_suppression_kinds: Vec::new(),
             unused_import_bindings: Vec::new(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],

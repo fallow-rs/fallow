@@ -245,6 +245,15 @@ issue_kind?: (string | null)
  * Whether this was a file-level suppression.
  */
 is_file_level: boolean
+/**
+ * Whether `issue_kind` parses to a known `IssueKind`. False when the
+ * token is a typo or refers to a kind that was renamed or removed in
+ * a newer fallow release. JSON consumers (CI annotations, MCP agents,
+ * VS Code) branch on this to choose the right next-step text.
+ * Omitted from the wire when `true` so producers that have not yet
+ * adopted the field stay byte-compatible. See issue #449.
+ */
+kind_known?: boolean
 type: "comment"
 } | {
 /**

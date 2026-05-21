@@ -170,3 +170,128 @@ fn total_stale_suppressions_count() {
             .collect::<Vec<_>>()
     );
 }
+
+// ── Issue #449: partial-accept for unknown kinds ────────────────
+
+#[test]
+fn issue_449_known_kind_suppresses_alongside_unknown_token() {
+    let root = fixture_path("issue-449-unknown-kind");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let secret_flagged = results
+        .unused_exports
+        .iter()
+        .any(|e| e.export.path.ends_with("utils.ts") && e.export.export_name == "secret");
+    assert!(
+        !secret_flagged,
+        "`unused-export` token in `// fallow-ignore-next-line unused-export, complexity-typo` must still suppress `secret`. \
+         unused_exports: {:?}",
+        results
+            .unused_exports
+            .iter()
+            .map(|e| format!("{}:{}", e.export.path.display(), e.export.export_name))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn issue_449_unknown_token_surfaces_as_stale_with_kind_known_false() {
+    let root = fixture_path("issue-449-unknown-kind");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unknown_findings: Vec<_> = results
+        .stale_suppressions
+        .iter()
+        .filter(|s| {
+            matches!(
+                &s.origin,
+                SuppressionOrigin::Comment {
+                    kind_known: false,
+                    ..
+                }
+            )
+        })
+        .collect();
+
+    // Expect two unknown-kind diagnostics: `complexity-typo` and `typo-only`.
+    let tokens: Vec<String> = unknown_findings
+        .iter()
+        .filter_map(|s| match &s.origin {
+            SuppressionOrigin::Comment {
+                issue_kind: Some(k),
+                ..
+            } => Some(k.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        tokens.iter().any(|t| t == "complexity-typo"),
+        "expected `complexity-typo` to surface as an unknown suppression token. tokens: {tokens:?}"
+    );
+    assert!(
+        tokens.iter().any(|t| t == "typo-only"),
+        "expected `typo-only` to surface as an unknown suppression token. tokens: {tokens:?}"
+    );
+}
+
+#[test]
+fn issue_449_unknown_token_explanation_carries_next_step_copy() {
+    let root = fixture_path("issue-449-unknown-kind");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let complexity_typo = results
+        .stale_suppressions
+        .iter()
+        .find(|s| {
+            matches!(
+                &s.origin,
+                SuppressionOrigin::Comment {
+                    issue_kind: Some(k),
+                    kind_known: false,
+                    ..
+                } if k == "complexity-typo"
+            )
+        })
+        .expect("expected complexity-typo unknown suppression to be present");
+
+    let explanation = complexity_typo.explanation();
+    assert!(
+        explanation.contains("not a recognized fallow issue kind"),
+        "unknown-kind explanation must say so explicitly. Got: {explanation}"
+    );
+    assert!(
+        explanation.contains("Other tokens on this line still apply"),
+        "explanation must reassure the user that sibling tokens still work. Got: {explanation}"
+    );
+}
+
+#[test]
+fn issue_449_close_typo_explanation_includes_levenshtein_hint() {
+    let root = fixture_path("issue-449-unknown-kind");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unsed_export = results
+        .stale_suppressions
+        .iter()
+        .find(|s| {
+            matches!(
+                &s.origin,
+                SuppressionOrigin::Comment {
+                    issue_kind: Some(k),
+                    kind_known: false,
+                    ..
+                } if k == "unsed-export"
+            )
+        })
+        .expect("expected unsed-export unknown suppression to be present");
+
+    let explanation = unsed_export.explanation();
+    assert!(
+        explanation.contains("Did you mean 'unused-export'?"),
+        "explanation should surface the Levenshtein hint for a close typo. Got: {explanation}"
+    );
+}

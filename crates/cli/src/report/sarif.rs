@@ -416,7 +416,7 @@ fn sarif_stale_suppression_fields(
     SarifFields {
         rule_id: "fallow/stale-suppression",
         level,
-        message: suppression.description(),
+        message: suppression.display_message(),
         uri: relative_uri(&suppression.path, root),
         region: Some((suppression.line, suppression.col + 1)),
         source_path: Some(suppression.path.clone()),

@@ -3,7 +3,7 @@
 use oxc_span::Span;
 
 use crate::discover::FileId;
-use crate::suppress::Suppression;
+use crate::suppress::{Suppression, UnknownSuppressionKind};
 
 /// Extracted module information from a single file.
 #[derive(Debug, Clone)]
@@ -44,6 +44,11 @@ pub struct ModuleInfo {
     pub content_hash: u64,
     /// Inline suppression directives parsed from comments.
     pub suppressions: Vec<Suppression>,
+    /// Suppression tokens that did not parse to any known `IssueKind`.
+    /// Surfaced as `StaleSuppression` findings via `find_stale` so users see
+    /// typos or obsolete kind names instead of having the entire marker
+    /// silently discarded. See issue #449.
+    pub unknown_suppression_kinds: Vec<UnknownSuppressionKind>,
     /// Local names of import bindings that are never referenced in this file.
     /// Populated via `oxc_semantic` scope analysis. Used at graph-build time
     /// to skip adding references for imports whose binding is never read,
@@ -576,7 +581,7 @@ const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 // `ModuleInfo` is the per-file extraction result, stored in a Vec during parallel parsing.
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 472);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 496);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]

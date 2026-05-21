@@ -116,7 +116,7 @@ pub(crate) fn parse_html_to_module_with_complexity(
     content_hash: u64,
     need_complexity: bool,
 ) -> ModuleInfo {
-    let suppressions = crate::suppress::parse_suppressions_from_source(source);
+    let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
 
     // Bare filenames (e.g., `src="app.js"`) are normalized to `./app.js` so
     // the resolver doesn't misclassify them as npm packages.
@@ -182,7 +182,8 @@ pub(crate) fn parse_html_to_module_with_complexity(
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         content_hash,
-        suppressions,
+        suppressions: parsed_suppressions.suppressions,
+        unknown_suppression_kinds: parsed_suppressions.unknown_kinds,
         unused_import_bindings: Vec::new(),
         type_referenced_import_bindings: Vec::new(),
         value_referenced_import_bindings: Vec::new(),

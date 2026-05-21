@@ -271,7 +271,7 @@ fn sfc_kind(path: &Path) -> SfcKind {
 fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
     // For SFC files, use string scanning for suppression comments since script block
     // byte offsets don't correspond to the original file positions.
-    let suppressions = crate::suppress::parse_suppressions_from_source(source);
+    let parsed = crate::suppress::parse_suppressions_from_source(source);
 
     ModuleInfo {
         file_id,
@@ -286,7 +286,8 @@ fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleI
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         content_hash,
-        suppressions,
+        suppressions: parsed.suppressions,
+        unknown_suppression_kinds: parsed.unknown_kinds,
         unused_import_bindings: Vec::new(),
         type_referenced_import_bindings: Vec::new(),
         value_referenced_import_bindings: Vec::new(),

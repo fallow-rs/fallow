@@ -7,7 +7,7 @@ use bitcode::{Decode, Encode};
 use crate::MemberKind;
 
 /// Cache version, bump when the cache format or cached extraction semantics change.
-pub(super) const CACHE_VERSION: u32 = 86;
+pub(super) const CACHE_VERSION: u32 = 87;
 
 /// Duplication token cache version — bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -63,6 +63,8 @@ pub struct CachedModule {
     pub value_referenced_import_bindings: Vec<String>,
     /// Inline suppression directives.
     pub suppressions: Vec<CachedSuppression>,
+    /// Suppression tokens that did not parse to any known `IssueKind`. See #449.
+    pub unknown_suppression_kinds: Vec<CachedUnknownSuppressionKind>,
     /// Pre-computed line-start byte offsets for O(log N) byte-to-line/col conversion.
     pub line_offsets: Vec<u32>,
     /// Per-function complexity metrics.
@@ -124,6 +126,17 @@ pub struct CachedSuppression {
     pub comment_line: u32,
     /// 0 = suppress all, 1-20 = `IssueKind` discriminant.
     pub kind: u8,
+}
+
+/// Cached unknown suppression kind token (see #449).
+#[derive(Debug, Clone, Encode, Decode)]
+pub struct CachedUnknownSuppressionKind {
+    /// 1-based line where the comment itself appears.
+    pub comment_line: u32,
+    /// True when the marker was `fallow-ignore-file`.
+    pub is_file_level: bool,
+    /// The verbatim token that did not parse.
+    pub token: String,
 }
 
 /// Cached export data for a single export declaration.
