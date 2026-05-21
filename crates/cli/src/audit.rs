@@ -1650,8 +1650,21 @@ impl Drop for BaseWorktree {
 }
 
 fn relative_key_path(path: &Path, root: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
+    // `dunce::simplified` strips the Windows `\\?\` verbatim prefix when present
+    // without touching the filesystem, so a path that came back from
+    // `std::fs::canonicalize` (verbatim form on Windows) compares equal to a
+    // path that did not (e.g., the BASE worktree path built via
+    // `std::env::temp_dir().join(...)`). On POSIX `dunce::simplified` is a
+    // no-op. Without this, audit's BASE-vs-HEAD finding-key intersection on
+    // Windows produced 0 matches because `config.root` and `finding.path`
+    // disagreed on the prefix shape, so every BASE key landed as a full
+    // absolute path while HEAD keys landed as relative; the intersection
+    // was empty and every pre-existing issue surfaced as "introduced".
+    let simple_path = dunce::simplified(path);
+    let simple_root = dunce::simplified(root);
+    simple_path
+        .strip_prefix(simple_root)
+        .unwrap_or(simple_path)
         .to_string_lossy()
         .replace('\\', "/")
 }
