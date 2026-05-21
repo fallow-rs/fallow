@@ -18,7 +18,6 @@
 //! falls back to the next handler in the chain.
 
 use std::io;
-use std::sync::atomic::{AtomicI32, Ordering};
 
 use windows_sys::Win32::Foundation::BOOL;
 use windows_sys::Win32::System::Console::{
@@ -27,10 +26,6 @@ use windows_sys::Win32::System::Console::{
 };
 
 use super::handle_signal;
-
-/// Records the exit code mapped from the most recently observed event;
-/// `handle_signal` reads this to compute its `exit(N)` argument.
-static EXIT_CODE: AtomicI32 = AtomicI32::new(143);
 
 /// SAFETY: invoked by the Windows kernel on a dedicated thread; only the
 /// arguments documented by the Win32 ABI are passed. The body delegates
@@ -41,7 +36,6 @@ unsafe extern "system" fn handler(ctrl_type: u32) -> BOOL {
         CTRL_CLOSE_EVENT | CTRL_LOGOFF_EVENT | CTRL_SHUTDOWN_EVENT => 143,
         _ => return 0, // TRUE/FALSE BOOL; 0 = FALSE (not handled).
     };
-    EXIT_CODE.store(exit_code, Ordering::SeqCst);
     handle_signal(exit_code);
     1 // TRUE = handled.
 }

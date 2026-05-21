@@ -1473,18 +1473,19 @@ mod tests {
         let (service, _) = LspService::build(FallowLspServer::new).finish();
         let backend = service.inner();
         // Set a workspace root so the flag check, not the missing-root
-        // check, is what causes the early return. Without a root the
-        // function returns before the cancellation gate fires and the
-        // test would be vacuous.
+        // check, is what would normally let analysis proceed. After
+        // shutdown the cancellation gate at the top of `run_analysis`
+        // must short-circuit before `spawn_blocking` populates
+        // `self.results`. Asserting on `results.is_none()` is the
+        // post-condition that proves the short-circuit fired; a
+        // try_lock-based assertion would be vacuous because try_lock
+        // is non-blocking and the guard is released on return.
         *backend.root.write().await = Some(std::env::temp_dir());
         backend.shutdown().await.expect("shutdown returns Ok");
-        // run_analysis should return immediately without acquiring the
-        // analysis_guard. Verify by checking the guard is still free
-        // after the call.
         backend.run_analysis().await;
         assert!(
-            backend.analysis_guard.try_lock().is_ok(),
-            "analysis_guard must not be held after a cancelled run_analysis",
+            backend.results.read().await.is_none(),
+            "results must stay None when run_analysis short-circuits on cancellation",
         );
     }
 

@@ -4,10 +4,10 @@
 //!
 //! Storage model: the wrapper OWNS the `Child` outright. The registry
 //! stores only the PID. On signal, `registry::drain_and_kill` kills by
-//! PID (`libc::kill` on Unix, `TerminateProcess` on Windows), which
-//! does not require ownership of the `Child`. The wrapper's wait then
-//! returns with a non-zero status; callers handle that the same way
-//! they would handle any subprocess failure.
+//! PID (`kill -9 <pid>` subprocess on Unix, `TerminateProcess` on
+//! Windows), which does not require ownership of the `Child`. The
+//! wrapper's wait then returns with a non-zero status; callers handle
+//! that the same way they would handle any subprocess failure.
 //!
 //! Why PID-based and not Child-based: the wrapper needs to call
 //! `Child::wait_with_output(self)` which consumes the Child by value.
@@ -24,8 +24,8 @@ use super::registry;
 /// RAII handle wrapping a spawned `Child` with registry tracking.
 pub struct ScopedChild {
     /// `None` after the wrapper has consumed the child (`wait_with_output`,
-    /// `wait`, `kill`). Drop checks this and reaps non-blockingly if
-    /// the child is still here.
+    /// `wait`). Drop checks this and reaps non-blockingly if the child
+    /// is still here.
     inner: Option<Child>,
     /// Registry key. `None` after deregister so Drop does not redo it.
     id: Option<u64>,
@@ -81,21 +81,6 @@ impl ScopedChild {
         }
         result
     }
-
-    /// Forcibly terminate the child. Equivalent to `Child::kill`.
-    /// No-op if the child has been consumed by `wait_with_output` /
-    /// `wait`.
-    #[allow(
-        dead_code,
-        reason = "exposed for external callers that need explicit cancel; signal handler covers most paths"
-    )]
-    pub fn kill(&mut self) -> io::Result<()> {
-        if let Some(child) = self.inner.as_mut() {
-            child.kill()
-        } else {
-            Ok(())
-        }
-    }
 }
 
 impl Drop for ScopedChild {
@@ -120,12 +105,16 @@ pub fn status(command: &mut Command) -> io::Result<ExitStatus> {
 
 /// Convenience: spawn and collect full output (stdout + stderr).
 ///
-/// Mirrors `Command::output` semantics: stdout / stderr are captured
-/// (piped to the wrapper) and stdin is null. Callers that already piped
-/// stdio in their builder get the same setting forwarded; this only
-/// fills the default when the caller did not specify.
+/// Mirrors `Command::output` semantics by unconditionally setting
+/// stdout / stderr to piped and stdin to null. Callers that need
+/// different stdio (e.g. inherited stdin for interactive prompts)
+/// must use `ScopedChild::spawn` directly and drive the wait
+/// themselves.
 pub fn output(command: &mut Command) -> io::Result<Output> {
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     ScopedChild::spawn(command)?.wait_with_output()
 }
 

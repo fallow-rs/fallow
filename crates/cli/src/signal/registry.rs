@@ -4,11 +4,12 @@
 //! because POSIX recycles PIDs aggressively on long-running runners; a
 //! recycled PID would collide with a previously-deregistered entry.
 //!
-//! Stores PIDs (not `Child` handles): the `ScopedChild` wrapper owns the
-//! `Child` outright so it can call `wait_with_output` / `wait` normally,
-//! and the signal handler kills by PID via `libc::kill` (Unix) or
-//! `OpenProcess` + `TerminateProcess` (Windows). No ownership transfer,
-//! no race between wait and kill.
+//! Stores PIDs (not `Child` handles): the `ScopedChild` wrapper owns
+//! the `Child` outright so it can call `wait_with_output` / `wait`
+//! normally, and the signal handler kills by PID via a `kill -9
+//! <pid>` shell subprocess on Unix (avoids adding `libc` as a
+//! workspace dep) or `OpenProcess + TerminateProcess` on Windows. No
+//! ownership transfer, no race between wait and kill.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -85,21 +86,13 @@ pub(super) fn drain_and_kill() {
 #[cfg(unix)]
 fn kill_pid(pid: u32) {
     // SIGKILL has the value 9 on every POSIX system fallow targets.
-    // SAFETY: `libc::kill` is the canonical primitive for sending a
-    // signal to a process by PID; pid -1, 0, and other special values
-    // are documented as having broad effects and we never construct
-    // them here (pids come from `Child::id()` which is always > 0).
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "pid u32 -> i32 via libc::kill; values exceeding i32::MAX are not produced by Child::id() on any supported platform"
-    )]
-    let pid_i32 = pid as i32;
-    // Use raw libc through std's exposed wrapper if available; we don't
-    // have libc in deps, so use the unix shell `kill -9 <pid>` fallback
-    // for portability. This costs an extra fork but only on signal-
-    // delivery, which happens once per process lifetime.
+    // No libc dep in the workspace, so fork `/bin/kill -9 <pid>`
+    // instead. Costs one extra process per signal delivery, which
+    // happens at most once per fallow invocation, so the overhead is
+    // negligible. PIDs from Child::id() are always positive; pid 0 / -1
+    // (broadcast semantics) cannot occur on this path.
     let _ = std::process::Command::new("kill")
-        .args(["-9", &pid_i32.to_string()])
+        .args(["-9", &pid.to_string()])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status();
