@@ -534,6 +534,51 @@ jobs:
             '
           done
 
+      # Embed each platform binary's SHA-256 digest into its platform
+      # package's package.json under the `fallowDigests` field. The npm
+      # postinstall script (`npm/fallow/scripts/verify-binary.js`) reads
+      # this field first and only falls back to the GitHub release API
+      # when it is absent. Without the embedded digest, shared-IP CI
+      # runners hit the 60 req/hr unauthenticated rate limit and the
+      # install aborts with `digest-unavailable`. PKG_PATH is set by the
+      # surrounding shell from a glob over npm/*/package.json, never from
+      # untrusted input. Refs #597.
+      - name: Embed SHA-256 digests into platform packages
+        run: |
+          for pkg in npm/*/package.json; do
+            PKG_PATH="$pkg" node -e '
+              const fs = require("fs");
+              const path = require("path");
+              const crypto = require("crypto");
+              const manifestPath = process.env.PKG_PATH;
+              const dir = path.dirname(manifestPath);
+              const pkg = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+              // Only platform packages (@fallow-cli/<platform>) ship binaries;
+              // the npm/fallow wrapper has no binaries to digest. Skip it
+              // silently so the same glob keeps working across both shapes.
+              if (typeof pkg.name !== "string" || !pkg.name.startsWith("@fallow-cli/")) {
+                process.exit(0);
+              }
+              const digests = {};
+              for (const entry of fs.readdirSync(dir)) {
+                if (entry.endsWith(".sig") || entry === "package.json" || entry === "README.md") {
+                  continue;
+                }
+                const full = path.join(dir, entry);
+                const stat = fs.statSync(full);
+                if (!stat.isFile()) continue;
+                digests[entry] = "sha256:" + crypto.createHash("sha256").update(fs.readFileSync(full)).digest("hex");
+              }
+              if (Object.keys(digests).length === 0) {
+                console.error("no binaries found in " + dir);
+                process.exit(1);
+              }
+              pkg.fallowDigests = digests;
+              fs.writeFileSync(manifestPath, JSON.stringify(pkg, null, 2) + "\n");
+              console.log(manifestPath + ": " + Object.keys(digests).join(", "));
+            '
+          done
+
       - name: Install NAPI package dependencies
         # Only safe here because this job has no publish tokens. The dev
         # dependency tree of @napi-rs/cli runs install scripts; keeping that

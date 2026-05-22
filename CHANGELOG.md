@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`npm install fallow` postinstall no longer fails on shared-IP CI runners with `digest-unavailable`.** Before, the postinstall verifier fetched each platform binary's expected SHA-256 from the unauthenticated GitHub release API (`api.github.com/repos/fallow-rs/fallow/releases/tags/v<version>`), so pooled CI IPs (Buildkite, GHA shared runners, internal build clusters) routinely exceeded the 60 req/hr unauthenticated limit and `pnpm install --frozen-lockfile` aborted with `fallow: binary verification failed ... (digest-unavailable): GitHub release API returned HTTP 403: API rate limit exceeded`. After, the release workflow's `npm-prep` job computes the SHA-256 of every binary inside each `@fallow-cli/<platform>` package and writes it into the platform package's `package.json` under `fallowDigests`. `verify-binary.js` reads that embedded value first and only falls back to the GitHub API for platform packages published before v2.78.1 that do not yet carry the field, so steady-state installs perform zero network calls during digest verification. The Ed25519 signature layer and the `FALLOW_SKIP_BINARY_VERIFY` escape hatch are unchanged. (Closes [#597](https://github.com/fallow-rs/fallow/issues/597).)
+
 ## [2.78.0] - 2026-05-22
 
 ### Added

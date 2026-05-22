@@ -24,9 +24,9 @@ On `fallow-rs/fallow`'s own GitHub Actions setup, the `approval_policy: first_ti
 
 ## Binary distribution and verification
 
-Every fallow release publishes per-platform CLI, LSP, and MCP binaries via three channels (the GitHub Release, the `@fallow-cli/*` npm platform packages, and the bundled `fallow-rs/fallow@v2` GitHub Action). At release time the `build` job in `.github/workflows/release.yml` signs each binary with the workflow's Ed25519 private key (`ED25519_BINARY_SIGNING_PRIVATE_KEY` repo secret), uploads the resulting `.sig` files alongside the binaries, and publishes npm tarballs with `npm publish --provenance --ignore-scripts`. GitHub records a SHA-256 `digest` field for every release asset; npm and Action installs compare platform-package bytes against that digest after signature verification succeeds.
+Every fallow release publishes per-platform CLI, LSP, and MCP binaries via three channels (the GitHub Release, the `@fallow-cli/*` npm platform packages, and the bundled `fallow-rs/fallow@v2` GitHub Action). At release time the `build` job in `.github/workflows/release.yml` signs each binary with the workflow's Ed25519 private key (`ED25519_BINARY_SIGNING_PRIVATE_KEY` repo secret), uploads the resulting `.sig` files alongside the binaries, and publishes npm tarballs with `npm publish --provenance --ignore-scripts`. The same workflow computes a SHA-256 digest of every platform binary and writes it into the platform package's `package.json` under a `fallowDigests` field, so npm and Action installs verify binary bytes locally without a network round-trip.
 
-The matching public key is `34 bytes of SPKI DER header + 32 raw bytes of Ed25519 public key`. The 32-byte raw key is hardcoded into every consumer (the VS Code extension at `editors/vscode/src/download.ts`, the npm wrapper at `npm/fallow/scripts/verify-binary.js`) so the Ed25519 layer of verification works fully offline and cannot be silently downgraded by network-path tampering. The SHA-256 layer reaches `https://api.github.com/repos/fallow-rs/fallow/releases/tags/v<version>` to pull the platform asset's `digest` field, providing a second factor that is rooted in GitHub's own integrity surface rather than the npm registry.
+The matching public key is `34 bytes of SPKI DER header + 32 raw bytes of Ed25519 public key`. The 32-byte raw key is hardcoded into every consumer (the VS Code extension at `editors/vscode/src/download.ts`, the npm wrapper at `npm/fallow/scripts/verify-binary.js`) so the Ed25519 layer of verification works fully offline and cannot be silently downgraded by network-path tampering. The SHA-256 layer reads the embedded `fallowDigests` field from the platform package's `package.json`. If the field is absent (older platform packages published before v2.78.1), the verifier falls back to fetching the platform asset's `digest` field from `https://api.github.com/repos/fallow-rs/fallow/releases/tags/v<version>`; this fallback can fail on shared-IP CI runners that exceed GitHub's 60 req/hr unauthenticated rate limit (issue #597), which is why steady-state verification uses the embedded path.
 
 **Public key fingerprint (raw 32-byte Ed25519, hex):**
 
@@ -41,7 +41,7 @@ You can copy this value out-of-band (a release blog post, this file at a tag you
 | Channel | When verification runs | What it verifies | Failure mode |
 |:--------|:-----------------------|:-----------------|:-------------|
 | VS Code extension | After downloading the binary from the GitHub Release | Ed25519 signature over the binary bytes; SHA-256 fallback when no `.sig` is present | Refuses to launch and deletes the partial download |
-| `npm install fallow` (postinstall) | After the platform package is resolved | Ed25519 signature over each of `fallow`, `fallow-lsp`, `fallow-mcp` in the resolved `@fallow-cli/<platform>` package, then SHA-256 of the binary bytes against the GitHub Release `asset.digest` field | Aborts the install with exit code 1 and a `fallow: binary verification failed: ...` message |
+| `npm install fallow` (postinstall) | After the platform package is resolved | Ed25519 signature over each of `fallow`, `fallow-lsp`, `fallow-mcp` in the resolved `@fallow-cli/<platform>` package, then SHA-256 of the binary bytes against the platform package's `fallowDigests` field (with the GitHub Release `asset.digest` field as a fallback for older packages) | Aborts the install with exit code 1 and a `fallow: binary verification failed: ...` message |
 | `fallow-rs/fallow@v2` GitHub Action installer | After `npm install -g --ignore-scripts fallow@<spec>` | Same as above, but the verifier code is loaded from the checked-out Action tree rather than the installed package so a tampered postinstall cannot self-validate | Aborts the action step with a `::error::` annotation |
 
 ### Out-of-band verification recipe
@@ -55,10 +55,16 @@ ED25519_BINARY_SIGNING_PUBLIC_KEY=g05v13Mz5u7fd5NHxxCstAPS2CNNVZ9e18h+VSreC9E= \
 
 The base64 form of the public key above (`g05v13Mz5u7fd5NHxxCstAPS2CNNVZ9e18h+VSreC9E=`) decodes to the same 32 bytes shown in the fingerprint section.
 
-For the SHA-256 half, compare the local binary hash with the GitHub Release asset digest:
+For the SHA-256 half, compare the local binary hash with the digest embedded in the matching `@fallow-cli/<platform>` package's `package.json`:
 
 ```sh
-shasum -a 256 fallow-aarch64-apple-darwin
+shasum -a 256 node_modules/@fallow-cli/linux-x64-gnu/fallow
+node -p 'require("@fallow-cli/linux-x64-gnu/package.json").fallowDigests.fallow'
+```
+
+Both lines should print the same hex digest (the second carries a `sha256:` prefix). For platform packages published before v2.78.1 that do not yet ship `fallowDigests`, compare against the GitHub Release asset digest instead:
+
+```sh
 gh release view v2.76.0 --repo fallow-rs/fallow --json assets \
   --jq '.assets[] | select(.name=="fallow-aarch64-apple-darwin") | .digest'
 ```

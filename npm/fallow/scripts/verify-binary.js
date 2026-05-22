@@ -2,18 +2,27 @@
 //
 // Verifies each platform binary against a .sig file shipped alongside it in
 // the @fallow-cli/<platform> package, then cross-checks the binary bytes
-// against the SHA-256 digest published by GitHub Releases for the matching
-// version/platform asset. The .sig is produced at release time by
-// `.github/scripts/sign-binary.mjs` using the workflow's
+// against an expected SHA-256 digest. The .sig is produced at release time
+// by `.github/scripts/sign-binary.mjs` using the workflow's
 // ED25519_BINARY_SIGNING_PRIVATE_KEY secret. The matching public key (32 raw
 // bytes) is embedded below and is identical to the value already trusted by
 // the VS Code extension at editors/vscode/src/download.ts:19-22.
+//
+// SHA-256 digest source (in order of preference, refs #465 and #597):
+//   1. `fallowDigests` field in the platform package's package.json, written
+//      at release time by the `npm-prep` job. This is the steady-state path:
+//      no network traffic, immune to GitHub API rate limits.
+//   2. Fallback: GitHub Release asset digest via the public REST API. Kept
+//      for backwards compatibility with platform packages published before
+//      #597 that lack the embedded field. Shared-IP CI runners (Buildkite,
+//      pooled GHA runners) can exceed the 60 req/hr unauthenticated limit;
+//      that failure mode is what motivated #597.
 //
 // Triggered from scripts/postinstall.js and from the GitHub Action installer
 // at action/scripts/install.sh. The escape hatch FALLOW_SKIP_BINARY_VERIFY=1
 // is documented in SECURITY.md.
 //
-// No external dependencies: uses node:crypto and node:fs only. Refs #465.
+// No external dependencies: uses node:crypto and node:fs only.
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -211,6 +220,31 @@ function platformPackageDir(pkg, resolveFrom) {
   return { dir: path.dirname(manifestPath), manifestPath };
 }
 
+// Read the SHA-256 digest for a binary embedded in the platform package's
+// package.json (written by the npm-prep job at release time as
+// `fallowDigests[<filename>]`). Returns the normalized digest hex or null
+// when the manifest does not exist, cannot be parsed, lacks the field, or
+// the value is malformed. Refs #597.
+function readEmbeddedDigest(manifestPath, binaryFileName) {
+  if (typeof manifestPath !== 'string' || manifestPath.length === 0) {
+    return null;
+  }
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch {
+    return null;
+  }
+  if (!manifest || typeof manifest !== 'object') {
+    return null;
+  }
+  const digests = manifest.fallowDigests;
+  if (!digests || typeof digests !== 'object') {
+    return null;
+  }
+  return normalizeDigest(digests[binaryFileName]);
+}
+
 function binaryTargetsForPlatform(platformId) {
   const isWindows = process.platform === 'win32';
   const ext = isWindows ? '.exe' : '';
@@ -265,6 +299,9 @@ async function verifyInstalled(options) {
     pkg = '<override>';
     version = opts.version || '0.0.0';
     platformId = opts.platformId || 'test-platform';
+    // Lets tests drop a package.json next to the binaries to exercise the
+    // embedded-digest path. readEmbeddedDigest returns null when missing.
+    manifestPath = path.join(dir, 'package.json');
   } else {
     if (process.platform !== 'linux') {
       pkg = getPlatformPackage(process.platform, process.arch);
@@ -308,22 +345,33 @@ async function verifyInstalled(options) {
     if (!result.ok) {
       return { ...result, binary: binaryPath, package: pkg };
     }
-    let expectedDigest;
-    try {
-      expectedDigest = await digestProvider({
-        assetName: target.asset,
-        binaryPath,
-        packageName: pkg,
-        version,
-      });
-    } catch (err) {
-      return {
-        ok: false,
-        code: 'digest-unavailable',
-        message: `cannot load SHA-256 digest for ${target.asset}: ${err.message}`,
-        binary: binaryPath,
-        package: pkg,
-      };
+    // Prefer the digest embedded in the platform package's package.json
+    // (written at release time by `npm-prep`). Falling back to the GitHub
+    // release API only when no embedded digest is present preserves
+    // backwards compatibility with platform packages published before #597.
+    // The shared-IP CI rate-limit failure mode that motivated #597 only
+    // affects the fallback path, so the steady-state install path is now
+    // fully offline.
+    let expectedDigest = manifestPath
+      ? readEmbeddedDigest(manifestPath, target.binary)
+      : null;
+    if (!expectedDigest) {
+      try {
+        expectedDigest = await digestProvider({
+          assetName: target.asset,
+          binaryPath,
+          packageName: pkg,
+          version,
+        });
+      } catch (err) {
+        return {
+          ok: false,
+          code: 'digest-unavailable',
+          message: `cannot load SHA-256 digest for ${target.asset}: ${err.message}`,
+          binary: binaryPath,
+          package: pkg,
+        };
+      }
     }
     const digestResult = verifyDigestAt(binaryPath, expectedDigest);
     if (!digestResult.ok) {
@@ -340,6 +388,7 @@ module.exports = {
   _verifyWithKey,
   fetchReleaseDigest,
   normalizeDigest,
+  readEmbeddedDigest,
   sha256Hex,
   EMBEDDED_PUBLIC_KEY,
   ED25519_SPKI_HEADER,

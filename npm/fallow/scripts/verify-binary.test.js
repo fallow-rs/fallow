@@ -12,6 +12,7 @@ const {
   verifyInstalled,
   sha256Hex,
   normalizeDigest,
+  readEmbeddedDigest,
   EMBEDDED_PUBLIC_KEY,
   ED25519_SPKI_HEADER,
   SKIP_ENV,
@@ -379,6 +380,141 @@ test('verifyInstalled honors FALLOW_SKIP_BINARY_VERIFY', async (t) => {
   const result = await verifyInstalled({ dirOverride: '/does/not/exist' });
   assert.equal(result.ok, true);
   assert.equal(result.skipped, true);
+});
+
+function computeDigestsForDir(dir) {
+  const ext = process.platform === 'win32' ? '.exe' : '';
+  const out = {};
+  for (const base of ['fallow', 'fallow-lsp', 'fallow-mcp']) {
+    const fileName = `${base}${ext}`;
+    const full = path.join(dir, fileName);
+    out[fileName] = 'sha256:' + crypto.createHash('sha256').update(fs.readFileSync(full)).digest('hex');
+  }
+  return out;
+}
+
+function writeManifest(dir, body) {
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(body));
+}
+
+test('readEmbeddedDigest returns null when manifest is missing', () => {
+  assert.equal(readEmbeddedDigest('/does/not/exist/package.json', 'fallow'), null);
+});
+
+test('readEmbeddedDigest returns null when fallowDigests field is absent', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fallow-vbtest-emb-'));
+  t.after(() => cleanup(dir));
+  writeManifest(dir, { name: '@fallow-cli/x', version: '1.0.0' });
+  assert.equal(readEmbeddedDigest(path.join(dir, 'package.json'), 'fallow'), null);
+});
+
+test('readEmbeddedDigest returns null when the per-binary entry is malformed', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fallow-vbtest-emb-'));
+  t.after(() => cleanup(dir));
+  writeManifest(dir, {
+    name: '@fallow-cli/x',
+    version: '1.0.0',
+    fallowDigests: { fallow: 'not-a-real-digest' },
+  });
+  assert.equal(readEmbeddedDigest(path.join(dir, 'package.json'), 'fallow'), null);
+});
+
+test('readEmbeddedDigest returns normalized hex for a valid sha256: prefixed entry', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fallow-vbtest-emb-'));
+  t.after(() => cleanup(dir));
+  const hex = 'a'.repeat(64);
+  writeManifest(dir, {
+    name: '@fallow-cli/x',
+    version: '1.0.0',
+    fallowDigests: { fallow: 'sha256:' + hex },
+  });
+  assert.equal(readEmbeddedDigest(path.join(dir, 'package.json'), 'fallow'), hex);
+});
+
+test('verifyInstalled uses the embedded digest without calling the provider', async (t) => {
+  const { privateKey, rawPub } = makeKeypair();
+  const dir = makePlatformDir(privateKey);
+  t.after(() => cleanup(dir));
+  writeManifest(dir, {
+    name: '@fallow-cli/x',
+    version: '1.0.0',
+    fallowDigests: computeDigestsForDir(dir),
+  });
+  let providerCalls = 0;
+  const result = await verifyInstalled({
+    dirOverride: dir,
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
+    digestProvider: () => {
+      providerCalls += 1;
+      return Promise.reject(new Error('provider should not be called'));
+    },
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(providerCalls, 0);
+});
+
+test('verifyInstalled falls back to the provider when the embedded digest is missing', async (t) => {
+  const { privateKey, rawPub } = makeKeypair();
+  const dir = makePlatformDir(privateKey);
+  t.after(() => cleanup(dir));
+  // No package.json at all; legacy platform package shape.
+  let providerCalls = 0;
+  const result = await verifyInstalled({
+    dirOverride: dir,
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
+    digestProvider: ({ binaryPath }) => {
+      providerCalls += 1;
+      return Promise.resolve('sha256:' + crypto.createHash('sha256').update(fs.readFileSync(binaryPath)).digest('hex'));
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(providerCalls, 3);
+});
+
+test('verifyInstalled falls back to the provider when fallowDigests is partial / malformed', async (t) => {
+  const { privateKey, rawPub } = makeKeypair();
+  const dir = makePlatformDir(privateKey);
+  t.after(() => cleanup(dir));
+  writeManifest(dir, {
+    name: '@fallow-cli/x',
+    version: '1.0.0',
+    fallowDigests: { fallow: 'not-a-real-digest' },
+  });
+  let providerCalls = 0;
+  const result = await verifyInstalled({
+    dirOverride: dir,
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
+    digestProvider: ({ binaryPath }) => {
+      providerCalls += 1;
+      return Promise.resolve('sha256:' + crypto.createHash('sha256').update(fs.readFileSync(binaryPath)).digest('hex'));
+    },
+  });
+  assert.equal(result.ok, true);
+  // One call per binary because all three entries fail to normalize.
+  assert.equal(providerCalls, 3);
+});
+
+test('verifyInstalled returns digest-mismatch when the embedded digest disagrees with the binary', async (t) => {
+  const { privateKey, rawPub } = makeKeypair();
+  const dir = makePlatformDir(privateKey);
+  t.after(() => cleanup(dir));
+  const ext = process.platform === 'win32' ? '.exe' : '';
+  writeManifest(dir, {
+    name: '@fallow-cli/x',
+    version: '1.0.0',
+    fallowDigests: {
+      [`fallow${ext}`]: 'sha256:' + 'a'.repeat(64),
+      [`fallow-lsp${ext}`]: 'sha256:' + 'a'.repeat(64),
+      [`fallow-mcp${ext}`]: 'sha256:' + 'a'.repeat(64),
+    },
+  });
+  const result = await verifyInstalled({
+    dirOverride: dir,
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
+    digestProvider: () => Promise.reject(new Error('should not be reached')),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'digest-mismatch');
 });
 
 test('verifyInstalled ignores skip env when allowSkipEnv is false', async (t) => {
