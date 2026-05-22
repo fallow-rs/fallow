@@ -1,7 +1,9 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{fixture_path, parse_json, redact_all, run_fallow, run_fallow_in_root};
+use common::{
+    fixture_path, parse_json, redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
+};
 use std::path::Path;
 use tempfile::tempdir;
 
@@ -2278,5 +2280,106 @@ fn health_file_scores_include_plugin_scoped_hidden_dirs_for_react_router() {
     assert!(
         scored_paths.contains(&"app/.client/analytics.ts"),
         "expected app/.client/analytics.ts in file_scores: {scored_paths:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Combined-mode --score / --trend human rendering (issue #557)
+// ---------------------------------------------------------------------------
+
+/// Count occurrences of a literal substring in `haystack`.
+fn count_occurrences(haystack: &str, needle: &str) -> usize {
+    if needle.is_empty() {
+        return 0;
+    }
+    let mut count = 0;
+    let mut start = 0;
+    while let Some(pos) = haystack[start..].find(needle) {
+        count += 1;
+        start += pos + needle.len();
+    }
+    count
+}
+
+/// Regression test for issue #557: `fallow --score` (bare combined mode) must
+/// render the health score in human output, and must render it EXACTLY ONCE.
+/// The score has always been present in JSON / SARIF / CodeClimate; only the
+/// terminal renderer was missing the call into `render_health_score`. The
+/// "exactly once" assertion guards the second half of the fix: a naive
+/// orientation-header render would double the line because the downstream
+/// Complexity section's own `print_health_human` call would render it again.
+#[test]
+fn combined_score_renders_health_score_exactly_once() {
+    let output = run_fallow_combined("complexity-project", &["--score"]);
+    assert!(
+        output.code == 0 || output.code == 1,
+        "combined --score should not crash: stdout={}\nstderr={}",
+        output.stdout,
+        output.stderr
+    );
+    let count = count_occurrences(&output.stderr, "Health score:");
+    assert_eq!(
+        count, 1,
+        "combined --score must render the Health score line exactly once \
+         (no duplicate from the downstream Complexity section), got {count}:\n{}",
+        output.stderr
+    );
+}
+
+/// Control: without `--score`, the bare `fallow` invocation must NOT render a
+/// Health score line. This guards against accidentally always rendering the
+/// score regardless of the flag.
+#[test]
+fn combined_without_score_omits_health_score_line() {
+    let output = run_fallow_combined("complexity-project", &[]);
+    assert!(
+        output.code == 0 || output.code == 1,
+        "bare combined run should not crash: stdout={}\nstderr={}",
+        output.stdout,
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("Health score:"),
+        "bare `fallow` (no --score) must NOT render a Health score line, got:\n{}",
+        output.stderr
+    );
+}
+
+/// Standalone `fallow health --score` must keep rendering the score inline:
+/// it has no upstream orientation header to absorb the responsibility. Pins
+/// the second half of the `skip_score_and_trend` contract (combined skips,
+/// standalone does not).
+#[test]
+fn standalone_health_score_still_renders_inline() {
+    let output = run_fallow("health", "complexity-project", &["--score"]);
+    assert!(
+        output.code == 0 || output.code == 1,
+        "fallow health --score should not crash: stdout={}\nstderr={}",
+        output.stdout,
+        output.stderr
+    );
+    let combined = format!("{}{}", output.stdout, output.stderr);
+    let count = count_occurrences(&combined, "Health score:");
+    assert_eq!(
+        count, 1,
+        "fallow health --score must render the Health score line exactly once, got {count}:\nstdout={}\nstderr={}",
+        output.stdout, output.stderr
+    );
+}
+
+/// `--min-score` is a `fallow health` (subcommand) flag, not a combined-mode
+/// flag. Pin that the standalone exit-code gate still fires when the score is
+/// below threshold, independent of where the human renderer emits the score.
+#[test]
+fn health_min_score_gate_fails_below_threshold() {
+    let output = run_fallow(
+        "health",
+        "complexity-project",
+        &["--score", "--min-score", "100"],
+    );
+    assert_ne!(
+        output.code, 0,
+        "fallow health --score --min-score 100 should fail the gate: stdout={}\nstderr={}",
+        output.stdout, output.stderr
     );
 }

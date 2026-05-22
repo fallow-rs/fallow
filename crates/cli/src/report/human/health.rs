@@ -19,6 +19,7 @@ pub(in crate::report) fn print_health_human(
     quiet: bool,
     show_explain_tip: bool,
     explain: bool,
+    skip_score_and_trend: bool,
 ) {
     if !quiet {
         eprintln!();
@@ -68,11 +69,7 @@ pub(in crate::report) fn print_health_human(
             .is_some_and(|coverage| !coverage.findings.is_empty());
     print_explain_tip_if_tty(show_explain_tip && has_findings, quiet);
 
-    let lines = if explain {
-        build_health_human_lines_with_explain(report, root, true)
-    } else {
-        build_health_human_lines(report, root)
-    };
+    let lines = build_health_human_lines_with_explain(report, root, explain, skip_score_and_trend);
     for line in lines {
         println!("{line}");
     }
@@ -119,21 +116,29 @@ pub(in crate::report) fn print_health_human(
 }
 
 /// Build human-readable output lines for health (complexity) findings.
-pub(in crate::report) fn build_health_human_lines(
+///
+/// Test-only convenience: production callers go through
+/// `print_health_human` directly so they can thread `explain` and
+/// `skip_score_and_trend` flags.
+#[cfg(test)]
+fn build_health_human_lines(
     report: &crate::health_types::HealthReport,
     root: &Path,
 ) -> Vec<String> {
-    build_health_human_lines_with_explain(report, root, false)
+    build_health_human_lines_with_explain(report, root, false, false)
 }
 
 fn build_health_human_lines_with_explain(
     report: &crate::health_types::HealthReport,
     root: &Path,
     explain: bool,
+    skip_score_and_trend: bool,
 ) -> Vec<String> {
     let mut lines = Vec::new();
-    render_health_score(&mut lines, report);
-    render_health_trend(&mut lines, report);
+    if !skip_score_and_trend {
+        render_health_score(&mut lines, report);
+        render_health_trend(&mut lines, report);
+    }
     render_runtime_coverage(&mut lines, report, root);
     render_vital_signs(&mut lines, report);
     render_risk_profiles(&mut lines, report);
@@ -400,7 +405,7 @@ fn render_upgrade_prompt(
 
 // ── Section renderers ────
 
-fn render_health_score(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
+pub fn render_health_score(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
     let Some(ref hs) = report.health_score else {
         return;
     };
@@ -539,7 +544,7 @@ fn fmt_trend_delta(v: f64, unit: &str) -> String {
     }
 }
 
-fn render_health_trend(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
+pub fn render_health_trend(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
     let Some(ref trend) = report.health_trend else {
         return;
     };

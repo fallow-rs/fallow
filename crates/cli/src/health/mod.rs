@@ -2464,6 +2464,9 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
         opts.min_severity,
         opts.summary,
         true,
+        // Standalone `fallow health`: no upstream orientation header, render
+        // the score / trend block inline.
+        false,
     )
 }
 
@@ -2491,6 +2494,15 @@ pub struct HealthResult {
 }
 
 /// Print health results and return appropriate exit code.
+///
+/// When called from combined mode (`fallow --score` / `fallow --trend`),
+/// `skip_score_and_trend` MUST be `true`: the orientation header already
+/// renders both blocks and rendering them a second time here would duplicate
+/// the lines. Standalone `fallow health` invocations pass `false`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "thin formatting dispatcher that mirrors HealthOptions presentation knobs; bundling would be churn"
+)]
 pub fn print_health_result(
     result: &HealthResult,
     quiet: bool,
@@ -2499,6 +2511,7 @@ pub fn print_health_result(
     min_severity: Option<FindingSeverity>,
     summary: bool,
     show_explain_tip: bool,
+    skip_score_and_trend: bool,
 ) -> ExitCode {
     let ctx = report::ReportContext {
         root: &result.config.root,
@@ -2512,6 +2525,7 @@ pub fn print_health_result(
         show_explain_tip,
         baseline_matched: None,
         config_fixable: false,
+        skip_score_and_trend,
     };
     let report_code = report::print_health_report(
         &result.report,
@@ -4123,7 +4137,7 @@ mod tests {
         };
 
         assert_eq!(
-            print_health_result(&result, true, false, None, None, false, true),
+            print_health_result(&result, true, false, None, None, false, true, false),
             ExitCode::from(1),
         );
     }

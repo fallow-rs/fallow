@@ -3114,7 +3114,12 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
                 eprintln!();
                 eprintln!("── Complexity ─────────────────────────────────────");
             }
-            crate::health::print_health_result(health, quiet, explain, None, None, false, false);
+            // `fallow audit` does not surface the health score / trend block
+            // (no orientation header), so let the standalone health renderer
+            // emit it inline like `fallow health`.
+            crate::health::print_health_result(
+                health, quiet, explain, None, None, false, false, false,
+            );
         }
     }
 

@@ -27,6 +27,9 @@ pub use grouping::OwnershipResolver;
     reason = "used by binary crate modules (combined.rs, audit.rs)"
 )]
 pub use json::strip_root_prefix;
+// Re-exported for combined.rs so `fallow --score` / `fallow --trend` can
+// render the same score / trend block as `fallow health --score` (issue #557).
+pub use human::health::{render_health_score, render_health_trend};
 
 /// Shared context for all report dispatch functions.
 ///
@@ -53,6 +56,11 @@ pub struct ReportContext<'a> {
     /// This is caller-provided because an explicit `--config` path is fixable
     /// even when default config discovery from the root would find nothing.
     pub config_fixable: bool,
+    /// When set, the human health renderer skips the `● Health score:` and
+    /// trend table sections because they have already been rendered upstream
+    /// (combined-mode orientation header). Standalone `fallow health` keeps
+    /// the default `false` and renders both sections inline.
+    pub skip_score_and_trend: bool,
 }
 
 /// Strip the project root prefix from a path for display, falling back to the full path.
@@ -507,6 +515,7 @@ pub fn print_health_report(
                     ctx.quiet,
                     ctx.show_explain_tip,
                     ctx.explain,
+                    ctx.skip_score_and_trend,
                 );
                 if let Some(grouping) = grouping {
                     human::print_health_grouping(grouping, ctx.root, ctx.quiet);

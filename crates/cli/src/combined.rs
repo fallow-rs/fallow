@@ -399,6 +399,10 @@ fn print_human_sections(
             None,
             opts.summary,
             false,
+            // Combined-mode orientation header already rendered the score /
+            // trend; suppress here to avoid the duplicate `Health score:` line
+            // (issue #557).
+            true,
         );
         max_exit = max_exit.max(exit_code_to_u8(code));
     }
@@ -894,6 +898,17 @@ fn print_orientation_header(
     check: Option<&CheckResult>,
     root: &std::path::Path,
 ) {
+    // Health score + trend (combined-mode fix for issue #557). The helpers
+    // early-return when the score / trend is absent, so this is a no-op for
+    // bare `fallow` without `--score` or `--trend`.
+    let mut score_lines: Vec<String> = Vec::new();
+    report::render_health_score(&mut score_lines, &health.report);
+    report::render_health_trend(&mut score_lines, &health.report);
+    let rendered_score = !score_lines.is_empty();
+    for line in &score_lines {
+        eprintln!("{line}");
+    }
+
     // Vital signs line (skip when trend table is active — it replaces vital signs)
     if let Some(ref vs) = health.report.vital_signs
         && health.report.health_trend.is_none()
@@ -950,7 +965,11 @@ fn print_orientation_header(
             ));
         }
         if !parts.is_empty() {
-            eprintln!();
+            // The score / trend block above already emits a trailing blank
+            // line; skip the leading separator here to avoid a double blank.
+            if !rendered_score {
+                eprintln!();
+            }
             eprintln!(
                 "{} {} {}",
                 "\u{25a0}".dimmed(),
