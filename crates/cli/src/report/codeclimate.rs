@@ -5,7 +5,7 @@ use fallow_config::{RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 
-use super::ci::fingerprint;
+use super::ci::{fingerprint, severity};
 use super::grouping::{self, OwnershipResolver};
 use super::{emit_json, normalize_uri, relative_path};
 use crate::health_types::{ExceededThreshold, HealthReport};
@@ -16,11 +16,7 @@ use crate::output_envelope::{
 
 /// Map fallow severity to CodeClimate severity.
 fn severity_to_codeclimate(s: Severity) -> CodeClimateSeverity {
-    match s {
-        Severity::Error => CodeClimateSeverity::Major,
-        Severity::Warn => CodeClimateSeverity::Minor,
-        Severity::Off => unreachable!(),
-    }
+    severity::codeclimate_severity(s)
 }
 
 /// Compute a relative path string with forward-slash normalization.
@@ -78,8 +74,12 @@ fn push_dep_cc_issues<'a, I>(
 ) where
     I: IntoIterator<Item = &'a fallow_core::results::UnusedDependency>,
 {
-    let level = severity_to_codeclimate(severity);
+    // Map severity lazily: in production mode, rules can resolve to
+    // `Severity::Off` and arrive here paired with empty (or filtered-down)
+    // dep slices; `severity_to_codeclimate` panics on `Off`, so the call must
+    // only fire once we have a finding to emit.
     for dep in deps {
+        let level = severity_to_codeclimate(severity);
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
         let fp = fingerprint_hash(&[rule_id, &dep.package_name]);
@@ -150,8 +150,9 @@ fn push_unused_export_issues<'a, I>(
 ) where
     I: IntoIterator<Item = &'a fallow_core::results::UnusedExport>,
 {
-    let level = severity_to_codeclimate(severity);
+    // Map severity lazily; see `push_dep_cc_issues` for rationale.
     for export in exports {
+        let level = severity_to_codeclimate(severity);
         let path = cc_path(&export.path, root);
         let kind = if export.is_re_export {
             re_export_label
@@ -285,8 +286,9 @@ fn push_unused_member_issues<'a, I>(
 ) where
     I: IntoIterator<Item = &'a fallow_core::results::UnusedMember>,
 {
-    let level = severity_to_codeclimate(severity);
+    // Map severity lazily; see `push_dep_cc_issues` for rationale.
     for member in members {
+        let level = severity_to_codeclimate(severity);
         let path = cc_path(&member.path, root);
         let line_str = member.line.to_string();
         let fp = fingerprint_hash(&[
@@ -1726,8 +1728,39 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "internal error: entered unreachable code")]
-    fn severity_off_maps_to_minor() {
+    fn severity_off_is_unreachable() {
         let _ = severity_to_codeclimate(Severity::Off);
+    }
+
+    /// Production-mode regression: rules can flip to `Severity::Off` while
+    /// the matching findings slice arrives empty (the analyzer's own off-
+    /// rule short-circuit clears the vec, but the generic-iterator helpers
+    /// in `codeclimate.rs` previously called `severity_to_codeclimate`
+    /// before checking emptiness and panicked at `Severity::Off`).
+    /// `fallow check --format codeclimate --production` on any project
+    /// with a `--production`-suppressed dep / export / member rule used to
+    /// exit 101 with `entered unreachable code` at `ci/severity.rs:28`.
+    /// This test exercises all three previously-vulnerable helpers
+    /// (`push_dep_cc_issues`, `push_unused_export_issues`,
+    /// `push_unused_member_issues`) through `build_codeclimate`.
+    #[test]
+    fn build_codeclimate_with_off_severity_and_empty_findings_does_not_panic() {
+        let root = PathBuf::from("/project");
+        let results = AnalysisResults::default();
+        let rules = RulesConfig {
+            unused_dependencies: Severity::Off,
+            unused_dev_dependencies: Severity::Off,
+            unused_optional_dependencies: Severity::Off,
+            unused_exports: Severity::Off,
+            unused_types: Severity::Off,
+            unused_enum_members: Severity::Off,
+            unused_class_members: Severity::Off,
+            ..RulesConfig::default()
+        };
+        // Must not panic: empty iterators must short-circuit before the
+        // severity mapping runs.
+        let issues = build_codeclimate(&results, &root, &rules);
+        assert!(issues.is_empty());
     }
 
     // ── health_severity ─────────────────────────────────────────────
