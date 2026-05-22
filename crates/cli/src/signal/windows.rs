@@ -32,9 +32,18 @@ use windows_sys::core::BOOL;
 
 use super::handle_signal;
 
-/// SAFETY: invoked by the Windows kernel on a dedicated thread; only the
-/// arguments documented by the Win32 ABI are passed. The body delegates
-/// to safe Rust immediately.
+/// Console control handler invoked by the Windows kernel on a dedicated
+/// thread.
+///
+/// # Safety
+///
+/// Called by the Win32 console subsystem with the documented
+/// `PHANDLER_ROUTINE` signature; the only inputs are kernel-supplied
+/// control codes. The body delegates to safe Rust immediately.
+#[expect(
+    unsafe_code,
+    reason = "Win32 PHANDLER_ROUTINE callback must be declared as unsafe extern"
+)]
 unsafe extern "system" fn handler(ctrl_type: u32) -> BOOL {
     let exit_code = match ctrl_type {
         CTRL_C_EVENT | CTRL_BREAK_EVENT => 130,
@@ -46,6 +55,10 @@ unsafe extern "system" fn handler(ctrl_type: u32) -> BOOL {
 }
 
 /// Install the console control handler.
+#[expect(
+    unsafe_code,
+    reason = "FFI to Win32 SetConsoleCtrlHandler; `handler` matches the documented PHANDLER_ROUTINE ABI"
+)]
 pub fn install() -> io::Result<()> {
     // SAFETY: `handler` matches the documented `PHANDLER_ROUTINE` ABI;
     // the second argument (`Add`) is TRUE so Windows pushes onto the

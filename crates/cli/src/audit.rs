@@ -1635,6 +1635,14 @@ mod windows_process {
             // SAFETY: `GetLastError` reads thread-local storage set by the
             // failing `OpenProcess` call. It has no preconditions.
             let err = unsafe { GetLastError() };
+            // The named `ERROR_ACCESS_DENIED` arm and the `_` arm map to the
+            // same conservative default; the named arm is kept solely to
+            // document the protected-process / cross-session case. Collapsing
+            // would lose that documentation.
+            #[expect(
+                clippy::match_same_arms,
+                reason = "named arm documents the cross-session protected-process case; collapsing loses that intent"
+            )]
             return match err {
                 // PID never existed or has already been fully reaped.
                 ERROR_INVALID_PARAMETER => false,

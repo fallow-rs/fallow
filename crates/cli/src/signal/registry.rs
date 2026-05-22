@@ -99,6 +99,10 @@ fn kill_pid(pid: u32) {
 }
 
 #[cfg(windows)]
+#[expect(
+    unsafe_code,
+    reason = "FFI to Win32 OpenProcess/TerminateProcess/CloseHandle; preconditions documented inline"
+)]
 fn kill_pid(pid: u32) {
     use windows_sys::Win32::Foundation::{CloseHandle, FALSE, HANDLE};
     use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
@@ -131,6 +135,10 @@ fn pid_is_alive(pid: u32) -> bool {
 }
 
 #[cfg(windows)]
+#[expect(
+    unsafe_code,
+    reason = "FFI to Win32 OpenProcess/WaitForSingleObject/CloseHandle; preconditions documented inline"
+)]
 fn pid_is_alive(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{CloseHandle, FALSE, HANDLE, WAIT_OBJECT_0};
     use windows_sys::Win32::System::Threading::{
