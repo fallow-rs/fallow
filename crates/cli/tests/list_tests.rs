@@ -172,7 +172,11 @@ fn list_json_files_are_relative_paths() {
             "file path should be relative, got: {path}"
         );
         assert!(
-            path.starts_with("src/") || path.starts_with("src\\"),
+            !path.contains('\\'),
+            "file path should use forward slashes, got: {path}"
+        );
+        assert!(
+            path.starts_with("src/"),
             "file path should start with src/, got: {path}"
         );
     }
@@ -189,6 +193,10 @@ fn list_json_entry_point_paths_are_relative() {
         assert!(
             !path.starts_with('/'),
             "entry point path should be relative, got: {path}"
+        );
+        assert!(
+            !path.contains('\\'),
+            "entry point path should use forward slashes, got: {path}"
         );
     }
 }

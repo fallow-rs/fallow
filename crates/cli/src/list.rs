@@ -2,6 +2,7 @@ use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
 
+use crate::report::format_display_path;
 use crate::runtime_support::load_config;
 
 pub struct ListOptions<'a> {
@@ -239,10 +240,7 @@ fn print_list_json(
         // rollup path normalisation that ships through `format_display_path`.
         let paths: Vec<serde_json::Value> = disc
             .iter()
-            .map(|f| {
-                let relative = f.path.strip_prefix(opts.root).unwrap_or(&f.path);
-                serde_json::json!(relative.display().to_string().replace('\\', "/"))
-            })
+            .map(|f| serde_json::json!(format_display_path(&f.path, opts.root)))
             .collect();
         result.insert("file_count".to_string(), serde_json::json!(paths.len()));
         result.insert("files".to_string(), serde_json::json!(paths));
@@ -252,9 +250,8 @@ fn print_list_json(
         let eps: Vec<serde_json::Value> = entries
             .iter()
             .map(|ep| {
-                let relative = ep.path.strip_prefix(opts.root).unwrap_or(&ep.path);
                 serde_json::json!({
-                    "path": relative.display().to_string().replace('\\', "/"),
+                    "path": format_display_path(&ep.path, opts.root),
                     "source": ep.source.to_string(),
                 })
             })
@@ -346,16 +343,18 @@ fn print_list_human(
     {
         eprintln!("Discovered {} files", disc.len());
         for file in disc {
-            let relative = file.path.strip_prefix(opts.root).unwrap_or(&file.path);
-            println!("{}", relative.display());
+            println!("{}", format_display_path(&file.path, opts.root));
         }
     }
 
     if let Some(entries) = entry_points {
         eprintln!("Found {} entry points", entries.len());
         for ep in entries {
-            let relative = ep.path.strip_prefix(opts.root).unwrap_or(&ep.path);
-            println!("{} ({})", relative.display(), ep.source);
+            println!(
+                "{} ({})",
+                format_display_path(&ep.path, opts.root),
+                ep.source
+            );
         }
     }
 
