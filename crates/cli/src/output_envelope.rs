@@ -324,6 +324,11 @@ pub struct CombinedOutput {
     pub version: ToolVersion,
     /// Analysis duration in milliseconds.
     pub elapsed_ms: ElapsedMs,
+    /// Sectioned `_meta` block emitted only when `--explain` is passed.
+    /// Contains `check`, `dupes`, and/or `health` keys matching the analyses
+    /// enabled for the combined run.
+    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<CombinedMeta>,
     /// Dead-code analysis sub-envelope. Absent when `--skip check`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check: Option<CheckOutput>,
@@ -337,6 +342,21 @@ pub struct CombinedOutput {
     /// `HealthOutput` envelope). Absent when `--skip health`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<HealthReport>,
+}
+
+/// Sectioned `_meta` block for the bare combined JSON envelope.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CombinedMeta {
+    /// Dead-code metadata from `crate::explain::check_meta()`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<serde_json::Value>,
+    /// Duplication metadata from `crate::explain::dupes_meta()`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dupes: Option<serde_json::Value>,
+    /// Health metadata from `crate::explain::health_meta()`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<serde_json::Value>,
 }
 
 /// Singleton schema-version discriminator for [`CoverageAnalyzeOutput`].

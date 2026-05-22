@@ -499,7 +499,7 @@ fn print_combined_json(
     health: Option<&HealthResult>,
     root: &std::path::Path,
     elapsed: std::time::Duration,
-    _explain: bool,
+    explain: bool,
     config_fixable: bool,
 ) -> ExitCode {
     // Build the envelope shell as a typed `CombinedOutput`, then convert
@@ -512,6 +512,7 @@ fn print_combined_json(
         schema_version: fallow_types::envelope::SchemaVersion(crate::report::SCHEMA_VERSION),
         version: fallow_types::envelope::ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: fallow_types::envelope::ElapsedMs(elapsed.as_millis() as u64),
+        meta: None,
         check: None,
         dupes: None,
         health: None,
@@ -614,6 +615,12 @@ fn print_combined_json(
     }
 
     let mut output = serde_json::Value::Object(combined);
+    if explain && let serde_json::Value::Object(ref mut map) = output {
+        map.insert(
+            "_meta".to_string(),
+            crate::explain::combined_meta(check.is_some(), dupes.is_some(), health.is_some()),
+        );
+    }
     report::harmonize_multi_kind_suppress_line_actions(&mut output);
 
     match serde_json::to_string_pretty(&output) {

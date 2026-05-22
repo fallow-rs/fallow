@@ -22,6 +22,7 @@ pub(in crate::report) fn print_duplication_human(
     elapsed: Duration,
     quiet: bool,
     show_explain_tip: bool,
+    explain: bool,
 ) {
     if !quiet {
         eprintln!();
@@ -44,7 +45,12 @@ pub(in crate::report) fn print_duplication_human(
 
     print_explain_tip_if_tty(show_explain_tip && !report.clone_groups.is_empty(), quiet);
 
-    for line in build_duplication_human_lines(report, root) {
+    let lines = if explain {
+        build_duplication_human_lines_with_explain(report, root, true)
+    } else {
+        build_duplication_human_lines(report, root)
+    };
+    for line in lines {
         println!("{line}");
     }
 
@@ -79,13 +85,21 @@ pub(in crate::report) fn print_duplication_human(
 }
 
 /// Build human-readable output lines for duplication report.
+pub(in crate::report) fn build_duplication_human_lines(
+    report: &DuplicationReport,
+    root: &Path,
+) -> Vec<String> {
+    build_duplication_human_lines_with_explain(report, root, false)
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "report builder with grouped output formatting"
 )]
-pub(in crate::report) fn build_duplication_human_lines(
+fn build_duplication_human_lines_with_explain(
     report: &DuplicationReport,
     root: &Path,
+    explain: bool,
 ) -> Vec<String> {
     let mut lines = Vec::new();
 
@@ -108,6 +122,12 @@ pub(in crate::report) fn build_duplication_human_lines(
             .cyan()
             .bold()
     ));
+    if explain && let Some(rule) = crate::explain::rule_by_id("fallow/code-duplication") {
+        lines.push(format!(
+            "  {}",
+            format!("Description: {}", rule.full).dimmed()
+        ));
+    }
     lines.push(String::new());
 
     for group in &sorted_groups[..shown] {

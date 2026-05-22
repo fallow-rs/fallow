@@ -18,6 +18,7 @@ pub(in crate::report) fn print_health_human(
     elapsed: Duration,
     quiet: bool,
     show_explain_tip: bool,
+    explain: bool,
 ) {
     if !quiet {
         eprintln!();
@@ -67,7 +68,12 @@ pub(in crate::report) fn print_health_human(
             .is_some_and(|coverage| !coverage.findings.is_empty());
     print_explain_tip_if_tty(show_explain_tip && has_findings, quiet);
 
-    for line in build_health_human_lines(report, root) {
+    let lines = if explain {
+        build_health_human_lines_with_explain(report, root, true)
+    } else {
+        build_health_human_lines(report, root)
+    };
+    for line in lines {
         println!("{line}");
     }
 
@@ -117,6 +123,14 @@ pub(in crate::report) fn build_health_human_lines(
     report: &crate::health_types::HealthReport,
     root: &Path,
 ) -> Vec<String> {
+    build_health_human_lines_with_explain(report, root, false)
+}
+
+fn build_health_human_lines_with_explain(
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+    explain: bool,
+) -> Vec<String> {
     let mut lines = Vec::new();
     render_health_score(&mut lines, report);
     render_health_trend(&mut lines, report);
@@ -129,7 +143,67 @@ pub(in crate::report) fn build_health_human_lines(
     render_file_scores(&mut lines, report, root);
     render_hotspots(&mut lines, report, root);
     render_refactoring_targets(&mut lines, report, root);
-    lines
+    if explain {
+        inject_explain_blocks(lines)
+    } else {
+        lines
+    }
+}
+
+fn inject_explain_blocks(lines: Vec<String>) -> Vec<String> {
+    let mut out = Vec::with_capacity(lines.len());
+    for line in lines {
+        let explain = health_explain_for_header(&line);
+        out.push(line);
+        if let Some(text) = explain {
+            out.push(format!("  {}", format!("Description: {text}").dimmed()));
+        }
+    }
+    out
+}
+
+fn health_explain_for_header(line: &str) -> Option<String> {
+    if line.contains("Runtime coverage:") {
+        return rule_full("fallow/runtime-coverage");
+    }
+    if line.contains("Health score:") {
+        return Some(
+            "The 0-100 project health grade combines dead code, complexity, maintainability, duplication, dependency, hotspot, and coverage signals when available."
+                .to_string(),
+        );
+    }
+    if line.contains("Metrics:") {
+        return Some(
+            "Vital signs summarize the analyzed project before truncation: dead-code percentages, maintainability index, hotspot count, circular dependencies, unused dependencies, and duplication where available."
+                .to_string(),
+        );
+    }
+    if line.contains("Large functions (") {
+        return rule_full("fallow/high-cyclomatic-complexity");
+    }
+    if line.contains("High complexity functions (") {
+        return rule_full("fallow/high-complexity");
+    }
+    if line.contains("Coverage gaps (") {
+        return Some(
+            "Coverage gaps identify runtime-reachable files or exports with no static path from discovered test entry points."
+                .to_string(),
+        );
+    }
+    if line.contains("Hotspots (") {
+        return Some(
+            "Hotspots combine recent churn with complexity so frequently changed risky files surface before quieter debt."
+                .to_string(),
+        );
+    }
+    if line.contains("Refactoring targets (") {
+        return rule_full("fallow/refactoring-target");
+    }
+    None
+}
+
+fn rule_full(id: &str) -> Option<String> {
+    crate::explain::rule_by_id(id).map(|rule| rule.full.to_string())
 }
 
 fn render_runtime_coverage(

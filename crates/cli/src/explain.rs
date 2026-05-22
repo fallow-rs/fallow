@@ -718,6 +718,22 @@ pub fn check_meta() -> Value {
     })
 }
 
+/// Build the sectioned `_meta` object for bare `fallow --format json --explain`.
+#[must_use]
+pub fn combined_meta(include_check: bool, include_dupes: bool, include_health: bool) -> Value {
+    let mut sections = serde_json::Map::new();
+    if include_check {
+        sections.insert("check".to_string(), check_meta());
+    }
+    if include_dupes {
+        sections.insert("dupes".to_string(), dupes_meta());
+    }
+    if include_health {
+        sections.insert("health".to_string(), health_meta());
+    }
+    Value::Object(sections)
+}
+
 /// Build the `_meta` object for `fallow health --format json --explain`.
 #[must_use]
 #[expect(

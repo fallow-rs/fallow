@@ -5480,6 +5480,12 @@ schema_version: SchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 /**
+ * Sectioned `_meta` block emitted only when `--explain` is passed.
+ * Contains `check`, `dupes`, and/or `health` keys matching the analyses
+ * enabled for the combined run.
+ */
+_meta?: (CombinedMeta | null)
+/**
  * Dead-code analysis sub-envelope. Absent when `--skip check`.
  */
 check?: (CheckOutput | null)
@@ -5495,6 +5501,29 @@ dupes?: (DupesReportPayload | null)
  * `HealthOutput` envelope). Absent when `--skip health`.
  */
 health?: (HealthReport | null)
+}
+/**
+ * Sectioned `_meta` block for the bare combined JSON envelope.
+ */
+export interface CombinedMeta {
+/**
+ * Dead-code metadata from `crate::explain::check_meta()`.
+ */
+check?: {
+[k: string]: unknown
+}
+/**
+ * Duplication metadata from `crate::explain::dupes_meta()`.
+ */
+dupes?: {
+[k: string]: unknown
+}
+/**
+ * Health metadata from `crate::explain::health_meta()`.
+ */
+health?: {
+[k: string]: unknown
+}
 }
 /**
  * Single CodeClimate-compatible issue inside [`CodeClimateOutput`].

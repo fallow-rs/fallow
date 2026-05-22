@@ -57,6 +57,99 @@ fn combined_mode_runs_successfully() {
 }
 
 #[test]
+fn combined_json_explain_includes_sectioned_meta() {
+    let output = run_fallow_combined(
+        "basic-project",
+        &["--format", "json", "--quiet", "--explain"],
+    );
+    assert!(
+        output.code == 0 || output.code == 1,
+        "combined mode should not crash, got exit code {}",
+        output.code
+    );
+    let json = parse_json(&output);
+    assert!(
+        json.pointer("/_meta/check/rules/unused-export/description")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|text| text.contains("Named exports")),
+        "combined _meta should include dead-code rule descriptions"
+    );
+    assert!(
+        json.pointer("/_meta/dupes/metrics/duplication_percentage/description")
+            .and_then(serde_json::Value::as_str)
+            .is_some(),
+        "combined _meta should include duplication metric descriptions"
+    );
+    assert!(
+        json.pointer("/_meta/health/metrics/cyclomatic/description")
+            .and_then(serde_json::Value::as_str)
+            .is_some(),
+        "combined _meta should include health metric descriptions"
+    );
+}
+
+#[test]
+fn human_explain_adds_inline_descriptions_for_analysis_commands() {
+    let check = run_fallow("check", "basic-project", &["--quiet", "--explain"]);
+    assert!(
+        check
+            .stdout
+            .contains("Description: Named exports that are never imported"),
+        "check --explain should describe dead-code sections, stdout:\n{}",
+        check.stdout
+    );
+
+    let dupes = run_fallow("dupes", "duplicate-code", &["--quiet", "--explain"]);
+    assert!(
+        dupes.stdout.contains("Description: A block of code"),
+        "dupes --explain should describe duplicate sections, stdout:\n{}",
+        dupes.stdout
+    );
+
+    let health = run_fallow("health", "complexity-project", &["--quiet", "--explain"]);
+    assert!(
+        health
+            .stdout
+            .contains("Description: Function exceeds both cyclomatic and cognitive"),
+        "health --explain should describe health sections, stdout:\n{}",
+        health.stdout
+    );
+}
+
+#[test]
+fn combined_human_explain_renders_inline_descriptions() {
+    let combined = run_fallow_combined("basic-project", &["--quiet", "--explain"]);
+    assert!(
+        combined.code == 0 || combined.code == 1,
+        "combined --explain should not crash, got exit code {}",
+        combined.code
+    );
+    assert!(
+        combined
+            .stdout
+            .contains("Description: Named exports that are never imported"),
+        "combined --explain should render dead-code descriptions inline, stdout:\n{}",
+        combined.stdout
+    );
+}
+
+#[test]
+fn check_grouped_human_explain_renders_inline_descriptions() {
+    let output = run_fallow(
+        "check",
+        "basic-project",
+        &["--quiet", "--explain", "--group-by", "directory"],
+    );
+    assert!(
+        output
+            .stdout
+            .contains("Description: Named exports that are never imported"),
+        "check --group-by --explain should render dead-code descriptions inline, stdout:\n{}",
+        output.stdout
+    );
+}
+
+#[test]
 fn combined_mode_config_enabled_coverage_gaps_stays_out_of_health_section() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let config_path = dir.path().join("fallow.json");

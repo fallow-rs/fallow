@@ -199,6 +199,7 @@ pub fn print_results(
                     ctx.quiet,
                     ctx.top,
                     ctx.show_explain_tip,
+                    ctx.explain,
                 );
             }
             ExitCode::SUCCESS
@@ -267,6 +268,7 @@ fn print_grouped_results(
                 ctx.elapsed,
                 ctx.quiet,
                 Some(resolver),
+                ctx.explain,
             );
             ExitCode::SUCCESS
         }
@@ -346,6 +348,7 @@ pub fn print_duplication_report(
                     ctx.elapsed,
                     ctx.quiet,
                     ctx.show_explain_tip,
+                    ctx.explain,
                 );
             }
             ExitCode::SUCCESS
@@ -503,6 +506,7 @@ pub fn print_health_report(
                     ctx.elapsed,
                     ctx.quiet,
                     ctx.show_explain_tip,
+                    ctx.explain,
                 );
                 if let Some(grouping) = grouping {
                     human::print_health_grouping(grouping, ctx.root, ctx.quiet);

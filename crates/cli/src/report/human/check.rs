@@ -170,6 +170,10 @@ fn insert_test_src_split<T>(lines: &mut Vec<String>, items: &[T], get_path: impl
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "human renderer entrypoint mirrors ReportContext fields without allocating a wrapper"
+)]
 pub(in crate::report) fn print_human(
     results: &AnalysisResults,
     root: &Path,
@@ -178,6 +182,7 @@ pub(in crate::report) fn print_human(
     quiet: bool,
     top: Option<usize>,
     show_explain_tip: bool,
+    explain: bool,
 ) {
     if !quiet {
         eprintln!();
@@ -189,7 +194,7 @@ pub(in crate::report) fn print_human(
     print_explain_tip_if_tty(show_explain_tip && total > 0, quiet);
 
     // Human output always includes section footers with doc links.
-    for line in build_human_lines(results, root, rules, top) {
+    for line in build_human_lines_with_explain(results, root, rules, top, explain) {
         println!("{line}");
     }
 
@@ -252,11 +257,22 @@ fn print_suppression_footer(results: &AnalysisResults) {
 ///
 /// Each section (unused files, exports, etc.) produces a header line followed by
 /// detail lines. Empty sections are omitted entirely.
+#[cfg(test)]
 pub(in crate::report) fn build_human_lines(
     results: &AnalysisResults,
     root: &Path,
     rules: &RulesConfig,
     top: Option<usize>,
+) -> Vec<String> {
+    build_human_lines_with_explain(results, root, rules, top, false)
+}
+
+fn build_human_lines_with_explain(
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    top: Option<usize>,
+    explain: bool,
 ) -> Vec<String> {
     let max_items = top.unwrap_or(MAX_FLAT_ITEMS);
     let max_grouped_files = top.unwrap_or(MAX_GROUPED_FILES);
@@ -284,7 +300,73 @@ pub(in crate::report) fn build_human_lines(
     build_structure_section(&mut lines, results, root, rules, total_issues);
     build_maintenance_section(&mut lines, results, root, rules, total_issues);
 
-    lines
+    if explain {
+        inject_explain_blocks(lines)
+    } else {
+        lines
+    }
+}
+
+fn inject_explain_blocks(lines: Vec<String>) -> Vec<String> {
+    let mut out = Vec::with_capacity(lines.len());
+    for line in lines {
+        let explain = check_explain_for_header(&line);
+        out.push(line);
+        if let Some(rule) = explain {
+            out.push(format!(
+                "  {}",
+                format!("Description: {}", rule.full).dimmed()
+            ));
+        }
+    }
+    out
+}
+
+fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleDef> {
+    let mappings = [
+        ("Unused files", "fallow/unused-file"),
+        ("Unused exports", "fallow/unused-export"),
+        ("Unused type exports", "fallow/unused-type"),
+        ("Private type leaks", "fallow/private-type-leak"),
+        ("Unused dependencies", "fallow/unused-dependency"),
+        ("Unused devDependencies", "fallow/unused-dev-dependency"),
+        (
+            "Unused optionalDependencies",
+            "fallow/unused-optional-dependency",
+        ),
+        ("Type-only dependencies", "fallow/type-only-dependency"),
+        (
+            "Test-only production dependencies",
+            "fallow/test-only-dependency",
+        ),
+        ("Unused enum members", "fallow/unused-enum-member"),
+        ("Unused class members", "fallow/unused-class-member"),
+        ("Unresolved imports", "fallow/unresolved-import"),
+        ("Unlisted dependencies", "fallow/unlisted-dependency"),
+        ("Duplicate exports", "fallow/duplicate-export"),
+        ("Circular dependencies", "fallow/circular-dependency"),
+        ("Re-Export Cycles", "fallow/re-export-cycle"),
+        ("Boundary violations", "fallow/boundary-violation"),
+        ("Stale suppressions", "fallow/stale-suppression"),
+        ("Unused catalog entries", "fallow/unused-catalog-entry"),
+        ("Empty catalog groups", "fallow/empty-catalog-group"),
+        (
+            "Unresolved catalog references",
+            "fallow/unresolved-catalog-reference",
+        ),
+        (
+            "Unused dependency overrides",
+            "fallow/unused-dependency-override",
+        ),
+        (
+            "Misconfigured dependency overrides",
+            "fallow/misconfigured-dependency-override",
+        ),
+    ];
+    let (_, rule_id) = mappings
+        .iter()
+        .find(|(title, _)| line.contains(&format!("{title} (")))?;
+    crate::explain::rule_by_id(rule_id)
 }
 
 /// `── Label ───...` header followed by a blank line, dimmed.
@@ -1699,6 +1781,7 @@ pub(in crate::report) fn print_grouped_human(
     elapsed: Duration,
     quiet: bool,
     resolver: Option<&OwnershipResolver>,
+    explain: bool,
 ) {
     if !quiet {
         eprintln!();
@@ -1770,7 +1853,7 @@ pub(in crate::report) fn print_grouped_human(
         }
 
         // Build lines and dedup doc URL footers across groups
-        let lines = build_human_lines(&group.results, root, rules, None);
+        let lines = build_human_lines_with_explain(&group.results, root, rules, None, explain);
         for line in &lines {
             if line.contains("docs.fallow.tools") && !seen_footers.insert(line.clone()) {
                 continue;

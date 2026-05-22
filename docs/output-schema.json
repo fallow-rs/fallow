@@ -26,6 +26,17 @@
           "description": "Analysis duration in milliseconds.",
           "$ref": "#/definitions/ElapsedMs"
         },
+        "_meta": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CombinedMeta"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Sectioned `_meta` block emitted only when `--explain` is passed.\nContains `check`, `dupes`, and/or `health` keys matching the analyses\nenabled for the combined run."
+        },
         "check": {
           "anyOf": [
             {
@@ -9296,6 +9307,21 @@
         }
       ],
       "description": "Discriminator for [`ReExportCycle`]: which structural shape was detected."
+    },
+    "CombinedMeta": {
+      "type": "object",
+      "properties": {
+        "check": {
+          "description": "Dead-code metadata from `crate::explain::check_meta()`."
+        },
+        "dupes": {
+          "description": "Duplication metadata from `crate::explain::dupes_meta()`."
+        },
+        "health": {
+          "description": "Health metadata from `crate::explain::health_meta()`."
+        }
+      },
+      "description": "Sectioned `_meta` block for the bare combined JSON envelope."
     }
   }
 }
