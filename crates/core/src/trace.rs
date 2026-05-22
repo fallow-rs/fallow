@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use fallow_types::serde_path;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 
@@ -38,6 +39,7 @@ fn path_matches(module_path: &Path, root: &Path, user_path: &str) -> bool {
 #[derive(Debug, Serialize)]
 pub struct ExportTrace {
     /// The file containing the export.
+    #[serde(serialize_with = "serde_path::serialize")]
     pub file: PathBuf,
     /// The export name being traced.
     pub export_name: String,
@@ -58,6 +60,7 @@ pub struct ExportTrace {
 /// A direct reference to an export.
 #[derive(Debug, Serialize)]
 pub struct ExportReference {
+    #[serde(serialize_with = "serde_path::serialize")]
     pub from_file: PathBuf,
     pub kind: String,
 }
@@ -66,6 +69,7 @@ pub struct ExportReference {
 #[derive(Debug, Serialize)]
 pub struct ReExportChain {
     /// The barrel file that re-exports this symbol.
+    #[serde(serialize_with = "serde_path::serialize")]
     pub barrel_file: PathBuf,
     /// The name it's re-exported as.
     pub exported_as: String,
@@ -77,6 +81,7 @@ pub struct ReExportChain {
 #[derive(Debug, Serialize)]
 pub struct FileTrace {
     /// The traced file.
+    #[serde(serialize_with = "serde_path::serialize")]
     pub file: PathBuf,
     /// Whether this file is reachable from entry points.
     pub is_reachable: bool,
@@ -85,8 +90,10 @@ pub struct FileTrace {
     /// Exports declared by this file.
     pub exports: Vec<TracedExport>,
     /// Files that this file imports from.
+    #[serde(serialize_with = "serde_path::serialize_vec")]
     pub imports_from: Vec<PathBuf>,
     /// Files that import from this file.
+    #[serde(serialize_with = "serde_path::serialize_vec")]
     pub imported_by: Vec<PathBuf>,
     /// Re-exports declared by this file.
     pub re_exports: Vec<TracedReExport>,
@@ -104,6 +111,7 @@ pub struct TracedExport {
 /// A re-export with source info.
 #[derive(Debug, Serialize)]
 pub struct TracedReExport {
+    #[serde(serialize_with = "serde_path::serialize")]
     pub source_file: PathBuf,
     pub imported_name: String,
     pub exported_name: String,
@@ -115,8 +123,10 @@ pub struct DependencyTrace {
     /// The dependency name being traced.
     pub package_name: String,
     /// Files that import this dependency.
+    #[serde(serialize_with = "serde_path::serialize_vec")]
     pub imported_by: Vec<PathBuf>,
     /// Files that import this dependency with type-only imports.
+    #[serde(serialize_with = "serde_path::serialize_vec")]
     pub type_only_imported_by: Vec<PathBuf>,
     /// Whether the dependency is invoked from package.json scripts or CI configs
     /// (e.g., `microbundle build`, `vitest run` in `scripts`, or binary names in
@@ -425,6 +435,7 @@ fn format_reference_kind(kind: ReferenceKind) -> String {
 /// Result of tracing a clone: all groups containing the code at a given location.
 #[derive(Debug, Serialize)]
 pub struct CloneTrace {
+    #[serde(serialize_with = "serde_path::serialize")]
     pub file: PathBuf,
     pub line: usize,
     pub matched_instance: Option<CloneInstance>,
@@ -1016,5 +1027,83 @@ mod tests {
         // root does not prefix module_path; the ends_with("/src/utils.ts")
         // fallback should still match once both sides are forward-slashed.
         assert!(path_matches(&module_path, root, "src/utils.ts"));
+    }
+
+    /// Regression for the MCP e2e trace_export / trace_file failures: even
+    /// after `path_matches` correctly identified the file on Windows, the
+    /// trace output struct's `file: PathBuf` field serialized the stored
+    /// backslash-shaped path verbatim. JSON consumers (MCP agents, CI
+    /// pipelines, the cross-platform trace_file assertion in
+    /// `e2e_trace_file_returns_json`) expect forward-slash. Pin the
+    /// contract via raw-string Windows-shaped `PathBuf::from` so the test
+    /// runs cross-platform.
+    #[test]
+    fn export_trace_serializes_windows_path_with_forward_slashes() {
+        let trace = ExportTrace {
+            file: PathBuf::from(r"src\utils.ts"),
+            export_name: "foo".to_string(),
+            file_reachable: true,
+            is_entry_point: false,
+            is_used: true,
+            direct_references: vec![ExportReference {
+                from_file: PathBuf::from(r"src\entry.ts"),
+                kind: "named import".to_string(),
+            }],
+            re_export_chains: vec![ReExportChain {
+                barrel_file: PathBuf::from(r"src\index.ts"),
+                exported_as: "foo".to_string(),
+                reference_count: 1,
+            }],
+            reason: "ok".to_string(),
+        };
+        let json = serde_json::to_string(&trace).expect("serializes");
+        assert!(
+            json.contains("\"file\":\"src/utils.ts\""),
+            "ExportTrace.file must serialize with forward slashes: {json}"
+        );
+        assert!(
+            json.contains("\"from_file\":\"src/entry.ts\""),
+            "ExportReference.from_file must serialize with forward slashes: {json}"
+        );
+        assert!(
+            json.contains("\"barrel_file\":\"src/index.ts\""),
+            "ReExportChain.barrel_file must serialize with forward slashes: {json}"
+        );
+        assert!(
+            !json.contains(r"\\"),
+            "no backslash sequence should remain anywhere in the JSON: {json}"
+        );
+    }
+
+    #[test]
+    fn file_trace_serializes_windows_paths_with_forward_slashes() {
+        let trace = FileTrace {
+            file: PathBuf::from(r"src\utils.ts"),
+            is_reachable: true,
+            is_entry_point: false,
+            exports: vec![],
+            imports_from: vec![PathBuf::from(r"src\helpers.ts")],
+            imported_by: vec![PathBuf::from(r"src\entry.ts")],
+            re_exports: vec![TracedReExport {
+                source_file: PathBuf::from(r"src\source.ts"),
+                imported_name: "foo".to_string(),
+                exported_name: "foo".to_string(),
+            }],
+        };
+        let json = serde_json::to_string(&trace).expect("serializes");
+        assert!(json.contains("\"file\":\"src/utils.ts\""), "got {json}");
+        assert!(
+            json.contains("\"imports_from\":[\"src/helpers.ts\"]"),
+            "got {json}"
+        );
+        assert!(
+            json.contains("\"imported_by\":[\"src/entry.ts\"]"),
+            "got {json}"
+        );
+        assert!(
+            json.contains("\"source_file\":\"src/source.ts\""),
+            "got {json}"
+        );
+        assert!(!json.contains(r"\\"), "no backslash should remain: {json}");
     }
 }
