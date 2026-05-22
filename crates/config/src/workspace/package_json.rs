@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// Type alias for standard `HashMap` used in serde-deserialized structs.
 /// `rustc-hash` v2 does not have a `serde` feature, so fields deserialized
@@ -8,6 +8,17 @@ use serde::{Deserialize, Serialize};
     reason = "rustc-hash v2 lacks serde feature — JSON deserialization needs std HashMap"
 )]
 type StdHashMap<K, V> = std::collections::HashMap<K, V>;
+
+fn deserialize_optional_bool_lenient<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(match value {
+        Some(serde_json::Value::Bool(value)) => Some(value),
+        _ => None,
+    })
+}
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct PeerDependencyMeta {
@@ -20,6 +31,8 @@ pub struct PeerDependencyMeta {
 pub struct PackageJson {
     #[serde(default)]
     pub name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_bool_lenient")]
+    pub private: Option<bool>,
     #[serde(default)]
     pub main: Option<String>,
     #[serde(default)]
@@ -331,6 +344,24 @@ mod tests {
         assert_eq!(pkg.main, Some("index.js".to_string()));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn package_json_private_non_bool_values_are_ignored() {
+        for raw in [
+            r#"{"private": "true"}"#,
+            r#"{"private": 1}"#,
+            r#"{"private": null}"#,
+        ] {
+            let pkg: PackageJson = serde_json::from_str(raw).unwrap();
+            assert_eq!(pkg.private, None);
+        }
+
+        let pkg: PackageJson = serde_json::from_str(r#"{"private": true}"#).unwrap();
+        assert_eq!(pkg.private, Some(true));
+
+        let pkg: PackageJson = serde_json::from_str(r#"{"private": false}"#).unwrap();
+        assert_eq!(pkg.private, Some(false));
     }
 
     #[test]

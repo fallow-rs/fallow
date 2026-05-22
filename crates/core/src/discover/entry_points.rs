@@ -171,13 +171,7 @@ fn resolve_entry_path_with_tracking(
     // We check this BEFORE the exists() check because even if the dist file exists,
     // fallow ignores dist/ by default, so we need the source file instead.
     if let Some(source_path) = try_output_to_source_path(base, entry) {
-        return validated_entry_point(
-            &source_path,
-            canonical_root,
-            entry,
-            source,
-            skipped_entries.as_deref_mut(),
-        );
+        return validated_entry_point(&source_path, canonical_root, entry, source, skipped_entries);
     }
 
     // When the entry lives under an output directory but has no direct src/ mirror
@@ -195,13 +189,7 @@ fn resolve_entry_path_with_tracking(
             fallback = %source_path.display(),
             "package.json entry resolves to an ignored output directory; falling back to source index"
         );
-        return validated_entry_point(
-            &source_path,
-            canonical_root,
-            entry,
-            source,
-            skipped_entries.as_deref_mut(),
-        );
+        return validated_entry_point(&source_path, canonical_root, entry, source, skipped_entries);
     }
 
     if resolved.is_file() {
@@ -227,6 +215,21 @@ fn resolve_entry_path_with_tracking(
             );
         }
     }
+
+    // Some source-first packages publish root build artifacts such as
+    // `./index.js` / `./index.cjs` but keep the real entry source in
+    // `src/index.ts`. If the root artifact is absent in a clean checkout, fall
+    // back to the conventional source index instead of dropping the entry.
+    if is_package_root_index_entry(entry)
+        && let Some(source_path) = try_source_index_fallback(base)
+    {
+        tracing::info!(
+            entry = %entry,
+            fallback = %source_path.display(),
+            "package.json root index entry is missing; falling back to source index"
+        );
+        return validated_entry_point(&source_path, canonical_root, entry, source, skipped_entries);
+    }
     None
 }
 
@@ -234,6 +237,23 @@ fn entry_has_parent_dir(entry: &str) -> bool {
     Path::new(entry)
         .components()
         .any(|component| matches!(component, Component::ParentDir))
+}
+
+fn is_package_root_index_entry(entry: &str) -> bool {
+    let mut components = Path::new(entry)
+        .components()
+        .filter(|component| !matches!(component, Component::CurDir));
+
+    let Some(Component::Normal(file_name)) = components.next() else {
+        return false;
+    };
+    if components.next().is_some() {
+        return false;
+    }
+
+    file_name
+        .to_str()
+        .is_some_and(|name| name == "index" || name.starts_with("index."))
 }
 
 fn validated_entry_point(
@@ -1611,6 +1631,16 @@ mod tests {
         }
 
         #[test]
+        fn root_index_entries_are_recognized_for_source_fallback() {
+            assert!(is_package_root_index_entry("./index.js"));
+            assert!(is_package_root_index_entry("index.cjs"));
+            assert!(is_package_root_index_entry("./index.d.ts"));
+            assert!(!is_package_root_index_entry("./src/index.js"));
+            assert!(!is_package_root_index_entry("./main.js"));
+            assert!(!is_package_root_index_entry(""));
+        }
+
+        #[test]
         fn rejects_substring_match_for_output_dir() {
             // "distro" contains "dist" as a substring but is not an output dir
             assert!(!is_entry_in_output_dir("./distro/index.js"));
@@ -1738,6 +1768,25 @@ mod tests {
                 EntryPointSource::PackageJsonMain,
             );
             assert_eq!(result.map(|e| e.path), Some(mirror_index));
+        }
+
+        #[test]
+        fn resolve_entry_path_falls_back_to_src_index_for_missing_root_index() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let canonical = dunce::canonicalize(dir.path()).unwrap();
+
+            let src = canonical.join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            let src_index = src.join("index.ts");
+            std::fs::write(&src_index, "export const x = 1;").unwrap();
+
+            let result = resolve_entry_path(
+                &canonical,
+                "./index.js",
+                &canonical,
+                EntryPointSource::PackageJsonMain,
+            );
+            assert_eq!(result.map(|entry| entry.path), Some(src_index));
         }
     }
 

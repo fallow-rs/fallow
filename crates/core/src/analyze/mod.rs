@@ -18,7 +18,7 @@ mod unused_overrides;
 #[cfg(test)]
 pub(crate) use unused_deps::matches_virtual_prefix;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_config::{PackageJson, ResolvedConfig, Severity};
 
@@ -69,11 +69,7 @@ use unused_exports::{
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
 )]
 use unused_files::find_unused_files;
-#[expect(
-    deprecated,
-    reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
-)]
-use unused_members::find_unused_members;
+use unused_members::find_unused_members_with_public_api_entry_points;
 #[expect(
     deprecated,
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
@@ -203,6 +199,139 @@ fn public_workspace_roots<'a>(
         .collect()
 }
 
+fn graph_path_to_file_id(graph: &ModuleGraph) -> FxHashMap<std::path::PathBuf, FileId> {
+    let mut path_to_file_id = FxHashMap::default();
+    for module in &graph.modules {
+        path_to_file_id.insert(module.path.clone(), module.file_id);
+        if let Ok(canonical) = dunce::canonicalize(&module.path) {
+            path_to_file_id.insert(canonical, module.file_id);
+        }
+    }
+    path_to_file_id
+}
+
+fn add_package_public_api_entry_points(
+    public_api_entry_points: &mut FxHashSet<FileId>,
+    path_to_file_id: &FxHashMap<std::path::PathBuf, FileId>,
+    package_root: &std::path::Path,
+    package_json: &PackageJson,
+    canonical_project_root: &std::path::Path,
+) {
+    if package_json.private.unwrap_or(false) {
+        return;
+    }
+
+    for entry in package_json.entry_points() {
+        let Some(entry_point) = crate::discover::resolve_entry_path(
+            package_root,
+            &entry,
+            canonical_project_root,
+            crate::discover::EntryPointSource::PackageJsonExports,
+        ) else {
+            continue;
+        };
+
+        if let Some(file_id) = path_to_file_id.get(&entry_point.path).copied().or_else(|| {
+            dunce::canonicalize(&entry_point.path)
+                .ok()
+                .and_then(|canonical| path_to_file_id.get(&canonical).copied())
+        }) {
+            public_api_entry_points.insert(file_id);
+        }
+    }
+}
+
+fn is_source_index_under_package(path: &std::path::Path, package_root: &std::path::Path) -> bool {
+    let Ok(relative) = path.strip_prefix(package_root) else {
+        return false;
+    };
+
+    if !matches!(
+        relative.components().next(),
+        Some(std::path::Component::Normal(segment)) if segment == "src"
+    ) {
+        return false;
+    }
+
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem == "index")
+}
+
+fn add_exportless_package_source_indexes(
+    public_api_entry_points: &mut FxHashSet<FileId>,
+    graph: &ModuleGraph,
+    package_root: &std::path::Path,
+    package_json: &PackageJson,
+) {
+    if package_json.private.unwrap_or(false) || package_json.exports.is_some() {
+        return;
+    }
+
+    let mut roots = vec![package_root.to_path_buf()];
+    if let Ok(canonical) = dunce::canonicalize(package_root) {
+        roots.push(canonical);
+    }
+
+    for module in &graph.modules {
+        if roots
+            .iter()
+            .any(|root| is_source_index_under_package(&module.path, root))
+        {
+            public_api_entry_points.insert(module.file_id);
+        }
+    }
+}
+
+fn public_api_package_entry_points(
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+    root_pkg: Option<&PackageJson>,
+    workspaces: &[fallow_config::WorkspaceInfo],
+) -> FxHashSet<FileId> {
+    let mut public_api_entry_points = FxHashSet::default();
+    let path_to_file_id = graph_path_to_file_id(graph);
+    let canonical_project_root =
+        dunce::canonicalize(&config.root).unwrap_or_else(|_| config.root.clone());
+
+    if let Some(pkg) = root_pkg {
+        add_package_public_api_entry_points(
+            &mut public_api_entry_points,
+            &path_to_file_id,
+            &config.root,
+            pkg,
+            &canonical_project_root,
+        );
+        add_exportless_package_source_indexes(
+            &mut public_api_entry_points,
+            graph,
+            &config.root,
+            pkg,
+        );
+    }
+
+    for workspace in workspaces {
+        let Ok(pkg) = PackageJson::load(&workspace.root.join("package.json")) else {
+            continue;
+        };
+        add_package_public_api_entry_points(
+            &mut public_api_entry_points,
+            &path_to_file_id,
+            &workspace.root,
+            &pkg,
+            &canonical_project_root,
+        );
+        add_exportless_package_source_indexes(
+            &mut public_api_entry_points,
+            graph,
+            &workspace.root,
+            &pkg,
+        );
+    }
+
+    public_api_entry_points
+}
+
 fn find_circular_dependencies(
     graph: &ModuleGraph,
     line_offsets_map: &LineOffsetsMap<'_>,
@@ -330,6 +459,8 @@ pub fn find_dead_code_full(
     // Build merged dependency set from root + all workspace package.json files
     let pkg_path = config.root.join("package.json");
     let pkg = PackageJson::load(&pkg_path).ok();
+    let public_api_entry_points =
+        public_api_package_entry_points(graph, config, pkg.as_ref(), workspaces);
 
     // Merge the top-level config rules with any plugin-contributed rules.
     // Plain string entries behave like the old global allowlist; scoped object
@@ -436,15 +567,17 @@ pub fn find_dead_code_full(
                             if config.rules.unused_enum_members != Severity::Off
                                 || config.rules.unused_class_members != Severity::Off
                             {
-                                let (enum_members, class_members) = find_unused_members(
-                                    graph,
-                                    resolved_modules,
-                                    modules,
-                                    &suppressions,
-                                    &line_offsets_by_file,
-                                    &user_class_members,
-                                    &config.ignore_decorators,
-                                );
+                                let (enum_members, class_members) =
+                                    find_unused_members_with_public_api_entry_points(
+                                        graph,
+                                        resolved_modules,
+                                        modules,
+                                        &suppressions,
+                                        &line_offsets_by_file,
+                                        &user_class_members,
+                                        &config.ignore_decorators,
+                                        &public_api_entry_points,
+                                    );
                                 if config.rules.unused_enum_members != Severity::Off {
                                     results.unused_enum_members = enum_members
                                         .into_iter()

@@ -1,0 +1,9 @@
+{
+  "name": "issue-643-public-api-class-members",
+  "main": "./index.js",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    "./subpath": "./src/subpath.ts"
+  }
+}

@@ -12,6 +12,7 @@ use rustc_hash::FxHashSet;
 pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 
 // Re-export public functions — preserves the existing `crate::discover::*` API
+pub(crate) use entry_points::resolve_entry_path;
 pub use entry_points::{
     CategorizedEntryPoints, compile_glob_set, discover_dynamically_loaded_entry_points,
     discover_entry_points, discover_plugin_entry_point_sets, discover_plugin_entry_points,

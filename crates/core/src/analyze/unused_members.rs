@@ -10,7 +10,7 @@ use crate::extract::{
     INSTANCE_EXPORT_SENTINEL, MemberKind, ModuleInfo, PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
     PLAYWRIGHT_FIXTURE_USE_SENTINEL,
 };
-use crate::graph::ModuleGraph;
+use crate::graph::{ModuleGraph, ReferenceKind};
 use crate::resolve::{ResolveResult, ResolvedModule};
 use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
@@ -525,6 +525,77 @@ fn export_key_with_origins(graph: &ModuleGraph, key: &ExportKey) -> Vec<ExportKe
         push_export_key(&mut keys, origin);
     }
     keys
+}
+
+fn entry_point_star_re_export_targets(
+    graph: &ModuleGraph,
+    public_api_entry_points: &FxHashSet<FileId>,
+) -> FxHashSet<FileId> {
+    let mut targets: FxHashSet<FileId> = public_api_entry_points
+        .iter()
+        .filter_map(|file_id| graph.modules.get(file_id.0 as usize))
+        .flat_map(|module| {
+            module
+                .re_exports
+                .iter()
+                .filter(|re_export| re_export.exported_name == "*")
+                .map(|re_export| re_export.source_file)
+        })
+        .collect();
+
+    let mut stack: Vec<FileId> = targets.iter().copied().collect();
+    while let Some(file_id) = stack.pop() {
+        let Some(module) = graph.modules.get(file_id.0 as usize) else {
+            continue;
+        };
+        for re_export in module
+            .re_exports
+            .iter()
+            .filter(|re_export| re_export.exported_name == "*")
+        {
+            if targets.insert(re_export.source_file) {
+                stack.push(re_export.source_file);
+            }
+        }
+    }
+
+    targets
+}
+
+fn export_has_class_members(export: &crate::graph::ExportSymbol) -> bool {
+    export.members.iter().any(|member| {
+        matches!(
+            member.kind,
+            MemberKind::ClassMethod | MemberKind::ClassProperty
+        )
+    })
+}
+
+fn export_has_entry_point_re_export_reference(
+    graph: &ModuleGraph,
+    export: &crate::graph::ExportSymbol,
+    public_api_entry_points: &FxHashSet<FileId>,
+) -> bool {
+    export.references.iter().any(|reference| {
+        reference.kind == ReferenceKind::ReExport
+            && public_api_entry_points.contains(&reference.from_file)
+            && graph
+                .modules
+                .get(reference.from_file.0 as usize)
+                .is_some_and(|module| module.is_entry_point())
+    })
+}
+
+fn is_entry_point_public_class_export(
+    graph: &ModuleGraph,
+    module: &crate::graph::ModuleNode,
+    export: &crate::graph::ExportSymbol,
+    entry_star_targets: &FxHashSet<FileId>,
+    public_api_entry_points: &FxHashSet<FileId>,
+) -> bool {
+    export_has_class_members(export)
+        && (entry_star_targets.contains(&module.file_id)
+            || export_has_entry_point_re_export_reference(graph, export, public_api_entry_points))
 }
 
 fn parse_playwright_fixture_sentinel<'a>(
@@ -1144,14 +1215,11 @@ fn propagate_class_inheritance(
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "member tracking requires many graph traversal steps; further splitting is possible but not yet a priority"
-)]
 #[deprecated(
     since = "2.76.0",
     note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
 )]
+#[allow(dead_code, reason = "kept for the deprecated fallow_core helper API")]
 pub fn find_unused_members(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
@@ -1160,6 +1228,33 @@ pub fn find_unused_members(
     line_offsets_by_file: &LineOffsetsMap<'_>,
     user_class_member_allowlist: &[UsedClassMemberRule],
     ignore_decorators: &[String],
+) -> (Vec<UnusedMember>, Vec<UnusedMember>) {
+    find_unused_members_with_public_api_entry_points(
+        graph,
+        resolved_modules,
+        modules,
+        suppressions,
+        line_offsets_by_file,
+        user_class_member_allowlist,
+        ignore_decorators,
+        &FxHashSet::default(),
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "member tracking requires many graph traversal steps; further splitting is possible but not yet a priority"
+)]
+pub(super) fn find_unused_members_with_public_api_entry_points(
+    graph: &ModuleGraph,
+    resolved_modules: &[ResolvedModule],
+    modules: &[ModuleInfo],
+    suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    user_class_member_allowlist: &[UsedClassMemberRule],
+    ignore_decorators: &[String],
+    public_api_entry_points: &FxHashSet<FileId>,
 ) -> (Vec<UnusedMember>, Vec<UnusedMember>) {
     let mut unused_enum_members = Vec::new();
     let mut unused_class_members = Vec::new();
@@ -1472,6 +1567,8 @@ pub fn find_unused_members(
         &mut self_accessed_members,
     );
 
+    let entry_star_targets = entry_point_star_re_export_targets(graph, public_api_entry_points);
+
     let member_results: Vec<(Vec<UnusedMember>, Vec<UnusedMember>)> = graph
         .modules
         .par_iter()
@@ -1513,6 +1610,14 @@ pub fn find_unused_members(
                     continue;
                 }
 
+                let is_public_api_class_export = is_entry_point_public_class_export(
+                    graph,
+                    module,
+                    export,
+                    &entry_star_targets,
+                    public_api_entry_points,
+                );
+
                 // Get `this.member` accesses from this file (internal class usage)
                 let file_self_accesses = self_accessed_members.get(&module.file_id);
 
@@ -1522,6 +1627,15 @@ pub fn find_unused_members(
                     // unused-export detector, so a fully-unused namespace remains
                     // reported and only the per-member granularity is missing.
                     if matches!(member.kind, MemberKind::NamespaceMember) {
+                        continue;
+                    }
+
+                    if is_public_api_class_export
+                        && matches!(
+                            member.kind,
+                            MemberKind::ClassMethod | MemberKind::ClassProperty
+                        )
+                    {
                         continue;
                     }
 

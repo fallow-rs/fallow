@@ -75,6 +75,96 @@ fn exported_instance_class_members_are_credited_to_class() {
     );
 }
 
+#[test]
+fn public_api_class_members_reexported_from_entry_points_are_not_reported() {
+    let root = fixture_path("issue-643-public-api-class-members");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<(String, String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| {
+            let path = m
+                .member
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&m.member.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            (
+                path,
+                m.member.parent_name.clone(),
+                m.member.member_name.clone(),
+            )
+        })
+        .collect();
+
+    for public_member in [
+        ("src/named-builder.ts", "NamedBuilder", "notNull"),
+        ("src/named-builder.ts", "NamedBuilder", "default"),
+        ("src/renamed-builder.ts", "RenamedBuilder", "columnType"),
+        ("src/default-builder.ts", "DefaultBuilder", "select"),
+        ("src/star-builder.ts", "StarBuilder", "publicApi"),
+        ("src/subpath-builder.ts", "SubpathBuilder", "transaction"),
+        ("src/gel-database.ts", "GelDatabase", "select"),
+        ("src/gel-database.ts", "GelDatabase", "transaction"),
+    ] {
+        assert!(
+            !unused_class_members.contains(&(
+                public_member.0.to_string(),
+                public_member.1.to_string(),
+                public_member.2.to_string(),
+            )),
+            "entry-point public API class members should not be reported, found: {unused_class_members:?}"
+        );
+    }
+
+    assert!(
+        unused_class_members.contains(&(
+            "src/internal.ts".to_string(),
+            "InternalOnly".to_string(),
+            "unused".to_string(),
+        )),
+        "reachable internal class members should still be reported, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&(
+            "src/internal.ts".to_string(),
+            "InternalOnly".to_string(),
+            "used".to_string(),
+        )),
+        "used internal class members should not be reported, found: {unused_class_members:?}"
+    );
+
+    let unused_enum_members: Vec<(String, String, String)> = results
+        .unused_enum_members
+        .iter()
+        .map(|m| {
+            let path = m
+                .member
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&m.member.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            (
+                path,
+                m.member.parent_name.clone(),
+                m.member.member_name.clone(),
+            )
+        })
+        .collect();
+    assert!(
+        unused_enum_members.contains(&(
+            "src/status.ts".to_string(),
+            "PublicStatus".to_string(),
+            "External".to_string(),
+        )),
+        "entry-point enum member behavior is unchanged by the public class API skip, found: {unused_enum_members:?}"
+    );
+}
+
 // ── Cross-package enum/class member access (issue #178) ────────
 
 #[test]
