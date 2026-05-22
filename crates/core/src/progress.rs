@@ -1,46 +1,45 @@
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use std::time::Duration;
 
-/// Progress reporter for analysis stages.
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+
+/// Process-wide progress reporter for analysis stages.
 pub struct AnalysisProgress {
-    multi: MultiProgress,
-    enabled: bool,
+    pb: Option<ProgressBar>,
 }
 
 impl AnalysisProgress {
     /// Create a new progress reporter.
     #[must_use]
     pub fn new(enabled: bool) -> Self {
-        Self {
-            multi: MultiProgress::new(),
-            enabled,
-        }
-    }
-
-    /// Create a spinner for a stage.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the progress template string is invalid (compile-time constant).
-    #[must_use]
-    pub fn stage_spinner(&self, message: &str) -> ProgressBar {
-        if !self.enabled {
-            return ProgressBar::hidden();
+        if !enabled {
+            return Self { pb: None };
         }
 
-        let pb = self.multi.add(ProgressBar::new_spinner());
+        let pb = ProgressBar::with_draw_target(None, ProgressDrawTarget::stderr_with_hz(30));
         pb.set_style(
-            ProgressStyle::with_template("{spinner:.cyan} {msg}")
+            ProgressStyle::with_template("{spinner:.cyan} fallow: {msg} ({elapsed})")
                 .expect("valid progress template")
                 .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ "),
         );
-        pb.set_message(message.to_string());
-        pb.enable_steady_tick(std::time::Duration::from_millis(80));
-        pb
+        pb.set_message("starting");
+        pb.tick();
+        pb.enable_steady_tick(Duration::from_millis(80));
+
+        Self { pb: Some(pb) }
     }
 
-    /// Finish all progress bars.
+    /// Update the current analysis stage.
+    pub fn set_stage(&self, message: &str) {
+        if let Some(pb) = &self.pb {
+            pb.set_message(message.to_string());
+        }
+    }
+
+    /// Finish and clear the progress spinner.
     pub fn finish(&self) {
-        let _ = self.multi.clear();
+        if let Some(pb) = &self.pb {
+            pb.finish_and_clear();
+        }
     }
 }
 

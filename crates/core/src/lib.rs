@@ -446,11 +446,10 @@ pub fn analyze_with_parse_result(
 
     // Stage 1: Discover files (cheap — needed for file registry and resolution)
     let t = Instant::now();
-    let pb = progress.stage_spinner("Discovering files...");
+    progress.set_stage("discovering files...");
     let discovered_files =
         discover::discover_files_with_additional_hidden_dirs(config, &discovery_hidden_dir_scopes);
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
-    pb.finish_and_clear();
 
     let project = project::ProjectState::new(discovered_files, workspaces_vec);
     let files = project.files();
@@ -459,7 +458,7 @@ pub fn analyze_with_parse_result(
 
     // Stage 1.5: Run plugin system
     let t = Instant::now();
-    let pb = progress.stage_spinner("Detecting plugins...");
+    progress.set_stage("detecting plugins...");
     let mut plugin_result = run_plugins(
         config,
         files,
@@ -468,7 +467,6 @@ pub fn analyze_with_parse_result(
         &workspace_pkgs,
     );
     let plugins_ms = t.elapsed().as_secs_f64() * 1000.0;
-    pb.finish_and_clear();
 
     // Stage 1.6: Analyze package.json scripts
     let t = Instant::now();
@@ -500,7 +498,7 @@ pub fn analyze_with_parse_result(
 
     // Stage 4: Resolve imports to file IDs
     let t = Instant::now();
-    let pb = progress.stage_spinner("Resolving imports...");
+    progress.set_stage("resolving imports...");
     let mut resolved = resolve::resolve_all_imports(
         modules,
         files,
@@ -518,11 +516,10 @@ pub fn analyze_with_parse_result(
         &plugin_result,
     );
     let resolve_ms = t.elapsed().as_secs_f64() * 1000.0;
-    pb.finish_and_clear();
 
     // Stage 5: Build module graph
     let t = Instant::now();
-    let pb = progress.stage_spinner("Building module graph...");
+    progress.set_stage("building module graph...");
     let mut graph = graph::ModuleGraph::build_with_reachability_roots(
         &resolved,
         &entry_points.all,
@@ -532,11 +529,10 @@ pub fn analyze_with_parse_result(
     );
     credit_workspace_package_usage(&mut graph, &resolved, workspaces);
     let graph_ms = t.elapsed().as_secs_f64() * 1000.0;
-    pb.finish_and_clear();
 
     // Stage 6: Analyze for dead code
     let t = Instant::now();
-    let pb = progress.stage_spinner("Analyzing...");
+    progress.set_stage("analyzing...");
     #[expect(
         deprecated,
         reason = "ADR-008 keeps workspace path-dependency calls while warning external fallow-core consumers"
@@ -551,7 +547,6 @@ pub fn analyze_with_parse_result(
         false,
     );
     let analyze_ms = t.elapsed().as_secs_f64() * 1000.0;
-    pb.finish_and_clear();
     progress.finish();
 
     result.entry_point_summary = Some(ep_summary);
@@ -686,11 +681,10 @@ fn analyze_full(
 
     // Stage 1: Discover all source files
     let t = Instant::now();
-    let pb = progress.stage_spinner("Discovering files...");
+    progress.set_stage("discovering files...");
     let discovered_files =
         discover::discover_files_with_additional_hidden_dirs(config, &discovery_hidden_dir_scopes);
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
-    pb.finish_and_clear();
 
     // Build ProjectState: owns the file registry with stable FileIds and workspace metadata.
     // This is the foundation for cross-workspace resolution and future incremental analysis.
@@ -701,7 +695,7 @@ fn analyze_full(
 
     // Stage 1.5: Run plugin system — parse config files, discover dynamic entries
     let t = Instant::now();
-    let pb = progress.stage_spinner("Detecting plugins...");
+    progress.set_stage("detecting plugins...");
     let mut plugin_result = run_plugins(
         config,
         files,
@@ -710,7 +704,6 @@ fn analyze_full(
         &workspace_pkgs,
     );
     let plugins_ms = t.elapsed().as_secs_f64() * 1000.0;
-    pb.finish_and_clear();
 
     // Stage 1.6: Analyze package.json scripts for binary usage and config file refs
     let t = Instant::now();
@@ -725,7 +718,7 @@ fn analyze_full(
 
     // Stage 2: Parse all files in parallel and extract imports/exports
     let t = Instant::now();
-    let pb = progress.stage_spinner(&format!("Parsing {} files...", files.len()));
+    progress.set_stage(&format!("parsing {} files...", files.len()));
     let cache_max_size_bytes = resolve_cache_max_size_bytes(config);
     let mut cache_store = if config.no_cache {
         None
@@ -742,7 +735,6 @@ fn analyze_full(
     let cache_hits = parse_result.cache_hits;
     let cache_misses = parse_result.cache_misses;
     let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
-    pb.finish_and_clear();
 
     // Update cache with freshly parsed modules and refresh stale mtime/size entries.
     let t = Instant::now();
@@ -773,7 +765,7 @@ fn analyze_full(
 
     // Stage 4: Resolve imports to file IDs
     let t = Instant::now();
-    let pb = progress.stage_spinner("Resolving imports...");
+    progress.set_stage("resolving imports...");
     let mut resolved = resolve::resolve_all_imports(
         &modules,
         files,
@@ -791,11 +783,10 @@ fn analyze_full(
         &plugin_result,
     );
     let resolve_ms = t.elapsed().as_secs_f64() * 1000.0;
-    pb.finish_and_clear();
 
     // Stage 5: Build module graph
     let t = Instant::now();
-    let pb = progress.stage_spinner("Building module graph...");
+    progress.set_stage("building module graph...");
     let mut graph = graph::ModuleGraph::build_with_reachability_roots(
         &resolved,
         &entry_points.all,
@@ -805,14 +796,13 @@ fn analyze_full(
     );
     credit_workspace_package_usage(&mut graph, &resolved, workspaces);
     let graph_ms = t.elapsed().as_secs_f64() * 1000.0;
-    pb.finish_and_clear();
 
     // Compute entry-point summary before the graph consumes the entry_points vec
     let ep_summary = summarize_entry_points(&entry_points.all);
 
     // Stage 6: Analyze for dead code (with plugin context and workspace info)
     let t = Instant::now();
-    let pb = progress.stage_spinner("Analyzing...");
+    progress.set_stage("analyzing...");
     #[expect(
         deprecated,
         reason = "ADR-008 keeps workspace path-dependency calls while warning external fallow-core consumers"
@@ -827,7 +817,6 @@ fn analyze_full(
         collect_usages,
     );
     let analyze_ms = t.elapsed().as_secs_f64() * 1000.0;
-    pb.finish_and_clear();
     progress.finish();
 
     result.entry_point_summary = Some(ep_summary);
