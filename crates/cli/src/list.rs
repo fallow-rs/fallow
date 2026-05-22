@@ -233,11 +233,15 @@ fn print_list_json(
     if (opts.files || show_all)
         && let Some(disc) = discovered
     {
+        // Normalise to forward slashes on Windows so JSON consumers (CI
+        // glob filters, MCP agents, downstream pipelines) get the same
+        // path shape they get on POSIX. Mirrors the workspaces / nudge /
+        // rollup path normalisation that ships through `format_display_path`.
         let paths: Vec<serde_json::Value> = disc
             .iter()
             .map(|f| {
                 let relative = f.path.strip_prefix(opts.root).unwrap_or(&f.path);
-                serde_json::json!(relative.display().to_string())
+                serde_json::json!(relative.display().to_string().replace('\\', "/"))
             })
             .collect();
         result.insert("file_count".to_string(), serde_json::json!(paths.len()));
@@ -250,7 +254,7 @@ fn print_list_json(
             .map(|ep| {
                 let relative = ep.path.strip_prefix(opts.root).unwrap_or(&ep.path);
                 serde_json::json!({
-                    "path": relative.display().to_string(),
+                    "path": relative.display().to_string().replace('\\', "/"),
                     "source": ep.source.to_string(),
                 })
             })
