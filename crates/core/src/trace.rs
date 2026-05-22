@@ -11,20 +11,27 @@ use crate::graph::{ModuleGraph, ReferenceKind};
 /// Handles monorepo scenarios where module paths may be canonicalized
 /// (symlinks resolved) while user-provided paths are not.
 fn path_matches(module_path: &Path, root: &Path, user_path: &str) -> bool {
+    // Normalise to forward slashes on both sides so user-supplied
+    // forward-slashed input (`src/utils.ts`, the shape MCP and most
+    // cross-platform tooling produces) matches Windows-shaped module
+    // paths (`D:\a\...\src\utils.ts`). Without this, the four byte-level
+    // string comparisons below all silently miss on Windows even though
+    // the file is in the graph. POSIX is a no-op.
+    let user_path_norm = user_path.replace('\\', "/");
     let rel = module_path.strip_prefix(root).unwrap_or(module_path);
-    let rel_str = rel.to_string_lossy();
-    if rel_str == user_path || module_path.to_string_lossy() == user_path {
+    let rel_str = rel.to_string_lossy().replace('\\', "/");
+    let module_str = module_path.to_string_lossy().replace('\\', "/");
+    if rel_str == user_path_norm || module_str == user_path_norm {
         return true;
     }
     if dunce::canonicalize(root).is_ok_and(|canonical_root| {
         module_path
             .strip_prefix(&canonical_root)
-            .is_ok_and(|rel| rel.to_string_lossy() == user_path)
+            .is_ok_and(|rel| rel.to_string_lossy().replace('\\', "/") == user_path_norm)
     }) {
         return true;
     }
-    let module_str = module_path.to_string_lossy();
-    module_str.ends_with(&format!("/{user_path}"))
+    module_str.ends_with(&format!("/{user_path_norm}"))
 }
 
 /// Result of tracing an export: why is it considered used or unused?
@@ -981,5 +988,33 @@ mod tests {
             !json.contains("\"/project/"),
             "serialized trace should not leak absolute paths: {json}",
         );
+    }
+
+    /// Regression for the MCP e2e `trace_export` / `trace_file` Windows
+    /// failures: the MCP layer passes forward-slashed user input
+    /// (`src/utils.ts`) but `module_path` on Windows uses backslash
+    /// separators (`D:\a\fallow\...\src\utils.ts`). The byte-level
+    /// equality check missed every match. The helper now normalises
+    /// both sides to forward slashes before comparing.
+    #[test]
+    fn path_matches_normalises_windows_module_path_against_posix_user_path() {
+        let root = Path::new(r"D:\a\fallow\fallow\tests\fixtures\basic-project");
+        let module_path =
+            PathBuf::from(r"D:\a\fallow\fallow\tests\fixtures\basic-project\src\utils.ts");
+        // user_path uses forward slashes (the shape MCP and other
+        // cross-platform tooling emit), but the stored path uses
+        // Windows backslashes. The helper should still match.
+        assert!(path_matches(&module_path, root, "src/utils.ts"));
+        assert!(path_matches(&module_path, root, r"src\utils.ts"));
+    }
+
+    #[test]
+    fn path_matches_ends_with_fallback_handles_mixed_separators() {
+        let root = Path::new("/some/other/root");
+        let module_path =
+            PathBuf::from(r"D:\a\fallow\fallow\tests\fixtures\basic-project\src\utils.ts");
+        // root does not prefix module_path; the ends_with("/src/utils.ts")
+        // fallback should still match once both sides are forward-slashed.
+        assert!(path_matches(&module_path, root, "src/utils.ts"));
     }
 }
