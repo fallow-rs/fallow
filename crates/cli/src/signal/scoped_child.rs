@@ -56,6 +56,18 @@ impl ScopedChild {
     /// OS-level process id of the underlying child. Returns `0` if the
     /// child has been consumed; used by the test-helper subcommand to
     /// surface the PID so integration tests can probe its liveness.
+    ///
+    /// The only call site is the cfg(unix) `signal_test_helper` in
+    /// `main.rs`; on Windows the helper is excluded so this method has
+    /// no caller. Tag with `dead_code` exempt rather than gating with
+    /// `#[cfg(unix)]` to keep the public surface symmetric for embedders.
+    #[cfg_attr(
+        not(unix),
+        expect(
+            dead_code,
+            reason = "only consumed by the cfg(unix) signal_test_helper in main.rs"
+        )
+    )]
     pub fn id(&self) -> u32 {
         self.inner.as_ref().map_or(0, Child::id)
     }
@@ -133,6 +145,10 @@ pub fn output(command: &mut Command) -> io::Result<Output> {
 mod tests {
     use super::*;
 
+    // The only callers (`scoped_child_drop_deregisters` and
+    // `scoped_child_wait_deregisters_and_succeeds`) are cfg(unix), so on
+    // Windows this helper has no consumer. Gate with cfg(unix) rather than
+    // a per-arm `#[expect(dead_code)]` to keep the intent obvious.
     #[cfg(unix)]
     fn assert_deregistered(id: u64) {
         // The registry is private; deregister is idempotent so calling
