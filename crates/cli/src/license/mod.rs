@@ -17,7 +17,7 @@ use std::process::ExitCode;
 use ed25519_dalek::VerifyingKey;
 use fallow_license::{
     DEFAULT_HARD_FAIL_DAYS, Feature, LicenseError, LicenseStatus, current_unix_seconds,
-    default_license_path, normalize_jwt, verify_jwt,
+    default_license_path, normalize_jwt, skew_tolerance_seconds_from_env, verify_jwt_with_skew,
 };
 use serde::Deserialize;
 
@@ -129,7 +129,13 @@ fn run_activate(args: &ActivateArgs) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    match verify_jwt(&jwt, &key, current_unix_seconds(), DEFAULT_HARD_FAIL_DAYS) {
+    match verify_jwt_with_skew(
+        &jwt,
+        &key,
+        current_unix_seconds(),
+        DEFAULT_HARD_FAIL_DAYS,
+        skew_tolerance_seconds_from_env(),
+    ) {
         Ok(status) => {
             if let Err(msg) = persist_jwt(&jwt) {
                 eprintln!("fallow license: {msg}");
@@ -354,7 +360,13 @@ fn store_verified_jwt(
 
 fn verify_downloaded_jwt(jwt: &str) -> Result<LicenseStatus, String> {
     let key = verifying_key()?;
-    match verify_jwt(jwt, &key, current_unix_seconds(), DEFAULT_HARD_FAIL_DAYS) {
+    match verify_jwt_with_skew(
+        jwt,
+        &key,
+        current_unix_seconds(),
+        DEFAULT_HARD_FAIL_DAYS,
+        skew_tolerance_seconds_from_env(),
+    ) {
         Ok(status) => Ok(status),
         Err(LicenseError::Truncated { .. }) => {
             Err(format!("{}", LicenseError::Truncated { actual: jwt.len() }))

@@ -47,6 +47,7 @@ Key modules:
 - `FALLOW_COVERAGE` — path to Istanbul coverage data for accurate CRAP scores
 - `FALLOW_LICENSE` — license JWT (full string). First-class storage path; intended for shared CI runners.
 - `FALLOW_LICENSE_PATH` — file path containing the license JWT.
+- `FALLOW_LICENSE_SKEW_TOLERANCE_SECONDS` — clock-skew tolerance applied to the JWT's `iat` claim during verification. Default 86_400 (24h). A JWT whose `iat` is more than this many seconds in the future relative to the local clock is rejected as `LicenseError::ClockSkew`. Lenient parsing: unset / empty / unparsable / negative all fall back to the default so a typo in a runner env block does not fail license verification. Consumed by `fallow_license::skew_tolerance_seconds_from_env()`; threaded through `verify_jwt_with_skew` at all CLI license call sites.
 - `FALLOW_COV_BIN` — explicit override for the closed-source `fallow-cov` sidecar binary (wins over project-local `node_modules/.bin`, package-manager `bin`, `~/.fallow/bin/`, and `PATH`). When set but the path is not a file, sidecar discovery fails fast with a targeted error rather than silently falling through.
 - `FALLOW_API_URL`: base URL for fallow cloud API calls (license refresh, trial, inventory upload). Trailing slashes are trimmed. Used for staging / local-dev overrides.
 - `FALLOW_API_KEY`: fallow cloud bearer token. Consumed by `fallow coverage upload-inventory` (flag `--api-key` wins) and `fallow coverage upload-source-maps` (env var only, no flag form, to keep the secret out of argv).
