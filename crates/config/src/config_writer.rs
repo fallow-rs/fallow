@@ -277,16 +277,21 @@ fn files_from_inline_array(array: &Array, config_dir: &Path) -> FxHashSet<String
 
 /// Insert an existing-entry path into the dedupe set under its canonical key.
 ///
-/// The canonical key is the entry as written. When the existing entry is an
-/// absolute path that resolves under the config dir, also insert the
-/// dir-relative form so a new entry emitted by the action builder (which is
-/// always config-dir-relative) is recognised as a duplicate.
+/// The canonical key is the entry as written. When the existing entry resolves
+/// under the config dir, also insert the dir-relative form so a new entry
+/// emitted by the action builder (which is always config-dir-relative) is
+/// recognised as a duplicate.
+///
+/// `strip_prefix` is called unconditionally: it naturally returns `Err` for
+/// values that do not start with `config_dir` (already-relative entries,
+/// entries pointing outside the project), so a `Path::is_absolute` /
+/// `Path::has_root` pre-gate is redundant. The pre-gate was actively wrong
+/// on Windows because `Path::is_absolute` requires a drive letter (`C:\`),
+/// so a POSIX-rooted entry like `/project/src/a.ts` written from Linux CI
+/// silently skipped the dir-relative dedup key.
 fn record_existing_file(seen: &mut FxHashSet<String>, file: &str, config_dir: &Path) {
     seen.insert(file.to_owned());
-    let path = Path::new(file);
-    if path.is_absolute()
-        && let Ok(relative) = path.strip_prefix(config_dir)
-    {
+    if let Ok(relative) = Path::new(file).strip_prefix(config_dir) {
         seen.insert(relative.to_string_lossy().replace('\\', "/"));
     }
 }
