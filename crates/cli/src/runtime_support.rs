@@ -1,7 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::{LazyLock, Mutex};
 
 use fallow_config::{FallowConfig, OutputFormat, ProductionAnalysis, ResolvedConfig};
+use rustc_hash::FxHashSet;
+
+static CONFIG_LOADED_LOGGED: LazyLock<Mutex<FxHashSet<PathBuf>>> =
+    LazyLock::new(|| Mutex::new(FxHashSet::default()));
 
 /// Analysis types for --only/--skip selection.
 #[derive(Clone, PartialEq, Eq, clap::ValueEnum)]
@@ -92,7 +97,15 @@ fn log_config_loaded(path: &Path, output: OutputFormat, quiet: bool) {
     if quiet || !matches!(output, OutputFormat::Human) {
         return;
     }
+    if !should_log_config_loaded(path) {
+        return;
+    }
     eprintln!("loaded config: {}", path.display());
+}
+
+fn should_log_config_loaded(path: &Path) -> bool {
+    let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    CONFIG_LOADED_LOGGED.lock().unwrap().insert(key)
 }
 
 #[expect(clippy::ref_option, reason = "&Option matches clap's field type")]
@@ -265,4 +278,22 @@ fn resolve_cache_max_size_env() -> Option<u32> {
         .ok()
         .and_then(|raw| raw.trim().parse::<u32>().ok())
         .filter(|mb| *mb > 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_loaded_notice_dedupes_by_config_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("first.fallow.json");
+        let second = dir.path().join("second.fallow.json");
+        std::fs::write(&first, "{}").unwrap();
+        std::fs::write(&second, "{}").unwrap();
+
+        assert!(should_log_config_loaded(&first));
+        assert!(!should_log_config_loaded(&first));
+        assert!(should_log_config_loaded(&second));
+    }
 }

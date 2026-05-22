@@ -2464,6 +2464,7 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
         opts.min_severity,
         opts.summary,
         true,
+        true,
         // Standalone `fallow health`: no upstream orientation header, render
         // the score / trend block inline.
         false,
@@ -2510,6 +2511,7 @@ pub fn print_health_result(
     min_score: Option<f64>,
     min_severity: Option<FindingSeverity>,
     summary: bool,
+    summary_heading: bool,
     show_explain_tip: bool,
     skip_score_and_trend: bool,
 ) -> ExitCode {
@@ -2522,6 +2524,7 @@ pub fn print_health_result(
         group_by: None,
         top: None,
         summary,
+        summary_heading,
         show_explain_tip,
         baseline_matched: None,
         config_fixable: false,
@@ -4137,7 +4140,7 @@ mod tests {
         };
 
         assert_eq!(
-            print_health_result(&result, true, false, None, None, false, true, false),
+            print_health_result(&result, true, false, None, None, false, true, true, false),
             ExitCode::from(1),
         );
     }

@@ -798,10 +798,11 @@ enum Command {
     ///
     /// Prints the rule rationale, a worked example, fix guidance, and the
     /// relevant docs URL. Accepts values like `unused-export`,
-    /// `fallow/unused-export`, `unused-exports`, and `code-duplication`.
+    /// `fallow/unused-export`, `unused exports`, and `code duplication`.
     Explain {
-        /// Issue type or rule id to explain
-        issue_type: String,
+        /// Issue type, issue label, or rule id to explain
+        #[arg(required = true, num_args = 1.., value_name = "ISSUE_TYPE")]
+        issue_type: Vec<String>,
     },
 
     /// Audit changed files for dead code, complexity, and duplication.
@@ -2519,7 +2520,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 top,
             })
         }
-        Command::Explain { issue_type } => explain::run_explain(&issue_type, output),
+        Command::Explain { issue_type } => explain::run_explain(&issue_type.join(" "), output),
         Command::Audit {
             production_dead_code,
             production_health,

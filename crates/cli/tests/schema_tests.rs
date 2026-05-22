@@ -65,6 +65,14 @@ fn explain_outputs_rule_guidance_as_json() {
 }
 
 #[test]
+fn explain_accepts_issue_labels_with_spaces() {
+    let output = run_fallow_raw(&["explain", "unused", "files", "--format", "json", "--quiet"]);
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["id"].as_str(), Some("fallow/unused-file"));
+}
+
+#[test]
 fn explain_compact_is_single_line() {
     let output = run_fallow_raw(&[
         "explain",

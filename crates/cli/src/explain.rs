@@ -288,7 +288,10 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         .strip_prefix("fallow/")
         .unwrap_or(trimmed)
         .trim_start_matches("--")
-        .replace('_', "-");
+        .replace('_', "-")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-");
     let alias = match normalized.as_str() {
         "unused-files" => Some("fallow/unused-file"),
         "unused-exports" => Some("fallow/unused-export"),
@@ -489,7 +492,7 @@ pub fn run_explain(issue_type: &str, output: OutputFormat) -> ExitCode {
     let Some(rule) = rule_by_token(issue_type) else {
         return crate::error::emit_error(
             &format!(
-                "unknown issue type '{issue_type}'. Try values like unused-export, unused-dependency, high-complexity, or code-duplication"
+                "unknown issue type '{issue_type}'. Try values like unused files, unused-export, high complexity, or code duplication"
             ),
             2,
             output,

@@ -504,6 +504,7 @@ pub struct PrintCheckOptions {
     pub group_by: Option<report::OwnershipResolver>,
     pub top: Option<usize>,
     pub summary: bool,
+    pub summary_heading: bool,
     pub show_explain_tip: bool,
 }
 
@@ -526,6 +527,7 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
         group_by: opts.group_by,
         top: opts.top,
         summary: opts.summary,
+        summary_heading: opts.summary_heading,
         show_explain_tip: opts.show_explain_tip,
         baseline_matched: result.baseline_matched,
         config_fixable: result.config_fixable,
@@ -591,6 +593,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
             group_by: resolver,
             top: opts.top,
             summary: opts.summary,
+            summary_heading: true,
             show_explain_tip: true,
         },
     );

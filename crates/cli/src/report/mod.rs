@@ -47,6 +47,10 @@ pub struct ReportContext<'a> {
     pub top: Option<usize>,
     /// When set, print a concise summary instead of the full report.
     pub summary: bool,
+    /// Human-only: print the summary renderer's own title line. Combined mode
+    /// already prints section headers, so it disables this to avoid duplicate
+    /// "Dead Code" / "Dead Code Summary" headings.
+    pub summary_heading: bool,
     /// Human-only: print a one-line hint pointing at `fallow explain`.
     pub show_explain_tip: bool,
     /// When a baseline was loaded: (total entries in baseline, entries that matched).
@@ -197,7 +201,13 @@ pub fn print_results(
     match output {
         OutputFormat::Human => {
             if ctx.summary {
-                human::check::print_check_summary(results, ctx.rules, ctx.elapsed, ctx.quiet);
+                human::check::print_check_summary(
+                    results,
+                    ctx.rules,
+                    ctx.elapsed,
+                    ctx.quiet,
+                    ctx.summary_heading,
+                );
             } else {
                 human::print_human(
                     results,
@@ -348,7 +358,12 @@ pub fn print_duplication_report(
     match output {
         OutputFormat::Human => {
             if ctx.summary {
-                human::dupes::print_duplication_summary(report, ctx.elapsed, ctx.quiet);
+                human::dupes::print_duplication_summary(
+                    report,
+                    ctx.elapsed,
+                    ctx.quiet,
+                    ctx.summary_heading,
+                );
             } else {
                 human::print_duplication_human(
                     report,
@@ -506,7 +521,12 @@ pub fn print_health_report(
     match output {
         OutputFormat::Human => {
             if ctx.summary {
-                human::health::print_health_summary(report, ctx.elapsed, ctx.quiet);
+                human::health::print_health_summary(
+                    report,
+                    ctx.elapsed,
+                    ctx.quiet,
+                    ctx.summary_heading,
+                );
             } else {
                 human::print_health_human(
                     report,

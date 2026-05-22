@@ -3080,7 +3080,8 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
         if show_headers && std::io::stdout().is_terminal() {
             println!(
                 "{}",
-                "Tip: run `fallow explain <issue-type>` for any finding below.".dimmed()
+                "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."
+                    .dimmed()
             );
             println!();
         }
@@ -3104,6 +3105,7 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
                     group_by: None,
                     top: None,
                     summary: false,
+                    summary_heading: true,
                     show_explain_tip: false,
                 },
             );
@@ -3114,7 +3116,7 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
                 eprintln!();
                 eprintln!("── Duplication ────────────────────────────────────");
             }
-            crate::dupes::print_dupes_result(dupes, quiet, explain, false, false);
+            crate::dupes::print_dupes_result(dupes, quiet, explain, false, true, false);
         }
 
         if has_health_findings && let Some(ref health) = result.health {
@@ -3126,7 +3128,7 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
             // (no orientation header), so let the standalone health renderer
             // emit it inline like `fallow health`.
             crate::health::print_health_result(
-                health, quiet, explain, None, None, false, false, false,
+                health, quiet, explain, None, None, false, true, false, false,
             );
         }
     }

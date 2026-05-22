@@ -2038,6 +2038,7 @@ pub(in crate::report) fn print_check_summary(
     rules: &RulesConfig,
     elapsed: Duration,
     quiet: bool,
+    heading: bool,
 ) {
     let total = results.total_issues();
     if total == 0 {
@@ -2052,8 +2053,10 @@ pub(in crate::report) fn print_check_summary(
         return;
     }
 
-    println!("{}", "Dead Code Summary".bold());
-    println!();
+    if heading {
+        println!("{}", "Dead Code Summary".bold());
+        println!();
+    }
 
     let categories: &[(&str, usize, Level)] = &[
         (

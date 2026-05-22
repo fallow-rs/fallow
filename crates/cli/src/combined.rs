@@ -348,7 +348,8 @@ fn print_human_sections(
     if show_headers && has_any_findings && std::io::stdout().is_terminal() {
         println!(
             "{}",
-            "Tip: run `fallow explain <issue-type>` for any finding below.".dimmed()
+            "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."
+                .dimmed()
         );
         println!();
     }
@@ -367,6 +368,7 @@ fn print_human_sections(
                 group_by: resolver,
                 top: None,
                 summary: opts.summary,
+                summary_heading: !show_headers,
                 show_explain_tip: false,
             },
         );
@@ -378,8 +380,14 @@ fn print_human_sections(
             eprintln!();
             eprintln!("── Duplication ────────────────────────────────────");
         }
-        let code =
-            crate::dupes::print_dupes_result(result, opts.quiet, opts.explain, opts.summary, false);
+        let code = crate::dupes::print_dupes_result(
+            result,
+            opts.quiet,
+            opts.explain,
+            opts.summary,
+            !show_headers,
+            false,
+        );
         max_exit = max_exit.max(exit_code_to_u8(code));
     }
 
@@ -398,6 +406,7 @@ fn print_human_sections(
             None,
             None,
             opts.summary,
+            !show_headers,
             false,
             // Combined-mode orientation header already rendered the score /
             // trend; suppress here to avoid the duplicate `Health score:` line

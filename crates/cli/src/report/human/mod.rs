@@ -45,7 +45,8 @@ pub(super) fn print_explain_tip_if_tty(has_findings: bool, quiet: bool) {
     if has_findings && !quiet && std::io::stdout().is_terminal() {
         println!(
             "{}",
-            "Tip: run `fallow explain <issue-type>` for any finding below.".dimmed()
+            "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."
+                .dimmed()
         );
         println!();
     }

@@ -120,6 +120,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
         group_by: None,
         top: None,
         summary: false,
+        summary_heading: true,
         show_explain_tip: true,
         baseline_matched: None,
         config_fixable: crate::fix::is_config_fixable(&config.root, opts.config_path.as_ref()),

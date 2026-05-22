@@ -1744,11 +1744,14 @@ pub(in crate::report) fn print_health_summary(
     report: &crate::health_types::HealthReport,
     elapsed: Duration,
     quiet: bool,
+    heading: bool,
 ) {
     let s = &report.summary;
 
-    println!("{}", "Health Summary".bold());
-    println!();
+    if heading {
+        println!("{}", "Health Summary".bold());
+        println!();
+    }
     println!("  {:>6}  Functions analyzed", s.functions_analyzed);
     println!("  {:>6}  Above threshold", s.functions_above_threshold);
     if let Some(mi) = s.average_maintainability {

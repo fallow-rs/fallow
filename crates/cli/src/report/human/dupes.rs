@@ -403,6 +403,7 @@ pub(in crate::report) fn print_duplication_summary(
     report: &DuplicationReport,
     elapsed: Duration,
     quiet: bool,
+    heading: bool,
 ) {
     if report.clone_groups.is_empty() {
         if !quiet {
@@ -421,8 +422,10 @@ pub(in crate::report) fn print_duplication_summary(
 
     let stats = &report.stats;
 
-    println!("{}", "Duplication Summary".bold());
-    println!();
+    if heading {
+        println!("{}", "Duplication Summary".bold());
+        println!();
+    }
     println!("  {:>6}  Clone families", report.clone_families.len());
     println!("  {:>6}  Clone groups", report.clone_groups.len());
     println!(

@@ -523,6 +523,7 @@ pub fn print_dupes_result(
     quiet: bool,
     explain: bool,
     summary: bool,
+    summary_heading: bool,
     show_explain_tip: bool,
 ) -> ExitCode {
     let ctx = report::ReportContext {
@@ -534,6 +535,7 @@ pub fn print_dupes_result(
         group_by: None,
         top: None,
         summary,
+        summary_heading,
         show_explain_tip,
         baseline_matched: None,
         config_fixable: false,
@@ -580,6 +582,7 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
         opts.explain,
         resolver,
         opts.summary,
+        true,
         true,
     )
 }
@@ -646,6 +649,7 @@ fn print_dupes_result_with_grouping(
     explain: bool,
     group_by: Option<report::OwnershipResolver>,
     summary: bool,
+    summary_heading: bool,
     show_explain_tip: bool,
 ) -> ExitCode {
     let ctx = report::ReportContext {
@@ -657,6 +661,7 @@ fn print_dupes_result_with_grouping(
         group_by,
         top: None,
         summary,
+        summary_heading,
         show_explain_tip,
         baseline_matched: None,
         config_fixable: false,
