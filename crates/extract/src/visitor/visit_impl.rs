@@ -2343,50 +2343,6 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.class_super_stack.pop();
     }
 
-    /// Track `<script src="...">` and `<link rel="stylesheet|modulepreload" href="...">`
-    /// asset references inside JSX/TSX files as `SideEffect` imports.
-    ///
-    /// Mirrors the HTML parser in `crates/extract/src/html.rs`. SSR frameworks
-    /// like Hono serve HTML via JSX templates, and the user-written string
-    /// literals in these attributes point at files on disk that must stay
-    /// reachable. Without this, `src/static/style.css` referenced from a
-    /// `<link href="/static/style.css" />` in a Hono layout shows up as an
-    /// unused file. See issue #105 (till's comment).
-    ///
-    /// Only `JSXAttributeValue::StringLiteral` values are captured. Expression
-    /// containers (`href={someVar}`) and computed references are skipped: the
-    /// type system enforces this distinction cleanly.
-    ///
-    /// The element name must be a lowercase intrinsic `Identifier`
-    /// (`<script>`, `<link>`), not a React-style capitalized `IdentifierReference`
-    /// (`<Script>`, `<Link>`, which are components with their own props
-    /// semantics and are beyond scope).
-    fn visit_jsx_opening_element(&mut self, element: &JSXOpeningElement<'a>) {
-        if let JSXElementName::Identifier(tag) = &element.name {
-            let tag_name = tag.name.as_str();
-            match tag_name {
-                "script" => {
-                    if let Some(src) = find_string_attr(&element.attributes, "src") {
-                        self.push_jsx_asset_import(src);
-                    }
-                }
-                "link" => {
-                    // Only track <link rel="stylesheet|modulepreload" ...>.
-                    // Other rel values (icon, preload, canonical) are skipped
-                    // to match the HTML parser's whitelist exactly.
-                    if let Some(rel) = find_string_attr(&element.attributes, "rel")
-                        && (rel == "stylesheet" || rel == "modulepreload")
-                        && let Some(href) = find_string_attr(&element.attributes, "href")
-                    {
-                        self.push_jsx_asset_import(href);
-                    }
-                }
-                _ => {}
-            }
-        }
-        walk::walk_jsx_opening_element(self, element);
-    }
-
     /// Track asset references inside `` html`...` `` tagged template literals
     /// as `SideEffect` imports.
     ///
@@ -2396,8 +2352,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     /// dynamic content only. When a layout component writes
     /// `` html`<script src="/static/app.js"></script>` ``, the `/static/app.js`
     /// file must stay reachable from that module, exactly like the HTML parser
-    /// and the JSX `<script src>` override handle the same markup in other
-    /// file types. See issue #105 (till's follow-up comment).
+    /// handles the same markup in `.html` files. See issue #105 (till's
+    /// follow-up comment).
     ///
     /// Only the `Expression::Identifier` tag named `html` is matched — member
     /// expressions (`lit.html`), call expressions, and other identifiers are
@@ -2414,7 +2370,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     .as_ref()
                     .map_or_else(|| quasi.value.raw.as_str(), |c| c.as_str());
                 for raw in crate::html::collect_asset_refs(text) {
-                    self.push_jsx_asset_import(&raw);
+                    self.push_html_template_asset_import(&raw);
                 }
             }
         }
@@ -2476,9 +2432,9 @@ fn is_html_tagged_template(tag: &Expression<'_>) -> bool {
 }
 
 impl ModuleInfoExtractor {
-    /// Push a JSX-sourced asset reference onto `imports`, mirroring the HTML
-    /// parser's `is_remote_url` → `normalize_asset_url` → `SideEffect` pipeline.
-    fn push_jsx_asset_import(&mut self, raw: &str) {
+    /// Push an HTML-template-sourced asset reference onto `imports`, mirroring
+    /// the HTML parser's remote-url, normalization, and `SideEffect` pipeline.
+    fn push_html_template_asset_import(&mut self, raw: &str) {
         let trimmed = raw.trim();
         if trimmed.is_empty() || is_remote_url(trimmed) {
             return;
@@ -2493,31 +2449,4 @@ impl ModuleInfoExtractor {
             source_span: oxc_span::Span::default(),
         });
     }
-}
-
-/// Find a JSX attribute by name and return its string-literal value if any.
-///
-/// Returns `None` if the attribute is missing, spread (`{...props}`), namespaced
-/// (`foo:bar`), boolean-valued, or non-string (expression container, element,
-/// fragment).
-fn find_string_attr<'a, 'b>(
-    attributes: &'b oxc_allocator::Vec<'a, JSXAttributeItem<'a>>,
-    name: &str,
-) -> Option<&'b str> {
-    for item in attributes {
-        let JSXAttributeItem::Attribute(attr) = item else {
-            continue;
-        };
-        let JSXAttributeName::Identifier(attr_name) = &attr.name else {
-            continue;
-        };
-        if attr_name.name.as_str() != name {
-            continue;
-        }
-        let Some(JSXAttributeValue::StringLiteral(lit)) = &attr.value else {
-            return None;
-        };
-        return Some(lit.value.as_str());
-    }
-    None
 }

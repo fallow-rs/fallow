@@ -957,13 +957,11 @@ pub(super) fn resolve_specifier(
     // the base, which is correct for both workspace members and single projects.
     //
     // Applied to web-facing source files: HTML, JSX/TSX, plain JS/TS, and
-    // Glimmer files. The JSX/TSX case covers SSR frameworks like Hono where JSX
-    // templates emit `<link href="/static/style.css" />`: these paths cannot be
-    // AST-resolved and have the same web-root semantics as HTML. See issue #105
-    // (till's comment). Applied unconditionally to JS/TS too because the JSX
-    // visitor emits `ImportInfo` with the raw attribute value, and the file
-    // extension after JSX retry may not reflect the original source (`.js`
-    // files with JSX still parse as JSX and get their asset refs recorded here).
+    // Glimmer files. HTML-like asset extraction can originate from `.html`
+    // parsing or from `html` tagged templates in JS/TS-family files, so keep
+    // the source extension set broad even though generic JSX resource
+    // attributes are intentionally ignored by default. See issues #105 and
+    // #640.
     if specifier.starts_with('/')
         && from_file.extension().is_some_and(|e| {
             matches!(

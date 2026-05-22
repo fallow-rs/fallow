@@ -1,5 +1,7 @@
-// A Hono-style layout component that emits HTML via JSX. The asset
-// references must be tracked so sibling files in `static/` stay reachable.
+import "./jsdoc-consumer.js";
+
+// A Hono-style layout component that emits HTML via JSX. These resource
+// attributes are runtime HTML metadata and should not become module imports.
 export const Layout = () => (
   <html>
     <head>

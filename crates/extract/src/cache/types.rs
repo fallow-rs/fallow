@@ -51,7 +51,12 @@ use crate::MemberKind;
 /// `into_module_info`. Pre-fix entries for `.gts` / `.gjs` files omit both,
 /// so template-only imports surface as `unused-import` and template-only
 /// class members as `unused-class-member` until the cache is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 95;
+///
+/// Bumped to 96 for issue #640: generic JSX `<script src>` and
+/// `<link rel="stylesheet|modulepreload" href>` attributes no longer emit
+/// synthetic `SideEffect` imports, so pre-fix entries can carry stale JSX
+/// resource edges that surface as false `unresolved-imports`.
+pub(super) const CACHE_VERSION: u32 = 96;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

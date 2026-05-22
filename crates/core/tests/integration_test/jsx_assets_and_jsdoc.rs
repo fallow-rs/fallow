@@ -1,68 +1,47 @@
-//! Integration tests for JSX asset tracking and JSDoc `import()` type
-//! extraction, both landed for issue #105 (till's comment).
+//! Integration tests for issue #640 and the JSDoc `import()` type extraction
+//! that landed with issue #105.
 //!
-//! The fixture (`tests/fixtures/jsx-assets-and-jsdoc/`) models a Hono-style
-//! layout: `src/layout.tsx` is the entry point and emits HTML via JSX with
-//! root-relative `<link rel="stylesheet" href="/static/style.css" />`,
-//! `<link rel="modulepreload" href="/static/vendor.js" />`, and
-//! `<script src="/static/app.js" />` references. The `static/app.js` file in
-//! turn references `src/lib/types.ts::Config` only via a JSDoc
-//! `@param cfg {import('../src/lib/types.ts').Config}` annotation — no ES
-//! import statement binds it. Together, these exercise:
-//!
-//! 1. JSX asset tracking routing through the web-root-relative resolver
-//!    branch (which previously only fired for `.html` source files).
-//! 2. JSDoc `import()` scanner recording the type reference so `Config` is
-//!    not flagged as unused.
-//! 3. End-to-end reachability propagation: JSX → `static/app.js` (SideEffect)
-//!    → JSDoc → `src/lib/types.ts` (type-only).
+//! The fixture (`tests/fixtures/jsx-assets-and-jsdoc/`) models a TSX layout
+//! that emits HTML metadata via JSX. Generic JSX resource attributes should not
+//! become module graph edges or unresolved imports. The same fixture keeps the
+//! JSDoc type-reference coverage on a normal JavaScript side-effect import so
+//! it no longer depends on JSX asset reachability.
+
+use fallow_types::results::AnalysisResults;
 
 use super::common::{create_config, fixture_path};
 
-#[test]
-fn jsx_layout_makes_static_assets_reachable() {
+fn analyze_fixture() -> AnalysisResults {
     let root = fixture_path("jsx-assets-and-jsdoc");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    fallow_core::analyze(&config).expect("analysis should succeed")
+}
 
-    let unused_file_names: Vec<String> = results
-        .unused_files
+#[test]
+fn jsx_resource_attributes_do_not_emit_unresolved_imports() {
+    let results = analyze_fixture();
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
         .iter()
-        .map(|f| {
-            f.file
-                .path
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_string()
-        })
+        .map(|issue| issue.import.specifier.as_str())
         .collect();
 
-    assert!(
-        !unused_file_names.contains(&"style.css".to_string()),
-        "static/style.css should be reachable via JSX <link href>, unused: {unused_file_names:?}"
-    );
-    assert!(
-        !unused_file_names.contains(&"vendor.js".to_string()),
-        "static/vendor.js should be reachable via JSX <link rel=modulepreload>, unused: {unused_file_names:?}"
-    );
-    assert!(
-        !unused_file_names.contains(&"app.js".to_string()),
-        "static/app.js should be reachable via JSX <script src>, unused: {unused_file_names:?}"
-    );
+    for specifier in ["/static/style.css", "/static/vendor.js", "/static/app.js"] {
+        assert!(
+            !unresolved_specifiers.contains(&specifier),
+            "{specifier} should be treated as a JSX runtime attribute, unresolved: {unresolved_specifiers:?}"
+        );
+    }
 }
 
 #[test]
 fn jsdoc_import_type_makes_referenced_types_module_reachable() {
-    let root = fixture_path("jsx-assets-and-jsdoc");
-    let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
-
+    let results = analyze_fixture();
     let unused_file_names: Vec<String> = results
         .unused_files
         .iter()
-        .map(|f| {
-            f.file
+        .map(|file| {
+            file.file
                 .path
                 .file_name()
                 .unwrap()
@@ -73,22 +52,18 @@ fn jsdoc_import_type_makes_referenced_types_module_reachable() {
 
     assert!(
         !unused_file_names.contains(&"types.ts".to_string()),
-        "src/lib/types.ts should be reachable via JSDoc import() in static/app.js, unused: {unused_file_names:?}"
+        "src/lib/types.ts should be reachable via JSDoc import() in src/jsdoc-consumer.js, unused: {unused_file_names:?}"
     );
 }
 
 #[test]
 fn jsdoc_referenced_type_not_flagged_unused() {
-    let root = fixture_path("jsx-assets-and-jsdoc");
-    let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = analyze_fixture();
 
-    // `Config` is only referenced via JSDoc import() in static/app.js. With
-    // the scanner, it should NOT be flagged as an unused type export.
     let unused_type_names: Vec<&str> = results
         .unused_types
         .iter()
-        .map(|e| e.export.export_name.as_str())
+        .map(|export| export.export.export_name.as_str())
         .collect();
 
     assert!(
@@ -99,21 +74,16 @@ fn jsdoc_referenced_type_not_flagged_unused() {
 
 #[test]
 fn jsdoc_scanner_does_not_credit_unrelated_types() {
-    let root = fixture_path("jsx-assets-and-jsdoc");
-    let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let results = analyze_fixture();
 
-    // `Unused` in types.ts is not referenced anywhere (including no JSDoc).
-    // The JSDoc scanner must credit ONLY the named member, not every export
-    // in the imported module.
     let unused_type_names: Vec<&str> = results
         .unused_types
         .iter()
-        .map(|e| e.export.export_name.as_str())
+        .map(|export| export.export.export_name.as_str())
         .collect();
 
     assert!(
         unused_type_names.contains(&"Unused"),
-        "Unused type should still be flagged: JSDoc scanner must credit only the named member, unused types: {unused_type_names:?}"
+        "Unused type should still be flagged because the JSDoc scanner credits only the named member, unused types: {unused_type_names:?}"
     );
 }
