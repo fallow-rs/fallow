@@ -169,6 +169,56 @@ fn tanstack_router_prefix_and_ignore_patterns_stay_strict() {
 }
 
 #[test]
+fn tanstack_router_generated_route_tree_import_without_file_is_not_unresolved() {
+    let root = fixture_path("tanstack-router-generated-route-tree-import");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|import| import.import.specifier.as_str())
+        .collect();
+
+    assert!(
+        !unresolved_specifiers.contains(&"./routeTree.gen"),
+        "TanStack Router generated route tree imports should not be unresolved, found: {unresolved_specifiers:?}"
+    );
+    assert!(
+        unresolved_specifiers.contains(&"./missing-control"),
+        "ordinary missing relative imports should still be unresolved, found: {unresolved_specifiers:?}"
+    );
+}
+
+#[test]
+fn route_tree_generated_import_stays_unresolved_without_tanstack_router_plugin() {
+    let temp = tempdir().expect("create temp dir");
+    let root = temp.path();
+
+    write_project_file(
+        root,
+        "package.json",
+        r#"{
+  "name": "route-tree-without-tanstack",
+  "main": "src/router.ts"
+}"#,
+    );
+    write_project_file(root, "src/router.ts", "import './routeTree.gen';\n");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|import| import.import.specifier.as_str())
+        .collect();
+
+    assert!(
+        unresolved_specifiers.contains(&"./routeTree.gen"),
+        "routeTree.gen should only be suppressed by the active TanStack Router plugin, found: {unresolved_specifiers:?}"
+    );
+}
+
+#[test]
 fn tanstack_router_inline_virtual_route_config_is_covered() {
     let root = fixture_path("tanstack-router-virtual-routes");
     let config = create_config(root.clone());

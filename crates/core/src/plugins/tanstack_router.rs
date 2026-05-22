@@ -34,6 +34,7 @@ const SUPPORTING_ENTRY_PATTERNS: &[&str] = &[
 ];
 const DEFAULT_GENERATED_ROUTE_TREE_PATTERNS: &[&str] =
     &["src/routeTree.gen.ts", "src/routeTree.gen.js"];
+const GENERATED_IMPORT_PATTERNS: &[&str] = &["/routeTree.gen"];
 const ENTRY_PATTERNS: &[&str] = &[
     "src/routes/**/*.{ts,tsx,js,jsx}",
     "app/routes/**/*.{ts,tsx,js,jsx}",
@@ -151,6 +152,10 @@ impl Plugin for TanstackRouterPlugin {
 
     fn tooling_dependencies(&self) -> &'static [&'static str] {
         TOOLING_DEPENDENCIES
+    }
+
+    fn generated_import_patterns(&self) -> &'static [&'static str] {
+        GENERATED_IMPORT_PATTERNS
     }
 
     fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
