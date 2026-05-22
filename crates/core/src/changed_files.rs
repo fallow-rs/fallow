@@ -347,41 +347,42 @@ pub fn filter_results_by_changed_files(
     results: &mut AnalysisResults,
     changed_files: &FxHashSet<PathBuf>,
 ) {
+    let cf = normalize_changed_files_set(changed_files);
     results
         .unused_files
-        .retain(|f| changed_files.contains(&f.file.path));
+        .retain(|f| contains_normalized(&cf, &f.file.path));
     results
         .unused_exports
-        .retain(|e| changed_files.contains(&e.export.path));
+        .retain(|e| contains_normalized(&cf, &e.export.path));
     results
         .unused_types
-        .retain(|e| changed_files.contains(&e.export.path));
+        .retain(|e| contains_normalized(&cf, &e.export.path));
     results
         .private_type_leaks
-        .retain(|e| changed_files.contains(&e.leak.path));
+        .retain(|e| contains_normalized(&cf, &e.leak.path));
     results
         .unused_enum_members
-        .retain(|m| changed_files.contains(&m.member.path));
+        .retain(|m| contains_normalized(&cf, &m.member.path));
     results
         .unused_class_members
-        .retain(|m| changed_files.contains(&m.member.path));
+        .retain(|m| contains_normalized(&cf, &m.member.path));
     results
         .unresolved_imports
-        .retain(|i| changed_files.contains(&i.import.path));
+        .retain(|i| contains_normalized(&cf, &i.import.path));
 
     // Unlisted deps: keep only if any importing file is changed
     results.unlisted_dependencies.retain(|d| {
         d.dep
             .imported_from
             .iter()
-            .any(|s| changed_files.contains(&s.path))
+            .any(|s| contains_normalized(&cf, &s.path))
     });
 
     // Duplicate exports: filter locations to changed files, drop groups with < 2
     for dup in &mut results.duplicate_exports {
         dup.export
             .locations
-            .retain(|loc| changed_files.contains(&loc.path));
+            .retain(|loc| contains_normalized(&cf, &loc.path));
     }
     results
         .duplicate_exports
@@ -390,48 +391,71 @@ pub fn filter_results_by_changed_files(
     // Circular deps: keep cycles where at least one file is changed
     results
         .circular_dependencies
-        .retain(|c| c.cycle.files.iter().any(|f| changed_files.contains(f)));
+        .retain(|c| c.cycle.files.iter().any(|f| contains_normalized(&cf, f)));
 
     // Re-export cycles: same file-level treatment as circular deps; the
     // cycle is file-scoped so any member changing counts as touching the
     // cycle.
     results
         .re_export_cycles
-        .retain(|c| c.cycle.files.iter().any(|f| changed_files.contains(f)));
+        .retain(|c| c.cycle.files.iter().any(|f| contains_normalized(&cf, f)));
 
     // Boundary violations: keep if the importing file changed
     results
         .boundary_violations
-        .retain(|v| changed_files.contains(&v.violation.from_path));
+        .retain(|v| contains_normalized(&cf, &v.violation.from_path));
 
     // Stale suppressions: keep if the file changed
     results
         .stale_suppressions
-        .retain(|s| changed_files.contains(&s.path));
+        .retain(|s| contains_normalized(&cf, &s.path));
 
     // Unresolved catalog references: anchored at the consumer package.json,
     // so keep only findings whose path is in the changed set.
     results
         .unresolved_catalog_references
-        .retain(|r| changed_files.contains(&r.reference.path));
+        .retain(|r| contains_normalized(&cf, &r.reference.path));
     results
         .empty_catalog_groups
-        .retain(|g| changed_files_contains_path(changed_files, &g.group.path));
+        .retain(|g| normalized_set_contains_path(&cf, &g.group.path));
 
     // Unused / misconfigured dependency overrides: anchored at the declaring
     // source file (pnpm-workspace.yaml or root package.json). Keep only
     // findings whose source file is in the changed set.
     results
         .unused_dependency_overrides
-        .retain(|o| changed_files.contains(&o.entry.path));
+        .retain(|o| contains_normalized(&cf, &o.entry.path));
     results
         .misconfigured_dependency_overrides
-        .retain(|o| changed_files.contains(&o.entry.path));
+        .retain(|o| contains_normalized(&cf, &o.entry.path));
 }
 
-fn changed_files_contains_path(changed_files: &FxHashSet<PathBuf>, path: &Path) -> bool {
-    changed_files.contains(path)
-        || (path.is_relative() && changed_files.iter().any(|changed| changed.ends_with(path)))
+/// Pre-normalise a `changed_files` set through `dunce::simplified` so each
+/// per-entry comparison can normalise its lookup side and avoid the Windows
+/// `\\?\` verbatim-vs-non-verbatim mismatch. On POSIX `dunce::simplified` is
+/// a no-op, so this is identical to cloning the set.
+///
+/// Background: `try_get_changed_files` joins git-emitted segments onto the
+/// `dunce::canonicalize`d toplevel, so entries land in non-verbatim shape.
+/// Analysis-pipeline paths (clone instances, finding paths) inherit the
+/// shape of `opts.root`, which `validate_root` / discovery / cache lookups
+/// pre-canonicalise with `std::fs::canonicalize` in test fixtures and tools
+/// (which yields verbatim paths on Windows). Comparing the two sides byte
+/// for byte silently dropped every finding before this normalisation.
+fn normalize_changed_files_set(changed_files: &FxHashSet<PathBuf>) -> FxHashSet<PathBuf> {
+    changed_files
+        .iter()
+        .map(|p| dunce::simplified(p).to_path_buf())
+        .collect()
+}
+
+fn contains_normalized(normalized: &FxHashSet<PathBuf>, path: &Path) -> bool {
+    normalized.contains(dunce::simplified(path))
+}
+
+fn normalized_set_contains_path(normalized: &FxHashSet<PathBuf>, path: &Path) -> bool {
+    contains_normalized(normalized, path)
+        || (path.is_relative() && normalized.iter().any(|changed| changed.ends_with(path)))
 }
 
 /// Recompute duplication statistics after filtering.
@@ -494,9 +518,12 @@ pub fn filter_duplication_by_changed_files(
     changed_files: &FxHashSet<PathBuf>,
     root: &Path,
 ) {
-    report
-        .clone_groups
-        .retain(|g| g.instances.iter().any(|i| changed_files.contains(&i.file)));
+    let cf = normalize_changed_files_set(changed_files);
+    report.clone_groups.retain(|g| {
+        g.instances
+            .iter()
+            .any(|i| contains_normalized(&cf, &i.file))
+    });
     report.clone_families = families::group_into_families(&report.clone_groups, root);
     report.mirrored_directories =
         families::detect_mirrored_directories(&report.clone_families, root);
@@ -817,6 +844,93 @@ mod tests {
         // stats recomputed from surviving groups
         assert_eq!(report.stats.clone_groups, 1);
         assert_eq!(report.stats.clone_instances, 2);
+    }
+
+    /// Regression for issue #561: on Windows, `try_get_changed_files` joins
+    /// segments onto the `dunce::canonicalize`d toplevel (non-verbatim),
+    /// while analysis-pipeline paths inherit the shape of `opts.root` which
+    /// tools / test fixtures often pre-canonicalise with `std::fs::canonicalize`
+    /// (verbatim). The byte-level lookup against `FxHashSet<PathBuf>` then
+    /// silently dropped every clone group. Pin both sides through a synthetic
+    /// verbatim path on one side and a plain path on the other.
+    #[cfg(windows)]
+    #[test]
+    fn filter_duplication_normalises_verbatim_prefix_mismatch() {
+        let mut report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![
+                    CloneInstance {
+                        file: PathBuf::from(r"\\?\C:\repo\src\changed.ts"),
+                        start_line: 1,
+                        end_line: 5,
+                        start_col: 0,
+                        end_col: 10,
+                        fragment: "code".into(),
+                    },
+                    CloneInstance {
+                        file: PathBuf::from(r"\\?\C:\repo\src\focused-copy.ts"),
+                        start_line: 1,
+                        end_line: 5,
+                        start_col: 0,
+                        end_col: 10,
+                        fragment: "code".into(),
+                    },
+                ],
+                token_count: 20,
+                line_count: 5,
+            }],
+            clone_families: vec![],
+            mirrored_directories: vec![],
+            stats: DuplicationStats {
+                total_files: 2,
+                files_with_clones: 2,
+                total_lines: 100,
+                duplicated_lines: 10,
+                total_tokens: 200,
+                duplicated_tokens: 40,
+                clone_groups: 1,
+                clone_instances: 2,
+                duplication_percentage: 10.0,
+                clone_groups_below_min_occurrences: 0,
+            },
+        };
+
+        let mut changed: FxHashSet<PathBuf> = FxHashSet::default();
+        changed.insert(PathBuf::from(r"C:\repo\src\changed.ts"));
+
+        filter_duplication_by_changed_files(&mut report, &changed, Path::new(""));
+        assert_eq!(
+            report.clone_groups.len(),
+            1,
+            "verbatim instance path must match non-verbatim changed-file entry"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn filter_results_normalises_verbatim_prefix_mismatch() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from(r"\\?\C:\repo\src\a.ts"),
+                export_name: "foo".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+
+        let mut changed: FxHashSet<PathBuf> = FxHashSet::default();
+        changed.insert(PathBuf::from(r"C:\repo\src\a.ts"));
+
+        filter_results_by_changed_files(&mut results, &changed);
+        assert_eq!(
+            results.unused_exports.len(),
+            1,
+            "verbatim finding path must match non-verbatim changed-file entry"
+        );
     }
 
     // -----------------------------------------------------------------------
