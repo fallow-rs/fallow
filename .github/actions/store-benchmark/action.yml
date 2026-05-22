@@ -36,7 +36,7 @@ runs:
         github-token: ${{ inputs.github-token }}
         auto-push: ${{ github.event_name != 'pull_request' }}
         comment-on-alert: true
-        comment-always: ${{ github.event_name == 'pull_request' }}
+        comment-always: false
         alert-threshold: ${{ inputs.alert-threshold }}
         fail-on-alert: false
         max-items-in-chart: 100
