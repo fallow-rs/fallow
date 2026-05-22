@@ -141,7 +141,11 @@ pub fn output(command: &mut Command) -> io::Result<Output> {
     ScopedChild::spawn(command)?.wait_with_output()
 }
 
-#[cfg(test)]
+// Every test in this module exec's `/bin/sh` / `true` / `echo`, so the
+// entire suite is cfg(unix)-only. Gating at the module level keeps the
+// Windows `unused_imports` lint quiet on `use super::*;` (since the
+// module would otherwise be reduced to just the import line on Windows).
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
