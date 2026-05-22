@@ -1585,10 +1585,14 @@ fn glimmer_typescript_imports_use_tsconfig_path_aliases() {
     let config = create_config(root);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
+    // Normalise to forward slashes so the `ends_with("app/services/...")`
+    // assertions below match on Windows too. The sibling
+    // `rootdirs_relative_imports_resolve_under_broken_extends_chain` test
+    // already does this; this one was missed.
     let unused_file_paths: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.file.path.to_string_lossy().to_string())
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
         .collect();
 
     assert!(
