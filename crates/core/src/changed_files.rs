@@ -944,6 +944,15 @@ mod tests {
 
     /// Initialize a temp git repo with a single committed file plus a tag
     /// at HEAD. Returns the canonical repo root.
+    ///
+    /// Uses `dunce::canonicalize` rather than `std::fs::canonicalize` so the
+    /// returned path agrees with what `resolve_git_toplevel` produces in
+    /// production (PR #566 swapped that helper to `dunce::canonicalize` to
+    /// strip the Windows `\\?\` verbatim prefix). `std::fs::canonicalize`
+    /// still produces verbatim on Windows, so the prior shape diverged from
+    /// the production helper and downstream `changed.contains(&expected)`
+    /// assertions silently failed because one side was verbatim and the
+    /// other was not. POSIX behaviour is identical to `std::fs::canonicalize`.
     fn init_repo(repo: &Path) -> PathBuf {
         run_git(repo, &["init", "--quiet", "--initial-branch=main"]);
         run_git(repo, &["config", "user.email", "test@example.com"]);
@@ -953,7 +962,7 @@ mod tests {
         run_git(repo, &["add", "seed.txt"]);
         run_git(repo, &["commit", "--quiet", "-m", "initial"]);
         run_git(repo, &["tag", "fallow-baseline"]);
-        repo.canonicalize().unwrap()
+        dunce::canonicalize(repo).unwrap()
     }
 
     fn run_git(cwd: &Path, args: &[&str]) {
@@ -1092,9 +1101,14 @@ mod tests {
 
         let toplevel = resolve_git_toplevel(&frontend).unwrap();
         assert_eq!(toplevel, repo, "toplevel should equal canonical repo root");
+        // Use `dunce::canonicalize` rather than `std::fs::canonicalize` on
+        // the RHS so the assertion stays self-consistent on Windows.
+        // Production `resolve_git_toplevel` runs `dunce::canonicalize` (PR
+        // #566); `std::fs::canonicalize` on Windows would re-add the `\\?\`
+        // verbatim prefix and diverge from `toplevel`. POSIX is identical.
         assert_eq!(
             toplevel,
-            toplevel.canonicalize().unwrap(),
+            dunce::canonicalize(&toplevel).unwrap(),
             "resolved toplevel should already be canonical"
         );
     }
