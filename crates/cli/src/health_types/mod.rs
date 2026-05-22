@@ -80,10 +80,10 @@ pub struct HealthReport {
     /// Summary statistics.
     pub summary: HealthSummary,
     /// Project-wide vital signs (always computed from available data).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vital_signs: Option<VitalSigns>,
     /// Project-wide health score (only populated with `--score`).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_score: Option<HealthScore>,
     /// Per-file health scores. Only present when --file-scores is used. Sorted
     /// by maintainability_index ascending (worst first). Zero-function files
@@ -95,7 +95,7 @@ pub struct HealthReport {
     /// Populated when coverage gaps are explicitly requested, or when the
     /// top-level `health` command allows config severity to surface them in the
     /// default report.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_gaps: Option<CoverageGaps>,
     /// Hotspot entries combining git churn with complexity. Only present when
     /// --hotspots is used. Sorted by score descending (highest risk first).
@@ -104,11 +104,11 @@ pub struct HealthReport {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hotspots: Vec<HotspotFinding>,
     /// Hotspot analysis summary (only set with `--hotspots`).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hotspot_summary: Option<HotspotSummary>,
     /// Runtime coverage findings from the paid sidecar (only populated with
     /// `--runtime-coverage`).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_coverage: Option<RuntimeCoverageReport>,
     /// Functions exceeding 60 LOC (very high risk). Only present when unit size
     /// very-high-risk bin >= 3%. Sorted by line count descending.
@@ -121,10 +121,10 @@ pub struct HealthReport {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<RefactoringTargetFinding>,
     /// Adaptive thresholds used for target scoring (only set with `--targets`).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_thresholds: Option<TargetThresholds>,
     /// Health trend comparison against a previous snapshot (only set with `--trend`).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_trend: Option<HealthTrend>,
     /// Audit breadcrumb explaining systemic action-array adjustments. Present
     /// only when at least one adjustment was made (e.g., health finding

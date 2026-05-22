@@ -177,13 +177,13 @@ impl Confidence {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TargetEvidence {
     /// Names of unused exports (populated for `RemoveDeadCode` targets).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_exports: Vec<String>,
     /// Complex functions with line numbers and cognitive scores (populated for `ExtractComplexFunctions`).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub complex_functions: Vec<EvidenceFunction>,
     /// Files forming the import cycle (populated for `BreakCircularDependency` targets).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cycle_path: Vec<String>,
 }
 
@@ -219,11 +219,11 @@ pub struct RefactoringTarget {
     pub confidence: Confidence,
     /// Contributing factors that triggered this recommendation. Empty array
     /// omitted from JSON.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub factors: Vec<ContributingFactor>,
     /// Structured evidence linking to specific analysis data.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<TargetEvidence>,
 }
 

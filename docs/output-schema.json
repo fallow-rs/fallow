@@ -5579,8 +5579,7 @@
         "kind",
         "confidence",
         "line",
-        "col",
-        "guarded_dead_exports"
+        "col"
       ],
       "description": "A detected feature flag use site."
     },
@@ -6144,11 +6143,6 @@
           "description": "Files forming the import cycle (populated for `BreakCircularDependency` targets)."
         }
       },
-      "required": [
-        "unused_exports",
-        "complex_functions",
-        "cycle_path"
-      ],
       "description": "Evidence linking a target back to specific analysis data.\n\nProvides enough detail for an AI agent to act on a recommendation\nwithout a second tool call."
     },
     "EvidenceFunction": {

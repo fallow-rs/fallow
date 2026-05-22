@@ -148,12 +148,12 @@ pub struct CoverageGaps {
     pub summary: CoverageGapSummary,
     /// Runtime files with no test dependency path. Each entry carries its
     /// own `actions` array via [`UntestedFileFinding`].
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub files: Vec<UntestedFileFinding>,
     /// Runtime exports with no test-reachable reference chain. Each entry
     /// carries its own `actions` array via [`UntestedExportFinding`].
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub exports: Vec<UntestedExportFinding>,
 }

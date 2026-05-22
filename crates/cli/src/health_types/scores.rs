@@ -85,11 +85,11 @@ pub struct HealthScore {
 pub struct HealthScorePenalties {
     /// Points lost from dead files (max 15). Null if dead code pipeline not
     /// run.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dead_files: Option<f64>,
     /// Points lost from dead exports (max 15). Null if dead code pipeline not
     /// run.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dead_exports: Option<f64>,
     /// Points lost from critical-complexity density (max 20). Older snapshots
     /// without density fields fall back to average cyclomatic complexity above
@@ -100,31 +100,31 @@ pub struct HealthScorePenalties {
     /// complexity.
     pub p90_complexity: f64,
     /// Points lost from low maintainability index density (max 15).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub maintainability: Option<f64>,
     /// Points lost from top-percentile hotspot density (max 10). Null if
     /// hotspots not computed.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hotspots: Option<f64>,
     /// Points lost from unused dependency density (max 25). Null if dead code
     /// pipeline not run.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unused_deps: Option<f64>,
     /// Points lost from circular dependency density (max 25). Null if dead code
     /// pipeline not run.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub circular_deps: Option<f64>,
     /// Points lost from oversized-function density (max 10). Null if no
     /// functions analyzed.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit_size: Option<f64>,
     /// Points lost from coupling concentration density (max 5). Null if file
     /// scores not computed.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coupling: Option<f64>,
     /// Points lost from code duplication (max 10). Penalty = min(max(0,
     /// duplication_pct - 5) * 1, 10). Null if duplication pipeline not run.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duplication: Option<f64>,
 }
 
@@ -271,12 +271,12 @@ pub struct ComplexityViolation {
     pub severity: FindingSeverity,
     /// CRAP score (`CC^2 * (1 - cov/100)^3 + CC`), rounded to one decimal.
     /// Present when the function also exceeded `--max-crap`, otherwise absent.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crap: Option<f64>,
     /// Per-function statement coverage percentage (0.0 to 100.0) used to
     /// derive `crap`. Present when Istanbul data matched the function,
     /// otherwise absent (estimated model or unmatched functions).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_pct: Option<f64>,
     /// Bucketed coverage tier used to drive action selection. Present whenever
     /// CRAP triggered the finding (Istanbul or estimated), absent otherwise.
@@ -284,7 +284,7 @@ pub struct ComplexityViolation {
     /// reports 0); `partial` = coverage is in `(0, 70)`; `high` = coverage is
     /// at or above the high watermark (default `>= 70`, or the estimated 85%
     /// band).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_tier: Option<CoverageTier>,
     /// Provenance of the coverage signal. Present whenever CRAP triggered the
     /// finding. `istanbul` = direct fnMap match; `estimated` = graph-based
@@ -292,7 +292,7 @@ pub struct ComplexityViolation {
     /// = graph-based estimate inherited from an Angular component `.ts`
     /// reached via the inverse `templateUrl` edge (synthetic `<template>`
     /// findings on `.html` files only).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_source: Option<CoverageSource>,
     /// Owning component file that contributed reachability when
     /// `coverage_source == "estimated_component_inherited"`. Always paired
@@ -302,7 +302,7 @@ pub struct ComplexityViolation {
     /// to project-relative form just like other path fields. Lets human and
     /// AI consumers explain "the template scored partial because the
     /// component it belongs to is tested" without re-deriving the link.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inherited_from: Option<std::path::PathBuf>,
     /// Breakdown of a synthetic `<component>` rollup finding into its
     /// worst-class-function and template contributions. Present only on
@@ -545,12 +545,12 @@ pub struct HealthSummary {
     pub max_crap_threshold: f64,
     /// Number of files with health scores. Only present when --file-scores is
     /// used. 0 indicates the flag was set but scoring failed.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files_scored: Option<usize>,
     /// Average maintainability index across all scored files (before --top
     /// truncation). Only present when --file-scores is used and at least one
     /// file was scored.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub average_maintainability: Option<f64>,
     /// Coverage model used for CRAP score computation. 'static_estimated'
     /// (default) uses per-function graph-based estimation from export
@@ -559,15 +559,15 @@ pub struct HealthSummary {
     /// a coverage-final.json file (--coverage flag or auto-detected).
     /// 'static_binary' is the legacy binary model. Only present when file
     /// scores are computed.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_model: Option<CoverageModel>,
     /// Number of functions matched against Istanbul coverage data.
     /// Only present when `coverage_model` is `istanbul`.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub istanbul_matched: Option<usize>,
     /// Total functions that could potentially be matched.
     /// Only present when `coverage_model` is `istanbul`.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub istanbul_total: Option<usize>,
     /// Number of findings with critical severity (cognitive >= 40 or cyclomatic
     /// >= 50).
@@ -716,7 +716,7 @@ pub struct HotspotEntry {
     pub trend: fallow_core::churn::ChurnTrend,
     /// Ownership signals (bus factor, contributors, declared owner, drift).
     /// Populated only when `--ownership` is requested.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ownership: Option<OwnershipMetrics>,
     /// True when the file path matches a test/mock convention (e.g.
     /// `**/__tests__/**`, `**/*.test.*`, `**/*.spec.*`, `**/__mocks__/**`).
@@ -787,7 +787,7 @@ pub struct OwnershipMetrics {
 
     /// Up to three additional contributors by share, ordered desc.
     /// Useful for "who else could review this file" routing.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub recent_contributors: Vec<ContributorEntry>,
 
@@ -797,13 +797,13 @@ pub struct OwnershipMetrics {
     /// filtered by [`ContributorEntry::stale_days`]. Excludes the top
     /// contributor (they are the sole author being flagged); consumers
     /// wanting the full list can union with `top_contributor`.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub suggested_reviewers: Vec<ContributorEntry>,
 
     /// CODEOWNERS-resolved owner for this file, if a rule matched.
     /// Only the primary (first) owner of the matched rule is reported.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub declared_owner: Option<String>,
 
     /// Tristate: `Some(true)` = CODEOWNERS file exists but no rule matches
@@ -817,7 +817,7 @@ pub struct OwnershipMetrics {
 
     /// Human-readable explanation of the drift, populated only when
     /// [`drift`](Self::drift) is true.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drift_reason: Option<String>,
 }
 

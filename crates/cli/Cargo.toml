@@ -106,6 +106,8 @@ insta = { workspace = true }
 fallow-types = { workspace = true }
 oxc_span = { workspace = true }
 proptest = { workspace = true }
+proc-macro2 = { version = "1", features = ["span-locations"] }
+syn = { version = "2", features = ["full"] }
 base64 = "0.22"
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 fallow-cov-protocol = "0.5"

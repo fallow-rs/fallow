@@ -22,19 +22,19 @@ pub struct TrendPoint {
     /// ISO 8601 timestamp of the snapshot.
     pub timestamp: String,
     /// Git SHA at time of snapshot.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_sha: Option<String>,
     /// Health score from the snapshot (stored, not re-derived).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub score: Option<f64>,
     /// Letter grade from the snapshot.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grade: Option<String>,
     /// Coverage model used for CRAP computation in this snapshot.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_model: Option<super::CoverageModel>,
     /// Schema version of the compared snapshot.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot_schema_version: Option<u32>,
 }
 
@@ -57,10 +57,10 @@ pub struct TrendMetric {
     /// Unit for display (e.g., `"%"`, `""`, `"pts"`).
     pub unit: &'static str,
     /// Raw count from previous snapshot (for JSON consumers).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_count: Option<TrendCount>,
     /// Raw count from current run (for JSON consumers).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_count: Option<TrendCount>,
 }
 

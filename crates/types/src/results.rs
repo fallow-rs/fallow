@@ -1019,7 +1019,7 @@ pub enum SuppressionOrigin {
     /// A `// fallow-ignore-next-line` or `// fallow-ignore-file` comment.
     Comment {
         /// The issue kind token from the comment (e.g., "unused-exports"), or None for blanket.
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         issue_kind: Option<String>,
         /// Whether this was a file-level suppression.
         is_file_level: bool,
@@ -1236,7 +1236,7 @@ pub struct FeatureFlag {
     #[serde(skip)]
     pub guard_span_end: Option<u32>,
     /// SDK or provider name (e.g., "LaunchDarkly", "Statsig"), if detected from SDK call.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sdk_name: Option<String>,
     /// Line range of the guarded code block (derived from guard_span + line_offsets).
     /// Used for cross-reference with dead code findings.
@@ -1247,7 +1247,7 @@ pub struct FeatureFlag {
     pub guard_line_end: Option<u32>,
     /// Unused exports found within the guarded code block.
     /// Populated by cross-reference with dead code analysis.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub guarded_dead_exports: Vec<String>,
 }
 

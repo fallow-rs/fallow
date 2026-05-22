@@ -37,7 +37,7 @@ pub struct HealthGroup {
     pub key: String,
     /// Section default owners (GitLab CODEOWNERS `[Section] @owner1 @owner2`).
     /// Present only when grouped_by is 'section'.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owners: Option<Vec<String>>,
     /// Files participating in this group after workspace and ignore filters.
     pub files_analyzed: usize,
@@ -48,11 +48,11 @@ pub struct HealthGroup {
     pub functions_above_threshold: usize,
     /// Per-group vital signs recomputed from the files in this group. Absent
     /// when --score-only suppressed top-level vital signs.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vital_signs: Option<VitalSigns>,
     /// Per-group health score recomputed from the per-group vital signs. Absent
     /// when --score was not requested.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_score: Option<HealthScore>,
     /// Findings restricted to files in this group. Each entry is the typed
     /// [`HealthFinding`] wrapper around a

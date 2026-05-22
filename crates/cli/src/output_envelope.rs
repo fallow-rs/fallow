@@ -1290,20 +1290,20 @@ pub struct BoundariesListLogicalGroup {
     pub file_count: usize,
     /// Pre-expansion rule keyed on the parent name, when the user wrote
     /// one.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authored_rule: Option<fallow_config::AuthoredRule>,
     /// When the parent zone also carried explicit `patterns`, it stayed in
     /// [`BoundariesListing::zones`] as a fallback classifier; this is its
     /// name. Equal to [`Self::name`] when present.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_zone: Option<String>,
     /// Parent zone indices merged into this group when the user declared
     /// the same parent name multiple times.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merged_from: Option<Vec<usize>>,
     /// Echo of the parent zone's `root` (subtree scope) as the user wrote
     /// it. `None` when the parent had no `root` field.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_zone_root: Option<String>,
     /// Parallel to [`Self::children`]: for child at index `i`, the index
     /// into [`Self::auto_discover`] of the path that produced it. Empty

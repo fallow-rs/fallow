@@ -255,7 +255,7 @@ pub struct RuntimeCoverageSummary {
     /// sidecars always populate it. Fuels the human-output short-window warning
     /// and the quantified trial CTA, and is passed through to JSON consumers so
     /// agent pipelines can surface the same signal.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture_quality: Option<RuntimeCoverageCaptureQuality>,
 }
 
@@ -290,7 +290,7 @@ pub struct RuntimeCoverageEvidence {
     pub test_coverage: String,
     /// `tracked` when V8 observed the function, `untracked` otherwise.
     pub v8_tracking: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Reason the function is untracked. Populated only when v8_tracking is
     /// `untracked`. Values: `lazy_parsed`, `worker_thread`, `dynamic_eval`,
     /// `unknown`.
@@ -340,11 +340,11 @@ pub struct RuntimeCoverageFinding {
     pub verdict: RuntimeCoverageVerdict,
     /// Raw V8 invocation count. `None` when the function was untracked
     /// (lazy-parsed, worker thread, or dynamic code).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invocations: Option<u64>,
     pub confidence: RuntimeCoverageConfidence,
     pub evidence: RuntimeCoverageEvidence,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     /// Suggested actions for this finding. Omitted when empty.
     pub actions: Vec<RuntimeCoverageAction>,
@@ -372,7 +372,7 @@ pub struct RuntimeCoverageHotPath {
     /// Percentile rank over this response's hot-path distribution. `100`
     /// means the busiest, `0` means the quietest function that qualified.
     pub percentile: u8,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     /// Suggested actions for this hot path (e.g., review-on-change). Omitted
     /// when empty.
@@ -423,7 +423,7 @@ pub struct RuntimeCoverageBlastRadiusEntry {
     pub caller_count: u32,
     /// Caller reach weighted by observed runtime traffic.
     pub caller_count_weighted_by_traffic: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Distinct deploy SHAs that touched the function in the observation
     /// window. Cloud mode only; omitted in local mode.
     pub deploys_touched: Option<u32>,
@@ -478,19 +478,19 @@ pub struct RuntimeCoverageReport {
     /// which is the single most actionable signal under the current
     /// context. Empty when the report is `Clean` and not under license
     /// grace. Order is stable severity-descending.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub signals: Vec<RuntimeCoverageSignal>,
     /// Aggregate tracked / hit / unhit / untracked counts for the analyzed
     /// runtime coverage input.
     pub summary: RuntimeCoverageSummary,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     /// Surfaced runtime coverage findings (`safe_to_delete`, `review_required`,
     /// `low_traffic`, `coverage_unavailable`). Omitted when empty. `active`
     /// functions stay out of this list so the CLI output remains actionable.
     pub findings: Vec<RuntimeCoverageFinding>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     /// Top runtime functions by invocation count. Omitted when empty.
     pub hot_paths: Vec<RuntimeCoverageHotPath>,
@@ -500,11 +500,11 @@ pub struct RuntimeCoverageReport {
     /// First-class production-importance entries for runtime-observed
     /// functions. Present whenever runtime coverage analysis runs.
     pub importance: Vec<RuntimeCoverageImportanceEntry>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     /// License/trial watermark for grace-mode output. Omitted when not
     /// applicable.
     pub watermark: Option<RuntimeCoverageWatermark>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     /// Non-fatal merge or coverage diagnostics. Omitted when empty.
     pub warnings: Vec<RuntimeCoverageMessage>,

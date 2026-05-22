@@ -408,7 +408,7 @@ pub struct LogicalGroup {
     /// `expand_auto_discover` rewrote it into per-child rules. `None` when
     /// the user wrote no rule for the parent (the children are then
     /// unrestricted unless a per-child rule exists).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authored_rule: Option<AuthoredRule>,
     /// When the parent zone also carried explicit `patterns`, it stayed in
     /// `zones[]` after expansion as a fallback classifier. This is its name
@@ -416,7 +416,7 @@ pub struct LogicalGroup {
     /// patterns and was dropped from `zones[]` entirely. Lets consumers wire
     /// the logical-group entry to its zone twin without name-matching
     /// heuristics.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_zone: Option<String>,
     /// Position of the parent zone in the user's pre-expansion `zones[]`
     /// array. Enables byte-accurate config patches by agent tooling without
@@ -433,7 +433,7 @@ pub struct LogicalGroup {
     /// Surfaced in JSON so consumers (config-edit agents, config-hygiene
     /// dashboards) can detect duplicates that `tracing::warn!` would otherwise
     /// hide from `--format json` consumption.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merged_from: Option<Vec<usize>>,
     /// The parent zone's `root` (subtree scope) as the user authored it,
     /// echoed onto the logical group so monorepo-aware tooling can tell
@@ -441,7 +441,7 @@ pub struct LogicalGroup {
     /// discovered child) or set per-child. `None` when the parent had no
     /// `root` field. The string is verbatim from the user's config (not
     /// the post-`normalize_zone_root` form) for byte-exact round-trip.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_zone_root: Option<String>,
     /// For each entry in [`Self::children`], the index into
     /// [`Self::auto_discover`] of the path that produced it (or the FIRST
@@ -775,7 +775,7 @@ impl BoundaryConfig {
                 // parent has two or more `auto_discover` paths; with one
                 // path every child trivially has index 0. Skip the noise
                 // on the common case so the JSON stays tight; the field
-                // is `#[serde(skip_serializing_if = "Vec::is_empty")]`.
+                // is `#[serde(default, skip_serializing_if = "Vec::is_empty")]`.
                 let child_source_indices = if draft.auto_discover.len() > 1 {
                     draft.child_source_indices
                 } else {

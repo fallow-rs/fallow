@@ -20,10 +20,10 @@ pub const SNAPSHOT_SCHEMA_VERSION: u32 = 8;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct VitalSigns {
     /// Percentage of files not reachable from any entry point.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dead_file_pct: Option<f64>,
     /// Percentage of exports never imported by other modules.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dead_export_pct: Option<f64>,
     /// Average cyclomatic complexity across all functions.
     pub avg_cyclomatic: f64,
@@ -34,37 +34,37 @@ pub struct VitalSigns {
     /// 90th percentile cyclomatic complexity.
     pub p90_cyclomatic: u32,
     /// Code duplication percentage (None if duplication pipeline was not run).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duplication_pct: Option<f64>,
     /// Number of hotspot files (score >= 50). None if git history unavailable.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hotspot_count: Option<u32>,
     /// Number of files in the top 1% of the within-project hotspot ranking.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub hotspot_top_pct_count: Option<u32>,
     /// Average maintainability index across all scored files (0–100).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub maintainability_avg: Option<f64>,
     /// Percentage of scored files with maintainability index below 70. Null if
     /// file scores were not computed.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub maintainability_low_pct: Option<f64>,
     /// Number of unused dependencies (dependencies + devDependencies + optional).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unused_dep_count: Option<u32>,
     /// Unused dependencies per 1,000 files. Null if dead code analysis did not
     /// run.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub unused_deps_per_k_files: Option<f64>,
     /// Number of circular dependency chains.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub circular_dep_count: Option<u32>,
     /// Circular dependency chains per 1,000 files. Null if dead code analysis
     /// did not run.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub circular_deps_per_k_files: Option<f64>,
     /// Raw counts backing the percentages (for orientation header display).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub counts: Option<VitalSignsCounts>,
     /// Function size risk profile: percentage of functions in each size bin.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -125,11 +125,11 @@ pub struct VitalSignsCounts {
     pub total_exports: usize,
     pub dead_files: usize,
     pub dead_exports: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duplicated_lines: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_lines: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files_scored: Option<usize>,
     pub total_deps: usize,
 }
@@ -144,10 +144,10 @@ pub struct VitalSignsSnapshot {
     /// ISO 8601 timestamp.
     pub timestamp: String,
     /// Git commit SHA at time of snapshot (None if not in a git repo).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_sha: Option<String>,
     /// Git branch name (None if not in a git repo or detached HEAD).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_branch: Option<String>,
     /// Whether the repository is a shallow clone.
     #[serde(default)]

@@ -4033,15 +4033,15 @@ export interface TargetEvidence {
 /**
  * Names of unused exports (populated for `RemoveDeadCode` targets).
  */
-unused_exports: string[]
+unused_exports?: string[]
 /**
  * Complex functions with line numbers and cognitive scores (populated for `ExtractComplexFunctions`).
  */
-complex_functions: EvidenceFunction[]
+complex_functions?: EvidenceFunction[]
 /**
  * Files forming the import cycle (populated for `BreakCircularDependency` targets).
  */
-cycle_path: string[]
+cycle_path?: string[]
 }
 /**
  * A function referenced in target evidence.
