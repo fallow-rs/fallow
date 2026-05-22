@@ -114,7 +114,10 @@ fallow-cov-protocol = "0.5"
 serde_yaml_ng = { workspace = true }
 
 [package.metadata.cargo-shear]
-ignored = ["miette"] # feature-only dep: activates fancy rendering for fallow-config's miette::Report
+ignored = [
+    "miette",       # feature-only dep: activates fancy rendering for fallow-config's miette::Report
+    "proc-macro2",  # feature-only dep: activates `span-locations` so syn-returned `.span().start().line` reports real source positions in the schema-drift gate (crates/cli/tests/schema_tests.rs); no explicit import
+]
 
 [lints]
 workspace = true
