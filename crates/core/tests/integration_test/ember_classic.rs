@@ -2,19 +2,19 @@
 //! against the `tests/fixtures/ember-classic/` fixture.
 //!
 //! Covers the plugin's two suppression mechanisms plus one HTML-scanner
-//! integration — at the level of `AnalysisResults`, not the per-shape unit
+//! integration at the level of `AnalysisResults`, not the per-shape unit
 //! tests in `crates/core/src/plugins/ember.rs`:
 //!
-//! 1. `tooling_dependencies` — `ember-source`, `ember-cli-htmlbars`, and
+//! 1. `tooling_dependencies`: `ember-source`, `ember-cli-htmlbars`, and
 //!    other runtime-resolved packages are not flagged as `unused-dependency`
 //!    even though no source file imports them.
-//! 2. `virtual_module_prefixes` — `@ember/object`,
+//! 2. `virtual_module_prefixes`: `@ember/object`,
 //!    `@ember/routing/router-service`, and `@ember/service` (AMD-loader /
 //!    Embroider-rewritten specifiers; not real npm packages) are not
 //!    flagged as `unresolved-import` or `unlisted-dependency`.
 //! 3. `<script src="{{rootURL}}...">` / `<script src="{{config.assetsPath}}...">`
 //!    placeholders in `app/index.html` are skipped by the generic
-//!    template-placeholder filter in `crate::extract::html` — they never
+//!    template-placeholder filter in `crate::extract::html`; they never
 //!    enter the import graph in the first place, so they don't surface as
 //!    `unresolved-import`. (This is a framework-agnostic HTML-scanner fix,
 //!    not Ember-specific plugin code; the witness lives here because
@@ -22,10 +22,10 @@
 //!
 //! Also fences:
 //!
-//! - `used_class_member_rules` — `Service::init` / `Service::willDestroy`
+//! - `used_class_member_rules`: `Service::init` / `Service::willDestroy`
 //!   and `Route::model` / `Route::setupController` are not surfaced as
 //!   `unused-class-member` on the convention subclasses.
-//! - Template-only imports survive — `on` in `app/components/counter.gts`
+//! - Template-only imports survive: `on` in `app/components/counter.gts`
 //!   is referenced only inside the `<template>` block.
 
 use super::common::{create_config, fixture_path};

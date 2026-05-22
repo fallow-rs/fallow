@@ -12,7 +12,7 @@
 //! `@ember/routing/router-service` don't surface as `unresolved-import`.
 //!
 //! Scoped to strict-mode Ember apps and v2 addons. Classic v1 addon layouts
-//! (`addon/`, `addon-test-support/`) are intentionally out of scope —
+//! (`addon/`, `addon-test-support/`) are intentionally out of scope:
 //! they predate strict-mode `.gts` / `.gjs`, so the plugin's value-adds
 //! (template scanner, virtual `@ember/*` prefixes, `.gts` parsing) don't
 //! apply. v1-addon maintainers can list those paths via `entry` in their
@@ -24,7 +24,7 @@
 //! Glimmer-aware extractor in `crates/extract/src/glimmer.rs`. **Co-located
 //! `.hbs` templates remain a known limitation** of that extractor: imports
 //! consumed only by a sibling `.hbs` file still surface as `unused-import` on
-//! the sibling `.js`/`.ts` — see the module-level note in
+//! the sibling `.js`/`.ts`; see the module-level note in
 //! `crates/extract/src/sfc_template/glimmer.rs`. `ENTRY_PATTERNS` below
 //! includes `*.hbs` paths so the templates themselves stay reachable as
 //! files; binding-level usage tracking inside them is out of scope until the
@@ -263,14 +263,14 @@ const ROUTER_MEMBERS: &[&str] = &[
 /// Silencing those with a blanket prefix would mask real missing-dep bugs.
 ///
 /// Source of truth for the virtual list: `ember-source`'s `package.json`
-/// `exports` field. Keep this in sync (it changes slowly — most additions
+/// `exports` field. Keep this in sync (it changes slowly; most additions
 /// land as new subpaths under existing roots like `@ember/object/...` which
 /// the prefix-match already covers).
 ///
 /// Known gaps NOT covered (documented; users can `ignoreDependencies` or
 /// add an inline `fallow-ignore-next-line unresolved-import`):
 ///
-/// - Bare `import Ember from 'ember'` — a legacy Embroider-rewritten
+/// - Bare `import Ember from 'ember'`: a legacy Embroider-rewritten
 ///   specifier. A `"ember"` prefix would also catch `ember-cli`,
 ///   `ember-data`, `ember-source` and silence legitimate missing-dep
 ///   reports, so we leave it.
@@ -539,7 +539,7 @@ mod tests {
     #[test]
     fn entry_patterns_do_not_include_v1_addon_layout() {
         // v1 addon `addon/` / `addon-test-support/` layouts are out of scope
-        // — they predate strict-mode `.gts` / `.gjs` and gain nothing from
+        // because they predate strict-mode `.gts` / `.gjs` and gain nothing from
         // the plugin's value-adds. Re-introducing them as automatic entry
         // patterns would credit unused files in apps that happen to have an
         // `addon/` directory for unrelated reasons; v1-addon maintainers

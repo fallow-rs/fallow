@@ -5,7 +5,7 @@ import { tracked } from "@glimmer/tracking";
 import type RouterService from "@ember/routing/router-service";
 
 // `@ember/object`, `@ember/service`, and `@ember/routing/router-service` are
-// AMD-loader / Embroider-rewritten specifiers — they are not real npm
+// AMD-loader / Embroider-rewritten specifiers are not real npm
 // packages and never resolve to a file on disk. The Ember plugin's
 // `virtual_module_prefixes` must keep these out of `unresolved-import` and
 // `unlisted-dependency` reporting; this controller is the fixture witness.

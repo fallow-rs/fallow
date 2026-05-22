@@ -28,7 +28,7 @@ use super::{LineOffsetsMap, byte_offset_to_line_col};
 /// - **Trailing-slash exact-bare match** (`ember/`): the bare specifier `ember`
 ///   also matches (via the second branch's `strip_suffix('/')` shortcut),
 ///   while real npm packages like `ember-cli` and `ember-data` deliberately
-///   do not — a no-slash entry would prefix-match them and silence legitimate
+///   do not. A no-slash entry would prefix-match them and silence legitimate
 ///   missing-dep reports.
 ///
 /// Centralised here so the `unresolved-import` and `unlisted-dependency`

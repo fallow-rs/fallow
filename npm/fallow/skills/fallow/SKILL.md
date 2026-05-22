@@ -218,7 +218,7 @@ fallow list --entry-points --format json --quiet
 fallow list --plugins --format json --quiet
 ```
 
-Shows detected entry points and active framework plugins (94 built-in: Next.js, Vite, Jest, Storybook, Tailwind, PandaCSS, tap, tsd, etc.).
+Shows detected entry points and active framework plugins (97 built-in: Next.js, Vite, Ember, Jest, Storybook, Tailwind, PandaCSS, tap, tsd, etc.).
 
 ### Production-only analysis
 

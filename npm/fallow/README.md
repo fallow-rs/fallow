@@ -12,7 +12,7 @@ Fallow turns a JS/TS repository into a trusted quality report: health score, cha
 
 It helps you answer: what changed, what got riskier, what should be reviewed, what should be refactored, and what can be safely removed. No AI inside the analyzer. Fallow produces deterministic findings, typed output contracts, and traceable explanations that downstream tools can trust.
 
-Static analysis is free and open source. An optional paid runtime layer (Fallow Runtime) adds production execution evidence. Rust-native, sub-second, 96 framework plugins, 5-41x faster than [knip](https://knip.dev) v5 (2-18x faster than knip v6), 8-29x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency for analysis.
+Static analysis is free and open source. An optional paid runtime layer (Fallow Runtime) adds production execution evidence. Rust-native, sub-second, 97 framework plugins, 5-41x faster than [knip](https://knip.dev) v5 (2-18x faster than knip v6), 8-29x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency for analysis.
 
 ## Installation
 
@@ -90,7 +90,7 @@ Every issue in `--format json` carries a machine-actionable `actions` array with
 
 ## Framework support
 
-96 built-in plugins covering Next.js, Nuxt, Remix, Qwik, SvelteKit, Gatsby, Astro, Angular, NestJS, AdonisJS, Expo Router, Vite, Webpack, Vitest, Jest, Playwright, Cypress, Storybook, ESLint, TypeScript, Tailwind, UnoCSS, Prisma, Drizzle, Convex, Turborepo, Hardhat, and many more. Auto-detected from your `package.json`.
+97 built-in plugins covering Next.js, Nuxt, Remix, Qwik, SvelteKit, Gatsby, Astro, Angular, NestJS, AdonisJS, Ember, Expo Router, Vite, Webpack, Vitest, Jest, Playwright, Cypress, Storybook, ESLint, TypeScript, Tailwind, UnoCSS, Prisma, Drizzle, Convex, Turborepo, Hardhat, and many more. Auto-detected from your `package.json`.
 
 ## Configuration
 

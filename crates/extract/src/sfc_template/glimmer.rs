@@ -7,21 +7,21 @@
 //! purpose-built tokenizer that recognises the constructs which can legally
 //! reference a JS-scope binding:
 //!
-//! - `<HelloWorld />` and `<HelloWorld>...</HelloWorld>` — PascalCase tag
+//! - `<HelloWorld />` and `<HelloWorld>...</HelloWorld>`: PascalCase tag
 //!   invocations credit a binding by tag name. Strict-mode `.gts` / `.gjs`
 //!   components are JavaScript bindings, so namespaced tags (`<Forms::Input />`)
 //!   and member-style tags (`<Buttons.Primary />`) are deliberately out of
-//!   scope — they're a classic-resolver / `.hbs` concept and `.hbs` is itself
+//!   scope. They're a classic-resolver / `.hbs` concept and `.hbs` is itself
 //!   a known limitation. Strict-mode code that wants that shape imports the
 //!   leaf component directly (`import Input from './forms/input'; <Input />`).
-//! - `{{capitalize x}}` — Handlebars helper invocation credits each bareword
+//! - `{{capitalize x}}`: Handlebars helper invocation credits each bareword
 //!   identifier that is not a built-in keyword, a literal, a `this.` chain,
 //!   an `@arg`, or a named-argument key.
-//! - `{{if (and a b) "yes" "no"}}` — sub-expressions are scanned recursively
+//! - `{{if (and a b) "yes" "no"}}`: sub-expressions are scanned recursively
 //!   inside `(...)`.
-//! - `<button {{on "click" handleClick}} />` — modifier mustaches inside
+//! - `<button {{on "click" handleClick}} />`: modifier mustaches inside
 //!   element-attribute position scan the same as regular mustaches.
-//! - `{{utils.formatDate value}}` — dotted member references credit the base
+//! - `{{utils.formatDate value}}`: dotted member references credit the base
 //!   binding and emit a `MemberAccess { object: utils, member: formatDate }`.
 //!
 //! Block-parameter introductions (`{{#each items as |item index|}}`) are
@@ -39,7 +39,7 @@ use rustc_hash::FxHashSet;
 use crate::MemberAccess;
 use crate::template_usage::TemplateUsage;
 
-/// Handlebars / Glimmer keywords that must never be resolved as imports —
+/// Handlebars / Glimmer keywords that must never be resolved as imports,
 /// scoped to **strict mode** (`.gts` / `.gjs`) semantics.
 ///
 /// Includes language keywords (control flow, scope) and the literal-name
@@ -64,7 +64,7 @@ const BUILTIN_KEYWORDS: &[&str] = &[
     "key",
     // Component / yield machinery (`component`, `helper`, `modifier` are
     // template-language keywords that introduce a `(component "name" ...)`
-    // / `(helper ...)` / `(modifier ...)` sub-expression — they are NOT the
+    // / `(helper ...)` / `(modifier ...)` sub-expression. They are NOT the
     // same as the same-named JS bindings a user might import).
     "yield",
     "outlet",
@@ -105,7 +105,7 @@ pub fn collect_glimmer_template_usage(
     }
     // Note: an empty `imported_bindings` set used to short-circuit here, but
     // the scanner ALSO emits `this.<member>` accesses for class-member
-    // tracking — those don't depend on imports, so we always walk every
+    // tracking. Those don't depend on imports, so we always walk every
     // template body. `credit_token` / `credit_tag_name` handle empty
     // imports cheaply (one set lookup short-circuits before any allocation).
 
@@ -138,7 +138,7 @@ fn template_body(source: &str, range: Range<usize>) -> Option<&str> {
     slice.get(body_start..body_end)
 }
 
-// ── block params ─────────────────────────────────────────────────────────
+// -- block params ---------------------------------------------------------
 
 /// Walk a template body and harvest every identifier introduced via
 /// `as |x y|` block-parameter syntax. The scan is purely textual and does
@@ -185,12 +185,12 @@ fn extract_block_params(body: &str) -> Vec<String> {
     locals
 }
 
-// ── tag scanning ─────────────────────────────────────────────────────────
+// -- tag scanning ---------------------------------------------------------
 
 /// Scan opening element tags for PascalCase component invocations.
 /// `<HelloWorld @x="y" />` credits binding `HelloWorld`.
 ///
-/// Only plain identifier tag names are recognised — strict-mode `.gts` /
+/// Only plain identifier tag names are recognised. Strict-mode `.gts` /
 /// `.gjs` components are JavaScript bindings, so namespaced or member-style
 /// tag invocations (`<Forms::Input />`, `<Buttons.Primary />`) are out of
 /// scope. They're a classic-resolver / `.hbs` concept and `.hbs` is itself a
@@ -223,7 +223,7 @@ fn scan_tags(
             continue;
         }
         // Skip closing tags, other `<!` shapes (doctype, CDATA), and
-        // processing instructions. Advance by one byte and keep scanning —
+        // processing instructions. Advance by one byte and keep scanning;
         // the loop will re-anchor on the next `<`.
         let next = bytes.get(index + 1).copied();
         if matches!(next, Some(b'/' | b'!' | b'?')) {
@@ -250,13 +250,13 @@ fn scan_tags(
             credit_binding(&body[name_start..end], imported_bindings, locals, usage);
         }
         // `end >= name_start + 1 = index + 2` whenever we matched a tag, and
-        // when we didn't `end == name_start == index + 1` — either way `end`
+        // when we didn't `end == name_start == index + 1`. Either way `end`
         // already advances past the current `<`, no `.max()` needed.
         index = end;
     }
 }
 
-// ── mustache scanning ────────────────────────────────────────────────────
+// -- mustache scanning ----------------------------------------------------
 
 /// Walk every `{{ ... }}` section in the template body and credit any
 /// imported bindings or member-accesses referenced inside. Triple-stash
@@ -275,20 +275,21 @@ fn scan_mustaches(
             index += 1;
             continue;
         }
-        // Skip Handlebars comments: {{!-- ... --}} and {{! ... }}.
-        let after_open = index + 2;
-        let comment_form = matches!(bytes.get(after_open), Some(b'!'));
-        let Some(close_rel) = body[after_open..].find("}}") else {
+        let triple_stash = matches!(bytes.get(index + 2), Some(b'{'));
+        let after_open = index + if triple_stash { 3 } else { 2 };
+        let close_token = if triple_stash { "}}}" } else { "}}" };
+        let comment_form = !triple_stash && matches!(bytes.get(after_open), Some(b'!'));
+        let Some(close_rel) = body[after_open..].find(close_token) else {
             break;
         };
         let close = after_open + close_rel;
         if comment_form {
-            index = close + 2;
+            index = close + close_token.len();
             continue;
         }
         let inner = &body[after_open..close];
         scan_mustache_inner(inner, imported_bindings, locals, usage);
-        index = close + 2;
+        index = close + close_token.len();
     }
 }
 
@@ -305,7 +306,7 @@ fn scan_mustache_inner(
         return;
     }
     // Block markers: `#each`, `/each`, `^else`. Skip the leading sigil but
-    // keep tokenizing the rest of the line — the helper name itself (e.g.
+    // keep tokenizing the rest of the line. The helper name itself (e.g.
     // `each`) is a built-in we filter below, but its arguments aren't.
     let inner = inner
         .strip_prefix('#')
@@ -334,7 +335,7 @@ fn credit_token(
     // shape-dispatch branches below run. Keywords are plain identifiers, so
     // none of the later branches (sub-expressions in parens, `key=value`
     // named args, `@arg`, `this.*`, dotted references) would consume them
-    // anyway — moving the check up just avoids the wasted work.
+    // anyway. Moving the check up just avoids the wasted work.
     if BUILTIN_KEYWORDS.contains(&token) {
         return;
     }
@@ -345,7 +346,7 @@ fn credit_token(
         return;
     }
 
-    // Named argument: `key=value` — credit the value, drop the key.
+    // Named argument: `key=value`; credit the value, drop the key.
     if let Some((_key, value)) = token.split_once('=')
         && !value.is_empty()
     {
@@ -358,7 +359,7 @@ fn credit_token(
         return;
     }
 
-    // `@arg` references are template arguments — never resolve to an import
+    // `@arg` references are template arguments. Never resolve to an import
     // binding and never emit passing the component.
     if token.starts_with('@') || token == "this" {
         return;
@@ -386,7 +387,7 @@ fn credit_token(
 
     // Dotted reference: credit the head and emit member accesses along the
     // chain. `utils.formatters.date` credits `utils` and emits
-    // `(utils, formatters)` + `(utils.formatters, date)` — matching the JS
+    // `(utils, formatters)` + `(utils.formatters, date)`, matching the JS
     // visitor's per-hop emission so cross-namespace member chains are
     // tracked the same way through the template scanner. The head is still
     // checked against `BUILTIN_KEYWORDS` because a dotted form like
@@ -472,7 +473,7 @@ impl<'a> Iterator for TokenSplitter<'a> {
     }
 }
 
-// ── helpers ──────────────────────────────────────────────────────────────
+// -- helpers --------------------------------------------------------------
 
 fn is_plain_identifier(token: &str) -> bool {
     let mut chars = token.chars();
@@ -594,6 +595,15 @@ mod tests {
     fn mustache_identifier_credits_binding() {
         let usage = usage_for("<template>{{capitalize name}}</template>", &["capitalize"]);
         assert!(usage.used_bindings.contains("capitalize"));
+    }
+
+    #[test]
+    fn triple_stash_helper_credits_binding() {
+        let usage = usage_for(
+            "<template>{{{formatHtml body}}}</template>",
+            &["formatHtml"],
+        );
+        assert!(usage.used_bindings.contains("formatHtml"));
     }
 
     #[test]

@@ -291,7 +291,7 @@ fn glimmer_import_used_only_inside_template_is_not_flagged() {
     assert!(info.unused_import_bindings.is_empty());
 }
 
-// ── negative cases: confirm the scanner does NOT over-credit ───────────
+// -- negative cases: confirm the scanner does NOT over-credit ------------
 //
 // The trio above only proves the credit path works. These tests fail the
 // suite if the scanner regresses into crediting bindings it shouldn't (or
@@ -329,7 +329,7 @@ fn glimmer_import_referenced_nowhere_is_flagged_unused() {
 
 #[test]
 fn glimmer_import_referenced_only_via_this_dot_in_template_is_flagged() {
-    // `this.greeting` reads a class property — even when `greeting` happens
+    // `this.greeting` reads a class property. Even when `greeting` happens
     // to also be an imported binding name, the template scanner must not
     // credit the import.
     let info = parse_source_to_module(
@@ -547,7 +547,7 @@ fn glimmer_file_with_two_template_only_components_credits_all_imports() {
     // Top-level template-only components are a first-class Glimmer pattern:
     // `const Foo = <template>...</template>;` defines a component without a
     // backing class. A `.gts` file may export several such components and
-    // each can pull from distinct module-scope imports — they must all be
+    // each can pull from distinct module-scope imports, so they must all be
     // credited (the JS parser sees the template bodies as blank padding, so
     // without the template scanner each import would surface as unused).
     let info = parse_source_to_module(

@@ -328,7 +328,7 @@ fn merge_script_into_module(
     // Vue/Svelte still credit template-visible imports via the post-hoc
     // `apply_template_usage` retain pass below, so pass an empty skip-set
     // here. (Folding the template scan in at this layer the way `.gts` /
-    // `.gjs` does is future work — see `crates/extract/src/parse.rs::
+    // `.gjs` does is future work; see `crates/extract/src/parse.rs::
     // collect_glimmer_template_into_extractor` for the target shape.)
     let empty_template_used = rustc_hash::FxHashSet::default();
     let binding_usage = if let Some(augmented) = augmented_body.as_deref() {

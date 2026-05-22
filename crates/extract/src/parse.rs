@@ -96,7 +96,7 @@ pub fn parse_source_to_module(
     // template-credited binding names flow into `compute_import_binding_usage`
     // as a skip-set so they never enter the `unused` vector in the first
     // place. The `apply_*` post-construction mutation that used to live here
-    // is gone — all state now flows through the extractor.
+    // is gone. All state now flows through the extractor.
     let mut template_used_imports =
         collect_glimmer_template_into_extractor(&mut extractor, path, source);
 
@@ -236,12 +236,12 @@ pub fn parse_source_to_module(
 /// `collect_angular_template_refs(...)` results straight onto
 /// `self.member_accesses`. The Glimmer scan can't run inside the JS visitor
 /// because template bodies are blanked by `strip_glimmer_templates` before
-/// the JS parse — the un-stripped source is only available here in
+/// the JS parse. The un-stripped source is only available here in
 /// `parse.rs`, so this is the earliest point we can fold the result in.
 ///
 /// `extractor.member_accesses` receives every emitted `MemberAccess`
 /// (including `this.<member>` chain hops that survive even when there are
-/// zero imports — class-member tracking still needs them). Bindings the
+/// zero imports; class-member tracking still needs them). Bindings the
 /// template credits are returned, not pushed; the caller threads them into
 /// `compute_import_binding_usage`'s skip-set so the `unused` vector never
 /// names them in the first place. This replaces the previous
@@ -663,7 +663,7 @@ pub fn compute_import_binding_usage(
 
             if !has_references {
                 // Templates may credit a binding the JS semantic pass can't
-                // see — skip it instead of flagging it unused.
+                // see, so skip it instead of flagging it unused.
                 if !template_used.contains(&import.local_name) {
                     unused.push(import.local_name.clone());
                 }
@@ -908,7 +908,7 @@ mod tests {
     #[test]
     fn scan_jsdoc_whitespace_between_paren_and_quote() {
         // `import( './types')` with whitespace between open-paren and the
-        // quote — less common but valid in loose formatters.
+        // quote. Less common, but valid in loose formatters.
         let imports = scan(" * @type {import( './types').Foo}");
         assert_eq!(imports.len(), 1);
         assert_eq!(imports[0].source, "./types");

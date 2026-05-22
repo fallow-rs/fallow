@@ -675,7 +675,7 @@ mod tests {
         );
         // HTML comments use <!-- --> not //, so suppression parsing
         // from source text won't find standard JS-style comments.
-        // This is expected — HTML suppression is not supported.
+        // This is expected; HTML suppression is not supported.
         assert_eq!(info.imports.len(), 1);
     }
 

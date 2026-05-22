@@ -17,7 +17,7 @@ pub fn is_glimmer_file(path: &Path) -> bool {
 /// of the source. The byte offsets are stable and the same offsets used by
 /// [`strip_glimmer_templates`] so callers (e.g. the
 /// `crates/extract/src/sfc_template/glimmer.rs` scanner) can correlate the
-/// two passes — the scanner walks each range over the UN-stripped source to
+/// two passes. The scanner walks each range over the UN-stripped source to
 /// recover template-only import/member references that the stripped JS
 /// parse pass cannot see.
 #[must_use]

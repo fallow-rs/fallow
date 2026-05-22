@@ -6,7 +6,7 @@ paths:
 
 # Plugin system
 
-96 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
+97 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
 
 ## Rich config parsing (18 plugins)
 
