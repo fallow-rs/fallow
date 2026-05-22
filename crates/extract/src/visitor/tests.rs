@@ -1245,6 +1245,49 @@ fn playwright_helper_function_records_fixture_definitions() {
 }
 
 #[test]
+fn playwright_helper_function_with_local_setup_records_fixture_definitions() {
+    let info = parse(
+        r#"
+            import { test as base } from '@playwright/test';
+            import { LoginActions } from './login-actions';
+
+            type MyFixtures = {
+                appUi: {
+                    step: {
+                        login: LoginActions;
+                    };
+                };
+            };
+
+            type UserRole = "assistant" | "anonymous";
+
+            export function appTest(role: UserRole = "assistant") {
+                const storageState = role === "assistant" ? "assistant-auth.json" : undefined;
+
+                return base.extend<MyFixtures>({
+                    storageState: async ({}, use) => {
+                        await use(storageState);
+                    },
+                });
+            }
+        "#,
+    );
+
+    assert!(
+        info.member_accesses.iter().any(|a| {
+            a.object
+                == format!(
+                    "{}appTest:appUi.step.login",
+                    crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL
+                )
+                && a.member == "LoginActions"
+        }),
+        "helper-function Playwright fixture with local setup should record a def sentinel keyed by the function name, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn playwright_helper_arrow_records_fixture_definitions() {
     let info = parse(
         r"

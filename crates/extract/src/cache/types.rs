@@ -40,7 +40,11 @@ use crate::MemberKind;
 /// `new URL(..., import.meta.url)`. Pre-fix entries carry empty
 /// `destructured_names` for the same source, so they would silently miss
 /// the named-export credit until the file is touched.
-pub(super) const CACHE_VERSION: u32 = 93;
+///
+/// Bumped to 94 for issue #586: Playwright helper fixture extraction recognizes
+/// helpers with local setup before the final `return base.extend<T>(...)`, so
+/// pre-fix entries can miss fixture definition sentinels.
+pub(super) const CACHE_VERSION: u32 = 94;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

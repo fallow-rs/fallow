@@ -1,0 +1,6 @@
+{
+  "name": "issue-586-playwright-helper-local-setup",
+  "devDependencies": {
+    "@playwright/test": "^1.0.0"
+  }
+}

@@ -265,6 +265,36 @@ fn playwright_helper_function_fixture_pom_methods_are_credited() {
 }
 
 #[test]
+fn playwright_helper_function_with_local_setup_fixture_pom_methods_are_credited() {
+    let root = fixture_path("issue-586-playwright-helper-local-setup");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&"SidebarActionsLocal.openPatientsWithLocal".to_string()),
+        "SidebarActionsLocal.openPatientsWithLocal should be credited through a helper that has local setup before returning base.extend, found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"SidebarActionsDirect.openPatientsDirect".to_string()),
+        "SidebarActionsDirect.openPatientsDirect should remain credited through the direct-return control helper, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&"SidebarActionsLocal.unusedLocalOnly".to_string()),
+        "genuinely unused local POM methods should still be reported, found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&"SidebarActionsDirect.unusedDirectOnly".to_string()),
+        "genuinely unused direct POM methods should still be reported, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
 fn playwright_fixture_teardown_credits_factory_getter_member_usage() {
     let root = fixture_path("issue-386-playwright-fixture-teardown");
     let config = create_config(root);
