@@ -621,6 +621,41 @@ fn docusaurus_contributes_virtual_module_prefixes() {
     );
 }
 
+#[test]
+fn tanstack_router_contributes_start_virtual_module_prefixes() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg(&["@tanstack/react-start"]);
+    let result = registry.run(&pkg, Path::new("/project"), &[]);
+
+    for prefix in [
+        "tanstack-start-manifest:",
+        "tanstack-start-injected-head-scripts:",
+    ] {
+        assert!(
+            result
+                .virtual_module_prefixes
+                .iter()
+                .any(|candidate| candidate == prefix),
+            "tanstack-router should contribute {prefix} virtual module prefix"
+        );
+    }
+}
+
+#[test]
+fn tanstack_start_virtual_module_prefixes_require_tanstack_enabler() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg(&["react"]);
+    let result = registry.run(&pkg, Path::new("/project"), &[]);
+
+    assert!(
+        !result
+            .virtual_module_prefixes
+            .iter()
+            .any(|prefix| prefix.starts_with("tanstack-start-")),
+        "TanStack Start virtual module prefixes should require an active TanStack plugin"
+    );
+}
+
 // ── External plugin: detection takes priority over enablers ──
 
 #[test]

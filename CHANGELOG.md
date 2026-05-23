@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Bun's bare `bun` runtime module is no longer reported as an unlisted dependency.** Before, fallow recognized `bun:*` specifiers such as `bun:sqlite` as Bun platform builtins, but still treated `import { SQL } from "bun"` and type-only imports from `"bun"` as an npm package named `bun` that had to be listed in `package.json`. After, the exact bare `bun` specifier is recognized as a Bun runtime builtin, while real packages such as `bun-types`, `@types/bun`, `bunyan`, and `bun/*` subpaths remain normal dependencies. (Closes [#642](https://github.com/fallow-rs/fallow/issues/642).)
 
+- **TanStack Start `:v` virtual modules no longer surface as unlisted dependencies.** Before, imports such as `tanstack-start-manifest:v` and `tanstack-start-injected-head-scripts:v` were treated as package names in TanStack Start projects. After, the TanStack Router / Start plugin registers those colon-prefixed runtime modules as framework virtual modules, so they are skipped by unlisted-dependency and unresolved-import reporting only when the TanStack plugin is active. Thanks [@BartWaardenburg](https://github.com/BartWaardenburg) for the report. (Closes [#636](https://github.com/fallow-rs/fallow/issues/636).)
+
 ## [2.79.0] - 2026-05-22
 
 ### Added

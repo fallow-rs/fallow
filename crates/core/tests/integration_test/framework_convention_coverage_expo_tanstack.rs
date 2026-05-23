@@ -219,6 +219,106 @@ fn route_tree_generated_import_stays_unresolved_without_tanstack_router_plugin()
 }
 
 #[test]
+fn tanstack_start_virtual_modules_are_not_unlisted() {
+    let temp = tempdir().expect("create temp dir");
+    let root = temp.path();
+
+    write_project_file(
+        root,
+        "package.json",
+        r#"{
+  "name": "tanstack-start-virtual-modules",
+  "main": "src/router-manifest.ts",
+  "dependencies": {
+    "@tanstack/react-start": "1.0.0"
+  }
+}"#,
+    );
+    write_project_file(
+        root,
+        "src/router-manifest.ts",
+        r#"import manifestModule from "tanstack-start-manifest:v";
+
+export async function loadManifest() {
+  const { tsrStartManifest } = await import("tanstack-start-manifest:v");
+  const mod = await import("tanstack-start-injected-head-scripts:v");
+  return [manifestModule, tsrStartManifest, mod];
+}
+"#,
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unlisted_names: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.as_str())
+        .collect();
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|import| import.import.specifier.as_str())
+        .collect();
+
+    for specifier in [
+        "tanstack-start-manifest:v",
+        "tanstack-start-injected-head-scripts:v",
+    ] {
+        assert!(
+            !unlisted_names.contains(&specifier),
+            "{specifier} should be treated as a TanStack Start virtual module, unlisted dependencies: {unlisted_names:?}"
+        );
+        assert!(
+            !unresolved_specifiers.contains(&specifier),
+            "{specifier} should be treated as a TanStack Start virtual module, unresolved imports: {unresolved_specifiers:?}"
+        );
+    }
+}
+
+#[test]
+fn tanstack_start_virtual_modules_stay_unlisted_without_plugin() {
+    let temp = tempdir().expect("create temp dir");
+    let root = temp.path();
+
+    write_project_file(
+        root,
+        "package.json",
+        r#"{
+  "name": "tanstack-start-virtual-modules-without-plugin",
+  "main": "src/router-manifest.ts"
+}"#,
+    );
+    write_project_file(
+        root,
+        "src/router-manifest.ts",
+        r#"export async function loadManifest() {
+  const { tsrStartManifest } = await import("tanstack-start-manifest:v");
+  const mod = await import("tanstack-start-injected-head-scripts:v");
+  return [tsrStartManifest, mod];
+}
+"#,
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unlisted_names: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.as_str())
+        .collect();
+
+    for specifier in [
+        "tanstack-start-manifest:v",
+        "tanstack-start-injected-head-scripts:v",
+    ] {
+        assert!(
+            unlisted_names.contains(&specifier),
+            "{specifier} should only be suppressed by the active TanStack plugin, unlisted dependencies: {unlisted_names:?}"
+        );
+    }
+}
+
+#[test]
 fn tanstack_router_inline_virtual_route_config_is_covered() {
     let root = fixture_path("tanstack-router-virtual-routes");
     let config = create_config(root.clone());

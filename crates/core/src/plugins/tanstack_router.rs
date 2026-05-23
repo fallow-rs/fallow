@@ -35,6 +35,10 @@ const SUPPORTING_ENTRY_PATTERNS: &[&str] = &[
 const DEFAULT_GENERATED_ROUTE_TREE_PATTERNS: &[&str] =
     &["src/routeTree.gen.ts", "src/routeTree.gen.js"];
 const GENERATED_IMPORT_PATTERNS: &[&str] = &["/routeTree.gen"];
+const VIRTUAL_MODULE_PREFIXES: &[&str] = &[
+    "tanstack-start-manifest:",
+    "tanstack-start-injected-head-scripts:",
+];
 const ENTRY_PATTERNS: &[&str] = &[
     "src/routes/**/*.{ts,tsx,js,jsx}",
     "app/routes/**/*.{ts,tsx,js,jsx}",
@@ -156,6 +160,10 @@ impl Plugin for TanstackRouterPlugin {
 
     fn generated_import_patterns(&self) -> &'static [&'static str] {
         GENERATED_IMPORT_PATTERNS
+    }
+
+    fn virtual_module_prefixes(&self) -> &'static [&'static str] {
+        VIRTUAL_MODULE_PREFIXES
     }
 
     fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {

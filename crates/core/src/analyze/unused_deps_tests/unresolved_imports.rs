@@ -207,6 +207,67 @@ fn unresolved_import_with_virtual_prefix_not_reported() {
 }
 
 #[test]
+fn unresolved_tanstack_start_virtual_imports_not_reported() {
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/src/router-manifest.ts"),
+        exports: vec![],
+        re_exports: vec![],
+        resolved_imports: [
+            "tanstack-start-manifest:v",
+            "tanstack-start-injected-head-scripts:v",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, spec)| ResolvedImport {
+            info: ImportInfo {
+                source: spec.to_string(),
+                imported_name: ImportedName::Named("default".to_string()),
+                local_name: format!("virtual_{index}"),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::new(0, 15),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::Unresolvable(spec.to_string()),
+        })
+        .collect(),
+        resolved_dynamic_imports: vec![],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        has_cjs_exports: false,
+        has_angular_component_template_url: false,
+        unused_import_bindings: FxHashSet::default(),
+        type_referenced_import_bindings: vec![],
+        value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
+    }];
+
+    let config = test_config(PathBuf::from("/project"));
+    let suppressions = SuppressionContext::empty();
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unresolved = find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &[
+            "tanstack-start-manifest:",
+            "tanstack-start-injected-head-scripts:",
+        ],
+        &[],
+        &[],
+        &line_offsets,
+    );
+
+    assert!(
+        unresolved.is_empty(),
+        "TanStack Start virtual imports should not be flagged as unresolved"
+    );
+}
+
+#[test]
 fn unresolved_import_suppressed_by_generated_import_pattern() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),

@@ -31,7 +31,7 @@ paths:
 
 ## Plugin trait extensions
 - `path_aliases()` for framework-specific alias resolution (Nuxt `~/`, Next.js `@/`)
-- `virtual_module_prefixes()` for framework virtual modules (Docusaurus `@theme/`, `@docusaurus/`)
+- `virtual_module_prefixes()` for framework virtual modules (Docusaurus `@theme/`, `@docusaurus/`, TanStack Start `tanstack-start-manifest:`)
 - `virtual_package_suffixes()` for framework virtual package conventions (Vitest `/__mocks__`). Matches as `ends_with` on the extracted package name, suppressing `unlisted-dependency` reports for non-npm specifiers like `@aws-sdk/__mocks__`.
 
 ## External plugins
