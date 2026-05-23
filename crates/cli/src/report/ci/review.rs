@@ -79,6 +79,7 @@ pub fn render_review_envelope_with_diff(
     let gitlab_diff_refs = (provider == Provider::Gitlab)
         .then(gitlab_diff_refs_from_env)
         .flatten();
+    let include_guidance = review_guidance_enabled();
 
     // Step 1: group consecutive same-(path, line) issues. Input is already
     // sorted by `(path, line, fingerprint)` (see `pr_comment::issues_from_codeclimate`).
@@ -90,7 +91,15 @@ pub fn render_review_envelope_with_diff(
     let comments: Vec<ReviewComment> = merged_groups
         .iter()
         .take(max)
-        .map(|group| render_merged_comment(provider, group, gitlab_diff_refs.as_ref(), diff_index))
+        .map(|group| {
+            render_merged_comment(
+                provider,
+                group,
+                gitlab_diff_refs.as_ref(),
+                diff_index,
+                include_guidance,
+            )
+        })
         .collect();
 
     let summary_text = format!(
@@ -179,6 +188,17 @@ fn env_nonempty(name: &str) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
+fn review_guidance_enabled() -> bool {
+    std::env::var("FALLOW_REVIEW_GUIDANCE").is_ok_and(|value| env_truthy(&value))
+}
+
+fn env_truthy(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
 /// Group consecutive same-(path, line) issues. Input is already sorted by
 /// `(path, line, fingerprint)` so a single linear pass collects runs.
 fn group_by_path_line(issues: &[CiIssue]) -> Vec<Vec<&CiIssue>> {
@@ -214,6 +234,7 @@ fn render_merged_comment(
     group: &[&CiIssue],
     gitlab_diff_refs: Option<&GitlabDiffRefs>,
     diff_index: Option<&DiffIndex>,
+    include_guidance: bool,
 ) -> ReviewComment {
     assert!(!group.is_empty(), "group_by_path_line never yields empty");
     let representative = group[0];
@@ -243,6 +264,9 @@ fn render_merged_comment(
         .expect("write to String is infallible");
         if let Some(suggestion) = super::suggestion::suggestion_block(provider, issue) {
             content.push_str(&suggestion);
+        }
+        if include_guidance && let Some(guidance) = review_guidance_block(issue) {
+            content.push_str(&guidance);
         }
     }
 
@@ -296,6 +320,17 @@ fn render_merged_comment(
             })
         }
     }
+}
+
+fn review_guidance_block(issue: &CiIssue) -> Option<String> {
+    let rule = crate::explain::rule_by_id(&issue.rule_id)?;
+    let guide = crate::explain::rule_guide(rule);
+    let docs_url = crate::explain::rule_docs_url(rule);
+
+    Some(format!(
+        "\n\n<details><summary>What to do</summary>\n\n{}\n\n[Read the rule docs]({docs_url})\n\n</details>",
+        guide.how_to_fix
+    ))
 }
 
 /// Truncate `content` if appending `marker_line` would exceed
@@ -373,6 +408,24 @@ mod tests {
         }
     }
 
+    fn issue_with_desc(
+        rule: &str,
+        desc: impl Into<String>,
+        sev: &str,
+        path: &str,
+        line: u64,
+        fp: &str,
+    ) -> CiIssue {
+        CiIssue {
+            rule_id: rule.into(),
+            description: desc.into(),
+            severity: sev.into(),
+            path: path.into(),
+            line,
+            fingerprint: fp.into(),
+        }
+    }
+
     #[test]
     fn github_review_envelope_matches_api_shape() {
         let issues = vec![issue(
@@ -402,6 +455,7 @@ mod tests {
             &[&issue],
             None,
             None,
+            false,
         ));
         assert_eq!(comment["side"], "RIGHT");
     }
@@ -414,6 +468,7 @@ mod tests {
             &[&issue],
             None,
             None,
+            false,
         ));
         assert!(comment["body"].as_str().unwrap().starts_with("**error**"));
     }
@@ -431,11 +486,90 @@ mod tests {
             &[&issue],
             Some(&refs),
             None,
+            false,
         ));
         assert_eq!(comment["position"]["position_type"], "text");
         assert_eq!(comment["position"]["base_sha"], "base");
         assert_eq!(comment["position"]["start_sha"], "start");
         assert_eq!(comment["position"]["head_sha"], "head");
+    }
+
+    #[test]
+    fn guidance_toggle_accepts_common_truthy_values() {
+        for value in ["1", "true", "TRUE", "yes", "on", " On "] {
+            assert!(env_truthy(value), "{value:?} should enable guidance");
+        }
+        for value in ["", "0", "false", "no", "off", "enabled"] {
+            assert!(!env_truthy(value), "{value:?} should not enable guidance");
+        }
+    }
+
+    #[test]
+    fn guidance_disabled_omits_details_block() {
+        let issue = issue(
+            "fallow/high-complexity",
+            "major",
+            "src/a.ts",
+            10,
+            "abc1234567890def",
+        );
+        let comment = comment_to_value(&render_merged_comment(
+            Provider::Github,
+            &[&issue],
+            None,
+            None,
+            false,
+        ));
+        let body = comment["body"].as_str().unwrap();
+        assert!(!body.contains("<details><summary>What to do</summary>"));
+        assert!(!body.contains("For function findings"));
+    }
+
+    #[test]
+    fn guidance_enabled_appends_rule_guide_details() {
+        let issue = issue(
+            "fallow/high-complexity",
+            "major",
+            "src/a.ts",
+            10,
+            "abc1234567890def",
+        );
+        let comment = comment_to_value(&render_merged_comment(
+            Provider::Github,
+            &[&issue],
+            None,
+            None,
+            true,
+        ));
+        let body = comment["body"].as_str().unwrap();
+        assert!(body.contains("<details><summary>What to do</summary>"));
+        assert!(body.contains("For function findings"));
+        assert!(body.contains("[Read the rule docs]("));
+        assert!(
+            body.find("</details>").unwrap() < body.find("fallow-fingerprint:v2:").unwrap(),
+            "guidance should render before the marker"
+        );
+    }
+
+    #[test]
+    fn guidance_attaches_to_each_merged_finding() {
+        let complexity = issue("fallow/high-complexity", "major", "src/foo.ts", 42, "fp_a");
+        let duplication = issue("fallow/code-duplication", "minor", "src/foo.ts", 42, "fp_b");
+        let comment = comment_to_value(&render_merged_comment(
+            Provider::Github,
+            &[&complexity, &duplication],
+            None,
+            None,
+            true,
+        ));
+        let body = comment["body"].as_str().unwrap();
+        assert_eq!(
+            body.matches("<details><summary>What to do</summary>")
+                .count(),
+            2
+        );
+        assert!(body.contains("For function findings"));
+        assert!(body.contains("Extract the shared logic"));
     }
 
     #[test]
@@ -618,6 +752,7 @@ rename to src/new.ts
             &[&issue],
             None,
             None,
+            false,
         ));
         let body = comment["body"].as_str().unwrap();
         assert!(
@@ -641,6 +776,30 @@ rename to src/new.ts
     }
 
     #[test]
+    fn oversized_guidance_body_truncates_and_preserves_marker() {
+        let issue = issue_with_desc(
+            "fallow/high-complexity",
+            "x".repeat(MAX_COMMENT_BODY_BYTES * 2),
+            "major",
+            "src/a.ts",
+            1,
+            "abc1234567890def",
+        );
+        let comment = comment_to_value(&render_merged_comment(
+            Provider::Github,
+            &[&issue],
+            None,
+            None,
+            true,
+        ));
+        let body = comment["body"].as_str().unwrap();
+        assert!(body.len() <= MAX_COMMENT_BODY_BYTES);
+        assert!(body.contains("<!-- fallow-truncated -->"));
+        assert!(body.contains("fallow-fingerprint:v2:"));
+        assert_eq!(comment["truncated"], true);
+    }
+
+    #[test]
     fn multibyte_body_truncates_at_char_boundary() {
         // Each Japanese char is 3 bytes in UTF-8. A byte-boundary truncation
         // anywhere inside one would produce invalid UTF-8.
@@ -658,6 +817,7 @@ rename to src/new.ts
             &[&issue],
             None,
             None,
+            false,
         ));
         let body = comment["body"].as_str().unwrap();
         // Cargo will fail to deserialize the snapshot if `body` is not

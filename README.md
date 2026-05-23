@@ -445,6 +445,7 @@ Useful GitHub Action modes:
     annotations: true        # default: inline workflow annotations
     comment: true            # sticky PR summary
     review-comments: true    # inline review comments with suggestions
+    review-guidance: false   # set true for collapsed "What to do" blocks
     diff-filter: added       # added | diff_context | file | nofilter
     max-comments: 50
 
@@ -520,6 +521,7 @@ fallow:
     FALLOW_COMMAND: "audit"
     FALLOW_COMMENT: "true"
     FALLOW_REVIEW: "true"
+    FALLOW_REVIEW_GUIDANCE: "true"
     FALLOW_MAX_CRAP: "30"
     FALLOW_COVERAGE: "artifacts/coverage-final.json"
     FALLOW_COVERAGE_ROOT: "/home/runner/work/myapp"
@@ -590,6 +592,7 @@ The GitLab CI template can post rich comments directly on merge requests -- summ
 |---|---|---|
 | `FALLOW_COMMENT` | `"false"` | Post a summary comment on the MR with collapsible sections per analysis |
 | `FALLOW_REVIEW` | `"false"` | Post inline MR discussions from the typed `review-gitlab` envelope v2, with stable fingerprints, suggestions, dedupe, and stale-thread reconciliation |
+| `FALLOW_REVIEW_GUIDANCE` | `"false"` | Add collapsed "What to do" guidance blocks to inline review discussions |
 | `FALLOW_MAX_COMMENTS` | `"50"` | Maximum number of inline review comments |
 | `FALLOW_DIFF_FILTER` | `"added"` | Filter line-level findings to added diff hunks by default; use `diff_context`, `file`, or `nofilter` to widen review scope |
 | `FALLOW_GITLAB_BASE_SHA` / `FALLOW_GITLAB_START_SHA` / `FALLOW_GITLAB_HEAD_SHA` | `""` | Optional overrides for the GitLab MR `diff_refs` used to build inline discussion positions |
@@ -621,6 +624,7 @@ fallow:
   variables:
     FALLOW_COMMENT: "true"       # Summary comment with collapsible sections
     FALLOW_REVIEW: "true"        # Inline discussions with suggestion blocks
+    FALLOW_REVIEW_GUIDANCE: "true" # Collapsed "What to do" blocks in inline discussions
     FALLOW_MAX_COMMENTS: "30"    # Cap inline comments (default: 50)
     FALLOW_SCRIPTS_REF: "vX.Y.Z" # Match the pinned template ref when using remote scripts
     FALLOW_FAIL_ON_ISSUES: "true"

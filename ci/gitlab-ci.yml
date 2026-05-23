@@ -26,6 +26,7 @@
 #   - Inline MR annotations via GitLab Code Quality reports (CodeClimate format)
 #   - Rich MR summary comments with collapsible sections (set FALLOW_COMMENT: "true")
 #   - Inline MR review discussions with suggestion blocks (set FALLOW_REVIEW: "true")
+#   - Optional inline "What to do" guidance (set FALLOW_REVIEW_GUIDANCE: "true")
 #   - Comment merging: groups unused exports per file, deduplicates clones
 #   - Automatic cleanup of previous fallow comments on re-runs
 #   - Auto --changed-since in MR context (scopes to changed files)
@@ -54,6 +55,7 @@
 #     variables:
 #       FALLOW_COMMENT: "true"
 #       FALLOW_REVIEW: "true"
+#       FALLOW_REVIEW_GUIDANCE: "true"
 #
 #   # Incremental: only report issues in changed files
 #   fallow:
@@ -87,6 +89,7 @@ variables:
   FALLOW_ARGS: ""               # Extra CLI arguments (space-separated)
   FALLOW_COMMENT: "false"       # Post results as MR summary comment
   FALLOW_REVIEW: "false"        # Post inline MR discussions with rich comments and suggestions
+  FALLOW_REVIEW_GUIDANCE: "false" # Add collapsed "What to do" guidance to inline review discussions
   FALLOW_CODEQUALITY: "true"    # Generate GitLab Code Quality report (inline MR annotations)
   FALLOW_MAX_COMMENTS: "50"     # Maximum number of inline review comments + items in the sticky details table
   FALLOW_COMMENT_ID: ""         # Sticky-comment marker id; auto-suffixed with the workspace name when scoped to one workspace and unset

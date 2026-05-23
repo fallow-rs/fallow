@@ -83,6 +83,10 @@ inputs:
     description: 'Post findings as inline PR review comments with rich markdown formatting (code blocks, tables, links, suggestions). Creates a single review per run. Automatically disables plain-text annotations when enabled.'
     required: false
     default: 'false'
+  review-guidance:
+    description: 'Append collapsed "What to do" guidance blocks to inline review comments. Requires review-comments: true.'
+    required: false
+    default: 'false'
   max-annotations:
     description: 'Maximum number of inline annotations to emit (default: 50)'
     required: false
@@ -492,6 +496,7 @@ runs:
         GH_REPO: ${{ github.repository }}
         FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
         FALLOW_ROOT: ${{ inputs.root }}
+        FALLOW_REVIEW_GUIDANCE: ${{ inputs.review-guidance }}
         MAX_COMMENTS: ${{ inputs.max-comments || inputs.max-annotations }}
         CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
         FALLOW_COMMENT_ID: ${{ inputs.comment-id }}

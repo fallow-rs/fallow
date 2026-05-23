@@ -34,7 +34,7 @@ pub fn suggestion_block_for_issue_line(
     if rule_id.contains("unused-enum-member") || rule_id.contains("unused-class-member") {
         return delete_line_suggestion(provider, line);
     }
-    if rule_id.contains("unused-export") {
+    if rule_id.contains("unused-export") || rule_id.contains("unused-type") {
         return unused_export_suggestion(provider, line);
     }
     None
@@ -142,6 +142,56 @@ mod tests {
             )
             .as_deref(),
             Some("\n\n```suggestion:-0+0\nthing;\n```")
+        );
+    }
+
+    #[test]
+    fn renders_unused_type_export_suggestion() {
+        assert_eq!(
+            suggestion_block_for_issue_line(
+                Provider::Github,
+                "fallow/unused-type",
+                "export type Legacy = { id: string };"
+            )
+            .as_deref(),
+            Some("\n\n```suggestion\ntype Legacy = { id: string };\n```")
+        );
+        assert_eq!(
+            suggestion_block_for_issue_line(
+                Provider::Gitlab,
+                "fallow/unused-type",
+                "export interface Legacy { id: string }"
+            )
+            .as_deref(),
+            Some("\n\n```suggestion:-0+0\ninterface Legacy { id: string }\n```")
+        );
+    }
+
+    #[test]
+    fn unused_type_suggestion_is_conservative() {
+        assert_eq!(
+            suggestion_block_for_issue_line(
+                Provider::Github,
+                "fallow/unused-type",
+                "  export type Indented = string;"
+            ),
+            None
+        );
+        assert_eq!(
+            suggestion_block_for_issue_line(
+                Provider::Github,
+                "fallow/unused-type",
+                "type Local = string;"
+            ),
+            None
+        );
+        assert_eq!(
+            suggestion_block_for_issue_line(
+                Provider::Github,
+                "fallow/unused-type",
+                "const used = 1; export type Legacy = string;"
+            ),
+            None
         );
     }
 

@@ -188,6 +188,7 @@ fn environment_variables_schema() -> serde_json::Value {
         "FALLOW_PRODUCTION_DEAD_CODE": "Set to true/false to override production mode for dead-code analysis.",
         "FALLOW_PRODUCTION_HEALTH": "Set to true/false to override production mode for health analysis.",
         "FALLOW_PRODUCTION_DUPES": "Set to true/false to override production mode for duplication analysis.",
+        "FALLOW_REVIEW_GUIDANCE": "Set to true to append collapsed guidance blocks to review-github/review-gitlab inline comment bodies.",
         "FALLOW_BIN": "Path to fallow binary (used by fallow-mcp server)."
     })
 }
