@@ -1,0 +1,6 @@
+{
+  "compilerOptions": {
+    "module": "preserve",
+    "types": ["bun"]
+  }
+}

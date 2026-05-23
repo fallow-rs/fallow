@@ -74,12 +74,24 @@ pub(super) fn make_pkg(deps: &[&str], dev_deps: &[&str], optional_deps: &[&str])
 }
 
 /// Build a minimal graph where a single entry file imports given npm packages.
+pub(super) fn build_graph_with_npm_imports(
+    npm_packages: &[(&str, bool)], // (package_name, is_type_only)
+) -> (ModuleGraph, Vec<ResolvedModule>) {
+    let npm_imports: Vec<(&str, &str, bool)> = npm_packages
+        .iter()
+        .map(|(name, is_type_only)| (*name, *name, *is_type_only))
+        .collect();
+    build_graph_with_npm_import_sources(&npm_imports)
+}
+
+/// Build a minimal graph where a single entry file imports npm packages, allowing the original
+/// source specifier to differ from the package name recorded by resolution.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "test span values are trivially small"
 )]
-pub(super) fn build_graph_with_npm_imports(
-    npm_packages: &[(&str, bool)], // (package_name, is_type_only)
+pub(super) fn build_graph_with_npm_import_sources(
+    npm_imports: &[(&str, &str, bool)], // (source, package_name, is_type_only)
 ) -> (ModuleGraph, Vec<ResolvedModule>) {
     let files = vec![DiscoveredFile {
         id: FileId(0),
@@ -92,12 +104,12 @@ pub(super) fn build_graph_with_npm_imports(
         source: EntryPointSource::PackageJsonMain,
     }];
 
-    let resolved_imports: Vec<ResolvedImport> = npm_packages
+    let resolved_imports: Vec<ResolvedImport> = npm_imports
         .iter()
         .enumerate()
-        .map(|(i, (name, is_type_only))| ResolvedImport {
+        .map(|(i, (source, package_name, is_type_only))| ResolvedImport {
             info: ImportInfo {
-                source: name.to_string(),
+                source: source.to_string(),
                 imported_name: ImportedName::Named("default".to_string()),
                 local_name: format!("import_{i}"),
                 is_type_only: *is_type_only,
@@ -105,7 +117,7 @@ pub(super) fn build_graph_with_npm_imports(
                 span: oxc_span::Span::new((i * 20) as u32, (i * 20 + 15) as u32),
                 source_span: oxc_span::Span::default(),
             },
-            target: ResolveResult::NpmPackage(name.to_string()),
+            target: ResolveResult::NpmPackage(package_name.to_string()),
         })
         .collect();
 

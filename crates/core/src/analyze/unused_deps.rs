@@ -720,7 +720,7 @@ fn has_types_package_for_file(
 ///
 /// Falls back to `(1, 0)` when no span is found (e.g. re-export-only usages).
 pub fn find_import_location(
-    import_spans_by_file: &FxHashMap<FileId, Vec<(&str, u32)>>,
+    import_spans_by_file: &FxHashMap<FileId, Vec<(&str, &str, u32)>>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
     file_id: FileId,
     package_name: &str,
@@ -730,12 +730,35 @@ pub fn find_import_location(
         .and_then(|spans| {
             spans
                 .iter()
-                .find(|(name, _)| *name == package_name)
-                .map(|(_, span_start)| {
+                .find(|(name, source, _)| *name == package_name && !is_builtin_module(source))
+                .or_else(|| spans.iter().find(|(name, _, _)| *name == package_name))
+                .map(|(_, _, span_start)| {
                     byte_offset_to_line_col(line_offsets_by_file, file_id, *span_start)
                 })
         })
         .unwrap_or((1, 0))
+}
+
+fn package_imports_are_all_builtin(
+    import_spans_by_file: &FxHashMap<FileId, Vec<(&str, &str, u32)>>,
+    file_id: FileId,
+    package_name: &str,
+) -> bool {
+    let Some(imports) = import_spans_by_file.get(&file_id) else {
+        return false;
+    };
+
+    let mut saw_package = false;
+    for (name, source, _) in imports {
+        if *name == package_name {
+            saw_package = true;
+            if !is_builtin_module(source) {
+                return false;
+            }
+        }
+    }
+
+    saw_package
 }
 
 /// Find dependencies used in imports but not listed in package.json.
@@ -797,16 +820,18 @@ pub fn find_unlisted_dependencies(
         .map(|pr| pr.tooling_dependencies.iter().map(String::as_str).collect())
         .unwrap_or_default();
 
-    // Build a lookup: FileId -> Vec<(package_name, span_start)> from resolved modules,
-    // so we can recover the import location when building UnlistedDependency results.
-    let mut import_spans_by_file: FxHashMap<FileId, Vec<(&str, u32)>> = FxHashMap::default();
+    // Build a lookup from resolved modules so we can recover the import location when building
+    // UnlistedDependency results. Keep both the collapsed npm package name and original source
+    // specifier because `bun/foo` resolves to package `bun` but is not the builtin `bun` module.
+    let mut import_spans_by_file: FxHashMap<FileId, Vec<(&str, &str, u32)>> = FxHashMap::default();
     for rm in resolved_modules {
         for import in rm.all_resolved_imports() {
             if let Some(name) = import.target.package_usage_name() {
-                import_spans_by_file
-                    .entry(rm.file_id)
-                    .or_default()
-                    .push((name, import.info.span.start));
+                import_spans_by_file.entry(rm.file_id).or_default().push((
+                    name,
+                    import.info.source.as_str(),
+                    import.info.span.start,
+                ));
             }
         }
         // Re-exports don't have span info on ReExportInfo, so skip them here.
@@ -822,7 +847,10 @@ pub fn find_unlisted_dependencies(
     let mut unlisted: FxHashMap<String, Vec<ImportSite>> = FxHashMap::default();
 
     for (package_name, file_ids) in &graph.package_usage {
-        if is_builtin_module(package_name) || is_path_alias(package_name) {
+        // The bare Bun builtin is handled per import below because `bun/foo` collapses to package
+        // `bun` but should still be reportable as an unlisted dependency.
+        if (package_name != "bun" && is_builtin_module(package_name)) || is_path_alias(package_name)
+        {
             continue;
         }
         if is_virtual_module(package_name) {
@@ -856,6 +884,11 @@ pub fn find_unlisted_dependencies(
             let Some(module) = graph.modules.get(id.0 as usize) else {
                 continue;
             };
+            if package_name == "bun"
+                && package_imports_are_all_builtin(&import_spans_by_file, *id, package_name)
+            {
+                continue;
+            }
             if is_package_listed_for_file(&module.path, package_name, &all_deps, &ws_dep_map) {
                 continue;
             }

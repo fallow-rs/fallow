@@ -27,6 +27,23 @@ fn builtin_module_cloudflare_workers() {
 }
 
 #[test]
+fn builtin_module_bun() {
+    assert!(super::super::super::predicates::is_builtin_module("bun"));
+    assert!(super::super::super::predicates::is_builtin_module(
+        "bun:sqlite"
+    ));
+    assert!(!super::super::super::predicates::is_builtin_module(
+        "bun-types"
+    ));
+    assert!(!super::super::super::predicates::is_builtin_module(
+        "@types/bun"
+    ));
+    assert!(!super::super::super::predicates::is_builtin_module(
+        "bunyan"
+    ));
+}
+
+#[test]
 fn builtin_module_deno_std() {
     assert!(super::super::super::predicates::is_builtin_module("std"));
     assert!(super::super::super::predicates::is_builtin_module(

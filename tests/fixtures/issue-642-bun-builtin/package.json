@@ -1,0 +1,9 @@
+{
+  "name": "issue-642-bun-builtin",
+  "type": "module",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "bun-types": "^1.2.0",
+    "typescript": "^6.0.3"
+  }
+}

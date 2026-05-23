@@ -692,7 +692,8 @@ fn no_at_types_still_flags_unlisted() {
 
 #[test]
 fn bun_builtins_not_reported_as_unlisted() {
-    let (graph, resolved_modules) = build_graph_with_npm_imports(&[("bun:sqlite", false)]);
+    let (graph, resolved_modules) =
+        build_graph_with_npm_imports(&[("bun", false), ("bun:sqlite", false)]);
     let pkg = make_pkg(&[], &[], &[]);
     let config = test_config(PathBuf::from("/project"));
     let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
@@ -708,8 +709,59 @@ fn bun_builtins_not_reported_as_unlisted() {
     );
 
     assert!(
+        !unlisted.iter().any(|d| d.package_name == "bun"),
+        "bun builtin should not be flagged as unlisted"
+    );
+    assert!(
         !unlisted.iter().any(|d| d.package_name == "bun:sqlite"),
         "bun:sqlite builtin should not be flagged as unlisted"
+    );
+}
+
+#[test]
+fn bun_type_only_builtin_not_reported_as_unlisted() {
+    let (graph, resolved_modules) = build_graph_with_npm_imports(&[("bun", true)]);
+    let pkg = make_pkg(&[], &[], &[]);
+    let config = test_config(PathBuf::from("/project"));
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unlisted = find_unlisted_dependencies(
+        &graph,
+        &pkg,
+        &config,
+        &[],
+        None,
+        &resolved_modules,
+        &line_offsets,
+    );
+
+    assert!(
+        !unlisted.iter().any(|d| d.package_name == "bun"),
+        "type-only bun builtin import should not be flagged as unlisted"
+    );
+}
+
+#[test]
+fn bun_slash_subpath_reported_as_unlisted() {
+    let (graph, resolved_modules) =
+        build_graph_with_npm_import_sources(&[("bun", "bun", false), ("bun/foo", "bun", false)]);
+    let pkg = make_pkg(&[], &[], &[]);
+    let config = test_config(PathBuf::from("/project"));
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unlisted = find_unlisted_dependencies(
+        &graph,
+        &pkg,
+        &config,
+        &[],
+        None,
+        &resolved_modules,
+        &line_offsets,
+    );
+
+    assert!(
+        unlisted.iter().any(|d| d.package_name == "bun"),
+        "bun slash subpaths should be treated as package imports, not Bun builtins"
     );
 }
 

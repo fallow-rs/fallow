@@ -10,8 +10,8 @@ pub fn is_virtual_module(name: &str) -> bool {
 
 /// Check if a package name is a platform built-in module (Node.js, Bun, Deno, Cloudflare Workers).
 pub fn is_builtin_module(name: &str) -> bool {
-    // Bun built-in modules (e.g., `bun:sqlite`, `bun:test`, `bun:ffi`)
-    if name.starts_with("bun:") {
+    // Bun built-in modules (e.g., `bun`, `bun:sqlite`, `bun:test`, `bun:ffi`)
+    if name == "bun" || name.starts_with("bun:") {
         return true;
     }
     // Cloudflare Workers built-in modules (e.g., `cloudflare:workers`, `cloudflare:sockets`)
@@ -547,10 +547,20 @@ mod tests {
     /// Bun built-in modules.
     #[test]
     fn builtin_module_bun() {
+        assert!(is_builtin_module("bun"));
         assert!(is_builtin_module("bun:sqlite"));
         assert!(is_builtin_module("bun:test"));
         assert!(is_builtin_module("bun:ffi"));
         assert!(is_builtin_module("bun:jsc"));
+    }
+
+    /// npm packages whose names merely start with `bun` are not Bun builtins.
+    #[test]
+    fn not_builtin_module_bun_like_packages() {
+        assert!(!is_builtin_module("bun-types"));
+        assert!(!is_builtin_module("bunyan"));
+        assert!(!is_builtin_module("@types/bun"));
+        assert!(!is_builtin_module("bun-types/path"));
     }
 
     /// Cloudflare Workers built-in modules.

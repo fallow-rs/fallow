@@ -238,6 +238,35 @@ fn broken_tsconfig_path_alias_is_not_misclassified_as_unlisted_dependency() {
     );
 }
 
+// ── Bun bare runtime module is a platform builtin (issue #642) ──
+
+#[test]
+fn bun_bare_runtime_module_is_not_unlisted() {
+    let root = fixture_path("issue-642-bun-builtin");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|import| import.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specifiers.contains(&"bun"),
+        "bare `bun` should resolve to a platform builtin: {unresolved_specifiers:?}"
+    );
+
+    let unlisted_names: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unlisted_names.contains(&"bun"),
+        "bare `bun` value and type imports must not surface as unlisted dependencies: {unlisted_names:?}"
+    );
+}
+
 // ── Wildcard tsconfig paths keep bare imports correctly classified (issue #327) ──
 
 #[test]

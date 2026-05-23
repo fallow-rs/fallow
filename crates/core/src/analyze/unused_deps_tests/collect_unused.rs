@@ -361,8 +361,11 @@ fn nested_workspace_uses_most_specific_manifest() {
 
 #[test]
 fn import_location_found() {
-    let mut spans: FxHashMap<FileId, Vec<(&str, u32)>> = FxHashMap::default();
-    spans.insert(FileId(0), vec![("react", 10), ("lodash", 50)]);
+    let mut spans: FxHashMap<FileId, Vec<(&str, &str, u32)>> = FxHashMap::default();
+    spans.insert(
+        FileId(0),
+        vec![("react", "react", 10), ("lodash", "lodash", 50)],
+    );
     let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
     // Without line offsets, falls back to (1, byte_offset) from byte_offset_to_line_col
     let (line, col) = find_import_location(&spans, &line_offsets, FileId(0), "lodash");
@@ -372,7 +375,7 @@ fn import_location_found() {
 
 #[test]
 fn import_location_not_found_falls_back() {
-    let spans: FxHashMap<FileId, Vec<(&str, u32)>> = FxHashMap::default();
+    let spans: FxHashMap<FileId, Vec<(&str, &str, u32)>> = FxHashMap::default();
     let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
     let (line, col) = find_import_location(&spans, &line_offsets, FileId(0), "axios");
     assert_eq!(line, 1);
@@ -381,8 +384,8 @@ fn import_location_not_found_falls_back() {
 
 #[test]
 fn import_location_file_exists_but_package_not_found() {
-    let mut spans: FxHashMap<FileId, Vec<(&str, u32)>> = FxHashMap::default();
-    spans.insert(FileId(0), vec![("react", 10)]);
+    let mut spans: FxHashMap<FileId, Vec<(&str, &str, u32)>> = FxHashMap::default();
+    spans.insert(FileId(0), vec![("react", "react", 10)]);
     let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
     let (line, col) = find_import_location(&spans, &line_offsets, FileId(0), "lodash");
     assert_eq!(line, 1);
