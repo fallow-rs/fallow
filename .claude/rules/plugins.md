@@ -6,9 +6,9 @@ paths:
 
 # Plugin system
 
-97 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
+98 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
 
-## Rich config parsing (18 plugins)
+## Rich config parsing (19 plugins)
 
 - **ESLint**: Legacy plugin/extends/parser short-name resolution (top-level AND inside `overrides[*]`), flat config plugin keys, JSON config, shared config following (reads imported config packages' entry points one level deep to discover peer deps), relative-path `extends` chain following (`./config/base.js`, `../shared/eslintrc.json`) with cycle protection and depth cap, settings["import/resolver"] (string/array/object formats)
 - **Vite**: rollupOptions.input, lib.entry, optimizeDeps include/exclude, ssr.external/noExternal
@@ -28,7 +28,7 @@ paths:
 - **Nx**: project.json targets.*.executor → deps; targets.*.options.{main, browser, styles, scripts, tsConfig} → entry points; targets.*.options.stylePreprocessorOptions.includePaths → SCSS include paths (with `{projectRoot}`/`{workspaceRoot}` token expansion)
 - **Prisma**: `generator { provider = "..." }` extraction from default `schema.prisma` / `prisma/schema.prisma` files and the multi-file `prisma/schema/*.prisma` layout; credits custom-generator npm packages; skips `datasource` providers, shell-command form (`node ./gen.js`), relative-path form, and commented-out providers. Custom schema paths configured via `prisma.config.ts`'s `schema` field are out of scope (filesystem fallback is non-recursive); users with non-canonical layouts fall back to `ignoreDependencies`.
 - **AdonisJS**: v5 `.adonisrc.json` (`preloads`, `providers`, `commands`, `aceProviders` mixed string / `{ file, environment }` forms; `aliases` → path-alias table; `metaFiles[].pattern` → always-used; `types` declarations). v6 / v7 `adonisrc.ts` (walks `defineConfig({...})` for thunk-wrapped `() => import('SPEC')` in `preloads` / `providers` / `commands`, `directories.*` overrides → extra entry patterns, project `package.json#imports` → Node subpath path aliases). `@ioc:` v5 IoC virtual import prefix suppresses `unlisted-dependency` for runtime-resolved container imports.
-
+- **Fumadocs**: activates on `fumadocs-mdx`, `fumadocs-core`, `fumadocs-ui`, or a root/workspace `source.config.{ts,tsx,js,jsx,mts,mjs,cts,cjs}` file. Keeps `source.config.*` and generated `.source/**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}` modules alive, traverses the hidden `.source` directory when active, suppresses `fumadocs-mdx:*` virtual imports, credits packages imported by `source.config.*`, and extracts literal `dir` values from `defineCollections`, `defineDocs`, and direct `defineConfig({ collections })` object entries as Markdown/MDX/JSON/YAML content roots.
 ## Plugin trait extensions
 - `path_aliases()` for framework-specific alias resolution (Nuxt `~/`, Next.js `@/`)
 - `virtual_module_prefixes()` for framework virtual modules (Docusaurus `@theme/`, `@docusaurus/`, TanStack Start `tanstack-start-manifest:`)

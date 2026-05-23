@@ -1312,6 +1312,144 @@ fn content_collections_framework_integration_only_activates_plugin() {
 }
 
 #[test]
+fn fumadocs_source_config_content_roots_and_virtual_imports_are_used() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    let docs = root.join("packages/docs");
+
+    std::fs::create_dir_all(docs.join("src/lib")).expect("src lib");
+    std::fs::create_dir_all(docs.join(".source")).expect("source dir");
+    std::fs::create_dir_all(docs.join("content/docs")).expect("docs content");
+    std::fs::create_dir_all(docs.join("content/blog")).expect("blog content");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "fumadocs-monorepo-fixture",
+            "private": true,
+            "workspaces": ["packages/*"]
+        }"#,
+    )
+    .expect("root package json");
+    std::fs::write(
+        docs.join("package.json"),
+        r#"{
+            "name": "@fixture/docs",
+            "private": true,
+            "main": "src/index.ts",
+            "devDependencies": {
+                "fumadocs-mdx": "1.0.0",
+                "@acme/fumadocs-preset": "1.0.0",
+                "left-pad": "1.0.0"
+            }
+        }"#,
+    )
+    .expect("docs package json");
+    std::fs::write(
+        docs.join("source.config.ts"),
+        r"
+            import { defineCollections, defineConfig } from 'fumadocs-mdx/config';
+            import { withPreset } from '@acme/fumadocs-preset';
+
+            const docs = defineCollections({ type: 'doc', dir: 'content/docs' });
+
+            export default defineConfig(withPreset({
+                collections: [
+                    docs,
+                    { type: 'doc', dir: './content/blog' },
+                ],
+            }));
+        ",
+    )
+    .expect("source config");
+    std::fs::write(
+        docs.join("src/index.ts"),
+        "import './lib/source';\nexport const app = true;\n",
+    )
+    .expect("entry");
+    std::fs::write(
+        docs.join("src/lib/source.ts"),
+        "import { loader } from '../../.source/index';\nimport { server } from 'fumadocs-mdx:collections/server';\nexport { loader, server };\n",
+    )
+    .expect("source lib");
+    std::fs::write(
+        docs.join(".source/index.ts"),
+        "export const loader = { load() { return null; } };\n",
+    )
+    .expect("generated source");
+    std::fs::write(docs.join("content/docs/index.mdx"), "# Docs\n").expect("docs mdx");
+    std::fs::write(docs.join("content/blog/post.mdx"), "# Blog\n").expect("blog mdx");
+    std::fs::write(docs.join("orphan.ts"), "export const orphan = true;\n").expect("orphan");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| {
+            file.file
+                .path
+                .strip_prefix(root)
+                .unwrap_or(&file.file.path)
+                .to_string_lossy()
+                .to_string()
+        })
+        .collect();
+    let unresolved_specs: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|unresolved| unresolved.import.specifier.as_str())
+        .collect();
+    let unlisted_deps: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.as_str())
+        .collect();
+    let unused_dev_deps: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.as_str())
+        .collect();
+
+    for path in [
+        "packages/docs/source.config.ts",
+        "packages/docs/.source/index.ts",
+        "packages/docs/content/docs/index.mdx",
+        "packages/docs/content/blog/post.mdx",
+    ] {
+        assert!(
+            !unused_files.iter().any(|unused| unused == path),
+            "{path} should be treated as used by the Fumadocs plugin: {unused_files:?}"
+        );
+    }
+    assert!(
+        unused_files
+            .iter()
+            .any(|unused| unused == "packages/docs/orphan.ts"),
+        "plain orphan files should still be reported: {unused_files:?}"
+    );
+    assert!(
+        !unresolved_specs.contains(&"fumadocs-mdx:collections/server"),
+        "Fumadocs generated virtual import should not be unresolved: {unresolved_specs:?}"
+    );
+    assert!(
+        !unlisted_deps.contains(&"fumadocs-mdx:collections"),
+        "Fumadocs generated virtual import should not be unlisted: {unlisted_deps:?}"
+    );
+    assert!(
+        !unused_dev_deps.contains(&"fumadocs-mdx"),
+        "source.config import should credit fumadocs-mdx: {unused_dev_deps:?}"
+    );
+    assert!(
+        !unused_dev_deps.contains(&"@acme/fumadocs-preset"),
+        "source.config import should credit preset packages: {unused_dev_deps:?}"
+    );
+    assert!(
+        unused_dev_deps.contains(&"left-pad"),
+        "unrelated dev dependencies should still be reported: {unused_dev_deps:?}"
+    );
+}
+
+#[test]
 fn wrangler_plain_json_config_main_keeps_worker_alive() {
     // The JSONC branch is exercised by `wrangler_config_main_entries_keep_worker_files_alive`;
     // this pins the plain `.json` variant since the dispatch in `extract_main_entries`

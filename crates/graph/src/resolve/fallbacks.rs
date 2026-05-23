@@ -750,6 +750,7 @@ fn lookup_internal_file_id(ctx: &ResolveContext<'_>, candidate: &Path) -> Option
     if let Some(&file_id) = ctx.path_to_id.get(candidate) {
         return Some(file_id);
     }
+    #[cfg(not(miri))]
     if let Ok(canonical) = dunce::canonicalize(candidate) {
         if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
             return Some(file_id);

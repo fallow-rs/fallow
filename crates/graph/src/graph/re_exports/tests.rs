@@ -3071,63 +3071,13 @@ fn self_re_export_does_not_panic() {
     let _graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 }
 
-/// Shared writer for capturing `tracing` output in tests via
-/// `tracing_subscriber`. Use with `tracing::subscriber::with_default`
-/// so the capture is scoped to a single block and never leaks across
-/// parallel test threads.
-#[derive(Clone, Default)]
-struct CaptureWriter(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
-
-impl std::io::Write for CaptureWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0
-            .lock()
-            .map(|mut g| {
-                g.extend_from_slice(buf);
-                buf.len()
-            })
-            .map_err(|e| std::io::Error::other(e.to_string()))
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CaptureWriter {
-    type Writer = CaptureWriter;
-    fn make_writer(&'a self) -> Self::Writer {
-        self.clone()
-    }
-}
-
-/// Build a graph with the given fixture under a scoped tracing
-/// subscriber and return whatever bytes the subscriber captured.
-fn capture_tracing(
-    resolved_modules: &[ResolvedModule],
-    entry_points: &[EntryPoint],
-    files: &[DiscoveredFile],
-) -> String {
-    let writer = CaptureWriter::default();
-    let subscriber = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::WARN)
-        .with_writer(writer.clone())
-        .with_ansi(false)
-        .without_time()
-        .finish();
-    tracing::subscriber::with_default(subscriber, || {
-        let _ = ModuleGraph::build(resolved_modules, entry_points, files);
-    });
-    let bytes = writer.0.lock().expect("writer poisoned").clone();
-    String::from_utf8(bytes).expect("tracing output is utf8")
-}
-
 /// Regression for issue #442 plus PR #516 reviewer feedback: confirm
-/// the `tracing::warn!` payload for a re-export cycle names every
-/// member's file path. Without this assertion, the diagnostic could
-/// regress to a context-free "cycle detected" message and the
-/// structural test would still pass.
+/// the structured re-export cycle payload names every member's file
+/// path. Without this assertion, the diagnostic could regress to a
+/// context-free "cycle detected" result and the structural termination
+/// test would still pass.
 #[test]
-fn re_export_cycle_warn_payload_lists_member_paths() {
+fn re_export_cycle_payload_lists_member_paths() {
     let files = vec![
         DiscoveredFile {
             id: FileId(0),
@@ -3209,33 +3159,39 @@ fn re_export_cycle_warn_payload_lists_member_paths() {
         },
     ];
 
-    let captured = capture_tracing(&resolved_modules, &entry_points, &files);
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 
-    assert!(
-        captured.contains("Re-export cycle detected"),
-        "expected cycle warn header in captured tracing output: {captured}"
+    let cycle = graph
+        .re_export_cycles
+        .iter()
+        .find(|cycle| !cycle.is_self_loop)
+        .expect("expected a multi-file re-export cycle");
+    let members = cycle
+        .files
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        members,
+        vec![
+            "/project/cycle_a.ts",
+            "/project/cycle_b.ts",
+            "/project/cycle_c.ts",
+        ]
     );
-    for member in [
-        "/project/cycle_a.ts",
-        "/project/cycle_b.ts",
-        "/project/cycle_c.ts",
-    ] {
-        assert!(
-            captured.contains(member),
-            "expected cycle member path '{member}' in captured tracing output: {captured}"
-        );
-    }
-    assert!(
-        captured.contains("cycle_size=3"),
-        "expected cycle_size=3 field in captured tracing output: {captured}"
+    assert_eq!(
+        cycle.file_ids,
+        vec![FileId(0), FileId(1), FileId(2)],
+        "expected file ids to stay parallel to the sorted paths"
     );
 }
 
 /// Regression for issue #442 plus PR #516 reviewer feedback: confirm
-/// the `tracing::warn!` for a barrel re-exporting from itself names
+/// the structured payload for a barrel re-exporting from itself names
 /// the offending file path.
 #[test]
-fn self_re_export_warn_payload_names_file() {
+fn self_re_export_payload_names_file() {
     let files = vec![DiscoveredFile {
         id: FileId(0),
         path: PathBuf::from("/project/self_barrel.ts"),
@@ -3263,14 +3219,11 @@ fn self_re_export_warn_payload_names_file() {
         ..Default::default()
     }];
 
-    let captured = capture_tracing(&resolved_modules, &entry_points, &files);
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 
-    assert!(
-        captured.contains("Re-export self-loop detected"),
-        "expected self-loop warn header in captured tracing output: {captured}"
-    );
-    assert!(
-        captured.contains("/project/self_barrel.ts"),
-        "expected self-loop file path in captured tracing output: {captured}"
-    );
+    assert_eq!(graph.re_export_cycles.len(), 1);
+    let cycle = &graph.re_export_cycles[0];
+    assert!(cycle.is_self_loop, "expected self-loop cycle payload");
+    assert_eq!(cycle.files, vec![PathBuf::from("/project/self_barrel.ts")]);
+    assert_eq!(cycle.file_ids, vec![FileId(0)]);
 }

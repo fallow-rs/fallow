@@ -68,6 +68,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
 const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
     "content-collections",
     "drizzle",
+    "fumadocs",
     "i18next",
     "knex",
     "kysely",
@@ -1004,6 +1005,7 @@ mod ember;
 mod eslint;
 mod expo;
 mod expo_router;
+mod fumadocs;
 mod gatsby;
 mod graphql_codegen;
 mod hardhat;

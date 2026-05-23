@@ -236,6 +236,15 @@ fn remix_contributes_discovery_hidden_dirs_when_active() {
 }
 
 #[test]
+fn fumadocs_contributes_source_hidden_dir_when_active() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg_dev(&["fumadocs-mdx"]);
+    let dirs = registry.discovery_hidden_dirs(&pkg, Path::new("/project"));
+
+    assert_eq!(dirs, vec![".source".to_string()]);
+}
+
+#[test]
 fn discovery_hidden_dirs_empty_without_router_plugins() {
     let registry = PluginRegistry::default();
     let pkg = make_pkg(&["react", "react-dom"]);
@@ -527,6 +536,19 @@ fn nuxt_contributes_virtual_module_prefixes() {
     assert!(
         result.virtual_module_prefixes.contains(&"#".to_string()),
         "nuxt should contribute '#' virtual module prefix"
+    );
+}
+
+#[test]
+fn fumadocs_contributes_virtual_module_prefixes() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg_dev(&["fumadocs-mdx"]);
+    let result = registry.run(&pkg, Path::new("/project"), &[]);
+    assert!(
+        result
+            .virtual_module_prefixes
+            .contains(&"fumadocs-mdx:".to_string()),
+        "fumadocs should contribute its generated virtual module prefix"
     );
 }
 
