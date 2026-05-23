@@ -1167,6 +1167,73 @@ fn wrangler_config_main_entries_keep_worker_files_alive() {
 }
 
 #[test]
+fn wrangler_config_precedence_only_keeps_selected_main_alive() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "wrangler-precedence-fixture",
+            "private": true,
+            "devDependencies": { "wrangler": "4.0.0" }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("wrangler.toml"),
+        r#"
+            name = "demo"
+            main = "src/legacy.ts"
+        "#,
+    )
+    .expect("wrangler toml");
+    std::fs::write(
+        root.join("wrangler.jsonc"),
+        r#"{
+            // Current worker entry; Wrangler selects this over wrangler.toml.
+            "main": "src/worker.tsx"
+        }"#,
+    )
+    .expect("wrangler jsonc");
+    std::fs::write(
+        root.join("src/worker.tsx"),
+        "export default { fetch() { return new Response('ok'); } };\n",
+    )
+    .expect("worker");
+    std::fs::write(
+        root.join("src/legacy.ts"),
+        "export default { fetch() { return new Response('dead'); } };\n",
+    )
+    .expect("legacy worker");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| {
+            file.file
+                .path
+                .strip_prefix(root)
+                .unwrap_or(&file.file.path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+
+    assert!(
+        !unused_files.iter().any(|path| path == "src/worker.tsx"),
+        "selected wrangler.jsonc main should be an entry point: {unused_files:?}"
+    );
+    assert!(
+        unused_files.iter().any(|path| path == "src/legacy.ts"),
+        "lower-precedence wrangler.toml main should not be kept alive: {unused_files:?}"
+    );
+}
+
+#[test]
 fn content_collections_config_and_tooling_deps_are_used() {
     let dir = tempfile::tempdir().expect("temp dir");
     let root = dir.path();
