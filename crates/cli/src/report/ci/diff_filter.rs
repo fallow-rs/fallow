@@ -40,6 +40,30 @@ impl DiffFilterMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SummaryScope {
+    All,
+    Diff,
+}
+
+impl SummaryScope {
+    #[must_use]
+    fn from_env() -> Self {
+        std::env::var("FALLOW_SUMMARY_SCOPE")
+            .ok()
+            .as_deref()
+            .map_or(Self::All, Self::from_value)
+    }
+
+    #[must_use]
+    fn from_value(value: &str) -> Self {
+        match value.trim() {
+            "diff" => Self::Diff,
+            _ => Self::All,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct DiffIndex {
     added_lines: FxHashMap<String, FxHashSet<u64>>,
@@ -497,27 +521,39 @@ pub fn filter_issues_from_env(issues: Vec<CiIssue>) -> Vec<CiIssue> {
 
 /// Filter for the typed PR-comment renderer (`print_pr_comment`).
 ///
-/// Project-level rule findings (dependency / catalog / override hygiene that
+/// `FALLOW_SUMMARY_SCOPE=all` (default) keeps the existing behavior:
+/// project-level rule findings (dependency / catalog / override hygiene that
 /// lives in `package.json` / `pnpm-workspace.yaml`) bypass the diff filter
 /// because the PR diff rarely touches the anchored line even though the
-/// finding is the reason CI fails. Source-anchored findings still go through
-/// the configured filter (`FALLOW_DIFF_FILTER`, default `added`) so the
-/// comment stays focused on what the PR actually changed.
+/// finding may be the reason CI fails.
+///
+/// `FALLOW_SUMMARY_SCOPE=diff` applies the same diff filter to project-level
+/// findings too, which is useful for advisory monorepo comments where
+/// unrelated pre-existing dependency findings would otherwise dominate the
+/// sticky summary.
 ///
 /// Sorting is restored after the partition + merge so downstream rendering
 /// sees the same `(path, line, fingerprint)` order as the unfiltered input.
 #[must_use]
 pub fn filter_issues_for_summary(issues: Vec<CiIssue>) -> Vec<CiIssue> {
-    summary_filter_with(issues, filter_issues_from_env)
+    summary_filter_with_scope(issues, SummaryScope::from_env(), filter_issues_from_env)
 }
 
-/// Partition + delegate helper for `filter_issues_for_summary`. Generic over
-/// the source-level filter so tests can call it with `filter_issues_from_path`
-/// against a tempdir diff without poking at `FALLOW_DIFF_FILE`.
-fn summary_filter_with<F>(issues: Vec<CiIssue>, source_filter: F) -> Vec<CiIssue>
+/// Scope-aware helper for `filter_issues_for_summary`. Generic over the
+/// source-level filter so tests can call it with `filter_issues_from_path`
+/// against a tempdir diff without relying on a process-wide diff env var.
+fn summary_filter_with_scope<F>(
+    issues: Vec<CiIssue>,
+    scope: SummaryScope,
+    source_filter: F,
+) -> Vec<CiIssue>
 where
     F: FnOnce(Vec<CiIssue>) -> Vec<CiIssue>,
 {
+    if scope == SummaryScope::Diff {
+        return source_filter(issues);
+    }
+
     let (project_level, diff_relevant): (Vec<CiIssue>, Vec<CiIssue>) = issues
         .into_iter()
         .partition(|issue| super::pr_comment::is_project_level_rule(&issue.rule_id));
@@ -645,7 +681,16 @@ mod tests {
     }
 
     #[test]
-    fn summary_filter_keeps_project_level_findings_when_diff_misses_them() {
+    fn summary_scope_parses_safe_defaults() {
+        assert_eq!(SummaryScope::from_value("diff"), SummaryScope::Diff);
+        assert_eq!(SummaryScope::from_value("all"), SummaryScope::All);
+        assert_eq!(SummaryScope::from_value(" all "), SummaryScope::All);
+        assert_eq!(SummaryScope::from_value(""), SummaryScope::All);
+        assert_eq!(SummaryScope::from_value("typo"), SummaryScope::All);
+    }
+
+    #[test]
+    fn summary_scope_all_keeps_project_level_findings_when_diff_misses_them() {
         // The bug from #381: a `pnpm.overrides` entry in `package.json`
         // becomes unused (transitive dep no longer in the resolved tree),
         // but the PR diff doesn't touch the override line. The default
@@ -653,9 +698,9 @@ mod tests {
         // exits non-zero because of the same finding, leaving the user with
         // a comment body that says "No findings."
         //
-        // `summary_filter_with` bypasses the filter for project-level rules
-        // so the override finding stays in the body. The diff used here
-        // doesn't even include `package.json` to make the bypass clear.
+        // `all` scope bypasses the filter for project-level rules so the
+        // override finding stays in the body. The diff used here doesn't
+        // even include `package.json` to make the bypass clear.
         let dir = tempfile::tempdir().expect("tempdir");
         let diff_path = dir.path().join("pr.diff");
         std::fs::write(
@@ -692,12 +737,13 @@ mod tests {
             line: 1,
             fingerprint: "out-diff".into(),
         };
-        let kept = summary_filter_with(
+        let kept = summary_filter_with_scope(
             vec![
                 project_level,
                 source_level_in_diff,
                 source_level_outside_diff,
             ],
+            SummaryScope::All,
             |src| filter_issues_from_path(src, &diff_path, DiffFilterMode::Added, 3),
         );
         let fingerprints: Vec<&str> = kept.iter().map(|i| i.fingerprint.as_str()).collect();
@@ -713,6 +759,130 @@ mod tests {
             !fingerprints.contains(&"out-diff"),
             "source-level finding outside diff must be dropped: {fingerprints:?}"
         );
+    }
+
+    #[test]
+    fn summary_scope_diff_filters_project_level_findings_when_diff_misses_them() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let diff_path = dir.path().join("pr.diff");
+        std::fs::write(
+            &diff_path,
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -0,0 +1,1 @@\n\
+             +new line\n",
+        )
+        .expect("write");
+
+        let project_level = CiIssue {
+            rule_id: "fallow/unused-dependency".into(),
+            description: "Dependency unused".into(),
+            severity: "minor".into(),
+            path: "package.json".into(),
+            line: 12,
+            fingerprint: "dep".into(),
+        };
+        let kept = summary_filter_with_scope(vec![project_level], SummaryScope::Diff, |src| {
+            filter_issues_from_path(src, &diff_path, DiffFilterMode::Added, 3)
+        });
+        assert!(
+            kept.is_empty(),
+            "diff scope must hide project-level findings outside the diff: {kept:?}"
+        );
+    }
+
+    #[test]
+    fn summary_scope_diff_keeps_project_level_findings_when_anchor_line_is_added() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let diff_path = dir.path().join("pr.diff");
+        std::fs::write(
+            &diff_path,
+            "diff --git a/package.json b/package.json\n\
+             --- a/package.json\n\
+             +++ b/package.json\n\
+             @@ -11,1 +11,2 @@\n\
+              \"dependencies\": {\n\
+             +  \"lodash\": \"^4.17.21\"\n",
+        )
+        .expect("write");
+
+        let project_level = CiIssue {
+            rule_id: "fallow/unused-dependency".into(),
+            description: "Dependency unused".into(),
+            severity: "minor".into(),
+            path: "package.json".into(),
+            line: 12,
+            fingerprint: "dep".into(),
+        };
+        let kept = summary_filter_with_scope(vec![project_level], SummaryScope::Diff, |src| {
+            filter_issues_from_path(src, &diff_path, DiffFilterMode::Added, 3)
+        });
+        assert_eq!(kept.len(), 1, "changed package.json finding must remain");
+        assert_eq!(kept[0].fingerprint, "dep");
+    }
+
+    #[test]
+    #[expect(unsafe_code, reason = "env var mutation requires unsafe")]
+    fn filter_issues_for_summary_uses_env_scope() {
+        let prior_scope = std::env::var("FALLOW_SUMMARY_SCOPE").ok();
+        let prior_diff_file = std::env::var("FALLOW_DIFF_FILE").ok();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let diff_path = dir.path().join("pr.diff");
+        std::fs::write(
+            &diff_path,
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -0,0 +1,1 @@\n\
+             +new line\n",
+        )
+        .expect("write");
+
+        let project_level = CiIssue {
+            rule_id: "fallow/unused-dependency".into(),
+            description: "Dependency unused".into(),
+            severity: "minor".into(),
+            path: "package.json".into(),
+            line: 12,
+            fingerprint: "dep".into(),
+        };
+
+        // SAFETY: this test owns the two environment variables it mutates
+        // and restores their prior values before returning.
+        unsafe {
+            std::env::set_var("FALLOW_DIFF_FILE", &diff_path);
+            std::env::remove_var("FALLOW_SUMMARY_SCOPE");
+        }
+        assert_eq!(
+            filter_issues_for_summary(vec![project_level.clone()]).len(),
+            1,
+            "unset summary scope defaults to all"
+        );
+
+        // SAFETY: see the note above.
+        unsafe {
+            std::env::set_var("FALLOW_SUMMARY_SCOPE", "diff");
+        }
+        assert!(
+            filter_issues_for_summary(vec![project_level]).is_empty(),
+            "diff summary scope filters untouched project-level findings"
+        );
+
+        // SAFETY: restore the environment to avoid leaking state into other
+        // tests in this process.
+        unsafe {
+            if let Some(value) = prior_scope {
+                std::env::set_var("FALLOW_SUMMARY_SCOPE", value);
+            } else {
+                std::env::remove_var("FALLOW_SUMMARY_SCOPE");
+            }
+            if let Some(value) = prior_diff_file {
+                std::env::set_var("FALLOW_DIFF_FILE", value);
+            } else {
+                std::env::remove_var("FALLOW_DIFF_FILE");
+            }
+        }
     }
 
     #[test]
@@ -736,7 +906,7 @@ mod tests {
             line: 5,
             fingerprint: "b".into(),
         };
-        let kept = summary_filter_with(vec![a, b], |issues| issues);
+        let kept = summary_filter_with_scope(vec![a, b], SummaryScope::All, |issues| issues);
         // `package.json` sorts before `src/a.ts` lexicographically.
         assert_eq!(kept[0].fingerprint, "b");
         assert_eq!(kept[1].fingerprint, "a");

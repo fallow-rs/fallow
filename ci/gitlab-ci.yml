@@ -93,8 +93,9 @@ variables:
   FALLOW_CODEQUALITY: "true"    # Generate GitLab Code Quality report (inline MR annotations)
   FALLOW_MAX_COMMENTS: "50"     # Maximum number of inline review comments + items in the sticky details table
   FALLOW_COMMENT_ID: ""         # Sticky-comment marker id; auto-suffixed with the workspace name when scoped to one workspace and unset
+  FALLOW_SUMMARY_SCOPE: "all"   # Sticky MR summary scope: 'all' keeps project-level dependency/catalog/override findings outside the diff; 'diff' applies the diff filter to them too. Inline review discussions are unaffected. If the diff cannot be read, fallow reports all findings.
   FALLOW_DIFF_FILTER: "added"   # Diff-aware filter: 'added' | 'diff_context' | 'file' | 'nofilter'
-  FALLOW_DIFF_FILE: ""          # Path to a unified-diff file. When unset and CI_MERGE_REQUEST_DIFF_BASE_SHA is set, the comment / review scripts derive it via `git diff` (see the script blocks below). When set OR derived, fallow narrows EVERY finding to lines inside an added hunk; project-level findings (unused deps, catalog, override) bypass the filter. When both FALLOW_DIFF_FILE and FALLOW_CHANGED_SINCE are set, --diff-file wins for line-level filtering and --changed-since still scopes file discovery; fallow logs a one-line stderr note.
+  FALLOW_DIFF_FILE: ""          # Path to a unified-diff file. When unset and CI_MERGE_REQUEST_DIFF_BASE_SHA is set, the comment / review scripts derive it via `git diff` (see the script blocks below). When set OR derived, fallow narrows findings to lines inside an added hunk. Sticky summary comments keep project-level findings by default unless FALLOW_SUMMARY_SCOPE is 'diff'; inline review discussions stay diff-anchored. When both FALLOW_DIFF_FILE and FALLOW_CHANGED_SINCE are set, --diff-file wins for line-level filtering and --changed-since still scopes file discovery; fallow logs a one-line stderr note.
   FALLOW_API_RETRIES: "3"       # Maximum HTTP retry attempts for the binary's reconcile-review and the curl/gh wrappers
   FALLOW_API_RETRY_DELAY: "2"   # Floor delay in seconds between rate-limited retries; server-supplied Retry-After overrides
   FALLOW_GITLAB_BASE_SHA: ""    # Override for the MR base SHA in the review-gitlab position object; falls back to CI_MERGE_REQUEST_DIFF_BASE_SHA
@@ -402,7 +403,7 @@ variables:
       # ── Pre-compute unified diff for line-level finding scoping ────
       # When the user did not supply $FALLOW_DIFF_FILE, write a
       # fallow-mr.diff alongside the analysis output so fallow can
-      # narrow every finding (dead-code, complexity, duplication,
+      # narrow source-anchored findings (dead-code, complexity, duplication,
       # boundary violations, runtime-coverage hot paths) to lines
       # inside the diff. Project-level findings (unused deps, catalog,
       # override) bypass the filter and pass through unchanged.

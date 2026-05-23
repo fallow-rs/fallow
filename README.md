@@ -520,6 +520,7 @@ fallow:
   variables:
     FALLOW_COMMAND: "audit"
     FALLOW_COMMENT: "true"
+    FALLOW_SUMMARY_SCOPE: "diff"
     FALLOW_REVIEW: "true"
     FALLOW_REVIEW_GUIDANCE: "true"
     FALLOW_MAX_CRAP: "30"
@@ -527,7 +528,7 @@ fallow:
     FALLOW_COVERAGE_ROOT: "/home/runner/work/myapp"
 ```
 
-`FALLOW_COMMENT` and `FALLOW_REVIEW` require `GITLAB_TOKEN` with API scope. In MR pipelines, the template auto-sets `FALLOW_CHANGED_SINCE` from the MR diff base SHA when possible and derives `FALLOW_DIFF_FILE` for line-level filtering. For monorepos, set `FALLOW_CHANGED_WORKSPACES: "origin/main"` to scope analysis to touched workspaces.
+`FALLOW_COMMENT` and `FALLOW_REVIEW` require `GITLAB_TOKEN` with API scope. In MR pipelines, the template auto-sets `FALLOW_CHANGED_SINCE` from the MR diff base SHA when possible and derives `FALLOW_DIFF_FILE` for line-level filtering. For monorepos, set `FALLOW_CHANGED_WORKSPACES: "origin/main"` to scope analysis to touched workspaces. Set `FALLOW_SUMMARY_SCOPE=diff` when the sticky summary should hide pre-existing project-level findings outside the diff.
 
 `FALLOW_REVIEW` uses the typed `review-gitlab` envelope v2, not scraped human output. That gives the template stable v2 fingerprints, same-line comment merging, UTF-8-safe body truncation, stale-thread reconciliation via `fallow ci reconcile-review`, and GitLab diff positions for inline discussions. The review script fetches MR `diff_refs` automatically; set `FALLOW_GITLAB_BASE_SHA`, `FALLOW_GITLAB_START_SHA`, or `FALLOW_GITLAB_HEAD_SHA` only when your runner needs explicit overrides.
 
@@ -564,7 +565,7 @@ Common CI flags:
 - `--group-by owner|directory|package|section` -- group output by CODEOWNERS ownership, directory, workspace package, or GitLab CODEOWNERS `[Section]` headers for team-level triage
 - `--summary` -- show only category counts (no individual issues)
 - `--changed-since main` -- analyze only files touched in a PR
-- `--diff-file <path>` / `--diff-stdin` -- filter findings to added diff hunks, while project-level package findings bypass line filtering
+- `--diff-file <path>` / `--diff-stdin` -- filter source-anchored findings to added diff hunks, while project-level package findings bypass analysis line filtering. Sticky summary comments can use `FALLOW_SUMMARY_SCOPE=diff` to filter project-level findings too
 - `--changed-workspaces origin/main` -- scope monorepo analysis to workspaces containing any changed file (CI primitive; fails hard on git errors so CI never silently widens back to the full repo)
 - `--baseline` / `--save-baseline` -- fail only on **new** issues for individual analyses; audit uses the per-analysis baselines shown above
 - `--fail-on-regression` / `--tolerance 2%` -- fail only if issues **grew** beyond tolerance
@@ -594,12 +595,13 @@ The GitLab CI template can post rich comments directly on merge requests -- summ
 | `FALLOW_REVIEW` | `"false"` | Post inline MR discussions from the typed `review-gitlab` envelope v2, with stable fingerprints, suggestions, dedupe, and stale-thread reconciliation |
 | `FALLOW_REVIEW_GUIDANCE` | `"false"` | Add collapsed "What to do" guidance blocks to inline review discussions |
 | `FALLOW_MAX_COMMENTS` | `"50"` | Maximum number of inline review comments |
+| `FALLOW_SUMMARY_SCOPE` | `"all"` | Sticky MR summary scope. Use `all` to include project-level dependency/catalog/override findings even when their anchor line is outside the diff; use `diff` to apply the diff filter to those findings too. Inline review comments are unaffected |
 | `FALLOW_DIFF_FILTER` | `"added"` | Filter line-level findings to added diff hunks by default; use `diff_context`, `file`, or `nofilter` to widen review scope |
 | `FALLOW_GITLAB_BASE_SHA` / `FALLOW_GITLAB_START_SHA` / `FALLOW_GITLAB_HEAD_SHA` | `""` | Optional overrides for the GitLab MR `diff_refs` used to build inline discussion positions |
 | `FALLOW_SCRIPTS_REF` | `""` | Pinned tag or commit for remote MR-integration scripts; leave empty to prefer vendored local `ci/` + `action/` scripts |
 | `FALLOW_VERSION` | `""` | Fallow version to install. Empty reads the project's `package.json` `fallow` dependency, then falls back to `latest`; set explicitly to override the local pin |
 
-In MR pipelines, `--changed-since` is set automatically to scope analysis to changed files, and the review script derives a unified diff so inline discussions stay on touched lines by default. Fallow edits sticky comments in place and fingerprints inline review comments so repeated runs can skip duplicates.
+In MR pipelines, `--changed-since` is set automatically to scope analysis to changed files, and the comment / review scripts derive a unified diff so inline discussions stay on touched lines by default. Fallow edits sticky comments in place and fingerprints inline review comments so repeated runs can skip duplicates. `FALLOW_SUMMARY_SCOPE=diff` keeps the sticky summary focused too: a pre-existing unused dependency in an unrelated package is hidden, while a newly added unused dependency in a changed `package.json` remains visible. If the diff cannot be fetched or read, fallow keeps the existing fail-open behavior and reports all findings.
 
 The v2 review envelope keeps MR threads readable by grouping findings that land on the same path and line into one comment, preserving a machine-readable `marker_regex`, and carrying GitLab `position` data (`old_path`, `new_path`, `new_line`, and diff refs) for reliable inline discussions, including renamed files.
 
@@ -623,6 +625,7 @@ fallow:
   extends: .fallow
   variables:
     FALLOW_COMMENT: "true"       # Summary comment with collapsible sections
+    FALLOW_SUMMARY_SCOPE: "diff" # Filter project-level findings in the sticky summary too
     FALLOW_REVIEW: "true"        # Inline discussions with suggestion blocks
     FALLOW_REVIEW_GUIDANCE: "true" # Collapsed "What to do" blocks in inline discussions
     FALLOW_MAX_COMMENTS: "30"    # Cap inline comments (default: 50)

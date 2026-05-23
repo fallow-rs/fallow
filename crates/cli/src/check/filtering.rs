@@ -326,8 +326,8 @@ pub use fallow_core::changed_files::{
 /// reasoning applies to catalog entries, dependency overrides, type-only
 /// deps, and test-only deps. The line filter is a noise-floor reducer for
 /// source-anchored findings; CI must still fail on project-level findings
-/// the PR caused. Mirrors the bypass that the existing
-/// `summary_filter_with` applies for PR-comment rendering.
+/// the PR caused. Mirrors the default `FALLOW_SUMMARY_SCOPE=all` behavior
+/// in typed PR-comment rendering.
 ///
 /// `relative_to_diff_path` normalizes the finding's absolute path to the
 /// forward-slashed key shape `git diff` writes (`+++ b/<path>`). When the

@@ -837,6 +837,7 @@ mkdir -p "$ACTION_TYPED_BIN"
 cat > "$ACTION_TYPED_BIN/fallow" <<'SH'
 #!/usr/bin/env bash
 printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
+printf 'summary_scope=%s\n' "${FALLOW_SUMMARY_SCOPE:-}" >> "$MOCK_LOG"
 if [ "${1:-}" = "ci" ]; then
   printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
   exit 0
@@ -903,6 +904,7 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_
     PR_NUMBER="123" \
     GH_REPO="owner/repo" \
     FALLOW_COMMAND="check" \
+    FALLOW_SUMMARY_SCOPE="diff" \
     bash "$SCRIPTS_DIR/comment.sh" > /dev/null
   PATH="$ACTION_TYPED_BIN:$PATH" \
     MOCK_LOG="$ACTION_TYPED_LOG" \
@@ -928,13 +930,29 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_
 ACTION_TYPED_OUT=$(cat "$ACTION_TYPED_LOG")
 assert_contains "$ACTION_TYPED_OUT" "--format pr-comment-github" "comment.sh invokes typed PR comment format"
 assert_contains "$ACTION_TYPED_OUT" "--format review-github" "review.sh invokes typed GitHub review format"
+assert_contains "$ACTION_TYPED_OUT" "summary_scope=diff" "comment.sh passes FALLOW_SUMMARY_SCOPE to typed PR comment render"
+ACTION_BLANK_SUMMARY_SCOPE_COUNT=$(printf '%s\n' "$ACTION_TYPED_OUT" | grep -c '^summary_scope=$' || true)
+if [ "$ACTION_BLANK_SUMMARY_SCOPE_COUNT" -ge 1 ]; then
+  pass "review.sh does not receive FALLOW_SUMMARY_SCOPE by default"
+else
+  fail "review.sh does not receive FALLOW_SUMMARY_SCOPE by default" "$ACTION_TYPED_OUT"
+fi
 assert_contains "$ACTION_TYPED_OUT" "fallow ci reconcile-review --provider github" "review.sh invokes GitHub reconcile command"
 assert_contains "$ACTION_TYPED_OUT" "repos/owner/repo/pulls/123/reviews" "review.sh posts review envelope"
 assert_contains "$ACTION_TYPED_OUT" "repos/owner/repo/issues/comments/777 --method PATCH" "review.sh updates existing body-only review comment"
 assert_contains "$(cat "$DIR/../../action.yml")" "review-guidance:" "action.yml exposes review-guidance input"
 assert_contains "$(cat "$DIR/../../action.yml")" "FALLOW_REVIEW_GUIDANCE: \${{ inputs.review-guidance }}" "action.yml maps review-guidance to env"
+assert_contains "$(cat "$DIR/../../action.yml")" "summary-scope:" "action.yml exposes summary-scope input"
+assert_contains "$(cat "$DIR/../../action.yml")" "FALLOW_SUMMARY_SCOPE: \${{ inputs.summary-scope }}" "action.yml maps summary-scope to comment env"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "gh_api_retry" "comment.sh wraps GitHub API calls with retry"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "gh_api_retry" "review.sh wraps GitHub API calls with retry"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "Unsupported FALLOW_SUMMARY_SCOPE" "comment.sh warns on invalid summary scope"
+assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "FALLOW_SUMMARY_SCOPE" "review.sh does not consume summary scope"
+if sed -n '/name: Post review comments/,/run: bash/p' "$DIR/../../action.yml" | /usr/bin/grep -q "FALLOW_SUMMARY_SCOPE"; then
+  fail "Post review comments action env excludes FALLOW_SUMMARY_SCOPE" "summary scope must not affect inline review comments"
+else
+  pass "Post review comments action env excludes FALLOW_SUMMARY_SCOPE"
+fi
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "rate limit response; retrying" "comment.sh retries GitHub rate-limit responses"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "rate limit response; retrying" "review.sh retries GitHub rate-limit responses"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "fallow-review-payload.json" "review.sh stores retryable review payload"

@@ -122,6 +122,15 @@ render_with_fallow() {
     fi
   fi
   export FALLOW_DIFF_FILTER="${FALLOW_DIFF_FILTER:-added}"
+  case "${FALLOW_SUMMARY_SCOPE:-all}" in
+    ""|all|diff)
+      export FALLOW_SUMMARY_SCOPE="${FALLOW_SUMMARY_SCOPE:-all}"
+      ;;
+    *)
+      echo "WARNING: Unsupported FALLOW_SUMMARY_SCOPE '${FALLOW_SUMMARY_SCOPE}', expected 'all' or 'diff'; using 'all'"
+      export FALLOW_SUMMARY_SCOPE="all"
+      ;;
+  esac
   FALLOW_COMMENT_ID="${FALLOW_COMMENT_ID:-fallow-results}" fallow "${args[@]}" > "$output" 2> fallow-comment-stderr.log || true
   # Surface fallow's structured-error envelope before the marker check so the
   # CLI message lands in the GitLab job log rather than a generic warning.

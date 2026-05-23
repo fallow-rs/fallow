@@ -619,6 +619,7 @@ assert_contains "$(cat "$CI_YAML")" "FALLOW_REVIEW" "has FALLOW_REVIEW variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_REVIEW_GUIDANCE" "has FALLOW_REVIEW_GUIDANCE variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_MAX_COMMENTS" "has FALLOW_MAX_COMMENTS variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_COMMENT" "has FALLOW_COMMENT variable"
+assert_contains "$(cat "$CI_YAML")" "FALLOW_SUMMARY_SCOPE" "has FALLOW_SUMMARY_SCOPE variable"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_CODEQUALITY" "has FALLOW_CODEQUALITY variable"
 assert_contains "$(cat "$CI_YAML")" "project_fallow_spec" "reads package.json fallow pin"
 assert_contains "$(cat "$CI_YAML")" "is_safe_version_spec" "validates fallow install spec"
@@ -651,6 +652,7 @@ assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "PUT" "can update existing co
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "POST" "can create new comment"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "curl_retry" "wraps GitLab API calls with retry"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "rate limit response; retrying" "retries GitLab rate-limit responses"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "Unsupported FALLOW_SUMMARY_SCOPE" "comment.sh warns on invalid summary scope"
 
 echo "  review.sh:"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "review-gitlab" "renders typed GitLab review envelope"
@@ -665,6 +667,7 @@ assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "curl_retry" "wraps GitLab API
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "rate limit response; retrying" "retries GitLab rate-limit responses"
 assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "merge-comments" "does not keep legacy jq merge fallback"
 assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "FALLOW_SHARED_JQ_DIR" "does not use shared jq fallback scripts"
+assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "FALLOW_SUMMARY_SCOPE" "review.sh does not consume summary scope"
 
 # =========================================================================
 # Typed GitLab script integration tests
@@ -681,6 +684,7 @@ mkdir -p "$CI_TYPED_BIN"
 cat > "$CI_TYPED_BIN/fallow" <<'SH'
 #!/usr/bin/env bash
 printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
+printf 'summary_scope=%s\n' "${FALLOW_SUMMARY_SCOPE:-}" >> "$MOCK_LOG"
 if [ "${1:-}" = "ci" ]; then
   printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
   exit 0
@@ -754,6 +758,7 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_TYPED_WORK
     CI_PROJECT_ID="18" \
     CI_MERGE_REQUEST_IID="123" \
     FALLOW_COMMAND="check" \
+    FALLOW_SUMMARY_SCOPE="diff" \
     bash "$SCRIPTS_DIR/comment.sh" > /dev/null
   PATH="$CI_TYPED_BIN:$PATH" \
     MOCK_LOG="$CI_TYPED_LOG" \
@@ -783,6 +788,13 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_TYPED_WORK
 CI_TYPED_OUT=$(cat "$CI_TYPED_LOG")
 assert_contains "$CI_TYPED_OUT" "--format pr-comment-gitlab" "comment.sh invokes typed MR comment format"
 assert_contains "$CI_TYPED_OUT" "--format review-gitlab" "review.sh invokes typed GitLab review format"
+assert_contains "$CI_TYPED_OUT" "summary_scope=diff" "comment.sh passes FALLOW_SUMMARY_SCOPE to typed MR comment render"
+CI_BLANK_SUMMARY_SCOPE_COUNT=$(printf '%s\n' "$CI_TYPED_OUT" | grep -c '^summary_scope=$' || true)
+if [ "$CI_BLANK_SUMMARY_SCOPE_COUNT" -ge 1 ]; then
+  pass "review.sh does not receive FALLOW_SUMMARY_SCOPE by default"
+else
+  fail "review.sh does not receive FALLOW_SUMMARY_SCOPE by default" "$CI_TYPED_OUT"
+fi
 assert_contains "$CI_TYPED_OUT" "fallow ci reconcile-review --provider gitlab" "review.sh invokes GitLab reconcile command"
 assert_contains "$CI_TYPED_OUT" "merge_requests/123/discussions" "review.sh posts discussion payload"
 assert_contains "$CI_TYPED_OUT" "merge_requests/123/notes/777" "review.sh updates existing body-only review note"

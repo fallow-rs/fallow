@@ -99,12 +99,16 @@ inputs:
     description: 'Sticky-comment marker id, embedded in the HTML comment that identifies fallow''s comment for upsert. Defaults to ''fallow-results'', auto-suffixed with the workspace name when running scoped to a single workspace package.'
     required: false
     default: ''
+  summary-scope:
+    description: 'Sticky PR summary comment scope: ''all'' (default, include project-level dependency/catalog/override findings even when their anchor line is outside the diff) or ''diff'' (apply the diff filter to those findings too). Does not affect inline review comments. If the diff file is unavailable, fallow reports all findings.'
+    required: false
+    default: 'all'
   diff-filter:
     description: 'Diff-aware finding filter: ''added'' (default, only findings on PR-added lines), ''diff_context'' (added lines plus surrounding context), ''file'' (any file touched by the PR), ''nofilter'' (every finding).'
     required: false
     default: 'added'
   diff-file:
-    description: 'Path to a unified-diff file. When set (directly OR derived by the analyze step from `gh pr diff` / `git diff --unified=0`), fallow narrows EVERY finding to lines inside an added hunk; project-level findings (unused deps, catalog entries, dependency overrides) bypass the filter. Also drives line-level scoping of the runtime-coverage `hot-path-touched` verdict. When both `diff-file` and `changed-since` are set, the diff filter wins for line-level filtering and `changed-since` still scopes file discovery; fallow logs a one-line stderr note. The analyze step propagates the resolved path via $GITHUB_ENV so the comment / review steps reuse the same file.'
+    description: 'Path to a unified-diff file. When set (directly OR derived by the analyze step from `gh pr diff` / `git diff --unified=0`), fallow narrows source-anchored findings to lines inside an added hunk; project-level findings (unused deps, catalog entries, dependency overrides) bypass the analysis filter. Sticky summary comments can opt into filtering project-level findings too with `summary-scope: diff`; inline review comments stay line-scoped. Also drives line-level scoping of the runtime-coverage `hot-path-touched` verdict. When both `diff-file` and `changed-since` are set, the diff filter wins for line-level filtering and `changed-since` still scopes file discovery; fallow logs a one-line stderr note. The analyze step propagates the resolved path via $GITHUB_ENV so the comment / review steps reuse the same file.'
     required: false
     default: ''
   api-retries:
@@ -470,6 +474,7 @@ runs:
         CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
         INPUT_ROOT: ${{ inputs.root }}
         FALLOW_COMMENT_ID: ${{ inputs.comment-id }}
+        FALLOW_SUMMARY_SCOPE: ${{ inputs.summary-scope }}
         FALLOW_DIFF_FILTER: ${{ inputs.diff-filter }}
         # FALLOW_DIFF_FILE is propagated from the analyze step via
         # $GITHUB_ENV. Declaring it here would override the propagation
