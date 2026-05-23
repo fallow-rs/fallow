@@ -1,0 +1,20 @@
+import { CodeBlock } from "../src/components/CodeBlock"
+import realMissing from "./real-missing"
+
+# API Examples
+
+This page renders a real MDX import above, but the fenced examples below are
+documentation only.
+
+```ts
+// file: exampleSlice.ts
+import { createSlice } from '@reduxjs/toolkit'
+
+// file: store.ts
+import exampleSliceReducer from './exampleSlice'
+import { store } from './store/hooks'
+
+console.log(createSlice, exampleSliceReducer, store)
+```
+
+<CodeBlock code="example" />

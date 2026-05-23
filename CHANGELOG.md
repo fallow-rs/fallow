@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **MDX documentation code fences no longer create unresolved imports.** Before, `import` and `export` lines inside fenced TypeScript examples in `.mdx` files were extracted like executable top-level MDX statements, so docs snippets with virtual `// file:` boundaries could report false `unresolved-import` findings. After, fenced Markdown code blocks are skipped during MDX import/export extraction, while real top-level MDX imports continue to be analyzed. The extraction cache version is bumped so warm `.mdx` entries are re-extracted on upgrade. (Closes [#639](https://github.com/fallow-rs/fallow/issues/639).)
+
 ## [2.79.0] - 2026-05-22
 
 ### Added

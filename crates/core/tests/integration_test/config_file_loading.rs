@@ -95,6 +95,30 @@ fn mdx_unused_file_detected() {
     );
 }
 
+#[test]
+fn mdx_code_fence_imports_do_not_report_unresolved() {
+    let root = fixture_path("mdx-project");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+
+    assert!(
+        unresolved_specifiers.contains(&"./real-missing"),
+        "top-level MDX imports should still be analyzed, found: {unresolved_specifiers:?}"
+    );
+    for specifier in ["./exampleSlice", "./store/hooks"] {
+        assert!(
+            !unresolved_specifiers.contains(&specifier),
+            "MDX code fence import {specifier} should not be unresolved, found: {unresolved_specifiers:?}"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Complexity project (used by health tests)
 // ---------------------------------------------------------------------------

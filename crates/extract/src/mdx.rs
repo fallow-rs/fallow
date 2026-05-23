@@ -31,9 +31,23 @@ pub fn extract_mdx_statements(source: &str) -> String {
     let mut statements = Vec::new();
     let mut in_multiline = false;
     let mut brace_depth: i32 = 0;
+    let mut code_fence: Option<CodeFence> = None;
 
     for line in source.lines() {
         let trimmed = line.trim();
+
+        if let Some(fence) = code_fence {
+            if fence.is_closing_line(trimmed) {
+                code_fence = None;
+            }
+            continue;
+        }
+
+        if !in_multiline && let Some(fence) = CodeFence::opening(trimmed) {
+            code_fence = Some(fence);
+            continue;
+        }
+
         if in_multiline {
             statements.push(line.to_string());
             brace_depth += trimmed.chars().filter(|&c| c == '{').count() as i32;
@@ -62,6 +76,33 @@ pub fn extract_mdx_statements(source: &str) -> String {
     }
 
     statements.join("\n")
+}
+
+#[derive(Clone, Copy)]
+struct CodeFence {
+    marker: char,
+    len: usize,
+}
+
+impl CodeFence {
+    fn opening(line: &str) -> Option<Self> {
+        let marker = line.chars().next()?;
+        if marker != '`' && marker != '~' {
+            return None;
+        }
+
+        let len = line.chars().take_while(|&c| c == marker).count();
+        (len >= 3).then_some(Self { marker, len })
+    }
+
+    fn is_closing_line(self, line: &str) -> bool {
+        if !line.starts_with(self.marker) {
+            return false;
+        }
+
+        let len = line.chars().take_while(|&c| c == self.marker).count();
+        len >= self.len && line[len..].trim().is_empty()
+    }
 }
 
 pub(crate) fn is_mdx_file(path: &Path) -> bool {
@@ -202,6 +243,83 @@ mod tests {
         assert!(!result.contains("Title"));
         assert!(!result.contains("markdown"));
         assert!(!result.contains("List item"));
+    }
+
+    // Code fences
+
+    #[test]
+    fn fenced_import_is_ignored() {
+        let source = r"import { Live } from './Live'
+
+# Example
+
+```ts
+// file: exampleSlice.ts
+import exampleSliceReducer from './exampleSlice'
+```
+";
+        let result = extract_mdx_statements(source);
+        assert!(result.contains("import { Live } from './Live'"));
+        assert!(!result.contains("./exampleSlice"));
+        assert_eq!(result.lines().count(), 1);
+    }
+
+    #[test]
+    fn fenced_export_is_ignored() {
+        let source = r"# Example
+
+```tsx
+export const Example = () => null
+```
+";
+        let result = extract_mdx_statements(source);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn tilde_fenced_import_is_ignored() {
+        let source = r"import { Live } from './Live'
+
+~~~ts
+import virtual from './virtual'
+~~~
+
+export { Live }
+";
+        let result = extract_mdx_statements(source);
+        assert!(result.contains("import { Live } from './Live'"));
+        assert!(result.contains("export { Live }"));
+        assert!(!result.contains("./virtual"));
+        assert_eq!(result.lines().count(), 2);
+    }
+
+    #[test]
+    fn longer_matching_fence_closes_code_block() {
+        let source = r"````ts
+import hidden from './hidden'
+````
+
+import { Visible } from './Visible'
+";
+        let result = extract_mdx_statements(source);
+        assert!(!result.contains("./hidden"));
+        assert!(result.contains("import { Visible } from './Visible'"));
+    }
+
+    #[test]
+    fn shorter_matching_fence_does_not_close_code_block() {
+        let source = r"````ts
+import hidden from './hidden'
+```
+import stillHidden from './still-hidden'
+````
+
+import { Visible } from './Visible'
+";
+        let result = extract_mdx_statements(source);
+        assert!(!result.contains("./hidden"));
+        assert!(!result.contains("./still-hidden"));
+        assert!(result.contains("import { Visible } from './Visible'"));
     }
 
     // ── Edge cases ───────────────────────────────────────────────

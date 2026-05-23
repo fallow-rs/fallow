@@ -12,7 +12,7 @@ Key modules:
 - `sfc_template/` — Template-visible import usage tracking for Vue and Svelte. Framework-specific scanners (`vue.rs`, `svelte.rs`) parse template markup to detect import references (`{formatDate(x)}`, `utils.formatDate()`). Shared scanner (`scanners.rs`) and helpers (`shared.rs`) provide HTML tag/curly-section parsing and expression analysis.
 - `template_usage.rs` — `TemplateUsage` struct and `analyze_template_snippet()` for parsing template expressions via Oxc to extract used bindings and member accesses.
 - `astro.rs` — Astro frontmatter extraction between `---` delimiters, plus Astro-processed `<script src="...">` references and inline `<script>` ESM imports from the template body (Astro bundles per-component client scripts at build time, so processed script shapes contribute to reachability; attributed inline scripts such as `is:inline` are left alone).
-- `mdx.rs` — MDX import/export extraction with multi-line brace tracking
+- `mdx.rs` - MDX import/export extraction with multi-line brace tracking and fenced code block skipping
 - `css.rs` — CSS/SCSS directive extraction (`@import`, `@use`, `@forward`, Tailwind `@plugin`, `@apply`, `@tailwind`) and CSS Module class name extraction (`.module.css`/`.module.scss` → named exports)
 - `html.rs` — HTML asset reference extraction (`<script src>`, `<link rel="stylesheet" href>`, `<link rel="modulepreload" href>` → `SideEffect` imports). Regex-based, comment-stripped.
 - `graphql.rs` — GraphQL document `#import "./fragment.graphql"` / `# import '../fragment.gql'` extraction for relative string specifiers. Emits `SideEffect` imports so document-only fragment/schema edges participate in reachability.

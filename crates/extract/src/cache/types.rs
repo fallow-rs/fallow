@@ -56,7 +56,11 @@ use crate::MemberKind;
 /// `<link rel="stylesheet|modulepreload" href>` attributes no longer emit
 /// synthetic `SideEffect` imports, so pre-fix entries can carry stale JSX
 /// resource edges that surface as false `unresolved-imports`.
-pub(super) const CACHE_VERSION: u32 = 96;
+///
+/// Bumped to 97 for issue #639: MDX import/export extraction now skips
+/// fenced Markdown code blocks, so pre-fix entries can carry stale example
+/// imports that surface as false `unresolved-imports`.
+pub(super) const CACHE_VERSION: u32 = 97;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

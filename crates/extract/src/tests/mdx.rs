@@ -103,3 +103,45 @@ More content.
     assert!(info.imports.iter().any(|i| i.source == "./Header"));
     assert!(info.imports.iter().any(|i| i.source == "./Footer"));
 }
+
+#[test]
+fn mdx_ignores_imports_inside_code_fences() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("docs.mdx"),
+        r"import { Live } from './Live'
+
+# Example
+
+```ts
+// file: exampleSlice.ts
+import exampleSliceReducer from './exampleSlice'
+import { store } from './store'
+```
+",
+        0,
+        false,
+    );
+    assert_eq!(info.imports.len(), 1);
+    assert!(info.imports.iter().any(|i| i.source == "./Live"));
+    assert!(!info.imports.iter().any(|i| i.source == "./exampleSlice"));
+    assert!(!info.imports.iter().any(|i| i.source == "./store"));
+}
+
+#[test]
+fn mdx_ignores_exports_inside_code_fences() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("docs.mdx"),
+        r"# Example
+
+```tsx
+export const Example = () => null
+```
+",
+        0,
+        false,
+    );
+    assert!(info.imports.is_empty());
+    assert!(info.exports.is_empty());
+}
