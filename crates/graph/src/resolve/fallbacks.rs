@@ -6,10 +6,11 @@
 use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
+use serde_json::Value;
 
 use fallow_types::discover::FileId;
 
-use super::types::{OUTPUT_DIRS, ResolveContext, ResolveResult, SOURCE_EXTS};
+use super::types::{OUTPUT_DIRS, PackageManifestInfo, ResolveContext, ResolveResult, SOURCE_EXTS};
 
 /// Try resolving a specifier using plugin-provided path aliases.
 ///
@@ -505,6 +506,263 @@ pub(super) fn try_source_fallback(
     None
 }
 
+/// Try to resolve a package `imports` entry from the nearest owning package.
+///
+/// `#...` specifiers are package-local by definition, so this fallback is only
+/// allowed when the importing file's nearest package manifest has a matching
+/// `imports` key. That keeps unrelated hash-prefixed path aliases unresolved.
+pub(super) fn try_package_imports_fallback(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    if !specifier.starts_with('#') {
+        return None;
+    }
+    let manifest = nearest_package_manifest(ctx.package_manifests, from_file)?;
+    let imports = manifest.package_json.imports.as_ref()?;
+    let PackageMapTarget::Target(target) =
+        package_map_target(imports, specifier, ctx.condition_names)
+    else {
+        return None;
+    };
+    let source_subpath = package_import_source_subpath(manifest, specifier);
+    resolve_package_map_target(ctx, manifest, &target, source_subpath.as_deref()).map(|file_id| {
+        match &manifest.name {
+            Some(package_name) => ResolveResult::InternalPackageModule {
+                file_id,
+                package_name: package_name.clone(),
+            },
+            None => ResolveResult::InternalModule(file_id),
+        }
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PackageMapTarget {
+    NoMatch,
+    Blocked,
+    Target(String),
+}
+
+fn package_map_match_value(
+    value: &Value,
+    condition_names: &[String],
+    capture: Option<&str>,
+) -> PackageMapTarget {
+    resolve_package_map_value(value, condition_names, capture)
+        .map_or(PackageMapTarget::Blocked, PackageMapTarget::Target)
+}
+
+fn package_map_target(
+    map: &Value,
+    specifier_key: &str,
+    condition_names: &[String],
+) -> PackageMapTarget {
+    let Some(obj) = map.as_object() else {
+        if specifier_key == "." {
+            return package_map_match_value(map, condition_names, None);
+        }
+        return PackageMapTarget::NoMatch;
+    };
+
+    let has_subpath_keys = obj
+        .keys()
+        .any(|key| key == "." || key.starts_with("./") || key.starts_with('#'));
+    if !has_subpath_keys {
+        if specifier_key == "." {
+            return package_map_match_value(map, condition_names, None);
+        }
+        return PackageMapTarget::NoMatch;
+    }
+
+    if let Some(value) = obj.get(specifier_key) {
+        return package_map_match_value(value, condition_names, None);
+    }
+
+    let mut patterns: Vec<(&str, &Value, String)> = obj
+        .iter()
+        .filter_map(|(pattern, value)| {
+            package_map_pattern_capture(pattern, specifier_key)
+                .map(|capture| (pattern.as_str(), value, capture))
+        })
+        .collect();
+    patterns.sort_by(|(left, _, _), (right, _, _)| {
+        package_map_pattern_specificity(right).cmp(&package_map_pattern_specificity(left))
+    });
+
+    patterns
+        .first()
+        .map_or(PackageMapTarget::NoMatch, |(_, value, capture)| {
+            package_map_match_value(value, condition_names, Some(capture))
+        })
+}
+
+fn resolve_package_map_value(
+    value: &Value,
+    condition_names: &[String],
+    capture: Option<&str>,
+) -> Option<String> {
+    match value {
+        Value::String(target) => Some(match capture {
+            Some(capture) => target.replace('*', capture),
+            None => target.clone(),
+        }),
+        Value::Object(map) => {
+            for (condition, value) in map {
+                if (condition == "default"
+                    || condition_names
+                        .iter()
+                        .any(|active_condition| active_condition == condition))
+                    && let Some(target) = resolve_package_map_value(value, condition_names, capture)
+                {
+                    return Some(target);
+                }
+            }
+            None
+        }
+        Value::Array(_) | Value::Bool(_) | Value::Null | Value::Number(_) => None,
+    }
+}
+
+fn package_map_pattern_capture(pattern: &str, specifier: &str) -> Option<String> {
+    let star = pattern.find('*')?;
+    if pattern[star + 1..].contains('*') {
+        return None;
+    }
+    let (prefix, suffix_with_star) = pattern.split_at(star);
+    let suffix = &suffix_with_star[1..];
+    let captured = specifier.strip_prefix(prefix)?.strip_suffix(suffix)?;
+    Some(captured.to_string())
+}
+
+fn package_map_pattern_specificity(pattern: &str) -> (usize, usize) {
+    let star = pattern.find('*').unwrap_or(pattern.len());
+    (star, pattern.len())
+}
+
+fn package_import_source_subpath(
+    manifest: &PackageManifestInfo,
+    specifier: &str,
+) -> Option<PathBuf> {
+    let stripped = specifier.strip_prefix('#')?;
+    let without_package_name = manifest
+        .name
+        .as_deref()
+        .and_then(|name| stripped.strip_prefix(name))
+        .and_then(|rest| rest.strip_prefix('/'))
+        .unwrap_or(stripped);
+    if without_package_name.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(without_package_name))
+    }
+}
+
+fn nearest_package_manifest<'a>(
+    manifests: &'a [PackageManifestInfo],
+    from_file: &Path,
+) -> Option<&'a PackageManifestInfo> {
+    manifests
+        .iter()
+        .filter(|manifest| {
+            from_file.starts_with(&manifest.root) || from_file.starts_with(&manifest.canonical_root)
+        })
+        .max_by_key(|manifest| manifest.root.components().count())
+}
+
+fn find_package_manifest<'a>(
+    manifests: &'a [PackageManifestInfo],
+    package_name: &str,
+) -> Option<&'a PackageManifestInfo> {
+    manifests
+        .iter()
+        .find(|manifest| manifest.name.as_deref() == Some(package_name))
+}
+
+fn resolve_package_map_target(
+    ctx: &ResolveContext<'_>,
+    manifest: &PackageManifestInfo,
+    target: &str,
+    source_subpath: Option<&Path>,
+) -> Option<FileId> {
+    let target = target.strip_prefix("./")?;
+    if target.starts_with("../") || target.starts_with('/') {
+        return None;
+    }
+    let target_path = manifest.root.join(target);
+
+    lookup_internal_file_id(ctx, &target_path)
+        .or_else(|| try_source_fallback(&target_path, ctx.raw_path_to_id))
+        .or_else(|| try_source_fallback(&target_path, ctx.path_to_id))
+        .or_else(|| source_subpath.and_then(|subpath| try_source_subpath(ctx, manifest, subpath)))
+}
+
+fn try_source_subpath(
+    ctx: &ResolveContext<'_>,
+    manifest: &PackageManifestInfo,
+    subpath: &Path,
+) -> Option<FileId> {
+    if subpath.as_os_str().is_empty()
+        && let Some(source) = manifest.package_json.source.as_deref()
+        && let Some(source) = source.strip_prefix("./")
+        && let Some(file_id) = lookup_internal_file_id(ctx, &manifest.root.join(source))
+    {
+        return Some(file_id);
+    }
+
+    for ext in SOURCE_EXTS {
+        let direct = if subpath.as_os_str().is_empty() {
+            manifest.root.join("src").join(format!("index.{ext}"))
+        } else {
+            manifest.root.join("src").join(subpath).with_extension(ext)
+        };
+        if let Some(file_id) = lookup_internal_file_id(ctx, &direct) {
+            return Some(file_id);
+        }
+
+        if !subpath.as_os_str().is_empty() {
+            let index = manifest
+                .root
+                .join("src")
+                .join(subpath)
+                .join(format!("index.{ext}"));
+            if let Some(file_id) = lookup_internal_file_id(ctx, &index) {
+                return Some(file_id);
+            }
+        }
+
+        if subpath.as_os_str().is_empty() {
+            let root_index = manifest.root.join(format!("index.{ext}"));
+            if let Some(file_id) = lookup_internal_file_id(ctx, &root_index) {
+                return Some(file_id);
+            }
+        }
+    }
+
+    None
+}
+
+fn lookup_internal_file_id(ctx: &ResolveContext<'_>, candidate: &Path) -> Option<FileId> {
+    if let Some(&file_id) = ctx.raw_path_to_id.get(candidate) {
+        return Some(file_id);
+    }
+    if let Some(&file_id) = ctx.path_to_id.get(candidate) {
+        return Some(file_id);
+    }
+    if let Ok(canonical) = dunce::canonicalize(candidate) {
+        if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
+            return Some(file_id);
+        }
+        if let Some(fallback) = ctx.canonical_fallback
+            && let Some(file_id) = fallback.get(&canonical)
+        {
+            return Some(file_id);
+        }
+    }
+    None
+}
+
 /// Extract npm package name from a resolved path inside `node_modules`.
 ///
 /// Given a path like `/project/node_modules/react/index.js`, returns `Some("react")`.
@@ -623,14 +881,12 @@ pub(super) fn try_pnpm_workspace_fallback(
 ///    entirely, still need to resolve `@org/other-pkg/sub` to the sibling
 ///    workspace's source file.
 ///
-/// Strategy: strip the package name prefix and resolve the remainder as a
-/// relative path from inside the workspace root, so `oxc_resolver` applies
-/// directory indices, source extensions, and any workspace-local `tsconfig.json`
-/// path aliases. The `exports` field is intentionally bypassed — it points at
-/// compiled output (`dist/esm/button/index.js`) that does not exist in a
-/// source-only workspace.
+/// Strategy: prefer a matching package `exports` target when the manifest has
+/// one, then strip the package name prefix and resolve the remainder as a
+/// relative path from inside the package root. The manifest branch covers
+/// source-only workspaces whose `exports` point at missing `dist` output.
 ///
-/// See issue #106.
+/// See issues #106 and #641.
 pub(super) fn try_workspace_package_fallback(
     ctx: &ResolveContext<'_>,
     specifier: &str,
@@ -640,7 +896,6 @@ pub(super) fn try_workspace_package_fallback(
         return None;
     }
     let pkg_name = super::path_info::extract_package_name(specifier);
-    let ws_root = *ctx.workspace_roots.get(pkg_name.as_str())?;
 
     // Remainder after the package name. Empty for `@org/pkg`, `"button"` for
     // `@org/pkg/button`, `"internal/base"` for `@org/pkg/internal/base`.
@@ -648,6 +903,40 @@ pub(super) fn try_workspace_package_fallback(
         .strip_prefix(pkg_name.as_str())
         .and_then(|s| s.strip_prefix('/'))
         .unwrap_or("");
+    let source_subpath = PathBuf::from(subpath);
+
+    if let Some(manifest) = find_package_manifest(ctx.package_manifests, pkg_name.as_str()) {
+        let export_key = if subpath.is_empty() {
+            ".".to_string()
+        } else {
+            format!("./{subpath}")
+        };
+        if let Some(exports) = manifest.package_json.exports.as_ref() {
+            match package_map_target(exports, &export_key, ctx.condition_names) {
+                PackageMapTarget::Target(target) => {
+                    if let Some(file_id) = resolve_package_map_target(
+                        ctx,
+                        manifest,
+                        &target,
+                        Some(source_subpath.as_path()),
+                    ) {
+                        return Some(ResolveResult::InternalPackageModule {
+                            file_id,
+                            package_name: pkg_name,
+                        });
+                    }
+                }
+                PackageMapTarget::NoMatch | PackageMapTarget::Blocked => return None,
+            }
+        }
+    }
+
+    let (ws_root, package_name) =
+        if let Some(manifest) = find_package_manifest(ctx.package_manifests, pkg_name.as_str()) {
+            (manifest.root.as_path(), pkg_name)
+        } else {
+            (*ctx.workspace_roots.get(pkg_name.as_str())?, pkg_name)
+        };
 
     // Synthetic importer inside the workspace root so tsconfig discovery walks
     // up from the correct directory and relative specifiers anchor there.
@@ -662,19 +951,31 @@ pub(super) fn try_workspace_package_fallback(
     let resolved_path = resolved.path();
 
     if let Some(&file_id) = ctx.raw_path_to_id.get(resolved_path) {
-        return Some(ResolveResult::InternalModule(file_id));
+        return Some(ResolveResult::InternalPackageModule {
+            file_id,
+            package_name,
+        });
     }
     if let Ok(canonical) = dunce::canonicalize(resolved_path) {
         if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
-            return Some(ResolveResult::InternalModule(file_id));
+            return Some(ResolveResult::InternalPackageModule {
+                file_id,
+                package_name,
+            });
         }
         if let Some(fallback) = ctx.canonical_fallback
             && let Some(file_id) = fallback.get(&canonical)
         {
-            return Some(ResolveResult::InternalModule(file_id));
+            return Some(ResolveResult::InternalPackageModule {
+                file_id,
+                package_name,
+            });
         }
         if let Some(file_id) = try_source_fallback(&canonical, ctx.path_to_id) {
-            return Some(ResolveResult::InternalModule(file_id));
+            return Some(ResolveResult::InternalPackageModule {
+                file_id,
+                package_name,
+            });
         }
     }
     None
@@ -697,6 +998,7 @@ pub(super) fn make_glob_from_pattern(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rustc_hash::FxHashSet;
 
     #[test]
     fn test_extract_package_name_from_node_modules_path_regular() {
@@ -918,6 +1220,212 @@ mod tests {
     }
 
     #[test]
+    fn package_map_exact_entry_beats_pattern_entry() {
+        let map = serde_json::json!({
+            "#nitro/runtime/task": "./dist/special/task.mjs",
+            "#nitro/runtime/*": "./dist/runtime/internal/*.mjs"
+        });
+        assert_eq!(
+            package_map_target(&map, "#nitro/runtime/task", &conditions()),
+            PackageMapTarget::Target("./dist/special/task.mjs".to_string())
+        );
+    }
+
+    #[test]
+    fn package_map_wildcard_substitutes_capture() {
+        let map = serde_json::json!({
+            "#nitro/runtime/*": "./dist/runtime/internal/*.mjs"
+        });
+        assert_eq!(
+            package_map_target(&map, "#nitro/runtime/task", &conditions()),
+            PackageMapTarget::Target("./dist/runtime/internal/task.mjs".to_string())
+        );
+    }
+
+    #[test]
+    fn package_map_exact_entry_with_no_target_blocks_pattern_entry() {
+        let map = serde_json::json!({
+            "#nitro/runtime/task": null,
+            "#nitro/runtime/*": "./dist/runtime/internal/*.mjs"
+        });
+        assert_eq!(
+            package_map_target(&map, "#nitro/runtime/task", &conditions()),
+            PackageMapTarget::Blocked
+        );
+    }
+
+    #[test]
+    fn package_map_best_pattern_with_no_target_blocks_broader_pattern() {
+        let map = serde_json::json!({
+            "#nitro/runtime/internal/*": null,
+            "#nitro/runtime/*": "./dist/runtime/*.mjs"
+        });
+        assert_eq!(
+            package_map_target(&map, "#nitro/runtime/internal/task", &conditions()),
+            PackageMapTarget::Blocked
+        );
+    }
+
+    #[test]
+    fn package_map_unmatched_subpath_is_not_a_target() {
+        let map = serde_json::json!({
+            "./query": "./dist/query/index.js"
+        });
+        assert_eq!(
+            package_map_target(&map, "./private", &conditions()),
+            PackageMapTarget::NoMatch
+        );
+    }
+
+    #[test]
+    fn package_map_nested_conditions_follow_manifest_order() {
+        let map = serde_json::json!({
+            "./query/react": {
+                "types": "./dist/query/react/index.d.ts",
+                "import": {
+                    "development": "./src/query/react/index.ts",
+                    "default": "./dist/query/react/index.js"
+                },
+                "default": "./dist/query/react/index.cjs"
+            }
+        });
+        assert_eq!(
+            package_map_target(&map, "./query/react", &conditions()),
+            PackageMapTarget::Target("./dist/query/react/index.d.ts".to_string())
+        );
+    }
+
+    #[test]
+    fn package_map_import_before_types_selects_runtime_branch() {
+        let map = serde_json::json!({
+            ".": {
+                "import": "./dist/index.js",
+                "types": "./dist/index.d.ts"
+            }
+        });
+        assert_eq!(
+            package_map_target(&map, ".", &conditions()),
+            PackageMapTarget::Target("./dist/index.js".to_string())
+        );
+    }
+
+    #[test]
+    fn package_map_condition_order_follows_manifest_order() {
+        let map = serde_json::json!({
+            ".": {
+                "node": "./dist/node.js",
+                "import": "./dist/index.js"
+            }
+        });
+        assert_eq!(
+            package_map_target(&map, ".", &conditions()),
+            PackageMapTarget::Target("./dist/node.js".to_string())
+        );
+    }
+
+    #[test]
+    fn package_map_unsupported_shapes_are_skipped() {
+        let map = serde_json::json!({
+            "#array": ["./dist/array.js"],
+            "#null": null,
+            "#false": false
+        });
+        assert_eq!(
+            package_map_target(&map, "#array", &conditions()),
+            PackageMapTarget::Blocked
+        );
+        assert_eq!(
+            package_map_target(&map, "#null", &conditions()),
+            PackageMapTarget::Blocked
+        );
+        assert_eq!(
+            package_map_target(&map, "#false", &conditions()),
+            PackageMapTarget::Blocked
+        );
+    }
+
+    #[test]
+    fn package_map_non_relative_target_does_not_trigger_source_fallback() {
+        let root = PathBuf::from("/project");
+        let manifest = PackageManifestInfo {
+            root: root.clone(),
+            canonical_root: root,
+            name: Some("pkg".to_string()),
+            package_json: fallow_config::PackageJson::default(),
+        };
+        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
+        let raw_path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
+        let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
+        let condition_names = conditions();
+        let resolver = oxc_resolver::Resolver::new(oxc_resolver::ResolveOptions::default());
+        let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+        let ctx = ResolveContext {
+            resolver: &resolver,
+            style_resolver: &resolver,
+            extensions: &[],
+            path_to_id: &path_to_id,
+            raw_path_to_id: &raw_path_to_id,
+            workspace_roots: &workspace_roots,
+            package_manifests: std::slice::from_ref(&manifest),
+            condition_names: &condition_names,
+            path_aliases: &[],
+            scss_include_paths: &[],
+            root: &manifest.root,
+            canonical_fallback: None,
+            tsconfig_warned: &tsconfig_warned,
+        };
+
+        assert!(resolve_package_map_target(&ctx, &manifest, "lodash", None).is_none());
+        assert!(resolve_package_map_target(&ctx, &manifest, "../dist/index.js", None).is_none());
+    }
+
+    #[test]
+    fn package_imports_fallback_supports_unnamed_packages() {
+        let root = PathBuf::from("/project");
+        let src_path = root.join("src/runtime/task.ts");
+        let manifest = PackageManifestInfo {
+            root: root.clone(),
+            canonical_root: root.clone(),
+            name: None,
+            package_json: fallow_config::PackageJson {
+                imports: Some(serde_json::json!({
+                    "#runtime/*": "./dist/runtime/*.mjs"
+                })),
+                ..Default::default()
+            },
+        };
+        let mut raw_path_to_id = FxHashMap::default();
+        raw_path_to_id.insert(src_path.as_path(), FileId(7));
+        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
+        let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
+        let condition_names = conditions();
+        let resolver = oxc_resolver::Resolver::new(oxc_resolver::ResolveOptions::default());
+        let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+        let ctx = ResolveContext {
+            resolver: &resolver,
+            style_resolver: &resolver,
+            extensions: &[],
+            path_to_id: &path_to_id,
+            raw_path_to_id: &raw_path_to_id,
+            workspace_roots: &workspace_roots,
+            package_manifests: std::slice::from_ref(&manifest),
+            condition_names: &condition_names,
+            path_aliases: &[],
+            scss_include_paths: &[],
+            root: &manifest.root,
+            canonical_fallback: None,
+            tsconfig_warned: &tsconfig_warned,
+        };
+
+        let result =
+            try_package_imports_fallback(&ctx, &root.join("src/index.ts"), "#runtime/task");
+        assert!(matches!(
+            result,
+            Some(ResolveResult::InternalModule(FileId(7)))
+        ));
+    }
+
+    #[test]
     fn test_pnpm_store_path_extract_package_name() {
         // pnpm virtual store paths should correctly extract package name
         let path =
@@ -937,6 +1445,17 @@ mod tests {
             extract_package_name_from_node_modules_path(&path),
             Some("@babel/core".to_string())
         );
+    }
+
+    fn conditions() -> Vec<String> {
+        vec![
+            "development".to_string(),
+            "import".to_string(),
+            "require".to_string(),
+            "default".to_string(),
+            "types".to_string(),
+            "node".to_string(),
+        ]
     }
 
     #[test]

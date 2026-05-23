@@ -13,12 +13,44 @@ use fallow_types::discover::FileId;
 pub enum ResolveResult {
     /// Resolved to a file within the project.
     InternalModule(FileId),
+    /// Resolved to a workspace or self package source file while preserving
+    /// dependency usage for package accounting.
+    InternalPackageModule {
+        /// Internal source file reached by the package map.
+        file_id: FileId,
+        /// Package name that was used in the import specifier.
+        package_name: String,
+    },
     /// Resolved to a file outside the project (`node_modules`, `.json`, etc.).
     ExternalFile(PathBuf),
     /// Bare specifier — an npm package.
     NpmPackage(String),
     /// Could not resolve.
     Unresolvable(String),
+}
+
+impl ResolveResult {
+    /// Return the target file for any project-internal result.
+    #[must_use]
+    pub const fn internal_file_id(&self) -> Option<FileId> {
+        match self {
+            Self::InternalModule(file_id) | Self::InternalPackageModule { file_id, .. } => {
+                Some(*file_id)
+            }
+            Self::ExternalFile(_) | Self::NpmPackage(_) | Self::Unresolvable(_) => None,
+        }
+    }
+
+    /// Return the package name that should receive dependency usage credit.
+    #[must_use]
+    pub fn package_usage_name(&self) -> Option<&str> {
+        match self {
+            Self::InternalPackageModule { package_name, .. } | Self::NpmPackage(package_name) => {
+                Some(package_name)
+            }
+            Self::InternalModule(_) | Self::ExternalFile(_) | Self::Unresolvable(_) => None,
+        }
+    }
 }
 
 /// A resolved import with its target.
@@ -131,6 +163,10 @@ pub(super) struct ResolveContext<'a> {
     pub raw_path_to_id: &'a FxHashMap<&'a Path, FileId>,
     /// Workspace name → canonical root path.
     pub workspace_roots: &'a FxHashMap<&'a str, &'a Path>,
+    /// Package manifests for the root package and workspace packages.
+    pub package_manifests: &'a [PackageManifestInfo],
+    /// Ordered package condition names matching the resolver configuration.
+    pub condition_names: &'a [String],
     /// Plugin-provided path aliases (prefix, replacement).
     pub path_aliases: &'a [(String, String)],
     /// Absolute directories to search when resolving bare SCSS/Sass
@@ -148,6 +184,19 @@ pub(super) struct ResolveContext<'a> {
     /// warning per affected file. Shared across all parallel resolver
     /// threads via `Mutex`. Empty and unused when no tsconfig errors occur.
     pub tsconfig_warned: &'a Mutex<FxHashSet<String>>,
+}
+
+/// Package manifest data used by source fallbacks.
+#[derive(Debug, Clone)]
+pub(super) struct PackageManifestInfo {
+    /// Package root path as discovered from the workspace tree.
+    pub root: PathBuf,
+    /// Canonical package root path for node_modules symlink comparisons.
+    pub canonical_root: PathBuf,
+    /// Parsed package name.
+    pub name: Option<String>,
+    /// Parsed package.json fields.
+    pub package_json: fallow_config::PackageJson,
 }
 
 /// Thread-safe lazy canonical path index, built on first access.

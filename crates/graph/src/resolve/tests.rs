@@ -44,6 +44,8 @@ fn with_empty_ctx<F: FnOnce(&ResolveContext)>(f: F) {
     let path_to_id = FxHashMap::default();
     let raw_path_to_id = FxHashMap::default();
     let workspace_roots = FxHashMap::default();
+    let package_manifests = Vec::new();
+    let condition_names = react_native::build_condition_names(&[], &[]);
     let root = PathBuf::from("/project");
     let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
     let ctx = ResolveContext {
@@ -53,6 +55,8 @@ fn with_empty_ctx<F: FnOnce(&ResolveContext)>(f: F) {
         path_to_id: &path_to_id,
         raw_path_to_id: &raw_path_to_id,
         workspace_roots: &workspace_roots,
+        package_manifests: &package_manifests,
+        condition_names: &condition_names,
         path_aliases: &[],
         scss_include_paths: &[],
         root: &root,
@@ -1498,6 +1502,8 @@ fn specifier_plugin_alias_match_returns_unresolvable() {
     let path_to_id = FxHashMap::default();
     let raw_path_to_id = FxHashMap::default();
     let workspace_roots = FxHashMap::default();
+    let package_manifests = Vec::new();
+    let condition_names = react_native::build_condition_names(&[], &[]);
     let root = PathBuf::from("/project");
     let aliases = vec![("$lib/".to_string(), "src/lib/".to_string())];
     let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
@@ -1508,6 +1514,8 @@ fn specifier_plugin_alias_match_returns_unresolvable() {
         path_to_id: &path_to_id,
         raw_path_to_id: &raw_path_to_id,
         workspace_roots: &workspace_roots,
+        package_manifests: &package_manifests,
+        condition_names: &condition_names,
         path_aliases: &aliases,
         scss_include_paths: &[],
         root: &root,

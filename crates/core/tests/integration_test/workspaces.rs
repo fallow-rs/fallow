@@ -316,6 +316,102 @@ fn workspace_exports_map_resolves_subpath_imports() {
     );
 }
 
+#[test]
+fn workspace_missing_dist_exports_resolve_to_source() {
+    let root = fixture_path("workspace-missing-dist-exports");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results
+            .unused_files
+            .iter()
+            .any(|f| f.file.path.ends_with("packages/toolkit/src/orphan.ts")),
+        "unrelated workspace source file should still be unused"
+    );
+    for terminal in [
+        "packages/toolkit/src/blocked.ts",
+        "packages/toolkit/src/private.ts",
+    ] {
+        assert!(
+            results
+                .unused_files
+                .iter()
+                .any(|f| f.file.path.ends_with(terminal)),
+            "{terminal} should stay unused because blocked or unexported package subpaths must not fall back to source"
+        );
+    }
+    for reachable in [
+        "packages/toolkit/src/index.ts",
+        "packages/toolkit/src/query/index.ts",
+        "packages/toolkit/src/query/react/index.ts",
+    ] {
+        assert!(
+            !results
+                .unused_files
+                .iter()
+                .any(|f| f.file.path.ends_with(reachable)),
+            "{reachable} should be reachable through workspace exports fallback"
+        );
+    }
+
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        unresolved_specifiers.contains(&"@reduxjs/toolkit/missing"),
+        "workspace export with no source target should remain unresolved: {unresolved_specifiers:?}"
+    );
+    assert!(
+        unresolved_specifiers.contains(&"@reduxjs/toolkit/blocked"),
+        "workspace export blocked by package map should remain unresolved: {unresolved_specifiers:?}"
+    );
+    assert!(
+        unresolved_specifiers.contains(&"@reduxjs/toolkit/private"),
+        "workspace subpath omitted from exports should remain unresolved: {unresolved_specifiers:?}"
+    );
+    assert!(
+        !unresolved_specifiers.contains(&"@reduxjs/toolkit/query/react"),
+        "mapped workspace export should resolve: {unresolved_specifiers:?}"
+    );
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dep_names.contains(&"@reduxjs/toolkit"),
+        "declared workspace dependency should receive usage credit: {unused_dep_names:?}"
+    );
+
+    let unlisted = results
+        .unlisted_dependencies
+        .iter()
+        .find(|dep| dep.dep.package_name == "@reduxjs/toolkit")
+        .expect("undeclared workspace import should report as unlisted");
+    assert!(
+        unlisted
+            .dep
+            .imported_from
+            .iter()
+            .any(|site| site.path.ends_with("examples/undeclared/src/index.ts")),
+        "unlisted dependency should point at undeclared workspace import sites: {:?}",
+        unlisted.dep.imported_from
+    );
+    assert!(
+        !unlisted
+            .dep
+            .imported_from
+            .iter()
+            .any(|site| site.path.ends_with("examples/app/src/index.ts")),
+        "declared app workspace should not contribute unlisted sites: {:?}",
+        unlisted.dep.imported_from
+    );
+}
+
 // ── Workspace nested exports map ──────────────────────────────
 
 #[test]

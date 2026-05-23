@@ -170,7 +170,8 @@ impl<'a> ExternalStylePackageScanner<'a> {
                             }
                         }
                     }
-                    ResolveResult::InternalModule(_) => {}
+                    ResolveResult::InternalModule(_)
+                    | ResolveResult::InternalPackageModule { .. } => {}
                 }
             }
         }

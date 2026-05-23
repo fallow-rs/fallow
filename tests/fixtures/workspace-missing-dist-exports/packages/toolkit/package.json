@@ -1,0 +1,17 @@
+{
+  "name": "@reduxjs/toolkit",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./query": "./dist/query/index.js",
+    "./query/react": {
+      "types": "./dist/query/react/index.d.ts",
+      "import": "./dist/query/react/index.js"
+    },
+    "./blocked": null,
+    "./missing": "./dist/missing.js"
+  }
+}

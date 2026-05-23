@@ -680,9 +680,7 @@ fn collect_dynamic_reexport_sources(
         let wrapper_exports = &wrapper.exports;
 
         for dynamic_import in &resolved.resolved_dynamic_imports {
-            let crate::resolve::ResolveResult::InternalModule(source_file_id) =
-                &dynamic_import.target
-            else {
+            let Some(source_file_id) = dynamic_import.target.internal_file_id() else {
                 continue;
             };
 

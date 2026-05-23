@@ -11,7 +11,7 @@ use crate::extract::{
     PLAYWRIGHT_FIXTURE_USE_SENTINEL,
 };
 use crate::graph::{ModuleGraph, ReferenceKind};
-use crate::resolve::{ResolveResult, ResolvedModule};
+use crate::resolve::ResolvedModule;
 use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
 
@@ -365,13 +365,13 @@ fn build_local_to_export_keys(resolved: &ResolvedModule) -> FxHashMap<&str, Vec<
         let Some(imported_name) = imported_export_name(&import.info.imported_name) else {
             continue;
         };
-        let ResolveResult::InternalModule(target_file_id) = &import.target else {
+        let Some(target_file_id) = import.target.internal_file_id() else {
             continue;
         };
         push_local_export_key(
             &mut local_to_export_keys,
             import.info.local_name.as_str(),
-            ExportKey::new(*target_file_id, imported_name),
+            ExportKey::new(target_file_id, imported_name),
         );
     }
 
@@ -1494,8 +1494,8 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
             }
             // Case 2: sentinel accesses on an imported file (external templateUrl)
             for import in resolved.all_resolved_imports() {
-                if let ResolveResult::InternalModule(target_id) = &import.target
-                    && let Some(refs) = angular_tpl_refs.get(target_id)
+                if let Some(target_id) = import.target.internal_file_id()
+                    && let Some(refs) = angular_tpl_refs.get(&target_id)
                 {
                     let entry = self_accessed_members.entry(resolved.file_id).or_default();
                     for &ref_name in refs {
@@ -1536,10 +1536,10 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
             }
             let local_to_export_keys = build_local_to_export_keys(resolved);
             for import in resolved.all_resolved_imports() {
-                let ResolveResult::InternalModule(target_id) = &import.target else {
+                let Some(target_id) = import.target.internal_file_id() else {
                     continue;
                 };
-                let Some(chains) = angular_tpl_chain_accesses.get(target_id) else {
+                let Some(chains) = angular_tpl_chain_accesses.get(&target_id) else {
                     continue;
                 };
                 for (object, member) in chains {

@@ -50,6 +50,8 @@ pub struct PackageJson {
     #[serde(default)]
     pub exports: Option<serde_json::Value>,
     #[serde(default)]
+    pub imports: Option<serde_json::Value>,
+    #[serde(default)]
     pub dependencies: Option<StdHashMap<String, String>>,
     #[serde(default, rename = "devDependencies")]
     pub dev_dependencies: Option<StdHashMap<String, String>>,

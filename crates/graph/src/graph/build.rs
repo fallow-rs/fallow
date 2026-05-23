@@ -2,7 +2,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
+use crate::resolve::{ResolvedImport, ResolvedModule};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{ExportName, ImportedName, VisibilityTag};
 
@@ -61,29 +61,23 @@ fn collect_import_edge(
     edges_by_target: &mut FxHashMap<FileId, Vec<ImportedSymbol>>,
     acc: &mut EdgeAccumulator,
 ) {
-    match &import.target {
-        ResolveResult::InternalModule(target_id) => {
-            if matches!(import.info.imported_name, ImportedName::Namespace) {
-                record_namespace_import(
-                    *target_id,
-                    &mut acc.namespace_imported,
-                    acc.total_capacity,
-                );
-            }
-            edges_by_target
-                .entry(*target_id)
-                .or_default()
-                .push(ImportedSymbol {
-                    imported_name: import.info.imported_name.clone(),
-                    local_name: import.info.local_name.clone(),
-                    import_span: import.info.span,
-                    is_type_only: import.info.is_type_only,
-                });
+    if let Some(package_name) = import.target.package_usage_name() {
+        record_package_usage(acc, package_name, file_id, import.info.is_type_only);
+    }
+
+    if let Some(target_id) = import.target.internal_file_id() {
+        if matches!(import.info.imported_name, ImportedName::Namespace) {
+            record_namespace_import(target_id, &mut acc.namespace_imported, acc.total_capacity);
         }
-        ResolveResult::NpmPackage(name) => {
-            record_package_usage(acc, name, file_id, import.info.is_type_only);
-        }
-        _ => {}
+        edges_by_target
+            .entry(target_id)
+            .or_default()
+            .push(ImportedSymbol {
+                imported_name: import.info.imported_name.clone(),
+                local_name: import.info.local_name.clone(),
+                import_span: import.info.span,
+                is_type_only: import.info.is_type_only,
+            });
     }
 }
 
@@ -107,9 +101,12 @@ fn collect_edges_for_module(
     // just because they're re-exported. Re-export chain propagation handles tracking
     // which specific names consumers actually import.
     for re_export in &resolved.re_exports {
-        if let ResolveResult::InternalModule(target_id) = &re_export.target {
+        if let Some(package_name) = re_export.target.package_usage_name() {
+            record_package_usage(acc, package_name, file_id, re_export.info.is_type_only);
+        }
+        if let Some(target_id) = re_export.target.internal_file_id() {
             edges_by_target
-                .entry(*target_id)
+                .entry(target_id)
                 .or_default()
                 .push(ImportedSymbol {
                     imported_name: ImportedName::SideEffect,
@@ -117,8 +114,6 @@ fn collect_edges_for_module(
                     import_span: oxc_span::Span::new(0, 0),
                     is_type_only: re_export.info.is_type_only,
                 });
-        } else if let ResolveResult::NpmPackage(name) = &re_export.target {
-            record_package_usage(acc, name, file_id, re_export.info.is_type_only);
         }
     }
 
@@ -227,17 +222,13 @@ fn build_module_node(
             m.re_exports
                 .iter()
                 .filter_map(|re| {
-                    if let ResolveResult::InternalModule(target_id) = &re.target {
-                        Some(ReExportEdge {
-                            source_file: *target_id,
-                            imported_name: re.info.imported_name.clone(),
-                            exported_name: re.info.exported_name.clone(),
-                            is_type_only: re.info.is_type_only,
-                            span: re.info.span,
-                        })
-                    } else {
-                        None
-                    }
+                    re.target.internal_file_id().map(|target_id| ReExportEdge {
+                        source_file: target_id,
+                        imported_name: re.info.imported_name.clone(),
+                        exported_name: re.info.exported_name.clone(),
+                        is_type_only: re.info.is_type_only,
+                        span: re.info.span,
+                    })
                 })
                 .collect()
         })

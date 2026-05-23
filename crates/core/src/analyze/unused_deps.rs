@@ -748,7 +748,10 @@ pub fn find_unlisted_dependencies(
     resolved_modules: &[ResolvedModule],
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<UnlistedDependency> {
-    let all_deps: FxHashSet<String> = pkg.all_dependency_names().into_iter().collect();
+    let mut all_deps: FxHashSet<String> = pkg.all_dependency_names().into_iter().collect();
+    if let Some(root_name) = &pkg.name {
+        all_deps.insert(root_name.clone());
+    }
 
     // Map: canonical workspace root -> set of dep names (for per-file checks)
     let mut ws_dep_map: Vec<(PathBuf, FxHashSet<String>)> = Vec::new();
@@ -799,11 +802,11 @@ pub fn find_unlisted_dependencies(
     let mut import_spans_by_file: FxHashMap<FileId, Vec<(&str, u32)>> = FxHashMap::default();
     for rm in resolved_modules {
         for import in rm.all_resolved_imports() {
-            if let crate::resolve::ResolveResult::NpmPackage(name) = &import.target {
+            if let Some(name) = import.target.package_usage_name() {
                 import_spans_by_file
                     .entry(rm.file_id)
                     .or_default()
-                    .push((name.as_str(), import.info.span.start));
+                    .push((name, import.info.span.start));
             }
         }
         // Re-exports don't have span info on ReExportInfo, so skip them here.

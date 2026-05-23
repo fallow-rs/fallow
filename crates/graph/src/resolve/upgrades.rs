@@ -16,8 +16,6 @@
 
 use rustc_hash::FxHashMap;
 
-use fallow_types::discover::FileId;
-
 use super::ResolvedModule;
 use super::path_info::is_bare_specifier;
 use super::types::ResolveResult;
@@ -38,28 +36,24 @@ use super::types::ResolveResult;
 /// encountered (by module order = `FileId` order) wins. This is deterministic but may be
 /// imprecise for that edge case — both files get connected regardless.
 pub(super) fn apply_specifier_upgrades(resolved: &mut [ResolvedModule]) {
-    let mut specifier_upgrades: FxHashMap<String, FileId> = FxHashMap::default();
+    let mut specifier_upgrades: FxHashMap<String, ResolveResult> = FxHashMap::default();
     for module in resolved.iter() {
         for imp in module
             .resolved_imports
             .iter()
             .chain(module.resolved_dynamic_imports.iter())
         {
-            if is_bare_specifier(&imp.info.source)
-                && let ResolveResult::InternalModule(file_id) = &imp.target
-            {
+            if is_bare_specifier(&imp.info.source) && imp.target.internal_file_id().is_some() {
                 specifier_upgrades
                     .entry(imp.info.source.clone())
-                    .or_insert(*file_id);
+                    .or_insert_with(|| imp.target.clone());
             }
         }
         for re in &module.re_exports {
-            if is_bare_specifier(&re.info.source)
-                && let ResolveResult::InternalModule(file_id) = &re.target
-            {
+            if is_bare_specifier(&re.info.source) && re.target.internal_file_id().is_some() {
                 specifier_upgrades
                     .entry(re.info.source.clone())
-                    .or_insert(*file_id);
+                    .or_insert_with(|| re.target.clone());
             }
         }
     }
@@ -76,16 +70,16 @@ pub(super) fn apply_specifier_upgrades(resolved: &mut [ResolvedModule]) {
             .chain(module.resolved_dynamic_imports.iter_mut())
         {
             if matches!(imp.target, ResolveResult::NpmPackage(_))
-                && let Some(&file_id) = specifier_upgrades.get(&imp.info.source)
+                && let Some(target) = specifier_upgrades.get(&imp.info.source)
             {
-                imp.target = ResolveResult::InternalModule(file_id);
+                imp.target = target.clone();
             }
         }
         for re in &mut module.re_exports {
             if matches!(re.target, ResolveResult::NpmPackage(_))
-                && let Some(&file_id) = specifier_upgrades.get(&re.info.source)
+                && let Some(target) = specifier_upgrades.get(&re.info.source)
             {
-                re.target = ResolveResult::InternalModule(file_id);
+                re.target = target.clone();
             }
         }
     }

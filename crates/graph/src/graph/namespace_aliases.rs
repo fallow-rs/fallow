@@ -23,7 +23,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use fallow_types::discover::FileId;
 use fallow_types::extract::{ImportedName, NamespaceObjectAlias};
 
-use crate::resolve::{ResolveResult, ResolvedModule};
+use crate::resolve::ResolvedModule;
 
 use super::ModuleGraph;
 use super::narrowing::{
@@ -166,10 +166,7 @@ fn resolve_namespace_target(
         if !matches!(import.info.imported_name, ImportedName::Namespace) {
             return None;
         }
-        match &import.target {
-            ResolveResult::InternalModule(file_id) => Some(*file_id),
-            _ => None,
-        }
+        import.target.internal_file_id()
     })
 }
 
@@ -196,7 +193,7 @@ fn collect_credits_for_alias(
             continue;
         }
         for import in &consumer.resolved_imports {
-            let ResolveResult::InternalModule(target_file_id) = &import.target else {
+            let Some(target_file_id) = import.target.internal_file_id() else {
                 continue;
             };
             let imported_name = match &import.info.imported_name {
@@ -204,7 +201,7 @@ fn collect_credits_for_alias(
                 ImportedName::Default => "default",
                 _ => continue,
             };
-            if !reachable.contains(&(*target_file_id, imported_name.to_string())) {
+            if !reachable.contains(&(target_file_id, imported_name.to_string())) {
                 continue;
             }
             let consumer_local = import.info.local_name.as_str();

@@ -223,8 +223,7 @@ fn collect_consumer_credits(
             continue;
         }
         for import in &consumer.resolved_imports {
-            let crate::resolve::ResolveResult::InternalModule(import_target) = &import.target
-            else {
+            let Some(import_target) = import.target.internal_file_id() else {
                 continue;
             };
             let imported_name = match &import.info.imported_name {
@@ -232,7 +231,7 @@ fn collect_consumer_credits(
                 ImportedName::Default => "default",
                 _ => continue,
             };
-            if !reachable.contains(&(*import_target, imported_name.to_string())) {
+            if !reachable.contains(&(import_target, imported_name.to_string())) {
                 continue;
             }
 

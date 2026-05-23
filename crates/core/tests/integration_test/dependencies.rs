@@ -325,6 +325,74 @@ fn subpath_imports_resolve_correctly() {
     );
 }
 
+#[test]
+fn package_imports_missing_dist_resolve_to_source() {
+    let root = fixture_path("package-imports-missing-dist");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specifiers.contains(&"#nitro/runtime/task"),
+        "manifest-mapped runtime import should resolve, got: {unresolved_specifiers:?}"
+    );
+    assert!(
+        !unresolved_specifiers.contains(&"#nitro/virtual/polyfills"),
+        "manifest-mapped virtual import should resolve, got: {unresolved_specifiers:?}"
+    );
+    assert!(
+        unresolved_specifiers.contains(&"#nitro/runtime/missing"),
+        "manifest match without a source target should stay unresolved: {unresolved_specifiers:?}"
+    );
+    assert!(
+        unresolved_specifiers.contains(&"#other/alias"),
+        "unmatched hash alias should stay unresolved: {unresolved_specifiers:?}"
+    );
+
+    assert!(
+        results.unlisted_dependencies.is_empty(),
+        "root self import and package imports should not become unlisted deps: {:?}",
+        results
+            .unlisted_dependencies
+            .iter()
+            .map(|d| d.dep.package_name.as_str())
+            .collect::<Vec<_>>()
+    );
+
+    assert!(
+        results
+            .unused_files
+            .iter()
+            .any(|f| f.file.path.ends_with("src/runtime/internal/orphan.ts")),
+        "unrelated source files should still be reported as unused"
+    );
+    assert!(
+        !results
+            .unused_files
+            .iter()
+            .any(|f| f.file.path.ends_with("src/runtime/internal/task.ts")),
+        "runtime task source should be reachable through imports fallback"
+    );
+    assert!(
+        !results
+            .unused_files
+            .iter()
+            .any(|f| f.file.path.ends_with("src/runtime/virtual/polyfills.ts")),
+        "virtual polyfills source should be reachable through imports fallback"
+    );
+    assert!(
+        !results
+            .unused_files
+            .iter()
+            .any(|f| f.file.path.ends_with("src/self.ts")),
+        "root self package export should resolve back to source"
+    );
+}
+
 // ── Issue #124: ignorePatterns applied to workspace package.json discovery ──
 
 #[test]

@@ -10,9 +10,9 @@ use serde_json::Value;
 
 use super::fallbacks::{
     extract_package_name_from_node_modules_path, try_css_extension_fallback,
-    try_path_alias_fallback, try_pnpm_workspace_fallback, try_scss_include_path_fallback,
-    try_scss_node_modules_fallback, try_scss_partial_fallback, try_source_fallback,
-    try_workspace_package_fallback,
+    try_package_imports_fallback, try_path_alias_fallback, try_pnpm_workspace_fallback,
+    try_scss_include_path_fallback, try_scss_node_modules_fallback, try_scss_partial_fallback,
+    try_source_fallback, try_workspace_package_fallback,
 };
 use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
@@ -1229,6 +1229,10 @@ pub(super) fn resolve_specifier(
                 return ResolveResult::Unresolvable(specifier.to_string());
             }
 
+            if let Some(result) = try_package_imports_fallback(ctx, from_file, specifier) {
+                return result;
+            }
+
             if is_alias || matches_plugin_alias {
                 // Try plugin-provided path aliases before giving up.
                 // This covers both built-in alias shapes (`~/`, `@/`, `#foo`) and
@@ -1247,12 +1251,21 @@ pub(super) fn resolve_specifier(
             } else if is_bare && is_valid_package_name(specifier) {
                 // Workspace package fallback: self-referencing and cross-workspace
                 // imports without node_modules symlinks. Resolves `@org/pkg/sub`
-                // against the workspace root's source tree. See issue #106.
+                // against the workspace root's source tree. See issues #106 and #641.
                 if let Some(result) = try_workspace_package_fallback(ctx, specifier) {
                     return result;
                 }
                 let pkg_name = extract_package_name(specifier);
-                ResolveResult::NpmPackage(pkg_name)
+                if ctx.workspace_roots.contains_key(pkg_name.as_str())
+                    || ctx
+                        .package_manifests
+                        .iter()
+                        .any(|manifest| manifest.name.as_deref() == Some(pkg_name.as_str()))
+                {
+                    ResolveResult::Unresolvable(specifier.to_string())
+                } else {
+                    ResolveResult::NpmPackage(pkg_name)
+                }
             } else {
                 ResolveResult::Unresolvable(specifier.to_string())
             }

@@ -43,11 +43,11 @@ use fallow_types::extract::ModuleInfo;
 
 use dynamic_imports::{resolve_dynamic_imports, resolve_dynamic_patterns};
 use re_exports::resolve_re_exports;
-use react_native::build_extensions;
+use react_native::{build_condition_names, build_extensions};
 use require_imports::resolve_require_imports;
 use specifier::create_resolver;
 use static_imports::resolve_static_imports;
-use types::ResolveContext;
+use types::{PackageManifestInfo, ResolveContext};
 use upgrades::apply_specifier_upgrades;
 
 /// Resolve all imports across all modules in parallel.
@@ -80,6 +80,26 @@ pub fn resolve_all_imports(
         .zip(canonical_ws_roots.iter())
         .map(|(ws, canonical)| (ws.name.as_str(), canonical.as_path()))
         .collect();
+    let root_canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut package_manifests = Vec::new();
+    if let Ok(package_json) = fallow_config::PackageJson::load(&root.join("package.json")) {
+        package_manifests.push(PackageManifestInfo {
+            root: root.to_path_buf(),
+            canonical_root: root_canonical,
+            name: package_json.name.clone(),
+            package_json,
+        });
+    }
+    for (ws, canonical_root) in workspaces.iter().zip(canonical_ws_roots.iter()) {
+        if let Ok(package_json) = fallow_config::PackageJson::load(&ws.root.join("package.json")) {
+            package_manifests.push(PackageManifestInfo {
+                root: ws.root.clone(),
+                canonical_root: canonical_root.clone(),
+                name: package_json.name.clone().or_else(|| Some(ws.name.clone())),
+                package_json,
+            });
+        }
+    }
 
     // Check if project root is already canonical (no symlinks in path).
     // When true, raw paths == canonical paths for files under root, so we can skip
@@ -119,6 +139,7 @@ pub fn resolve_all_imports(
 
     // Create resolvers ONCE and share across threads (oxc_resolver::Resolver is Send + Sync).
     let extensions = build_extensions(active_plugins);
+    let condition_names = build_condition_names(active_plugins, extra_conditions);
     let resolver = create_resolver(active_plugins, extra_conditions);
     let mut style_conditions = extra_conditions.to_vec();
     style_conditions.push("style".to_string());
@@ -143,6 +164,8 @@ pub fn resolve_all_imports(
         path_to_id: &path_to_id,
         raw_path_to_id: &raw_path_to_id,
         workspace_roots: &workspace_roots,
+        package_manifests: &package_manifests,
+        condition_names: &condition_names,
         path_aliases,
         scss_include_paths,
         root,
