@@ -3,11 +3,11 @@ use super::framework_convention_coverage_common::{
     collect_unused_exports, collect_unused_files, has_unused_export,
 };
 
-fn assert_bundle_boundary_modules_are_traversed(
+fn collect_unresolved_imports(
     root: &std::path::Path,
     results: &fallow_core::results::AnalysisResults,
-) {
-    let unresolved: Vec<(String, String)> = results
+) -> Vec<(String, String)> {
+    results
         .unresolved_imports
         .iter()
         .map(|import| {
@@ -22,7 +22,14 @@ fn assert_bundle_boundary_modules_are_traversed(
                 import.import.specifier.clone(),
             )
         })
-        .collect();
+        .collect()
+}
+
+fn assert_bundle_boundary_modules_are_traversed(
+    root: &std::path::Path,
+    results: &fallow_core::results::AnalysisResults,
+) {
+    let unresolved = collect_unresolved_imports(root, results);
 
     for specifier in ["../.client/analytics", "../.server/db"] {
         assert!(
@@ -89,6 +96,27 @@ fn react_router_route_config_root_and_route_exports_are_covered() {
 }
 
 #[test]
+fn react_router_generated_route_type_imports_are_not_unresolved() {
+    let root = fixture_path("react-router-conventions");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unresolved = collect_unresolved_imports(&root, &results);
+
+    assert!(
+        !unresolved
+            .iter()
+            .any(|(path, spec)| path == "app/root.tsx" && spec == "./+types/root"),
+        "React Router generated type import should not be unresolved, found: {unresolved:?}"
+    );
+    assert!(
+        unresolved
+            .iter()
+            .any(|(path, spec)| path == "app/root.tsx" && spec == "./+types/runtime"),
+        "runtime imports under ./+types/ should still be reported, found: {unresolved:?}"
+    );
+}
+
+#[test]
 fn remix_root_and_client_data_exports_are_covered() {
     let root = fixture_path("remix-conventions");
     let config = create_config(root.clone());
@@ -122,6 +150,21 @@ fn remix_root_and_client_data_exports_are_covered() {
             "{path}:{export} should still be reported as unused, found: {unused_exports:?}"
         );
     }
+}
+
+#[test]
+fn remix_generated_route_type_imports_are_not_unresolved() {
+    let root = fixture_path("remix-conventions");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unresolved = collect_unresolved_imports(&root, &results);
+
+    assert!(
+        !unresolved
+            .iter()
+            .any(|(path, spec)| path == "app/root.tsx" && spec == "./+types/root"),
+        "Remix generated type import should not be unresolved, found: {unresolved:?}"
+    );
 }
 
 #[test]

@@ -1,3 +1,5 @@
+import type { Route } from "./+types/root";
+
 export async function loader() {
   return null;
 }
@@ -22,7 +24,7 @@ export function shouldRevalidate() {
   return true;
 }
 
-export function Layout({ children }: { children: unknown }) {
+export function Layout({ children }: Route.ComponentProps) {
   return children;
 }
 

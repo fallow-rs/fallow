@@ -43,6 +43,7 @@ fn unresolved_import_detected() {
         &suppressions,
         &[],
         &[],
+        &[],
         &line_offsets,
     );
 
@@ -91,6 +92,7 @@ fn unresolved_dynamic_import_detected_with_real_location() {
         &resolved_modules,
         &config,
         &suppressions,
+        &[],
         &[],
         &[],
         &line_offsets,
@@ -143,6 +145,7 @@ fn unresolved_virtual_module_not_reported() {
         &suppressions,
         &[],
         &[],
+        &[],
         &line_offsets,
     );
 
@@ -192,6 +195,7 @@ fn unresolved_import_with_virtual_prefix_not_reported() {
         &config,
         &suppressions,
         &["#"], // Nuxt-style virtual prefix
+        &[],
         &[],
         &line_offsets,
     );
@@ -269,6 +273,7 @@ fn unresolved_import_suppressed_by_generated_import_pattern() {
         &suppressions,
         &[],
         &["/$types"], // SvelteKit-style generated import
+        &[],
         &line_offsets,
     );
 
@@ -276,6 +281,138 @@ fn unresolved_import_suppressed_by_generated_import_pattern() {
         unresolved.is_empty(),
         "imports matching generated_import_patterns should not be flagged as unresolved, found: {unresolved:?}"
     );
+}
+
+#[test]
+fn unresolved_import_suppressed_by_generated_type_import_prefix() {
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/app/root.tsx"),
+        exports: vec![],
+        re_exports: vec![],
+        resolved_imports: vec![
+            ResolvedImport {
+                info: ImportInfo {
+                    source: "./+types/root".to_string(),
+                    imported_name: ImportedName::Named("Route".to_string()),
+                    local_name: "Route".to_string(),
+                    is_type_only: true,
+                    from_style: false,
+                    span: oxc_span::Span::new(0, 45),
+                    source_span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::Unresolvable("./+types/root".to_string()),
+            },
+            ResolvedImport {
+                info: ImportInfo {
+                    source: "./+types/runtime".to_string(),
+                    imported_name: ImportedName::Named("runtimeValue".to_string()),
+                    local_name: "runtimeValue".to_string(),
+                    is_type_only: false,
+                    from_style: false,
+                    span: oxc_span::Span::new(50, 100),
+                    source_span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::Unresolvable("./+types/runtime".to_string()),
+            },
+            ResolvedImport {
+                info: ImportInfo {
+                    source: "./not-types/root".to_string(),
+                    imported_name: ImportedName::Named("Other".to_string()),
+                    local_name: "Other".to_string(),
+                    is_type_only: true,
+                    from_style: false,
+                    span: oxc_span::Span::new(105, 150),
+                    source_span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::Unresolvable("./not-types/root".to_string()),
+            },
+        ],
+        resolved_dynamic_imports: vec![],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        has_cjs_exports: false,
+        has_angular_component_template_url: false,
+        unused_import_bindings: FxHashSet::default(),
+        type_referenced_import_bindings: vec![],
+        value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
+    }];
+
+    let config = test_config(PathBuf::from("/project"));
+    let suppressions = SuppressionContext::empty();
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unresolved = find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &[],
+        &[],
+        &["./+types/"],
+        &line_offsets,
+    );
+
+    let specifiers: Vec<&str> = unresolved
+        .iter()
+        .map(|import| import.specifier.as_str())
+        .collect();
+
+    assert_eq!(
+        specifiers,
+        vec!["./+types/runtime", "./not-types/root"],
+        "only type-only imports under the generated prefix should be suppressed"
+    );
+}
+
+#[test]
+fn generated_type_import_prefix_is_plugin_gated() {
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/app/root.tsx"),
+        exports: vec![],
+        re_exports: vec![],
+        resolved_imports: vec![ResolvedImport {
+            info: ImportInfo {
+                source: "./+types/root".to_string(),
+                imported_name: ImportedName::Named("Route".to_string()),
+                local_name: "Route".to_string(),
+                is_type_only: true,
+                from_style: false,
+                span: oxc_span::Span::new(0, 45),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::Unresolvable("./+types/root".to_string()),
+        }],
+        resolved_dynamic_imports: vec![],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        has_cjs_exports: false,
+        has_angular_component_template_url: false,
+        unused_import_bindings: FxHashSet::default(),
+        type_referenced_import_bindings: vec![],
+        value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
+    }];
+
+    let config = test_config(PathBuf::from("/project"));
+    let suppressions = SuppressionContext::empty();
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unresolved = find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &[],
+        &[],
+        &[],
+        &line_offsets,
+    );
+
+    assert_eq!(unresolved.len(), 1);
+    assert_eq!(unresolved[0].specifier, "./+types/root");
 }
 
 #[test]
@@ -325,6 +462,7 @@ fn unresolved_import_suppressed_by_inline_comment() {
         &resolved_modules,
         &config,
         &suppressions,
+        &[],
         &[],
         &[],
         &line_offsets,
@@ -386,6 +524,7 @@ fn unresolved_dynamic_import_suppressed_by_inline_comment() {
         &suppressions,
         &[],
         &[],
+        &[],
         &line_offsets,
     );
 
@@ -442,6 +581,7 @@ fn unresolved_import_file_level_suppression() {
         &resolved_modules,
         &config,
         &suppressions,
+        &[],
         &[],
         &[],
         &line_offsets,
@@ -508,6 +648,7 @@ fn resolved_import_not_reported_as_unresolved() {
         &suppressions,
         &[],
         &[],
+        &[],
         &line_offsets,
     );
 
@@ -530,6 +671,7 @@ fn no_resolved_modules_produces_no_unresolved() {
         &resolved_modules,
         &config,
         &suppressions,
+        &[],
         &[],
         &[],
         &line_offsets,
@@ -590,6 +732,7 @@ fn unresolved_import_not_suppressed_by_wrong_kind() {
         &resolved_modules,
         &config,
         &suppressions,
+        &[],
         &[],
         &[],
         &line_offsets,

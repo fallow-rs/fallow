@@ -1220,6 +1220,11 @@ fn run_plugins(
         result.virtual_module_prefixes.iter().cloned().collect();
     let mut seen_generated: rustc_hash::FxHashSet<String> =
         result.generated_import_patterns.iter().cloned().collect();
+    let mut seen_generated_type_prefixes: rustc_hash::FxHashSet<String> = result
+        .generated_type_import_prefixes
+        .iter()
+        .cloned()
+        .collect();
     let mut seen_suffixes: rustc_hash::FxHashSet<String> =
         result.virtual_package_suffixes.iter().cloned().collect();
 
@@ -1289,9 +1294,10 @@ fn run_plugins(
             .tooling_dependencies
             .extend(ws_result.tooling_dependencies);
         // Virtual import boundaries — prefixes (e.g., Docusaurus `@theme/`),
-        // generated import patterns (e.g., SvelteKit `/$types`), and package-name
-        // suffixes (e.g., Vitest `/__mocks__`) — match against import specifiers
-        // or package names, never file paths, so no workspace prefix is applied.
+        // generated import patterns (e.g., SvelteKit `/$types`), generated type
+        // prefixes (e.g., React Router `./+types/`), and package-name suffixes
+        // (e.g., Vitest `/__mocks__`) — match against import specifiers or
+        // package names, never file paths, so no workspace prefix is applied.
         extend_unique(
             &mut result.virtual_module_prefixes,
             &mut seen_prefixes,
@@ -1301,6 +1307,11 @@ fn run_plugins(
             &mut result.generated_import_patterns,
             &mut seen_generated,
             ws_result.generated_import_patterns,
+        );
+        extend_unique(
+            &mut result.generated_type_import_prefixes,
+            &mut seen_generated_type_prefixes,
+            ws_result.generated_type_import_prefixes,
         );
         extend_unique(
             &mut result.virtual_package_suffixes,

@@ -486,6 +486,14 @@ pub fn find_dead_code_full(
                 .collect()
         })
         .unwrap_or_default();
+    let generated_type_prefixes: Vec<&str> = plugin_result
+        .map(|pr| {
+            pr.generated_type_import_prefixes
+                .iter()
+                .map(String::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
 
     let (
         (unused_files, export_results),
@@ -682,6 +690,7 @@ pub fn find_dead_code_full(
                                             &suppressions,
                                             &virtual_prefixes,
                                             &generated_patterns,
+                                            &generated_type_prefixes,
                                             &line_offsets_by_file,
                                         )
                                         .into_iter()

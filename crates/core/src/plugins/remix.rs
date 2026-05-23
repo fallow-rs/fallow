@@ -31,6 +31,7 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
 ];
 
 const BUNDLE_BOUNDARY_DIRS: &[&str] = &[".client", ".server"];
+const GENERATED_TYPE_IMPORT_PREFIXES: &[&str] = &["./+types/"];
 
 macro_rules! route_module_exports {
     ($($export:literal),+ $(,)?) => {
@@ -61,6 +62,7 @@ define_plugin! {
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
     discovery_hidden_dirs: BUNDLE_BOUNDARY_DIRS,
+    generated_type_import_prefixes: GENERATED_TYPE_IMPORT_PREFIXES,
     used_exports: [
         ("app/routes/**/*.{ts,tsx,js,jsx}", ROUTE_EXPORTS),
         ("app/root.{ts,tsx,js,jsx}", ROOT_EXPORTS),

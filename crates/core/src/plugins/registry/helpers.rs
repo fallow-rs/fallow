@@ -105,6 +105,11 @@ pub fn process_static_patterns(
             .generated_import_patterns
             .push((*pattern).to_string());
     }
+    for prefix in plugin.generated_type_import_prefixes() {
+        result
+            .generated_type_import_prefixes
+            .push((*prefix).to_string());
+    }
     for (prefix, replacement) in plugin.path_aliases(root) {
         result.path_aliases.push((prefix.to_string(), replacement));
     }

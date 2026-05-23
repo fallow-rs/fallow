@@ -901,6 +901,7 @@ pub fn find_unresolved_imports(
     suppressions: &SuppressionContext<'_>,
     virtual_prefixes: &[&str],
     generated_patterns: &[&str],
+    generated_type_prefixes: &[&str],
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<UnresolvedImport> {
     let mut unresolved = Vec::new();
@@ -942,6 +943,16 @@ pub fn find_unresolved_imports(
                     if generated_patterns.iter().any(|pat| bare.ends_with(pat)) {
                         continue;
                     }
+                }
+                // Skip build-time generated route type imports from framework plugins
+                // (e.g., React Router's `./+types/root`). Keep this type-only so
+                // missing runtime imports under the same directory remain visible.
+                if import.info.is_type_only
+                    && generated_type_prefixes
+                        .iter()
+                        .any(|prefix| spec.starts_with(prefix))
+                {
+                    continue;
                 }
                 let (line, col) = byte_offset_to_line_col(
                     line_offsets_by_file,

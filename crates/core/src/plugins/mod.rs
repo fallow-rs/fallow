@@ -692,6 +692,14 @@ pub trait Plugin: Send + Sync {
         &[]
     }
 
+    /// Import prefixes for generated type-only relative imports.
+    ///
+    /// Unresolved type-only imports whose specifier starts with one of these prefixes
+    /// will not be flagged as unresolved. Runtime imports are still reported.
+    fn generated_type_import_prefixes(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// Path alias mappings provided by this framework at build time.
     ///
     /// Returns a list of `(prefix, replacement_dir)` tuples. When an import starting
@@ -736,7 +744,8 @@ fn builtin_entry_point_role(name: &str) -> EntryPointRole {
 ///
 /// Generates a struct and a `Plugin` trait impl with the standard static methods
 /// (`name`, `enablers`, `entry_patterns`, `config_patterns`, `always_used`, `tooling_dependencies`,
-/// `fixture_glob_patterns`, `used_exports`).
+/// `fixture_glob_patterns`, `virtual_module_prefixes`, `virtual_package_suffixes`,
+/// `generated_type_import_prefixes`, `used_exports`).
 ///
 /// For plugins that need custom `resolve_config()` or `is_enabled()`, keep those as
 /// manual `impl Plugin for ...` blocks instead of using this macro.
@@ -805,6 +814,7 @@ macro_rules! define_plugin {
         $(, discovery_hidden_dirs: $hidden_dirs:expr)?
         $(, virtual_module_prefixes: $virtual:expr)?
         $(, virtual_package_suffixes: $virtual_suffixes:expr)?
+        $(, generated_type_import_prefixes: $generated_type_prefixes:expr)?
         $(, used_exports: [$( ($pat:expr, $exports:expr) ),* $(,)?])?
         , resolve_config: imports_only
         $(,)?
@@ -828,6 +838,7 @@ macro_rules! define_plugin {
             $( fn discovery_hidden_dirs(&self) -> &'static [&'static str] { $hidden_dirs } )?
             $( fn virtual_module_prefixes(&self) -> &'static [&'static str] { $virtual } )?
             $( fn virtual_package_suffixes(&self) -> &'static [&'static str] { $virtual_suffixes } )?
+            $( fn generated_type_import_prefixes(&self) -> &'static [&'static str] { $generated_type_prefixes } )?
 
             $(
                 fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
@@ -866,6 +877,7 @@ macro_rules! define_plugin {
         $(, discovery_hidden_dirs: $hidden_dirs:expr)?
         $(, virtual_module_prefixes: $virtual:expr)?
         $(, virtual_package_suffixes: $virtual_suffixes:expr)?
+        $(, generated_type_import_prefixes: $generated_type_prefixes:expr)?
         $(, package_json_config_key: $pkg_key:expr)?
         $(, used_exports: [$( ($pat:expr, $exports:expr) ),* $(,)?])?
         , resolve_config($cp:ident, $src:ident, $root:ident) $body:block
@@ -890,6 +902,7 @@ macro_rules! define_plugin {
             $( fn discovery_hidden_dirs(&self) -> &'static [&'static str] { $hidden_dirs } )?
             $( fn virtual_module_prefixes(&self) -> &'static [&'static str] { $virtual } )?
             $( fn virtual_package_suffixes(&self) -> &'static [&'static str] { $virtual_suffixes } )?
+            $( fn generated_type_import_prefixes(&self) -> &'static [&'static str] { $generated_type_prefixes } )?
 
             $(
                 fn package_json_config_key(&self) -> Option<&'static str> {
@@ -925,6 +938,7 @@ macro_rules! define_plugin {
         $(, discovery_hidden_dirs: $hidden_dirs:expr)?
         $(, virtual_module_prefixes: $virtual:expr)?
         $(, virtual_package_suffixes: $virtual_suffixes:expr)?
+        $(, generated_type_import_prefixes: $generated_type_prefixes:expr)?
         $(, used_exports: [$( ($pat:expr, $exports:expr) ),* $(,)?])?
         $(,)?
     ) => {
@@ -947,6 +961,7 @@ macro_rules! define_plugin {
             $( fn discovery_hidden_dirs(&self) -> &'static [&'static str] { $hidden_dirs } )?
             $( fn virtual_module_prefixes(&self) -> &'static [&'static str] { $virtual } )?
             $( fn virtual_package_suffixes(&self) -> &'static [&'static str] { $virtual_suffixes } )?
+            $( fn generated_type_import_prefixes(&self) -> &'static [&'static str] { $generated_type_prefixes } )?
 
             $(
                 fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
