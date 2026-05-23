@@ -2303,3 +2303,249 @@ fn node_module_register_legacy_loader_hook_exports_are_used() {
         "non-hook exports should still be reported: {unused_exports:?}"
     );
 }
+
+#[test]
+fn dangerfile_ts_is_recognized_as_tooling_entry() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "danger-fixture",
+            "private": true,
+            "main": "src/index.ts",
+            "devDependencies": {
+                "danger": "13.0.0",
+                "unused-tool": "1.0.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(root.join("src/index.ts"), "export const app = true;\n").expect("source file");
+    std::fs::write(
+        root.join("dangerfile.ts"),
+        "import { danger } from 'danger';\n\
+         export default function check() {\n\
+             return danger.github.pr;\n\
+         }\n",
+    )
+    .expect("dangerfile");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files = unused_file_paths(&results);
+    assert!(
+        !unused_files.contains(&"dangerfile.ts".to_owned()),
+        "Dangerfile should be treated as a tooling entry. unused_files={unused_files:?}"
+    );
+
+    let unused_dev = unused_dev_dependencies(&results);
+    assert!(
+        !unused_dev.contains(&"danger".to_owned()),
+        "Danger should be credited as the active tooling package. unused_dev={unused_dev:?}"
+    );
+    assert!(
+        unused_dev.contains(&"unused-tool".to_owned()),
+        "unrelated dev dependencies should remain reportable. unused_dev={unused_dev:?}"
+    );
+}
+
+#[test]
+fn stryker_config_mjs_credits_runner_checker_and_plugin_packages() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "stryker-fixture",
+            "private": true,
+            "main": "src/index.ts",
+            "devDependencies": {
+                "@stryker-mutator/core": "8.0.0",
+                "@stryker-mutator/mocha-runner": "8.0.0",
+                "@stryker-mutator/typescript-checker": "8.0.0",
+                "@stryker-mutator/html-reporter": "8.0.0",
+                "custom-stryker-plugin": "1.0.0",
+                "unused-tool": "1.0.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(root.join("src/index.ts"), "export const app = true;\n").expect("source file");
+    std::fs::write(
+        root.join("stryker.conf.mjs"),
+        "import '@stryker-mutator/html-reporter';\n\
+         export default {\n\
+             testRunner: 'mocha',\n\
+             checkers: ['typescript'],\n\
+             plugins: ['custom-stryker-plugin', 'dashboard']\n\
+         };\n",
+    )
+    .expect("stryker config");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files = unused_file_paths(&results);
+    assert!(
+        !unused_files.contains(&"stryker.conf.mjs".to_owned()),
+        "Stryker config should be treated as a tooling entry. unused_files={unused_files:?}"
+    );
+
+    let unused_dev = unused_dev_dependencies(&results);
+    for dep in [
+        "@stryker-mutator/core",
+        "@stryker-mutator/mocha-runner",
+        "@stryker-mutator/typescript-checker",
+        "@stryker-mutator/html-reporter",
+        "custom-stryker-plugin",
+    ] {
+        assert!(
+            !unused_dev.contains(&dep.to_owned()),
+            "{dep} should be credited from Stryker config. unused_dev={unused_dev:?}"
+        );
+    }
+    assert!(
+        unused_dev.contains(&"unused-tool".to_owned()),
+        "unrelated dev dependencies should remain reportable. unused_dev={unused_dev:?}"
+    );
+}
+
+#[test]
+fn stryker_json_config_credits_known_runner_without_js_parsing() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "stryker-json-fixture",
+            "private": true,
+            "main": "src/index.ts",
+            "devDependencies": {
+                "@stryker-mutator/core": "8.0.0",
+                "@stryker-mutator/jest-runner": "8.0.0",
+                "unused-tool": "1.0.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(root.join("src/index.ts"), "export const app = true;\n").expect("source file");
+    std::fs::write(
+        root.join("stryker.config.json"),
+        r#"{
+            "testRunner": "jest",
+            "plugins": ["dashboard"]
+        }"#,
+    )
+    .expect("stryker json config");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files = unused_file_paths(&results);
+    assert!(
+        !unused_files.contains(&"stryker.config.json".to_owned()),
+        "Stryker JSON config should be treated as a tooling entry. unused_files={unused_files:?}"
+    );
+
+    let unused_dev = unused_dev_dependencies(&results);
+    assert!(
+        !unused_dev.contains(&"@stryker-mutator/core".to_owned()),
+        "Stryker core should be credited as tooling. unused_dev={unused_dev:?}"
+    );
+    assert!(
+        !unused_dev.contains(&"@stryker-mutator/jest-runner".to_owned()),
+        "known JSON testRunner should credit the runner package. unused_dev={unused_dev:?}"
+    );
+    assert!(
+        unused_dev.contains(&"unused-tool".to_owned()),
+        "unrelated dev dependencies should remain reportable. unused_dev={unused_dev:?}"
+    );
+}
+
+#[test]
+fn stryker_workspace_config_is_recognized_from_root_dev_dependency() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("packages/app/src")).expect("workspace src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "stryker-workspace-fixture",
+            "private": true,
+            "workspaces": ["packages/*"],
+            "devDependencies": {
+                "@stryker-mutator/core": "8.0.0",
+                "@stryker-mutator/jest-runner": "8.0.0",
+                "unused-tool": "1.0.0"
+            }
+        }"#,
+    )
+    .expect("root package json");
+    std::fs::write(
+        root.join("packages/app/package.json"),
+        r#"{
+            "name": "@example/app",
+            "private": true,
+            "main": "src/index.ts"
+        }"#,
+    )
+    .expect("workspace package json");
+    std::fs::write(
+        root.join("packages/app/src/index.ts"),
+        "export const app = true;\n",
+    )
+    .expect("source file");
+    std::fs::write(
+        root.join("packages/app/stryker.conf.mjs"),
+        "export default { testRunner: 'jest' };\n",
+    )
+    .expect("workspace stryker config");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files = unused_file_paths(&results);
+    assert!(
+        !unused_files.contains(&"packages/app/stryker.conf.mjs".to_owned()),
+        "workspace Stryker config should be treated as a tooling entry. unused_files={unused_files:?}"
+    );
+
+    let unused_dev = unused_dev_dependencies(&results);
+    assert!(
+        !unused_dev.contains(&"@stryker-mutator/core".to_owned()),
+        "root Stryker core should activate tooling in a workspace-shaped project. unused_dev={unused_dev:?}"
+    );
+    assert!(
+        !unused_dev.contains(&"@stryker-mutator/jest-runner".to_owned()),
+        "nested Stryker config should credit known runner packages. unused_dev={unused_dev:?}"
+    );
+    assert!(
+        unused_dev.contains(&"unused-tool".to_owned()),
+        "unrelated dev dependencies should remain reportable. unused_dev={unused_dev:?}"
+    );
+}
+
+fn unused_file_paths(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
+    results
+        .unused_files
+        .iter()
+        .map(|file| file.file.path.to_string_lossy().replace('\\', "/"))
+        .collect()
+}
+
+fn unused_dev_dependencies(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
+    results
+        .unused_dev_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.clone())
+        .collect()
+}

@@ -2631,6 +2631,28 @@ fn transpiler_plugins_have_correct_enablers() {
 }
 
 #[test]
+fn testing_plugins_have_correct_enablers() {
+    let registry = PluginRegistry::default();
+
+    let stryker_pkg = make_pkg(&["@stryker-mutator/core"]);
+    let result = registry.run(&stryker_pkg, Path::new("/project"), &[]);
+    assert!(result.active_plugins.contains(&"stryker".to_string()));
+
+    let legacy_stryker_pkg = make_pkg(&["stryker"]);
+    let result = registry.run(&legacy_stryker_pkg, Path::new("/project"), &[]);
+    assert!(result.active_plugins.contains(&"stryker".to_string()));
+}
+
+#[test]
+fn ci_cd_plugins_have_correct_enablers() {
+    let registry = PluginRegistry::default();
+
+    let danger_pkg = make_pkg(&["danger"]);
+    let result = registry.run(&danger_pkg, Path::new("/project"), &[]);
+    assert!(result.active_plugins.contains(&"danger".to_string()));
+}
+
+#[test]
 fn deployment_plugins_have_correct_enablers() {
     let registry = PluginRegistry::default();
 

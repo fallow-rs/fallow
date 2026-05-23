@@ -67,6 +67,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
 #[cfg(test)]
 const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
     "content-collections",
+    "danger",
     "drizzle",
     "fumadocs",
     "i18next",
@@ -75,6 +76,7 @@ const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
     "msw",
     "prisma",
     "storybook",
+    "stryker",
     "typeorm",
 ];
 
@@ -997,6 +999,7 @@ mod convex;
 mod cspell;
 mod cucumber;
 mod cypress;
+mod danger;
 mod dependency_cruiser;
 mod docusaurus;
 mod drizzle;
@@ -1055,6 +1058,7 @@ mod semantic_release;
 mod sentry;
 mod simple_git_hooks;
 mod storybook;
+mod stryker;
 mod stylelint;
 mod sveltekit;
 mod svgo;
@@ -1425,6 +1429,7 @@ mod tests {
             (&playwright::PlaywrightPlugin, "@playwright/test"),
             (&cypress::CypressPlugin, "cypress"),
             (&mocha::MochaPlugin, "mocha"),
+            (&stryker::StrykerPlugin, "@stryker-mutator/core"),
         ];
         for (plugin, enabler) in cases {
             assert!(
@@ -1511,6 +1516,7 @@ mod tests {
             &nuxt::NuxtPlugin,
             &angular::AngularPlugin,
             &nx::NxPlugin,
+            &stryker::StrykerPlugin,
             &rollup::RollupPlugin,
             &sveltekit::SvelteKitPlugin,
             &prettier::PrettierPlugin,
@@ -1533,6 +1539,8 @@ mod tests {
             &typescript::TypeScriptPlugin,
             &eslint::EslintPlugin,
             &prettier::PrettierPlugin,
+            &danger::DangerPlugin,
+            &stryker::StrykerPlugin,
         ];
         for plugin in plugins {
             let tooling = plugin.tooling_dependencies();

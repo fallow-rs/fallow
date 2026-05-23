@@ -6,9 +6,9 @@ paths:
 
 # Plugin system
 
-98 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
+100 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
 
-## Rich config parsing (19 plugins)
+## Rich config parsing (20 plugins)
 
 - **ESLint**: Legacy plugin/extends/parser short-name resolution (top-level AND inside `overrides[*]`), flat config plugin keys, JSON config, shared config following (reads imported config packages' entry points one level deep to discover peer deps), relative-path `extends` chain following (`./config/base.js`, `../shared/eslintrc.json`) with cycle protection and depth cap, settings["import/resolver"] (string/array/object formats)
 - **Vite**: rollupOptions.input, lib.entry, optimizeDeps include/exclude, ssr.external/noExternal
@@ -25,6 +25,7 @@ paths:
 - **Drizzle**: schema field (string/array/glob/directory → entry points), out directory
 - **Angular**: angular.json projects.*.architect.build.options → entry points; peer dep awareness
 - **Vitest**: test.include, setupFiles, globalSetup, environment, reporters, coverage.provider, typecheck.checker, browser.provider; projects[*] nested extraction
+- **Stryker**: documented default `stryker.conf.{json,js,mjs,cjs}` / `stryker.config.{json,js,mjs,cjs}` configs plus fallow-compatible `jsonc` and `ts` variants stay alive at the root or inside workspaces; static imports/requires are credited; `plugins` / `appendPlugins` credit explicit package names; `checkers: ["typescript"]` credits `@stryker-mutator/typescript-checker`; known `testRunner` short names credit their runner packages
 - **Nx**: project.json targets.*.executor → deps; targets.*.options.{main, browser, styles, scripts, tsConfig} → entry points; targets.*.options.stylePreprocessorOptions.includePaths → SCSS include paths (with `{projectRoot}`/`{workspaceRoot}` token expansion)
 - **Prisma**: `generator { provider = "..." }` extraction from default `schema.prisma` / `prisma/schema.prisma` files and the multi-file `prisma/schema/*.prisma` layout; credits custom-generator npm packages; skips `datasource` providers, shell-command form (`node ./gen.js`), relative-path form, and commented-out providers. Custom schema paths configured via `prisma.config.ts`'s `schema` field are out of scope (filesystem fallback is non-recursive); users with non-canonical layouts fall back to `ignoreDependencies`.
 - **AdonisJS**: v5 `.adonisrc.json` (`preloads`, `providers`, `commands`, `aceProviders` mixed string / `{ file, environment }` forms; `aliases` → path-alias table; `metaFiles[].pattern` → always-used; `types` declarations). v6 / v7 `adonisrc.ts` (walks `defineConfig({...})` for thunk-wrapped `() => import('SPEC')` in `preloads` / `providers` / `commands`, `directories.*` overrides → extra entry patterns, project `package.json#imports` → Node subpath path aliases). `@ioc:` v5 IoC virtual import prefix suppresses `unlisted-dependency` for runtime-resolved container imports.
