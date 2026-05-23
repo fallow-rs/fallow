@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **TanStack Start `:v` virtual modules no longer surface as unlisted dependencies.** Before, imports such as `tanstack-start-manifest:v` and `tanstack-start-injected-head-scripts:v` were treated as package names in TanStack Start projects. After, the TanStack Router / Start plugin registers those colon-prefixed runtime modules as framework virtual modules, so they are skipped by unlisted-dependency and unresolved-import reporting only when the TanStack plugin is active. Thanks [@BartWaardenburg](https://github.com/BartWaardenburg) for the report. (Closes [#636](https://github.com/fallow-rs/fallow/issues/636).)
 
+- **Node package-script and forked runner entrypoints no longer report as unused.** Package scripts such as `node scripts/process-messages` now resolve extensionless directory paths to `scripts/process-messages/index.*` after exact-file and source-extension probing. Statically resolvable local `child_process.fork()` targets from proven `node:child_process` / `child_process` imports or requires are also credited as dynamic entrypoints, including the `const runner = path.resolve(filename, "../runner.js"); fork(runner)` shape where `filename` comes from `fileURLToPath(import.meta.url)`. The extractor cache version is bumped so warm caches re-extract files with forked runner targets. (Closes [#638](https://github.com/fallow-rs/fallow/issues/638).)
+
 ## [2.79.0] - 2026-05-22
 
 ### Added

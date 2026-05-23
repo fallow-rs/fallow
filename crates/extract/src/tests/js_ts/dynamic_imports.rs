@@ -547,6 +547,176 @@ fn then_callback_non_import_callee_ignored() {
     assert!(info.dynamic_imports.is_empty());
 }
 
+// -- child_process.fork() entrypoints (issue #638) --
+
+fn dynamic_sources(source: &str) -> Vec<String> {
+    parse_source(source)
+        .dynamic_imports
+        .into_iter()
+        .map(|import| import.source)
+        .collect()
+}
+
+#[test]
+fn child_process_fork_named_import_credits_literal_runner() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         fork('./direct-runner.js');",
+    );
+
+    assert!(sources.contains(&"./direct-runner.js".to_string()));
+}
+
+#[test]
+fn child_process_fork_namespace_import_credits_literal_runner() {
+    let sources = dynamic_sources(
+        "import * as childProcess from 'child_process';\n\
+         childProcess.fork('./direct-runner.js');",
+    );
+
+    assert!(sources.contains(&"./direct-runner.js".to_string()));
+}
+
+#[test]
+fn child_process_fork_destructured_require_credits_literal_runner() {
+    let sources = dynamic_sources(
+        "const { fork } = require('child_process');\n\
+         fork('./direct-runner.js');",
+    );
+
+    assert!(sources.contains(&"./direct-runner.js".to_string()));
+}
+
+#[test]
+fn child_process_fork_namespace_require_credits_literal_runner() {
+    let sources = dynamic_sources(
+        "const childProcess = require('node:child_process');\n\
+         childProcess.fork('./direct-runner.js');",
+    );
+
+    assert!(sources.contains(&"./direct-runner.js".to_string()));
+}
+
+#[test]
+fn child_process_fork_credits_static_path_resolve_runner_binding() {
+    let sources = dynamic_sources(
+        "import path from 'node:path';\n\
+         import { fork } from 'node:child_process';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         const filename = fileURLToPath(import.meta.url);\n\
+         const runner = path.resolve(filename, '../runner.js');\n\
+         fork(runner);",
+    );
+
+    assert!(sources.contains(&"./runner.js".to_string()));
+}
+
+#[test]
+fn child_process_fork_credits_static_runner_inside_top_level_block() {
+    let sources = dynamic_sources(
+        "import path from 'node:path';\n\
+         import { fork } from 'node:child_process';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         const filename = fileURLToPath(import.meta.url);\n\
+         const runner = path.resolve(filename, '../runner.js');\n\
+         for (const branch of requested_branches) {\n\
+           fork(runner, [], { stdio: 'inherit' });\n\
+         }",
+    );
+
+    assert!(sources.contains(&"./runner.js".to_string()));
+}
+
+#[test]
+fn child_process_fork_credits_static_runner_inside_callback() {
+    let sources = dynamic_sources(
+        "import path from 'node:path';\n\
+         import { fork } from 'node:child_process';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         const filename = fileURLToPath(import.meta.url);\n\
+         const runner = path.resolve(filename, '../runner.js');\n\
+         await new Promise((fulfil, reject) => {\n\
+           const child = fork(runner, [], { stdio: 'inherit' });\n\
+           child.on('message', fulfil);\n\
+           child.on('error', reject);\n\
+         });",
+    );
+
+    assert!(sources.contains(&"./runner.js".to_string()));
+}
+
+#[test]
+fn child_process_fork_credits_new_url_runner_binding() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         const runner = new URL('./runner.js', import.meta.url);\n\
+         fork(runner);",
+    );
+
+    assert!(sources.contains(&"./runner.js".to_string()));
+}
+
+#[test]
+fn unrelated_fork_call_is_not_credited() {
+    let sources = dynamic_sources(
+        "import { fork } from './process-utils';\n\
+         fork('./runner.js');",
+    );
+
+    assert!(!sources.contains(&"./runner.js".to_string()));
+}
+
+#[test]
+fn shadowed_fork_call_is_not_credited() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         function run(fork) { fork('./runner.js'); }",
+    );
+
+    assert!(!sources.contains(&"./runner.js".to_string()));
+}
+
+#[test]
+fn shadowed_runner_binding_is_not_credited() {
+    let sources = dynamic_sources(
+        "import path from 'node:path';\n\
+         import { fork } from 'node:child_process';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         const filename = fileURLToPath(import.meta.url);\n\
+         const runner = path.resolve(filename, '../runner.js');\n\
+         { const runner = './other.js'; fork(runner); }",
+    );
+
+    assert!(!sources.contains(&"./runner.js".to_string()));
+    assert!(!sources.contains(&"./other.js".to_string()));
+}
+
+#[test]
+fn shadowed_fork_callback_runner_parameter_is_not_credited() {
+    let sources = dynamic_sources(
+        "import path from 'node:path';\n\
+         import { fork } from 'node:child_process';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         const filename = fileURLToPath(import.meta.url);\n\
+         const runner = path.resolve(filename, '../runner.js');\n\
+         function run(runner) { fork(runner); }",
+    );
+
+    assert!(!sources.contains(&"./runner.js".to_string()));
+}
+
+#[test]
+fn unresolved_or_computed_fork_targets_are_not_credited() {
+    let sources = dynamic_sources(
+        "import { fork } from 'node:child_process';\n\
+         fork(runner);\n\
+         fork(`./${name}.js`);\n\
+         fork('worker');",
+    );
+
+    assert!(sources.is_empty());
+}
+
 // ── node:module register() loader hook (issue #293) ──────────
 
 #[test]

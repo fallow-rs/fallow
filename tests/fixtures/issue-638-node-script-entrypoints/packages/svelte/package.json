@@ -1,0 +1,8 @@
+{
+  "name": "issue-638-svelte",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/process-messages -w & rollup -cw",
+    "generate": "node scripts/process-messages && node ./scripts/generate-types.js"
+  }
+}

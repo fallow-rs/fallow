@@ -8,7 +8,8 @@ use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk;
 use oxc_semantic::ScopeFlags;
 use oxc_span::Span;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::path::{Component, PathBuf};
 
 use crate::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
@@ -211,6 +212,61 @@ fn new_url_import_source(expr: &NewExpression<'_>) -> Option<String> {
         Some(path_lit.value.to_string())
     } else {
         None
+    }
+}
+
+fn is_child_process_source(source: &str) -> bool {
+    matches!(source, "node:child_process" | "child_process")
+}
+
+fn is_node_path_source(source: &str) -> bool {
+    matches!(source, "node:path" | "path")
+}
+
+fn is_node_url_source(source: &str) -> bool {
+    matches!(source, "node:url" | "url")
+}
+
+fn local_fork_source(source: &str) -> Option<String> {
+    if (source.starts_with("./") || source.starts_with("../")) && !source.ends_with('/') {
+        Some(source.to_string())
+    } else {
+        None
+    }
+}
+
+fn normalize_module_file_relative_path(relative: &str) -> Option<String> {
+    if relative.is_empty() || relative.starts_with('/') || relative.ends_with('/') {
+        return None;
+    }
+
+    let normalized = PathBuf::from("__fallow_current_file__").join(relative);
+
+    let mut parts = Vec::new();
+    for component in normalized.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => parts.push(part.to_string_lossy().to_string()),
+            Component::ParentDir => {
+                parts.pop()?;
+            }
+            Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+
+    if parts
+        .first()
+        .is_some_and(|part| part == "__fallow_current_file__")
+        || parts.is_empty()
+    {
+        return None;
+    }
+
+    let joined = parts.join("/");
+    if joined.starts_with("../") {
+        Some(joined)
+    } else {
+        Some(format!("./{joined}"))
     }
 }
 
@@ -503,6 +559,58 @@ fn fixture_type_reference_name(ty: &TSType<'_>) -> Option<(String, Span)> {
 }
 
 impl ModuleInfoExtractor {
+    fn is_module_scope(&self) -> bool {
+        self.block_depth == 0 && self.function_depth == 0 && self.namespace_depth == 0
+    }
+
+    fn is_module_or_function_runtime_scope(&self) -> bool {
+        self.namespace_depth == 0
+    }
+
+    fn nested_scope_shadows(&self, name: &str) -> bool {
+        self.nested_declaration_stack
+            .iter()
+            .rev()
+            .any(|scope| scope.contains(name))
+    }
+
+    fn record_nested_declaration_names<'a>(
+        &mut self,
+        declarations: impl IntoIterator<Item = &'a BindingIdentifier<'a>>,
+    ) {
+        if self.namespace_depth > 0 {
+            return;
+        }
+        let Some(scope) = self.nested_declaration_stack.last_mut() else {
+            return;
+        };
+        scope.extend(declarations.into_iter().map(|id| id.name.to_string()));
+    }
+
+    fn push_function_declaration_scope(&mut self, params: &FormalParameters<'_>) {
+        if self.namespace_depth > 0 {
+            return;
+        }
+
+        let mut scope = FxHashSet::default();
+        for param in &params.items {
+            scope.extend(
+                param
+                    .pattern
+                    .get_binding_identifiers()
+                    .into_iter()
+                    .map(|id| id.name.to_string()),
+            );
+        }
+        self.nested_declaration_stack.push(scope);
+    }
+
+    fn pop_function_declaration_scope(&mut self) {
+        if self.namespace_depth == 0 {
+            self.nested_declaration_stack.pop();
+        }
+    }
+
     fn record_node_module_register_url_binding(&mut self, name: String, sources: Vec<String>) {
         let entry = self
             .node_module_register_url_bindings
@@ -938,6 +1046,191 @@ impl ModuleInfoExtractor {
         }
     }
 
+    fn record_child_process_require_binding(
+        &mut self,
+        declarator: &VariableDeclarator<'_>,
+        source: &str,
+    ) {
+        if !self.is_module_scope() {
+            return;
+        }
+
+        match &declarator.id {
+            BindingPattern::BindingIdentifier(id) if is_child_process_source(source) => {
+                self.child_process_namespace_bindings
+                    .insert(id.name.to_string());
+            }
+            BindingPattern::ObjectPattern(obj_pat) if is_child_process_source(source) => {
+                for (local_name, source_name) in extract_object_pattern_bindings(obj_pat) {
+                    if source_name == "fork" {
+                        self.child_process_fork_bindings.insert(local_name);
+                    }
+                }
+            }
+            BindingPattern::BindingIdentifier(id) if is_node_path_source(source) => {
+                self.node_path_namespace_bindings
+                    .insert(id.name.to_string());
+            }
+            BindingPattern::ObjectPattern(obj_pat) if is_node_url_source(source) => {
+                for (local_name, source_name) in extract_object_pattern_bindings(obj_pat) {
+                    if source_name == "fileURLToPath" {
+                        self.node_url_file_url_to_path_bindings.insert(local_name);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn record_current_module_file_path_binding(&mut self, name: &str, expr: &Expression<'_>) {
+        if !self.is_module_scope() {
+            return;
+        }
+        let Expression::CallExpression(call) = expr else {
+            return;
+        };
+        let Some(first_arg) = call.arguments.first() else {
+            return;
+        };
+        if !is_meta_url_arg(first_arg) {
+            return;
+        }
+
+        let is_file_url_to_path = match &call.callee {
+            Expression::Identifier(ident) => self
+                .node_url_file_url_to_path_bindings
+                .contains(ident.name.as_str()),
+            Expression::StaticMemberExpression(member) => {
+                member.property.name == "fileURLToPath"
+                    && matches!(&member.object, Expression::Identifier(obj)
+                        if self.node_url_file_url_to_path_bindings.contains(obj.name.as_str()))
+            }
+            _ => false,
+        };
+
+        if is_file_url_to_path {
+            self.current_module_file_path_bindings
+                .insert(name.to_string());
+        }
+    }
+
+    fn record_child_process_fork_target_binding(&mut self, name: &str, expr: &Expression<'_>) {
+        if !self.is_module_scope() {
+            return;
+        }
+        let sources = self.child_process_fork_sources_from_expression(expr);
+        if !sources.is_empty() {
+            self.child_process_fork_target_bindings
+                .insert(name.to_string(), sources);
+        }
+    }
+
+    fn child_process_fork_sources_from_expression(&self, expr: &Expression<'_>) -> Vec<String> {
+        match expr {
+            Expression::StringLiteral(lit) => local_fork_source(&lit.value)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => tpl
+                .quasis
+                .first()
+                .and_then(|quasi| local_fork_source(&quasi.value.raw))
+                .into_iter()
+                .collect(),
+            Expression::Identifier(ident) => self
+                .child_process_fork_target_bindings
+                .get(ident.name.as_str())
+                .filter(|_| !self.nested_scope_shadows(ident.name.as_str()))
+                .cloned()
+                .unwrap_or_default(),
+            Expression::NewExpression(new_expr) => new_url_import_source(new_expr)
+                .and_then(|source| local_fork_source(&source))
+                .into_iter()
+                .collect(),
+            Expression::CallExpression(call) => self.child_process_fork_sources_from_call(call),
+            Expression::ParenthesizedExpression(paren) => {
+                self.child_process_fork_sources_from_expression(&paren.expression)
+            }
+            Expression::TSAsExpression(ts_as) => {
+                self.child_process_fork_sources_from_expression(&ts_as.expression)
+            }
+            Expression::TSSatisfiesExpression(ts_sat) => {
+                self.child_process_fork_sources_from_expression(&ts_sat.expression)
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn child_process_fork_sources_from_call(&self, call: &CallExpression<'_>) -> Vec<String> {
+        let Expression::StaticMemberExpression(member) = &call.callee else {
+            return Vec::new();
+        };
+        if member.property.name != "resolve" {
+            return Vec::new();
+        }
+        let Expression::Identifier(object) = &member.object else {
+            return Vec::new();
+        };
+        if !self
+            .node_path_namespace_bindings
+            .contains(object.name.as_str())
+        {
+            return Vec::new();
+        }
+        let Some(Argument::Identifier(base)) = call.arguments.first() else {
+            return Vec::new();
+        };
+        if !self
+            .current_module_file_path_bindings
+            .contains(base.name.as_str())
+        {
+            return Vec::new();
+        }
+        let Some(Argument::StringLiteral(relative)) = call.arguments.get(1) else {
+            return Vec::new();
+        };
+        normalize_module_file_relative_path(&relative.value)
+            .and_then(|source| local_fork_source(&source))
+            .into_iter()
+            .collect()
+    }
+
+    fn try_record_child_process_fork(&mut self, expr: &CallExpression<'_>) {
+        if !self.is_module_or_function_runtime_scope() {
+            return;
+        }
+
+        let is_fork_call = match &expr.callee {
+            Expression::Identifier(ident) => {
+                self.child_process_fork_bindings
+                    .contains(ident.name.as_str())
+                    && !self.nested_scope_shadows(ident.name.as_str())
+            }
+            Expression::StaticMemberExpression(member) => {
+                member.property.name == "fork"
+                    && matches!(&member.object, Expression::Identifier(obj)
+                        if self.child_process_namespace_bindings.contains(obj.name.as_str())
+                            && !self.nested_scope_shadows(obj.name.as_str()))
+            }
+            _ => false,
+        };
+        if !is_fork_call {
+            return;
+        }
+
+        let Some(first_arg) = expr.arguments.first().and_then(Argument::as_expression) else {
+            return;
+        };
+        for source in self.child_process_fork_sources_from_expression(first_arg) {
+            self.dynamic_imports.push(DynamicImportInfo {
+                source,
+                span: expr.span,
+                destructured_names: Vec::new(),
+                local_name: None,
+                is_speculative: false,
+            });
+        }
+    }
+
     fn extract_angular_inject_target(&self, call: &CallExpression<'_>) -> Option<String> {
         let Expression::Identifier(callee) = &call.callee else {
             return None;
@@ -1216,7 +1509,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_block_statement(&mut self, stmt: &BlockStatement<'a>) {
         self.block_depth += 1;
+        if self.namespace_depth == 0 {
+            self.nested_declaration_stack.push(FxHashSet::default());
+        }
         walk::walk_block_statement(self, stmt);
+        if self.namespace_depth == 0 {
+            self.nested_declaration_stack.pop();
+        }
         self.block_depth -= 1;
     }
 
@@ -1290,21 +1589,46 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 }
                 _ => {}
             }
+        } else if self.namespace_depth == 0 {
+            match decl {
+                Declaration::VariableDeclaration(var) => {
+                    for declarator in &var.declarations {
+                        self.record_nested_declaration_names(
+                            declarator.id.get_binding_identifiers(),
+                        );
+                    }
+                }
+                Declaration::ClassDeclaration(class) => {
+                    if let Some(id) = class.id.as_ref() {
+                        self.record_nested_declaration_names(std::iter::once(id));
+                    }
+                }
+                Declaration::FunctionDeclaration(function) => {
+                    if let Some(id) = function.id.as_ref() {
+                        self.record_nested_declaration_names(std::iter::once(id));
+                    }
+                }
+                _ => {}
+            }
         }
 
         walk::walk_declaration(self, decl);
     }
 
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
+        self.push_function_declaration_scope(&func.params);
         self.function_depth += 1;
         walk::walk_function(self, func, flags);
         self.function_depth -= 1;
+        self.pop_function_declaration_scope();
     }
 
     fn visit_arrow_function_expression(&mut self, expr: &ArrowFunctionExpression<'a>) {
+        self.push_function_declaration_scope(&expr.params);
         self.function_depth += 1;
         walk::walk_arrow_function_expression(self, expr);
         self.function_depth -= 1;
+        self.pop_function_declaration_scope();
     }
 
     fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
@@ -1317,6 +1641,20 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             for spec in specifiers {
                 match spec {
                     ImportDeclarationSpecifier::ImportSpecifier(s) => {
+                        if self.is_module_scope()
+                            && is_child_process_source(&source)
+                            && s.imported.name() == "fork"
+                        {
+                            self.child_process_fork_bindings
+                                .insert(s.local.name.to_string());
+                        }
+                        if self.is_module_scope()
+                            && is_node_url_source(&source)
+                            && s.imported.name() == "fileURLToPath"
+                        {
+                            self.node_url_file_url_to_path_bindings
+                                .insert(s.local.name.to_string());
+                        }
                         self.imports.push(ImportInfo {
                             source: source.clone(),
                             imported_name: ImportedName::Named(s.imported.name().to_string()),
@@ -1328,6 +1666,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         });
                     }
                     ImportDeclarationSpecifier::ImportDefaultSpecifier(s) => {
+                        if self.is_module_scope() && is_node_path_source(&source) {
+                            self.node_path_namespace_bindings
+                                .insert(s.local.name.to_string());
+                        }
                         self.imports.push(ImportInfo {
                             source: source.clone(),
                             imported_name: ImportedName::Default,
@@ -1340,6 +1682,16 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     }
                     ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => {
                         let local = s.local.name.to_string();
+                        if self.is_module_scope() && is_child_process_source(&source) {
+                            self.child_process_namespace_bindings.insert(local.clone());
+                        }
+                        if self.is_module_scope() && is_node_path_source(&source) {
+                            self.node_path_namespace_bindings.insert(local.clone());
+                        }
+                        if self.is_module_scope() && is_node_url_source(&source) {
+                            self.node_url_file_url_to_path_bindings
+                                .insert(local.clone());
+                        }
                         self.namespace_binding_names.push(local.clone());
                         self.imports.push(ImportInfo {
                             source: source.clone(),
@@ -1607,7 +1959,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
         for declarator in &decl.declarations {
-            if self.block_depth == 0 && self.function_depth == 0 && self.namespace_depth == 0 {
+            if self.is_module_scope() {
                 let refs = Self::collect_variable_signature_refs(declarator);
                 for id in declarator.id.get_binding_identifiers() {
                     self.record_local_signature_refs(&id.name, refs.clone());
@@ -1629,6 +1981,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 if !sources.is_empty() {
                     self.record_node_module_register_url_binding(id.name.to_string(), sources);
                 }
+                self.record_current_module_file_path_binding(id.name.as_str(), init);
+                self.record_child_process_fork_target_binding(id.name.as_str(), init);
             }
 
             if let BindingPattern::BindingIdentifier(id) = &declarator.id
@@ -1664,6 +2018,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
             // `const x = require('./y')` — static require
             if let Some((call, source)) = try_extract_require(init) {
+                self.record_child_process_require_binding(declarator, source);
                 self.handle_require_declaration(declarator, call, source);
                 continue;
             }
@@ -1825,6 +2180,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
 
         self.try_record_node_module_register(expr);
+        self.try_record_child_process_fork(expr);
 
         // Detect require()
         if let Expression::Identifier(ident) = &expr.callee

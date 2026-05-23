@@ -208,6 +208,22 @@ pub(crate) struct ModuleInfoExtractor {
     /// outcome is a few extra `DynamicImportInfo` entries whose sources resolve
     /// (correct) or fail to resolve (no-op).
     pub(crate) node_module_register_url_bindings: FxHashMap<String, Vec<String>>,
+    /// Module-scope local names proven to be `fork` from `node:child_process`.
+    pub(crate) child_process_fork_bindings: FxHashSet<String>,
+    /// Module-scope namespace local names proven to be `node:child_process`.
+    pub(crate) child_process_namespace_bindings: FxHashSet<String>,
+    /// Module-scope namespace or default local names proven to be `node:path`.
+    pub(crate) node_path_namespace_bindings: FxHashSet<String>,
+    /// Module-scope local names proven to be `fileURLToPath` from `node:url`.
+    pub(crate) node_url_file_url_to_path_bindings: FxHashSet<String>,
+    /// Module-scope locals equal to `fileURLToPath(import.meta.url)`.
+    pub(crate) current_module_file_path_bindings: FxHashSet<String>,
+    /// Module-scope locals that resolve to local child-process target specifiers.
+    pub(crate) child_process_fork_target_bindings: FxHashMap<String, Vec<String>>,
+    /// Lexical declarations currently in scope below module scope. Used to
+    /// avoid crediting module-scope child-process bindings when a nested block
+    /// or function shadows the callee or target identifier.
+    pub(crate) nested_declaration_stack: Vec<FxHashSet<String>>,
     /// Stack of class type-parameter constraint maps for classes currently
     /// being walked. Each frame maps a type parameter name to its constraint
     /// type (`TClient -> Some(BaseClient)` for `<TClient extends BaseClient>`)

@@ -60,7 +60,12 @@ use crate::MemberKind;
 /// Bumped to 97 for issue #639: MDX import/export extraction now skips
 /// fenced Markdown code blocks, so pre-fix entries can carry stale example
 /// imports that surface as false `unresolved-imports`.
-pub(super) const CACHE_VERSION: u32 = 97;
+///
+/// Bumped to 98 for issue #638: statically resolvable `child_process.fork()`
+/// targets now emit `DynamicImportInfo` entries for local runner files.
+/// Pre-fix entries omit those dynamic imports, so forked script files can be
+/// reported as unused until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 98;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

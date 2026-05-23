@@ -216,6 +216,16 @@ fn resolve_entry_path_with_tracking(
         }
     }
 
+    if let Some(index_entry) = try_directory_index_entry(&resolved) {
+        return validated_entry_point(
+            &index_entry,
+            canonical_root,
+            entry,
+            source,
+            skipped_entries.as_deref_mut(),
+        );
+    }
+
     // Some source-first packages publish root build artifacts such as
     // `./index.js` / `./index.cjs` but keep the real entry source in
     // `src/index.ts`. If the root artifact is absent in a clean checkout, fall
@@ -229,6 +239,16 @@ fn resolve_entry_path_with_tracking(
             "package.json root index entry is missing; falling back to source index"
         );
         return validated_entry_point(&source_path, canonical_root, entry, source, skipped_entries);
+    }
+    None
+}
+
+fn try_directory_index_entry(resolved: &Path) -> Option<PathBuf> {
+    for ext in SOURCE_EXTENSIONS {
+        let candidate = resolved.join(format!("index.{ext}"));
+        if candidate.is_file() {
+            return Some(candidate);
+        }
     }
     None
 }
@@ -1370,6 +1390,107 @@ mod tests {
                 ep.path.to_string_lossy().contains("index.ts"),
                 "should find index.ts via extension fallback"
             );
+        }
+
+        #[test]
+        fn exact_file_wins_before_directory_index_fallback() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let canonical = dunce::canonicalize(dir.path()).unwrap();
+            let scripts = canonical.join("scripts");
+            std::fs::create_dir_all(scripts.join("process-messages")).unwrap();
+            std::fs::write(
+                scripts.join("process-messages.js"),
+                "export const direct = true;",
+            )
+            .unwrap();
+            std::fs::write(
+                scripts.join("process-messages").join("index.js"),
+                "export const index = true;",
+            )
+            .unwrap();
+
+            let result = resolve_entry_path(
+                &canonical,
+                "scripts/process-messages.js",
+                &canonical,
+                EntryPointSource::PackageJsonScript,
+            )
+            .expect("exact file should resolve");
+
+            assert!(result.path.ends_with("scripts/process-messages.js"));
+        }
+
+        #[test]
+        fn extension_fallback_wins_before_directory_index_fallback() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let canonical = dunce::canonicalize(dir.path()).unwrap();
+            let scripts = canonical.join("scripts");
+            std::fs::create_dir_all(scripts.join("process-messages")).unwrap();
+            std::fs::write(
+                scripts.join("process-messages.ts"),
+                "export const withExt = true;",
+            )
+            .unwrap();
+            std::fs::write(
+                scripts.join("process-messages").join("index.js"),
+                "export const index = true;",
+            )
+            .unwrap();
+
+            let result = resolve_entry_path(
+                &canonical,
+                "scripts/process-messages",
+                &canonical,
+                EntryPointSource::PackageJsonScript,
+            )
+            .expect("extension fallback should resolve");
+
+            assert!(result.path.ends_with("scripts/process-messages.ts"));
+        }
+
+        #[test]
+        fn resolves_directory_index_after_exact_and_extension_fallbacks() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let canonical = dunce::canonicalize(dir.path()).unwrap();
+            let scripts = canonical.join("scripts/process-messages");
+            std::fs::create_dir_all(&scripts).unwrap();
+            std::fs::write(scripts.join("index.js"), "export const index = true;").unwrap();
+
+            let result = resolve_entry_path(
+                &canonical,
+                "scripts/process-messages",
+                &canonical,
+                EntryPointSource::PackageJsonScript,
+            )
+            .expect("directory index should resolve");
+
+            assert!(result.path.ends_with("scripts/process-messages/index.js"));
+        }
+
+        #[test]
+        fn directory_index_fallback_ignores_wildcards_and_url_like_entries() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let canonical = dunce::canonicalize(dir.path()).unwrap();
+            std::fs::create_dir_all(canonical.join("scripts/process-messages")).unwrap();
+            std::fs::write(
+                canonical.join("scripts/process-messages/index.js"),
+                "export const index = true;",
+            )
+            .unwrap();
+
+            for entry in [
+                "scripts/*",
+                "https://example.com/scripts/process-messages",
+                "@scope/package/scripts/process-messages",
+            ] {
+                let result = resolve_entry_path(
+                    &canonical,
+                    entry,
+                    &canonical,
+                    EntryPointSource::PackageJsonScript,
+                );
+                assert!(result.is_none(), "{entry} should not resolve");
+            }
         }
 
         #[test]

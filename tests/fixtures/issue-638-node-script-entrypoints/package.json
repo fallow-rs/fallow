@@ -1,0 +1,10 @@
+{
+  "name": "issue-638-node-script-entrypoints",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "bench:compare": "NODE_ENV=production node --allow-natives-syntax ./benchmarking/compare/index.js"
+  }
+}
