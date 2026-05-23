@@ -942,6 +942,10 @@ pub fn find_unresolved_imports(
     for module in resolved_modules {
         for import in module.all_resolved_imports() {
             if let crate::resolve::ResolveResult::Unresolvable(spec) = &import.target {
+                // Platform builtins are provided by the runtime, not the filesystem.
+                if is_builtin_module(spec) {
+                    continue;
+                }
                 // Skip virtual module imports using the `virtual:` convention
                 // (e.g., `virtual:pwa-register`, `virtual:uno.css`)
                 if is_virtual_module(spec) {

@@ -105,6 +105,79 @@ fn unresolved_dynamic_import_detected_with_real_location() {
 }
 
 #[test]
+fn unresolved_platform_builtins_not_reported() {
+    let specs = [
+        "node:url",
+        "node:process",
+        "node:fs/promises",
+        "bun:sqlite",
+        "cloudflare:workers",
+        "sass:math",
+        "std/path",
+        "node:not-real",
+        "url-parse",
+        "path-browserify",
+    ];
+    let resolved_imports: Vec<ResolvedImport> = specs
+        .iter()
+        .enumerate()
+        .map(|(index, spec)| ResolvedImport {
+            info: ImportInfo {
+                source: (*spec).to_string(),
+                imported_name: ImportedName::Named(format!("import_{index}")),
+                local_name: format!("import_{index}"),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::default(),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::Unresolvable((*spec).to_string()),
+        })
+        .collect();
+
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/src/index.ts"),
+        exports: vec![],
+        re_exports: vec![],
+        resolved_imports,
+        resolved_dynamic_imports: vec![],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        has_cjs_exports: false,
+        has_angular_component_template_url: false,
+        unused_import_bindings: FxHashSet::default(),
+        type_referenced_import_bindings: vec![],
+        value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
+    }];
+
+    let config = test_config(PathBuf::from("/project"));
+    let suppressions = SuppressionContext::empty();
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unresolved = find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &[],
+        &[],
+        &[],
+        &line_offsets,
+    );
+    let unresolved_specifiers: Vec<&str> = unresolved
+        .iter()
+        .map(|import| import.specifier.as_str())
+        .collect();
+
+    assert_eq!(
+        unresolved_specifiers,
+        ["node:not-real", "url-parse", "path-browserify"]
+    );
+}
+
+#[test]
 fn unresolved_virtual_module_not_reported() {
     let resolved_modules = vec![ResolvedModule {
         file_id: FileId(0),
