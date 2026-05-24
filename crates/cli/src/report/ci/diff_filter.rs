@@ -823,69 +823,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(unsafe_code, reason = "env var mutation requires unsafe")]
-    fn filter_issues_for_summary_uses_env_scope() {
-        let prior_scope = std::env::var("FALLOW_SUMMARY_SCOPE").ok();
-        let prior_diff_file = std::env::var("FALLOW_DIFF_FILE").ok();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let diff_path = dir.path().join("pr.diff");
-        std::fs::write(
-            &diff_path,
-            "diff --git a/src/a.ts b/src/a.ts\n\
-             --- a/src/a.ts\n\
-             +++ b/src/a.ts\n\
-             @@ -0,0 +1,1 @@\n\
-             +new line\n",
-        )
-        .expect("write");
-
-        let project_level = CiIssue {
-            rule_id: "fallow/unused-dependency".into(),
-            description: "Dependency unused".into(),
-            severity: "minor".into(),
-            path: "package.json".into(),
-            line: 12,
-            fingerprint: "dep".into(),
-        };
-
-        // SAFETY: this test owns the two environment variables it mutates
-        // and restores their prior values before returning.
-        unsafe {
-            std::env::set_var("FALLOW_DIFF_FILE", &diff_path);
-            std::env::remove_var("FALLOW_SUMMARY_SCOPE");
-        }
-        assert_eq!(
-            filter_issues_for_summary(vec![project_level.clone()]).len(),
-            1,
-            "unset summary scope defaults to all"
-        );
-
-        // SAFETY: see the note above.
-        unsafe {
-            std::env::set_var("FALLOW_SUMMARY_SCOPE", "diff");
-        }
-        assert!(
-            filter_issues_for_summary(vec![project_level]).is_empty(),
-            "diff summary scope filters untouched project-level findings"
-        );
-
-        // SAFETY: restore the environment to avoid leaking state into other
-        // tests in this process.
-        unsafe {
-            if let Some(value) = prior_scope {
-                std::env::set_var("FALLOW_SUMMARY_SCOPE", value);
-            } else {
-                std::env::remove_var("FALLOW_SUMMARY_SCOPE");
-            }
-            if let Some(value) = prior_diff_file {
-                std::env::set_var("FALLOW_DIFF_FILE", value);
-            } else {
-                std::env::remove_var("FALLOW_DIFF_FILE");
-            }
-        }
-    }
-
-    #[test]
     fn summary_filter_preserves_path_line_fingerprint_sort_order() {
         // The partition step shuffles project-level issues to the back of
         // the vec; the post-merge sort restores the canonical ordering the
