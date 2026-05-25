@@ -985,6 +985,7 @@ dependencies = [
 name = "fallow-mcp"
 version = "2.80.0"
 dependencies = [
+ "regex",
  "rmcp",
  "schemars",
  "serde",

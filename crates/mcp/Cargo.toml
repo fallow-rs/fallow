@@ -24,5 +24,8 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 schemars.workspace = true
 tracing-subscriber.workspace = true
 
+[dev-dependencies]
+regex.workspace = true
+
 [lints]
 workspace = true

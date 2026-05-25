@@ -1,3 +1,7 @@
+use std::collections::BTreeMap;
+use std::sync::LazyLock;
+
+use regex::Regex;
 use rmcp::ServerHandler;
 
 use super::super::FallowMcp;
@@ -667,6 +671,201 @@ fn converted_field_descriptions_render_in_schema() {
             );
         }
     }
+}
+
+#[derive(Clone, Copy)]
+struct ToolDefaultExpectation {
+    tool: &'static str,
+    param: &'static str,
+}
+
+static CLAP_DEFAULT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"default_value_t\s*=\s*([0-9]+(?:\.[0-9]+)?)").unwrap());
+
+static DOC_DEFAULT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:spec\s+default|default)\s*\(?([0-9]+(?:\.[0-9]+)?)\)?").unwrap()
+});
+
+static DESCRIPTION_DEFAULT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\bdefault\s*\(?([0-9]+(?:\.[0-9]+)?)\)?").unwrap());
+
+const RUNTIME_DEFAULT_EXPECTATIONS: &[ToolDefaultExpectation] = &[
+    ToolDefaultExpectation {
+        tool: "check_health",
+        param: "min_invocations_hot",
+    },
+    ToolDefaultExpectation {
+        tool: "check_health",
+        param: "min_observation_volume",
+    },
+    ToolDefaultExpectation {
+        tool: "check_health",
+        param: "low_traffic_threshold",
+    },
+    ToolDefaultExpectation {
+        tool: "check_runtime_coverage",
+        param: "min_invocations_hot",
+    },
+    ToolDefaultExpectation {
+        tool: "check_runtime_coverage",
+        param: "min_observation_volume",
+    },
+    ToolDefaultExpectation {
+        tool: "check_runtime_coverage",
+        param: "low_traffic_threshold",
+    },
+    ToolDefaultExpectation {
+        tool: "audit",
+        param: "min_invocations_hot",
+    },
+];
+
+fn mcp_tool_descriptions() -> BTreeMap<String, String> {
+    let server = FallowMcp::new();
+    server
+        .tool_router
+        .list_all()
+        .iter()
+        .map(|tool| {
+            (
+                tool.name.to_string(),
+                tool.description.as_deref().unwrap_or("").to_owned(),
+            )
+        })
+        .collect()
+}
+
+fn default_drift_reports(
+    descriptions: &BTreeMap<String, String>,
+    cli_src: &str,
+    expectations: &[ToolDefaultExpectation],
+) -> Vec<String> {
+    let mut reports = Vec::new();
+
+    for expectation in expectations {
+        let Some(cli_default) = cli_default_for_param(cli_src, expectation.param) else {
+            reports.push(format!(
+                "{}.{}: CLI-side default not found",
+                expectation.tool, expectation.param
+            ));
+            continue;
+        };
+
+        match descriptions
+            .get(expectation.tool)
+            .and_then(|description| description_default_for_param(description, expectation.param))
+        {
+            Some(description_default) if description_default == cli_default => {}
+            Some(description_default) => reports.push(format!(
+                "{}.{} default mismatch: MCP description states {}, CLI source states {}",
+                expectation.tool, expectation.param, description_default, cli_default
+            )),
+            None => reports.push(format!(
+                "{}.{} default missing from MCP description; CLI source states {}",
+                expectation.tool, expectation.param, cli_default
+            )),
+        }
+    }
+
+    reports
+}
+
+fn cli_default_for_param(cli_src: &str, param: &str) -> Option<String> {
+    let lines: Vec<_> = cli_src.lines().collect();
+    let needle = format!("{param}:");
+
+    for (idx, line) in lines.iter().enumerate() {
+        if !line.contains(&needle) {
+            continue;
+        }
+
+        let mut context_lines = Vec::new();
+        for candidate in lines[..idx].iter().rev() {
+            let trimmed = candidate.trim_start();
+            if trimmed.starts_with("///") || trimmed.starts_with("#[") {
+                context_lines.push(*candidate);
+                continue;
+            }
+            break;
+        }
+        context_lines.reverse();
+        context_lines.push(*line);
+        let context = context_lines.join(" ");
+        if let Some(captures) = CLAP_DEFAULT_RE.captures(&context) {
+            return Some(captures[1].to_owned());
+        }
+        if let Some(captures) = DOC_DEFAULT_RE.captures(&context) {
+            return Some(captures[1].to_owned());
+        }
+    }
+
+    None
+}
+
+fn description_default_for_param(description: &str, param: &str) -> Option<String> {
+    let start = description.find(param)?;
+    let window: String = description[start..].chars().take(220).collect();
+    DESCRIPTION_DEFAULT_RE
+        .captures(&window)
+        .map(|captures| captures[1].to_owned())
+}
+
+#[test]
+fn mcp_tool_description_defaults_match_cli_defaults() {
+    let descriptions = mcp_tool_descriptions();
+    let reports = default_drift_reports(
+        &descriptions,
+        include_str!("../../../../cli/src/main.rs"),
+        RUNTIME_DEFAULT_EXPECTATIONS,
+    );
+
+    assert!(
+        reports.is_empty(),
+        "MCP tool description default drift:\n{}",
+        reports.join("\n")
+    );
+}
+
+#[test]
+fn default_drift_gate_trips_on_changed_or_missing_tool_description_default() {
+    let mut descriptions = BTreeMap::new();
+    descriptions.insert(
+        "check_health".to_string(),
+        "Runtime tuning: min_invocations_hot default 101; low_traffic_threshold default 0.001."
+            .to_string(),
+    );
+
+    let reports = default_drift_reports(
+        &descriptions,
+        include_str!("../../../../cli/src/main.rs"),
+        &[
+            ToolDefaultExpectation {
+                tool: "check_health",
+                param: "min_invocations_hot",
+            },
+            ToolDefaultExpectation {
+                tool: "check_health",
+                param: "min_observation_volume",
+            },
+        ],
+    );
+
+    assert!(
+        reports.iter().any(|report| {
+            report.contains("check_health.min_invocations_hot")
+                && report.contains("101")
+                && report.contains("100")
+        }),
+        "changed defaults should produce a diff-friendly report: {reports:?}"
+    );
+    assert!(
+        reports.iter().any(|report| {
+            report.contains("check_health.min_observation_volume")
+                && report.contains("missing")
+                && report.contains("5000")
+        }),
+        "missing defaults should produce a diff-friendly report: {reports:?}"
+    );
 }
 
 #[test]
