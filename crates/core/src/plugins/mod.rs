@@ -1021,6 +1021,7 @@ mod karma;
 mod knex;
 mod kysely;
 mod lefthook;
+mod lexical;
 mod lint_staged;
 mod lit;
 mod markdownlint;

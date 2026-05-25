@@ -1,0 +1,7 @@
+{
+  "name": "lexical-nodes-fixture",
+  "main": "src/index.ts",
+  "dependencies": {
+    "lexical": "^0.21.0"
+  }
+}
