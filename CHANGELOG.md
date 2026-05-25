@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Oxlint `jsPlugins` packages no longer report as unused dependencies.** Before, packages loaded only through Oxlint's `jsPlugins` config, such as `eslint-plugin-testing-library`, `eslint-plugin-playwright`, and `eslint-plugin-sonarjs`, could surface as unused devDependencies because fallow only treated `oxlint` itself as tooling. After, the Oxlint plugin parses `jsPlugins` from `.oxlintrc.json`, `oxlint.json`, and `oxlint.config.ts`, credits string entries and alias-object `specifier` values as referenced package dependencies, and treats relative plugin files as support entry files. Built-in Oxlint `plugins` names such as `typescript`, `vitest`, and `unicorn` are still ignored for npm dependency credit. Thanks [@pasTa4667](https://github.com/pasTa4667) for the patch. (Closes [#607](https://github.com/fallow-rs/fallow/issues/607).)
+
 ## [2.80.0] - 2026-05-24
 
 ### Added

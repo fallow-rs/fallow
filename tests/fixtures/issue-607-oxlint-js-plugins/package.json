@@ -1,0 +1,15 @@
+{
+  "name": "issue-607-oxlint-js-plugins",
+  "private": true,
+  "scripts": {
+    "lint": "oxlint"
+  },
+  "devDependencies": {
+    "eslint-plugin-playwright": "1.0.0",
+    "eslint-plugin-regexp": "1.0.0",
+    "eslint-plugin-sonarjs": "1.0.0",
+    "eslint-plugin-testing-library": "1.0.0",
+    "eslint-plugin-unused-control": "1.0.0",
+    "oxlint": "1.0.0"
+  }
+}

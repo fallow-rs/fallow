@@ -121,6 +121,28 @@ pub fn extract_config_shallow_strings(source: &str, path: &Path, key: &str) -> V
     .unwrap_or_default()
 }
 
+/// Extract top-level string values from a config array, including object entries.
+///
+/// Handles string entries, tuple entries, and alias objects such as:
+/// `jsPlugins: ["pkg", ["pkg-with-options", {}], { specifier: "pkg-alias" }]`.
+#[must_use]
+pub fn extract_config_shallow_strings_or_object_property(
+    source: &str,
+    path: &Path,
+    key: &str,
+    object_property: &str,
+) -> Vec<String> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let prop = find_property(obj, key)?;
+        Some(collect_shallow_string_or_object_property_values(
+            &prop.value,
+            object_property,
+        ))
+    })
+    .unwrap_or_default()
+}
+
 /// Extract shallow strings from an array property inside a nested object path.
 ///
 /// Navigates `outer_path` to find a nested object, then extracts shallow strings
@@ -1135,6 +1157,50 @@ fn collect_shallow_string_values(expr: &Expression) -> Vec<String> {
     values
 }
 
+/// Collect top-level string values, plus a named string property from object entries.
+fn collect_shallow_string_or_object_property_values(
+    expr: &Expression,
+    object_property: &str,
+) -> Vec<String> {
+    match expr {
+        Expression::ArrayExpression(arr) => arr
+            .elements
+            .iter()
+            .filter_map(|element| {
+                element
+                    .as_expression()
+                    .and_then(|expr| shallow_string_or_object_property(expr, object_property))
+            })
+            .collect(),
+        _ => shallow_string_or_object_property(expr, object_property)
+            .into_iter()
+            .collect(),
+    }
+}
+
+fn shallow_string_or_object_property(expr: &Expression, object_property: &str) -> Option<String> {
+    match expr {
+        Expression::ParenthesizedExpression(paren) => {
+            shallow_string_or_object_property(&paren.expression, object_property)
+        }
+        Expression::TSSatisfiesExpression(ts_sat) => {
+            shallow_string_or_object_property(&ts_sat.expression, object_property)
+        }
+        Expression::TSAsExpression(ts_as) => {
+            shallow_string_or_object_property(&ts_as.expression, object_property)
+        }
+        Expression::ArrayExpression(sub_arr) => sub_arr
+            .elements
+            .first()
+            .and_then(ArrayExpressionElement::as_expression)
+            .and_then(expression_to_string),
+        Expression::ObjectExpression(obj) => {
+            find_property(obj, object_property).and_then(|prop| expression_to_string(&prop.value))
+        }
+        _ => expression_to_string(expr),
+    }
+}
+
 /// Recursively collect all string literal values from an expression tree.
 fn collect_all_string_values(expr: &Expression, values: &mut Vec<String>) {
     match expr {
@@ -2070,6 +2136,33 @@ mod tests {
         let source = r#"export default { other: "val" };"#;
         let values = extract_config_shallow_strings(source, &js_path(), "missing");
         assert!(values.is_empty());
+    }
+
+    #[test]
+    fn shallow_strings_or_object_property_alias_objects() {
+        let source = r#"
+            export default {
+                jsPlugins: [
+                    "eslint-plugin-playwright",
+                    ["eslint-plugin-regexp", { rules: {} }],
+                    { name: "short", specifier: "eslint-plugin-with-long-name" }
+                ]
+            };
+        "#;
+        let values = extract_config_shallow_strings_or_object_property(
+            source,
+            &ts_path(),
+            "jsPlugins",
+            "specifier",
+        );
+        assert_eq!(
+            values,
+            vec![
+                "eslint-plugin-playwright",
+                "eslint-plugin-regexp",
+                "eslint-plugin-with-long-name"
+            ]
+        );
     }
 
     // ── extract_config_nested_shallow_strings tests ──────────────

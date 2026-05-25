@@ -1,0 +1,12 @@
+{
+  "name": "issue-607-oxlint-ts-config",
+  "private": true,
+  "scripts": {
+    "lint": "oxlint"
+  },
+  "devDependencies": {
+    "eslint-plugin-regexp": "1.0.0",
+    "eslint-plugin-unused-control": "1.0.0",
+    "oxlint": "1.0.0"
+  }
+}

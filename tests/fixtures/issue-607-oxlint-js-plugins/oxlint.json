@@ -1,0 +1,8 @@
+{
+  "plugins": ["typescript", "vitest", "unicorn", "import", "promise", "node"],
+  "jsPlugins": [
+    "eslint-plugin-testing-library",
+    "eslint-plugin-playwright",
+    "eslint-plugin-sonarjs"
+  ]
+}
