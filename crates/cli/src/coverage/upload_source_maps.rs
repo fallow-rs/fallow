@@ -7,7 +7,7 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
-use std::time::Duration;
+use std::time::SystemTime;
 
 use colored::Colorize as _;
 use fallow_core::git_env::clear_ambient_git_env;
@@ -15,7 +15,11 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::api::{ResponseBodyReader, api_agent_with_timeout, api_url, sanitize_network_error};
+use crate::api::{
+    NETWORK_EXIT_CODE, ResponseBodyReader, api_url, parse_error_envelope, response_message_suffix,
+    retry_delay_for_status, sanitize_network_error, should_retry_status,
+    try_api_agent_with_timeout,
+};
 
 const LOG_PREFIX: &str = "fallow coverage upload-source-maps";
 const DEFAULT_ENDPOINT: &str = "https://api.fallow.cloud";
@@ -42,6 +46,7 @@ pub struct UploadSourceMapsArgs {
 #[derive(Debug)]
 enum UploadSourceMapsError {
     Validation(String),
+    Network(String),
     Partial(Vec<MapOutcome>),
 }
 
@@ -51,6 +56,10 @@ impl UploadSourceMapsError {
             Self::Validation(message) => {
                 eprintln!("{LOG_PREFIX}: {}: {message}", "error".red().bold());
                 ExitCode::from(2)
+            }
+            Self::Network(message) => {
+                eprintln!("{LOG_PREFIX}: {}: {message}", "error".red().bold());
+                ExitCode::from(NETWORK_EXIT_CODE)
             }
             Self::Partial(outcomes) => {
                 print_failure_summary(&outcomes);
@@ -373,6 +382,7 @@ fn prepare_source_map(candidate: &SourceMapCandidate) -> MapOutcome {
     if candidate.bytes > MAX_MAP_BYTES {
         return MapOutcome::failed(
             candidate,
+            FailureKind::Validation,
             format!(
                 "source map is too large ({}); maximum is {}",
                 format_bytes(candidate.bytes),
@@ -386,9 +396,17 @@ fn prepare_source_map(candidate: &SourceMapCandidate) -> MapOutcome {
                 candidate: candidate.clone(),
                 source_map,
             }),
-            Err(err) => MapOutcome::failed(candidate, format!("not valid JSON ({err}); skipping")),
+            Err(err) => MapOutcome::failed(
+                candidate,
+                FailureKind::Validation,
+                format!("not valid JSON ({err}); skipping"),
+            ),
         },
-        Err(err) => MapOutcome::failed(candidate, format!("read failed: {err}")),
+        Err(err) => MapOutcome::failed(
+            candidate,
+            FailureKind::Validation,
+            format!("read failed: {err}"),
+        ),
     }
 }
 
@@ -436,6 +454,8 @@ fn upload_maps(
         display_endpoint_url(args.endpoint.as_deref(), repo)
     );
 
+    let agent = try_api_agent_with_timeout(CONNECT_TIMEOUT_SECS, TOTAL_TIMEOUT_SECS)
+        .map_err(|err| UploadSourceMapsError::Network(err.to_string()))?;
     let concurrency = args.concurrency.max(1);
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(concurrency)
@@ -446,7 +466,14 @@ fn upload_maps(
     let mut uploaded = if args.fail_fast {
         let mut uploaded = Vec::new();
         for map in &ready {
-            let outcome = upload_one(args.endpoint.as_deref(), repo, git_sha, api_key, map);
+            let outcome = upload_one(
+                &agent,
+                args.endpoint.as_deref(),
+                repo,
+                git_sha,
+                api_key,
+                map,
+            );
             let failed = matches!(outcome, MapOutcome::Failed { .. });
             uploaded.push(outcome);
             if failed {
@@ -458,7 +485,16 @@ fn upload_maps(
         pool.install(|| {
             ready
                 .par_iter()
-                .map(|map| upload_one(args.endpoint.as_deref(), repo, git_sha, api_key, map))
+                .map(|map| {
+                    upload_one(
+                        &agent,
+                        args.endpoint.as_deref(),
+                        repo,
+                        git_sha,
+                        api_key,
+                        map,
+                    )
+                })
                 .collect::<Vec<_>>()
         })
     };
@@ -470,6 +506,20 @@ fn upload_maps(
         .count();
     let failure_count = outcomes.len().saturating_sub(success_count);
     if failure_count > 0 {
+        if success_count == 0
+            && outcomes
+                .iter()
+                .filter_map(MapOutcome::failure_kind)
+                .all(|kind| kind == FailureKind::Network)
+        {
+            let detail = outcomes
+                .iter()
+                .find_map(MapOutcome::failure_reason)
+                .unwrap_or("network error");
+            return Err(UploadSourceMapsError::Network(format!(
+                "all source map uploads failed with network errors: {detail}"
+            )));
+        }
         return Err(UploadSourceMapsError::Partial(outcomes));
     }
 
@@ -482,6 +532,7 @@ fn upload_maps(
 }
 
 fn upload_one(
+    agent: &ureq::Agent,
     endpoint_override: Option<&str>,
     repo: &str,
     git_sha: &str,
@@ -489,7 +540,7 @@ fn upload_one(
     map: &PreparedSourceMap,
 ) -> MapOutcome {
     for attempt in 1..=MAX_ATTEMPTS {
-        match send_source_map(endpoint_override, repo, git_sha, api_key, map) {
+        match send_source_map(agent, endpoint_override, repo, git_sha, api_key, map) {
             Ok(response) => {
                 println!(
                     "  {} {} ({})",
@@ -500,14 +551,31 @@ fn upload_one(
                 return MapOutcome::Success;
             }
             Err(err) if err.retryable && attempt < MAX_ATTEMPTS => {
-                std::thread::sleep(Duration::from_millis(100 * u64::from(attempt)));
+                let retry_delay = retry_delay_for_status(
+                    err.status.unwrap_or(502),
+                    err.retry_after.as_deref(),
+                    attempt,
+                    SystemTime::now(),
+                );
+                eprintln!(
+                    "{LOG_PREFIX}: {} retrying {} in {}ms (attempt {}/{MAX_ATTEMPTS})",
+                    "warning".yellow().bold(),
+                    map.candidate.file_name,
+                    retry_delay.as_millis(),
+                    attempt + 1,
+                );
+                std::thread::sleep(retry_delay);
             }
             Err(err) => {
-                return MapOutcome::failed(&map.candidate, err.message);
+                return MapOutcome::failed(&map.candidate, err.kind, err.message);
             }
         }
     }
-    MapOutcome::failed(&map.candidate, "upload failed after retries".to_owned())
+    MapOutcome::failed(
+        &map.candidate,
+        FailureKind::Network,
+        "upload failed after retries".to_owned(),
+    )
 }
 
 #[derive(Debug, Serialize)]
@@ -535,9 +603,13 @@ struct SourceMapUploadData {
 struct UploadAttemptError {
     message: String,
     retryable: bool,
+    status: Option<u16>,
+    retry_after: Option<String>,
+    kind: FailureKind,
 }
 
 fn send_source_map(
+    agent: &ureq::Agent,
     endpoint_override: Option<&str>,
     repo: &str,
     git_sha: &str,
@@ -550,13 +622,16 @@ fn send_source_map(
         file_name: &map.candidate.file_name,
         source_map: &map.source_map,
     };
-    let mut response = api_agent_with_timeout(CONNECT_TIMEOUT_SECS, TOTAL_TIMEOUT_SECS)
+    let mut response = agent
         .post(&url)
         .header("Authorization", &format!("Bearer {api_key}"))
         .send_json(&payload)
         .map_err(|err| UploadAttemptError {
             message: sanitize_network_error(&format!("network error: {err}")),
             retryable: true,
+            status: Some(502),
+            retry_after: None,
+            kind: FailureKind::Network,
         })?;
 
     let status = response.status().as_u16();
@@ -566,13 +641,24 @@ fn send_source_map(
             .map_err(|err| UploadAttemptError {
                 message: format!("malformed response body: {err}"),
                 retryable: false,
+                status: None,
+                retry_after: None,
+                kind: FailureKind::Http,
             });
     }
 
+    let retry_after = response
+        .headers()
+        .get("Retry-After")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
     let body = response.body_mut().read_to_string().unwrap_or_default();
     Err(UploadAttemptError {
         message: classify_http_error(status, &body),
-        retryable: matches!(status, 429 | 500..=599),
+        retryable: should_retry_status(status),
+        status: Some(status),
+        retry_after,
+        kind: FailureKind::Http,
     })
 }
 
@@ -619,56 +705,70 @@ fn url_encode_path_segment(value: &str) -> String {
 }
 
 fn classify_http_error(status: u16, body: &str) -> String {
-    let envelope: Option<ErrorEnvelope> = serde_json::from_str(body).ok();
+    let envelope = parse_error_envelope(body);
     match status {
         401 | 403 => "authentication failed: invalid or expired API key".to_owned(),
         429 => "rate limited; retry with fewer concurrent uploads via --concurrency".to_owned(),
         500..=599 => {
-            let suffix = response_message_suffix(body, envelope.as_ref());
+            let suffix = source_map_message_suffix(body, &envelope);
             format!("server error: {status}{suffix}")
         }
         _ => {
-            let suffix = response_message_suffix(body, envelope.as_ref());
+            let suffix = source_map_message_suffix(body, &envelope);
             format!("server rejected: HTTP {status}{suffix}")
         }
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct ErrorEnvelope {
-    #[serde(default)]
-    message: Option<String>,
+fn source_map_message_suffix(body: &str, envelope: &crate::api::ParsedErrorEnvelope) -> String {
+    response_message_suffix(body, envelope)
+        .strip_prefix(':')
+        .map_or_else(String::new, ToOwned::to_owned)
 }
 
-fn response_message_suffix(body: &str, envelope: Option<&ErrorEnvelope>) -> String {
-    if let Some(message) = envelope.and_then(|envelope| envelope.message.as_deref())
-        && !message.trim().is_empty()
-    {
-        return format!(" {}", message.trim());
-    }
-    if !body.trim().is_empty() {
-        return format!(" {}", body.trim());
-    }
-    String::new()
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FailureKind {
+    Validation,
+    Network,
+    Http,
 }
 
 #[derive(Debug, Clone)]
 enum MapOutcome {
     Ready(PreparedSourceMap),
     Success,
-    Failed { file_name: String, reason: String },
+    Failed {
+        file_name: String,
+        reason: String,
+        kind: FailureKind,
+    },
 }
 
 impl MapOutcome {
-    fn failed(candidate: &SourceMapCandidate, reason: String) -> Self {
+    fn failed(candidate: &SourceMapCandidate, kind: FailureKind, reason: String) -> Self {
         Self::Failed {
             file_name: candidate.file_name.clone(),
             reason,
+            kind,
         }
     }
 
     const fn is_success(&self) -> bool {
         matches!(self, Self::Success)
+    }
+
+    const fn failure_kind(&self) -> Option<FailureKind> {
+        match self {
+            Self::Failed { kind, .. } => Some(*kind),
+            Self::Ready(_) | Self::Success => None,
+        }
+    }
+
+    fn failure_reason(&self) -> Option<&str> {
+        match self {
+            Self::Failed { reason, .. } => Some(reason),
+            Self::Ready(_) | Self::Success => None,
+        }
     }
 }
 
@@ -681,7 +781,10 @@ fn print_failure_summary(outcomes: &[MapOutcome]) {
     eprintln!("{LOG_PREFIX}: {success_count}/{total} uploaded");
     eprintln!("{LOG_PREFIX}: failed:");
     for outcome in outcomes {
-        if let MapOutcome::Failed { file_name, reason } = outcome {
+        if let MapOutcome::Failed {
+            file_name, reason, ..
+        } = outcome
+        {
             eprintln!("  {} {file_name} ({reason})", "x".red());
         }
     }
@@ -829,5 +932,42 @@ mod tests {
             "rate limited; retry with fewer concurrent uploads via --concurrency"
         );
         assert!(classify_http_error(500, "oops").starts_with("server error: 500"));
+    }
+
+    #[test]
+    fn classify_http_error_preserves_malformed_response_body() {
+        let message = classify_http_error(500, "<html>bad gateway</html>");
+        assert!(message.contains("<html>bad gateway</html>"));
+        assert!(message.contains("malformed error envelope"));
+    }
+
+    #[test]
+    fn all_network_failures_are_reported_as_network_exit() {
+        let candidate = SourceMapCandidate {
+            path: PathBuf::from("dist/app.js.map"),
+            rel_path: PathBuf::from("dist/app.js.map"),
+            file_name: "dist/app.js.map".to_owned(),
+            bytes: 10,
+        };
+        let outcomes = [MapOutcome::failed(
+            &candidate,
+            FailureKind::Network,
+            "network error: connection refused".to_owned(),
+        )];
+        let success_count = outcomes
+            .iter()
+            .filter(|outcome| outcome.is_success())
+            .count();
+        assert_eq!(success_count, 0);
+        assert!(
+            outcomes
+                .iter()
+                .filter_map(MapOutcome::failure_kind)
+                .all(|kind| kind == FailureKind::Network)
+        );
+        assert_eq!(
+            outcomes.iter().find_map(MapOutcome::failure_reason),
+            Some("network error: connection refused")
+        );
     }
 }

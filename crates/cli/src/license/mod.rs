@@ -22,7 +22,7 @@ use fallow_license::{
 use serde::Deserialize;
 
 use crate::api::{
-    NETWORK_EXIT_CODE, api_agent, api_url, http_status_message, sanitize_network_error,
+    NETWORK_EXIT_CODE, api_url, http_status_message, sanitize_network_error, try_api_agent,
 };
 
 /// Ed25519 verification key for fallow license JWT validation.
@@ -301,7 +301,8 @@ pub fn verifying_key() -> Result<VerifyingKey, String> {
 }
 
 pub fn activate_trial(email: &str) -> Result<LicenseStatus, String> {
-    let mut response = api_agent()
+    let mut response = try_api_agent()
+        .map_err(|err| err.to_string())?
         .post(&api_url("/v1/auth/license/trial"))
         .send_json(TrialRequest { email })
         .map_err(|err| sanitize_network_error(&format!("failed to request a trial: {err}")))?;
@@ -313,7 +314,8 @@ pub fn activate_trial(email: &str) -> Result<LicenseStatus, String> {
 
 pub fn refresh_active_license() -> Result<LicenseStatus, String> {
     let current = load_current_jwt()?;
-    let mut response = api_agent()
+    let mut response = try_api_agent()
+        .map_err(|err| err.to_string())?
         .post(&api_url("/v1/auth/license/refresh"))
         .header("Authorization", &format!("Bearer {current}"))
         .send_empty()

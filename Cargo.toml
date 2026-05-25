@@ -60,6 +60,7 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 rustc-hash = "2"
 
 # HTTP
+httpdate = "1"
 ureq = { version = "3", default-features = false, features = ["json", "rustls"] }
 
 # Caching

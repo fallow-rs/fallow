@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use fallow_config::OutputFormat;
 use serde_json::Value;
 
-use crate::api::{ResponseBodyReader, api_agent, sanitize_network_error};
+use crate::api::{ResponseBodyReader, sanitize_network_error, try_api_agent};
 use crate::error::emit_error;
 
 pub enum CiCommand {
@@ -259,7 +259,7 @@ fn load_github_state(
         .api_url
         .unwrap_or("https://api.github.com")
         .trim_end_matches('/');
-    let agent = api_agent();
+    let agent = try_api_agent().map_err(|err| err.to_string())?;
     let mut state = ProviderState::default();
 
     for page in 1..=100 {
@@ -424,7 +424,13 @@ fn apply_github_reconcile(
         .api_url
         .unwrap_or("https://api.github.com")
         .trim_end_matches('/');
-    let agent = api_agent();
+    let agent = match try_api_agent() {
+        Ok(agent) => agent,
+        Err(err) => {
+            result.errors.push(err.to_string());
+            return result;
+        }
+    };
     let sha = std::env::var("GITHUB_SHA")
         .ok()
         .or_else(|| std::env::var("PR_HEAD_SHA").ok());
@@ -494,7 +500,7 @@ fn load_gitlab_state(
         .or_else(|| std::env::var("CI_API_V4_URL").ok())
         .unwrap_or_else(|| "https://gitlab.com/api/v4".to_owned());
     let api = api.trim_end_matches('/').to_owned();
-    let agent = api_agent();
+    let agent = try_api_agent().map_err(|err| err.to_string())?;
     let mut state = ProviderState::default();
 
     for page in 1..=100 {
@@ -571,7 +577,13 @@ fn apply_gitlab_reconcile(
         .or_else(|| std::env::var("CI_API_V4_URL").ok())
         .unwrap_or_else(|| "https://gitlab.com/api/v4".to_owned());
     let api = api.trim_end_matches('/').to_owned();
-    let agent = api_agent();
+    let agent = match try_api_agent() {
+        Ok(agent) => agent,
+        Err(err) => {
+            result.errors.push(err.to_string());
+            return result;
+        }
+    };
     let sha = std::env::var("CI_COMMIT_SHA").ok();
     let encoded_project = url_encode_path_segment(&project_id);
 

@@ -29,8 +29,9 @@ use serde::{Deserialize, Serialize};
 use colored::Colorize as _;
 
 use crate::api::{
-    ErrorEnvelope, NETWORK_EXIT_CODE, ResponseBodyReader, actionable_error_hint,
-    api_agent_with_timeout, api_url, sanitize_network_error,
+    NETWORK_EXIT_CODE, ParsedErrorEnvelope, ResponseBodyReader, actionable_error_hint, api_url,
+    parse_error_envelope, response_message_suffix, sanitize_network_error,
+    try_api_agent_with_timeout,
 };
 
 /// Log prefix used on every human-facing line from this subcommand.
@@ -719,7 +720,8 @@ fn upload(
         payload.git_sha,
     );
 
-    let agent = api_agent_with_timeout(UPLOAD_CONNECT_TIMEOUT_SECS, UPLOAD_TOTAL_TIMEOUT_SECS);
+    let agent = try_api_agent_with_timeout(UPLOAD_CONNECT_TIMEOUT_SECS, UPLOAD_TOTAL_TIMEOUT_SECS)
+        .map_err(|err| UploadError::Network(err.to_string()))?;
     let mut response = agent
         .post(&url)
         .header("Authorization", &format!("Bearer {api_key}"))
@@ -760,9 +762,9 @@ fn upload(
     // route through `http_status_message`; it collapses code + message into
     // one formatted string, which forces callers to string-scan to classify.
     let body = response.read_to_string().unwrap_or_default();
-    let envelope: ErrorEnvelope = serde_json::from_str(&body).unwrap_or_default();
-    let code = envelope.code.as_deref();
-    let message = format_upload_error_message(status, &body, code, envelope.message.as_deref());
+    let envelope = parse_error_envelope(&body);
+    let code = envelope.code();
+    let message = format_upload_error_message(status, &body, code, &envelope);
     classify_upload_error(status, code, message)
 }
 
@@ -770,18 +772,14 @@ fn format_upload_error_message(
     status: u16,
     body: &str,
     code: Option<&str>,
-    message: Option<&str>,
+    envelope: &ParsedErrorEnvelope,
 ) -> String {
     if let Some(code) = code
         && let Some(hint) = actionable_error_hint("upload-inventory", code)
     {
         return format!("{hint} (HTTP {status}, code {code})");
     }
-    let body_suffix = match message {
-        Some(m) if !m.trim().is_empty() => format!(": {}", m.trim()),
-        _ if !body.trim().is_empty() => format!(": {}", body.trim()),
-        _ => String::new(),
-    };
+    let body_suffix = response_message_suffix(body, envelope);
     format!("upload-inventory request failed with HTTP {status}{body_suffix}")
 }
 
@@ -1232,7 +1230,8 @@ mod tests {
 
     #[test]
     fn format_upload_error_message_uses_hint_for_known_code() {
-        let message = format_upload_error_message(400, "{}", Some("payload_too_large"), None);
+        let envelope = parse_error_envelope(r#"{"code":"payload_too_large"}"#);
+        let message = format_upload_error_message(400, "{}", Some("payload_too_large"), &envelope);
         assert!(
             message.contains("200,000-function server limit"),
             "got: {message}"
@@ -1243,16 +1242,27 @@ mod tests {
 
     #[test]
     fn format_upload_error_message_falls_back_to_server_message() {
-        let message =
-            format_upload_error_message(500, "{}", Some("internal"), Some("database timeout"));
+        let body = r#"{"code":"internal","message":"database timeout"}"#;
+        let envelope = parse_error_envelope(body);
+        let message = format_upload_error_message(500, body, Some("internal"), &envelope);
         assert!(message.starts_with("upload-inventory request failed with HTTP 500"));
         assert!(message.ends_with(": database timeout"));
     }
 
     #[test]
     fn format_upload_error_message_handles_empty_body() {
-        let message = format_upload_error_message(502, "", None, None);
+        let envelope = parse_error_envelope("");
+        let message = format_upload_error_message(502, "", None, &envelope);
         assert_eq!(message, "upload-inventory request failed with HTTP 502");
+    }
+
+    #[test]
+    fn format_upload_error_message_preserves_malformed_body() {
+        let body = "gateway timeout";
+        let envelope = parse_error_envelope(body);
+        let message = format_upload_error_message(500, body, None, &envelope);
+        assert!(message.contains("gateway timeout"));
+        assert!(message.contains("malformed error envelope"));
     }
 
     #[test]

@@ -11,10 +11,13 @@
 //! `ureq::Response` so error-path code can be unit-tested with a lightweight
 //! stub.
 
-use std::time::Duration;
+use std::fmt;
+use std::path::PathBuf;
+use std::time::{Duration, SystemTime};
 
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use ureq::tls::{PemItem, RootCerts, TlsConfig};
 
 /// Default fallow cloud API base URL.
 pub const DEFAULT_API_URL: &str = "https://api.fallow.cloud";
@@ -23,6 +26,12 @@ pub const DEFAULT_API_URL: &str = "https://api.fallow.cloud";
 /// Used by any subcommand that reaches fallow cloud; keeps error classification
 /// consistent across `license` and `coverage` surfaces.
 pub const NETWORK_EXIT_CODE: u8 = 7;
+
+/// Environment variable pointing at a PEM trust bundle for fallow cloud calls.
+pub const CA_BUNDLE_ENV: &str = "FALLOW_CA_BUNDLE";
+
+/// Maximum Retry-After sleep accepted from the server.
+pub const RETRY_MAX_WAIT_SECONDS: u64 = 60;
 
 /// Default connect timeout (seconds).
 const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 5;
@@ -33,8 +42,17 @@ const DEFAULT_TOTAL_TIMEOUT_SECS: u64 = 10;
 ///
 /// Suitable for small-body JSON requests (license trial / refresh). For larger
 /// payloads (inventory upload), use [`api_agent_with_timeout`].
+#[expect(
+    dead_code,
+    reason = "kept as the infallible compatibility wrapper for out-of-tree users"
+)]
 pub fn api_agent() -> ureq::Agent {
     api_agent_with_timeout(DEFAULT_CONNECT_TIMEOUT_SECS, DEFAULT_TOTAL_TIMEOUT_SECS)
+}
+
+/// Construct a fallible `ureq::Agent` with the default API timeouts.
+pub fn try_api_agent() -> Result<ureq::Agent, ApiClientError> {
+    try_api_agent_with_timeout(DEFAULT_CONNECT_TIMEOUT_SECS, DEFAULT_TOTAL_TIMEOUT_SECS)
 }
 
 /// Construct a `ureq::Agent` with custom timeouts.
@@ -44,12 +62,83 @@ pub fn api_agent() -> ureq::Agent {
 /// is set so callers can inspect non-2xx responses via [`http_status_message`]
 /// instead of having them surface as transport errors.
 pub fn api_agent_with_timeout(connect_timeout_secs: u64, total_timeout_secs: u64) -> ureq::Agent {
-    ureq::Agent::config_builder()
+    try_api_agent_with_timeout(connect_timeout_secs, total_timeout_secs)
+        .unwrap_or_else(|err| panic!("{err}"))
+}
+
+/// Construct a fallible `ureq::Agent` with custom timeouts.
+///
+/// This variant reports invalid `FALLOW_CA_BUNDLE` configuration as a typed
+/// setup error so user-facing commands can exit with the network failure code
+/// instead of panicking.
+pub fn try_api_agent_with_timeout(
+    connect_timeout_secs: u64,
+    total_timeout_secs: u64,
+) -> Result<ureq::Agent, ApiClientError> {
+    let mut builder = ureq::Agent::config_builder();
+    if let Some(tls_config) = tls_config_from_env()? {
+        builder = builder.tls_config(tls_config);
+    }
+    Ok(builder
         .timeout_connect(Some(Duration::from_secs(connect_timeout_secs)))
         .timeout_global(Some(Duration::from_secs(total_timeout_secs)))
         .http_status_as_error(false)
         .build()
-        .new_agent()
+        .new_agent())
+}
+
+/// Error raised while constructing the shared API client.
+#[derive(Debug)]
+pub struct ApiClientError {
+    message: String,
+}
+
+impl ApiClientError {
+    fn ca_bundle(path: &str, detail: impl fmt::Display) -> Self {
+        Self {
+            message: format!("{CA_BUNDLE_ENV}={path}: {detail}"),
+        }
+    }
+}
+
+impl fmt::Display for ApiClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ApiClientError {}
+
+fn tls_config_from_env() -> Result<Option<TlsConfig>, ApiClientError> {
+    let Some(path) = std::env::var(CA_BUNDLE_ENV)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let bytes = std::fs::read(PathBuf::from(&path)).map_err(|err| {
+        ApiClientError::ca_bundle(&path, format!("failed to read PEM bundle: {err}"))
+    })?;
+    let mut certs = Vec::new();
+    for item in ureq::tls::parse_pem(&bytes) {
+        if let PemItem::Certificate(cert) = item.map_err(|err| {
+            ApiClientError::ca_bundle(&path, format!("failed to parse PEM bundle: {err}"))
+        })? {
+            certs.push(cert);
+        }
+    }
+    if certs.is_empty() {
+        return Err(ApiClientError::ca_bundle(
+            &path,
+            "PEM bundle did not contain any certificates",
+        ));
+    }
+    Ok(Some(
+        TlsConfig::builder()
+            .root_certs(RootCerts::new_with_certs(&certs))
+            .build(),
+    ))
 }
 
 /// Resolve an API endpoint path to a full URL.
@@ -73,6 +162,112 @@ pub struct ErrorEnvelope {
     /// Human-readable message from the backend.
     #[serde(default)]
     pub message: Option<String>,
+}
+
+/// Result of parsing a fallow-cloud error body.
+#[derive(Debug)]
+pub enum ParsedErrorEnvelope {
+    Parsed(ErrorEnvelope),
+    Malformed { body: String, error: String },
+    Missing,
+}
+
+impl ParsedErrorEnvelope {
+    pub fn code(&self) -> Option<&str> {
+        match self {
+            Self::Parsed(envelope) => envelope.code.as_deref(),
+            Self::Malformed { .. } | Self::Missing => None,
+        }
+    }
+
+    pub fn message(&self) -> Option<&str> {
+        match self {
+            Self::Parsed(envelope) => envelope.message.as_deref(),
+            Self::Malformed { .. } | Self::Missing => None,
+        }
+    }
+
+    pub fn raw_body(&self) -> Option<&str> {
+        match self {
+            Self::Malformed { body, .. } if !body.trim().is_empty() => Some(body),
+            Self::Parsed(_) | Self::Malformed { .. } | Self::Missing => None,
+        }
+    }
+
+    pub fn parse_failure(&self) -> Option<&str> {
+        match self {
+            Self::Malformed { error, .. } => Some(error),
+            Self::Parsed(_) | Self::Missing => None,
+        }
+    }
+}
+
+pub fn parse_error_envelope(body: &str) -> ParsedErrorEnvelope {
+    if body.trim().is_empty() {
+        return ParsedErrorEnvelope::Missing;
+    }
+    match serde_json::from_str::<ErrorEnvelope>(body) {
+        Ok(envelope) => ParsedErrorEnvelope::Parsed(envelope),
+        Err(error) => ParsedErrorEnvelope::Malformed {
+            body: body.to_owned(),
+            error: error.to_string(),
+        },
+    }
+}
+
+pub fn response_message_suffix(body: &str, envelope: &ParsedErrorEnvelope) -> String {
+    if let Some(message) = envelope.message()
+        && !message.trim().is_empty()
+    {
+        return format!(": {}", message.trim());
+    }
+    let raw = envelope.raw_body().unwrap_or(body);
+    if !raw.trim().is_empty() {
+        let parse_detail = envelope.parse_failure().map_or_else(String::new, |err| {
+            format!(" (malformed error envelope: {err})")
+        });
+        return format!(": {}{parse_detail}", raw.trim());
+    }
+    String::new()
+}
+
+/// Whether a fallow-cloud response status should be retried by upload clients.
+pub const fn should_retry_status(status: u16) -> bool {
+    status == 429 || matches!(status, 502..=504)
+}
+
+pub fn retry_after_delay(raw: Option<&str>, now: SystemTime) -> Option<Duration> {
+    let value = raw?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(clamp_retry_delay(Duration::from_secs(seconds)));
+    }
+    let date = httpdate::parse_http_date(value).ok()?;
+    let delay = date
+        .duration_since(now)
+        .unwrap_or_else(|_| Duration::from_secs(0));
+    Some(clamp_retry_delay(delay))
+}
+
+pub fn retry_delay_for_status(
+    status: u16,
+    retry_after: Option<&str>,
+    attempt: u8,
+    now: SystemTime,
+) -> Duration {
+    if status == 429
+        && let Some(delay) = retry_after_delay(retry_after, now)
+    {
+        return delay;
+    }
+    let millis = 100_u64.saturating_mul(u64::from(attempt.max(1)));
+    Duration::from_millis(millis)
+}
+
+fn clamp_retry_delay(delay: Duration) -> Duration {
+    delay.min(Duration::from_secs(RETRY_MAX_WAIT_SECONDS))
 }
 
 /// Map a backend error-code + operation pair to an actionable user-facing
@@ -248,18 +443,13 @@ const fn is_token_byte(byte: u8) -> bool {
 pub fn http_status_message(response: &mut impl ResponseBodyReader, operation: &str) -> String {
     let status = response.status();
     let body = response.read_to_string().unwrap_or_default();
-    let envelope: Option<ErrorEnvelope> = serde_json::from_str(&body).ok();
-    if let Some(envelope) = envelope.as_ref()
-        && let Some(code) = envelope.code.as_deref()
+    let envelope = parse_error_envelope(&body);
+    if let Some(code) = envelope.code()
         && let Some(hint) = actionable_error_hint(operation, code)
     {
         return format!("{hint} (HTTP {status}, code {code})");
     }
-    let body_suffix = match envelope.as_ref().and_then(|e| e.message.as_deref()) {
-        Some(message) if !message.trim().is_empty() => format!(": {}", message.trim()),
-        _ if !body.trim().is_empty() => format!(": {}", body.trim()),
-        _ => String::new(),
-    };
+    let body_suffix = response_message_suffix(&body, &envelope);
     format!("{operation} request failed with HTTP {status}{body_suffix}")
 }
 
@@ -383,6 +573,74 @@ mod tests {
         };
         let message = http_status_message(&mut response, "trial");
         assert_eq!(message, "trial request failed with HTTP 502");
+    }
+
+    #[test]
+    fn malformed_error_envelope_preserves_raw_body_and_parse_failure() {
+        let mut response = StubResponse {
+            status: 500,
+            body: "upstream timeout".to_owned(),
+        };
+        let message = http_status_message(&mut response, "refresh");
+        assert!(message.contains("upstream timeout"));
+        assert!(message.contains("malformed error envelope"));
+    }
+
+    #[test]
+    fn retry_status_is_narrowed_to_429_and_gateway_failures() {
+        assert!(should_retry_status(429));
+        assert!(should_retry_status(502));
+        assert!(should_retry_status(503));
+        assert!(should_retry_status(504));
+        assert!(!should_retry_status(500));
+        assert!(!should_retry_status(501));
+    }
+
+    #[test]
+    fn retry_after_delta_and_http_date_are_capped() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        assert_eq!(
+            retry_after_delay(Some("120"), now),
+            Some(Duration::from_secs(RETRY_MAX_WAIT_SECONDS))
+        );
+        let date = httpdate::fmt_http_date(now + Duration::from_mins(2));
+        assert_eq!(
+            retry_after_delay(Some(&date), now),
+            Some(Duration::from_secs(RETRY_MAX_WAIT_SECONDS))
+        );
+    }
+
+    #[test]
+    fn retry_delay_ignores_retry_after_for_5xx() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        assert_eq!(
+            retry_delay_for_status(503, Some("60"), 2, now),
+            Duration::from_millis(200)
+        );
+    }
+
+    #[test]
+    #[expect(unsafe_code, reason = "env var mutation requires unsafe")]
+    fn ca_bundle_read_errors_are_reported_as_client_setup_errors() {
+        let prior = std::env::var(CA_BUNDLE_ENV).ok();
+        // SAFETY: env mutation is unsafe because it is not thread-safe. This
+        // test serializes its own writes and restores the prior value before
+        // returning; no other test in this module touches FALLOW_CA_BUNDLE.
+        unsafe {
+            std::env::set_var(CA_BUNDLE_ENV, "/definitely/missing/fallow-ca.pem");
+        }
+        let err = try_api_agent().expect_err("missing bundle should fail");
+        let message = err.to_string();
+        assert!(message.contains(CA_BUNDLE_ENV));
+        assert!(message.contains("failed to read PEM bundle"));
+        // SAFETY: see the `set_var` safety note above.
+        unsafe {
+            if let Some(value) = prior {
+                std::env::set_var(CA_BUNDLE_ENV, value);
+            } else {
+                std::env::remove_var(CA_BUNDLE_ENV);
+            }
+        }
     }
 
     #[test]

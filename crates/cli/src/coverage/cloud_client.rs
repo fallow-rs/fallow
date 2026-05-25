@@ -8,7 +8,8 @@ use std::fmt::{self, Write as _};
 use serde::Deserialize;
 
 use crate::api::{
-    ErrorEnvelope, NETWORK_EXIT_CODE, api_agent_with_timeout, api_url, sanitize_network_error,
+    NETWORK_EXIT_CODE, api_url, parse_error_envelope, sanitize_network_error,
+    try_api_agent_with_timeout,
 };
 
 const CLOUD_CONNECT_TIMEOUT_SECS: u64 = 5;
@@ -214,7 +215,8 @@ pub enum CloudRuntimeWarning {
 pub fn fetch_runtime_context(request: &CloudRequest) -> Result<CloudRuntimeContext, CloudError> {
     validate_request(request)?;
     let url = runtime_context_url(request);
-    let agent = api_agent_with_timeout(CLOUD_CONNECT_TIMEOUT_SECS, CLOUD_TOTAL_TIMEOUT_SECS);
+    let agent = try_api_agent_with_timeout(CLOUD_CONNECT_TIMEOUT_SECS, CLOUD_TOTAL_TIMEOUT_SECS)
+        .map_err(|err| CloudError::Network(network_message(&err.to_string())))?;
     let mut response = agent
         .get(&url)
         .header("Authorization", &format!("Bearer {}", request.api_key))
@@ -235,11 +237,10 @@ pub fn fetch_runtime_context(request: &CloudRequest) -> Result<CloudRuntimeConte
     }
 
     let body = response.body_mut().read_to_string().unwrap_or_default();
-    let envelope: ErrorEnvelope = serde_json::from_str(&body).unwrap_or_default();
-    let code = envelope.code.as_deref();
+    let envelope = parse_error_envelope(&body);
+    let code = envelope.code();
     let message = envelope
-        .message
-        .as_deref()
+        .message()
         .filter(|message| !message.trim().is_empty())
         .unwrap_or_else(|| body.trim());
 
