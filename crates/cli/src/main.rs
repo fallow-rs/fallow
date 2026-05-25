@@ -2920,6 +2920,8 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         fail_on_issues,
         filters: &args.filters,
         changed_since: cli.changed_since.as_deref(),
+        diff_index: None,
+        use_shared_diff_index: true,
         baseline: cli.baseline.as_deref(),
         save_baseline: cli.save_baseline.as_deref(),
         sarif_file: cli.sarif_file.as_deref(),
@@ -2988,6 +2990,8 @@ fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> E
         production_override: Some(production),
         trace: args.trace.as_deref(),
         changed_since: cli.changed_since.as_deref(),
+        diff_index: None,
+        use_shared_diff_index: true,
         changed_files: None,
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
@@ -3116,6 +3120,8 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         production,
         production_override: Some(production),
         changed_since: cli.changed_since.as_deref(),
+        diff_index: None,
+        use_shared_diff_index: true,
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
         baseline: cli.baseline.as_deref(),
@@ -3229,6 +3235,39 @@ mod tests {
             };
             cursor += offset + needle.len();
         }
+    }
+
+    #[test]
+    fn programmatic_common_options_track_analysis_affecting_cli_globals() {
+        use clap::CommandFactory;
+
+        let cli_flags: std::collections::BTreeSet<String> = Cli::command()
+            .get_arguments()
+            .filter(|arg| arg.is_global_set())
+            .filter_map(|arg| arg.get_long().map(str::to_owned))
+            .filter(|name| {
+                matches!(
+                    name.as_str(),
+                    "root"
+                        | "config"
+                        | "no-cache"
+                        | "threads"
+                        | "changed-since"
+                        | "diff-file"
+                        | "production"
+                        | "workspace"
+                        | "changed-workspaces"
+                        | "explain"
+                )
+            })
+            .collect();
+        let programmatic_flags: std::collections::BTreeSet<String> =
+            fallow_cli::programmatic::COMMON_ANALYSIS_OPTION_FLAGS
+                .iter()
+                .map(|flag| (*flag).to_owned())
+                .collect();
+
+        assert_eq!(programmatic_flags, cli_flags);
     }
 
     fn visit_help(cmd: &mut clap::Command, path: &str, violations: &mut Vec<(String, String)>) {

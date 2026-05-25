@@ -163,6 +163,22 @@ export function duplicatedTwo(items: number[]) {
 console.log('Testing @fallow-cli/fallow-node...\n');
 
 const root = makeFixture();
+const serviceDiff = join(root, 'service.diff');
+writeFileSync(
+  serviceDiff,
+  [
+    'diff --git a/src/application/service.ts b/src/application/service.ts',
+    '--- a/src/application/service.ts',
+    '+++ b/src/application/service.ts',
+    '@@ -1,5 +1,5 @@',
+    ' export function usedThing() {',
+    "   return 'ok';",
+    ' }',
+    ' ',
+    '+export const unusedThing = 42;',
+    '',
+  ].join('\n'),
+);
 
 {
   const report = await detectDeadCode({ root, explain: true });
@@ -170,6 +186,20 @@ const root = makeFixture();
   assert.ok(report._meta);
   assert.ok(report.unused_exports.some((item) => item.export_name === 'unusedThing'));
   console.log('  [PASS] detectDeadCode');
+}
+
+{
+  const report = await detectDeadCode({
+    root,
+    diffFile: serviceDiff,
+    unusedExports: true,
+    threads: 2,
+  });
+  assert.deepEqual(
+    report.unused_exports.map((item) => item.export_name),
+    ['unusedThing'],
+  );
+  console.log('  [PASS] detectDeadCode diffFile');
 }
 
 {

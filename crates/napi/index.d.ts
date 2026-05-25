@@ -3,6 +3,7 @@ export interface AnalysisOptions {
   configPath?: string;
   noCache?: boolean;
   threads?: number;
+  diffFile?: string;
   production?: boolean;
   changedSince?: string;
   workspace?: string[];

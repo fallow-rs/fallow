@@ -462,9 +462,9 @@ pub fn load_diff_index_for_findings(source: &DiffSource, quiet: bool) -> Option<
 /// Populated once by `main()` via [`init_shared_diff`] after CLI parsing;
 /// every subsystem queries it via [`shared_diff_index`] at filter time.
 ///
-/// Programmatic callers (Node bindings, in-process embedders) that never
-/// call `init_shared_diff` see `None` here, which means no line-level
-/// filter applies: the diff filter is strictly opt-in.
+/// Programmatic and Node callers pass their own per-call diff index instead
+/// of populating this cache; callers that never provide one see no line-level
+/// filter. In every path, the diff filter is strictly opt-in.
 static SHARED_DIFF: OnceLock<Option<LoadedDiff>> = OnceLock::new();
 
 /// Resolve, read, and parse the diff source once for the lifetime of the

@@ -8,7 +8,21 @@ use crate::check::{CheckOptions, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions};
 use crate::health::{HealthOptions, SortBy};
 use crate::health_types::EffortEstimate;
+use crate::report::ci::diff_filter::{DiffIndex, LoadedDiff, MAX_DIFF_BYTES};
 use crate::report::{build_duplication_json, build_health_json};
+
+pub const COMMON_ANALYSIS_OPTION_FLAGS: &[&str] = &[
+    "root",
+    "config",
+    "no-cache",
+    "threads",
+    "changed-since",
+    "diff-file",
+    "production",
+    "workspace",
+    "changed-workspaces",
+    "explain",
+];
 
 /// Structured error surface for the programmatic API.
 #[derive(Debug, Clone, Serialize)]
@@ -68,6 +82,7 @@ pub struct AnalysisOptions {
     pub config_path: Option<PathBuf>,
     pub no_cache: bool,
     pub threads: Option<usize>,
+    pub diff_file: Option<PathBuf>,
     /// Legacy convenience override. `true` forces production mode; `false`
     /// defers to config unless `production_override` is set.
     pub production: bool,
@@ -257,12 +272,13 @@ pub struct ComplexityOptions {
     pub coverage_root: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone)]
 struct ResolvedAnalysisOptions {
     root: PathBuf,
     config_path: Option<PathBuf>,
     no_cache: bool,
     threads: usize,
+    pool: rayon::ThreadPool,
+    diff: Option<LoadedDiff>,
     production_override: Option<bool>,
     changed_since: Option<String>,
     workspace: Option<Vec<String>>,
@@ -330,7 +346,16 @@ impl AnalysisOptions {
         }
 
         let threads = self.threads.unwrap_or_else(default_threads);
-        crate::rayon_pool::configure_global_pool(threads);
+        let pool = crate::rayon_pool::build_thread_pool(threads).map_err(|err| {
+            ProgrammaticError::new(format!("failed to build analysis thread pool: {err}"), 2)
+                .with_code("FALLOW_THREAD_POOL_INIT_FAILED")
+                .with_context("analysis.threads")
+        })?;
+        let diff = self
+            .diff_file
+            .as_deref()
+            .map(|path| load_explicit_diff_file(path, &root))
+            .transpose()?;
         let production_override = self
             .production_override
             .or_else(|| self.production.then_some(true));
@@ -340,6 +365,8 @@ impl AnalysisOptions {
             config_path: self.config_path.clone(),
             no_cache: self.no_cache,
             threads,
+            pool,
+            diff,
             production_override,
             changed_since: self.changed_since.clone(),
             workspace: self.workspace.clone(),
@@ -349,8 +376,80 @@ impl AnalysisOptions {
     }
 }
 
+impl ResolvedAnalysisOptions {
+    fn install<R: Send>(&self, f: impl FnOnce() -> R + Send) -> R {
+        self.pool.install(f)
+    }
+
+    fn diff_index(&self) -> Option<&DiffIndex> {
+        self.diff.as_ref().map(|loaded| &loaded.index)
+    }
+}
+
 fn default_threads() -> usize {
     std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
+}
+
+fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<LoadedDiff> {
+    if path == Path::new("-") {
+        return Err(ProgrammaticError::new(
+            "`diff_file` does not support stdin; pass a file path",
+            2,
+        )
+        .with_code("FALLOW_INVALID_DIFF_FILE")
+        .with_context("analysis.diffFile"));
+    }
+
+    let abs = if crate::path_util::is_absolute_path_any_platform(path) {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+
+    let meta = std::fs::metadata(&abs).map_err(|err| {
+        ProgrammaticError::new(
+            format!(
+                "diff file does not exist or cannot be read: {} ({err})",
+                abs.display()
+            ),
+            2,
+        )
+        .with_code("FALLOW_INVALID_DIFF_FILE")
+        .with_context("analysis.diffFile")
+    })?;
+    if !meta.is_file() {
+        return Err(ProgrammaticError::new(
+            format!("diff path is not a file: {}", abs.display()),
+            2,
+        )
+        .with_code("FALLOW_INVALID_DIFF_FILE")
+        .with_context("analysis.diffFile"));
+    }
+    if meta.len() > MAX_DIFF_BYTES {
+        return Err(ProgrammaticError::new(
+            format!(
+                "diff file is {} bytes, above the {MAX_DIFF_BYTES} byte limit: {}",
+                meta.len(),
+                abs.display()
+            ),
+            2,
+        )
+        .with_code("FALLOW_INVALID_DIFF_FILE")
+        .with_context("analysis.diffFile"));
+    }
+
+    let text = std::fs::read_to_string(&abs).map_err(|err| {
+        ProgrammaticError::new(
+            format!("failed to read diff file {}: {err}", abs.display()),
+            2,
+        )
+        .with_code("FALLOW_INVALID_DIFF_FILE")
+        .with_context("analysis.diffFile")
+    })?;
+
+    Ok(LoadedDiff {
+        index: DiffIndex::from_unified_diff(&text),
+    })
 }
 
 fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
@@ -432,6 +531,8 @@ fn build_check_options<'a>(
         fail_on_issues: false,
         filters,
         changed_since: resolved.changed_since.as_deref(),
+        diff_index: resolved.diff_index(),
+        use_shared_diff_index: false,
         baseline: None,
         save_baseline: None,
         sarif_file: None,
@@ -506,23 +607,25 @@ fn filter_for_boundary_violations(results: &AnalysisResults) -> AnalysisResults 
 /// Run the dead-code analysis and return the CLI JSON contract as a value.
 pub fn detect_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<serde_json::Value> {
     let resolved = options.analysis.resolve()?;
-    let filters = to_issue_filters(&options.filters);
-    let trace_opts = TraceOptions {
-        trace_export: None,
-        trace_file: None,
-        trace_dependency: None,
-        performance: false,
-    };
-    let check_options = build_check_options(&resolved, options, &filters, &trace_opts);
-    let result = crate::check::execute_check(&check_options)
-        .map_err(|_| generic_analysis_error("dead-code"))?;
-    build_dead_code_json(
-        &result.results,
-        &result.config.root,
-        result.elapsed,
-        resolved.explain,
-        result.config_fixable,
-    )
+    resolved.install(|| {
+        let filters = to_issue_filters(&options.filters);
+        let trace_opts = TraceOptions {
+            trace_export: None,
+            trace_file: None,
+            trace_dependency: None,
+            performance: false,
+        };
+        let check_options = build_check_options(&resolved, options, &filters, &trace_opts);
+        let result = crate::check::execute_check(&check_options)
+            .map_err(|_| generic_analysis_error("dead-code"))?;
+        build_dead_code_json(
+            &result.results,
+            &result.config.root,
+            result.elapsed,
+            resolved.explain,
+            result.config_fixable,
+        )
+    })
 }
 
 /// Run the circular-dependency analysis and return the standard dead-code JSON envelope
@@ -531,24 +634,26 @@ pub fn detect_circular_dependencies(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<serde_json::Value> {
     let resolved = options.analysis.resolve()?;
-    let filters = to_issue_filters(&options.filters);
-    let trace_opts = TraceOptions {
-        trace_export: None,
-        trace_file: None,
-        trace_dependency: None,
-        performance: false,
-    };
-    let check_options = build_check_options(&resolved, options, &filters, &trace_opts);
-    let result = crate::check::execute_check(&check_options)
-        .map_err(|_| generic_analysis_error("dead-code"))?;
-    let filtered = filter_for_circular_dependencies(&result.results);
-    build_dead_code_json(
-        &filtered,
-        &result.config.root,
-        result.elapsed,
-        resolved.explain,
-        result.config_fixable,
-    )
+    resolved.install(|| {
+        let filters = to_issue_filters(&options.filters);
+        let trace_opts = TraceOptions {
+            trace_export: None,
+            trace_file: None,
+            trace_dependency: None,
+            performance: false,
+        };
+        let check_options = build_check_options(&resolved, options, &filters, &trace_opts);
+        let result = crate::check::execute_check(&check_options)
+            .map_err(|_| generic_analysis_error("dead-code"))?;
+        let filtered = filter_for_circular_dependencies(&result.results);
+        build_dead_code_json(
+            &filtered,
+            &result.config.root,
+            result.elapsed,
+            resolved.explain,
+            result.config_fixable,
+        )
+    })
 }
 
 /// Run the boundary-violation analysis and return the standard dead-code JSON envelope
@@ -557,77 +662,83 @@ pub fn detect_boundary_violations(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<serde_json::Value> {
     let resolved = options.analysis.resolve()?;
-    let filters = to_issue_filters(&options.filters);
-    let trace_opts = TraceOptions {
-        trace_export: None,
-        trace_file: None,
-        trace_dependency: None,
-        performance: false,
-    };
-    let check_options = build_check_options(&resolved, options, &filters, &trace_opts);
-    let result = crate::check::execute_check(&check_options)
-        .map_err(|_| generic_analysis_error("dead-code"))?;
-    let filtered = filter_for_boundary_violations(&result.results);
-    build_dead_code_json(
-        &filtered,
-        &result.config.root,
-        result.elapsed,
-        resolved.explain,
-        result.config_fixable,
-    )
+    resolved.install(|| {
+        let filters = to_issue_filters(&options.filters);
+        let trace_opts = TraceOptions {
+            trace_export: None,
+            trace_file: None,
+            trace_dependency: None,
+            performance: false,
+        };
+        let check_options = build_check_options(&resolved, options, &filters, &trace_opts);
+        let result = crate::check::execute_check(&check_options)
+            .map_err(|_| generic_analysis_error("dead-code"))?;
+        let filtered = filter_for_boundary_violations(&result.results);
+        build_dead_code_json(
+            &filtered,
+            &result.config.root,
+            result.elapsed,
+            resolved.explain,
+            result.config_fixable,
+        )
+    })
 }
 
 /// Run the duplication analysis and return the CLI JSON contract as a value.
 pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<serde_json::Value> {
     let resolved = options.analysis.resolve()?;
-    let dupes_options = DupesOptions {
-        root: &resolved.root,
-        config_path: &resolved.config_path,
-        output: OutputFormat::Human,
-        no_cache: resolved.no_cache,
-        threads: resolved.threads,
-        quiet: true,
-        // The programmatic API requires callers to provide concrete values
-        // (the public `DuplicationOptions` has no Optional scalars), so we
-        // forward each as an explicit override.
-        mode: Some(options.mode.to_cli()),
-        min_tokens: Some(options.min_tokens),
-        min_lines: Some(options.min_lines),
-        min_occurrences: Some(options.min_occurrences),
-        threshold: Some(options.threshold),
-        skip_local: options.skip_local,
-        cross_language: options.cross_language,
-        ignore_imports: options.ignore_imports,
-        top: options.top,
-        baseline_path: None,
-        save_baseline_path: None,
-        production: resolved.production_override.unwrap_or(false),
-        production_override: resolved.production_override,
-        trace: None,
-        changed_since: resolved.changed_since.as_deref(),
-        changed_files: None,
-        workspace: resolved.workspace.as_deref(),
-        changed_workspaces: resolved.changed_workspaces.as_deref(),
-        explain: resolved.explain,
-        explain_skipped: false,
-        summary: false,
-        group_by: None,
-        // The programmatic API returns structured JSON; performance panels go
-        // to stderr in human mode and are not part of the public contract.
-        performance: false,
-    };
-    let result =
-        crate::dupes::execute_dupes(&dupes_options).map_err(|_| generic_analysis_error("dupes"))?;
-    build_duplication_json(
-        &result.report,
-        &result.config.root,
-        result.elapsed,
-        resolved.explain,
-    )
-    .map_err(|err| {
-        ProgrammaticError::new(format!("failed to serialize duplication report: {err}"), 2)
-            .with_code("FALLOW_SERIALIZE_DUPLICATION_REPORT")
-            .with_context("dupes")
+    resolved.install(|| {
+        let dupes_options = DupesOptions {
+            root: &resolved.root,
+            config_path: &resolved.config_path,
+            output: OutputFormat::Human,
+            no_cache: resolved.no_cache,
+            threads: resolved.threads,
+            quiet: true,
+            // The programmatic API requires callers to provide concrete values
+            // (the public `DuplicationOptions` has no Optional scalars), so we
+            // forward each as an explicit override.
+            mode: Some(options.mode.to_cli()),
+            min_tokens: Some(options.min_tokens),
+            min_lines: Some(options.min_lines),
+            min_occurrences: Some(options.min_occurrences),
+            threshold: Some(options.threshold),
+            skip_local: options.skip_local,
+            cross_language: options.cross_language,
+            ignore_imports: options.ignore_imports,
+            top: options.top,
+            baseline_path: None,
+            save_baseline_path: None,
+            production: resolved.production_override.unwrap_or(false),
+            production_override: resolved.production_override,
+            trace: None,
+            changed_since: resolved.changed_since.as_deref(),
+            diff_index: resolved.diff_index(),
+            use_shared_diff_index: false,
+            changed_files: None,
+            workspace: resolved.workspace.as_deref(),
+            changed_workspaces: resolved.changed_workspaces.as_deref(),
+            explain: resolved.explain,
+            explain_skipped: false,
+            summary: false,
+            group_by: None,
+            // The programmatic API returns structured JSON; performance panels go
+            // to stderr in human mode and are not part of the public contract.
+            performance: false,
+        };
+        let result = crate::dupes::execute_dupes(&dupes_options)
+            .map_err(|_| generic_analysis_error("dupes"))?;
+        build_duplication_json(
+            &result.report,
+            &result.config.root,
+            result.elapsed,
+            resolved.explain,
+        )
+        .map_err(|err| {
+            ProgrammaticError::new(format!("failed to serialize duplication report: {err}"), 2)
+                .with_code("FALLOW_SERIALIZE_DUPLICATION_REPORT")
+                .with_context("dupes")
+        })
     })
 }
 
@@ -685,6 +796,8 @@ fn build_complexity_options<'a>(
         production: resolved.production_override.unwrap_or(false),
         production_override: resolved.production_override,
         changed_since: resolved.changed_since.as_deref(),
+        diff_index: resolved.diff_index(),
+        use_shared_diff_index: false,
         workspace: resolved.workspace.as_deref(),
         changed_workspaces: resolved.changed_workspaces.as_deref(),
         baseline: None,
@@ -715,10 +828,6 @@ fn build_complexity_options<'a>(
         performance: false,
         min_severity: None,
         runtime_coverage: None,
-        // Programmatic API does not surface line-level PR scoping; callers
-        // that want it populate the process-wide diff cache via
-        // `crate::report::ci::diff_filter::init_shared_diff(...)` before
-        // calling `compute_complexity`.
     }
 }
 
@@ -743,19 +852,21 @@ pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<ser
             .with_context("health.coverage_root"));
     }
 
-    let health_options = build_complexity_options(&resolved, options);
-    let result = crate::health::execute_health(&health_options)
-        .map_err(|_| generic_analysis_error("health"))?;
-    build_health_json(
-        &result.report,
-        &result.config.root,
-        result.elapsed,
-        resolved.explain,
-    )
-    .map_err(|err| {
-        ProgrammaticError::new(format!("failed to serialize health report: {err}"), 2)
-            .with_code("FALLOW_SERIALIZE_HEALTH_REPORT")
-            .with_context("health")
+    resolved.install(|| {
+        let health_options = build_complexity_options(&resolved, options);
+        let result = crate::health::execute_health(&health_options)
+            .map_err(|_| generic_analysis_error("health"))?;
+        build_health_json(
+            &result.report,
+            &result.config.root,
+            result.elapsed,
+            resolved.explain,
+        )
+        .map_err(|err| {
+            ProgrammaticError::new(format!("failed to serialize health report: {err}"), 2)
+                .with_code("FALLOW_SERIALIZE_HEALTH_REPORT")
+                .with_context("health")
+        })
     })
 }
 
@@ -768,6 +879,11 @@ pub fn compute_health(options: &ComplexityOptions) -> ProgrammaticResult<serde_j
 mod tests {
     use super::*;
     use crate::report::test_helpers::sample_results;
+    use std::process::Command;
+
+    const SHARED_DIFF_CHILD_ENV: &str = "FALLOW_PROGRAMMATIC_SHARED_DIFF_CHILD";
+    const SHARED_DIFF_CHILD_TEST: &str =
+        "programmatic::tests::programmatic_without_diff_file_ignores_shared_diff_cache";
 
     #[test]
     fn circular_dependency_filter_clears_other_issue_types() {
@@ -866,6 +982,173 @@ mod tests {
         );
     }
 
+    #[test]
+    fn analysis_resolve_uses_per_call_thread_pool() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+
+        let one = AnalysisOptions {
+            root: Some(root.to_path_buf()),
+            threads: Some(1),
+            ..AnalysisOptions::default()
+        }
+        .resolve()
+        .expect("one-thread options should resolve");
+        let two = AnalysisOptions {
+            root: Some(root.to_path_buf()),
+            threads: Some(2),
+            ..AnalysisOptions::default()
+        }
+        .resolve()
+        .expect("two-thread options should resolve");
+
+        assert_eq!(one.install(rayon::current_num_threads), 1);
+        assert_eq!(two.install(rayon::current_num_threads), 2);
+    }
+
+    #[test]
+    fn explicit_diff_file_scopes_dead_code_per_call() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"programmatic-diff","main":"src/index.ts"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/index.ts"),
+            "import { used } from './used';\nimport './a';\nimport './b';\nconsole.log(used);\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("src/used.ts"), "export const used = 1;\n").unwrap();
+        std::fs::write(root.join("src/a.ts"), "export const deadA = 1;\n").unwrap();
+        std::fs::write(root.join("src/b.ts"), "export const deadB = 1;\n").unwrap();
+        std::fs::write(
+            root.join("a.diff"),
+            diff_for("src/a.ts", "export const deadA = 1;\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("b.diff"),
+            diff_for("src/b.ts", "export const deadB = 1;\n"),
+        )
+        .unwrap();
+
+        let filters = DeadCodeFilters {
+            unused_exports: true,
+            ..DeadCodeFilters::default()
+        };
+
+        let a_json = detect_dead_code(&DeadCodeOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                diff_file: Some(PathBuf::from("a.diff")),
+                ..AnalysisOptions::default()
+            },
+            filters: filters.clone(),
+            ..DeadCodeOptions::default()
+        })
+        .expect("a-scoped analysis should succeed");
+        let b_json = detect_dead_code(&DeadCodeOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                diff_file: Some(PathBuf::from("b.diff")),
+                ..AnalysisOptions::default()
+            },
+            filters,
+            ..DeadCodeOptions::default()
+        })
+        .expect("b-scoped analysis should succeed");
+
+        assert_eq!(unused_export_names(&a_json), vec!["deadA"]);
+        assert_eq!(unused_export_names(&b_json), vec!["deadB"]);
+    }
+
+    #[test]
+    fn programmatic_without_diff_file_ignores_shared_diff_cache() {
+        if std::env::var_os(SHARED_DIFF_CHILD_ENV).is_some() {
+            run_programmatic_shared_diff_child();
+            return;
+        }
+
+        let current_exe = std::env::current_exe().expect("current test binary should be known");
+        let output = Command::new(current_exe)
+            .arg("--exact")
+            .arg(SHARED_DIFF_CHILD_TEST)
+            .arg("--nocapture")
+            .env(SHARED_DIFF_CHILD_ENV, "1")
+            .output()
+            .expect("shared diff child should start");
+
+        assert!(
+            output.status.success(),
+            "shared diff child failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn run_programmatic_shared_diff_child() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"programmatic-shared-diff","main":"src/index.ts"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/index.ts"),
+            "import { used } from './used';\nimport './a';\nimport './b';\nconsole.log(used);\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("src/used.ts"), "export const used = 1;\n").unwrap();
+        std::fs::write(root.join("src/a.ts"), "export const deadA = 1;\n").unwrap();
+        std::fs::write(root.join("src/b.ts"), "export const deadB = 1;\n").unwrap();
+        std::fs::write(
+            root.join("a.diff"),
+            diff_for("src/a.ts", "export const deadA = 1;\n"),
+        )
+        .unwrap();
+
+        let source = crate::report::ci::diff_filter::DiffSource::Flag(root.join("a.diff"));
+        let loaded = crate::report::ci::diff_filter::init_shared_diff(Some(&source), true);
+        assert!(loaded.is_some(), "shared diff should load in child process");
+
+        let json = detect_dead_code(&DeadCodeOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                ..AnalysisOptions::default()
+            },
+            filters: DeadCodeFilters {
+                unused_exports: true,
+                ..DeadCodeFilters::default()
+            },
+            ..DeadCodeOptions::default()
+        })
+        .expect("analysis without explicit diff should succeed");
+
+        assert_eq!(unused_export_names(&json), vec!["deadA", "deadB"]);
+    }
+
+    #[test]
+    fn explicit_diff_file_rejects_stdin_sentinel() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let Err(error) = AnalysisOptions {
+            root: Some(dir.path().to_path_buf()),
+            diff_file: Some(PathBuf::from("-")),
+            ..AnalysisOptions::default()
+        }
+        .resolve() else {
+            panic!("stdin sentinel is not part of the programmatic API");
+        };
+
+        assert_eq!(error.code.as_deref(), Some("FALLOW_INVALID_DIFF_FILE"));
+        assert_eq!(error.context.as_deref(), Some("analysis.diffFile"));
+    }
+
     fn unused_file_paths(json: &serde_json::Value) -> Vec<String> {
         json["unused_files"]
             .as_array()
@@ -874,5 +1157,21 @@ mod tests {
             .filter_map(|file| file["path"].as_str())
             .map(str::to_owned)
             .collect()
+    }
+
+    fn unused_export_names(json: &serde_json::Value) -> Vec<String> {
+        let mut names: Vec<String> = json["unused_exports"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|export| export["export_name"].as_str())
+            .map(str::to_owned)
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn diff_for(path: &str, line: &str) -> String {
+        format!("diff --git a/{path} b/{path}\n--- /dev/null\n+++ b/{path}\n@@ -0,0 +1 @@\n+{line}")
     }
 }

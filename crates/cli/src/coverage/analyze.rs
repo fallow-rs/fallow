@@ -150,6 +150,8 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
         production: args.production,
         production_override: Some(args.production),
         changed_since: None,
+        diff_index: None,
+        use_shared_diff_index: true,
         workspace: None,
         changed_workspaces: None,
         baseline: None,

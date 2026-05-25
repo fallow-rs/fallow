@@ -81,6 +81,8 @@ pub struct HealthOptions<'a> {
     pub production: bool,
     pub production_override: Option<bool>,
     pub changed_since: Option<&'a str>,
+    pub diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
+    pub use_shared_diff_index: bool,
     pub workspace: Option<&'a [String]>,
     pub changed_workspaces: Option<&'a str>,
     pub baseline: Option<&'a std::path::Path>,
@@ -129,16 +131,9 @@ pub struct HealthOptions<'a> {
     pub min_severity: Option<FindingSeverity>,
     /// Paid runtime coverage sidecar input.
     pub runtime_coverage: Option<RuntimeCoverageOptions>,
-    // `diff_file` was removed from this struct: health now sources the
-    // parsed diff index from the process-wide cache in
-    // `crate::report::ci::diff_filter::shared_diff_index()`, populated
-    // by `main()`. The cache covers `--diff-file PATH`, `--diff-file -`,
-    // `--diff-stdin`, and the `$FALLOW_DIFF_FILE` env var; the prior
-    // per-options field only accepted a path and silently dropped the
-    // two stdin forms. Programmatic API callers that want to scope
-    // hot-path-touched by a diff must populate the shared cache via
-    // `diff_filter::init_shared_diff(...)` before invoking
-    // `execute_health`.
+    // CLI calls source the parsed diff from the process-wide startup cache.
+    // Programmatic and NAPI calls pass `diff_index` explicitly so each request
+    // can carry its own line-level scope without touching process globals.
 }
 
 struct HealthPipelineTimings {
@@ -278,18 +273,14 @@ fn execute_health_inner(
     let changed_files = opts
         .changed_since
         .and_then(|git_ref| get_changed_files(opts.root, git_ref));
-    // Source the runtime-coverage diff index from the same process-wide
-    // cache that drives the finding-level filter. `main()` resolves
-    // `--diff-file`, `--diff-stdin`, the `-` stdin sentinel, and the
-    // `$FALLOW_DIFF_FILE` env var into a single parsed `DiffIndex` and
-    // populates `SHARED_DIFF`; both the hot-path-touched verdict here
-    // AND the cross-cutting finding filter must read from that cache so
-    // they cannot diverge. The old per-path loader (which only accepted
-    // `Option<&Path>`) silently ignored `--diff-stdin` (None) and
-    // tried to read a file literally named `-` for the stdin sentinel,
-    // producing a degraded runtime-coverage verdict for the new stdin
-    // paths even though help text and CI docs advertised them.
-    let diff_index = crate::report::ci::diff_filter::shared_diff_index();
+    // Use one diff source for runtime-coverage and finding-level filters.
+    // CLI calls fall back to the startup cache; embedded callers pass an
+    // explicit per-call index.
+    let diff_index = match opts.diff_index {
+        Some(index) => Some(index),
+        None if opts.use_shared_diff_index => crate::report::ci::diff_filter::shared_diff_index(),
+        None => None,
+    };
     let ws_roots = resolve_workspace_scope(
         opts.root,
         opts.workspace,
@@ -551,7 +542,7 @@ fn execute_health_inner(
     // accurate, not jq-corrected" goal). Hotspots and refactoring
     // targets filter at file level later in this function; the line-
     // level filter only fits findings that carry a function-body span.
-    if let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index() {
+    if let Some(diff_index) = diff_index {
         filter_complexity_findings_by_diff(&mut findings, diff_index, &config.root);
     }
 
@@ -598,7 +589,7 @@ fn execute_health_inner(
     } else {
         (Vec::new(), None)
     };
-    if let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index() {
+    if let Some(diff_index) = diff_index {
         filter_hotspots_by_diff(&mut hotspots, diff_index, &config.root);
     }
     let hotspots_ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -613,7 +604,7 @@ fn execute_health_inner(
         loaded_baseline.as_ref(),
         &config.root,
     );
-    if let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index() {
+    if let Some(diff_index) = diff_index {
         filter_refactoring_targets_by_diff(&mut targets, diff_index, &config.root);
     }
     let targets_ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -718,7 +709,7 @@ fn execute_health_inner(
         changed_files.as_ref(),
         ws_roots.as_deref(),
     );
-    if let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index() {
+    if let Some(diff_index) = diff_index {
         filter_large_functions_by_diff(&mut large_functions, diff_index, &config.root);
     }
 
@@ -1009,15 +1000,9 @@ fn retain_hot_paths_in_change_scope(
     true
 }
 
-// `health::load_diff_index` (formerly here) was retired in favour of the
-// process-wide `diff_filter::shared_diff_index()` cache populated by
-// `main()`. The retired helper only knew how to read from a path or the
-// `$FALLOW_DIFF_FILE` env var; it silently dropped `--diff-stdin` (None
-// path) and the `-` stdin sentinel (path literally `-`, no file on
-// disk). Sourcing the index from the shared cache lets the runtime-
-// coverage hot-path verdict honor every diff source the CLI accepts,
-// matches the finding-level filter's behaviour, and keeps the diff
-// parsed exactly once per process.
+// `health::load_diff_index` (formerly here) was retired in favour of passing
+// a single parsed diff index through `HealthOptions`: CLI calls fall back to
+// the startup cache, while embedded calls can provide a per-request index.
 
 /// Reduce `path` to a forward-slashed, project-root-relative string for
 /// matching against a unified diff's `+++ b/<path>` keys. Returns `None`
@@ -4031,12 +4016,10 @@ mod tests {
         );
     }
 
-    // `load_diff_index_*` tests retired: the per-path loader they
-    // exercised was removed when health switched to the process-wide
-    // `diff_filter::shared_diff_index()` cache. The cache's path /
-    // env / stdin resolution is covered end-to-end in
-    // `crates/cli/src/report/ci/diff_filter.rs` tests
-    // (resolve_diff_source + load_diff_index_for_findings).
+    // `load_diff_index_*` tests retired: the per-path loader they exercised
+    // was removed when health switched to an already-parsed `diff_index`.
+    // CLI path/env/stdin resolution is covered end-to-end in
+    // `crates/cli/src/report/ci/diff_filter.rs` tests.
 
     #[test]
     fn retain_hot_paths_drops_when_diff_touches_file_but_no_added_lines() {

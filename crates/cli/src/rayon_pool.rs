@@ -3,12 +3,24 @@
 // `configured_pool_survives_deep_worker_stack_probe` test asserts this floor.
 const WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
 
+#[allow(
+    dead_code,
+    reason = "used by the CLI binary; the library build uses per-call pools"
+)]
 pub fn configure_global_pool(threads: usize) {
     // `build_global` is process-wide and one-shot: subsequent calls (e.g. from
     // a NAPI host that constructs `AnalysisOptions` per request) return Err and
     // leave the first-set thread count and stack size in place. Errors are
     // intentionally discarded so re-entry is a no-op rather than a hard failure.
     let _ = build_pool(threads).build_global();
+}
+
+#[allow(
+    dead_code,
+    reason = "used by the library programmatic API; the CLI binary uses the global pool"
+)]
+pub fn build_thread_pool(threads: usize) -> Result<rayon::ThreadPool, rayon::ThreadPoolBuildError> {
+    build_pool(threads).build()
 }
 
 fn build_pool(threads: usize) -> rayon::ThreadPoolBuilder {

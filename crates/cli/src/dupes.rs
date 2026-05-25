@@ -59,6 +59,8 @@ pub struct DupesOptions<'a> {
     pub production_override: Option<bool>,
     pub trace: Option<&'a str>,
     pub changed_since: Option<&'a str>,
+    pub diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
+    pub use_shared_diff_index: bool,
     pub changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     pub workspace: Option<&'a [String]>,
     pub changed_workspaces: Option<&'a str>,
@@ -370,13 +372,14 @@ fn execute_dupes_inner(
         filter_by_changed_files(&mut report, changed, &config.root);
     }
 
-    // Diff-line filtering (issue #424). Group-level retention: a clone
-    // family stays in the report when at least one of its instances'
-    // `[start_line..=end_line]` ranges overlaps an added line in the
-    // diff. Runs AFTER the changed-files pass so the latter has already
-    // narrowed to touched files; this then narrows to touched LINES
-    // within those files. No-op when no diff was supplied.
-    if let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index() {
+    // Diff-line filtering (issue #424). CLI calls use the startup cache;
+    // programmatic/NAPI calls pass an explicit per-call index so concurrent
+    // requests cannot inherit another request's diff scope.
+    if let Some(diff_index) = match opts.diff_index {
+        Some(index) => Some(index),
+        None if opts.use_shared_diff_index => crate::report::ci::diff_filter::shared_diff_index(),
+        None => None,
+    } {
         filter_by_diff(&mut report, diff_index, &config.root);
     }
 
@@ -823,6 +826,8 @@ mod tests {
             production_override: None,
             trace: None,
             changed_since: None,
+            diff_index: None,
+            use_shared_diff_index: true,
             changed_files: None,
             workspace: None,
             changed_workspaces: None,

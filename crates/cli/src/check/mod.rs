@@ -171,6 +171,8 @@ pub struct CheckOptions<'a> {
     pub fail_on_issues: bool,
     pub filters: &'a IssueFilters,
     pub changed_since: Option<&'a str>,
+    pub diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
+    pub use_shared_diff_index: bool,
     pub baseline: Option<&'a std::path::Path>,
     pub save_baseline: Option<&'a std::path::Path>,
     pub sarif_file: Option<&'a std::path::Path>,
@@ -342,15 +344,15 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         filtering::filter_changed_files(&mut results, changed);
     }
 
-    // Diff-line filtering (issue #424). When `--diff-file` or `$FALLOW_DIFF_FILE`
-    // was supplied, the shared cache is populated by `main()` and every
-    // subsystem applies the same line-level filter so combined runs do not
-    // re-read the diff three times. The filter is opt-in: when no diff is
-    // configured, `shared_diff_index()` returns `None` and this block is a
-    // no-op. Runs AFTER `filter_changed_files` so the latter has already
-    // narrowed the result set to the touched files; the diff filter then
-    // narrows to the touched LINES, and project-level findings bypass.
-    if let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index() {
+    // Diff-line filtering (issue #424). CLI calls use the startup cache so
+    // combined runs do not re-read stdin or re-parse the same file three
+    // times; programmatic/NAPI calls pass an explicit per-call index so
+    // concurrent requests cannot inherit another request's diff scope.
+    if let Some(diff_index) = match opts.diff_index {
+        Some(index) => Some(index),
+        None if opts.use_shared_diff_index => crate::report::ci::diff_filter::shared_diff_index(),
+        None => None,
+    } {
         filtering::filter_results_by_diff(&mut results, diff_index, opts.root);
     }
 
