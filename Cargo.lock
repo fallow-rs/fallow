@@ -810,11 +810,11 @@ dependencies = [
  "globset",
  "http",
  "httpdate",
+ "ignore",
  "insta",
  "jsonc-parser",
  "miette",
  "notify",
- "notify-debouncer-mini",
  "oxc_coverage_instrument",
  "oxc_span",
  "proc-macro2",
@@ -1894,18 +1894,6 @@ dependencies = [
  "notify-types",
  "walkdir",
  "windows-sys 0.60.2",
-]
-
-[[package]]
-name = "notify-debouncer-mini"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17849edfaabd9a5fef1c606d99cfc615a8e99f7ac4366406d86c7942a3184cf2"
-dependencies = [
- "log",
- "notify",
- "notify-types",
- "tempfile",
 ]
 
 [[package]]

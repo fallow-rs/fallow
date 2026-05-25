@@ -1,11 +1,13 @@
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use colored::Colorize;
 use fallow_config::OutputFormat;
-use notify_debouncer_mini::{DebouncedEventKind, new_debouncer};
+use ignore::Match;
+use notify::{RecommendedWatcher, Watcher};
 use rustc_hash::FxHashSet;
 
 use crate::report;
@@ -13,6 +15,9 @@ use crate::runtime_support::load_config;
 
 /// ANSI escape: clear screen + scrollback + move cursor home (same sequence as tsc --watch).
 const CLEAR_SCREEN: &str = "\x1B[2J\x1B[3J\x1B[H";
+const DEBOUNCE_WINDOW: Duration = Duration::from_millis(500);
+const ROOT_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const REATTACH_ERROR_INTERVAL: Duration = Duration::from_secs(5);
 
 pub struct WatchOptions<'a> {
     pub root: &'a Path,
@@ -63,34 +68,232 @@ fn is_relevant_config(path: &Path) -> bool {
         })
 }
 
-/// Collect changed file paths from debounced events, deduplicating and stripping the root prefix.
-fn collect_changed_paths(
-    events: &[notify_debouncer_mini::DebouncedEvent],
-    root: &Path,
-) -> Vec<String> {
+fn has_disallowed_hidden_dir(relative: &Path) -> bool {
+    relative.parent().is_some_and(|parent| {
+        parent.components().any(|component| {
+            let name = component.as_os_str();
+            name.to_string_lossy().starts_with('.')
+                && !fallow_core::discover::is_allowed_hidden_dir(name)
+        })
+    })
+}
+
+fn build_production_glob_set() -> Option<globset::GlobSet> {
+    let mut builder = globset::GlobSetBuilder::new();
+    for pattern in fallow_core::discover::PRODUCTION_EXCLUDE_PATTERNS {
+        if let Ok(glob) = globset::GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .build()
+        {
+            builder.add(glob);
+        }
+    }
+    builder.build().ok()
+}
+
+#[derive(Clone)]
+struct WatchFilter {
+    root: PathBuf,
+    ignore_patterns: globset::GlobSet,
+    production_excludes: Option<globset::GlobSet>,
+    gitignores: Vec<ignore::gitignore::Gitignore>,
+    global_gitignore: ignore::gitignore::Gitignore,
+}
+
+impl WatchFilter {
+    fn new(config: &fallow_config::ResolvedConfig) -> Self {
+        let gitignores = build_project_gitignores(config);
+        let (global_gitignore, _) = ignore::gitignore::Gitignore::global();
+        Self {
+            root: config.root.clone(),
+            ignore_patterns: config.ignore_patterns.clone(),
+            production_excludes: config.production.then(build_production_glob_set).flatten(),
+            gitignores,
+            global_gitignore,
+        }
+    }
+
+    fn allows(&self, path: &Path) -> bool {
+        if !path.starts_with(&self.root) {
+            return false;
+        }
+        let relative = path.strip_prefix(&self.root).unwrap_or(path);
+        if has_disallowed_hidden_dir(relative) {
+            return false;
+        }
+        if self.ignore_patterns.is_match(relative) {
+            return false;
+        }
+        if self
+            .production_excludes
+            .as_ref()
+            .is_some_and(|excludes| excludes.is_match(relative))
+        {
+            return false;
+        }
+        let is_dir = path.is_dir();
+        match self.project_gitignore_match(path, is_dir) {
+            Some(true) => return false,
+            Some(false) => {}
+            None => {
+                if matches!(
+                    self.global_gitignore.matched(path, is_dir),
+                    Match::Ignore(_)
+                ) {
+                    return false;
+                }
+            }
+        }
+        is_relevant_source(path) || is_relevant_config(path) || path == self.root.join(".gitignore")
+    }
+
+    fn project_gitignore_match(&self, path: &Path, is_dir: bool) -> Option<bool> {
+        let mut ignored = None;
+        for gitignore in &self.gitignores {
+            match gitignore.matched_path_or_any_parents(path, is_dir) {
+                Match::Ignore(_) => ignored = Some(true),
+                Match::Whitelist(_) => ignored = Some(false),
+                Match::None => {}
+            }
+        }
+        ignored
+    }
+}
+
+fn build_project_gitignores(
+    config: &fallow_config::ResolvedConfig,
+) -> Vec<ignore::gitignore::Gitignore> {
+    let root = &config.root;
+    let mut gitignores = Vec::new();
+
+    let git_exclude = root.join(".git/info/exclude");
+    if let Some(gitignore) = build_gitignore(root, &git_exclude) {
+        gitignores.push(gitignore);
+    }
+
+    for path in discover_project_gitignores(root, &config.ignore_patterns) {
+        if let Some(base) = path.parent()
+            && let Some(gitignore) = build_gitignore(base, &path)
+        {
+            gitignores.push(gitignore);
+        }
+    }
+
+    gitignores
+}
+
+fn build_gitignore(base: &Path, path: &Path) -> Option<ignore::gitignore::Gitignore> {
+    let mut builder = ignore::gitignore::GitignoreBuilder::new(base);
+    let _ = builder.add(path);
+    builder.build().ok()
+}
+
+fn discover_project_gitignores(root: &Path, ignore_patterns: &globset::GlobSet) -> Vec<PathBuf> {
+    let root = root.to_path_buf();
+    let ignore_patterns = ignore_patterns.clone();
+    let filter_root = root.clone();
+    let mut walk_builder = ignore::WalkBuilder::new(&root);
+    walk_builder
+        .hidden(false)
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
+        .filter_entry(move |entry| {
+            let relative = entry
+                .path()
+                .strip_prefix(&filter_root)
+                .unwrap_or_else(|_| entry.path());
+            !has_disallowed_hidden_dir(relative) && !ignore_patterns.is_match(relative)
+        });
+
+    let mut paths = Vec::new();
+    for entry in walk_builder.build().flatten() {
+        if entry
+            .file_type()
+            .is_some_and(|file_type| !file_type.is_dir())
+            && entry.file_name() == ".gitignore"
+        {
+            paths.push(entry.into_path());
+        }
+    }
+    paths.sort_unstable();
+    paths
+}
+
+fn filter_event_paths(event: notify::Event, filter: &WatchFilter) -> Vec<PathBuf> {
     let mut seen = FxHashSet::default();
     let mut paths = Vec::new();
-    for event in events {
-        if !matches!(event.kind, DebouncedEventKind::Any) {
+    for path in event.paths {
+        if !filter.allows(&path) {
             continue;
         }
-        if !is_relevant_source(&event.path) && !is_relevant_config(&event.path) {
-            continue;
-        }
-        let display = event
-            .path
-            .strip_prefix(root)
-            .unwrap_or(&event.path)
-            .display()
-            .to_string();
-        if seen.insert(display.clone()) {
-            paths.push(display);
+        if seen.insert(path.clone()) {
+            paths.push(path);
         }
     }
     paths
 }
 
-fn print_waiting() {
+#[derive(Debug, Default)]
+struct PathDebouncer {
+    paths: Vec<PathBuf>,
+    seen: FxHashSet<PathBuf>,
+    last_update: Option<Instant>,
+}
+
+impl PathDebouncer {
+    fn push_paths(&mut self, paths: Vec<PathBuf>, now: Instant) {
+        if paths.is_empty() {
+            return;
+        }
+        for path in paths {
+            if self.seen.insert(path.clone()) {
+                self.paths.push(path);
+            }
+        }
+        self.last_update = Some(now);
+    }
+
+    fn drain_ready(&mut self, now: Instant, timeout: Duration) -> Option<Vec<PathBuf>> {
+        if self
+            .last_update
+            .is_some_and(|updated| now.duration_since(updated) >= timeout)
+        {
+            self.last_update = None;
+            self.seen.clear();
+            Some(std::mem::take(&mut self.paths))
+        } else {
+            None
+        }
+    }
+
+    fn clear(&mut self) {
+        self.paths.clear();
+        self.seen.clear();
+        self.last_update = None;
+    }
+}
+
+fn display_changed_paths(paths: Vec<PathBuf>, root: &Path) -> Vec<String> {
+    let mut seen = FxHashSet::default();
+    let mut display_paths = Vec::with_capacity(paths.len());
+    for path in paths {
+        let display = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        if seen.insert(display.clone()) {
+            display_paths.push(display);
+        }
+    }
+    display_paths
+}
+
+fn print_waiting(opts: &WatchOptions<'_>) {
+    if opts.quiet {
+        return;
+    }
     eprintln!(
         "\n{}",
         "Watching for changes... (press Ctrl+C to stop)".dimmed()
@@ -161,7 +364,6 @@ fn reload_config_or_keep_previous(
 
 pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
     use std::sync::mpsc;
-    use std::time::Duration;
 
     // Ensure the global signal handler is registered (idempotent if main
     // already called this) and flip the handler into graceful mode so a
@@ -195,65 +397,180 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
     if initial_status != ExitCode::SUCCESS {
         return initial_status;
     }
-    print_waiting();
+    print_waiting(opts);
 
-    // Set up file watcher
     let (tx, rx) = mpsc::channel();
-    let mut debouncer = match new_debouncer(Duration::from_millis(500), tx) {
-        Ok(d) => d,
+    let filter = Arc::new(Mutex::new(WatchFilter::new(&config)));
+    let mut watcher = match create_watcher(opts.root, Arc::clone(&filter), tx.clone()) {
+        Ok(w) => Some(w),
         Err(e) => {
             eprintln!("Failed to create file watcher: {e}");
             return ExitCode::from(2);
         }
     };
 
-    if let Err(e) = debouncer
-        .watcher()
-        .watch(opts.root.as_ref(), notify::RecursiveMode::Recursive)
-    {
-        eprintln!("Failed to watch directory: {e}");
-        return ExitCode::from(2);
-    }
-
+    let mut debouncer = PathDebouncer::default();
+    let mut detached = false;
+    let mut next_root_check = Instant::now() + ROOT_POLL_INTERVAL;
+    let mut last_reattach_error = None;
     loop {
         if crate::signal::is_shutting_down() {
             eprintln!("Watch stopped.");
             return ExitCode::SUCCESS;
         }
+
+        let now = Instant::now();
+        if now >= next_root_check {
+            next_root_check = now + ROOT_POLL_INTERVAL;
+            handle_root_lifecycle(
+                opts,
+                &mut config,
+                &filter,
+                &mut watcher,
+                &tx,
+                &mut debouncer,
+                &mut detached,
+                &mut last_reattach_error,
+            );
+        }
+
         match rx.recv_timeout(Duration::from_millis(200)) {
-            Ok(Ok(events)) => {
-                let changed = collect_changed_paths(&events, opts.root);
-                if changed.is_empty() {
+            Ok(Ok(paths)) => {
+                if detached {
                     continue;
                 }
-
-                if opts.clear_screen && std::io::stderr().is_terminal() {
-                    eprint!("{CLEAR_SCREEN}");
-                }
-
-                // Show which files changed
-                for path in &changed {
-                    eprintln!("{} {path}", "Changed:".dimmed());
-                }
-                eprintln!();
-
-                reload_config_or_keep_previous(&mut config, opts, load_config);
-
-                let status = analyze_and_report(&config, opts);
-                if status != ExitCode::SUCCESS {
-                    eprintln!("Watch analysis failed; continuing to watch for changes");
-                }
-                print_waiting();
+                debouncer.push_paths(paths, Instant::now());
             }
             Ok(Err(e)) => {
                 eprintln!("Watch error: {e:?}");
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                // Loop back to check the shutdown flag.
+                // Loop back to check the shutdown flag and debounce timeout.
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                eprintln!("Channel error: notify-debouncer sender disconnected");
+                eprintln!("Channel error: notify sender disconnected");
                 return ExitCode::from(2);
+            }
+        }
+
+        if !detached && let Some(paths) = debouncer.drain_ready(Instant::now(), DEBOUNCE_WINDOW) {
+            let changed = display_changed_paths(paths, opts.root);
+            if changed.is_empty() {
+                continue;
+            }
+
+            if opts.clear_screen && std::io::stderr().is_terminal() {
+                eprint!("{CLEAR_SCREEN}");
+            }
+
+            // Show which files changed
+            for path in &changed {
+                eprintln!("{} {path}", "Changed:".dimmed());
+            }
+            eprintln!();
+
+            reload_config_or_keep_previous(&mut config, opts, load_config);
+
+            let status = analyze_and_report(&config, opts);
+            if status != ExitCode::SUCCESS {
+                eprintln!("Watch analysis failed; continuing to watch for changes");
+            }
+            print_waiting(opts);
+        }
+    }
+}
+
+type WatchEvent = Result<Vec<PathBuf>, notify::Error>;
+
+fn create_watcher(
+    root: &Path,
+    filter: Arc<Mutex<WatchFilter>>,
+    tx: std::sync::mpsc::Sender<WatchEvent>,
+) -> notify::Result<RecommendedWatcher> {
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        let event = match event {
+            Ok(event) => event,
+            Err(err) => {
+                let _ = tx.send(Err(err));
+                return;
+            }
+        };
+        let Ok(filter) = filter.lock() else {
+            return;
+        };
+        let paths = filter_event_paths(event, &filter);
+        if !paths.is_empty() {
+            let _ = tx.send(Ok(paths));
+        }
+    })?;
+    watcher.watch(root, notify::RecursiveMode::Recursive)?;
+    Ok(watcher)
+}
+
+fn replace_watch_filter(filter: &Arc<Mutex<WatchFilter>>, config: &fallow_config::ResolvedConfig) {
+    if let Ok(mut guard) = filter.lock() {
+        *guard = WatchFilter::new(config);
+    }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "watch root lifecycle owns the explicit state slots mutated by the main loop"
+)]
+fn handle_root_lifecycle(
+    opts: &WatchOptions<'_>,
+    config: &mut fallow_config::ResolvedConfig,
+    filter: &Arc<Mutex<WatchFilter>>,
+    watcher: &mut Option<RecommendedWatcher>,
+    tx: &std::sync::mpsc::Sender<WatchEvent>,
+    debouncer: &mut PathDebouncer,
+    detached: &mut bool,
+    last_reattach_error: &mut Option<Instant>,
+) {
+    let root_exists = opts.root.metadata().is_ok();
+    if !root_exists {
+        if !*detached {
+            watcher.take();
+            debouncer.clear();
+            *detached = true;
+            *last_reattach_error = None;
+            if !opts.quiet {
+                eprintln!("Watch root disappeared; waiting for it to reappear...");
+            }
+        }
+        return;
+    }
+
+    if !*detached {
+        return;
+    }
+
+    reload_config_or_keep_previous(config, opts, load_config);
+    replace_watch_filter(filter, config);
+    match create_watcher(opts.root, Arc::clone(filter), tx.clone()) {
+        Ok(new_watcher) => {
+            *watcher = Some(new_watcher);
+            debouncer.clear();
+            *detached = false;
+            *last_reattach_error = None;
+            if !opts.quiet {
+                eprintln!("Watch root re-attached; running analysis...");
+            }
+            let status = analyze_and_report(config, opts);
+            if status != ExitCode::SUCCESS {
+                eprintln!("Watch analysis failed; continuing to watch for changes");
+            }
+            print_waiting(opts);
+        }
+        Err(e) => {
+            let now = Instant::now();
+            if last_reattach_error
+                .is_none_or(|last| now.duration_since(last) >= REATTACH_ERROR_INTERVAL)
+            {
+                if !opts.quiet {
+                    eprintln!("Failed to re-attach watch root: {e}");
+                }
+                *last_reattach_error = Some(now);
             }
         }
     }
@@ -263,7 +580,7 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
 mod tests {
     use super::*;
     use fallow_config::FallowConfig;
-    use notify_debouncer_mini::{DebouncedEvent, DebouncedEventKind};
+    use notify::event::EventKind;
 
     // ── is_relevant_source ───────────────────────────────────────────
 
@@ -329,79 +646,259 @@ mod tests {
         assert!(!is_relevant_config(Path::new("README.md")));
     }
 
-    // ── collect_changed_paths ────────────────────────────────────────
+    #[test]
+    fn disallowed_hidden_dirs_match_discovery_filter() {
+        assert!(has_disallowed_hidden_dir(Path::new(".fallow/.gitignore")));
+        assert!(has_disallowed_hidden_dir(Path::new(".cache/file.ts")));
+        assert!(!has_disallowed_hidden_dir(Path::new(".storybook/main.ts")));
+        assert!(!has_disallowed_hidden_dir(Path::new("src/.generated.ts")));
+    }
 
-    fn make_event(path: &str, kind: DebouncedEventKind) -> DebouncedEvent {
-        DebouncedEvent {
-            path: PathBuf::from(path),
-            kind,
+    // ── watch filtering ──────────────────────────────────────────────
+
+    fn make_event(paths: &[&Path]) -> notify::Event {
+        let mut event = notify::Event::new(EventKind::Any);
+        for path in paths {
+            event = event.add_path((*path).to_path_buf());
         }
+        event
     }
 
     #[test]
-    fn collect_changed_paths_filters_non_source() {
+    fn watch_filter_rejects_non_source() {
         let root = PathBuf::from("/project");
-        let events = vec![
-            make_event("/project/src/index.ts", DebouncedEventKind::Any),
-            make_event("/project/README.md", DebouncedEventKind::Any),
-            make_event("/project/image.png", DebouncedEventKind::Any),
-        ];
-        let paths = collect_changed_paths(&events, &root);
-        assert_eq!(paths, vec!["src/index.ts"]);
+        let config = make_config(&root, OutputFormat::Human, 1, false);
+        let filter = WatchFilter::new(&config);
+        let event = make_event(&[
+            Path::new("/project/src/index.ts"),
+            Path::new("/project/README.md"),
+            Path::new("/project/image.png"),
+        ]);
+        let paths = filter_event_paths(event, &filter);
+        assert_eq!(display_changed_paths(paths, &root), vec!["src/index.ts"]);
     }
 
     #[test]
-    fn collect_changed_paths_includes_config() {
+    fn watch_filter_includes_config() {
         let root = PathBuf::from("/project");
-        let events = vec![
-            make_event("/project/package.json", DebouncedEventKind::Any),
-            make_event("/project/.fallowrc.json", DebouncedEventKind::Any),
-        ];
-        let paths = collect_changed_paths(&events, &root);
+        let config = make_config(&root, OutputFormat::Human, 1, false);
+        let filter = WatchFilter::new(&config);
+        let event = make_event(&[
+            Path::new("/project/package.json"),
+            Path::new("/project/.fallowrc.json"),
+        ]);
+        let paths = display_changed_paths(filter_event_paths(event, &filter), &root);
         assert_eq!(paths.len(), 2);
         assert!(paths.contains(&"package.json".to_string()));
         assert!(paths.contains(&".fallowrc.json".to_string()));
     }
 
     #[test]
-    fn collect_changed_paths_deduplicates() {
+    fn watch_filter_deduplicates() {
         let root = PathBuf::from("/project");
-        let events = vec![
-            make_event("/project/src/index.ts", DebouncedEventKind::Any),
-            make_event("/project/src/index.ts", DebouncedEventKind::Any),
-            make_event("/project/src/index.ts", DebouncedEventKind::Any),
-        ];
-        let paths = collect_changed_paths(&events, &root);
+        let config = make_config(&root, OutputFormat::Human, 1, false);
+        let filter = WatchFilter::new(&config);
+        let event = make_event(&[
+            Path::new("/project/src/index.ts"),
+            Path::new("/project/src/index.ts"),
+            Path::new("/project/src/index.ts"),
+        ]);
+        let paths = display_changed_paths(filter_event_paths(event, &filter), &root);
         assert_eq!(paths, vec!["src/index.ts"]);
     }
 
     #[test]
-    fn collect_changed_paths_ignores_non_any_events() {
+    fn watch_filter_rejects_default_ignored_paths() {
         let root = PathBuf::from("/project");
-        let events = vec![make_event(
-            "/project/src/index.ts",
-            DebouncedEventKind::AnyContinuous,
-        )];
-        let paths = collect_changed_paths(&events, &root);
+        let config = make_config(&root, OutputFormat::Human, 1, false);
+        let filter = WatchFilter::new(&config);
+        let event = make_event(&[
+            Path::new("/project/node_modules/foo/index.ts"),
+            Path::new("/project/dist/index.ts"),
+            Path::new("/project/.git/config"),
+            Path::new("/project/build/index.ts"),
+            Path::new("/project/src/vendor.min.js"),
+        ]);
+        let paths = filter_event_paths(event, &filter);
         assert!(paths.is_empty());
     }
 
     #[test]
-    fn collect_changed_paths_empty_events() {
+    fn watch_filter_allows_root_gitignore_but_rejects_internal_gitignore() {
         let root = PathBuf::from("/project");
-        let paths = collect_changed_paths(&[], &root);
+        let config = make_config(&root, OutputFormat::Human, 1, false);
+        let filter = WatchFilter::new(&config);
+        let event = make_event(&[
+            Path::new("/project/.gitignore"),
+            Path::new("/project/.fallow/.gitignore"),
+        ]);
+        let paths = display_changed_paths(filter_event_paths(event, &filter), &root);
+        assert_eq!(paths, vec![".gitignore"]);
+    }
+
+    #[test]
+    fn watch_filter_rejects_user_ignore_patterns() {
+        let root = PathBuf::from("/project");
+        let config = make_config_with_ignores(
+            &root,
+            OutputFormat::Human,
+            1,
+            false,
+            vec!["src/generated/**".to_string()],
+        );
+        let filter = WatchFilter::new(&config);
+        let event = make_event(&[Path::new("/project/src/generated/client.ts")]);
+        let paths = filter_event_paths(event, &filter);
         assert!(paths.is_empty());
     }
 
     #[test]
-    fn collect_changed_paths_strips_root_prefix() {
+    fn watch_filter_rejects_gitignored_paths() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join(".gitignore"), "ignored/**\n").expect("write gitignore");
+        let config = make_config(dir.path(), OutputFormat::Human, 1, false);
+        let filter = WatchFilter::new(&config);
+        let event = make_event(&[&dir.path().join("ignored/file.ts")]);
+        let paths = filter_event_paths(event, &filter);
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn watch_filter_rejects_nested_gitignored_paths() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("packages/web")).expect("create package dir");
+        std::fs::write(dir.path().join("packages/web/.gitignore"), "generated/**\n")
+            .expect("write nested gitignore");
+        let config = make_config(dir.path(), OutputFormat::Human, 1, false);
+        let filter = WatchFilter::new(&config);
+        let event = make_event(&[&dir.path().join("packages/web/generated/client.ts")]);
+        let paths = filter_event_paths(event, &filter);
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn watch_filter_project_whitelist_overrides_parent_ignore() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("packages/web/generated"))
+            .expect("create package dir");
+        std::fs::write(dir.path().join(".gitignore"), "packages/web/generated/**\n")
+            .expect("write root gitignore");
+        std::fs::write(
+            dir.path().join("packages/web/.gitignore"),
+            "!generated/client.ts\n",
+        )
+        .expect("write nested gitignore");
+        let config = make_config(dir.path(), OutputFormat::Human, 1, false);
+        let filter = WatchFilter::new(&config);
+        let event = make_event(&[&dir.path().join("packages/web/generated/client.ts")]);
+        let paths = display_changed_paths(filter_event_paths(event, &filter), dir.path());
+        assert_eq!(paths, vec!["packages/web/generated/client.ts"]);
+    }
+
+    #[test]
+    fn watch_filter_rejects_ignored_config_files() {
         let root = PathBuf::from("/project");
-        let events = vec![make_event(
-            "/project/src/deep/nested/file.tsx",
-            DebouncedEventKind::Any,
-        )];
-        let paths = collect_changed_paths(&events, &root);
+        let config = make_config_with_ignores(
+            &root,
+            OutputFormat::Human,
+            1,
+            false,
+            vec!["package.json".to_string()],
+        );
+        let filter = WatchFilter::new(&config);
+        let event = make_event(&[Path::new("/project/package.json")]);
+        let paths = filter_event_paths(event, &filter);
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn display_changed_paths_strips_root_prefix() {
+        let root = PathBuf::from("/project");
+        let paths = display_changed_paths(
+            vec![PathBuf::from("/project/src/deep/nested/file.tsx")],
+            &root,
+        );
         assert_eq!(paths, vec!["src/deep/nested/file.tsx"]);
+    }
+
+    #[test]
+    fn path_debouncer_emits_one_deduplicated_batch_after_quiet_window() {
+        let start = Instant::now();
+        let mut debouncer = PathDebouncer::default();
+        debouncer.push_paths(
+            vec![
+                PathBuf::from("/project/src/index.ts"),
+                PathBuf::from("/project/src/index.ts"),
+            ],
+            start,
+        );
+        assert!(
+            debouncer
+                .drain_ready(start + Duration::from_millis(499), DEBOUNCE_WINDOW)
+                .is_none()
+        );
+
+        let paths = debouncer
+            .drain_ready(start + DEBOUNCE_WINDOW, DEBOUNCE_WINDOW)
+            .expect("ready batch");
+        assert_eq!(paths, vec![PathBuf::from("/project/src/index.ts")]);
+    }
+
+    #[test]
+    fn empty_or_ignored_batches_do_not_extend_debounce_window() {
+        let start = Instant::now();
+        let mut debouncer = PathDebouncer::default();
+        debouncer.push_paths(vec![PathBuf::from("/project/src/index.ts")], start);
+        debouncer.push_paths(Vec::new(), start + Duration::from_millis(400));
+
+        assert!(
+            debouncer
+                .drain_ready(start + DEBOUNCE_WINDOW, DEBOUNCE_WINDOW)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn root_lifecycle_detaches_and_reattaches() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("project");
+        std::fs::create_dir(&root).expect("create root");
+        let mut config = make_config(&root, OutputFormat::Human, 1, true);
+        let opts = make_watch_options(&root, OutputFormat::Human, 1, true);
+        let filter = Arc::new(Mutex::new(WatchFilter::new(&config)));
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut watcher = None;
+        let mut debouncer = PathDebouncer::default();
+        let mut detached = false;
+        let mut last_reattach_error = None;
+
+        std::fs::remove_dir(&root).expect("remove root");
+        handle_root_lifecycle(
+            &opts,
+            &mut config,
+            &filter,
+            &mut watcher,
+            &tx,
+            &mut debouncer,
+            &mut detached,
+            &mut last_reattach_error,
+        );
+        assert!(detached);
+        assert!(watcher.is_none());
+
+        std::fs::create_dir(&root).expect("recreate root");
+        handle_root_lifecycle(
+            &opts,
+            &mut config,
+            &filter,
+            &mut watcher,
+            &tx,
+            &mut debouncer,
+            &mut detached,
+            &mut last_reattach_error,
+        );
+        assert!(!detached);
+        assert!(watcher.is_some());
     }
 
     fn make_config(
@@ -410,11 +907,21 @@ mod tests {
         threads: usize,
         quiet: bool,
     ) -> fallow_config::ResolvedConfig {
+        make_config_with_ignores(root, output, threads, quiet, Vec::new())
+    }
+
+    fn make_config_with_ignores(
+        root: &Path,
+        output: OutputFormat,
+        threads: usize,
+        quiet: bool,
+        ignore_patterns: Vec<String>,
+    ) -> fallow_config::ResolvedConfig {
         FallowConfig {
             schema: None,
             extends: vec![],
             entry: vec![],
-            ignore_patterns: vec![],
+            ignore_patterns,
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],

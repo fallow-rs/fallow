@@ -84,7 +84,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-st
 
 # File watching
 notify = "8"
-notify-debouncer-mini = "0.7"
 
 # Testing
 criterion = { version = "0.8", features = ["html_reports"] }
