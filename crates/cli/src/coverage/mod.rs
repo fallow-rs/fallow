@@ -604,8 +604,7 @@ fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
         let path = setup_state
             .recipe
             .as_ref()
-            .map(|recipe| recipe.path.clone())
-            .unwrap_or_else(|| recipe_path(root));
+            .map_or_else(|| recipe_path(root), |recipe| recipe.path.clone());
         println!(
             "Step 3/4: Coverage recipe... ok ({}) (resumed).",
             display_relative(root, &path)
