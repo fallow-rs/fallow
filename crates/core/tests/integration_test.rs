@@ -54,6 +54,8 @@ mod jsx_assets_and_jsdoc;
 mod member_detection;
 #[path = "integration_test/nx_project_json.rs"]
 mod nx_project_json;
+#[path = "integration_test/redwoodsdk.rs"]
+mod redwoodsdk;
 #[path = "integration_test/rules_config.rs"]
 mod rules_config;
 #[path = "integration_test/sfc_parsing.rs"]

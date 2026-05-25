@@ -2614,6 +2614,19 @@ fn css_plugins_have_correct_enablers() {
 }
 
 #[test]
+fn framework_plugins_have_correct_enablers() {
+    let registry = PluginRegistry::default();
+
+    let redwoodsdk_pkg = make_pkg(&["rwsdk"]);
+    let result = registry.run(&redwoodsdk_pkg, Path::new("/project"), &[]);
+    assert!(result.active_plugins.contains(&"redwoodsdk".to_string()));
+
+    let plain_vite_pkg = make_pkg(&["vite"]);
+    let result = registry.run(&plain_vite_pkg, Path::new("/project"), &[]);
+    assert!(!result.active_plugins.contains(&"redwoodsdk".to_string()));
+}
+
+#[test]
 fn transpiler_plugins_have_correct_enablers() {
     let registry = PluginRegistry::default();
 

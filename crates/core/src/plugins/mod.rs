@@ -48,6 +48,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "qwik",
     "react-native",
     "react-router",
+    "redwoodsdk",
     "remix",
     "rolldown",
     "rollup",
@@ -1046,6 +1047,7 @@ mod prisma;
 mod qwik;
 mod react_native;
 mod react_router;
+mod redwoodsdk;
 mod relay;
 mod remark;
 mod remix;
