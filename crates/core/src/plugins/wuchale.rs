@@ -22,6 +22,7 @@ const ENABLERS: &[&str] = &["wuchale", "@wuchale/vite-plugin"];
 const CONFIG_PATTERNS: &[&str] = &[
     "wuchale.config.js",
     "**/wuchale.config.js",
+    "vite.config.{ts,js,mts,mjs}",
     "**/vite.config.{ts,js,mts,mjs}",
 ];
 const ALWAYS_USED: &[&str] = &["wuchale.config.js", "**/wuchale.config.js"];
@@ -29,13 +30,37 @@ const TOOLING_DEPENDENCIES: &[&str] = &["wuchale", "@wuchale/vite-plugin"];
 const VITE_PLUGIN_PACKAGE: &str = "@wuchale/vite-plugin";
 const VITE_PLUGIN_EXPORTS: &[&str] = &["wuchale", "vitePlugin"];
 
-define_plugin! {
-    struct WuchalePlugin => "wuchale",
-    enablers: ENABLERS,
-    config_patterns: CONFIG_PATTERNS,
-    always_used: ALWAYS_USED,
-    tooling_dependencies: TOOLING_DEPENDENCIES,
-    resolve_config(config_path, source, root) {
+pub struct WuchalePlugin;
+
+impl Plugin for WuchalePlugin {
+    fn name(&self) -> &'static str {
+        "wuchale"
+    }
+
+    fn enablers(&self) -> &'static [&'static str] {
+        ENABLERS
+    }
+
+    fn is_enabled_with_deps(&self, deps: &[String], root: &Path) -> bool {
+        ENABLERS
+            .iter()
+            .any(|enabler| deps.iter().any(|dep| dep == enabler))
+            || root.join("wuchale.config.js").is_file()
+    }
+
+    fn config_patterns(&self) -> &'static [&'static str] {
+        CONFIG_PATTERNS
+    }
+
+    fn always_used(&self) -> &'static [&'static str] {
+        ALWAYS_USED
+    }
+
+    fn tooling_dependencies(&self) -> &'static [&'static str] {
+        TOOLING_DEPENDENCIES
+    }
+
+    fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
         let mut result = PluginResult::default();
 
         if is_wuchale_config(config_path) {
@@ -285,6 +310,19 @@ mod tests {
         assert!(plugin.always_used().contains(&"**/wuchale.config.js"));
         assert!(!plugin.always_used().contains(&"wuchale.config.ts"));
         assert!(!plugin.config_patterns().contains(&"wuchale.config.ts"));
+    }
+
+    #[test]
+    fn activates_from_documented_js_config_file() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let plugin = WuchalePlugin;
+        let deps = Vec::new();
+
+        assert!(!plugin.is_enabled_with_deps(&deps, tmp.path()));
+
+        std::fs::write(tmp.path().join("wuchale.config.js"), "export default {};\n")
+            .expect("wuchale config");
+        assert!(plugin.is_enabled_with_deps(&deps, tmp.path()));
     }
 
     #[test]

@@ -2602,6 +2602,55 @@ fn wuchale_workspace_config_is_recognized_from_root_dependency() {
 }
 
 #[test]
+fn wuchale_config_file_activates_plugin_without_enabler_dependency() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "wuchale-config-activated-fixture",
+            "private": true,
+            "main": "src/index.ts",
+            "devDependencies": {
+                "@wuchale/svelte": "0.9.0",
+                "unused-tool": "1.0.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(root.join("src/index.ts"), "export const app = true;\n").expect("source file");
+    std::fs::write(
+        root.join("wuchale.config.js"),
+        "import { adapter as svelte } from '@wuchale/svelte';\n\
+         export default { adapters: { main: svelte() } };\n",
+    )
+    .expect("wuchale config");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files = unused_file_paths(&results);
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path.ends_with("wuchale.config.js")),
+        "documented Wuchale config should activate the plugin and stay reachable. unused_files={unused_files:?}"
+    );
+
+    let unused_dev = unused_dev_dependencies(&results);
+    assert!(
+        !unused_dev.contains(&"@wuchale/svelte".to_owned()),
+        "adapter imported from config should be credited when activation comes from the config file. unused_dev={unused_dev:?}"
+    );
+    assert!(
+        unused_dev.contains(&"unused-tool".to_owned()),
+        "unrelated dev dependencies should remain reportable. unused_dev={unused_dev:?}"
+    );
+}
+
+#[test]
 fn wuchale_vite_config_file_keeps_custom_js_config_reachable() {
     let dir = tempfile::tempdir().expect("temp dir");
     let root = dir.path();
