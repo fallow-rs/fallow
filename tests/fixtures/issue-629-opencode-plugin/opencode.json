@@ -1,0 +1,9 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    "opencode-wakatime",
+    ["@acme/opencode-theme", { "enabled": true }],
+    "./plugins/local.js",
+    "https://example.com/plugin.js"
+  ]
+}

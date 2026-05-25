@@ -1,0 +1,15 @@
+{
+  "name": "issue-629-opencode-plugin",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "left-pad": "1.3.0"
+  },
+  "devDependencies": {
+    "@acme/opencode-theme": "1.0.0",
+    "@opencode-ai/plugin": "1.0.0",
+    "opencode-wakatime": "1.0.0",
+    "unused-control": "1.0.0"
+  }
+}

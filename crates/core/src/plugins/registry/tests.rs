@@ -245,6 +245,49 @@ fn fumadocs_contributes_source_hidden_dir_when_active() {
 }
 
 #[test]
+fn opencode_contributes_hidden_dir_when_active_from_dependency() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg_dev(&["@opencode-ai/plugin"]);
+    let dirs = registry.discovery_hidden_dirs(&pkg, Path::new("/project"));
+
+    assert_eq!(dirs, vec![".opencode".to_string()]);
+}
+
+#[test]
+fn opencode_detected_from_config_or_directory() {
+    let registry = PluginRegistry::default();
+    let pkg = PackageJson::default();
+    let tmp = tempfile::tempdir().expect("temp dir");
+
+    std::fs::write(tmp.path().join("opencode.json"), "{}\n").expect("opencode config");
+    let config_result = registry.run(&pkg, tmp.path(), &[]);
+    assert!(
+        config_result
+            .active_plugins
+            .contains(&"opencode".to_string())
+    );
+
+    std::fs::remove_file(tmp.path().join("opencode.json")).expect("remove opencode config");
+    std::fs::create_dir(tmp.path().join(".opencode")).expect("opencode dir");
+    let dir_result = registry.run(&pkg, tmp.path(), &[]);
+    assert!(dir_result.active_plugins.contains(&"opencode".to_string()));
+}
+
+#[test]
+fn opencode_detected_from_plugin_api_dependency() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg_dev(&["@opencode-ai/plugin"]);
+    let result = registry.run(&pkg, Path::new("/project"), &[]);
+
+    assert!(result.active_plugins.contains(&"opencode".to_string()));
+    assert!(
+        result
+            .tooling_dependencies
+            .contains(&"@opencode-ai/plugin".to_string())
+    );
+}
+
+#[test]
 fn discovery_hidden_dirs_empty_without_router_plugins() {
     let registry = PluginRegistry::default();
     let pkg = make_pkg(&["react", "react-dom"]);

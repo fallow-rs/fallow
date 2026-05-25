@@ -75,6 +75,7 @@ const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
     "knex",
     "kysely",
     "msw",
+    "opencode",
     "prisma",
     "storybook",
     "stryker",
@@ -1034,6 +1035,7 @@ mod nuxt;
 mod nx;
 mod nyc;
 mod openapi_ts;
+mod opencode;
 mod oxlint;
 mod pandacss;
 mod parcel;
