@@ -865,7 +865,7 @@
           ]
         },
         "emailMode": {
-          "description": "Privacy mode for emitted author emails. Defaults to `handle`.\nOverride on the CLI via `--ownership-emails=raw|handle|hash`.",
+          "description": "Privacy mode for emitted author emails. Defaults to `handle`.\nOverride on the CLI via `--ownership-emails=raw|handle|anonymized`.\nThe legacy spelling `hash` is still accepted for compatibility.",
           "$ref": "#/$defs/EmailMode",
           "default": "handle"
         }
@@ -885,7 +885,12 @@
           "const": "handle"
         },
         {
-          "description": "Show a stable `xxh3:<16hex>` pseudonym derived from the raw email.\nNon-cryptographic; suitable to keep raw emails out of CI artifacts\n(SARIF, code-scanning uploads) but not as a security primitive --\na known list of org emails can be brute-forced into a rainbow table.\nUse in regulated environments where even local-parts are sensitive.",
+          "description": "Show a stable `xxh3:<16hex>` pseudonym derived from the raw email.\nNon-cryptographic; suitable to keep raw emails out of CI artifacts\n(SARIF, code-scanning uploads) but not as a security primitive:\na known list of org emails can be brute-forced into a rainbow table.\nUse in regulated environments where even local-parts are sensitive.",
+          "type": "string",
+          "const": "anonymized"
+        },
+        {
+          "description": "Legacy spelling for [`EmailMode::Anonymized`].",
           "type": "string",
           "const": "hash"
         }

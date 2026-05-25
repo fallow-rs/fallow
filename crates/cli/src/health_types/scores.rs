@@ -729,21 +729,21 @@ pub struct HotspotEntry {
 }
 
 /// Per-author contribution summary. The identifier is rendered per the
-/// configured ownership.emailMode (handle, hash, or raw); the format field
-/// discriminates the three so type-aware consumers can branch without
+/// configured ownership.emailMode (handle, anonymized/hash, or raw); the format field
+/// discriminates the modes so type-aware consumers can branch without
 /// re-parsing.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ContributorEntry {
     /// Display string per the configured email mode: raw email
-    /// (`alice@example.com`), local-part handle (`alice`), or stable hash
+    /// (`alice@example.com`), local-part handle (`alice`), or stable anonymized hash
     /// pseudonym (`xxh3:<16hex>`). The format depends on `format`.
     ///
-    /// Renamed from `email` because in `handle` and `hash` modes the value
+    /// Renamed from `email` because in `handle` and `anonymized`/`hash` modes the value
     /// is no longer an email address; consumers tempted to use it as one
     /// (e.g. `mailto:`) would be wrong.
     pub identifier: String,
-    /// Format of [`identifier`](Self::identifier): `raw`, `handle`, or `hash`.
+    /// Format of [`identifier`](Self::identifier): `raw`, `handle`, `anonymized`, or `hash`.
     /// Lets type-aware consumers branch without re-parsing the string.
     pub format: ContributorIdentifierFormat,
     /// Recency-weighted share of total weighted commits (0..1, three decimals).
@@ -762,10 +762,30 @@ pub enum ContributorIdentifierFormat {
     /// Raw author email as recorded in git history.
     Raw,
     /// Local-part of the author email, with GitHub-style numeric noreply
-    /// prefixes unwrapped (`12345+alice@users.noreply.github.com` → `alice`).
+    /// prefixes unwrapped (`12345+alice@users.noreply.github.com` -> `alice`).
     Handle,
     /// Non-cryptographic stable pseudonym (`xxh3:<16hex>`).
+    Anonymized,
+    /// Legacy discriminator retained for older programmatic callers.
     Hash,
+}
+
+/// Machine-readable ownership state for a hotspot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum OwnershipState {
+    /// No ownership risk was detected, or the declared owner matches a
+    /// contributor active in the ownership recency window.
+    Active,
+    /// A CODEOWNERS file exists but no rule matches this hotspot path.
+    Unowned,
+    /// CODEOWNERS declares an owner, but fallow cannot match that owner to
+    /// an active contributor using offline git identity data.
+    DeclaredInactive,
+    /// The original author has stepped away and no declared owner suppresses
+    /// the git-history drift signal.
+    Drifting,
 }
 
 /// Per-file ownership signals attached to hotspot entries when the user
@@ -810,6 +830,10 @@ pub struct OwnershipMetrics {
     /// this file; `Some(false)` = a CODEOWNERS rule matches; `None` = no
     /// CODEOWNERS file was discovered for the repository (cannot determine).
     pub unowned: Option<bool>,
+
+    /// Canonical ownership state. Consumers should prefer this field over
+    /// combining `unowned`, `drift`, and `declared_owner` manually.
+    pub ownership_state: OwnershipState,
 
     /// True when ownership has drifted from the original author to a new
     /// top contributor. Pairs with [`drift_reason`](Self::drift_reason).

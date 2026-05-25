@@ -1093,6 +1093,9 @@ fn ownership_md_cells(
     if o.unowned == Some(true) {
         notes.push("**unowned**");
     }
+    if o.ownership_state == crate::health_types::OwnershipState::DeclaredInactive {
+        notes.push("declared owner inactive");
+    }
     if o.drift {
         notes.push("drift");
     }

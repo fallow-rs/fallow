@@ -2592,6 +2592,10 @@
           ],
           "description": "Tristate: `Some(true)` = CODEOWNERS file exists but no rule matches\nthis file; `Some(false)` = a CODEOWNERS rule matches; `None` = no\nCODEOWNERS file was discovered for the repository (cannot determine)."
         },
+        "ownership_state": {
+          "description": "Canonical ownership state. Consumers should prefer this field over\ncombining `unowned`, `drift`, and `declared_owner` manually.",
+          "$ref": "#/definitions/OwnershipState"
+        },
         "drift": {
           "type": "boolean",
           "description": "True when ownership has drifted from the original author to a new\ntop contributor. Pairs with [`drift_reason`](Self::drift_reason)."
@@ -2608,6 +2612,7 @@
         "bus_factor",
         "contributor_count",
         "top_contributor",
+        "ownership_state",
         "drift"
       ],
       "description": "Per-file ownership signals attached to hotspot entries when the user\npasses `--ownership`. All fields are derived from git history and the\nrepository's CODEOWNERS file (if any)."
@@ -2617,10 +2622,10 @@
       "properties": {
         "identifier": {
           "type": "string",
-          "description": "Display string per the configured email mode: raw email\n(`alice@example.com`), local-part handle (`alice`), or stable hash\npseudonym (`xxh3:<16hex>`). The format depends on `format`.\n\nRenamed from `email` because in `handle` and `hash` modes the value\nis no longer an email address; consumers tempted to use it as one\n(e.g. `mailto:`) would be wrong."
+          "description": "Display string per the configured email mode: raw email\n(`alice@example.com`), local-part handle (`alice`), or stable anonymized hash\npseudonym (`xxh3:<16hex>`). The format depends on `format`.\n\nRenamed from `email` because in `handle` and `anonymized`/`hash` modes the value\nis no longer an email address; consumers tempted to use it as one\n(e.g. `mailto:`) would be wrong."
         },
         "format": {
-          "description": "Format of [`identifier`](Self::identifier): `raw`, `handle`, or `hash`.\nLets type-aware consumers branch without re-parsing the string.",
+          "description": "Format of [`identifier`](Self::identifier): `raw`, `handle`, `anonymized`, or `hash`.\nLets type-aware consumers branch without re-parsing the string.",
           "$ref": "#/definitions/ContributorIdentifierFormat"
         },
         "share": {
@@ -2643,7 +2648,7 @@
         "stale_days",
         "commits"
       ],
-      "description": "Per-author contribution summary. The identifier is rendered per the\nconfigured ownership.emailMode (handle, hash, or raw); the format field\ndiscriminates the three so type-aware consumers can branch without\nre-parsing."
+      "description": "Per-author contribution summary. The identifier is rendered per the\nconfigured ownership.emailMode (handle, anonymized/hash, or raw); the format field\ndiscriminates the modes so type-aware consumers can branch without\nre-parsing."
     },
     "HotspotSummary": {
       "type": "object",
@@ -6018,12 +6023,17 @@
         {
           "type": "string",
           "const": "handle",
-          "description": "Local-part of the author email, with GitHub-style numeric noreply\nprefixes unwrapped (`12345+alice@users.noreply.github.com` → `alice`)."
+          "description": "Local-part of the author email, with GitHub-style numeric noreply\nprefixes unwrapped (`12345+alice@users.noreply.github.com` -> `alice`)."
+        },
+        {
+          "type": "string",
+          "const": "anonymized",
+          "description": "Non-cryptographic stable pseudonym (`xxh3:<16hex>`)."
         },
         {
           "type": "string",
           "const": "hash",
-          "description": "Non-cryptographic stable pseudonym (`xxh3:<16hex>`)."
+          "description": "Legacy discriminator retained for older programmatic callers."
         }
       ],
       "description": "Format discriminator for [`ContributorEntry::identifier`]."
@@ -9353,6 +9363,31 @@
         }
       },
       "description": "Sectioned `_meta` block for the bare combined JSON envelope."
+    },
+    "OwnershipState": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "active",
+          "description": "No ownership risk was detected, or the declared owner matches a\ncontributor active in the ownership recency window."
+        },
+        {
+          "type": "string",
+          "const": "unowned",
+          "description": "A CODEOWNERS file exists but no rule matches this hotspot path."
+        },
+        {
+          "type": "string",
+          "const": "declared_inactive",
+          "description": "CODEOWNERS declares an owner, but fallow cannot match that owner to\nan active contributor using offline git identity data."
+        },
+        {
+          "type": "string",
+          "const": "drifting",
+          "description": "The original author has stepped away and no declared owner suppresses\nthe git-history drift signal."
+        }
+      ],
+      "description": "Machine-readable ownership state for a hotspot."
     }
   }
 }

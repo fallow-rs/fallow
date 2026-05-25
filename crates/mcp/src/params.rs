@@ -27,15 +27,18 @@ pub enum EmailModeParam {
     /// Show local-part only (default). Unwraps GitHub-style noreply prefixes.
     Handle,
     /// Show stable non-cryptographic pseudonyms (`xxh3:<hex>`).
+    Anonymized,
+    /// Legacy spelling for anonymized output.
     Hash,
 }
 
 impl EmailModeParam {
-    /// Render as the corresponding CLI flag value (`raw`, `handle`, `hash`).
+    /// Render as the corresponding CLI flag value.
     pub const fn as_cli(self) -> &'static str {
         match self {
             Self::Raw => "raw",
             Self::Handle => "handle",
+            Self::Anonymized => "anonymized",
             Self::Hash => "hash",
         }
     }

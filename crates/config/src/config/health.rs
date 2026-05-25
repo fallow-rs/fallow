@@ -67,9 +67,11 @@ pub enum EmailMode {
     Handle,
     /// Show a stable `xxh3:<16hex>` pseudonym derived from the raw email.
     /// Non-cryptographic; suitable to keep raw emails out of CI artifacts
-    /// (SARIF, code-scanning uploads) but not as a security primitive --
+    /// (SARIF, code-scanning uploads) but not as a security primitive:
     /// a known list of org emails can be brute-forced into a rainbow table.
     /// Use in regulated environments where even local-parts are sensitive.
+    Anonymized,
+    /// Legacy spelling for [`EmailMode::Anonymized`].
     Hash,
 }
 
@@ -84,7 +86,8 @@ pub struct OwnershipConfig {
     pub bot_patterns: Vec<String>,
 
     /// Privacy mode for emitted author emails. Defaults to `handle`.
-    /// Override on the CLI via `--ownership-emails=raw|handle|hash`.
+    /// Override on the CLI via `--ownership-emails=raw|handle|anonymized`.
+    /// The legacy spelling `hash` is still accepted for compatibility.
     #[serde(default = "default_email_mode")]
     pub email_mode: EmailMode,
 }
@@ -345,10 +348,11 @@ ignore = ["generated/**", "vendor/**"]
 
     #[test]
     fn ownership_config_email_mode_kebab_case() {
-        // All three EmailMode variants round-trip through their kebab-case JSON form.
+        // EmailMode variants round-trip through their kebab-case JSON form.
         for (mode, repr) in [
             (EmailMode::Raw, "\"raw\""),
             (EmailMode::Handle, "\"handle\""),
+            (EmailMode::Anonymized, "\"anonymized\""),
             (EmailMode::Hash, "\"hash\""),
         ] {
             let s = serde_json::to_string(&mode).unwrap();
@@ -356,5 +360,11 @@ ignore = ["generated/**", "vendor/**"]
             let back: EmailMode = serde_json::from_str(repr).unwrap();
             assert_eq!(back, mode);
         }
+    }
+
+    #[test]
+    fn ownership_config_email_mode_accepts_legacy_hash_alias() {
+        let back: EmailMode = serde_json::from_str("\"hash\"").unwrap();
+        assert_eq!(back, EmailMode::Hash);
     }
 }

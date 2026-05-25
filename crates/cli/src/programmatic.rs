@@ -199,6 +199,8 @@ pub enum OwnershipEmailMode {
     Raw,
     #[default]
     Handle,
+    Anonymized,
+    /// Legacy spelling retained for embedders that already pass `hash`.
     Hash,
 }
 
@@ -207,6 +209,7 @@ impl OwnershipEmailMode {
         match self {
             Self::Raw => EmailMode::Raw,
             Self::Handle => EmailMode::Handle,
+            Self::Anonymized => EmailMode::Anonymized,
             Self::Hash => EmailMode::Hash,
         }
     }

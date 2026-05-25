@@ -1463,6 +1463,10 @@ fn render_ownership_line(
         parts.push("unowned".red().to_string());
     }
 
+    if ownership.ownership_state == crate::health_types::OwnershipState::DeclaredInactive {
+        parts.push("declared owner inactive".yellow().to_string());
+    }
+
     if ownership.drift {
         parts.push("drift".yellow().to_string());
     }

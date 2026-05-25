@@ -24,10 +24,10 @@
 //!
 //! Author emails are emitted in one of three modes per [`EmailMode`]:
 //!
-//! - `Raw` — full email as it appears in git history.
-//! - `Handle` (default) — local-part only, with GitHub-style `12345+name`
+//! - `Raw`: full email as it appears in git history.
+//! - `Handle` (default): local-part only, with GitHub-style `12345+name`
 //!   noreply addresses unwrapped to `name`.
-//! - `Hash` — stable `xxh3:<16hex>` pseudonym derived from the raw email.
+//! - `Anonymized`: stable `xxh3:<16hex>` pseudonym derived from the raw email.
 //!
 //! Hashed mode is suitable for CI artifacts in regulated environments where
 //! even local-parts are sensitive. The hash is non-cryptographic but stable
@@ -36,13 +36,16 @@
 use std::path::Path;
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
+use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
 use fallow_config::EmailMode;
 use fallow_core::churn::{AuthorContribution, FileChurn};
 
 use crate::codeowners::CodeOwners;
-use crate::health_types::{ContributorEntry, ContributorIdentifierFormat, OwnershipMetrics};
+use crate::health_types::{
+    ContributorEntry, ContributorIdentifierFormat, OwnershipMetrics, OwnershipState,
+};
 
 /// Seconds in one day.
 const SECS_PER_DAY: u64 = 86_400;
@@ -55,6 +58,10 @@ const DRIFT_MIN_FILE_AGE_DAYS: u64 = 30;
 /// below this fraction for drift to fire. Tightens the boolean against
 /// "scaffolded by one person, properly built by team" false positives.
 const DRIFT_MAX_ORIGINAL_SHARE: f64 = 0.10;
+
+/// Declared owner activity: a matching contributor must have touched the file
+/// inside this window to suppress drift as actively owned.
+const DECLARED_OWNER_ACTIVE_DAYS: u64 = 90;
 
 /// Inputs needed to compute ownership for one file. Built once per analysis
 /// run and reused for every hotspot.
@@ -113,8 +120,9 @@ pub fn compute_ownership(
             }
             Some(RankedAuthor {
                 idx: *idx,
+                raw_email,
                 contribution,
-                rendered: render_email(raw_email, ctx.email_mode),
+                rendered: String::new(),
             })
         })
         .collect();
@@ -123,11 +131,14 @@ pub fn compute_ownership(
         return None;
     }
 
+    render_author_identifiers(&mut filtered, ctx.email_mode);
+
     filtered.sort_by(|a, b| {
         b.contribution
             .weighted_commits
             .partial_cmp(&a.contribution.weighted_commits)
             .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.raw_email.cmp(b.raw_email))
     });
 
     let total_weighted: f64 = filtered
@@ -172,7 +183,7 @@ pub fn compute_ownership(
         .cloned()
         .collect();
 
-    let (drift, drift_reason) = compute_drift(&filtered, total_weighted, ctx.now_secs);
+    let (raw_drift, raw_drift_reason) = compute_drift(&filtered, total_weighted, ctx.now_secs);
 
     let (declared_owner, unowned) = ctx.codeowners.map_or((None, None), |co| {
         co.owner_of(relative_path)
@@ -180,6 +191,18 @@ pub fn compute_ownership(
                 (Some(owner.to_string()), Some(false))
             })
     });
+    let ownership_state = classify_ownership_state(
+        declared_owner.as_deref(),
+        unowned,
+        raw_drift,
+        &filtered,
+        ctx.now_secs,
+    );
+    let (drift, drift_reason) = if ownership_state == OwnershipState::Drifting {
+        (raw_drift, raw_drift_reason)
+    } else {
+        (false, None)
+    };
 
     Some(OwnershipMetrics {
         bus_factor,
@@ -189,6 +212,7 @@ pub fn compute_ownership(
         suggested_reviewers,
         declared_owner,
         unowned,
+        ownership_state,
         drift,
         drift_reason,
     })
@@ -199,8 +223,71 @@ struct RankedAuthor<'a> {
     /// Interned author pool index. Stable identifier for equality checks
     /// across `min_by_key` / sorted-position comparisons in drift detection.
     idx: u32,
+    raw_email: &'a str,
     contribution: &'a AuthorContribution,
     rendered: String,
+}
+
+fn render_author_identifiers(authors: &mut [RankedAuthor<'_>], mode: EmailMode) {
+    match mode {
+        EmailMode::Raw => {
+            for author in authors {
+                author.rendered = author.raw_email.to_string();
+            }
+        }
+        EmailMode::Handle => render_handle_identifiers(authors),
+        EmailMode::Anonymized | EmailMode::Hash => {
+            for author in authors {
+                author.rendered = hash_email(author.raw_email);
+            }
+        }
+    }
+}
+
+fn render_handle_identifiers(authors: &mut [RankedAuthor<'_>]) {
+    let mut emails_by_handle: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
+    for author in authors.iter() {
+        emails_by_handle
+            .entry(extract_handle(author.raw_email))
+            .or_default()
+            .insert(author.raw_email.to_string());
+    }
+
+    for author in authors {
+        let base = extract_handle(author.raw_email);
+        let collides = emails_by_handle
+            .get(&base)
+            .is_some_and(|emails| emails.len() > 1);
+        if collides {
+            author.rendered = format!("{base}~{}", collision_suffix(author.raw_email));
+        } else {
+            author.rendered = base;
+        }
+    }
+}
+
+fn collision_suffix(email: &str) -> String {
+    let domain = email.split_once('@').map_or("", |(_, domain)| domain);
+    if domain.is_empty() {
+        return format!("id{:016x}", xxh3_64(email.as_bytes()));
+    }
+    sanitize_suffix(domain)
+}
+
+fn sanitize_suffix(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push('-');
+        }
+    }
+    if out.is_empty() {
+        "unknown".to_string()
+    } else {
+        out
+    }
 }
 
 /// Avelino truck factor. Sort by weighted commits descending (already done
@@ -261,6 +348,63 @@ fn compute_drift(
     (true, Some(reason))
 }
 
+fn classify_ownership_state(
+    declared_owner: Option<&str>,
+    unowned: Option<bool>,
+    raw_drift: bool,
+    ranked: &[RankedAuthor<'_>],
+    now_secs: u64,
+) -> OwnershipState {
+    if unowned == Some(true) {
+        return OwnershipState::Unowned;
+    }
+
+    if let Some(owner) = declared_owner {
+        if declared_owner_is_active(owner, ranked, now_secs) {
+            return OwnershipState::Active;
+        }
+        return OwnershipState::DeclaredInactive;
+    }
+
+    if raw_drift {
+        OwnershipState::Drifting
+    } else {
+        OwnershipState::Active
+    }
+}
+
+fn declared_owner_is_active(owner: &str, ranked: &[RankedAuthor<'_>], now_secs: u64) -> bool {
+    ranked.iter().any(|author| {
+        stale_days(author.contribution.last_commit_ts, now_secs) < DECLARED_OWNER_ACTIVE_DAYS
+            && declared_owner_matches_author(owner, author)
+    })
+}
+
+fn declared_owner_matches_author(owner: &str, author: &RankedAuthor<'_>) -> bool {
+    let owner = owner.trim();
+    if owner.is_empty() {
+        return false;
+    }
+
+    if !owner.starts_with('@') && owner.eq_ignore_ascii_case(author.raw_email) {
+        return true;
+    }
+
+    let owner_handle = owner.trim_start_matches('@');
+    if owner_handle.is_empty() || owner_handle.contains('/') {
+        return false;
+    }
+
+    let raw_handle = extract_handle(author.raw_email);
+    let rendered_handle = author
+        .rendered
+        .split('~')
+        .next()
+        .unwrap_or(&author.rendered);
+    owner_handle.eq_ignore_ascii_case(&raw_handle)
+        || owner_handle.eq_ignore_ascii_case(rendered_handle)
+}
+
 fn stale_days(commit_ts: u64, now_secs: u64) -> u64 {
     now_secs.saturating_sub(commit_ts) / SECS_PER_DAY
 }
@@ -271,6 +415,7 @@ const fn identifier_format(mode: EmailMode) -> ContributorIdentifierFormat {
     match mode {
         EmailMode::Raw => ContributorIdentifierFormat::Raw,
         EmailMode::Handle => ContributorIdentifierFormat::Handle,
+        EmailMode::Anonymized => ContributorIdentifierFormat::Anonymized,
         EmailMode::Hash => ContributorIdentifierFormat::Hash,
     }
 }
@@ -284,18 +429,19 @@ fn is_bot(email: &str, bot_globs: &GlobSet) -> bool {
 }
 
 /// Render an author email per the configured privacy mode.
+#[cfg(test)]
 fn render_email(email: &str, mode: EmailMode) -> String {
     match mode {
         EmailMode::Raw => email.to_string(),
         EmailMode::Handle => extract_handle(email),
-        EmailMode::Hash => hash_email(email),
+        EmailMode::Anonymized | EmailMode::Hash => hash_email(email),
     }
 }
 
 /// Extract a display handle from an email address.
 ///
 /// Strips the domain and unwraps GitHub-style numeric noreply prefixes
-/// (`12345+alice@users.noreply.github.com` → `alice`).
+/// (`12345+alice@users.noreply.github.com` -> `alice`).
 fn extract_handle(email: &str) -> String {
     let local = email.split('@').next().unwrap_or(email);
     if let Some(plus_idx) = local.find('+') {
@@ -314,7 +460,7 @@ fn extract_handle(email: &str) -> String {
 ///
 /// Uses xxh3 (already a workspace dep) prefixed with `xxh3:` so consumers
 /// can recognize the pseudonym format. Not suitable as a security primitive
-/// — given a known list of org emails, rebuilding the rainbow table is
+/// because given a known list of org emails, rebuilding the rainbow table is
 /// trivial. The intent is to avoid emitting raw PII into CI artifacts.
 fn hash_email(email: &str) -> String {
     let h = xxh3_64(email.as_bytes());
@@ -442,9 +588,46 @@ mod tests {
 
     #[test]
     fn render_email_hash_obfuscates() {
-        let r = render_email("alice@example.com", EmailMode::Hash);
+        let r = render_email("alice@example.com", EmailMode::Anonymized);
         assert!(r.starts_with("xxh3:"));
         assert!(!r.contains("alice"));
+    }
+
+    #[test]
+    fn handle_mode_disambiguates_same_local_part_collisions() {
+        let pool = vec![
+            "alice@contractor.io".to_string(),
+            "alice@company.com".to_string(),
+        ];
+        let churn = churn_with_authors(
+            "f.ts",
+            &[
+                (0, 8, 8.0, ts_days_ago(80), ts_days_ago(3)),
+                (1, 9, 9.0, ts_days_ago(70), ts_days_ago(1)),
+            ],
+        );
+        let globs = empty_globs();
+        let mut ctx = ctx_with(&pool, &globs, None);
+        ctx.email_mode = EmailMode::Handle;
+        let m = compute_ownership(&churn, Path::new("f.ts"), &ctx).unwrap();
+        assert_eq!(m.top_contributor.identifier, "alice~company.com");
+        assert_eq!(m.recent_contributors[0].identifier, "alice~contractor.io");
+    }
+
+    #[test]
+    fn anonymized_mode_hides_raw_email_and_handle() {
+        let pool = vec!["alice@example.com".to_string()];
+        let churn = churn_with_authors("f.ts", &[(0, 5, 5.0, ts_days_ago(60), ts_days_ago(1))]);
+        let globs = empty_globs();
+        let mut ctx = ctx_with(&pool, &globs, None);
+        ctx.email_mode = EmailMode::Anonymized;
+        let m = compute_ownership(&churn, Path::new("f.ts"), &ctx).unwrap();
+        assert!(m.top_contributor.identifier.starts_with("xxh3:"));
+        assert!(!m.top_contributor.identifier.contains("alice"));
+        assert_eq!(
+            m.top_contributor.format,
+            ContributorIdentifierFormat::Anonymized
+        );
     }
 
     // ── compile_bot_globs / is_bot ────────────────────────────────
@@ -586,6 +769,7 @@ mod tests {
         let ctx = ctx_with(&pool, &globs, None);
         let m = compute_ownership(&churn, Path::new("f.ts"), &ctx).unwrap();
         assert!(m.drift);
+        assert_eq!(m.ownership_state, OwnershipState::Drifting);
         let reason = m.drift_reason.expect("drift_reason should be set");
         assert!(reason.contains("alice@x"));
         assert!(reason.contains("bob@x"));
@@ -606,6 +790,7 @@ mod tests {
         let ctx = ctx_with(&pool, &globs, None);
         let m = compute_ownership(&churn, Path::new("f.ts"), &ctx).unwrap();
         assert!(!m.drift);
+        assert_eq!(m.ownership_state, OwnershipState::Active);
         assert!(m.drift_reason.is_none());
     }
 
@@ -648,6 +833,7 @@ mod tests {
         let ctx = ctx_with(&pool, &globs, Some(&co));
         let m = compute_ownership(&churn, Path::new("README.md"), &ctx).unwrap();
         assert_eq!(m.unowned, Some(true));
+        assert_eq!(m.ownership_state, OwnershipState::Unowned);
         assert!(m.declared_owner.is_none());
     }
 
@@ -664,6 +850,47 @@ mod tests {
         let m = compute_ownership(&churn, Path::new("src/app.ts"), &ctx).unwrap();
         assert_eq!(m.unowned, Some(false));
         assert_eq!(m.declared_owner.as_deref(), Some("@frontend"));
+        assert_eq!(m.ownership_state, OwnershipState::DeclaredInactive);
+    }
+
+    #[test]
+    fn declared_owner_active_suppresses_git_history_drift() {
+        let co = CodeOwners::parse("/src/ @bob\n").unwrap();
+        let pool = vec!["alice@x".to_string(), "bob@x".to_string()];
+        let churn = churn_with_authors(
+            "src/app.ts",
+            &[
+                (0, 1, 0.5, ts_days_ago(200), ts_days_ago(200)),
+                (1, 20, 20.0, ts_days_ago(60), ts_days_ago(1)),
+            ],
+        );
+        let globs = empty_globs();
+        let ctx = ctx_with(&pool, &globs, Some(&co));
+        let m = compute_ownership(&churn, Path::new("src/app.ts"), &ctx).unwrap();
+        assert_eq!(m.declared_owner.as_deref(), Some("@bob"));
+        assert_eq!(m.ownership_state, OwnershipState::Active);
+        assert!(!m.drift);
+        assert!(m.drift_reason.is_none());
+    }
+
+    #[test]
+    fn declared_owner_inactive_suppresses_vague_drift() {
+        let co = CodeOwners::parse("/src/ @carol\n").unwrap();
+        let pool = vec!["alice@x".to_string(), "bob@x".to_string()];
+        let churn = churn_with_authors(
+            "src/app.ts",
+            &[
+                (0, 1, 0.5, ts_days_ago(200), ts_days_ago(200)),
+                (1, 20, 20.0, ts_days_ago(60), ts_days_ago(1)),
+            ],
+        );
+        let globs = empty_globs();
+        let ctx = ctx_with(&pool, &globs, Some(&co));
+        let m = compute_ownership(&churn, Path::new("src/app.ts"), &ctx).unwrap();
+        assert_eq!(m.declared_owner.as_deref(), Some("@carol"));
+        assert_eq!(m.ownership_state, OwnershipState::DeclaredInactive);
+        assert!(!m.drift);
+        assert!(m.drift_reason.is_none());
     }
 
     #[test]
@@ -677,6 +904,7 @@ mod tests {
         let ctx = ctx_with(&pool, &globs, None);
         let m = compute_ownership(&churn, Path::new("src/app.ts"), &ctx).unwrap();
         assert_eq!(m.unowned, None);
+        assert_eq!(m.ownership_state, OwnershipState::Active);
         assert!(m.declared_owner.is_none());
     }
 

@@ -348,6 +348,13 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
                 if let Some(unowned) = o.unowned {
                     parts.push(format!("unowned={unowned}"));
                 }
+                let state = match o.ownership_state {
+                    crate::health_types::OwnershipState::Active => "active",
+                    crate::health_types::OwnershipState::Unowned => "unowned",
+                    crate::health_types::OwnershipState::DeclaredInactive => "declared_inactive",
+                    crate::health_types::OwnershipState::Drifting => "drifting",
+                };
+                parts.push(format!("ownership_state={state}"));
                 if o.drift {
                     parts.push("drift=true".to_string());
                 }

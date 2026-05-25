@@ -33,7 +33,9 @@ use fallow_types::output_health::{
 use std::ops::Deref;
 use std::path::Path;
 
-use crate::health_types::scores::{ComplexityViolation, CoverageTier, HotspotEntry};
+use crate::health_types::scores::{
+    ComplexityViolation, CoverageTier, HotspotEntry, OwnershipState,
+};
 use crate::health_types::targets::{RecommendationCategory, RefactoringTarget};
 
 /// Cyclomatic distance from `max_cyclomatic_threshold` at which a
@@ -631,7 +633,7 @@ fn build_hotspot_actions(entry: &HotspotEntry, root: &Path) -> Vec<HotspotAction
 
     // Drift: original author no longer maintains; add a notice action so
     // agents can route the next change to the new top contributor.
-    if ownership.drift {
+    if ownership.ownership_state == OwnershipState::Drifting && ownership.drift {
         let reason = ownership
             .drift_reason
             .as_deref()
@@ -801,7 +803,7 @@ const fn category_snake_case(cat: &RecommendationCategory) -> &'static str {
 mod hotspot_target_tests {
     use super::*;
     use crate::health_types::scores::{
-        ContributorEntry, ContributorIdentifierFormat, OwnershipMetrics,
+        ContributorEntry, ContributorIdentifierFormat, OwnershipMetrics, OwnershipState,
     };
     use fallow_core::churn::ChurnTrend;
     use std::path::PathBuf;
@@ -884,6 +886,7 @@ mod hotspot_target_tests {
             suggested_reviewers: vec![contributor("bob", 4), contributor("carol", 2)],
             declared_owner: None,
             unowned: None,
+            ownership_state: OwnershipState::Active,
             drift: false,
             drift_reason: None,
         });
@@ -910,6 +913,7 @@ mod hotspot_target_tests {
             suggested_reviewers: Vec::new(),
             declared_owner: None,
             unowned: None,
+            ownership_state: OwnershipState::Active,
             drift: false,
             drift_reason: None,
         });
@@ -938,6 +942,7 @@ mod hotspot_target_tests {
             suggested_reviewers: Vec::new(),
             declared_owner: None,
             unowned: None,
+            ownership_state: OwnershipState::Active,
             drift: false,
             drift_reason: None,
         });
@@ -961,6 +966,7 @@ mod hotspot_target_tests {
             suggested_reviewers: Vec::new(),
             declared_owner: None,
             unowned: Some(true),
+            ownership_state: OwnershipState::Unowned,
             drift: false,
             drift_reason: None,
         });
@@ -1002,6 +1008,7 @@ mod hotspot_target_tests {
             suggested_reviewers: Vec::new(),
             declared_owner: None,
             unowned: Some(true),
+            ownership_state: OwnershipState::Unowned,
             drift: false,
             drift_reason: None,
         });
@@ -1032,6 +1039,7 @@ mod hotspot_target_tests {
             suggested_reviewers: Vec::new(),
             declared_owner: None,
             unowned: Some(false),
+            ownership_state: OwnershipState::Drifting,
             drift: true,
             drift_reason: Some("top contributor changed in last 6 months".to_string()),
         });

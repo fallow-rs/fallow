@@ -682,7 +682,7 @@ enum Command {
 
         /// Privacy mode for author emails emitted with `--ownership`.
         /// Defaults to `handle` (local-part only). Use `raw` for OSS repos
-        /// where authors are public, or `hash` to emit non-reversible
+        /// where authors are public, or `anonymized` to emit non-reversible
         /// pseudonyms in regulated environments. Implies `--ownership`.
         #[arg(long, value_name = "MODE", value_enum)]
         ownership_emails: Option<EmailModeArg>,
@@ -1464,6 +1464,9 @@ pub enum EmailModeArg {
     /// Show local-part only (default). Unwraps GitHub-style noreply prefixes.
     Handle,
     /// Show stable non-cryptographic pseudonyms (`xxh3:<hex>`).
+    Anonymized,
+    /// Legacy spelling for anonymized output.
+    #[value(hide = true)]
     Hash,
 }
 
@@ -1473,6 +1476,7 @@ impl EmailModeArg {
         match self {
             Self::Raw => fallow_config::EmailMode::Raw,
             Self::Handle => fallow_config::EmailMode::Handle,
+            Self::Anonymized => fallow_config::EmailMode::Anonymized,
             Self::Hash => fallow_config::EmailMode::Hash,
         }
     }

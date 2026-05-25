@@ -682,14 +682,14 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
         low_traffic_threshold: Some(0.005),
         min_severity: Some("critical".to_string()),
         ownership: Some(true),
-        ownership_email_mode: Some(crate::params::EmailModeParam::Hash),
+        ownership_email_mode: Some(crate::params::EmailModeParam::Anonymized),
         group_by: Some("section".to_string()),
     };
     let args = build_health_args(&params);
     // Every single flag should be present
     assert!(args.contains(&"--ownership".to_string()));
     assert!(args.contains(&"--ownership-emails".to_string()));
-    assert!(args.contains(&"hash".to_string()));
+    assert!(args.contains(&"anonymized".to_string()));
     // --hotspots must appear exactly once even when both `hotspots: true`
     // and `ownership: true` are set; the implied flag is deduplicated.
     assert_eq!(args.iter().filter(|a| *a == "--hotspots").count(), 1);

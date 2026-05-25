@@ -423,7 +423,11 @@ export type ChurnTrend = ("accelerating" | "stable" | "cooling")
 /**
  * Format discriminator for [`ContributorEntry::identifier`].
  */
-export type ContributorIdentifierFormat = ("raw" | "handle" | "hash")
+export type ContributorIdentifierFormat = ("raw" | "handle" | "anonymized" | "hash")
+/**
+ * Machine-readable ownership state for a hotspot.
+ */
+export type OwnershipState = ("active" | "unowned" | "declared_inactive" | "drifting")
 /**
  * Discriminant for [`HotspotAction::kind`].
  */
@@ -3497,6 +3501,7 @@ declared_owner?: (string | null)
  * CODEOWNERS file was discovered for the repository (cannot determine).
  */
 unowned?: (boolean | null)
+ownership_state: OwnershipState
 /**
  * True when ownership has drifted from the original author to a new
  * top contributor. Pairs with [`drift_reason`](Self::drift_reason).
@@ -3510,17 +3515,17 @@ drift_reason?: (string | null)
 }
 /**
  * Per-author contribution summary. The identifier is rendered per the
- * configured ownership.emailMode (handle, hash, or raw); the format field
- * discriminates the three so type-aware consumers can branch without
+ * configured ownership.emailMode (handle, anonymized/hash, or raw); the format field
+ * discriminates the modes so type-aware consumers can branch without
  * re-parsing.
  */
 export interface ContributorEntry {
 /**
  * Display string per the configured email mode: raw email
- * (`alice@example.com`), local-part handle (`alice`), or stable hash
+ * (`alice@example.com`), local-part handle (`alice`), or stable anonymized hash
  * pseudonym (`xxh3:<16hex>`). The format depends on `format`.
  *
- * Renamed from `email` because in `handle` and `hash` modes the value
+ * Renamed from `email` because in `handle` and `anonymized`/`hash` modes the value
  * is no longer an email address; consumers tempted to use it as one
  * (e.g. `mailto:`) would be wrong.
  */

@@ -188,11 +188,12 @@ fn parse_ownership_email_mode(
     match normalize_enum_literal(&value).as_str() {
         "raw" => Ok(Some(programmatic::OwnershipEmailMode::Raw)),
         "handle" => Ok(Some(programmatic::OwnershipEmailMode::Handle)),
+        "anonymized" => Ok(Some(programmatic::OwnershipEmailMode::Anonymized)),
         "hash" => Ok(Some(programmatic::OwnershipEmailMode::Hash)),
         _ => Err(invalid_enum_value(
             "ownershipEmails",
             &value,
-            &["raw", "handle", "hash"],
+            &["raw", "handle", "anonymized", "hash"],
         )),
     }
 }
