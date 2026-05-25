@@ -5,7 +5,7 @@
     "bin/fallow-lsp",
     "bin/fallow-mcp",
     "scripts/platform-package.js",
-    "scripts/postinstall.js",
+    "scripts/run-binary.js",
     "scripts/verify-binary.js"
   ],
   "ignorePatterns": [

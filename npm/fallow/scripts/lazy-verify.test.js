@@ -8,10 +8,10 @@ const path = require('node:path');
 const {
   ensureVerified,
   SENTINEL_SCHEMA_VERSION,
-  SENTINEL_FILENAME,
   VERIFY_LOG_ENV,
   _resetWarningState,
 } = require('./lazy-verify');
+const { SENTINEL_FILENAME } = require('./sentinel-path');
 const { _verifyWithKey, SKIP_ENV } = require('./verify-binary');
 
 // ---- shared fixtures ------------------------------------------------------

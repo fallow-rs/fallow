@@ -4,5 +4,15 @@
     "tests/fixtures/**",
     "tests/conformance/fixtures/**",
     "editors/vscode/test/integration/fixtures/**"
-  ]
+  ],
+  "health": {
+    "ignore": [
+      "npm/fallow/scripts/**"
+    ]
+  },
+  "duplicates": {
+    "ignore": [
+      "npm/fallow/scripts/**"
+    ]
+  }
 }

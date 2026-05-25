@@ -1,3 +1,4 @@
 #!/usr/bin/env node
 
-require('../scripts/run-binary').runBinary('fallow-mcp');
+const { runBinary } = require('../scripts/run-binary');
+runBinary('fallow-mcp');

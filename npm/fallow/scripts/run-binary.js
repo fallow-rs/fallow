@@ -51,70 +51,68 @@ function describeVerified(result) {
   return `verified: no (${result.code})`;
 }
 
-function runBinary(binaryBaseName) {
+// Resolve the platform package directory + manifest path, or print an
+// actionable error and exit. Keeps `runBinary` a flat top-level sequence.
+function resolvePlatformPaths() {
   const pkg = resolvePlatformPackageName();
   if (!pkg) {
     process.stderr.write(`Unsupported platform: ${process.platform}-${process.arch}\n`);
     process.exit(1);
   }
-
-  let manifestPath;
-  let platformPkgDir;
   try {
-    manifestPath = require.resolve(`${pkg}/package.json`);
-    platformPkgDir = path.dirname(manifestPath);
+    const manifestPath = require.resolve(`${pkg}/package.json`);
+    return { pkg, manifestPath, platformPkgDir: path.dirname(manifestPath) };
   } catch {
     process.stderr.write(
       `Could not find ${pkg}. Run 'npm install' to install the platform-specific binary.\n`,
     );
     process.exit(1);
   }
+}
+
+function printVerifyError(verifyResult) {
+  const where = verifyResult.binary ? ` ${verifyResult.binary}` : '';
+  process.stderr.write(
+    `fallow: binary verification failed${where} (${verifyResult.code}): ${verifyResult.message}\n` +
+    `See https://github.com/fallow-rs/fallow/blob/main/SECURITY.md for the trust model. ` +
+    `Set FALLOW_SKIP_BINARY_VERIFY=1 only when you deliberately replace the published binary.\n`,
+  );
+}
+
+function writeVerifiedLineIfVersionQuery(verifyResult) {
+  if (isVersionQuery(process.argv)) {
+    process.stdout.write(`${describeVerified(verifyResult)}\n`);
+  }
+}
+
+function runBinary(binaryBaseName) {
+  const { pkg, manifestPath, platformPkgDir } = resolvePlatformPaths();
 
   const binaryName = process.platform === 'win32' ? `${binaryBaseName}.exe` : binaryBaseName;
   const binaryPath = path.join(platformPkgDir, binaryName);
-
   if (!fs.existsSync(binaryPath)) {
     process.stderr.write(`Binary not found at ${binaryPath}\n`);
     process.exit(1);
   }
 
   // Lazy first-run verify. Errors are user-facing.
-  const verifyResult = ensureVerified({
-    platformPkgDir,
-    packageName: pkg,
-    manifestPath,
-  });
-
+  const verifyResult = ensureVerified({ platformPkgDir, packageName: pkg, manifestPath });
   if (!verifyResult.ok) {
-    const where = verifyResult.binary ? ` ${verifyResult.binary}` : '';
-    process.stderr.write(
-      `fallow: binary verification failed${where} (${verifyResult.code}): ${verifyResult.message}\n` +
-      `See https://github.com/fallow-rs/fallow/blob/main/SECURITY.md for the trust model. ` +
-      `Set FALLOW_SKIP_BINARY_VERIFY=1 only when you deliberately replace the published binary.\n`,
-    );
+    printVerifyError(verifyResult);
     process.exit(1);
   }
 
   try {
     execFileSync(binaryPath, process.argv.slice(2), { stdio: 'inherit' });
   } catch (e) {
-    if (e.status !== undefined) {
-      // Append the verified line only on a successful --version exit. The
-      // child wrote its version line to stdout via the inherited handle;
-      // adding a line here is safe because the child has already exited.
-      if (e.status === 0 && isVersionQuery(process.argv)) {
-        process.stdout.write(`${describeVerified(verifyResult)}\n`);
-      }
-      process.exit(e.status);
-    }
-    throw e;
+    if (e.status === undefined) throw e;
+    // Child has already written its --version line via inherited stdio;
+    // append the verified line here only on a clean exit.
+    if (e.status === 0) writeVerifiedLineIfVersionQuery(verifyResult);
+    process.exit(e.status);
   }
 
-  // execFileSync only throws on non-zero exit. On success (exit 0) it falls
-  // through here.
-  if (isVersionQuery(process.argv)) {
-    process.stdout.write(`${describeVerified(verifyResult)}\n`);
-  }
+  writeVerifiedLineIfVersionQuery(verifyResult);
 }
 
 module.exports = {

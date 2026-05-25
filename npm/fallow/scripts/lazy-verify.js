@@ -23,7 +23,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const { resolveSentinelPath, SENTINEL_FILENAME } = require('./sentinel-path');
+const { resolveSentinelPath } = require('./sentinel-path');
 const { verifyInstalledSync, SKIP_ENV } = require('./verify-binary');
 
 const SENTINEL_SCHEMA_VERSION = 1;
@@ -85,43 +85,57 @@ function readManifestVersion(manifestPath) {
   return null;
 }
 
-// Read and validate the sentinel. Returns true when the sentinel is valid for
-// the current platform package state (binary mtimes + version + package name
-// all match). Any failure mode (missing file, malformed JSON, schema drift,
-// stale mtime, mismatched name/version) returns false, triggering re-verify.
-function isSentinelValid(sentinelPath, platformPkgDir, manifest, platform) {
+// Parse the sentinel JSON file, returning the parsed object or null on any
+// failure (missing file, IO error, malformed JSON, non-object value).
+function readSentinelFile(sentinelPath) {
   if (typeof sentinelPath !== 'string' || sentinelPath.length === 0) {
-    return false;
+    return null;
   }
   let raw;
   try {
     raw = fs.readFileSync(sentinelPath, 'utf8');
   } catch {
-    return false;
+    return null;
   }
-  let parsed;
   try {
-    parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
   } catch {
-    return false;
+    return null;
   }
-  if (!parsed || typeof parsed !== 'object') return false;
+}
+
+// True when the structural fields (schema, version, name, binaries map) all
+// match. Mtime check is in a separate helper to keep both functions flat.
+function sentinelStructureMatches(parsed, manifest) {
+  if (!parsed) return false;
   if (parsed.schemaVersion !== SENTINEL_SCHEMA_VERSION) return false;
   if (parsed.packageVersion !== manifest.version) return false;
   if (parsed.packageName !== manifest.name) return false;
-  if (!parsed.binaries || typeof parsed.binaries !== 'object') return false;
+  return parsed.binaries && typeof parsed.binaries === 'object';
+}
 
-  const targets = binaryTargetsForPlatform(platform);
-  for (const target of targets) {
+// True when every recorded binary mtime still matches the on-disk mtime within
+// the 1ms rounding tolerance some filesystems (NFS, FAT) introduce.
+function sentinelMtimesMatch(parsed, platformPkgDir, platform) {
+  for (const target of binaryTargetsForPlatform(platform)) {
     const recorded = parsed.binaries[target];
     if (!recorded || typeof recorded.mtimeMs !== 'number') return false;
     const current = statMtimeMs(path.join(platformPkgDir, target));
     if (current === null) return false;
-    // Allow a tiny rounding tolerance: some filesystems (NFS, FAT) round mtimes
-    // to whole seconds, so within 1ms is treated as equal.
     if (Math.abs(current - recorded.mtimeMs) > 1) return false;
   }
   return true;
+}
+
+// Read and validate the sentinel. Returns true when the sentinel is valid for
+// the current platform package state (binary mtimes + version + package name
+// all match). Any failure mode (missing file, malformed JSON, schema drift,
+// stale mtime, mismatched name/version) returns false, triggering re-verify.
+function isSentinelValid(sentinelPath, platformPkgDir, manifest, platform) {
+  const parsed = readSentinelFile(sentinelPath);
+  if (!sentinelStructureMatches(parsed, manifest)) return false;
+  return sentinelMtimesMatch(parsed, platformPkgDir, platform);
 }
 
 function buildSentinelPayload(platformPkgDir, manifest, platform) {
@@ -190,13 +204,47 @@ function isSkipRequested(env) {
 //   { ok: true, cached: false, sentinelPath: string|null }
 //   { ok: true, skipped: true, reason }
 //   { ok: false, code, message, binary?, package? }
+function buildVerifyOptions(input, manifest) {
+  const opts = {
+    dirOverride: input.platformPkgDir,
+    version: manifest.version,
+    platformId: (input.packageName || '').replace(/^@fallow-cli\//, '') || 'unknown',
+  };
+  if (typeof input.verifyFn === 'function') opts.verifyFn = input.verifyFn;
+  if (typeof input.digestProvider === 'function') opts.digestProvider = input.digestProvider;
+  return opts;
+}
+
+// Persist the sentinel on a successful verify. Logs (warn-once) when the
+// resolved cache location is read-only or every cascade step failed.
+function persistSentinel(sentinel, platformPkgDir, manifest, platform) {
+  if (!sentinel.path) {
+    warnOnce(
+      'sentinel-no-writable-location',
+      `no writable cache location for verify sentinel (platform pkg dir read-only, ` +
+      `$FALLOW_VERIFY_CACHE_DIR unset, $XDG_CACHE_HOME / %LOCALAPPDATA% unavailable). ` +
+      `Binary verification will re-run on every invocation. Set ${SKIP_ENV}=1 to ` +
+      `bypass verification entirely.`,
+    );
+    return;
+  }
+  const payload = buildSentinelPayload(platformPkgDir, manifest, platform);
+  if (!payload) return;
+  const write = writeSentinel(sentinel.path, payload);
+  if (write.ok) return;
+  warnOnce(
+    'sentinel-write-failed',
+    `could not persist verify sentinel at ${sentinel.path} (${write.code}): ` +
+    `verification will re-run on next invocation. Set FALLOW_VERIFY_CACHE_DIR ` +
+    `to a writable location to enable caching.`,
+  );
+}
+
 function ensureVerified(input) {
   const {
     platformPkgDir,
     packageName,
     manifestPath,
-    verifyFn,
-    digestProvider,
     env = process.env,
     platform = process.platform,
   } = input || {};
@@ -220,12 +268,7 @@ function ensureVerified(input) {
     };
   }
 
-  const sentinel = resolveSentinelPath({
-    platformPkgDir,
-    packageName,
-    env,
-    platform,
-  });
+  const sentinel = resolveSentinelPath({ platformPkgDir, packageName, env, platform });
 
   // Cache hit: sentinel exists, schema matches, mtimes match, version matches.
   if (sentinel.path && isSentinelValid(sentinel.path, platformPkgDir, manifest, platform)) {
@@ -234,15 +277,7 @@ function ensureVerified(input) {
   }
 
   // Cache miss: run full sig + digest verification.
-  const verifyOptions = {
-    dirOverride: platformPkgDir,
-    version: manifest.version,
-    platformId: (packageName || '').replace(/^@fallow-cli\//, '') || 'unknown',
-  };
-  if (typeof verifyFn === 'function') verifyOptions.verifyFn = verifyFn;
-  if (typeof digestProvider === 'function') verifyOptions.digestProvider = digestProvider;
-
-  const result = verifyInstalledSync(verifyOptions);
+  const result = verifyInstalledSync(buildVerifyOptions(input || {}, manifest));
 
   if (!result.ok) {
     emitVerifyLog(env, {
@@ -254,35 +289,8 @@ function ensureVerified(input) {
     return { ...result, package: packageName };
   }
 
-  // Verify passed. Persist the sentinel if we have a writable location.
-  if (sentinel.path) {
-    const payload = buildSentinelPayload(platformPkgDir, manifest, platform);
-    if (payload) {
-      const write = writeSentinel(sentinel.path, payload);
-      if (!write.ok) {
-        warnOnce(
-          'sentinel-write-failed',
-          `could not persist verify sentinel at ${sentinel.path} (${write.code}): ` +
-          `verification will re-run on next invocation. Set FALLOW_VERIFY_CACHE_DIR ` +
-          `to a writable location to enable caching.`,
-        );
-      }
-    }
-  } else {
-    warnOnce(
-      'sentinel-no-writable-location',
-      `no writable cache location for verify sentinel (platform pkg dir read-only, ` +
-      `$FALLOW_VERIFY_CACHE_DIR unset, $XDG_CACHE_HOME / %LOCALAPPDATA% unavailable). ` +
-      `Binary verification will re-run on every invocation. Set ${SKIP_ENV}=1 to ` +
-      `bypass verification entirely.`,
-    );
-  }
-
-  emitVerifyLog(env, {
-    outcome: 'ok',
-    cache: 'miss',
-    sentinel: sentinel.path || '<none>',
-  });
+  persistSentinel(sentinel, platformPkgDir, manifest, platform);
+  emitVerifyLog(env, { outcome: 'ok', cache: 'miss', sentinel: sentinel.path || '<none>' });
   return { ok: true, cached: false, sentinelPath: sentinel.path };
 }
 
@@ -294,7 +302,6 @@ function _resetWarningState() {
 module.exports = {
   ensureVerified,
   SENTINEL_SCHEMA_VERSION,
-  SENTINEL_FILENAME,
   VERIFY_LOG_ENV,
   _resetWarningState,
 };

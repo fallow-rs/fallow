@@ -83,6 +83,48 @@ function packageIdToFilename(packageName) {
   return `${packageName.replace(/^@/, '').replace(/[\/\\]/g, '__')}.json`;
 }
 
+// Each cascade step is a small helper that returns a resolved sentinel
+// descriptor or null. Resolving in this shape keeps `resolveSentinelPath`
+// itself a flat for-loop so cyclomatic complexity stays low.
+
+function tryPlatformPkgDir(platformPkgDir, writableProbe) {
+  if (typeof platformPkgDir !== 'string' || platformPkgDir.length === 0) {
+    return null;
+  }
+  if (!writableProbe(platformPkgDir)) {
+    return null;
+  }
+  return {
+    path: path.join(platformPkgDir, SENTINEL_FILENAME),
+    location: 'platform-pkg',
+    writable: true,
+  };
+}
+
+function tryCacheDirEnv(env, filename, ensureDir, writableProbe) {
+  const dir = env.FALLOW_VERIFY_CACHE_DIR;
+  if (!dir || dir.length === 0) return null;
+  if (!ensureDir(dir) || !writableProbe(dir)) return null;
+  return { path: path.join(dir, filename), location: 'cache-dir-env', writable: true };
+}
+
+function xdgLocationLabel(env, platformId) {
+  if (platformId === 'win32') return 'localappdata';
+  return env.XDG_CACHE_HOME ? 'xdg' : 'home-cache';
+}
+
+function tryXdgFallback(env, homeDir, platformId, filename, ensureDir, writableProbe) {
+  const root = xdgCacheRoot(env, homeDir, platformId);
+  if (!root) return null;
+  const dir = path.join(root, 'fallow', 'sentinels');
+  if (!ensureDir(dir) || !writableProbe(dir)) return null;
+  return {
+    path: path.join(dir, filename),
+    location: xdgLocationLabel(env, platformId),
+    writable: true,
+  };
+}
+
 // Resolve the sentinel path according to the cascade documented above.
 // Dependency-inject env / homedir / platform / fsProbe so the unit tests can
 // exercise every branch without touching the real filesystem state.
@@ -94,8 +136,6 @@ function packageIdToFilename(packageName) {
 // }
 function resolveSentinelPath(options) {
   const opts = options || {};
-  const platformPkgDir = opts.platformPkgDir;
-  const packageName = opts.packageName;
   const env = opts.env || process.env;
   // Using `in` so an explicit `homedir: undefined` opts out of the os.homedir()
   // fallback (tests rely on this to exercise the "no cache home" branch).
@@ -103,47 +143,17 @@ function resolveSentinelPath(options) {
   const platformId = opts.platform || process.platform;
   const writableProbe = typeof opts.isWritable === 'function' ? opts.isWritable : isWritable;
   const ensureDir = typeof opts.ensureDir === 'function' ? opts.ensureDir : ensureDirExists;
+  const filename = packageIdToFilename(opts.packageName);
 
-  // Step 1: try the platform pkg dir itself. This is the steady-state path
-  // for normal npm / pnpm-hoisted / bun installs.
-  if (typeof platformPkgDir === 'string' && platformPkgDir.length > 0) {
-    if (writableProbe(platformPkgDir)) {
-      return {
-        path: path.join(platformPkgDir, SENTINEL_FILENAME),
-        location: 'platform-pkg',
-        writable: true,
-      };
+  return (
+    tryPlatformPkgDir(opts.platformPkgDir, writableProbe) ||
+    tryCacheDirEnv(env, filename, ensureDir, writableProbe) ||
+    tryXdgFallback(env, homeDir, platformId, filename, ensureDir, writableProbe) || {
+      path: null,
+      location: 'none',
+      writable: false,
     }
-  }
-
-  const filename = packageIdToFilename(packageName);
-
-  // Step 2: explicit override via FALLOW_VERIFY_CACHE_DIR.
-  if (env.FALLOW_VERIFY_CACHE_DIR && env.FALLOW_VERIFY_CACHE_DIR.length > 0) {
-    const dir = env.FALLOW_VERIFY_CACHE_DIR;
-    if (ensureDir(dir) && writableProbe(dir)) {
-      return {
-        path: path.join(dir, filename),
-        location: 'cache-dir-env',
-        writable: true,
-      };
-    }
-  }
-
-  // Step 3: XDG / LOCALAPPDATA cache fallback.
-  const root = xdgCacheRoot(env, homeDir, platformId);
-  if (root) {
-    const dir = path.join(root, 'fallow', 'sentinels');
-    if (ensureDir(dir) && writableProbe(dir)) {
-      return {
-        path: path.join(dir, filename),
-        location: platformId === 'win32' ? 'localappdata' : env.XDG_CACHE_HOME ? 'xdg' : 'home-cache',
-        writable: true,
-      };
-    }
-  }
-
-  return { path: null, location: 'none', writable: false };
+  );
 }
 
 module.exports = {
@@ -152,6 +162,4 @@ module.exports = {
   resolveSentinelPath,
   // exported for tests
   _isWritable: isWritable,
-  _ensureDirExists: ensureDirExists,
-  _xdgCacheRoot: xdgCacheRoot,
 };
