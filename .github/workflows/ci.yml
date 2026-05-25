@@ -237,6 +237,35 @@ jobs:
           cd npm/fallow
           npm run test:platform
           npm run test:verify
+          npm run test:sentinel-path
+          npm run test:lazy-verify
+
+      - name: Smoke that no postinstall runs on install
+        # Phase 2 of RFC 868 will block postinstall hooks by default. fallow
+        # must not regress to depending on postinstall. Pack the candidate
+        # tarball and install with --ignore-scripts; confirm the bin wrappers
+        # land and the postinstall file is gone.
+        run: |
+          set -euo pipefail
+          npm pack ./npm/fallow --pack-destination /tmp/fallow-tarball > /tmp/fallow-pack.log
+          TARBALL=$(ls /tmp/fallow-tarball/fallow-*.tgz | head -1)
+          mkdir -p /tmp/fallow-smoke && cd /tmp/fallow-smoke
+          printf '%s' '{"name":"fallow-smoke","version":"0.0.0","private":true}' > package.json
+          npm install --ignore-scripts "$TARBALL" 2>&1 | tee /tmp/fallow-install.log
+          if grep -q "postinstall" /tmp/fallow-install.log; then
+            echo "::error::npm install ran a postinstall hook; fallow must be zero-script after RFC 868 prep"
+            exit 1
+          fi
+          test -f node_modules/fallow/bin/fallow
+          test -f node_modules/fallow/bin/fallow-lsp
+          test -f node_modules/fallow/bin/fallow-mcp
+          if [ -f node_modules/fallow/scripts/postinstall.js ]; then
+            echo "::error::postinstall.js still ships in the npm tarball; remove from npm/fallow/scripts/"
+            exit 1
+          fi
+          test -f node_modules/fallow/scripts/lazy-verify.js
+          test -f node_modules/fallow/scripts/sentinel-path.js
+          test -f node_modules/fallow/scripts/run-binary.js
 
   fallow-self-analyze:
     name: Fallow Self Analysis

@@ -70,9 +70,11 @@
     "schema.json"
   ],
   "scripts": {
-    "postinstall": "node scripts/postinstall.js",
     "test:platform": "node --test scripts/platform-package.test.js",
-    "test:verify": "node --test scripts/verify-binary.test.js"
+    "test:verify": "node --test scripts/verify-binary.test.js",
+    "test:sentinel-path": "node --test scripts/sentinel-path.test.js",
+    "test:lazy-verify": "node --test scripts/lazy-verify.test.js",
+    "test": "node --test scripts/*.test.js"
   },
   "dependencies": {
     "detect-libc": "2.1.2"

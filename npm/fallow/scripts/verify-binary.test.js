@@ -10,6 +10,7 @@ const {
   verifyBinaryAt,
   verifyDigestAt,
   verifyInstalled,
+  verifyInstalledSync,
   sha256Hex,
   normalizeDigest,
   readEmbeddedDigest,
@@ -531,6 +532,145 @@ test('verifyInstalled ignores skip env when allowSkipEnv is false', async (t) =>
     dirOverride: dir,
     verifyFn: (p) => _verifyWithKey(p, rawPub),
     digestProvider: makeDigestProvider(dir),
+    allowSkipEnv: false,
+  });
+  assert.equal(result.ok, true);
+  assert.notEqual(result.skipped, true);
+});
+
+// ---- verifyInstalledSync (lazy first-run path) ----------------------------
+
+function makeSyncDigestProvider(dir) {
+  return ({ binaryPath }) =>
+    'sha256:' + crypto.createHash('sha256').update(fs.readFileSync(binaryPath)).digest('hex');
+}
+
+test('verifyInstalledSync with embedded digests returns ok end-to-end', (t) => {
+  const { privateKey, rawPub } = makeKeypair();
+  const dir = makePlatformDir(privateKey);
+  t.after(() => cleanup(dir));
+  writeManifest(dir, {
+    name: '@fallow-cli/x',
+    version: '9.9.9',
+    fallowDigests: computeDigestsForDir(dir),
+  });
+  const result = verifyInstalledSync({
+    dirOverride: dir,
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.package, '<override>');
+});
+
+test('verifyInstalledSync fails fast on first bad signature', (t) => {
+  const { privateKey, rawPub } = makeKeypair();
+  const dir = makePlatformDir(privateKey, { corruptSigFor: 'fallow-lsp' });
+  t.after(() => cleanup(dir));
+  writeManifest(dir, {
+    name: '@fallow-cli/x',
+    version: '9.9.9',
+    fallowDigests: computeDigestsForDir(dir),
+  });
+  const result = verifyInstalledSync({
+    dirOverride: dir,
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'sig-invalid');
+  assert.match(result.binary, /fallow-lsp/);
+});
+
+test('verifyInstalledSync reports digest-mismatch when bytes diverge from embedded digest', (t) => {
+  const { privateKey, rawPub } = makeKeypair();
+  const dir = makePlatformDir(privateKey);
+  t.after(() => cleanup(dir));
+  writeManifest(dir, {
+    name: '@fallow-cli/x',
+    version: '9.9.9',
+    fallowDigests: { fallow: 'sha256:' + 'a'.repeat(64), 'fallow-lsp': 'sha256:' + 'a'.repeat(64), 'fallow-mcp': 'sha256:' + 'a'.repeat(64), 'fallow.exe': 'sha256:' + 'a'.repeat(64), 'fallow-lsp.exe': 'sha256:' + 'a'.repeat(64), 'fallow-mcp.exe': 'sha256:' + 'a'.repeat(64) },
+  });
+  const result = verifyInstalledSync({
+    dirOverride: dir,
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'digest-mismatch');
+});
+
+test('verifyInstalledSync reports digest-unavailable when no embedded digest and no provider', (t) => {
+  const { privateKey, rawPub } = makeKeypair();
+  const dir = makePlatformDir(privateKey);
+  t.after(() => cleanup(dir));
+  writeManifest(dir, { name: '@fallow-cli/x', version: '9.9.9' });
+  const result = verifyInstalledSync({
+    dirOverride: dir,
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'digest-unavailable');
+  assert.match(result.message, /predates fallow 2\.78\.1/);
+  assert.match(result.message, new RegExp(SKIP_ENV));
+});
+
+test('verifyInstalledSync accepts a sync digestProvider for test isolation', (t) => {
+  const { privateKey, rawPub } = makeKeypair();
+  const dir = makePlatformDir(privateKey);
+  t.after(() => cleanup(dir));
+  // No fallowDigests on manifest; the sync provider supplies them.
+  writeManifest(dir, { name: '@fallow-cli/x', version: '9.9.9' });
+  const result = verifyInstalledSync({
+    dirOverride: dir,
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
+    digestProvider: makeSyncDigestProvider(dir),
+  });
+  assert.equal(result.ok, true);
+});
+
+test('verifyInstalledSync surfaces provider errors as digest-unavailable', (t) => {
+  const { privateKey, rawPub } = makeKeypair();
+  const dir = makePlatformDir(privateKey);
+  t.after(() => cleanup(dir));
+  writeManifest(dir, { name: '@fallow-cli/x', version: '9.9.9' });
+  const result = verifyInstalledSync({
+    dirOverride: dir,
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
+    digestProvider: () => { throw new Error('disk on fire'); },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'digest-unavailable');
+  assert.match(result.message, /disk on fire/);
+});
+
+test('verifyInstalledSync honors FALLOW_SKIP_BINARY_VERIFY', (t) => {
+  const previous = process.env[SKIP_ENV];
+  process.env[SKIP_ENV] = '1';
+  t.after(() => {
+    if (previous === undefined) delete process.env[SKIP_ENV];
+    else process.env[SKIP_ENV] = previous;
+  });
+  const result = verifyInstalledSync({ dirOverride: '/does/not/exist' });
+  assert.equal(result.ok, true);
+  assert.equal(result.skipped, true);
+});
+
+test('verifyInstalledSync ignores skip env when allowSkipEnv is false', (t) => {
+  const previous = process.env[SKIP_ENV];
+  process.env[SKIP_ENV] = '1';
+  t.after(() => {
+    if (previous === undefined) delete process.env[SKIP_ENV];
+    else process.env[SKIP_ENV] = previous;
+  });
+  const { privateKey, rawPub } = makeKeypair();
+  const dir = makePlatformDir(privateKey);
+  t.after(() => cleanup(dir));
+  writeManifest(dir, {
+    name: '@fallow-cli/x',
+    version: '9.9.9',
+    fallowDigests: computeDigestsForDir(dir),
+  });
+  const result = verifyInstalledSync({
+    dirOverride: dir,
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
     allowSkipEnv: false,
   });
   assert.equal(result.ok, true);
