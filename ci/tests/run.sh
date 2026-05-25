@@ -796,6 +796,8 @@ else
   fail "review.sh does not receive FALLOW_SUMMARY_SCOPE by default" "$CI_TYPED_OUT"
 fi
 assert_contains "$CI_TYPED_OUT" "fallow ci reconcile-review --provider gitlab" "review.sh invokes GitLab reconcile command"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_errors" "review.sh checks reconcile apply errors"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_hint" "review.sh emits reconcile apply hint"
 assert_contains "$CI_TYPED_OUT" "merge_requests/123/discussions" "review.sh posts discussion payload"
 assert_contains "$CI_TYPED_OUT" "merge_requests/123/notes/777" "review.sh updates existing body-only review note"
 rm -rf "$CI_TYPED_WORK"

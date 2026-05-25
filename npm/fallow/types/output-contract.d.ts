@@ -4555,9 +4555,21 @@ resolution_comments_posted: number
  */
 threads_resolved: number
 /**
+ * Operator-facing retry hint when apply stopped early.
+ */
+apply_hint?: (string | null)
+/**
  * Errors collected during apply, one entry per failure.
  */
 apply_errors: string[]
+/**
+ * Stale fingerprints whose provider mutation failed.
+ */
+failed_fingerprints?: string[]
+/**
+ * Stale fingerprints not fully applied after the fail-fast stop.
+ */
+unapplied_fingerprints?: string[]
 }
 /**
  * Envelope emitted by `fallow coverage setup --json`. Deterministic

@@ -191,13 +191,19 @@ render_with_fallow() {
 
 if render_with_fallow review-gitlab fallow-review.json; then
   reconcile_review() {
-    fallow ci reconcile-review \
+    if fallow ci reconcile-review \
       --provider gitlab \
       --mr "$CI_MERGE_REQUEST_IID" \
       --project-id "$CI_PROJECT_ID" \
       --api-url "$CI_API_V4_URL" \
-      --envelope fallow-review.json > fallow-review-reconcile.json 2> fallow-review-reconcile-stderr.log \
-      || echo "WARNING: Failed to reconcile resolved review discussions"
+      --envelope fallow-review.json > fallow-review-reconcile.json 2> fallow-review-reconcile-stderr.log; then
+      if jq -e '(.apply_errors // []) | length > 0' fallow-review-reconcile.json > /dev/null 2>&1; then
+        HINT=$(jq -r '.apply_hint // "refresh provider state and rerun the job"' fallow-review-reconcile.json)
+        echo "WARNING: fallow reconcile-review apply incomplete: $HINT"
+      fi
+    else
+      echo "WARNING: Failed to reconcile resolved review discussions"
+    fi
   }
 
   TOTAL=$(jq '.comments | length' fallow-review.json)

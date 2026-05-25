@@ -112,18 +112,18 @@ fn reconcile_review(
             output,
         );
     };
-    let plan = reconcile_sets(&current, &state.fingerprints);
+    let plan = PlannedReconcile::new(&current, &state);
 
     let applied = if opts.dry_run {
         ApplyResult::default()
     } else {
         match provider {
-            CiProvider::Github => apply_github_reconcile(&plan, &state, target, opts),
-            CiProvider::Gitlab => apply_gitlab_reconcile(&plan, &state, target, opts),
+            CiProvider::Github => apply_github_reconcile(&plan, target, opts),
+            CiProvider::Gitlab => apply_gitlab_reconcile(&plan, target, opts),
         }
     };
 
-    emit_reconcile_result(provider, target, &envelope, opts, &plan, &applied)
+    emit_reconcile_result(provider, target, &envelope, opts, &plan.plan, &applied)
 }
 
 #[expect(
@@ -156,7 +156,10 @@ fn emit_reconcile_result(
         provider_warning: plan.provider_warning.clone(),
         resolution_comments_posted: applied.resolution_comments_posted as u32,
         threads_resolved: applied.threads_resolved as u32,
+        apply_hint: applied.hint(),
         apply_errors: applied.errors.clone(),
+        failed_fingerprints: applied.failed_fingerprints.iter().cloned().collect(),
+        unapplied_fingerprints: applied.unapplied_fingerprints.iter().cloned().collect(),
     };
     match serde_json::to_value(&envelope_struct) {
         Ok(value) => crate::report::emit_json(&value, "review reconcile"),
@@ -234,11 +237,61 @@ fn reconcile_sets(current: &BTreeSet<String>, existing: &BTreeSet<String>) -> Re
     }
 }
 
+#[derive(Debug)]
+struct PlannedReconcile<'state> {
+    plan: ReconcilePlan,
+    state: &'state ProviderState,
+}
+
+impl<'state> PlannedReconcile<'state> {
+    fn new(current: &BTreeSet<String>, state: &'state ProviderState) -> Self {
+        Self {
+            plan: reconcile_sets(current, &state.fingerprints),
+            state,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct ApplyResult {
     resolution_comments_posted: usize,
     threads_resolved: usize,
     errors: Vec<String>,
+    failed_fingerprints: BTreeSet<String>,
+    unapplied_fingerprints: BTreeSet<String>,
+}
+
+impl ApplyResult {
+    fn hint(&self) -> Option<String> {
+        (!self.errors.is_empty()).then(|| {
+            "Reconcile apply stopped before all stale fingerprints were applied. Refresh provider state and rerun the job; fingerprints listed in unapplied_fingerprints were not fully applied.".to_owned()
+        })
+    }
+
+    fn record_failure(
+        &mut self,
+        failure: ApplyFailure,
+        unapplied: impl IntoIterator<Item = String>,
+    ) {
+        self.errors.push(failure.message);
+        self.failed_fingerprints.insert(failure.fingerprint);
+        self.unapplied_fingerprints.extend(unapplied);
+    }
+}
+
+#[derive(Debug)]
+struct ApplyFailure {
+    fingerprint: String,
+    message: String,
+}
+
+impl ApplyFailure {
+    fn new(fingerprint: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            fingerprint: fingerprint.into(),
+            message: message.into(),
+        }
+    }
 }
 
 fn load_github_state(
@@ -373,6 +426,7 @@ query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
             for comment in comments {
                 let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
                 if let Some(fingerprint) = extract_fallow_fingerprint(body) {
+                    state.fingerprints.insert(fingerprint.clone());
                     state
                         .github_threads_by_fingerprint
                         .entry(fingerprint)
@@ -400,8 +454,7 @@ query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
 }
 
 fn apply_github_reconcile(
-    plan: &ReconcilePlan,
-    state: &ProviderState,
+    plan: &PlannedReconcile<'_>,
     target: Option<&str>,
     opts: ReconcileOptions<'_>,
 ) -> ApplyResult {
@@ -434,52 +487,221 @@ fn apply_github_reconcile(
     let sha = std::env::var("GITHUB_SHA")
         .ok()
         .or_else(|| std::env::var("PR_HEAD_SHA").ok());
+    let operations = stage_github_operations(plan, sha.as_deref());
 
-    for fingerprint in &plan.stale {
+    if let Err(failure) = preflight_github_operations(&operations, &agent, &repo, &token, api) {
+        result.record_failure(
+            failure,
+            operations
+                .iter()
+                .map(GithubApplyOperation::fingerprint_owned),
+        );
+        return result;
+    }
+
+    for (index, operation) in operations.iter().enumerate() {
+        if let Err(failure) =
+            apply_github_operation(operation, &agent, &repo, pr, &token, api, &mut result)
+        {
+            result.record_failure(
+                failure,
+                operations[index..]
+                    .iter()
+                    .map(GithubApplyOperation::fingerprint_owned),
+            );
+            return result;
+        }
+    }
+    result
+}
+
+#[derive(Debug)]
+enum GithubApplyOperation {
+    Reply {
+        fingerprint: String,
+        comment_id: u64,
+        body: String,
+    },
+    ResolveThread {
+        fingerprint: String,
+        thread_id: String,
+    },
+}
+
+impl GithubApplyOperation {
+    fn fingerprint(&self) -> &str {
+        match self {
+            Self::Reply { fingerprint, .. } | Self::ResolveThread { fingerprint, .. } => {
+                fingerprint
+            }
+        }
+    }
+
+    fn fingerprint_owned(&self) -> String {
+        self.fingerprint().to_owned()
+    }
+}
+
+fn stage_github_operations(
+    plan: &PlannedReconcile<'_>,
+    sha: Option<&str>,
+) -> Vec<GithubApplyOperation> {
+    let mut operations = Vec::new();
+    for fingerprint in &plan.plan.stale {
         // Idempotency: check the (fingerprint, sha) marker, not the bare
         // fingerprint. Re-runs on the same commit must not post duplicate
         // "Resolved in `<sha>`" replies; legacy markers without a SHA suffix
         // still match on bare fingerprint to keep first-run-after-upgrade
         // clean.
-        let marker_key = resolved_marker_key(fingerprint, sha.as_deref());
-        let already_resolved = state.github_resolved_markers.contains(&marker_key)
-            || state.github_resolved_markers.contains(fingerprint);
+        let marker_key = resolved_marker_key(fingerprint, sha);
+        let already_resolved = plan.state.github_resolved_markers.contains(&marker_key)
+            || plan.state.github_resolved_markers.contains(fingerprint);
         if !already_resolved {
-            for comment_id in state
+            for comment_id in plan
+                .state
                 .github_comments_by_fingerprint
                 .get(fingerprint)
                 .into_iter()
                 .flatten()
             {
-                let body = resolved_body(fingerprint, sha.as_deref());
-                let payload = serde_json::json!({ "body": body });
-                let url = format!("{api}/repos/{repo}/pulls/{pr}/comments/{comment_id}/replies");
-                match github_post_json(&agent, &url, &token, &payload) {
-                    Ok(_) => result.resolution_comments_posted += 1,
-                    Err(e) => result.errors.push(e),
-                }
+                let body = resolved_body(fingerprint, sha);
+                operations.push(GithubApplyOperation::Reply {
+                    fingerprint: fingerprint.clone(),
+                    comment_id: *comment_id,
+                    body,
+                });
             }
         }
-        for thread_id in state
+        for thread_id in plan
+            .state
             .github_threads_by_fingerprint
             .get(fingerprint)
             .into_iter()
             .flatten()
         {
+            operations.push(GithubApplyOperation::ResolveThread {
+                fingerprint: fingerprint.clone(),
+                thread_id: thread_id.clone(),
+            });
+        }
+    }
+    operations
+}
+
+fn preflight_github_operations(
+    operations: &[GithubApplyOperation],
+    agent: &ureq::Agent,
+    repo: &str,
+    token: &str,
+    api: &str,
+) -> Result<(), ApplyFailure> {
+    let mut comment_ids = BTreeMap::<u64, String>::new();
+    let mut thread_ids = BTreeMap::<String, String>::new();
+    for operation in operations {
+        match operation {
+            GithubApplyOperation::Reply {
+                fingerprint,
+                comment_id,
+                ..
+            } => {
+                comment_ids
+                    .entry(*comment_id)
+                    .or_insert_with(|| fingerprint.clone());
+            }
+            GithubApplyOperation::ResolveThread {
+                fingerprint,
+                thread_id,
+            } => {
+                thread_ids
+                    .entry(thread_id.clone())
+                    .or_insert_with(|| fingerprint.clone());
+            }
+        }
+    }
+
+    for (comment_id, fingerprint) in comment_ids {
+        let url = format!("{api}/repos/{repo}/pulls/comments/{comment_id}");
+        github_get_json(agent, &url, token).map_err(|err| {
+            ApplyFailure::new(
+                fingerprint,
+                format!("GitHub preflight failed for review comment {comment_id}: {err}"),
+            )
+        })?;
+    }
+
+    for (thread_id, fingerprint) in thread_ids {
+        let payload = serde_json::json!({
+            "query": "query($threadId:ID!){node(id:$threadId){... on PullRequestReviewThread{id isResolved}}}",
+            "variables": { "threadId": thread_id },
+        });
+        let value =
+            github_post_json(agent, &format!("{api}/graphql"), token, &payload).map_err(|err| {
+                ApplyFailure::new(
+                    fingerprint.clone(),
+                    format!("GitHub preflight failed for review thread {thread_id}: {err}"),
+                )
+            })?;
+        if value.get("errors").is_some() || value.pointer("/data/node/id").is_none() {
+            return Err(ApplyFailure::new(
+                fingerprint,
+                format!("GitHub preflight failed for review thread {thread_id}: {value}"),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn apply_github_operation(
+    operation: &GithubApplyOperation,
+    agent: &ureq::Agent,
+    repo: &str,
+    pr: &str,
+    token: &str,
+    api: &str,
+    result: &mut ApplyResult,
+) -> Result<(), ApplyFailure> {
+    match operation {
+        GithubApplyOperation::Reply {
+            fingerprint,
+            comment_id,
+            body,
+        } => {
+            let payload = serde_json::json!({ "body": body });
+            let url = format!("{api}/repos/{repo}/pulls/{pr}/comments/{comment_id}/replies");
+            github_post_json(agent, &url, token, &payload).map_err(|err| {
+                ApplyFailure::new(
+                    fingerprint.clone(),
+                    format!("GitHub failed to post resolution reply for {fingerprint}: {err}"),
+                )
+            })?;
+            result.resolution_comments_posted += 1;
+        }
+        GithubApplyOperation::ResolveThread {
+            fingerprint,
+            thread_id,
+        } => {
             let payload = serde_json::json!({
                 "query": "mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{id isResolved}}}",
                 "variables": { "threadId": thread_id },
             });
-            match github_post_json(&agent, &format!("{api}/graphql"), &token, &payload) {
-                Ok(value) if value.get("errors").is_none() => result.threads_resolved += 1,
-                Ok(value) => result
-                    .errors
-                    .push(format!("GitHub resolveReviewThread failed: {value}")),
-                Err(e) => result.errors.push(e),
+            let value = github_post_json(agent, &format!("{api}/graphql"), token, &payload)
+                .map_err(|err| {
+                    ApplyFailure::new(
+                        fingerprint.clone(),
+                        format!("GitHub failed to resolve review thread {thread_id}: {err}"),
+                    )
+                })?;
+            if value.get("errors").is_some() {
+                return Err(ApplyFailure::new(
+                    fingerprint.clone(),
+                    format!("GitHub resolveReviewThread failed for {fingerprint}: {value}"),
+                ));
             }
+            result.threads_resolved += 1;
         }
     }
-    result
+    Ok(())
 }
 
 fn load_gitlab_state(
@@ -553,8 +775,7 @@ fn load_gitlab_state(
 }
 
 fn apply_gitlab_reconcile(
-    plan: &ReconcilePlan,
-    state: &ProviderState,
+    plan: &PlannedReconcile<'_>,
     target: Option<&str>,
     opts: ReconcileOptions<'_>,
 ) -> ApplyResult {
@@ -586,41 +807,189 @@ fn apply_gitlab_reconcile(
     };
     let sha = std::env::var("CI_COMMIT_SHA").ok();
     let encoded_project = url_encode_path_segment(&project_id);
+    let operations = stage_gitlab_operations(plan, sha.as_deref());
 
-    for fingerprint in &plan.stale {
+    if let Err(failure) =
+        preflight_gitlab_operations(&operations, &agent, &encoded_project, mr, &token, &api)
+    {
+        result.record_failure(
+            failure,
+            operations
+                .iter()
+                .map(GitlabApplyOperation::fingerprint_owned),
+        );
+        return result;
+    }
+
+    for (index, operation) in operations.iter().enumerate() {
+        if let Err(failure) = apply_gitlab_operation(
+            operation,
+            &agent,
+            &encoded_project,
+            mr,
+            &token,
+            &api,
+            &mut result,
+        ) {
+            result.record_failure(
+                failure,
+                operations[index..]
+                    .iter()
+                    .map(GitlabApplyOperation::fingerprint_owned),
+            );
+            return result;
+        }
+    }
+    result
+}
+
+#[derive(Debug)]
+enum GitlabApplyOperation {
+    Note {
+        fingerprint: String,
+        discussion_id: String,
+        body: String,
+    },
+    ResolveDiscussion {
+        fingerprint: String,
+        discussion_id: String,
+    },
+}
+
+impl GitlabApplyOperation {
+    fn fingerprint(&self) -> &str {
+        match self {
+            Self::Note { fingerprint, .. } | Self::ResolveDiscussion { fingerprint, .. } => {
+                fingerprint
+            }
+        }
+    }
+
+    fn fingerprint_owned(&self) -> String {
+        self.fingerprint().to_owned()
+    }
+}
+
+fn stage_gitlab_operations(
+    plan: &PlannedReconcile<'_>,
+    sha: Option<&str>,
+) -> Vec<GitlabApplyOperation> {
+    let mut operations = Vec::new();
+    for fingerprint in &plan.plan.stale {
         // Idempotency: same approach as GitHub apply. (fingerprint, sha)
         // marker, with bare-fingerprint legacy fallback.
-        let marker_key = resolved_marker_key(fingerprint, sha.as_deref());
-        let already_resolved = state.gitlab_resolved_markers.contains(&marker_key)
-            || state.gitlab_resolved_markers.contains(fingerprint);
-        for discussion_id in state
+        let marker_key = resolved_marker_key(fingerprint, sha);
+        let already_resolved = plan.state.gitlab_resolved_markers.contains(&marker_key)
+            || plan.state.gitlab_resolved_markers.contains(fingerprint);
+        for discussion_id in plan
+            .state
             .gitlab_discussions_by_fingerprint
             .get(fingerprint)
             .into_iter()
             .flatten()
         {
             if !already_resolved {
-                let body = resolved_body(fingerprint, sha.as_deref());
-                let payload = serde_json::json!({ "body": body });
-                let url = format!(
-                    "{api}/projects/{encoded_project}/merge_requests/{mr}/discussions/{discussion_id}/notes"
-                );
-                match gitlab_post_json(&agent, &url, &token, &payload) {
-                    Ok(_) => result.resolution_comments_posted += 1,
-                    Err(e) => result.errors.push(e),
-                }
+                let body = resolved_body(fingerprint, sha);
+                operations.push(GitlabApplyOperation::Note {
+                    fingerprint: fingerprint.clone(),
+                    discussion_id: discussion_id.clone(),
+                    body,
+                });
             }
+            operations.push(GitlabApplyOperation::ResolveDiscussion {
+                fingerprint: fingerprint.clone(),
+                discussion_id: discussion_id.clone(),
+            });
+        }
+    }
+    operations
+}
+
+fn preflight_gitlab_operations(
+    operations: &[GitlabApplyOperation],
+    agent: &ureq::Agent,
+    encoded_project: &str,
+    mr: &str,
+    token: &str,
+    api: &str,
+) -> Result<(), ApplyFailure> {
+    let mut discussion_ids = BTreeMap::<String, String>::new();
+    for operation in operations {
+        match operation {
+            GitlabApplyOperation::Note {
+                fingerprint,
+                discussion_id,
+                ..
+            }
+            | GitlabApplyOperation::ResolveDiscussion {
+                fingerprint,
+                discussion_id,
+            } => {
+                discussion_ids
+                    .entry(discussion_id.clone())
+                    .or_insert_with(|| fingerprint.clone());
+            }
+        }
+    }
+    for (discussion_id, fingerprint) in discussion_ids {
+        let url = format!(
+            "{api}/projects/{encoded_project}/merge_requests/{mr}/discussions/{discussion_id}"
+        );
+        gitlab_get_json(agent, &url, token).map_err(|err| {
+            ApplyFailure::new(
+                fingerprint,
+                format!("GitLab preflight failed for discussion {discussion_id}: {err}"),
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn apply_gitlab_operation(
+    operation: &GitlabApplyOperation,
+    agent: &ureq::Agent,
+    encoded_project: &str,
+    mr: &str,
+    token: &str,
+    api: &str,
+    result: &mut ApplyResult,
+) -> Result<(), ApplyFailure> {
+    match operation {
+        GitlabApplyOperation::Note {
+            fingerprint,
+            discussion_id,
+            body,
+        } => {
+            let payload = serde_json::json!({ "body": body });
+            let url = format!(
+                "{api}/projects/{encoded_project}/merge_requests/{mr}/discussions/{discussion_id}/notes"
+            );
+            gitlab_post_json(agent, &url, token, &payload).map_err(|err| {
+                ApplyFailure::new(
+                    fingerprint.clone(),
+                    format!("GitLab failed to post resolution note for {fingerprint}: {err}"),
+                )
+            })?;
+            result.resolution_comments_posted += 1;
+        }
+        GitlabApplyOperation::ResolveDiscussion {
+            fingerprint,
+            discussion_id,
+        } => {
             let payload = serde_json::json!({ "resolved": true });
             let url = format!(
                 "{api}/projects/{encoded_project}/merge_requests/{mr}/discussions/{discussion_id}"
             );
-            match gitlab_put_json(&agent, &url, &token, &payload) {
-                Ok(_) => result.threads_resolved += 1,
-                Err(e) => result.errors.push(e),
-            }
+            gitlab_put_json(agent, &url, token, &payload).map_err(|err| {
+                ApplyFailure::new(
+                    fingerprint.clone(),
+                    format!("GitLab failed to resolve discussion {discussion_id}: {err}"),
+                )
+            })?;
+            result.threads_resolved += 1;
         }
     }
-    result
+    Ok(())
 }
 
 fn require_target<'a>(label: &str, target: Option<&'a str>) -> Result<&'a str, String> {

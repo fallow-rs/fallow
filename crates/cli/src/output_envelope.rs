@@ -1156,8 +1156,17 @@ pub struct ReviewReconcileOutput {
     pub resolution_comments_posted: u32,
     /// Stale review threads actually resolved (zero on dry runs).
     pub threads_resolved: u32,
+    /// Operator-facing retry hint when apply stopped early.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apply_hint: Option<String>,
     /// Errors collected during apply, one entry per failure.
     pub apply_errors: Vec<String>,
+    /// Stale fingerprints whose provider mutation failed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed_fingerprints: Vec<String>,
+    /// Stale fingerprints not fully applied after the fail-fast stop.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unapplied_fingerprints: Vec<String>,
 }
 
 /// Schema-version discriminator for the review reconcile envelope.

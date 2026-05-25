@@ -116,12 +116,18 @@ render_with_fallow() {
 
 if render_with_fallow review-github fallow-review.json; then
   reconcile_review() {
-    fallow ci reconcile-review \
+    if fallow ci reconcile-review \
       --provider github \
       --pr "$PR_NUMBER" \
       --repo "$GH_REPO" \
-      --envelope fallow-review.json > fallow-review-reconcile.json 2> fallow-review-reconcile-stderr.log \
-      || echo "::warning::Failed to reconcile resolved review threads"
+      --envelope fallow-review.json > fallow-review-reconcile.json 2> fallow-review-reconcile-stderr.log; then
+      if jq -e '(.apply_errors // []) | length > 0' fallow-review-reconcile.json > /dev/null 2>&1; then
+        HINT=$(jq -r '.apply_hint // "refresh provider state and rerun the job"' fallow-review-reconcile.json)
+        echo "::warning::fallow reconcile-review apply incomplete: $HINT"
+      fi
+    else
+      echo "::warning::Failed to reconcile resolved review threads"
+    fi
   }
 
   TOTAL=$(jq '.comments | length' fallow-review.json)

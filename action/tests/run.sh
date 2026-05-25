@@ -938,6 +938,8 @@ else
   fail "review.sh does not receive FALLOW_SUMMARY_SCOPE by default" "$ACTION_TYPED_OUT"
 fi
 assert_contains "$ACTION_TYPED_OUT" "fallow ci reconcile-review --provider github" "review.sh invokes GitHub reconcile command"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_errors" "review.sh checks reconcile apply errors"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_hint" "review.sh emits reconcile apply hint"
 assert_contains "$ACTION_TYPED_OUT" "repos/owner/repo/pulls/123/reviews" "review.sh posts review envelope"
 assert_contains "$ACTION_TYPED_OUT" "repos/owner/repo/issues/comments/777 --method PATCH" "review.sh updates existing body-only review comment"
 assert_contains "$(cat "$DIR/../../action.yml")" "review-guidance:" "action.yml exposes review-guidance input"

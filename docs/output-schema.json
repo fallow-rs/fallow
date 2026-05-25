@@ -5027,12 +5027,33 @@
           "type": "integer",
           "description": "Stale review threads actually resolved (zero on dry runs)."
         },
+        "apply_hint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Operator-facing retry hint when apply stopped early."
+        },
         "apply_errors": {
           "type": "array",
           "items": {
             "type": "string"
           },
           "description": "Errors collected during apply, one entry per failure."
+        },
+        "failed_fingerprints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Stale fingerprints whose provider mutation failed."
+        },
+        "unapplied_fingerprints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Stale fingerprints not fully applied after the fail-fast stop."
         }
       },
       "required": [
