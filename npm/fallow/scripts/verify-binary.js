@@ -246,7 +246,11 @@ function readEmbeddedDigest(manifestPath, binaryFileName) {
 }
 
 function binaryTargetsForPlatform(platformId) {
-  const isWindows = process.platform === 'win32';
+  // Derive the `.exe` suffix from the platformId, not from the live
+  // process.platform. Production callers pass `<platform>-<arch>...` strings
+  // that already encode windows-ness (`win32-x64-msvc`, `win32-arm64-msvc`),
+  // and tests can synthesize a Windows verify without running on Windows.
+  const isWindows = typeof platformId === 'string' && platformId.startsWith('win32');
   const ext = isWindows ? '.exe' : '';
   return [
     { binary: `fallow${ext}`, asset: `fallow-${platformId}${ext}` },

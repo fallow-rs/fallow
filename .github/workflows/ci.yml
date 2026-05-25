@@ -245,20 +245,34 @@ jobs:
         # must not regress to depending on postinstall. Pack the candidate
         # tarball and install with --ignore-scripts; confirm the bin wrappers
         # land and the postinstall file is gone.
+        shell: bash
         run: |
           set -euo pipefail
+          mkdir -p /tmp/fallow-tarball
           npm pack ./npm/fallow --pack-destination /tmp/fallow-tarball > /tmp/fallow-pack.log
-          TARBALL=$(ls /tmp/fallow-tarball/fallow-*.tgz | head -1)
-          mkdir -p /tmp/fallow-smoke && cd /tmp/fallow-smoke
-          printf '%s' '{"name":"fallow-smoke","version":"0.0.0","private":true}' > package.json
-          npm install --ignore-scripts "$TARBALL" 2>&1 | tee /tmp/fallow-install.log
-          if grep -q "postinstall" /tmp/fallow-install.log; then
-            echo "::error::npm install ran a postinstall hook; fallow must be zero-script after RFC 868 prep"
+          shopt -s nullglob
+          tarballs=(/tmp/fallow-tarball/fallow-*.tgz)
+          if [ ${#tarballs[@]} -eq 0 ]; then
+            echo "::error::npm pack produced no tarball"
             exit 1
           fi
-          test -f node_modules/fallow/bin/fallow
-          test -f node_modules/fallow/bin/fallow-lsp
-          test -f node_modules/fallow/bin/fallow-mcp
+          TARBALL="${tarballs[0]}"
+          mkdir -p /tmp/fallow-smoke && cd /tmp/fallow-smoke
+          printf '%s' '{"name":"fallow-smoke","version":"0.0.0","private":true}' > package.json
+          # Skip the optional platform-binary fetch: the smoke checks install
+          # layout, not binary exec. Avoids unnecessary network traffic and
+          # registry rate-limit risk on busy CI windows.
+          npm install --ignore-scripts --omit=optional "$TARBALL" 2>&1 | tee /tmp/fallow-install.log
+          # Match only npm's lifecycle-script announcement for fallow itself
+          # (`> fallow@<version> postinstall`), not the substring "postinstall"
+          # in transitive-dep announcements.
+          if grep -qE "^> fallow@[0-9].*(postinstall|preinstall|install)" /tmp/fallow-install.log; then
+            echo "::error::npm install ran an install lifecycle script for fallow; the package must be zero-script after RFC 868 prep"
+            exit 1
+          fi
+          test -x node_modules/fallow/bin/fallow
+          test -x node_modules/fallow/bin/fallow-lsp
+          test -x node_modules/fallow/bin/fallow-mcp
           if [ -f node_modules/fallow/scripts/postinstall.js ]; then
             echo "::error::postinstall.js still ships in the npm tarball; remove from npm/fallow/scripts/"
             exit 1
