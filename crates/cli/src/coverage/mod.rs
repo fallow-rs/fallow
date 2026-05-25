@@ -13,13 +13,17 @@
 //!   can resolve back to original source files.
 
 use std::ffi::OsStr;
+use std::fmt::Write as FmtWrite;
+use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-use fallow_config::{OutputFormat, PackageJson, WorkspaceInfo, discover_workspaces};
+use fallow_config::{OutputFormat, PackageJson, WorkspaceInfo, atomic_write, discover_workspaces};
 use fallow_core::git_env::clear_ambient_git_env;
 use fallow_license::{DEFAULT_HARD_FAIL_DAYS, LicenseStatus};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::health::coverage as runtime_coverage;
 use crate::license;
@@ -34,6 +38,7 @@ mod upload_inventory;
 mod upload_source_maps;
 
 const COVERAGE_DOCS_URL: &str = "https://docs.fallow.tools/analysis/runtime-coverage";
+const SETUP_STATE_SCHEMA_VERSION: u8 = 1;
 
 /// Subcommands for `fallow coverage`.
 #[derive(Debug, Clone)]
@@ -193,6 +198,81 @@ struct CoverageSetupMember {
     context: CoverageSetupContext,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct CoverageSetupState {
+    schema_version: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    license: Option<SetupLicenseState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sidecar: Option<SetupSidecarState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    recipe: Option<SetupRecipeState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completed_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct SetupLicenseState {
+    fingerprint: String,
+    updated_at: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct SetupSidecarState {
+    path: PathBuf,
+    checksum: String,
+    updated_at: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct SetupRecipeState {
+    path: PathBuf,
+    checksum: String,
+    context_fingerprint: String,
+    updated_at: i64,
+}
+
+#[derive(Debug)]
+struct CoverageSetupLock {
+    _file: File,
+}
+
+impl Default for CoverageSetupState {
+    fn default() -> Self {
+        Self {
+            schema_version: SETUP_STATE_SCHEMA_VERSION,
+            license: None,
+            sidecar: None,
+            recipe: None,
+            completed_at: None,
+        }
+    }
+}
+
+impl CoverageSetupLock {
+    fn try_acquire(root: &Path) -> Result<Self, String> {
+        let lock_path = setup_lock_path(root);
+        ensure_fallow_dir(root)?;
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)
+            .map_err(|err| format!("failed to open {}: {err}", lock_path.display()))?;
+        match file.try_lock() {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(std::fs::TryLockError::WouldBlock) => Err(format!(
+                "another fallow coverage setup is already running for this project. \
+                 The advisory lock is at {}; retry after that process finishes.",
+                display_relative(root, &lock_path)
+            )),
+            Err(std::fs::TryLockError::Error(err)) => {
+                Err(format!("failed to lock {}: {err}", lock_path.display()))
+            }
+        }
+    }
+}
+
 impl CoverageSetupContext {
     fn script_runner(&self) -> PackageManager {
         self.package_manager.unwrap_or(PackageManager::Npm)
@@ -251,16 +331,216 @@ pub fn run(subcommand: CoverageSubcommand, ctx: &RunContext<'_>) -> ExitCode {
     }
 }
 
+fn setup_state_path(root: &Path) -> PathBuf {
+    root.join(".fallow").join("setup.json")
+}
+
+fn setup_lock_path(root: &Path) -> PathBuf {
+    root.join(".fallow").join("setup.lock")
+}
+
+fn ensure_fallow_dir(root: &Path) -> Result<(), String> {
+    let dir = root.join(".fallow");
+    std::fs::create_dir_all(&dir)
+        .map_err(|err| format!("failed to create {}: {err}", dir.display()))
+}
+
+fn load_setup_state(root: &Path) -> CoverageSetupState {
+    let path = setup_state_path(root);
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return CoverageSetupState::default();
+    };
+    match serde_json::from_str::<CoverageSetupState>(&content) {
+        Ok(state) if state.schema_version == SETUP_STATE_SCHEMA_VERSION => state,
+        Ok(_) => {
+            eprintln!(
+                "fallow coverage setup: ignoring incompatible setup state at {}",
+                display_relative(root, &path)
+            );
+            CoverageSetupState::default()
+        }
+        Err(err) => {
+            eprintln!(
+                "fallow coverage setup: ignoring unreadable setup state at {}: {err}",
+                display_relative(root, &path)
+            );
+            CoverageSetupState::default()
+        }
+    }
+}
+
+fn save_setup_state(root: &Path, state: &CoverageSetupState) -> Result<(), String> {
+    ensure_fallow_dir(root)?;
+    let path = setup_state_path(root);
+    let content = serde_json::to_vec_pretty(state)
+        .map_err(|err| format!("failed to serialize {}: {err}", path.display()))?;
+    atomic_write(&path, &content)
+        .map_err(|err| format!("failed to write {}: {err}", path.display()))
+}
+
+fn mark_setup_completed(state: &mut CoverageSetupState) {
+    state.completed_at = Some(fallow_license::current_unix_seconds());
+}
+
+fn license_status_is_setup_acceptable(
+    status: &Result<LicenseStatus, fallow_license::LicenseError>,
+) -> bool {
+    matches!(
+        status,
+        Ok(LicenseStatus::Valid { .. }
+            | LicenseStatus::ExpiredWarning { .. }
+            | LicenseStatus::ExpiredWatermark { .. })
+    )
+}
+
+fn active_license_fingerprint() -> Option<String> {
+    let jwt = fallow_license::load_raw_jwt().ok().flatten()?;
+    if jwt.is_empty() {
+        return None;
+    }
+    Some(hash_bytes(jwt.as_bytes()))
+}
+
+fn license_state_is_current(
+    state: &CoverageSetupState,
+    status: &Result<LicenseStatus, fallow_license::LicenseError>,
+) -> bool {
+    if !license_status_is_setup_acceptable(status) {
+        return false;
+    }
+    let Some(recorded) = state.license.as_ref() else {
+        return false;
+    };
+    active_license_fingerprint().as_deref() == Some(recorded.fingerprint.as_str())
+}
+
+fn record_current_license_state(state: &mut CoverageSetupState) {
+    if let Some(fingerprint) = active_license_fingerprint() {
+        state.license = Some(SetupLicenseState {
+            fingerprint,
+            updated_at: fallow_license::current_unix_seconds(),
+        });
+    } else {
+        state.license = None;
+    }
+}
+
+fn sidecar_state_is_current(state: &CoverageSetupState) -> bool {
+    let Some(recorded) = state.sidecar.as_ref() else {
+        return false;
+    };
+    if sidecar_env_override_is_set() || !recorded.path.is_file() {
+        return false;
+    }
+    hash_file(&recorded.path).as_deref() == Some(recorded.checksum.as_str())
+}
+
+fn sidecar_env_override_is_set() -> bool {
+    ["FALLOW_COV_BIN", "FALLOW_COV_BINARY_PATH"]
+        .iter()
+        .any(|key| std::env::var_os(key).is_some_and(|value| !value.is_empty()))
+}
+
+fn record_sidecar_state(state: &mut CoverageSetupState, path: PathBuf) -> Result<(), String> {
+    let checksum =
+        hash_file(&path).ok_or_else(|| format!("failed to hash sidecar {}", path.display()))?;
+    state.sidecar = Some(SetupSidecarState {
+        path,
+        checksum,
+        updated_at: fallow_license::current_unix_seconds(),
+    });
+    Ok(())
+}
+
+fn recipe_state_is_current(
+    state: &CoverageSetupState,
+    context: &CoverageSetupContext,
+    expected_contents: &str,
+) -> bool {
+    let Some(recorded) = state.recipe.as_ref() else {
+        return false;
+    };
+    if recorded.context_fingerprint != setup_context_fingerprint(context) {
+        return false;
+    }
+    if !recorded.path.is_file() {
+        return false;
+    }
+    let expected_checksum = hash_bytes(expected_contents.as_bytes());
+    recorded.checksum == expected_checksum
+        && hash_file(&recorded.path).as_deref() == Some(expected_checksum.as_str())
+}
+
+fn record_recipe_state(
+    state: &mut CoverageSetupState,
+    path: PathBuf,
+    context: &CoverageSetupContext,
+    contents: &str,
+) {
+    state.recipe = Some(SetupRecipeState {
+        path,
+        checksum: hash_bytes(contents.as_bytes()),
+        context_fingerprint: setup_context_fingerprint(context),
+        updated_at: fallow_license::current_unix_seconds(),
+    });
+}
+
+fn setup_context_fingerprint(context: &CoverageSetupContext) -> String {
+    hash_bytes(setup_context_key(context).as_bytes())
+}
+
+fn setup_context_key(context: &CoverageSetupContext) -> String {
+    format!(
+        "{:?}|{:?}|{}|{}|{}|{}|{}|{}",
+        context.framework,
+        context.package_manager,
+        context.has_build_script,
+        context.has_start_script,
+        context.has_preview_script,
+        context.node_entry_path,
+        context.build_command().unwrap_or_default(),
+        context.run_command()
+    )
+}
+
+fn hash_file(path: &Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    Some(hash_bytes(&bytes))
+}
+
+fn hash_bytes(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut output = String::with_capacity("sha256:".len() + digest.len() * 2);
+    output.push_str("sha256:");
+    for byte in digest {
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    output
+}
+
 fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
     if args.json {
         return run_setup_json(root, args.explain);
     }
+
+    let _lock = match CoverageSetupLock::try_acquire(root) {
+        Ok(lock) => lock,
+        Err(message) => {
+            eprintln!("fallow coverage setup: {message}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut setup_state = load_setup_state(root);
 
     println!("fallow coverage setup");
     println!();
     println!("What \"runtime coverage\" means: fallow looks at which functions actually");
     println!("ran in your deployed app, so it can say \"this code is never called\" with");
     println!("proof, not just \"this code has no static references.\"");
+    println!(
+        "Setup progress is saved at {} so interrupted runs can resume.",
+        display_relative(root, &setup_state_path(root))
+    );
     println!();
 
     let key = match license::verifying_key() {
@@ -272,31 +552,95 @@ fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
     };
 
     let license_state = fallow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS);
-    if let Some(exit) = handle_license_step(root, args, &license_state) {
-        return exit;
+    if license_state_is_current(&setup_state, &license_state) {
+        println!("Step 1/4: License check... ok (resumed).");
+    } else {
+        if let Some(exit) = handle_license_step(root, args, &license_state) {
+            return exit;
+        }
+        let license_state = fallow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS);
+        if license_status_is_setup_acceptable(&license_state) {
+            record_current_license_state(&mut setup_state);
+            if let Err(message) = save_setup_state(root, &setup_state) {
+                eprintln!("fallow coverage setup: {message}");
+                return ExitCode::from(2);
+            }
+        } else {
+            setup_state.license = None;
+        }
     }
 
     let context = detect_setup_context(root);
 
-    if let Some(exit) = handle_sidecar_step(root, args, context.package_manager) {
-        return exit;
+    if sidecar_state_is_current(&setup_state) {
+        if let Some(sidecar) = setup_state.sidecar.as_ref() {
+            println!(
+                "Step 2/4: Sidecar check... ok ({}) (resumed).",
+                sidecar.path.to_string_lossy()
+            );
+        }
+    } else {
+        if let Some(exit) = handle_sidecar_step(root, args, context.package_manager) {
+            return exit;
+        }
+        match runtime_coverage::discover_sidecar(Some(root)) {
+            Ok(path) => {
+                if let Err(message) = record_sidecar_state(&mut setup_state, path)
+                    .and_then(|()| save_setup_state(root, &setup_state))
+                {
+                    eprintln!("fallow coverage setup: {message}");
+                    return ExitCode::from(2);
+                }
+            }
+            Err(message) => {
+                eprintln!("fallow coverage setup: {message}");
+                return ExitCode::from(4);
+            }
+        }
     }
 
-    let recipe_path = match write_recipe(root, &context) {
-        Ok(path) => path,
-        Err(message) => {
-            eprintln!("fallow coverage setup: {message}");
-            return ExitCode::from(2);
+    let recipe = recipe_contents(&context);
+    let recipe_path = if recipe_state_is_current(&setup_state, &context, &recipe) {
+        let path = setup_state
+            .recipe
+            .as_ref()
+            .map(|recipe| recipe.path.clone())
+            .unwrap_or_else(|| recipe_path(root));
+        println!(
+            "Step 3/4: Coverage recipe... ok ({}) (resumed).",
+            display_relative(root, &path)
+        );
+        path
+    } else {
+        match write_recipe(root, &recipe) {
+            Ok(path) => {
+                record_recipe_state(&mut setup_state, path.clone(), &context, &recipe);
+                if let Err(message) = save_setup_state(root, &setup_state) {
+                    eprintln!("fallow coverage setup: {message}");
+                    return ExitCode::from(2);
+                }
+                path
+            }
+            Err(message) => {
+                eprintln!("fallow coverage setup: {message}");
+                return ExitCode::from(2);
+            }
         }
     };
 
+    mark_setup_completed(&mut setup_state);
+    if let Err(message) = save_setup_state(root, &setup_state) {
+        eprintln!("fallow coverage setup: {message}");
+        return ExitCode::from(2);
+    }
+
     if let Some(coverage_path) = detect_coverage_artifact(root) {
         println!(
-            "Step 3/4: Coverage found at {}",
+            "Step 4/4: Coverage found at {}",
             display_relative(root, &coverage_path)
         );
         println!(
-            "Step 4/4: Running fallow health --runtime-coverage {} ...",
+            "Running fallow health --runtime-coverage {} ...",
             display_relative(root, &coverage_path)
         );
         let exit = run_health_analysis(root, &coverage_path);
@@ -304,7 +648,7 @@ fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
         return exit;
     }
 
-    println!("Step 3/4: Collecting coverage for your app.");
+    println!("Step 4/4: Collecting coverage for your app.");
     println!("  -> Detected: {}.", context.framework.label());
     println!(
         "  -> Wrote {} with the {} recipe.",
@@ -1244,12 +1588,16 @@ fn detect_package_manager_from_field(root: &Path) -> Option<PackageManager> {
     }
 }
 
-fn write_recipe(root: &Path, context: &CoverageSetupContext) -> Result<PathBuf, String> {
+fn recipe_path(root: &Path) -> PathBuf {
+    root.join("docs").join("collect-coverage.md")
+}
+
+fn write_recipe(root: &Path, contents: &str) -> Result<PathBuf, String> {
     let docs_dir = root.join("docs");
     std::fs::create_dir_all(&docs_dir)
         .map_err(|err| format!("failed to create {}: {err}", docs_dir.display()))?;
-    let path = docs_dir.join("collect-coverage.md");
-    std::fs::write(&path, recipe_contents(context))
+    let path = recipe_path(root);
+    atomic_write(&path, contents.as_bytes())
         .map_err(|err| format!("failed to write {}: {err}", path.display()))?;
     Ok(path)
 }
@@ -1405,10 +1753,13 @@ mod tests {
     use super::{
         CoverageSetupContext, FrameworkKind, PackageManager, SetupArgs, build_setup_json,
         detect_coverage_artifact, detect_framework, detect_package_manager, handle_license_step,
-        recipe_contents,
+        hash_file, load_setup_state, recipe_contents, recipe_state_is_current, record_recipe_state,
+        record_sidecar_state, run_setup, save_setup_state, setup_context_fingerprint,
+        setup_state_path, sidecar_state_is_current, write_recipe,
     };
     use fallow_config::PackageJson;
     use fallow_license::LicenseStatus;
+    use std::path::{Path, PathBuf};
     use tempfile::tempdir;
 
     #[test]
@@ -1810,6 +2161,187 @@ mod tests {
             !dir.path().join("docs/collect-coverage.md").exists(),
             "JSON setup must not write the human recipe"
         );
+        assert!(
+            !dir.path().join(".fallow").exists(),
+            "JSON setup must not write setup state or lock files"
+        );
+    }
+
+    #[test]
+    fn run_setup_json_does_not_write_state_lock_or_recipe() {
+        let dir = tempdir().expect("tempdir should be created");
+
+        let exit = run_setup(
+            SetupArgs {
+                json: true,
+                ..SetupArgs::default()
+            },
+            dir.path(),
+        );
+
+        assert_eq!(exit, std::process::ExitCode::SUCCESS);
+        assert!(!dir.path().join(".fallow").exists());
+        assert!(!dir.path().join("docs/collect-coverage.md").exists());
+    }
+
+    #[test]
+    fn corrupt_setup_state_falls_back_to_default() {
+        let dir = tempdir().expect("tempdir should be created");
+        std::fs::create_dir_all(dir.path().join(".fallow")).expect(".fallow should be created");
+        std::fs::write(setup_state_path(dir.path()), "{not json")
+            .expect("corrupt setup state should be written");
+
+        let state = load_setup_state(dir.path());
+
+        assert_eq!(state.schema_version, 1);
+        assert!(state.license.is_none());
+        assert!(state.sidecar.is_none());
+        assert!(state.recipe.is_none());
+    }
+
+    #[test]
+    fn sidecar_state_requires_matching_file_checksum() {
+        let dir = tempdir().expect("tempdir should be created");
+        let sidecar = write_fake_sidecar(dir.path(), b"first");
+        let mut state = super::CoverageSetupState::default();
+        record_sidecar_state(&mut state, sidecar.clone()).expect("sidecar state should record");
+
+        assert!(sidecar_state_is_current(&state));
+
+        std::fs::write(&sidecar, b"second").expect("sidecar should be mutated");
+
+        assert!(!sidecar_state_is_current(&state));
+    }
+
+    #[test]
+    fn recipe_state_requires_current_context_and_file_checksum() {
+        let dir = tempdir().expect("tempdir should be created");
+        let vite_context = CoverageSetupContext {
+            framework: FrameworkKind::ViteBrowser,
+            package_manager: Some(PackageManager::Pnpm),
+            has_build_script: true,
+            has_start_script: false,
+            has_preview_script: true,
+            node_entry_path: "src/main.ts".to_owned(),
+        };
+        let next_context = CoverageSetupContext {
+            framework: FrameworkKind::NextJs,
+            package_manager: Some(PackageManager::Pnpm),
+            has_build_script: true,
+            has_start_script: true,
+            has_preview_script: false,
+            node_entry_path: "src/main.ts".to_owned(),
+        };
+        let vite_recipe = recipe_contents(&vite_context);
+        let recipe_path = write_recipe(dir.path(), &vite_recipe).expect("recipe should write");
+        let mut state = super::CoverageSetupState::default();
+        record_recipe_state(&mut state, recipe_path.clone(), &vite_context, &vite_recipe);
+
+        assert!(recipe_state_is_current(&state, &vite_context, &vite_recipe));
+        assert!(!recipe_state_is_current(
+            &state,
+            &next_context,
+            &recipe_contents(&next_context)
+        ));
+
+        std::fs::write(&recipe_path, "manual edit").expect("recipe should be mutated");
+
+        assert!(!recipe_state_is_current(
+            &state,
+            &vite_context,
+            &vite_recipe
+        ));
+    }
+
+    #[test]
+    fn setup_context_fingerprint_changes_when_recipe_inputs_change() {
+        let base = CoverageSetupContext {
+            framework: FrameworkKind::PlainNode,
+            package_manager: Some(PackageManager::Npm),
+            has_build_script: false,
+            has_start_script: false,
+            has_preview_script: false,
+            node_entry_path: "src/server.ts".to_owned(),
+        };
+        let changed = CoverageSetupContext {
+            package_manager: Some(PackageManager::Bun),
+            ..base.clone()
+        };
+
+        assert_ne!(
+            setup_context_fingerprint(&base),
+            setup_context_fingerprint(&changed)
+        );
+    }
+
+    #[test]
+    fn setup_lock_reports_contention() {
+        let dir = tempdir().expect("tempdir should be created");
+        let _first =
+            super::CoverageSetupLock::try_acquire(dir.path()).expect("first lock should acquire");
+
+        let err = super::CoverageSetupLock::try_acquire(dir.path())
+            .expect_err("second lock should report contention");
+
+        assert!(err.contains("another fallow coverage setup is already running"));
+        assert!(err.contains(".fallow/setup.lock"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_setup_resumes_valid_recipe_state_without_rewriting() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().expect("tempdir should be created");
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"api","packageManager":"npm@10.0.0","dependencies":{"elysia":"^1.0.0"}}"#,
+        )
+        .expect("package.json should be written");
+        let sidecar = write_fake_sidecar(root, b"sidecar");
+        let context = super::detect_setup_context(root);
+        let recipe = recipe_contents(&context);
+        let recipe_path = write_recipe(root, &recipe).expect("recipe should be written");
+        let mut state = super::CoverageSetupState::default();
+        record_sidecar_state(&mut state, sidecar).expect("sidecar should record");
+        record_recipe_state(&mut state, recipe_path.clone(), &context, &recipe);
+        save_setup_state(root, &state).expect("state should save");
+
+        let docs_dir = root.join("docs");
+        let original_mode = std::fs::metadata(&docs_dir)
+            .expect("docs metadata should be readable")
+            .permissions()
+            .mode();
+        let mut readonly = std::fs::metadata(&docs_dir)
+            .expect("docs metadata should be readable")
+            .permissions();
+        readonly.set_mode(0o555);
+        std::fs::set_permissions(&docs_dir, readonly).expect("docs should become read-only");
+
+        let exit = run_setup(
+            SetupArgs {
+                non_interactive: true,
+                ..SetupArgs::default()
+            },
+            root,
+        );
+
+        let mut restored = std::fs::metadata(&docs_dir)
+            .expect("docs metadata should be readable")
+            .permissions();
+        restored.set_mode(original_mode & 0o7777);
+        std::fs::set_permissions(&docs_dir, restored).expect("docs permissions should restore");
+
+        assert_eq!(exit, std::process::ExitCode::SUCCESS);
+        assert_eq!(
+            std::fs::read_to_string(&recipe_path).expect("recipe should be readable"),
+            recipe
+        );
+        assert_eq!(
+            hash_file(&recipe_path).as_deref(),
+            state.recipe.as_ref().map(|r| r.checksum.as_str())
+        );
     }
 
     #[test]
@@ -1838,6 +2370,18 @@ mod tests {
                 .as_object()
                 .is_some_and(|enums| enums.contains_key("runtime_targets"))
         );
+    }
+
+    fn write_fake_sidecar(root: &Path, bytes: &[u8]) -> PathBuf {
+        let bin_dir = root.join("node_modules").join(".bin");
+        std::fs::create_dir_all(&bin_dir).expect("sidecar bin dir should be created");
+        let path = if cfg!(windows) {
+            bin_dir.join("fallow-cov.cmd")
+        } else {
+            bin_dir.join("fallow-cov")
+        };
+        std::fs::write(&path, bytes).expect("sidecar should be written");
+        path
     }
 
     #[test]
