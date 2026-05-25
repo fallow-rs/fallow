@@ -20,6 +20,20 @@ where
     })
 }
 
+fn deserialize_string_array_lenient<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(match value {
+        Some(serde_json::Value::Array(values)) => values
+            .into_iter()
+            .filter_map(|value| value.as_str().map(str::to_owned))
+            .collect(),
+        _ => Vec::new(),
+    })
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct PeerDependencyMeta {
     #[serde(default)]
@@ -43,6 +57,8 @@ pub struct PackageJson {
     pub typings: Option<String>,
     #[serde(default)]
     pub source: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_string_array_lenient")]
+    pub files: Vec<String>,
     #[serde(default)]
     pub browser: Option<serde_json::Value>,
     #[serde(default)]
@@ -364,6 +380,26 @@ mod tests {
 
         let pkg: PackageJson = serde_json::from_str(r#"{"private": false}"#).unwrap();
         assert_eq!(pkg.private, Some(false));
+    }
+
+    #[test]
+    fn package_json_files_preserves_string_array_values() {
+        let pkg: PackageJson =
+            serde_json::from_str(r#"{"files": ["index.js", "template-*", "dist"]}"#).unwrap();
+        assert_eq!(pkg.files, vec!["index.js", "template-*", "dist"]);
+    }
+
+    #[test]
+    fn package_json_files_missing_or_unexpected_shapes_are_ignored() {
+        let pkg: PackageJson = serde_json::from_str(r#"{"name": "pkg"}"#).unwrap();
+        assert!(pkg.files.is_empty());
+
+        let pkg: PackageJson = serde_json::from_str(r#"{"files": "dist"}"#).unwrap();
+        assert!(pkg.files.is_empty());
+
+        let pkg: PackageJson =
+            serde_json::from_str(r#"{"files": ["template-*", 42, false, null]}"#).unwrap();
+        assert_eq!(pkg.files, vec!["template-*"]);
     }
 
     #[test]

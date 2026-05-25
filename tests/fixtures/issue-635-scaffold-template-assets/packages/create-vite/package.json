@@ -1,0 +1,10 @@
+{
+  "name": "create-vite",
+  "type": "module",
+  "source": "src/index.ts",
+  "files": [
+    "index.js",
+    "template-*",
+    "dist"
+  ]
+}

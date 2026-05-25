@@ -21,6 +21,7 @@ pub(crate) mod errors;
 mod external_style_usage;
 pub mod extract;
 pub mod git_env;
+mod package_assets;
 pub mod plugins;
 pub(crate) mod progress;
 pub mod results;
@@ -1145,6 +1146,40 @@ fn summarize_entry_points(entry_points: &[discover::EntryPoint]) -> results::Ent
     }
 }
 
+fn append_package_file_asset_patterns(
+    result: &mut plugins::AggregatedPluginResult,
+    prefix: &str,
+    pkg: &PackageJson,
+) {
+    let prefix = prefix.trim_matches('/');
+    for pattern in package_assets::scaffold_template_asset_patterns(pkg) {
+        let pattern = if prefix.is_empty() {
+            pattern
+        } else {
+            format!("{prefix}/{pattern}")
+        };
+        result
+            .discovered_always_used
+            .push((pattern, package_assets::PACKAGE_FILES_SOURCE.to_string()));
+    }
+}
+
+fn append_workspace_package_file_asset_patterns(
+    result: &mut plugins::AggregatedPluginResult,
+    config: &ResolvedConfig,
+    workspace_pkgs: &[LoadedWorkspacePackage<'_>],
+) {
+    for (ws, ws_pkg) in workspace_pkgs {
+        let ws_prefix = ws
+            .root
+            .strip_prefix(&config.root)
+            .unwrap_or(&ws.root)
+            .to_string_lossy()
+            .replace('\\', "/");
+        append_package_file_asset_patterns(result, &ws_prefix, ws_pkg);
+    }
+}
+
 /// Run plugins for root project and all workspace packages.
 fn run_plugins(
     config: &ResolvedConfig,
@@ -1171,10 +1206,15 @@ fn run_plugins(
             config.production,
         )
     });
+    if let Some(pkg) = root_pkg {
+        append_package_file_asset_patterns(&mut result, "", pkg);
+    }
 
     if workspaces.is_empty() {
         return result;
     }
+
+    append_workspace_package_file_asset_patterns(&mut result, config, workspace_pkgs);
 
     let root_active_plugins: rustc_hash::FxHashSet<&str> =
         result.active_plugins.iter().map(String::as_str).collect();
