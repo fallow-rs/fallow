@@ -718,6 +718,37 @@ fn bun_builtins_not_reported_as_unlisted() {
     );
 }
 
+/// `node:sqlite` is a mandatory-`node:`-prefix builtin and must not be flagged as
+/// unlisted, while the bare `sqlite` form (a real npm package) still surfaces.
+/// See issue #627.
+#[test]
+fn node_prefix_only_builtins_not_reported_as_unlisted() {
+    let (graph, resolved_modules) =
+        build_graph_with_npm_imports(&[("node:sqlite", false), ("sqlite", false)]);
+    let pkg = make_pkg(&[], &[], &[]);
+    let config = test_config(PathBuf::from("/project"));
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unlisted = find_unlisted_dependencies(
+        &graph,
+        &pkg,
+        &config,
+        &[],
+        None,
+        &resolved_modules,
+        &line_offsets,
+    );
+
+    assert!(
+        !unlisted.iter().any(|d| d.package_name == "node:sqlite"),
+        "node:sqlite builtin should not be flagged as unlisted"
+    );
+    assert!(
+        unlisted.iter().any(|d| d.package_name == "sqlite"),
+        "bare sqlite is a real npm package and should still be flagged as unlisted"
+    );
+}
+
 #[test]
 fn bun_type_only_builtin_not_reported_as_unlisted() {
     let (graph, resolved_modules) = build_graph_with_npm_imports(&[("bun", true)]);

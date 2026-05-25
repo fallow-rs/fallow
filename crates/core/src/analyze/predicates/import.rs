@@ -29,6 +29,9 @@ pub fn is_builtin_module(name: &str) -> bool {
     if name == "std" || name.starts_with("std/") {
         return true;
     }
+    // Node built-in modules importable with OR without the `node:` prefix. The
+    // mandatory-`node:`-prefix family (`sqlite`, `sea`, `test`, `test/reporters`)
+    // is intentionally absent here; see `NODE_PREFIX_ONLY_BUILTINS` below.
     let builtins = [
         "assert",
         "assert/strict",
@@ -71,8 +74,6 @@ pub fn is_builtin_module(name: &str) -> bool {
         "stream/web",
         "string_decoder",
         "sys",
-        "test",
-        "test/reporters",
         "timers",
         "timers/promises",
         "tls",
@@ -87,12 +88,25 @@ pub fn is_builtin_module(name: &str) -> bool {
         "worker_threads",
         "zlib",
     ];
-    let stripped = name.strip_prefix("node:").unwrap_or(name);
-    // All known builtins and their subpaths (fs/promises, path/posix, test/reporters,
-    // stream/consumers, etc.) are listed explicitly in the array above.
-    // No fallback root-segment matching — it would false-positive on npm packages
-    // like test-utils, url-parse, path-browserify, stream-browserify, events-emitter.
-    builtins.contains(&stripped)
+    // Node built-in modules that ONLY exist with a mandatory `node:` prefix. Node
+    // refuses to resolve these as bare specifiers, and real npm packages share the
+    // bare names (`sqlite`, `sea`, `test`), so they are classified as builtins only
+    // when the `node:` prefix is present.
+    // https://nodejs.org/api/modules.html#built-in-modules-with-mandatory-node-prefix
+    const NODE_PREFIX_ONLY_BUILTINS: &[&str] = &["sea", "sqlite", "test", "test/reporters"];
+
+    if let Some(stripped) = name.strip_prefix("node:") {
+        // With the `node:` prefix, both the always-available list and the
+        // mandatory-prefix list are valid builtin specifiers.
+        return builtins.contains(&stripped) || NODE_PREFIX_ONLY_BUILTINS.contains(&stripped);
+    }
+    // Bare specifier (no `node:` prefix): only the always-available list matches.
+    // Mandatory-prefix modules written without the prefix are real npm packages,
+    // not builtins. All known builtins and their subpaths (fs/promises, path/posix,
+    // stream/consumers, etc.) are listed explicitly in the array above. No fallback
+    // root-segment matching: it would false-positive on npm packages like
+    // test-utils, url-parse, path-browserify, stream-browserify, events-emitter.
+    builtins.contains(&name)
 }
 
 /// Dependencies that are used implicitly (not via imports).
@@ -530,7 +544,8 @@ mod tests {
         assert!(is_builtin_module("timers/promises"));
         assert!(is_builtin_module("util/types"));
         assert!(is_builtin_module("inspector/promises"));
-        assert!(is_builtin_module("test/reporters"));
+        // `test/reporters` is a mandatory-`node:`-prefix module; the bare form is
+        // covered as a non-builtin in `not_builtin_module_bare_prefix_only_names`.
     }
 
     /// Subpath builtins with `node:` prefix.
@@ -542,6 +557,38 @@ mod tests {
         assert!(is_builtin_module("node:timers/promises"));
         assert!(is_builtin_module("node:util/types"));
         assert!(is_builtin_module("node:test/reporters"));
+    }
+
+    /// Mandatory-`node:`-prefix builtins are recognized only with the prefix.
+    /// Node documents these as built-in modules that require the `node:` scheme.
+    /// See issue #627.
+    #[test]
+    fn builtin_module_node_prefix_only() {
+        assert!(is_builtin_module("node:sqlite"));
+        assert!(is_builtin_module("node:sea"));
+        assert!(is_builtin_module("node:test"));
+        assert!(is_builtin_module("node:test/reporters"));
+    }
+
+    /// The bare forms of mandatory-`node:`-prefix modules are NOT builtins: Node
+    /// refuses to resolve them without the prefix, and real npm packages share the
+    /// names. npm packages that merely start with one of the names stay deps too.
+    /// See issue #627.
+    #[test]
+    fn not_builtin_module_bare_prefix_only_names() {
+        assert!(!is_builtin_module("sqlite"));
+        assert!(!is_builtin_module("sea"));
+        assert!(!is_builtin_module("test"));
+        assert!(!is_builtin_module("test/reporters"));
+        // npm packages with a prefix-only builtin as a name prefix.
+        assert!(!is_builtin_module("sqlite3"));
+        assert!(!is_builtin_module("better-sqlite3"));
+        assert!(!is_builtin_module("node-sqlite3"));
+        assert!(!is_builtin_module("seamless"));
+        assert!(!is_builtin_module("test-utils"));
+        // Unknown names under the `node:` scheme are still not builtins.
+        assert!(!is_builtin_module("node:sqlite3"));
+        assert!(!is_builtin_module("node:not-a-builtin"));
     }
 
     /// Bun built-in modules.
