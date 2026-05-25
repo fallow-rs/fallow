@@ -2534,6 +2534,189 @@ fn stryker_workspace_config_is_recognized_from_root_dev_dependency() {
     );
 }
 
+#[test]
+fn wuchale_workspace_config_is_recognized_from_root_dependency() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("packages/app/src")).expect("workspace src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "wuchale-workspace-fixture",
+            "private": true,
+            "workspaces": ["packages/*"],
+            "devDependencies": {
+                "wuchale": "0.9.0",
+                "@wuchale/vite-plugin": "0.9.0",
+                "@wuchale/svelte": "0.9.0",
+                "unused-tool": "1.0.0"
+            }
+        }"#,
+    )
+    .expect("root package json");
+    std::fs::write(
+        root.join("packages/app/package.json"),
+        r#"{
+            "name": "@example/app",
+            "private": true,
+            "main": "src/index.ts"
+        }"#,
+    )
+    .expect("workspace package json");
+    std::fs::write(
+        root.join("packages/app/src/index.ts"),
+        "export const app = true;\n",
+    )
+    .expect("source file");
+    std::fs::write(
+        root.join("packages/app/wuchale.config.js"),
+        "import { defineConfig } from 'wuchale';\n\
+         import { adapter as svelte } from '@wuchale/svelte';\n\
+         export default defineConfig({ adapters: { main: svelte() } });\n",
+    )
+    .expect("wuchale config");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files = unused_file_paths(&results);
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path.ends_with("packages/app/wuchale.config.js")),
+        "workspace Wuchale config should be treated as a tooling entry. unused_files={unused_files:?}"
+    );
+
+    let unused_dev = unused_dev_dependencies(&results);
+    for dep in ["wuchale", "@wuchale/vite-plugin", "@wuchale/svelte"] {
+        assert!(
+            !unused_dev.contains(&dep.to_owned()),
+            "{dep} should be credited from Wuchale tooling/config. unused_dev={unused_dev:?}"
+        );
+    }
+    assert!(
+        unused_dev.contains(&"unused-tool".to_owned()),
+        "unrelated dev dependencies should remain reportable. unused_dev={unused_dev:?}"
+    );
+}
+
+#[test]
+fn wuchale_vite_config_file_keeps_custom_js_config_reachable() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("packages/app/config")).expect("config dir");
+    std::fs::create_dir_all(root.join("packages/app/src")).expect("source dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "wuchale-vite-fixture",
+            "private": true,
+            "workspaces": ["packages/*"],
+            "devDependencies": {
+                "wuchale": "0.9.0",
+                "@wuchale/vite-plugin": "0.9.0",
+                "@wuchale/svelte": "0.9.0",
+                "unused-tool": "1.0.0"
+            }
+        }"#,
+    )
+    .expect("root package json");
+    std::fs::write(
+        root.join("packages/app/package.json"),
+        r#"{
+            "name": "@example/app",
+            "private": true,
+            "main": "src/index.ts"
+        }"#,
+    )
+    .expect("workspace package json");
+    std::fs::write(
+        root.join("packages/app/src/index.ts"),
+        "export const app = true;\n",
+    )
+    .expect("source file");
+    std::fs::write(
+        root.join("packages/app/vite.config.ts"),
+        "import { defineConfig } from 'vite';\n\
+         import { wuchale } from '@wuchale/vite-plugin';\n\
+         export default defineConfig({\n\
+             plugins: [wuchale({ configFile: './config/custom-wuchale.config.js' })]\n\
+         });\n",
+    )
+    .expect("vite config");
+    std::fs::write(
+        root.join("packages/app/config/custom-wuchale.config.js"),
+        "import { defineConfig } from 'wuchale';\n\
+         import { adapter as svelte } from '@wuchale/svelte';\n\
+         export default defineConfig({ adapters: { main: svelte() } });\n",
+    )
+    .expect("custom wuchale config");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files = unused_file_paths(&results);
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path.ends_with("packages/app/config/custom-wuchale.config.js")),
+        "static Vite configFile should keep the custom Wuchale config reachable. unused_files={unused_files:?}"
+    );
+
+    let unused_dev = unused_dev_dependencies(&results);
+    for dep in ["wuchale", "@wuchale/vite-plugin", "@wuchale/svelte"] {
+        assert!(
+            !unused_dev.contains(&dep.to_owned()),
+            "{dep} should be credited from Wuchale Vite config wiring. unused_dev={unused_dev:?}"
+        );
+    }
+    assert!(
+        unused_dev.contains(&"unused-tool".to_owned()),
+        "unrelated dev dependencies should remain reportable. unused_dev={unused_dev:?}"
+    );
+}
+
+#[test]
+fn wuchale_unsupported_ts_config_remains_reportable() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "wuchale-ts-config-fixture",
+            "private": true,
+            "main": "src/index.ts",
+            "devDependencies": {
+                "wuchale": "0.9.0",
+                "@wuchale/svelte": "0.9.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(root.join("src/index.ts"), "export const app = true;\n").expect("source file");
+    std::fs::write(
+        root.join("wuchale.config.ts"),
+        "import { adapter as svelte } from '@wuchale/svelte';\n\
+         export default { adapters: { main: svelte() } };\n",
+    )
+    .expect("unsupported config");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files = unused_file_paths(&results);
+    assert!(
+        unused_files
+            .iter()
+            .any(|path| path.ends_with("wuchale.config.ts")),
+        "unsupported Wuchale TypeScript config should not be hidden by the plugin. unused_files={unused_files:?}"
+    );
+}
+
 fn unused_file_paths(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
     results
         .unused_files

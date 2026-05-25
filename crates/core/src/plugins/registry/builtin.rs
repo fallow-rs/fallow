@@ -32,7 +32,7 @@ use super::super::{
     tsup::TsupPlugin, turborepo::TurborepoPlugin, typedoc::TypedocPlugin, typeorm::TypeormPlugin,
     typescript::TypeScriptPlugin, unocss::UnoCssPlugin, vite::VitePlugin,
     vitepress::VitePressPlugin, vitest::VitestPlugin, webdriverio::WebdriverioPlugin,
-    webpack::WebpackPlugin, wrangler::WranglerPlugin,
+    webpack::WebpackPlugin, wrangler::WranglerPlugin, wuchale::WuchalePlugin,
 };
 
 /// Create all built-in plugin instances, categorized by domain.
@@ -153,6 +153,7 @@ pub fn create_builtin_plugins() -> Vec<Box<dyn Plugin>> {
         Box::new(NodemonPlugin),
         Box::new(Pm2Plugin),
         Box::new(DependencyCruiserPlugin),
+        Box::new(WuchalePlugin),
         // Package managers
         Box::new(PnpmPlugin),
         // Runtime

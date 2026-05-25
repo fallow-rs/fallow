@@ -1084,6 +1084,7 @@ mod vitest;
 mod webdriverio;
 mod webpack;
 mod wrangler;
+mod wuchale;
 
 #[cfg(test)]
 mod tests {
@@ -1519,6 +1520,7 @@ mod tests {
             &angular::AngularPlugin,
             &nx::NxPlugin,
             &stryker::StrykerPlugin,
+            &wuchale::WuchalePlugin,
             &rollup::RollupPlugin,
             &sveltekit::SvelteKitPlugin,
             &prettier::PrettierPlugin,
@@ -1543,6 +1545,7 @@ mod tests {
             &prettier::PrettierPlugin,
             &danger::DangerPlugin,
             &stryker::StrykerPlugin,
+            &wuchale::WuchalePlugin,
         ];
         for plugin in plugins {
             let tooling = plugin.tooling_dependencies();

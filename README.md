@@ -716,7 +716,7 @@ See the [full configuration reference](https://docs.fallow.tools/configuration/o
 
 ## Framework plugins
 
-100 built-in plugins detect entry points, convention exports, config-defined aliases, and template-visible usage for your framework automatically.
+101 built-in plugins detect entry points, convention exports, config-defined aliases, and template-visible usage for your framework automatically.
 
 | Category | Plugins |
 |---|---|
@@ -728,6 +728,7 @@ See the [full configuration reference](https://docs.fallow.tools/configuration/o
 | **Databases & Backend** | Prisma, Drizzle, Knex, TypeORM, Kysely, Convex |
 | **Blockchain** | Hardhat |
 | **Monorepos** | Turborepo, Nx, Changesets, Syncpack, pnpm |
+| **i18n** | Wuchale, next-intl, i18next |
 
 [Full plugin list](https://docs.fallow.tools/frameworks/built-in) -- missing one? Add a [custom plugin](https://docs.fallow.tools/frameworks/custom-plugins) or [open an issue](https://github.com/fallow-rs/fallow/issues).
 

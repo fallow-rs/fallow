@@ -6,9 +6,9 @@ paths:
 
 # Plugin system
 
-100 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
+101 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
 
-## Rich config parsing (21 plugins)
+## Rich config parsing (22 plugins)
 
 - **ESLint**: Legacy plugin/extends/parser short-name resolution (top-level AND inside `overrides[*]`), flat config plugin keys, JSON config, shared config following (reads imported config packages' entry points one level deep to discover peer deps), relative-path `extends` chain following (`./config/base.js`, `../shared/eslintrc.json`) with cycle protection and depth cap, settings["import/resolver"] (string/array/object formats)
 - **Vite**: rollupOptions.input, lib.entry, optimizeDeps include/exclude, ssr.external/noExternal
@@ -31,6 +31,7 @@ paths:
 - **AdonisJS**: v5 `.adonisrc.json` (`preloads`, `providers`, `commands`, `aceProviders` mixed string / `{ file, environment }` forms; `aliases` → path-alias table; `metaFiles[].pattern` → always-used; `types` declarations). v6 / v7 `adonisrc.ts` (walks `defineConfig({...})` for thunk-wrapped `() => import('SPEC')` in `preloads` / `providers` / `commands`, `directories.*` overrides → extra entry patterns, project `package.json#imports` → Node subpath path aliases). `@ioc:` v5 IoC virtual import prefix suppresses `unlisted-dependency` for runtime-resolved container imports.
 - **Fumadocs**: activates on `fumadocs-mdx`, `fumadocs-core`, `fumadocs-ui`, or a root/workspace `source.config.{ts,tsx,js,jsx,mts,mjs,cts,cjs}` file. Keeps `source.config.*` and generated `.source/**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}` modules alive, traverses the hidden `.source` directory when active, suppresses `fumadocs-mdx:*` virtual imports, credits packages imported by `source.config.*`, and extracts literal `dir` values from `defineCollections`, `defineDocs`, and direct `defineConfig({ collections })` object entries as Markdown/MDX/JSON/YAML content roots.
 - **Oxlint**: parses `.oxlintrc.json`, `oxlint.json`, and `oxlint.config.ts`; `jsPlugins` string entries, tuple first-elements, and alias-object specifier values are credited as npm dependencies; relative/absolute plugin paths are recorded as support setup files; built-in Oxlint plugin names are ignored for dependency credit.
+- **Wuchale**: keeps documented `wuchale.config.js` files alive at the root or inside workspaces; credits package imports/requires from those config files; treats `wuchale` and `@wuchale/vite-plugin` as tooling dependencies; and follows static `configFile` values passed to `@wuchale/vite-plugin` in `vite.config.*` only when they point at JavaScript config modules. Dynamic values and unsupported `wuchale.config.ts` files remain reportable.
 ## Plugin trait extensions
 - `path_aliases()` for framework-specific alias resolution (Nuxt `~/`, Next.js `@/`)
 - `virtual_module_prefixes()` for framework virtual modules (Docusaurus `@theme/`, `@docusaurus/`, TanStack Start `tanstack-start-manifest:`)
