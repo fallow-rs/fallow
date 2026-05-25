@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **Fallow now dogfoods its shipped JavaScript and TypeScript surfaces in CI.** The main CI workflow builds the fallow binary and runs `fallow dead-code --format json --quiet` against `editors/vscode` and `npm/fallow` on relevant pull requests and every push to `main`. Per-surface configs mark VS Code's public generated type re-export surface and npm's platform-package wrapper shape explicitly, and the previously exported but unused `fetchReleaseDigest` helper is no longer part of the npm wrapper's CommonJS surface. The README now advertises that fallow self-analyzes its JS/TS code. (Closes [#483](https://github.com/fallow-rs/fallow/issues/483).)
+
 - **Extraction cache structs now fail loudly when their size changes without review.** `CachedModule`, its nested cache structs, and external extract element types persisted inside the cache have compile-time size assertions next to the cache type definitions. A future cache-shape edit that changes type sizes now fails the build until the contributor decides whether `CACHE_VERSION` must be bumped and updates the assertion values. (Closes [#443](https://github.com/fallow-rs/fallow/issues/443).)
 
 ## [2.80.0] - 2026-05-24

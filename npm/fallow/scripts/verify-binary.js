@@ -386,7 +386,6 @@ module.exports = {
   verifyDigestAt,
   verifyInstalled,
   _verifyWithKey,
-  fetchReleaseDigest,
   normalizeDigest,
   readEmbeddedDigest,
   sha256Hex,

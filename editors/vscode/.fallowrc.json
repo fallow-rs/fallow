@@ -1,7 +1,22 @@
 {
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": [
+    "src/extension.ts",
+    "src/types.ts",
+    "src/generated/output-contract.d.ts"
+  ],
+  "ignorePatterns": [
+    "test/integration/fixtures/**"
+  ],
   "ignoreDependencies": ["@vscode/vsce"],
+  "ignoreExports": [
+    {
+      "file": "src/types.ts",
+      "exports": ["*"]
+    }
+  ],
   "rules": {
-    "unlisted-dependencies": "warn"
+    "unlisted-dependencies": "warn",
+    "unresolved-imports": "warn"
   }
 }

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": [
+    "bin/fallow",
+    "bin/fallow-lsp",
+    "bin/fallow-mcp",
+    "scripts/platform-package.js",
+    "scripts/postinstall.js",
+    "scripts/verify-binary.js"
+  ],
+  "ignorePatterns": [
+    "skills/**",
+    "types/**"
+  ]
+}

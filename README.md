@@ -16,6 +16,7 @@
 <p align="center">
   <a href="https://github.com/fallow-rs/fallow/actions/workflows/ci.yml"><img src="https://github.com/fallow-rs/fallow/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/fallow-rs/fallow/actions/workflows/coverage.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/fallow-rs/fallow/badges/coverage.json" alt="Coverage"></a>
+  <a href="https://github.com/fallow-rs/fallow/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/self--analyzed-fallow-brightgreen" alt="Self analyzed"></a>
   <a href="https://crates.io/crates/fallow-cli"><img src="https://img.shields.io/crates/v/fallow-cli.svg" alt="crates.io"></a>
   <a href="https://www.npmjs.com/package/fallow"><img src="https://img.shields.io/npm/v/fallow.svg" alt="npm"></a>
   <a href="https://github.com/fallow-rs/fallow/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
@@ -33,6 +34,8 @@ Fallow turns a JS/TS repository into a trusted quality report: health score, cha
 - What can be safely removed?
 
 Fallow is built for maintainers, CI pipelines, editors, and AI agents that need structured evidence instead of guesses. No AI inside the analyzer. Fallow produces deterministic findings, typed output contracts, and traceable explanations that downstream tools can trust.
+
+Fallow dogfoods its shipped JavaScript and TypeScript surfaces in CI: the VS Code extension and npm wrapper package are analyzed with fallow on every relevant change.
 
 ## Quick start
 

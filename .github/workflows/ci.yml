@@ -33,6 +33,7 @@ jobs:
       miri: ${{ steps.filter.outputs.miri }}
       ci-scripts: ${{ steps.filter.outputs.ci-scripts }}
       npm-package: ${{ steps.filter.outputs.npm-package }}
+      self-analyze: ${{ steps.filter.outputs.self-analyze }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
@@ -90,6 +91,10 @@ jobs:
               - 'npm/fallow/**'
               - 'schema.json'
               - '.github/workflows/ci.yml'
+            self-analyze:
+              - '.github/workflows/ci.yml'
+              - 'editors/vscode/**'
+              - 'npm/fallow/**'
 
   check:
     name: Check (${{ matrix.os }})
@@ -226,6 +231,30 @@ jobs:
             throw new Error(`npm package is missing expected files: ${missing.join(', ')}`);
           }
           NODE
+
+      - name: Run npm wrapper unit tests
+        run: |
+          cd npm/fallow
+          npm run test:platform
+          npm run test:verify
+
+  fallow-self-analyze:
+    name: Fallow Self Analysis
+    needs: changes
+    if: needs.changes.outputs.self-analyze == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/setup-rust
+      - name: Build fallow binary
+        run: cargo build --bin fallow
+      - name: Analyze VS Code extension
+        run: ./target/debug/fallow dead-code --root editors/vscode --format json --quiet
+      - name: Analyze npm wrapper package
+        run: ./target/debug/fallow dead-code --root npm/fallow --format json --quiet
 
   vscode:
     name: VS Code Extension
@@ -437,7 +466,7 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [check, doc, typos, vscode, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri]
+    needs: [check, doc, typos, npm-package, fallow-self-analyze, vscode, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
