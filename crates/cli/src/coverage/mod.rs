@@ -425,11 +425,18 @@ fn record_current_license_state(state: &mut CoverageSetupState) {
     }
 }
 
-fn sidecar_state_is_current(state: &CoverageSetupState) -> bool {
+fn sidecar_state_is_current(state: &CoverageSetupState, root: &Path) -> bool {
     let Some(recorded) = state.sidecar.as_ref() else {
         return false;
     };
     if sidecar_env_override_is_set() || !recorded.path.is_file() {
+        return false;
+    }
+    if runtime_coverage::discover_sidecar(Some(root))
+        .ok()
+        .as_deref()
+        != Some(recorded.path.as_path())
+    {
         return false;
     }
     hash_file(&recorded.path).as_deref() == Some(recorded.checksum.as_str())
@@ -454,6 +461,7 @@ fn record_sidecar_state(state: &mut CoverageSetupState, path: PathBuf) -> Result
 
 fn recipe_state_is_current(
     state: &CoverageSetupState,
+    root: &Path,
     context: &CoverageSetupContext,
     expected_contents: &str,
 ) -> bool {
@@ -463,7 +471,7 @@ fn recipe_state_is_current(
     if recorded.context_fingerprint != setup_context_fingerprint(context) {
         return false;
     }
-    if !recorded.path.is_file() {
+    if recorded.path != recipe_path(root) || !recorded.path.is_file() {
         return false;
     }
     let expected_checksum = hash_bytes(expected_contents.as_bytes());
@@ -572,7 +580,7 @@ fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
 
     let context = detect_setup_context(root);
 
-    if sidecar_state_is_current(&setup_state) {
+    if sidecar_state_is_current(&setup_state, root) {
         if let Some(sidecar) = setup_state.sidecar.as_ref() {
             println!(
                 "Step 2/4: Sidecar check... ok ({}) (resumed).",
@@ -600,7 +608,7 @@ fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
     }
 
     let recipe = recipe_contents(&context);
-    let recipe_path = if recipe_state_is_current(&setup_state, &context, &recipe) {
+    let recipe_path = if recipe_state_is_current(&setup_state, root, &context, &recipe) {
         let path = setup_state
             .recipe
             .as_ref()
@@ -2205,11 +2213,11 @@ mod tests {
         let mut state = super::CoverageSetupState::default();
         record_sidecar_state(&mut state, sidecar.clone()).expect("sidecar state should record");
 
-        assert!(sidecar_state_is_current(&state));
+        assert!(sidecar_state_is_current(&state, dir.path()));
 
         std::fs::write(&sidecar, b"second").expect("sidecar should be mutated");
 
-        assert!(!sidecar_state_is_current(&state));
+        assert!(!sidecar_state_is_current(&state, dir.path()));
     }
 
     #[test]
@@ -2236,9 +2244,15 @@ mod tests {
         let mut state = super::CoverageSetupState::default();
         record_recipe_state(&mut state, recipe_path.clone(), &vite_context, &vite_recipe);
 
-        assert!(recipe_state_is_current(&state, &vite_context, &vite_recipe));
+        assert!(recipe_state_is_current(
+            &state,
+            dir.path(),
+            &vite_context,
+            &vite_recipe
+        ));
         assert!(!recipe_state_is_current(
             &state,
+            dir.path(),
             &next_context,
             &recipe_contents(&next_context)
         ));
@@ -2247,8 +2261,35 @@ mod tests {
 
         assert!(!recipe_state_is_current(
             &state,
+            dir.path(),
             &vite_context,
             &vite_recipe
+        ));
+    }
+
+    #[test]
+    fn recipe_state_requires_path_under_current_root() {
+        let old_dir = tempdir().expect("old tempdir should be created");
+        let new_dir = tempdir().expect("new tempdir should be created");
+        let context = CoverageSetupContext {
+            framework: FrameworkKind::PlainNode,
+            package_manager: Some(PackageManager::Npm),
+            has_build_script: false,
+            has_start_script: false,
+            has_preview_script: false,
+            node_entry_path: "src/server.ts".to_owned(),
+        };
+        let recipe = recipe_contents(&context);
+        let old_recipe_path =
+            write_recipe(old_dir.path(), &recipe).expect("old recipe should write");
+        let mut state = super::CoverageSetupState::default();
+        record_recipe_state(&mut state, old_recipe_path, &context, &recipe);
+
+        assert!(!recipe_state_is_current(
+            &state,
+            new_dir.path(),
+            &context,
+            &recipe
         ));
     }
 
