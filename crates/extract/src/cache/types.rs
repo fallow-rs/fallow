@@ -96,6 +96,36 @@ pub(super) const IMPORT_KIND_DEFAULT: u8 = 1;
 pub(super) const IMPORT_KIND_NAMESPACE: u8 = 2;
 pub(super) const IMPORT_KIND_SIDE_EFFECT: u8 = 3;
 
+macro_rules! assert_cached_type_size {
+    ($ty:ty, $size:expr) => {
+        const _: () = assert!(
+            std::mem::size_of::<$ty>() == $size,
+            concat!(
+                stringify!($ty),
+                " size changed; bump CACHE_VERSION if the cached wire shape or extraction semantics changed, then update this assertion"
+            )
+        );
+    };
+}
+
+assert_cached_type_size!(CachedModule, 520);
+assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
+assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
+assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
+assert_cached_type_size!(CachedSuppression, 12);
+assert_cached_type_size!(CachedUnknownSuppressionKind, 32);
+assert_cached_type_size!(CachedExport, 112);
+assert_cached_type_size!(CachedImport, 96);
+assert_cached_type_size!(CachedDynamicImport, 88);
+assert_cached_type_size!(CachedRequireCall, 80);
+assert_cached_type_size!(CachedReExport, 88);
+assert_cached_type_size!(CachedMember, 64);
+assert_cached_type_size!(CachedDynamicImportPattern, 56);
+assert_cached_type_size!(crate::MemberAccess, 48);
+assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 48);
+assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
+assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 96);
+
 /// Cached data for a single module.
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct CachedModule {

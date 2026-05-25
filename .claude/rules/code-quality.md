@@ -15,7 +15,7 @@ paths:
 - All suppressions use `#[expect(clippy::..., reason = "...")]` — warns when unnecessary, preventing dead annotations. Every `#[allow]` and `#[expect]` must include a `reason` attribute. Use `#[allow]` only for pedantic-only or target-dependent lints where `#[expect]` would be unfulfilled.
 
 ## Size assertions
-`ModuleNode` (96 bytes), `ModuleInfo` (400 bytes), `ExportInfo` (112 bytes), `ImportInfo` (96 bytes), `Edge` (32 bytes), `MemberAccess` (48 bytes), `ImportedName` / `ExportName` (24 bytes each), prevents accidental struct bloat. Source of truth is `const _: () = assert!(...)` in `crates/types/src/extract.rs`; this doc is informational and may lag the code.
+`ModuleNode` (96 bytes), `ModuleInfo` (496 bytes), `ExportInfo` (112 bytes), `ImportInfo` (96 bytes), `Edge` (32 bytes), `MemberAccess` (48 bytes), `ImportedName` / `ExportName` (24 bytes each), prevents accidental struct bloat. `CachedModule` (520 bytes), nested cache structs, and external extract element types persisted inside the cache are also pinned in `crates/extract/src/cache/types.rs`; assertion failures there are the review point for whether `CACHE_VERSION` needs a bump. Source of truth is `const _: () = assert!(...)` in the relevant Rust files; this doc is informational and may lag the code.
 
 ## Formatting
 `.rustfmt.toml` with `style_edition = "2024"`.

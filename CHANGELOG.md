@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Re-export source edges now participate in resolver dependency diagnostics.** Before, unresolved `export { x } from "./missing"` and `export * from "./missing"` sources were skipped by `unresolved-import`, and package re-exports such as `export { default as pad } from "left-pad"` could fall back to `package.json:1` style locations in unlisted-dependency reporting. After, re-export sources share the same resolved source-edge path as static and literal dynamic imports, so missing re-export sources report as unresolved imports and package re-exports report their actual source line. Package `imports` / `exports` array targets also preserve fallback order, and package `imports` entries that target external packages credit the target dependency. Thanks [@M-Hassan-Raza](https://github.com/M-Hassan-Raza) for the patch. (PR [#666](https://github.com/fallow-rs/fallow/pull/666).)
 
+### Internal
+
+- **Extraction cache structs now fail loudly when their size changes without review.** `CachedModule`, its nested cache structs, and external extract element types persisted inside the cache have compile-time size assertions next to the cache type definitions. A future cache-shape edit that changes type sizes now fails the build until the contributor decides whether `CACHE_VERSION` must be bumped and updates the assertion values. (Closes [#443](https://github.com/fallow-rs/fallow/issues/443).)
 
 ## [2.80.0] - 2026-05-24
 
