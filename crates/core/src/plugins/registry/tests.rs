@@ -3189,3 +3189,106 @@ fn process_config_result_strips_invalid_regex_in_used_exports() {
         "invalid regex on used_exports rule should be stripped"
     );
 }
+
+// ── Meta-framework prerequisite detection (issue #637) ───────────
+
+#[test]
+fn missing_meta_framework_prerequisites_flags_astro_without_dot_astro() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let registry = PluginRegistry::new(Vec::new());
+    let astro = registry
+        .plugins
+        .iter()
+        .map(AsRef::as_ref)
+        .find(|p| p.name() == "astro")
+        .expect("astro plugin");
+
+    let warnings = missing_meta_framework_prerequisites(&[astro], dir.path());
+
+    assert_eq!(
+        warnings.len(),
+        1,
+        "astro active + no .astro/ -> one warning"
+    );
+    assert_eq!(warnings[0].dedupe_key, "meta-prereq::astro");
+    assert!(
+        warnings[0].message.contains("astro sync"),
+        "message names the remediation: {}",
+        warnings[0].message
+    );
+}
+
+#[test]
+fn missing_meta_framework_prerequisites_silent_when_dot_astro_present() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    std::fs::create_dir(dir.path().join(".astro")).unwrap();
+    let registry = PluginRegistry::new(Vec::new());
+    let astro = registry
+        .plugins
+        .iter()
+        .map(AsRef::as_ref)
+        .find(|p| p.name() == "astro")
+        .expect("astro plugin");
+
+    let warnings = missing_meta_framework_prerequisites(&[astro], dir.path());
+
+    assert!(
+        warnings.is_empty(),
+        "no warning when the generated .astro/ directory exists: {warnings:?}"
+    );
+}
+
+#[test]
+fn missing_meta_framework_prerequisites_flags_nuxt_without_tsconfig() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let registry = PluginRegistry::new(Vec::new());
+    let nuxt = registry
+        .plugins
+        .iter()
+        .map(AsRef::as_ref)
+        .find(|p| p.name() == "nuxt")
+        .expect("nuxt plugin");
+
+    let warnings = missing_meta_framework_prerequisites(&[nuxt], dir.path());
+
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].dedupe_key, "meta-prereq::nuxt");
+    assert!(
+        warnings[0].message.contains("nuxt prepare"),
+        "{}",
+        warnings[0].message
+    );
+}
+
+#[test]
+fn missing_meta_framework_prerequisites_ignores_non_meta_frameworks() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let registry = PluginRegistry::new(Vec::new());
+    let nextjs = registry
+        .plugins
+        .iter()
+        .map(AsRef::as_ref)
+        .find(|p| p.name() == "nextjs")
+        .expect("nextjs plugin");
+
+    let warnings = missing_meta_framework_prerequisites(&[nextjs], dir.path());
+
+    assert!(
+        warnings.is_empty(),
+        "non-meta-framework plugins produce no prerequisite warning: {warnings:?}"
+    );
+}
+
+#[test]
+fn check_meta_framework_prerequisites_dedupes_per_framework() {
+    // The dedupe set is process-wide, so a previous test in this binary may
+    // have already consumed the "meta-prereq::astro" key. Assert the gate's
+    // contract directly: two `should_warn` calls on the same key return at most
+    // one `true`, and the first call after a unique key is always `true`.
+    let unique = format!("meta-prereq::test-{}", std::process::id());
+    assert!(should_warn(unique.clone()), "first emit for a fresh key");
+    assert!(
+        !should_warn(unique),
+        "second emit for the same key is suppressed"
+    );
+}

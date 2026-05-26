@@ -6,6 +6,13 @@
 //! `tracing::warn!` so users running fallow with default tracing filters see
 //! the cause of "fallow doesn't see my package."
 //!
+//! Repeated `GlobMatchedNoPackageJson` diagnostics are aggregated by glob
+//! pattern at emission time so a wide glob matching hundreds of package-less
+//! directories on a large monorepo collapses to one bounded summary line per
+//! pattern instead of one line per directory (issue #637). The structured
+//! `Vec<WorkspaceDiagnostic>` returned to callers stays full; only the stderr
+//! surface is bounded.
+//!
 //! Mirrors the dedupe + capture pattern in
 //! `crates/config/src/config/parsing.rs::warn_on_unknown_rule_keys` (issue
 //! #467).
@@ -145,13 +152,20 @@ fn normalise_payload_paths(root: &Path, kind: WorkspaceDiagnosticKind) -> Worksp
     }
 }
 
-fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> String {
-    let display = path
-        .strip_prefix(root)
+/// Render `path` relative to `root` with forward slashes. Shared by
+/// [`render_message`] and [`build_glob_group_message`] so the per-instance and
+/// aggregated message surfaces format paths identically (the forward-slash
+/// normalisation is load-bearing for cross-platform output stability).
+fn display_relative(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
         .unwrap_or(path)
         .display()
         .to_string()
-        .replace('\\', "/");
+        .replace('\\', "/")
+}
+
+fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> String {
+    let display = display_relative(root, path);
     match kind {
         WorkspaceDiagnosticKind::UndeclaredWorkspace => format!(
             "Directory '{display}' contains package.json but is not declared as a workspace. \
@@ -203,49 +217,192 @@ impl std::fmt::Display for WorkspaceLoadError {
 
 impl std::error::Error for WorkspaceLoadError {}
 
-/// Emit a `tracing::warn!` for a workspace diagnostic, dedupe-keyed on the
-/// canonical workspace root, the diagnostic's kind identifier, and the
-/// offending path.
-///
-/// `root` is canonicalised before hashing so watch-mode reruns and parallel
-/// agents on the same root coalesce. Two distinct roots produce independent
-/// keys, which is what nested-monorepo callers want.
-pub(super) fn emit_warn(root: &Path, diag: &WorkspaceDiagnostic) {
+/// Maximum number of example directories named in an aggregated
+/// `GlobMatchedNoPackageJson` warning before the tail is summarised as
+/// "and N more". Keeps a fanned-out glob to one bounded stderr line.
+const GLOB_EXAMPLE_CAP: usize = 3;
+
+/// Process-wide set of already-emitted diagnostic dedupe keys. Per-instance
+/// keys (`root::kind::path`) and aggregated per-pattern keys
+/// (`root::glob-matched-no-package-json-agg::pattern`) share one set so
+/// combined-mode (check + dupes + health through one loader) and watch-mode
+/// reruns warn at most once per logical diagnostic. The two key namespaces are
+/// disjoint, so there is no cross-talk.
+fn warned_keys() -> &'static Mutex<FxHashSet<String>> {
     static WARNED: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
-    let warned = WARNED.get_or_init(|| Mutex::new(FxHashSet::default()));
+    WARNED.get_or_init(|| Mutex::new(FxHashSet::default()))
+}
 
+/// Insert `key` and return `true` when it was newly inserted (caller should
+/// emit). On a poisoned mutex returns `true` so over-warning beats swallowing
+/// a typo. Mirrors `parsing::warn_on_unknown_rule_keys` and
+/// `plugins::registry::should_warn`.
+fn should_emit(key: String) -> bool {
+    warned_keys().lock().map_or(true, |mut set| set.insert(key))
+}
+
+/// A single planned stderr warning: its process-dedupe key and the rendered
+/// message. The pure output of [`plan_warnings`] so the partition/aggregation
+/// logic is unit-testable without a tracing subscriber or the process-wide
+/// dedupe set.
+#[derive(Debug, PartialEq, Eq)]
+struct PlannedWarning {
+    dedupe_key: String,
+    message: String,
+}
+
+/// Turn a batch of workspace diagnostics into the bounded set of stderr
+/// warnings to emit, collapsing the two kinds that fan out on large monorepos
+/// (issue #637):
+/// - `GlobMatchedNoPackageJson`: aggregated by glob pattern, one summary line
+///   per pattern instead of one line per package-less directory.
+/// - `TsconfigReferenceDirMissing`: aggregated together, one summary line
+///   instead of one per missing `references[]` entry in the root tsconfig.
+///
+/// Pure: no tracing, no dedupe-set mutation. A group of exactly one keeps
+/// today's per-instance message byte-for-byte (no regression for the common
+/// single-match case); every other kind plans one per-instance warning. The
+/// returned plan lists non-aggregated diagnostics first (in first-seen order),
+/// then the glob-pattern summaries, then the tsconfig summary; ordering does
+/// not affect correctness since these are independent stderr lines.
+fn plan_warnings(root: &Path, diagnostics: &[WorkspaceDiagnostic]) -> Vec<PlannedWarning> {
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let dedupe_key = format!(
-        "{}::{}::{}",
-        canonical.display(),
-        diag.kind.id(),
-        diag.path.display()
-    );
+    let per_instance = |diag: &WorkspaceDiagnostic| PlannedWarning {
+        dedupe_key: format!(
+            "{}::{}::{}",
+            canonical.display(),
+            diag.kind.id(),
+            diag.path.display()
+        ),
+        message: diag.message.clone(),
+    };
 
-    // Push into the test-only capture FIRST, before the dedupe gate. The
-    // capture buffer is meant for assertion-friendly tests; two calls on the
-    // same (root, kind, path) inside one test should both observe the
-    // emission. The process-wide dedupe still suppresses repeated
-    // `tracing::warn!` calls, which is the surface that matters for real
-    // users (watch-mode reruns, combined-mode running check + dupes + health
-    // through the same loader).
-    #[cfg(test)]
-    WORKSPACE_DIAGNOSTIC_CAPTURE.with(|cell| {
-        if let Some(buf) = cell.borrow_mut().as_mut() {
-            buf.push(diag.clone());
+    let mut plans: Vec<PlannedWarning> = Vec::new();
+    let mut glob_groups: Vec<(&str, Vec<&WorkspaceDiagnostic>)> = Vec::new();
+    // `tsconfig.json` references[] entries pointing at missing directories are
+    // aggregated together: a single root tsconfig commonly lists every sibling
+    // package, and on a large monorepo the referenced source tree may not be
+    // checked out, producing dozens of distinct-but-repetitive lines.
+    let mut tsconfig_ref_misses: Vec<&WorkspaceDiagnostic> = Vec::new();
+    for diag in diagnostics {
+        match &diag.kind {
+            WorkspaceDiagnosticKind::GlobMatchedNoPackageJson { pattern } => {
+                match glob_groups.iter_mut().find(|(p, _)| *p == pattern.as_str()) {
+                    Some((_, group)) => group.push(diag),
+                    None => glob_groups.push((pattern.as_str(), vec![diag])),
+                }
+            }
+            WorkspaceDiagnosticKind::TsconfigReferenceDirMissing => tsconfig_ref_misses.push(diag),
+            _ => plans.push(per_instance(diag)),
         }
-    });
-
-    // On a poisoned mutex, fall through and emit anyway: over-warning beats
-    // swallowing a typo. Matches the parsing.rs::warn_on_unknown_rule_keys
-    // pattern.
-    if let Ok(mut set) = warned.lock()
-        && !set.insert(dedupe_key)
-    {
-        return;
     }
 
-    tracing::warn!("fallow: {}", diag.message);
+    for (pattern, group) in glob_groups {
+        if let [only] = group.as_slice() {
+            plans.push(per_instance(only));
+            continue;
+        }
+        let paths: Vec<&Path> = group.iter().map(|d| d.path.as_path()).collect();
+        plans.push(PlannedWarning {
+            dedupe_key: format!(
+                "{}::glob-matched-no-package-json-agg::{pattern}",
+                canonical.display()
+            ),
+            message: build_glob_group_message(root, pattern, &paths),
+        });
+    }
+
+    // A single missing reference keeps today's per-instance message; two or
+    // more collapse to one summary line naming a few of the missing paths.
+    if let [only] = tsconfig_ref_misses.as_slice() {
+        plans.push(per_instance(only));
+    } else if !tsconfig_ref_misses.is_empty() {
+        let paths: Vec<&Path> = tsconfig_ref_misses
+            .iter()
+            .map(|d| d.path.as_path())
+            .collect();
+        plans.push(PlannedWarning {
+            dedupe_key: format!(
+                "{}::tsconfig-reference-dir-missing-agg",
+                canonical.display()
+            ),
+            message: build_tsconfig_refs_message(root, &paths),
+        });
+    }
+
+    plans
+}
+
+/// Emit `tracing::warn!` lines for a batch of workspace diagnostics.
+///
+/// Delegates the partition/aggregation decisions to the pure [`plan_warnings`]
+/// and applies the process-wide dedupe so combined-mode (check + dupes + health
+/// through one loader) and watch-mode reruns warn at most once per logical
+/// diagnostic. The returned/stashed `Vec<WorkspaceDiagnostic>` is unaffected;
+/// only the stderr surface is bounded, so structured JSON consumers still see
+/// every diagnostic.
+pub(super) fn emit_diagnostics(root: &Path, diagnostics: &[WorkspaceDiagnostic]) {
+    // Capture every diagnostic before the dedupe gate so tests observe both
+    // calls on the same (root, kind, path) and see the constituents behind an
+    // aggregated glob warning.
+    #[cfg(test)]
+    for diag in diagnostics {
+        capture_diag(diag);
+    }
+
+    for plan in plan_warnings(root, diagnostics) {
+        // On a poisoned mutex, `should_emit` returns true and we emit anyway:
+        // over-warning beats swallowing a typo.
+        if should_emit(plan.dedupe_key) {
+            tracing::warn!("fallow: {}", plan.message);
+        }
+    }
+}
+
+/// Render up to [`GLOB_EXAMPLE_CAP`] project-relative example paths (sorted for
+/// deterministic output) with an "and N more" tail when the count exceeds the
+/// cap. Returns the joined example string and the total path count. Shared by
+/// the aggregated-message builders.
+fn summarize_examples(root: &Path, paths: &[&Path]) -> (String, usize) {
+    let mut examples: Vec<String> = paths.iter().map(|p| display_relative(root, p)).collect();
+    examples.sort();
+    let count = examples.len();
+    let shown = examples
+        .iter()
+        .take(GLOB_EXAMPLE_CAP)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    let remaining = count.saturating_sub(GLOB_EXAMPLE_CAP);
+    let listed = if remaining > 0 {
+        format!("{shown}, and {remaining} more")
+    } else {
+        shown
+    };
+    (listed, count)
+}
+
+/// Build the aggregated message for a glob pattern that matched `paths`
+/// package-less directories (always called with `paths.len() >= 2`).
+fn build_glob_group_message(root: &Path, pattern: &str, paths: &[&Path]) -> String {
+    let (listed, count) = summarize_examples(root, paths);
+    format!(
+        "Glob '{pattern}' matched {count} directories with no package.json \
+         (e.g. {listed}). Add a package.json, narrow the pattern, or add \
+         them to ignorePatterns."
+    )
+}
+
+/// Build the aggregated message for `paths` `tsconfig.json` `references[]`
+/// entries that point at missing directories (always called with
+/// `paths.len() >= 2`).
+fn build_tsconfig_refs_message(root: &Path, paths: &[&Path]) -> String {
+    let (listed, count) = summarize_examples(root, paths);
+    format!(
+        "tsconfig.json references {count} directories that do not exist \
+         (e.g. {listed}). Update or remove the references, or restore the \
+         missing directories."
+    )
 }
 
 thread_local! {
@@ -260,9 +417,23 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
+/// Push `diag` into the thread-local capture buffer when one is installed.
+/// No-op when no test has called [`capture_workspace_warnings`] on the current
+/// thread, so production code never allocates. Called once per diagnostic by
+/// [`emit_diagnostics`] before the dedupe gate, so every diagnostic is observed
+/// regardless of whether it was emitted per-instance or aggregated.
+#[cfg(test)]
+fn capture_diag(diag: &WorkspaceDiagnostic) {
+    WORKSPACE_DIAGNOSTIC_CAPTURE.with(|cell| {
+        if let Some(buf) = cell.borrow_mut().as_mut() {
+            buf.push(diag.clone());
+        }
+    });
+}
+
 /// Install a thread-local capture buffer and run `body`. Returns the body's
-/// result alongside every diagnostic emitted by [`emit_warn`] on the current
-/// thread, in order.
+/// result alongside every diagnostic passed through [`emit_diagnostics`] on the
+/// current thread, in order.
 ///
 /// Test-only. Diagnostics captured here also bypass the process-wide dedupe
 /// (so two captures on the same root + kind + path inside one test both
@@ -287,7 +458,7 @@ pub fn capture_workspace_warnings<F: FnOnce() -> R, R>(body: F) -> (R, Vec<Works
 /// `fallow check / dupes / health`) read via [`workspace_diagnostics_for`].
 ///
 /// Canonicalisation matches the dedupe-key canonicalisation in
-/// [`emit_warn`]: two callers on the same physical root coalesce, and
+/// [`plan_warnings`]: two callers on the same physical root coalesce, and
 /// nested-monorepo callers on different roots stay independent.
 static WORKSPACE_DIAGNOSTICS: OnceLock<Mutex<FxHashMap<PathBuf, Vec<WorkspaceDiagnostic>>>> =
     OnceLock::new();
@@ -395,4 +566,264 @@ pub(super) fn is_ignored_workspace_dir(
     let relative_str = relative_dir.to_string_lossy().replace('\\', "/");
     ignore_patterns.is_match(relative_str.as_str())
         || ignore_patterns.is_match(format!("{relative_str}/package.json").as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn glob_diag(root: &Path, pattern: &str, rel_path: &str) -> WorkspaceDiagnostic {
+        WorkspaceDiagnostic::new(
+            root,
+            root.join(rel_path),
+            WorkspaceDiagnosticKind::GlobMatchedNoPackageJson {
+                pattern: pattern.to_owned(),
+            },
+        )
+    }
+
+    #[test]
+    fn build_glob_group_message_caps_examples_and_summarises_tail() {
+        let root = Path::new("/project");
+        let paths = [
+            root.join("playground/cli"),
+            root.join("playground/lib-types"),
+            root.join("playground/minify"),
+            root.join("playground/ssr"),
+            root.join("playground/worker"),
+        ];
+        let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
+        let message = build_glob_group_message(root, "playground/**", &refs);
+
+        assert!(
+            message.starts_with("Glob 'playground/**' matched 5 directories with no package.json"),
+            "count and pattern lead the message: {message}"
+        );
+        // First three sorted examples are named; the rest summarised.
+        assert!(
+            message.contains(
+                "(e.g. playground/cli, playground/lib-types, playground/minify, and 2 more)"
+            ),
+            "three sorted examples + tail count: {message}"
+        );
+        assert!(
+            message.ends_with(
+                "Add a package.json, narrow the pattern, or add them to ignorePatterns."
+            ),
+            "next-step hint preserved: {message}"
+        );
+        // Never names the truncated examples inline.
+        assert!(
+            !message.contains("playground/ssr"),
+            "tail example not named: {message}"
+        );
+    }
+
+    #[test]
+    fn build_glob_group_message_no_tail_when_at_or_below_cap() {
+        let root = Path::new("/project");
+        let paths = [root.join("packages/a"), root.join("packages/b")];
+        let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
+        let message = build_glob_group_message(root, "packages/*", &refs);
+
+        assert!(message.contains("matched 2 directories"), "{message}");
+        assert!(
+            message.contains("(e.g. packages/a, packages/b)"),
+            "both examples named, no `and N more`: {message}"
+        );
+        assert!(!message.contains("more)"), "no tail clause: {message}");
+    }
+
+    #[test]
+    fn plan_warnings_aggregates_repeated_glob_diagnostics_to_one_line() {
+        let root = Path::new("/project");
+        let diagnostics: Vec<WorkspaceDiagnostic> = (0..50)
+            .map(|i| glob_diag(root, "playground/**", &format!("playground/p{i}")))
+            .collect();
+
+        let plans = plan_warnings(root, &diagnostics);
+
+        assert_eq!(
+            plans.len(),
+            1,
+            "50 same-pattern diagnostics collapse to one plan"
+        );
+        assert!(
+            plans[0]
+                .dedupe_key
+                .ends_with("::glob-matched-no-package-json-agg::playground/**")
+        );
+        assert!(plans[0].message.contains("matched 50 directories"));
+    }
+
+    #[test]
+    fn plan_warnings_keeps_distinct_patterns_separate() {
+        let root = Path::new("/project");
+        let diagnostics = vec![
+            glob_diag(root, "apps/*", "apps/a"),
+            glob_diag(root, "apps/*", "apps/b"),
+            glob_diag(root, "packages/*", "packages/x"),
+            glob_diag(root, "packages/*", "packages/y"),
+        ];
+
+        let plans = plan_warnings(root, &diagnostics);
+
+        assert_eq!(plans.len(), 2, "one aggregated plan per distinct pattern");
+        let messages: Vec<&str> = plans.iter().map(|p| p.message.as_str()).collect();
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("Glob 'apps/*' matched 2")),
+            "{messages:?}"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("Glob 'packages/*' matched 2")),
+            "{messages:?}"
+        );
+    }
+
+    #[test]
+    fn plan_warnings_single_match_keeps_per_instance_message_and_key() {
+        let root = Path::new("/project");
+        let diag = glob_diag(root, "packages/*", "packages/scratch");
+
+        let plans = plan_warnings(root, std::slice::from_ref(&diag));
+
+        assert_eq!(plans.len(), 1);
+        // Byte-identical to the per-instance message and key (no aggregation).
+        assert_eq!(plans[0].message, diag.message);
+        assert!(
+            plans[0]
+                .dedupe_key
+                .contains("::glob-matched-no-package-json::")
+                && plans[0].dedupe_key.ends_with("packages/scratch"),
+            "per-instance key is `root::kind::path`, not the `-agg::pattern` form: {}",
+            plans[0].dedupe_key
+        );
+        assert!(
+            !plans[0].message.contains("directories"),
+            "single match is not aggregated"
+        );
+    }
+
+    #[test]
+    fn plan_warnings_non_glob_kinds_stay_per_instance() {
+        let root = Path::new("/project");
+        let diagnostics = vec![
+            WorkspaceDiagnostic::new(
+                root,
+                root.join("packages/a"),
+                WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            ),
+            WorkspaceDiagnostic::new(
+                root,
+                root.join("packages/b"),
+                WorkspaceDiagnosticKind::MalformedPackageJson {
+                    error: "trailing comma".to_owned(),
+                },
+            ),
+        ];
+
+        let plans = plan_warnings(root, &diagnostics);
+
+        assert_eq!(
+            plans.len(),
+            2,
+            "each non-glob diagnostic plans its own warning"
+        );
+        assert!(
+            plans
+                .iter()
+                .all(|p| !p.message.contains("directories with no package.json"))
+        );
+    }
+
+    fn tsconfig_ref_diag(root: &Path, rel_path: &str) -> WorkspaceDiagnostic {
+        WorkspaceDiagnostic::new(
+            root,
+            root.join(rel_path),
+            WorkspaceDiagnosticKind::TsconfigReferenceDirMissing,
+        )
+    }
+
+    #[test]
+    fn plan_warnings_aggregates_repeated_tsconfig_ref_misses_to_one_line() {
+        let root = Path::new("/project");
+        let diagnostics: Vec<WorkspaceDiagnostic> = (0..30)
+            .map(|i| tsconfig_ref_diag(root, &format!("packages/p{i:02}/tsconfig.json")))
+            .collect();
+
+        let plans = plan_warnings(root, &diagnostics);
+
+        assert_eq!(plans.len(), 1, "30 missing references collapse to one plan");
+        assert!(
+            plans[0]
+                .dedupe_key
+                .ends_with("::tsconfig-reference-dir-missing-agg")
+        );
+        assert!(
+            plans[0]
+                .message
+                .starts_with("tsconfig.json references 30 directories that do not exist"),
+            "{}",
+            plans[0].message
+        );
+        assert!(
+            plans[0].message.contains(
+                "(e.g. packages/p00/tsconfig.json, packages/p01/tsconfig.json, \
+                 packages/p02/tsconfig.json, and 27 more)"
+            ),
+            "three sorted examples + tail: {}",
+            plans[0].message
+        );
+        assert!(
+            plans[0]
+                .message
+                .ends_with("Update or remove the references, or restore the missing directories."),
+            "{}",
+            plans[0].message
+        );
+    }
+
+    #[test]
+    fn plan_warnings_single_tsconfig_ref_miss_keeps_per_instance_message() {
+        let root = Path::new("/project");
+        let diag = tsconfig_ref_diag(root, "packages/only/tsconfig.json");
+
+        let plans = plan_warnings(root, std::slice::from_ref(&diag));
+
+        assert_eq!(plans.len(), 1);
+        assert_eq!(
+            plans[0].message, diag.message,
+            "single miss is not aggregated"
+        );
+        assert!(!plans[0].message.contains("directories that do not exist"));
+    }
+
+    #[test]
+    fn plan_warnings_mixed_aggregatable_kinds_each_collapse_independently() {
+        let root = Path::new("/project");
+        let mut diagnostics: Vec<WorkspaceDiagnostic> = (0..5)
+            .map(|i| glob_diag(root, "packages/*", &format!("packages/g{i}")))
+            .collect();
+        diagnostics.extend(
+            (0..4).map(|i| tsconfig_ref_diag(root, &format!("packages/t{i}/tsconfig.json"))),
+        );
+
+        let plans = plan_warnings(root, &diagnostics);
+
+        assert_eq!(plans.len(), 2, "one glob summary + one tsconfig summary");
+        assert!(
+            plans
+                .iter()
+                .any(|p| p.message.contains("matched 5 directories"))
+        );
+        assert!(
+            plans
+                .iter()
+                .any(|p| p.message.contains("references 4 directories"))
+        );
+    }
 }

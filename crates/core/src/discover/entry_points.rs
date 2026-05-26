@@ -4,7 +4,7 @@ use super::parse_scripts::extract_script_file_refs;
 use super::walk::SOURCE_EXTENSIONS;
 use fallow_config::{EntryPointRole, PackageJson, ResolvedConfig};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Known output directory names from exports maps.
 /// When an entry point path is inside one of these directories, we also try
@@ -55,9 +55,30 @@ fn format_skipped_entry_warning(skipped_entries: &FxHashMap<String, usize>) -> O
 }
 
 pub fn warn_skipped_entry_summary(skipped_entries: &FxHashMap<String, usize>) {
-    if let Some(message) = format_skipped_entry_warning(skipped_entries) {
+    let Some(message) = format_skipped_entry_warning(skipped_entries) else {
+        return;
+    };
+    // This summary is emitted once per workspace package, and on a monorepo
+    // every package commonly skips the same out-of-root binary (e.g. a shared
+    // `bin` pointing at `../../packages/<tool>/bin/<tool>`), producing dozens of
+    // byte-identical lines. Dedupe on the rendered message so identical
+    // summaries warn once per process while genuinely distinct skip-sets each
+    // still surface (issue #637).
+    if should_warn_skipped_entry(&message) {
         tracing::warn!("{message}");
     }
+}
+
+/// Process-wide dedupe for [`warn_skipped_entry_summary`]. Returns `true` when
+/// `message` was newly inserted (caller should emit). On a poisoned mutex
+/// returns `true` so over-warning beats swallowing.
+fn should_warn_skipped_entry(message: &str) -> bool {
+    static WARNED: std::sync::OnceLock<std::sync::Mutex<FxHashSet<String>>> =
+        std::sync::OnceLock::new();
+    let warned = WARNED.get_or_init(|| std::sync::Mutex::new(FxHashSet::default()));
+    warned
+        .lock()
+        .map_or(true, |mut set| set.insert(message.to_owned()))
 }
 
 /// Entry points grouped by reachability role.
@@ -1614,6 +1635,26 @@ mod tests {
             assert_eq!(
                 warning,
                 "Skipped 10 package.json entry points outside project root or containing parent directory traversal: ../../scripts/rm.mjs (8x), ../utils/bar.js (2x)"
+            );
+        }
+
+        #[test]
+        fn skipped_entry_summary_dedupes_identical_messages() {
+            // The summary is emitted once per workspace package; on a monorepo
+            // many packages skip the same out-of-root binary. A unique message
+            // suffix keeps this test independent of the process-wide set's
+            // state across sibling tests in the same binary.
+            let message = format!(
+                "Skipped 1 package.json entry point outside project root: ../../pkg-{}/bin/x",
+                std::process::id()
+            );
+            assert!(
+                should_warn_skipped_entry(&message),
+                "first occurrence of a message emits"
+            );
+            assert!(
+                !should_warn_skipped_entry(&message),
+                "identical repeat is suppressed"
             );
         }
 

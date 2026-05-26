@@ -15,9 +15,9 @@ pub use diagnostics::{
     WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceLoadError, append_workspace_diagnostics,
     stash_workspace_diagnostics, workspace_diagnostics_for,
 };
-use diagnostics::{emit_warn, is_skip_listed_dir};
-// `emit_warn` is wired only at the top-level `discover_workspaces_with_diagnostics`
-// loop below; the collector helpers populate `Vec<WorkspaceDiagnostic>` without
+use diagnostics::{emit_diagnostics, is_skip_listed_dir};
+// `emit_diagnostics` is wired only at the top-level `discover_workspaces_with_diagnostics`
+// call below; the collector helpers populate `Vec<WorkspaceDiagnostic>` without
 // emitting so the legacy `discover_workspaces` back-compat path stays silent.
 pub use package_json::PackageJson;
 pub use parsers::parse_tsconfig_root_dir;
@@ -67,7 +67,7 @@ pub struct WorkspaceInfo {
 /// hard exits.
 ///
 /// This wrapper goes through the silent collector path that does NOT call
-/// `emit_warn` (private helper in `crates/config/src/workspace/diagnostics.rs`
+/// `emit_diagnostics` (private helper in `crates/config/src/workspace/diagnostics.rs`
 /// that does the `tracing::warn!` emission). Without that split, sibling
 /// callers in `core/src/lib.rs` (analyze) and `core/src/discover/mod.rs`
 /// (file discovery) would re-emit `tracing::warn!` on paths the user already
@@ -124,9 +124,7 @@ pub fn discover_workspaces_with_diagnostics(
     // `tracing::warn!` on paths the user already excluded via
     // `ignorePatterns`, because those callers have no access to the
     // resolved globset.
-    for diag in &diagnostics {
-        emit_warn(root, diag);
-    }
+    emit_diagnostics(root, &diagnostics);
 
     Ok((workspaces, diagnostics))
 }

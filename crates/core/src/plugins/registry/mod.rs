@@ -808,27 +808,53 @@ fn process_package_json_inline_configs(
     }
 }
 
+/// A missing meta-framework prerequisite: the per-process dedupe key and the
+/// warning message to emit.
+#[derive(Debug)]
+struct MetaFrameworkWarning {
+    dedupe_key: &'static str,
+    message: &'static str,
+}
+
+/// Pure detection: which active meta-frameworks are missing their generated
+/// config/types directory under `root`. Separated from emission so the
+/// detection logic is unit-testable without a tracing subscriber or the
+/// process-wide dedupe set.
+fn missing_meta_framework_prerequisites(
+    active_plugins: &[&dyn Plugin],
+    root: &Path,
+) -> Vec<MetaFrameworkWarning> {
+    active_plugins
+        .iter()
+        .filter_map(|plugin| match plugin.name() {
+            "nuxt" if !root.join(".nuxt/tsconfig.json").exists() => Some(MetaFrameworkWarning {
+                dedupe_key: "meta-prereq::nuxt",
+                message: "Nuxt project missing .nuxt/tsconfig.json: run `nuxt prepare` \
+                          before fallow for accurate analysis",
+            }),
+            "astro" if !root.join(".astro").exists() => Some(MetaFrameworkWarning {
+                dedupe_key: "meta-prereq::astro",
+                message: "Astro project missing .astro/ types: run `astro sync` \
+                          before fallow for accurate analysis",
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Warn when meta-frameworks are active but their generated configs are missing.
 ///
 /// Meta-frameworks like Nuxt and Astro generate tsconfig/types files during a
 /// "prepare" step. Without these, the tsconfig extends chain breaks and
 /// extensionless imports fail wholesale (e.g. 2000+ unresolved imports).
+///
+/// Deduped per framework so combined-mode (check + dupes + health through one
+/// loader) does not re-warn. The advice is generic and does not name the root,
+/// so one line per process per framework is the right bound (issue #637).
 fn check_meta_framework_prerequisites(active_plugins: &[&dyn Plugin], root: &Path) {
-    for plugin in active_plugins {
-        match plugin.name() {
-            "nuxt" if !root.join(".nuxt/tsconfig.json").exists() => {
-                tracing::warn!(
-                    "Nuxt project missing .nuxt/tsconfig.json: run `nuxt prepare` \
-                     before fallow for accurate analysis"
-                );
-            }
-            "astro" if !root.join(".astro").exists() => {
-                tracing::warn!(
-                    "Astro project missing .astro/ types: run `astro sync` \
-                     before fallow for accurate analysis"
-                );
-            }
-            _ => {}
+    for warning in missing_meta_framework_prerequisites(active_plugins, root) {
+        if should_warn(warning.dedupe_key.to_owned()) {
+            tracing::warn!("{}", warning.message);
         }
     }
 }
