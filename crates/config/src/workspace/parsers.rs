@@ -4,7 +4,16 @@ use super::diagnostics::{
     WorkspaceDiagnostic, WorkspaceDiagnosticKind, is_ignored_workspace_dir, is_skip_listed_dir,
 };
 
-/// Parse `tsconfig.json` at the project root and extract `references[].path` directories.
+/// Parse `tsconfig.json` at the project root and extract workspace-candidate
+/// `references[].path` directories.
+///
+/// Per the TypeScript Project References spec, `path` may point at either a
+/// directory containing `tsconfig.json` OR a config file directly. Workspace
+/// discovery only cares about directory references because file references
+/// cannot host a `package.json`. File references are already followed for
+/// entry-point and alias extraction by the TypeScript plugin in
+/// `core::plugins::typescript::parse_tsconfig_references`; here they are
+/// skipped silently to keep the two reference-resolution sites consistent.
 ///
 /// Returns directories that exist on disk. tsconfig.json is JSONC (comments + trailing commas).
 ///
@@ -16,14 +25,21 @@ pub(super) fn parse_tsconfig_references(root: &Path) -> Vec<PathBuf> {
     parse_tsconfig_references_with_diagnostics(root, &globset::GlobSet::empty(), &mut diagnostics)
 }
 
-/// Parse `tsconfig.json` at the project root and extract `references[].path` directories,
-/// surfacing parse errors and missing reference directories as workspace diagnostics.
+/// Parse `tsconfig.json` at the project root and extract workspace-candidate
+/// `references[].path` directories, surfacing parse errors and unresolved
+/// references as workspace diagnostics.
 ///
 /// Severity policy (mirrors what tsc itself does):
 /// - `tsconfig.json` missing: silent (many JS-only projects have none).
 /// - `tsconfig.json` exists but fails to parse as JSONC: emit
 ///   [`WorkspaceDiagnosticKind::MalformedTsconfig`].
-/// - `references[].path` points to a directory that does not exist: emit
+/// - `references[].path` points to an existing **file**: silent. The
+///   TypeScript Project References spec allows `path` to target a config
+///   file directly; the TypeScript plugin already follows these to extract
+///   entry points and path aliases, so workspace discovery skips them
+///   rather than misreporting them as missing directories.
+/// - `references[].path` points to a path that exists as neither a directory
+///   nor a file: emit
 ///   [`WorkspaceDiagnosticKind::TsconfigReferenceDirMissing`], filtered through
 ///   `ignore_patterns` so user-excluded paths stay quiet.
 pub(super) fn parse_tsconfig_references_with_diagnostics(
@@ -73,9 +89,20 @@ pub(super) fn parse_tsconfig_references_with_diagnostics(
             continue;
         }
 
-        // Reference points to a missing directory. Filter through
-        // ignore_patterns so paths the user already excluded do not trigger
-        // a redundant diagnostic.
+        // File references are valid per the TypeScript Project References
+        // spec (the `path` may target a config file directly), but they
+        // cannot host a `package.json`, so they are not workspace
+        // candidates. The TypeScript plugin in
+        // `core::plugins::typescript::parse_tsconfig_references` already
+        // follows them; skip silently here to avoid a misleading
+        // "directory does not exist" diagnostic.
+        if candidate.is_file() {
+            continue;
+        }
+
+        // Reference points to a missing path. Filter through ignore_patterns
+        // so paths the user already excluded do not trigger a redundant
+        // diagnostic.
         let relative = candidate
             .strip_prefix(root)
             .unwrap_or(candidate.as_path())
@@ -608,6 +635,136 @@ mod tests {
         let refs = parse_tsconfig_references(&temp_dir);
         assert_eq!(refs.len(), 1);
         assert!(refs[0].ends_with("packages/core"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn tsconfig_references_skip_file_paths_silently() {
+        // TypeScript Project References allow `path` to point at either a
+        // directory containing tsconfig.json OR a config file directly.
+        // File references are valid and must not surface as
+        // `TsconfigReferenceDirMissing` diagnostics. The TypeScript plugin
+        // already follows file references; workspace discovery skips them
+        // because files cannot host a package.json.
+        //
+        // The directory names chosen below (`build`, `dist`, `packages/foo`,
+        // a top-level config) are arbitrary; the only thing the
+        // implementation inspects is whether the resolved path is a file
+        // via `Path::is_file()`. The fix is intentionally generic across
+        // any framework or convention that generates tsconfig files.
+        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-file-refs");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(temp_dir.join("build")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("dist/types")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("packages/foo")).unwrap();
+
+        // Mix of locations and filenames — none of them follow a single
+        // convention.
+        std::fs::write(
+            temp_dir.join("build/tsconfig.app.json"),
+            r#"{"compilerOptions": {}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            temp_dir.join("dist/types/index.d.json"),
+            r#"{"compilerOptions": {}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            temp_dir.join("packages/foo/tsconfig.lib.json"),
+            r#"{"compilerOptions": {}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            temp_dir.join("tsconfig.base.json"),
+            r#"{"compilerOptions": {}}"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            temp_dir.join("tsconfig.json"),
+            r#"{
+                "references": [
+                    {"path": "./build/tsconfig.app.json"},
+                    {"path": "./dist/types/index.d.json"},
+                    {"path": "./packages/foo/tsconfig.lib.json"},
+                    {"path": "./tsconfig.base.json"}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let mut diagnostics = Vec::new();
+        let refs = parse_tsconfig_references_with_diagnostics(
+            &temp_dir,
+            &globset::GlobSet::empty(),
+            &mut diagnostics,
+        );
+
+        // Files at any path are not workspace candidates — they should be
+        // skipped silently rather than surfacing as workspaces or diagnostics.
+        assert!(
+            refs.is_empty(),
+            "file references at any path should not be workspace candidates; got: {refs:?}"
+        );
+        assert!(
+            diagnostics.is_empty(),
+            "file references must not trigger TsconfigReferenceDirMissing; got: {diagnostics:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn tsconfig_references_mixed_file_and_dir() {
+        // A tsconfig may mix file-path and directory-path references. The
+        // directory references should still be returned; file references
+        // (regardless of location) should be silently skipped.
+        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-mixed-refs");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(temp_dir.join("packages/core")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("apps/web")).unwrap();
+        std::fs::write(
+            temp_dir.join("tsconfig.shared.json"),
+            r#"{"compilerOptions": {}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            temp_dir.join("apps/web/tsconfig.json"),
+            r#"{"compilerOptions": {}}"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            temp_dir.join("tsconfig.json"),
+            r#"{
+                "references": [
+                    {"path": "./packages/core"},
+                    {"path": "./tsconfig.shared.json"},
+                    {"path": "./apps/web/tsconfig.json"}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let mut diagnostics = Vec::new();
+        let refs = parse_tsconfig_references_with_diagnostics(
+            &temp_dir,
+            &globset::GlobSet::empty(),
+            &mut diagnostics,
+        );
+
+        assert_eq!(
+            refs.len(),
+            1,
+            "only the directory reference should be returned"
+        );
+        assert!(refs[0].ends_with("packages/core"));
+        assert!(
+            diagnostics.is_empty(),
+            "file references must not trigger diagnostics; got: {diagnostics:?}"
+        );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
