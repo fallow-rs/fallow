@@ -34,6 +34,8 @@ mod framework_convention_coverage_astro_gatsby;
 mod framework_convention_coverage_common;
 #[path = "integration_test/framework_convention_coverage_docusaurus.rs"]
 mod framework_convention_coverage_docusaurus;
+#[path = "integration_test/framework_convention_coverage_electron.rs"]
+mod framework_convention_coverage_electron;
 #[path = "integration_test/framework_convention_coverage_expo_tanstack.rs"]
 mod framework_convention_coverage_expo_tanstack;
 #[path = "integration_test/framework_convention_coverage_mintlify.rs"]

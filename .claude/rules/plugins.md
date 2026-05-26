@@ -8,7 +8,7 @@ paths:
 
 107 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
 
-## Rich config parsing (22 plugins)
+## Rich config parsing (24 plugins)
 
 - **ESLint**: Legacy plugin/extends/parser short-name resolution (top-level AND inside `overrides[*]`), flat config plugin keys, JSON config, shared config following (reads imported config packages' entry points one level deep to discover peer deps), relative-path `extends` chain following (`./config/base.js`, `../shared/eslintrc.json`) with cycle protection and depth cap, settings["import/resolver"] (string/array/object formats)
 - **Vite**: rollupOptions.input, lib.entry (string/array/object literals AND path-helper calls: `resolve(__dirname, ...)`, `path.resolve(...)`, `join(...)`, `import.meta.dirname` equivalents, evaluated by the shared `expression_to_string_or_array`), optimizeDeps include/exclude, ssr.external/noExternal, resolve.alias (path-alias-only); embedded Vitest `test.alias` + `test.projects[*]` test.alias/resolve.alias (vite.config.* commonly hosts the Vitest config)
@@ -19,6 +19,7 @@ paths:
 - **TypeScript**: extends (string/array TS 5.0+), compilerOptions.types → @types/*, jsxImportSource, plugins, references, JSONC
 - **Babel**: presets/plugins with short-name resolution, extends, JSON/.babelrc
 - **Rollup**: input entries, external deps
+- **Electron**: electron-vite `main` / `preload` / `renderer` `build.rollupOptions.input` (string/array/object forms, path-helper calls resolved) seeded as entry points relative to `electron.vite.config.*`, so multi-window renderer HTML entries keep their `<script src>` trees reachable; static main/preload globs cover `{ts,tsx,js,jsx,mts,mjs}`
 - **PostCSS**: plugins (object keys, require() calls, string arrays)
 - **Prettier**: plugins array (JSON/.prettierrc and JS configs)
 - **Nuxt**: modules, css, plugins, extends, postcss plugins; path aliases (`~`, `~~`, `#shared`)

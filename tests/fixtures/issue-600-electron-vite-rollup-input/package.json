@@ -1,0 +1,9 @@
+{
+  "name": "electron-vite-rollup-input-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-vite": "^2.0.0"
+  }
+}
