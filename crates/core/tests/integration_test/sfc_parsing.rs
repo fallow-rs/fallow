@@ -507,3 +507,105 @@ fn sveltekit_param_matchers_keep_match_export_alive() {
         "SvelteKit matcher file should still report truly unused exports: {unused_exports:?}"
     );
 }
+
+fn unused_file_names(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
+    results
+        .unused_files
+        .iter()
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
+        .collect()
+}
+
+fn unused_export_pairs(results: &fallow_core::results::AnalysisResults) -> Vec<(String, String)> {
+    results
+        .unused_exports
+        .iter()
+        .map(|e| {
+            (
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                e.export.export_name.clone(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn sveltekit_remote_files_are_reachable() {
+    let root = fixture_path("sveltekit-remote-functions");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let files = unused_file_names(&results);
+
+    // Generated-binding-only remote file: reachable only as an entry point.
+    assert!(
+        !files.contains(&"posts.remote.ts".to_string()),
+        "generated-binding-only remote file must not be unused: {files:?}"
+    );
+    // Imported-by-a-route remote file.
+    assert!(
+        !files.contains(&"data.remote.ts".to_string()),
+        "imported remote file must not be unused: {files:?}"
+    );
+    // Control: a non-remote orphan stays flagged, proving the credit is scoped
+    // to *.remote.* rather than applied project-wide.
+    assert!(
+        files.contains(&"orphan.ts".to_string()),
+        "non-remote orphan file must still report as unused: {files:?}"
+    );
+}
+
+#[test]
+fn sveltekit_remote_exports_are_credited() {
+    let root = fixture_path("sveltekit-remote-functions");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let exports = unused_export_pairs(&results);
+
+    for (file, name) in [
+        ("data.remote.ts", "getData"),
+        ("data.remote.ts", "submitData"),
+        ("posts.remote.ts", "getPosts"),
+        ("posts.remote.ts", "addPost"),
+    ] {
+        assert!(
+            !exports.iter().any(|(f, e)| f == file && e == name),
+            "remote function {file}#{name} must not report as unused export: {exports:?}"
+        );
+    }
+}
+
+#[test]
+fn sveltekit_remote_exports_credited_under_include_entry_exports() {
+    let root = fixture_path("sveltekit-remote-functions");
+    let mut config = create_config(root);
+    // --include-entry-exports disables the entry-point skip, so this run proves
+    // the `used_exports: ["*"]` rule (not just entry-point status) keeps the
+    // user-named remote functions exempt.
+    config.include_entry_exports = true;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let exports = unused_export_pairs(&results);
+
+    for (file, name) in [
+        ("data.remote.ts", "getData"),
+        ("data.remote.ts", "submitData"),
+        ("posts.remote.ts", "getPosts"),
+        ("posts.remote.ts", "addPost"),
+    ] {
+        assert!(
+            !exports.iter().any(|(f, e)| f == file && e == name),
+            "remote function {file}#{name} must stay credited under --include-entry-exports: {exports:?}"
+        );
+    }
+}

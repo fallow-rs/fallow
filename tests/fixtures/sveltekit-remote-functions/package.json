@@ -1,0 +1,12 @@
+{
+  "name": "sveltekit-remote-functions",
+  "private": true,
+  "dependencies": {
+    "svelte": "^5.0.0"
+  },
+  "devDependencies": {
+    "@sveltejs/kit": "^2.27.0",
+    "@sveltejs/adapter-auto": "^3.0.0",
+    "@sveltejs/vite-plugin-svelte": "^4.0.0"
+  }
+}

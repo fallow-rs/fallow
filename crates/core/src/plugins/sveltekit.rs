@@ -30,6 +30,9 @@ const ENTRY_PATTERNS: &[&str] = &[
     "src/service-worker.{ts,js}",
     // Params matchers
     "src/params/**/*.{ts,js}",
+    // Remote functions (SvelteKit 2.27+): invoked through generated client/server
+    // bindings, so the file is never reached through fallow's import graph.
+    "src/**/*.remote.{ts,js}",
 ];
 
 const CONFIG_PATTERNS: &[&str] = &["svelte.config.{js,cjs,mjs,ts}"];
@@ -95,6 +98,11 @@ const HOOKS_SERVER_EXPORTS: &[&str] = &["handle", "handleError", "handleFetch", 
 const HOOKS_CLIENT_EXPORTS: &[&str] = &["handleError", "init"];
 const HOOKS_SHARED_EXPORTS: &[&str] = &["reroute", "transport", "handleError", "init"];
 const PARAM_MATCHER_EXPORTS: &[&str] = &["match"];
+// Remote-function exports (`export const getPosts = query(...)`) carry
+// user-defined names rather than a fixed convention set, so every export is
+// credited via the `"*"` wildcard. SvelteKit consumes them through generated
+// bindings, keeping them exempt even under `--include-entry-exports`.
+const REMOTE_EXPORTS: &[&str] = &["*"];
 
 impl Plugin for SvelteKitPlugin {
     fn name(&self) -> &'static str {
@@ -150,6 +158,7 @@ impl Plugin for SvelteKitPlugin {
             ("src/hooks.client.{ts,js}", HOOKS_CLIENT_EXPORTS),
             ("src/hooks.{ts,js}", HOOKS_SHARED_EXPORTS),
             ("src/params/**/*.{ts,js}", PARAM_MATCHER_EXPORTS),
+            ("src/**/*.remote.{ts,js}", REMOTE_EXPORTS),
         ]
     }
 
@@ -272,6 +281,31 @@ mod tests {
             .find(|(pat, _)| *pat == "src/params/**/*.{ts,js}")
             .expect("param matcher used exports");
         assert!(matcher_entry.1.contains(&"match"));
+    }
+
+    #[test]
+    fn entry_patterns_include_remote_functions() {
+        let plugin = SvelteKitPlugin;
+        let patterns = plugin.entry_patterns();
+        assert!(
+            patterns.contains(&"src/**/*.remote.{ts,js}"),
+            "SvelteKit remote-function files should be entry points: {patterns:?}"
+        );
+    }
+
+    #[test]
+    fn used_exports_credit_all_remote_exports() {
+        let plugin = SvelteKitPlugin;
+        let exports = plugin.used_exports();
+        let remote_entry = exports
+            .iter()
+            .find(|(pat, _)| *pat == "src/**/*.remote.{ts,js}")
+            .expect("remote used_exports rule");
+        assert!(
+            remote_entry.1.contains(&"*"),
+            "remote functions carry user-defined names, so all exports must be credited: {:?}",
+            remote_entry.1
+        );
     }
 
     #[test]
