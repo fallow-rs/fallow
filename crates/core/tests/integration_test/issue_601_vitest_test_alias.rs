@@ -276,3 +276,233 @@ fn test_alias_does_not_shadow_tsconfig_alias() {
         "src/api.ts `realApi` must be credited via the tsconfig-aliased import, found: {unused_exports:?}"
     );
 }
+
+/// Follow-up surface 1: `test.alias` embedded in `vite.config.ts` (the common
+/// `defineConfig({ test: {...}, resolve: { alias } })` shape). The Vitest plugin
+/// never sees vite.config.ts; the Vite plugin extracts the test-block aliases.
+#[test]
+fn vite_config_embedded_test_alias_resolves_virtual_module() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    write(
+        &root.join("package.json"),
+        r#"{
+            "name": "vite-embedded-test-alias",
+            "private": true,
+            "main": "src/index.ts",
+            "devDependencies": { "vite": "5.0.0", "vitest": "2.0.0" }
+        }"#,
+    );
+    write(
+        &root.join("tsconfig.json"),
+        r#"{ "compilerOptions": { "module": "ESNext", "moduleResolution": "bundler" } }"#,
+    );
+    write(
+        &root.join("vite.config.ts"),
+        r#"
+            import { defineConfig } from "vite";
+            export default defineConfig({
+                test: { alias: { vscode: "./test/mock/vscode.ts" } }
+            });
+        "#,
+    );
+    write(
+        &root.join("test/mock/vscode.ts"),
+        "export const window = { showMessage: () => {} };\n",
+    );
+    write(
+        &root.join("src/index.ts"),
+        r#"
+            import { window } from "vscode";
+            export const run = () => window.showMessage();
+        "#,
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved.contains(&"vscode"),
+        "test.alias in vite.config must resolve the virtual module, found: {unresolved:?}"
+    );
+    let unlisted: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unlisted.contains(&"vscode"),
+        "alias-resolved virtual module must not be unlisted, found: {unlisted:?}"
+    );
+}
+
+/// Follow-up surface 2 + misfire fix: a project-level `resolve.alias` mock in a
+/// `vitest.config.ts` (the vite `test-alias-from-vite` workspaces-browser shape),
+/// AND a top-level `resolve.alias` directory mapping `@app` -> path.resolve(src)
+/// that must NOT be mistaken for a package-to-package alias (the misfire fix),
+/// even though `src/` exists only because we write it here. The import `@app/api`
+/// must resolve to `src/api.ts` so it stays referenced.
+#[test]
+fn vitest_config_resolve_alias_directory_and_project_mock() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    write(
+        &root.join("package.json"),
+        r#"{
+            "name": "vitest-resolve-alias",
+            "private": true,
+            "devDependencies": { "vitest": "2.0.0" }
+        }"#,
+    );
+    write(
+        &root.join("tsconfig.json"),
+        r#"{ "compilerOptions": { "module": "ESNext", "moduleResolution": "bundler" } }"#,
+    );
+    write(
+        &root.join("vitest.config.ts"),
+        r#"
+            import { defineConfig } from "vitest/config";
+            import { resolve } from "node:path";
+            export default defineConfig({
+                resolve: { alias: { "@app": resolve(__dirname, "src") } },
+                test: {
+                    projects: [
+                        {
+                            test: { name: "browser" },
+                            resolve: { alias: { vscode: "./test/mock/vscode.ts" } }
+                        }
+                    ]
+                }
+            });
+        "#,
+    );
+    // A test file is a Vitest entry point.
+    write(
+        &root.join("src/feature.test.ts"),
+        r#"
+            import { realApi } from "@app/api";
+            import { window } from "vscode";
+            it("uses aliases", () => { realApi(); window; });
+        "#,
+    );
+    write(
+        &root.join("src/api.ts"),
+        "export const realApi = () => 1;\n",
+    );
+    write(
+        &root.join("test/mock/vscode.ts"),
+        "export const window = {};\n",
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files.iter().any(|p| p.ends_with("src/api.ts")),
+        "`@app`->resolve(src) directory alias must resolve `@app/api` to src/api.ts \
+         (NOT be misclassified as package-to-package), so src/api.ts stays referenced; \
+         unused_files: {unused_files:?}"
+    );
+
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved.contains(&"@app/api"),
+        "`@app/api` must resolve via the directory alias, found: {unresolved:?}"
+    );
+    // bare `vscode` would classify as an npm package (unlisted) without the
+    // project-level resolve.alias extraction; assert NOT unlisted so the
+    // project-mock assertion is not vacuous.
+    let unlisted: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unlisted.contains(&"vscode"),
+        "project-level resolve.alias must resolve the mock (not unlisted), found: {unlisted:?}"
+    );
+}
+
+/// Follow-up surface 3: `vitest.workspace.ts` array file (`defineWorkspace([...])`).
+/// `find_config_object` returns None for an array default export, so the
+/// workspace-array traversal must extract each element's aliases.
+#[test]
+fn vitest_workspace_array_file_aliases_resolve() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    write(
+        &root.join("package.json"),
+        r#"{
+            "name": "vitest-workspace-array",
+            "private": true,
+            "main": "src/index.ts",
+            "devDependencies": { "vitest": "2.0.0" }
+        }"#,
+    );
+    write(
+        &root.join("tsconfig.json"),
+        r#"{ "compilerOptions": { "module": "ESNext", "moduleResolution": "bundler" } }"#,
+    );
+    write(
+        &root.join("vitest.workspace.ts"),
+        r#"
+            import { defineWorkspace } from "vitest/config";
+            export default defineWorkspace([
+                { test: { alias: { vscode: "./test/mock/vscode.ts" } } }
+            ]);
+        "#,
+    );
+    write(
+        &root.join("test/mock/vscode.ts"),
+        "export const window = {};\n",
+    );
+    write(
+        &root.join("src/index.ts"),
+        r#"
+            import { window } from "vscode";
+            export const run = () => window;
+        "#,
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved.contains(&"vscode"),
+        "vitest.workspace array-file alias must resolve the virtual module, found: {unresolved:?}"
+    );
+    // Without alias extraction, bare `vscode` classifies as an npm package and
+    // surfaces as unlisted (not unresolved); assert NOT unlisted so this test is
+    // not vacuous (it must fail if the workspace-array extraction is removed).
+    let unlisted: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unlisted.contains(&"vscode"),
+        "workspace-array alias-resolved module must not be unlisted, found: {unlisted:?}"
+    );
+}

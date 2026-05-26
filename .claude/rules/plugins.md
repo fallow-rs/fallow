@@ -11,7 +11,7 @@ paths:
 ## Rich config parsing (22 plugins)
 
 - **ESLint**: Legacy plugin/extends/parser short-name resolution (top-level AND inside `overrides[*]`), flat config plugin keys, JSON config, shared config following (reads imported config packages' entry points one level deep to discover peer deps), relative-path `extends` chain following (`./config/base.js`, `../shared/eslintrc.json`) with cycle protection and depth cap, settings["import/resolver"] (string/array/object formats)
-- **Vite**: rollupOptions.input, lib.entry, optimizeDeps include/exclude, ssr.external/noExternal
+- **Vite**: rollupOptions.input, lib.entry, optimizeDeps include/exclude, ssr.external/noExternal, resolve.alias (path-alias-only); embedded Vitest `test.alias` + `test.projects[*]` test.alias/resolve.alias (vite.config.* commonly hosts the Vitest config)
 - **Jest**: preset, setupFiles, globalSetup/Teardown, testMatch, transform, reporters, testEnvironment, watchPlugins, resolver, snapshotSerializers, testRunner, runner, JSON config
 - **Storybook**: addons, framework (string/object), stories, core.builder, typescript.reactDocgen
 - **Tailwind**: content globs, plugins (require/strings), presets
@@ -24,7 +24,7 @@ paths:
 - **Nuxt**: modules, css, plugins, extends, postcss plugins; path aliases (`~`, `~~`, `#shared`)
 - **Drizzle**: schema field (string/array/glob/directory → entry points), out directory
 - **Angular**: angular.json projects.*.architect.build.options → entry points; peer dep awareness
-- **Vitest**: test.include, setupFiles, globalSetup, environment, reporters, coverage.provider, typecheck.checker, browser.provider, test.alias (object + array forms; mock/virtual-module aliases seeded as support entry points); projects[*] nested extraction (include, setupFiles, globalSetup, alias)
+- **Vitest**: test.include, setupFiles, globalSetup, environment, reporters, coverage.provider, typecheck.checker, browser.provider, test.alias + resolve.alias (object + array forms; mock/virtual-module aliases seeded as support entry points; shared `test_alias` module with the Vite plugin); projects[*] nested extraction (include, setupFiles, globalSetup, test.alias, resolve.alias); `vitest.workspace.{ts,js}` array-file (`defineWorkspace([...])`) per-element test.alias/resolve.alias
 - **Stryker**: documented default `stryker.conf.{json,js,mjs,cjs}` / `stryker.config.{json,js,mjs,cjs}` configs plus fallow-compatible `jsonc` and `ts` variants stay alive at the root or inside workspaces; static imports/requires are credited; `plugins` / `appendPlugins` credit explicit package names; `checkers: ["typescript"]` credits `@stryker-mutator/typescript-checker`; known `testRunner` short names credit their runner packages
 - **Nx**: project.json targets.*.executor → deps; targets.*.options.{main, browser, styles, scripts, tsConfig} → entry points; targets.*.options.stylePreprocessorOptions.includePaths → SCSS include paths (with `{projectRoot}`/`{workspaceRoot}` token expansion)
 - **Prisma**: `generator { provider = "..." }` extraction from default `schema.prisma` / `prisma/schema.prisma` files and the multi-file `prisma/schema/*.prisma` layout; credits custom-generator npm packages; skips `datasource` providers, shell-command form (`node ./gen.js`), relative-path form, and commented-out providers. Custom schema paths configured via `prisma.config.ts`'s `schema` field are out of scope (filesystem fallback is non-recursive); users with non-canonical layouts fall back to `ignoreDependencies`.

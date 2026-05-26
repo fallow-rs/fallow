@@ -119,6 +119,15 @@ define_plugin!(
             }
         }
 
+        // Vitest test config is commonly embedded in vite.config.* via
+        // defineConfig({ test: {...}, resolve: { alias } }). The Vitest plugin
+        // never sees this file (its config_patterns are vitest.config.* /
+        // vitest.workspace.* only), so extract the test-block + projects aliases
+        // here. Top-level resolve.alias above stays path-alias-only (no
+        // mock-file entry seeding / dependency credit) to keep pure-Vite
+        // behavior unchanged. See crate::plugins::test_alias.
+        super::test_alias::apply_test_block_aliases(&mut result, source, config_path, root);
+
         // build.rollupOptions.input → entry points (string, array, or object)
         let rollup_input = config_parser::extract_config_string_or_array(
             source,
@@ -282,6 +291,54 @@ mod tests {
         assert_eq!(
             result.path_aliases,
             vec![("@".to_string(), "src".to_string())]
+        );
+    }
+
+    #[test]
+    fn resolve_config_extracts_embedded_test_alias_and_project_resolve_alias() {
+        // The common defineConfig({ test: {...}, resolve: { alias } }) shape in
+        // vite.config.ts: the Vite plugin must extract the Vitest test-block
+        // aliases (the Vitest plugin never sees vite.config.ts).
+        let source = r#"
+            import { defineConfig } from 'vite';
+            export default defineConfig({
+                resolve: { alias: { "@": "./src" } },
+                test: {
+                    alias: { vscode: "./test/mock/vscode.ts" },
+                    projects: [
+                        { test: { name: "browser" }, resolve: { alias: { "test-alias-from-vite": "./mock/to.ts" } } }
+                    ]
+                }
+            });
+        "#;
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert!(
+            result
+                .path_aliases
+                .contains(&("vscode".to_string(), "test/mock/vscode.ts".to_string())),
+            "test.alias in vite.config must be extracted: {:?}",
+            result.path_aliases
+        );
+        assert!(
+            result
+                .path_aliases
+                .contains(&("test-alias-from-vite".to_string(), "mock/to.ts".to_string())),
+            "test.projects[*].resolve.alias in vite.config must be extracted: {:?}",
+            result.path_aliases
+        );
+        // The top-level resolve.alias `@`->`./src` stays handled by Vite's own
+        // A-only extraction (path alias, no entry seeding).
+        assert!(
+            result
+                .path_aliases
+                .contains(&("@".to_string(), "src".to_string())),
+            "top-level resolve.alias unchanged: {:?}",
+            result.path_aliases
         );
     }
 

@@ -451,6 +451,99 @@ pub fn extract_config_array_nested_aliases(
     .unwrap_or_default()
 }
 
+/// Like [`extract_config_aliases`] but each tuple carries a third element:
+/// `replacement_is_bare_string_literal`, true ONLY when the replacement was
+/// written as a plain bare string literal (not starting with `./`/`../`/`/`)
+/// rather than a path expression (`path.resolve(...)`, `path.join(...)`,
+/// `fileURLToPath(...)`, `new URL(...)`). This is the filesystem-free
+/// discriminator between a package-to-package alias (`'lodash-es' -> 'lodash'`,
+/// bare literal) and a directory/file alias (`'@' -> path.resolve(__dirname,
+/// 'src')`, path expression). See `test_alias::process_test_alias`.
+#[must_use]
+pub fn extract_config_aliases_kinded(
+    source: &str,
+    path: &Path,
+    prop_path: &[&str],
+) -> Vec<(String, String, bool)> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let expr = get_nested_expression(obj, prop_path)?;
+        let aliases = expression_to_alias_pairs_kinded(expr);
+        (!aliases.is_empty()).then_some(aliases)
+    })
+    .unwrap_or_default()
+}
+
+/// Kinded variant of [`extract_config_array_nested_aliases`] (see
+/// [`extract_config_aliases_kinded`] for the third tuple element).
+#[must_use]
+pub fn extract_config_array_nested_aliases_kinded(
+    source: &str,
+    path: &Path,
+    array_path: &[&str],
+    alias_path: &[&str],
+) -> Vec<(String, String, bool)> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let array_expr = get_nested_expression(obj, array_path)?;
+        let Expression::ArrayExpression(arr) = array_expr else {
+            return None;
+        };
+        let mut results = Vec::new();
+        for element in &arr.elements {
+            if let Some(Expression::ObjectExpression(element_obj)) = element.as_expression()
+                && let Some(alias_expr) = get_nested_expression(element_obj, alias_path)
+            {
+                results.extend(expression_to_alias_pairs_kinded(alias_expr));
+            }
+        }
+        (!results.is_empty()).then_some(results)
+    })
+    .unwrap_or_default()
+}
+
+/// Extract kinded aliases from a default-exported ARRAY config, the
+/// `defineWorkspace([...])` / `vitest.workspace.{ts,js}` shape. `find_config_object`
+/// only finds an object default export, so the workspace array file is invisible
+/// to the object-based extractors; this walks each object element of the array and
+/// reads `alias_path` from it. One level only (nested `test.projects` inside an
+/// element is out of scope).
+#[must_use]
+pub fn extract_default_export_array_aliases_kinded(
+    source: &str,
+    path: &Path,
+    alias_path: &[&str],
+) -> Vec<(String, String, bool)> {
+    extract_from_source(source, path, |program| {
+        let arr = find_default_export_array(program)?;
+        let mut results = Vec::new();
+        for element in &arr.elements {
+            if let Some(Expression::ObjectExpression(element_obj)) = element.as_expression()
+                && let Some(alias_expr) = get_nested_expression(element_obj, alias_path)
+            {
+                results.extend(expression_to_alias_pairs_kinded(alias_expr));
+            }
+        }
+        (!results.is_empty()).then_some(results)
+    })
+    .unwrap_or_default()
+}
+
+/// True when a parsed config has neither an object default export
+/// (`find_config_object`) nor an array default export
+/// (`find_default_export_array`). Used to emit a diagnostic when a config shape
+/// such as `mergeConfig(base, defineConfig({...}))` or an imported-and-spread
+/// base config cannot be statically reached.
+#[must_use]
+pub fn config_default_export_unreachable(source: &str, path: &Path) -> bool {
+    extract_from_source(source, path, |program| {
+        let reachable =
+            find_config_object(program).is_some() || find_default_export_array(program).is_some();
+        Some(reachable)
+    })
+    .is_some_and(|reachable| !reachable)
+}
+
 /// Extract string values from a nested array, supporting both string elements and
 /// object elements with a named string/path field.
 ///
@@ -1101,6 +1194,95 @@ fn expression_to_alias_pairs(expr: &Expression) -> Vec<(String, String)> {
             })
             .collect(),
         _ => Vec::new(),
+    }
+}
+
+/// Kinded variant of [`expression_to_alias_pairs`]: each tuple gains a
+/// `replacement_is_bare_string_literal` flag. See
+/// [`extract_config_aliases_kinded`].
+fn expression_to_alias_pairs_kinded(expr: &Expression) -> Vec<(String, String, bool)> {
+    match expr {
+        Expression::ObjectExpression(obj) => obj
+            .properties
+            .iter()
+            .filter_map(|prop| {
+                let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+                    return None;
+                };
+                let find = property_key_to_string(&prop.key)?;
+                let (replacement, is_bare) = alias_replacement_kinded(&prop.value)?;
+                Some((find, replacement, is_bare))
+            })
+            .collect(),
+        Expression::ArrayExpression(arr) => arr
+            .elements
+            .iter()
+            .filter_map(|element| {
+                let Expression::ObjectExpression(obj) = element.as_expression()? else {
+                    return None;
+                };
+                let find = find_property(obj, "find")
+                    .and_then(|prop| expression_to_string(&prop.value))?;
+                let (replacement, is_bare) = find_property(obj, "replacement")
+                    .and_then(|prop| alias_replacement_kinded(&prop.value))?;
+                Some((find, replacement, is_bare))
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Extract an alias replacement string plus whether it was written as a plain
+/// bare string literal. A bare string literal (not starting with `./`/`../`/`/`)
+/// signals a potential package-to-package alias; a path expression
+/// (`path.resolve(...)`, `path.join(...)`, `fileURLToPath(...)`, `new URL(...)`)
+/// or a `./`-prefixed string is always a filesystem path. This is the
+/// filesystem-free discriminator the package-to-package gate relies on.
+fn alias_replacement_kinded(expr: &Expression) -> Option<(String, bool)> {
+    match expr {
+        Expression::ParenthesizedExpression(paren) => alias_replacement_kinded(&paren.expression),
+        Expression::TSAsExpression(ts_as) => alias_replacement_kinded(&ts_as.expression),
+        Expression::TSSatisfiesExpression(ts_sat) => alias_replacement_kinded(&ts_sat.expression),
+        Expression::StringLiteral(s) => {
+            let value = s.value.to_string();
+            let is_bare =
+                !value.starts_with("./") && !value.starts_with("../") && !value.starts_with('/');
+            Some((value, is_bare))
+        }
+        // Path-builder calls / `new URL(...)` / other expressions are filesystem
+        // paths, never bare-package aliases.
+        _ => expression_to_path_string(expr).map(|value| (value, false)),
+    }
+}
+
+/// Find a default-exported array config, the `defineWorkspace([...])` /
+/// `vitest.workspace.{ts,js}` shape. Handles `export default [...]` and
+/// `export default defineWorkspace([...])` / `defineConfig([...])` (the array as
+/// the call's first argument), plus parenthesised / `as` wrappers.
+fn find_default_export_array<'a>(program: &'a Program<'a>) -> Option<&'a ArrayExpression<'a>> {
+    for stmt in &program.body {
+        if let Statement::ExportDefaultDeclaration(decl) = stmt
+            && let Some(expr) = decl.declaration.as_expression()
+        {
+            return array_from_expression(expr);
+        }
+    }
+    None
+}
+
+fn array_from_expression<'a>(expr: &'a Expression<'a>) -> Option<&'a ArrayExpression<'a>> {
+    match expr {
+        Expression::ArrayExpression(arr) => Some(arr),
+        Expression::ParenthesizedExpression(paren) => array_from_expression(&paren.expression),
+        Expression::TSAsExpression(ts_as) => array_from_expression(&ts_as.expression),
+        Expression::TSSatisfiesExpression(ts_sat) => array_from_expression(&ts_sat.expression),
+        // defineWorkspace([...]) / defineConfig([...]): the array is the first arg.
+        Expression::CallExpression(call) => call
+            .arguments
+            .first()
+            .and_then(Argument::as_expression)
+            .and_then(array_from_expression),
+        _ => None,
     }
 }
 

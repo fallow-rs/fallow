@@ -7,6 +7,7 @@
 use std::path::Path;
 
 use super::config_parser;
+use super::test_alias;
 use super::{Plugin, PluginResult};
 
 pub struct VitestPlugin;
@@ -143,23 +144,28 @@ impl Plugin for VitestPlugin {
             result.referenced_dependencies.push(dep);
         }
 
-        // test.alias → path aliases + mock-file crediting. Vitest merges test.alias
-        // with Vite's resolve.alias when running tests, so imports that only resolve
-        // through a test alias (virtual modules like `vscode`) and __mocks__ files
-        // aliased to mock a real package must be made visible. Collect the top-level
-        // map and every test.projects[*].test.alias map, then apply each via
-        // process_test_alias (see its docs for the three mechanisms).
-        let mut aliases =
-            config_parser::extract_config_aliases(source, config_path, &["test", "alias"]);
-        aliases.extend(config_parser::extract_config_array_nested_aliases(
-            source,
-            config_path,
-            &["test", "projects"],
-            &["test", "alias"],
-        ));
-        for (find, replacement) in aliases {
-            process_test_alias(&mut result, &find, &replacement, config_path, root);
+        // Vitest merges test.alias AND resolve.alias (top-level + per
+        // test.projects[*]) when running tests, so imports that only resolve
+        // through such an alias (virtual modules like `vscode`) and __mocks__
+        // files aliased to mock a real package must be made visible. The
+        // test-block + projects sources are shared with the Vite plugin; the
+        // workspace-array file (`vitest.workspace.*`) and top-level resolve.alias
+        // are Vitest-specific here. See crate::plugins::test_alias.
+        test_alias::apply_test_block_aliases(&mut result, source, config_path, root);
+        for (find, replacement, is_bare) in
+            config_parser::extract_config_aliases_kinded(source, config_path, &["resolve", "alias"])
+        {
+            test_alias::process_test_alias(
+                &mut result,
+                &find,
+                &replacement,
+                is_bare,
+                config_path,
+                root,
+            );
         }
+        test_alias::apply_workspace_array_aliases(&mut result, source, config_path, root);
+        test_alias::debug_unreachable_config(source, config_path);
 
         // test.include → entry patterns that replace defaults
         // Vitest treats root-level test.include as a full override of its default
@@ -287,93 +293,6 @@ impl Plugin for VitestPlugin {
 
         result
     }
-}
-
-/// Source-file extensions an alias replacement may name. A mock alias always
-/// points at a JS/TS file; directory targets (`@/` -> `src`) have no extension
-/// and are not seeded as entry points.
-const ALIAS_SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"];
-
-/// True when `spec` is a bare npm package specifier (not a relative path, URL,
-/// `data:`, or `@/` / `~/` / `#` style path alias key).
-fn is_bare_package_specifier(spec: &str) -> bool {
-    crate::resolve::is_bare_specifier(spec)
-        && crate::resolve::is_valid_package_name(spec)
-        && !crate::resolve::is_path_alias(spec)
-}
-
-/// True when a normalized alias replacement names a local source file (by
-/// extension), as opposed to a directory.
-fn alias_target_is_source_file(normalized: &str) -> bool {
-    Path::new(normalized)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ALIAS_SOURCE_EXTENSIONS.contains(&ext))
-}
-
-/// Apply one `test.alias` entry to the plugin result.
-///
-/// Three mechanisms cooperate so both Vitest alias false-positive classes
-/// disappear without introducing new ones:
-/// - (A) push the alias into `path_aliases` so a virtual-module / alias-only
-///   import (`vscode` -> `./mock/vscode.js`) resolves instead of surfacing as
-///   `unresolved-import` / `unlisted-dependency`.
-/// - (B) when the replacement names a local source FILE, seed it as a support
-///   entry point so an aliased `__mocks__` file keeps its exports credited even
-///   when the original package resolves through `node_modules` (in which case
-///   the production import never reaches the path-alias fallback).
-/// - (C) when the alias KEY is a bare package, credit it as a referenced
-///   dependency so redirecting its import through the alias (only happens when
-///   `node_modules` is absent) does not regress it into a false
-///   `unused-dependency`.
-///
-/// Package-to-package aliases (`'lodash-es' -> 'lodash'`, where BOTH sides are
-/// bare npm packages) are special-cased: the replacement is not a filesystem
-/// path, so `normalize_config_path` would treat it as a local path and pushing a path alias
-/// would turn the source import `Unresolvable` in a no-`node_modules` run.
-/// Instead both package names are credited as referenced and no path alias is
-/// emitted. A bare directory replacement (`'@/' -> 'src'`) is not affected
-/// because the `@/` key is a path-alias key, not a bare package.
-fn process_test_alias(
-    result: &mut PluginResult,
-    find: &str,
-    replacement: &str,
-    config_path: &Path,
-    root: &Path,
-) {
-    let find_is_pkg = is_bare_package_specifier(find);
-
-    if find_is_pkg && is_bare_package_specifier(replacement) {
-        result
-            .referenced_dependencies
-            .push(crate::resolve::extract_package_name(replacement));
-        result
-            .referenced_dependencies
-            .push(crate::resolve::extract_package_name(find));
-        return;
-    }
-
-    let Some(normalized) = config_parser::normalize_config_path(replacement, config_path, root)
-    else {
-        return;
-    };
-
-    // (A)
-    result
-        .path_aliases
-        .push((find.to_owned(), normalized.clone()));
-    // (B)
-    if alias_target_is_source_file(&normalized) {
-        result.setup_files.push(root.join(&normalized));
-    }
-    // (C)
-    if find_is_pkg {
-        result
-            .referenced_dependencies
-            .push(crate::resolve::extract_package_name(find));
-    }
-
-    tracing::debug!(find, target = %normalized, "vitest test.alias extracted");
 }
 
 #[cfg(test)]
@@ -959,6 +878,71 @@ mod tests {
         assert!(
             result.path_aliases.is_empty(),
             "RegExp alias key should be skipped: {:?}",
+            result.path_aliases
+        );
+    }
+
+    #[test]
+    fn top_level_resolve_alias_extracted_from_vitest_config() {
+        // Vitest merges top-level resolve.alias; vite's own vitest.config.ts uses
+        // `resolve.alias: { 'vite/module-runner': resolve(...) }`.
+        let source = r#"
+            import { resolve } from "node:path";
+            export default {
+                resolve: {
+                    alias: { "vite/module-runner": resolve(__dirname, "src/module-runner/index.ts") }
+                },
+                test: { include: ["**/*.spec.ts"] }
+            };
+        "#;
+        let result = resolve_abs(source);
+        assert!(
+            result.path_aliases.contains(&(
+                "vite/module-runner".to_string(),
+                "src/module-runner/index.ts".to_string()
+            )),
+            "top-level resolve.alias must be extracted: {:?}",
+            result.path_aliases
+        );
+    }
+
+    #[test]
+    fn project_level_resolve_alias_extracted() {
+        // test.projects[*].resolve.alias (Codex's vite workspaces-browser shape).
+        let source = r#"
+            export default {
+                test: {
+                    projects: [
+                        { test: { name: "browser" }, resolve: { alias: { "test-alias-from-vite": "./mock/to.ts" } } }
+                    ]
+                }
+            };
+        "#;
+        let result = resolve_abs(source);
+        assert!(
+            result
+                .path_aliases
+                .contains(&("test-alias-from-vite".to_string(), "mock/to.ts".to_string())),
+            "project-level resolve.alias must be extracted: {:?}",
+            result.path_aliases
+        );
+    }
+
+    #[test]
+    fn function_form_define_config_test_alias_extracted() {
+        // `defineConfig(() => ({ test: { alias } }))` arrow-returning-object form.
+        let source = r#"
+            import { defineConfig } from "vitest/config";
+            export default defineConfig(() => ({
+                test: { alias: { vscode: "./test/mock/vscode.ts" } }
+            }));
+        "#;
+        let result = resolve_abs(source);
+        assert!(
+            result
+                .path_aliases
+                .contains(&("vscode".to_string(), "test/mock/vscode.ts".to_string())),
+            "function-form defineConfig test.alias must be extracted: {:?}",
             result.path_aliases
         );
     }

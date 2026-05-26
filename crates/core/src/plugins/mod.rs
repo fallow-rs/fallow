@@ -1093,6 +1093,7 @@ mod syncpack;
 mod tailwind;
 mod tanstack_router;
 mod tap;
+mod test_alias;
 mod tsd;
 mod tsdown;
 mod tsup;
