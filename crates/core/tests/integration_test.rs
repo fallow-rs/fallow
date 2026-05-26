@@ -139,6 +139,8 @@ mod issue_463_glob_validation;
 mod issue_515_re_export_cycles;
 #[path = "integration_test/issue_607_oxlint_js_plugins.rs"]
 mod issue_607_oxlint_js_plugins;
+#[path = "integration_test/issue_625_k6_plugin.rs"]
+mod issue_625_k6_plugin;
 #[path = "integration_test/issue_629_opencode_plugin.rs"]
 mod issue_629_opencode_plugin;
 #[path = "integration_test/issue_635_scaffold_template_assets.rs"]

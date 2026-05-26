@@ -161,7 +161,7 @@ impl PluginRegistry {
         let active: Vec<&dyn Plugin> = self
             .plugins
             .iter()
-            .filter(|p| p.is_enabled_with_deps(&all_deps, root))
+            .filter(|p| p.is_enabled_with_files(&all_deps, root, discovered_files))
             .map(AsRef::as_ref)
             .collect();
 
@@ -354,16 +354,16 @@ impl PluginRegistry {
 
         // Phase 1: Determine which plugins are active (with pre-computed deps)
         let all_deps = pkg.all_dependency_names();
-        let active: Vec<&dyn Plugin> = self
-            .plugins
-            .iter()
-            .filter(|p| p.is_enabled_with_deps(&all_deps, root))
-            .map(AsRef::as_ref)
-            .collect();
-
         let workspace_files: Vec<PathBuf> = relative_files
             .iter()
             .map(|(abs_path, _)| abs_path.clone())
+            .collect();
+
+        let active: Vec<&dyn Plugin> = self
+            .plugins
+            .iter()
+            .filter(|p| p.is_enabled_with_files(&all_deps, root, &workspace_files))
+            .map(AsRef::as_ref)
             .collect();
 
         tracing::info!(

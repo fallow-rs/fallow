@@ -1,0 +1,11 @@
+{
+  "name": "issue-625-k6-script",
+  "version": "1.0.0",
+  "scripts": {
+    "load": "k6 run load/scripted.k6.js"
+  },
+  "devDependencies": {
+    "k6": "^0.52.0",
+    "unused-control": "^1.0.0"
+  }
+}

@@ -837,6 +837,16 @@ mod tests {
     }
 
     #[test]
+    fn analyze_extracts_k6_run_entry_file_and_binary() {
+        let scripts: HashMap<String, String> =
+            std::iter::once(("load".to_string(), "k6 run load/smoke.k6.js".to_string())).collect();
+        let result = analyze_scripts(&scripts, Path::new("/nonexistent"), &FxHashMap::default());
+
+        assert!(result.entry_files.contains(&"load/smoke.k6.js".to_string()));
+        assert!(result.used_packages.contains("k6"));
+    }
+
+    #[test]
     fn analyze_cross_env_with_config() {
         let scripts: HashMap<String, String> = std::iter::once((
             "build".to_string(),

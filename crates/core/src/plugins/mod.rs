@@ -19,6 +19,7 @@ const TEST_ENTRY_POINT_PLUGINS: &[&str] = &[
     "cucumber",
     "cypress",
     "jest",
+    "k6",
     "mocha",
     "playwright",
     "tap",
@@ -587,6 +588,20 @@ pub trait Plugin: Send + Sync {
         })
     }
 
+    /// Check whether this plugin should be active with source discovery available.
+    ///
+    /// Most plugins only need dependency/config activation. Convention-only tools
+    /// can override this to activate from discovered source filenames without
+    /// forcing a separate filesystem walk.
+    fn is_enabled_with_files(
+        &self,
+        deps: &[String],
+        root: &Path,
+        _discovered_files: &[PathBuf],
+    ) -> bool {
+        self.is_enabled_with_deps(deps, root)
+    }
+
     /// Default glob patterns for entry point files.
     fn entry_patterns(&self) -> &'static [&'static str] {
         &[]
@@ -1018,6 +1033,7 @@ mod hardhat;
 mod husky;
 mod i18next;
 mod jest;
+mod k6;
 mod karma;
 mod knex;
 mod kysely;

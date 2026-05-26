@@ -1,0 +1,5 @@
+{
+  "name": "issue-625-k6-plugin",
+  "version": "1.0.0",
+  "main": "src/index.js"
+}

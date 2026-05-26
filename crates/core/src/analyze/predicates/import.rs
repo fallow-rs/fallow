@@ -29,6 +29,11 @@ pub fn is_builtin_module(name: &str) -> bool {
     if name == "std" || name.starts_with("std/") {
         return true;
     }
+    // k6 runtime modules (e.g., `k6`, `k6/http`, `k6/execution`) are provided
+    // by the k6 load-test runtime, not npm resolution.
+    if name == "k6" || name.starts_with("k6/") {
+        return true;
+    }
     // Node built-in modules importable with OR without the `node:` prefix. The
     // mandatory-`node:`-prefix family (`sqlite`, `sea`, `test`, `test/reporters`)
     // is intentionally absent here; see `NODE_PREFIX_ONLY_BUILTINS` below.
@@ -260,6 +265,21 @@ mod tests {
         assert!(!is_builtin_module("util-deprecate"));
         assert!(!is_builtin_module("os-tmpdir"));
         assert!(!is_builtin_module("net-ping"));
+    }
+
+    #[test]
+    fn builtin_k6_runtime_modules() {
+        assert!(is_builtin_module("k6"));
+        assert!(is_builtin_module("k6/http"));
+        assert!(is_builtin_module("k6/execution"));
+    }
+
+    #[test]
+    fn not_builtin_k6_similar_packages() {
+        assert!(!is_builtin_module("k6-tools"));
+        assert!(!is_builtin_module("k6ish"));
+        assert!(!is_builtin_module("k6x/http"));
+        assert!(!is_builtin_module("@types/k6"));
     }
 
     // is_implicit_dependency tests
