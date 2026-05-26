@@ -67,10 +67,6 @@ function cleanup(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
-function freshEnv(extra) {
-  return { ...extra };
-}
-
 function captureStderr(t) {
   const lines = [];
   const original = process.stderr.write.bind(process.stderr);
