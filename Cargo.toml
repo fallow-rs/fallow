@@ -57,7 +57,7 @@ regex = { version = "1", default-features = false, features = ["std", "perf", "u
 
 # Hashing
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
-sha2 = "0.10"
+sha2 = "0.11"
 rustc-hash = "2"
 
 # HTTP
