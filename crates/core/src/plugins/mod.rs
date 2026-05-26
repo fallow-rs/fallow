@@ -1174,6 +1174,7 @@ mod typedoc;
 mod typeorm;
 mod typescript;
 mod unocss;
+mod varlock;
 mod vite;
 mod vitepress;
 mod vitest;

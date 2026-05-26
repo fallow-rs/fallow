@@ -32,9 +32,9 @@ use super::super::{
     tailwind::TailwindPlugin, tanstack_router::TanstackRouterPlugin, tap::TapPlugin,
     tsd::TsdPlugin, tsdown::TsdownPlugin, tsup::TsupPlugin, turborepo::TurborepoPlugin,
     typedoc::TypedocPlugin, typeorm::TypeormPlugin, typescript::TypeScriptPlugin,
-    unocss::UnoCssPlugin, vite::VitePlugin, vitepress::VitePressPlugin, vitest::VitestPlugin,
-    webdriverio::WebdriverioPlugin, webpack::WebpackPlugin, wrangler::WranglerPlugin,
-    wuchale::WuchalePlugin,
+    unocss::UnoCssPlugin, varlock::VarlockPlugin, vite::VitePlugin, vitepress::VitePressPlugin,
+    vitest::VitestPlugin, webdriverio::WebdriverioPlugin, webpack::WebpackPlugin,
+    wrangler::WranglerPlugin, wuchale::WuchalePlugin,
 };
 
 /// Create all built-in plugin instances, categorized by domain.
@@ -162,6 +162,7 @@ pub fn create_builtin_plugins() -> Vec<Box<dyn Plugin>> {
         Box::new(Pm2Plugin),
         Box::new(DependencyCruiserPlugin),
         Box::new(WuchalePlugin),
+        Box::new(VarlockPlugin),
         // Package managers
         Box::new(PnpmPlugin),
         // Runtime

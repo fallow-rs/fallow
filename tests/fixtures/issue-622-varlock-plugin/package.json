@@ -1,0 +1,16 @@
+{
+  "name": "issue-622-varlock-plugin",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "left-pad": "1.3.0"
+  },
+  "devDependencies": {
+    "@varlock/google-secret-manager-plugin": "1.0.0",
+    "@varlock/vite-integration": "1.0.0",
+    "unused-control": "1.0.0",
+    "varlock": "1.0.0",
+    "vite": "latest"
+  }
+}

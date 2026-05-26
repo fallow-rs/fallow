@@ -157,6 +157,8 @@ mod issue_607_oxlint_js_plugins;
 mod issue_619_vite_react_babel_plugins;
 #[path = "integration_test/issue_621_playwright_webserver.rs"]
 mod issue_621_playwright_webserver;
+#[path = "integration_test/issue_622_varlock_plugin.rs"]
+mod issue_622_varlock_plugin;
 #[path = "integration_test/issue_624_supabase_edge.rs"]
 mod issue_624_supabase_edge;
 #[path = "integration_test/issue_625_k6_plugin.rs"]

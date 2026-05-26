@@ -16,5 +16,5 @@ Key modules:
 - `suppress.rs` — Inline suppression parsing; 12 issue kinds including `code-duplication` and `circular-dependency`
 - `duplicates/` — Clone detection: `families.rs` (grouping + refactoring suggestions), `normalize.rs` (configurable normalization), `tokenize.rs` (AST tokenizer with type stripping)
 - `cross_reference.rs` — Cross-references duplication with dead code analysis
-- `plugins/` - Plugin system: `Plugin` trait, registry (107 built-in, ~41 with AST-based config parsing), `config_parser.rs` (Oxc-based helpers), `tooling.rs` (general tooling dep detection)
+- `plugins/` - Plugin system: `Plugin` trait, registry (109 built-in, ~41 with AST-based config parsing), `config_parser.rs` (Oxc-based helpers), `tooling.rs` (general tooling dep detection)
 - `trace.rs` — Debug/trace tooling and `PipelineTimings` for `--performance`
