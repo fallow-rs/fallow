@@ -241,6 +241,7 @@ pub fn cached_to_module_opts(
                 namespace_local: alias.namespace_local.clone(),
             })
             .collect(),
+        iconify_prefixes: cached.iconify_prefixes.clone(),
     }
 }
 
@@ -424,5 +425,6 @@ pub fn module_to_cached(
                 namespace_local: alias.namespace_local.clone(),
             })
             .collect(),
+        iconify_prefixes: module.iconify_prefixes.clone(),
     }
 }

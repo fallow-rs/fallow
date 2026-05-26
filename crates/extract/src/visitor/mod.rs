@@ -831,6 +831,8 @@ impl ModuleInfoExtractor {
             local_type_declarations: self.local_type_declarations,
             public_signature_type_references: self.public_signature_type_references,
             namespace_object_aliases,
+            // Populated by `parse_source_to_module` from the raw markup (issue #608).
+            iconify_prefixes: Vec::new(),
         }
     }
 

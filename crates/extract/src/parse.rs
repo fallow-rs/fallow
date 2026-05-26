@@ -40,6 +40,22 @@ pub fn parse_source_to_module(
     content_hash: u64,
     need_complexity: bool,
 ) -> ModuleInfo {
+    let mut module =
+        parse_source_to_module_inner(file_id, path, source, content_hash, need_complexity);
+    // Scan the raw markup for static Iconify icon strings so the analysis layer
+    // can credit `@iconify-json/<prefix>` packages. One regex pass over
+    // markup/JSX file kinds only; no-op for other kinds. See issue #608.
+    module.iconify_prefixes = crate::iconify::extract_iconify_prefixes(path, source);
+    module
+}
+
+fn parse_source_to_module_inner(
+    file_id: FileId,
+    path: &Path,
+    source: &str,
+    content_hash: u64,
+    need_complexity: bool,
+) -> ModuleInfo {
     // Defense in depth: production entry points (`parse_single_file_cached`,
     // `parse_single_file`, `parse_from_content`) already strip the BOM before
     // hashing and before this call, so the strip here is a no-op on the hot

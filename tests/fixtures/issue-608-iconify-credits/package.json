@@ -1,0 +1,11 @@
+{
+  "name": "issue-608-iconify-credits",
+  "version": "1.0.0",
+  "dependencies": {
+    "astro": "^4.0.0",
+    "astro-icon": "^1.1.0",
+    "@iconify-json/jam": "^1.2.0",
+    "@iconify-json/ic": "^1.2.0",
+    "unused-dep": "^1.0.0"
+  }
+}

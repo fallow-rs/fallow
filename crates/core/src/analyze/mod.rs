@@ -1,5 +1,6 @@
 mod boundary;
 pub mod feature_flags;
+mod iconify;
 mod package_json_utils;
 mod predicates;
 mod re_export_cycles;
@@ -461,6 +462,22 @@ pub fn find_dead_code_full(
     let pkg = PackageJson::load(&pkg_path).ok();
     let public_api_entry_points =
         public_api_package_entry_points(graph, config, pkg.as_ref(), workspaces);
+
+    // Credit `@iconify-json/<prefix>` packages used only through static icon
+    // strings (`<Icon name="jam:github" />`) so they are not reported as unused
+    // dependencies. Gated on the project declaring an Iconify-ecosystem dep, so
+    // the clone below only happens for Iconify projects. See issue #608.
+    let iconify_referenced =
+        iconify::collect_iconify_referenced_deps(modules, pkg.as_ref(), workspaces);
+    let augmented_plugin_result;
+    let plugin_result = if iconify_referenced.is_empty() {
+        plugin_result
+    } else {
+        let mut owned = plugin_result.cloned().unwrap_or_default();
+        owned.referenced_dependencies.extend(iconify_referenced);
+        augmented_plugin_result = owned;
+        Some(&augmented_plugin_result)
+    };
 
     // Merge the top-level config rules with any plugin-contributed rules.
     // Plain string entries behave like the old global allowlist; scoped object
@@ -1320,6 +1337,7 @@ mod tests {
                 local_type_declarations: Vec::new(),
                 public_signature_type_references: Vec::new(),
                 namespace_object_aliases: Vec::new(),
+                iconify_prefixes: Vec::new(),
             }];
 
             let rules = RulesConfig {

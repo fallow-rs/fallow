@@ -1020,6 +1020,7 @@ mod tests {
             local_type_declarations: Vec::new(),
             public_signature_type_references: Vec::new(),
             namespace_object_aliases: Vec::new(),
+            iconify_prefixes: Vec::new(),
             complexity: vec![fallow_types::extract::FunctionComplexity {
                 name: format!("fn_{id}"),
                 line: id + 1,

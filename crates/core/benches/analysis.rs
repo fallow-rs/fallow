@@ -652,6 +652,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
+        iconify_prefixes: Vec::new(),
     };
 
     c.bench_function("cache_round_trip", |b| {

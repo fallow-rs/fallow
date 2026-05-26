@@ -15,6 +15,7 @@ pub mod flags;
 pub mod glimmer;
 pub mod graphql;
 pub mod html;
+pub mod iconify;
 pub mod inventory;
 pub mod mdx;
 mod parse;

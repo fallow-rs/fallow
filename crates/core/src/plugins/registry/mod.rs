@@ -34,7 +34,7 @@ pub struct PluginRegistry {
 }
 
 /// Aggregated results from all active plugins for a project.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct AggregatedPluginResult {
     /// All entry point patterns from active plugins: (rule, plugin_name).
     pub entry_patterns: Vec<(PathRule, String)>,

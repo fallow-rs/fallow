@@ -212,6 +212,7 @@ pub(crate) fn parse_html_to_module_with_complexity(
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
+        iconify_prefixes: Vec::new(),
     }
 }
 

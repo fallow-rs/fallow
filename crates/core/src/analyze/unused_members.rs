@@ -1996,6 +1996,7 @@ mod tests {
             local_type_declarations: vec![],
             public_signature_type_references: vec![],
             namespace_object_aliases: vec![],
+            iconify_prefixes: vec![],
         }
     }
 

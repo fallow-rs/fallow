@@ -90,6 +90,14 @@ pub struct ModuleInfo {
     /// from cross-package consumers to the namespace's source module so that
     /// `<X>` is not falsely reported as `unused-export`. See issue #303.
     pub namespace_object_aliases: Vec<NamespaceObjectAlias>,
+    /// Deduped Iconify collection prefixes found in static icon props in this
+    /// file's markup, e.g. `["ic", "jam"]` from `<Icon name="jam:github" />` and
+    /// `<List icon="ic:round-home" />`. The analysis layer maps each prefix to
+    /// the `@iconify-json/<prefix>` package and credits it as a referenced
+    /// dependency (gated on the project declaring an Iconify-ecosystem dep), so
+    /// icon-set packages consumed only through build-time string names are not
+    /// flagged as unused. Populated for markup/JSX file kinds only. See issue #608.
+    pub iconify_prefixes: Vec<String>,
 }
 
 /// One alias entry tying an exported object's dotted property path to a
@@ -581,7 +589,7 @@ const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 // `ModuleInfo` is the per-file extraction result, stored in a Vec during parallel parsing.
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 496);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 520);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]

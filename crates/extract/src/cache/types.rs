@@ -70,7 +70,12 @@ use crate::MemberKind;
 /// receivers (direct and fluent-chain) now emit member accesses crediting the
 /// constructed class. Pre-fix entries lack those accesses, so such methods can
 /// be reported as unused class members until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 99;
+///
+/// Bumped to 100 for issue #608: static Iconify icon strings (`icon="jam:github"`,
+/// `name="ic:round-home"`) in markup now populate `iconify_prefixes` so the
+/// `@iconify-json/<prefix>` package is credited. Pre-fix entries omit the field,
+/// so icon-set packages can be reported as unused until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 100;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -113,7 +118,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 520);
+assert_cached_type_size!(CachedModule, 544);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -196,6 +201,8 @@ pub struct CachedModule {
     /// Namespace-import aliases re-exported through an object literal
     /// (`export const API = { foo }` where `foo` is `import * as foo from './bar'`).
     pub namespace_object_aliases: Vec<CachedNamespaceObjectAlias>,
+    /// Iconify collection prefixes found in static icon props (issue #608).
+    pub iconify_prefixes: Vec<String>,
 }
 
 /// Cached namespace-object alias.

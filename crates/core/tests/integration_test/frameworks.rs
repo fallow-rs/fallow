@@ -543,6 +543,34 @@ fn tailwind_plugin_directive_marks_plugin_targets_used() {
 }
 
 #[test]
+fn iconify_static_icon_strings_credit_icon_set_packages() {
+    // Issue #608: `@iconify-json/<prefix>` packages are consumed through a
+    // build-time string name (`<Icon name="jam:github" />`) rather than an
+    // import, so they must be credited from the static icon string.
+    let root = fixture_path("issue-608-iconify-credits");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dep_names.contains(&"@iconify-json/jam"),
+        "@iconify-json/jam should be credited via the `jam:` icon string: {unused_dep_names:?}"
+    );
+    assert!(
+        !unused_dep_names.contains(&"@iconify-json/ic"),
+        "@iconify-json/ic should be credited via the `ic:` icon string: {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"unused-dep"),
+        "an unreferenced dependency should still be reported: {unused_dep_names:?}"
+    );
+}
+
+#[test]
 fn pandacss_config_is_not_flagged_unused() {
     let root = fixture_path("pandacss-config");
     let config = create_config(root);
