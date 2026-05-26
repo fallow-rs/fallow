@@ -11,3 +11,27 @@ if command -v typos &> /dev/null; then
   echo "Running typos check..."
   typos
 fi
+
+# Run oxlint + oxfmt --check only when this commit touches a JS/TS file
+# inside one of the lintable scopes. Keeps pure-Rust commits fast.
+#
+# The lintable scopes mirror the root `npm run lint:js` / `fmt:js:check`
+# script targets in package.json. Update both when adding a new tree.
+js_ts_changed=$(
+  git diff --cached --name-only --diff-filter=ACMR | \
+    grep -E '^(npm/|benchmarks/|crates/napi/|\.github/scripts/|editors/vscode/src/|commitlint\.config\.mjs$)' | \
+    grep -E '\.(js|ts|mjs|cjs|jsx|tsx)$' || true
+)
+
+if [ -n "$js_ts_changed" ]; then
+  if [ ! -d node_modules ]; then
+    echo "JS/TS files staged but node_modules is missing. Run \`npm install\` first." >&2
+    exit 1
+  fi
+
+  echo "Running oxlint..."
+  npm run --silent lint:js
+
+  echo "Running oxfmt --check..."
+  npm run --silent fmt:js:check
+fi
