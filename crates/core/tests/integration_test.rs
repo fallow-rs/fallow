@@ -162,3 +162,6 @@ mod visibility_tags;
 
 #[path = "integration_test/ember_classic.rs"]
 mod ember_classic;
+
+#[path = "integration_test/issue_620_error_subclass_name.rs"]
+mod issue_620_error_subclass_name;

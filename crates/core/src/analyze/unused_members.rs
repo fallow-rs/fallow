@@ -37,6 +37,42 @@ fn is_native_custom_element_lifecycle_method(member_name: &str, super_class: Opt
         && NATIVE_CUSTOM_ELEMENT_LIFECYCLE_MEMBERS.contains(&member_name)
 }
 
+/// Native ECMAScript `Error` constructors. A class extending any of these is an
+/// error type whose `name` member is consumed at runtime (logs, serializers,
+/// `err.name === "..."` discrimination) rather than via a static member access
+/// fallow can see.
+const NATIVE_ERROR_BASE_NAMES: &[&str] = &[
+    "Error",
+    "TypeError",
+    "RangeError",
+    "SyntaxError",
+    "ReferenceError",
+    "EvalError",
+    "URIError",
+    "AggregateError",
+];
+
+/// Class members treated as runtime-used on error subclasses. Scoped to `name`
+/// only: `message` / `stack` / `cause` are inherited from `Error` and rarely
+/// re-declared as own members, so keeping the set narrow preserves reporting of
+/// genuinely-unused members on error classes (issue #620).
+const ERROR_SUBCLASS_RUNTIME_MEMBERS: &[&str] = &["name"];
+
+fn is_native_error_base_name(name: &str) -> bool {
+    NATIVE_ERROR_BASE_NAMES.contains(&name)
+}
+
+/// `name` (and any future entry in `ERROR_SUBCLASS_RUNTIME_MEMBERS`) is
+/// runtime-used when its declaring class is in the error-subclass closure.
+fn is_error_subclass_runtime_member(
+    member_name: &str,
+    export_key: &ExportKey,
+    error_subclass_keys: &FxHashSet<ExportKey>,
+) -> bool {
+    ERROR_SUBCLASS_RUNTIME_MEMBERS.contains(&member_name)
+        && error_subclass_keys.contains(export_key)
+}
+
 /// Find unused enum and class members in exported symbols.
 ///
 /// Collects all `Identifier.member` static member accesses from all modules,
@@ -1243,6 +1279,59 @@ fn build_parent_to_children(
     parent_to_children
 }
 
+/// Build the set of exported class `ExportKey`s whose heritage chain reaches a
+/// native JavaScript `Error` constructor, directly (`class X extends Error`) or
+/// transitively through a local/imported subclass (`class Y extends X` where
+/// `X extends Error`).
+///
+/// The transitive walk reuses `build_parent_to_children`, which resolves
+/// `extends` clauses through imports, local exports, and re-export origins, so
+/// this covers the same heritage shapes the rest of the member analysis does.
+/// Same-file NON-exported intermediate bases are not resolved (the same
+/// limitation `build_parent_to_children` carries), so a non-exported
+/// `class Base extends Error {}` does not propagate to an exported subclass.
+///
+/// Seeding is by direct super-class name, matching the existing
+/// `is_native_custom_element_lifecycle_method` built-in
+/// (`super_class == Some("HTMLElement")`): a local class shadowing a native
+/// error name is treated as a native error base, which is acceptable because
+/// shadowing a global error constructor is pathological in practice.
+fn build_error_subclass_export_keys(
+    parent_to_children: &FxHashMap<ExportKey, Vec<ExportKey>>,
+    class_heritage_by_export: &FxHashMap<ExportKey, (Option<String>, Vec<String>)>,
+) -> FxHashSet<ExportKey> {
+    // Seed: classes that directly extend a native Error constructor.
+    let mut error_keys: FxHashSet<ExportKey> = class_heritage_by_export
+        .iter()
+        .filter(|(_, (super_class, _))| {
+            super_class
+                .as_deref()
+                .is_some_and(is_native_error_base_name)
+        })
+        .map(|(key, _)| key.clone())
+        .collect();
+
+    if error_keys.is_empty() {
+        return error_keys;
+    }
+
+    // Transitive: walk `extends` chains downward from each seed. The parent
+    // keys in `parent_to_children` are origin-resolved, matching the seed keys
+    // (each defining-site `ExportKey`).
+    let mut stack: Vec<ExportKey> = error_keys.iter().cloned().collect();
+    while let Some(parent_key) = stack.pop() {
+        if let Some(children) = parent_to_children.get(&parent_key) {
+            for child in children {
+                if error_keys.insert(child.clone()) {
+                    stack.push(child.clone());
+                }
+            }
+        }
+    }
+
+    error_keys
+}
+
 /// Propagate member accesses through `extends` chains in both directions.
 ///
 /// - Parent `this.*` accesses flow down to child files, so a base class method
@@ -1257,19 +1346,17 @@ fn build_parent_to_children(
 /// Self-access propagations are computed on a snapshot first and applied after
 /// the external-access loop so the mutable borrows stay disjoint.
 fn propagate_class_inheritance(
-    graph: &ModuleGraph,
-    resolved_modules: &[ResolvedModule],
+    parent_to_children: &FxHashMap<ExportKey, Vec<ExportKey>>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
     self_accessed_members: &mut FxHashMap<FileId, FxHashSet<String>>,
 ) {
-    let parent_to_children = build_parent_to_children(graph, resolved_modules);
     if parent_to_children.is_empty() {
         return;
     }
 
     let mut propagations: Vec<(FileId, Vec<String>)> = Vec::new();
 
-    for (parent_key, children) in &parent_to_children {
+    for (parent_key, children) in parent_to_children {
         if let Some(parent_self_accesses) = self_accessed_members.get(&parent_key.file_id) {
             let accesses: Vec<String> = parent_self_accesses.iter().cloned().collect();
             for child_key in children {
@@ -1672,14 +1759,22 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
         }
     }
 
+    // Resolve the `parent -> [child, ...]` extends map once and share it
+    // between inheritance propagation and the Error-subclass closure.
+    let parent_to_children = build_parent_to_children(graph, resolved_modules);
+
     propagate_class_inheritance(
-        graph,
-        resolved_modules,
+        &parent_to_children,
         &mut accessed_members,
         &mut self_accessed_members,
     );
 
     let entry_star_targets = entry_point_star_re_export_targets(graph, public_api_entry_points);
+
+    // Exported classes whose heritage reaches a native `Error` constructor, so
+    // their `name` member is credited as runtime-used (issue #620).
+    let error_subclass_keys =
+        build_error_subclass_export_keys(&parent_to_children, &class_heritage_by_export);
 
     let member_results: Vec<(Vec<UnusedMember>, Vec<UnusedMember>)> = graph
         .modules
@@ -1798,15 +1893,22 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
 
                     // Skip lifecycle methods called by runtimes or the browser, not user code:
                     // React class component lifecycle, Angular lifecycle hooks, and native
-                    // Custom Elements lifecycle on direct HTMLElement subclasses. The user
-                    // allowlist extends these built-ins with framework-invoked names contributed
-                    // by plugins and top-level config (ag-Grid's `agInit`, etc.).
+                    // Custom Elements lifecycle on direct HTMLElement subclasses. The `name`
+                    // member of native Error subclasses is runtime-used (logs, serializers,
+                    // `err.name === "..."` discrimination). The user allowlist extends these
+                    // built-ins with framework-invoked names contributed by plugins and
+                    // top-level config (ag-Grid's `agInit`, etc.).
                     if matches!(
                         member.kind,
                         MemberKind::ClassMethod | MemberKind::ClassProperty
                     ) && (is_react_lifecycle_method(&member.name)
                         || is_angular_lifecycle_method(&member.name)
                         || is_native_custom_element_lifecycle_method(&member.name, super_class)
+                        || is_error_subclass_runtime_member(
+                            &member.name,
+                            &export_key,
+                            &error_subclass_keys,
+                        )
                         || allowlist.matches(
                             member.name.as_str(),
                             super_class,
@@ -1877,8 +1979,8 @@ mod tests {
     use super::*;
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
     use crate::extract::{
-        ExportName, ImportInfo, ImportedName, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
-        VisibilityTag,
+        ExportInfo, ExportName, ImportInfo, ImportedName, MemberAccess, MemberInfo, MemberKind,
+        ModuleInfo, VisibilityTag,
     };
     use crate::graph::{ExportSymbol, ModuleGraph, SymbolReference};
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
@@ -2823,6 +2925,168 @@ mod tests {
 
         assert_eq!(class_members.len(), 1);
         assert_eq!(class_members[0].member_name, "customHelper");
+    }
+
+    fn make_export_info(name: &str, super_class: Option<&str>) -> ExportInfo {
+        ExportInfo {
+            name: ExportName::Named(name.to_string()),
+            local_name: Some(name.to_string()),
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            span: Span::new(0, 10),
+            members: vec![],
+            super_class: super_class.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn is_native_error_base_name_recognizes_native_errors() {
+        for base in [
+            "Error",
+            "TypeError",
+            "RangeError",
+            "SyntaxError",
+            "ReferenceError",
+            "EvalError",
+            "URIError",
+            "AggregateError",
+        ] {
+            assert!(
+                is_native_error_base_name(base),
+                "{base} should be a native error base"
+            );
+        }
+        // Not native error constructors.
+        assert!(!is_native_error_base_name("Person"));
+        assert!(!is_native_error_base_name("HttpException"));
+        assert!(!is_native_error_base_name("error")); // case-sensitive
+        assert!(!is_native_error_base_name("DOMException")); // out of scope
+    }
+
+    #[test]
+    fn error_subclass_name_member_not_flagged_but_other_members_are() {
+        // `class DomainError extends Error { name = "..."; unusedHelper() {} }`.
+        // `name` is runtime-used on error subclasses; `unusedHelper` is not.
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/errors.ts", false)]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_export_with_members(
+            "DomainError",
+            vec![
+                make_member("name", MemberKind::ClassProperty),
+                make_member("unusedHelper", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )];
+
+        let modules = vec![make_module_with_class_heritage(
+            1,
+            "DomainError",
+            Some("Error"),
+            &[],
+        )];
+
+        let (_, class_members) = find_unused_members(
+            &graph,
+            &[],
+            &modules,
+            &SuppressionContext::empty(),
+            &FxHashMap::default(),
+            &[],
+            &[],
+        );
+
+        assert_eq!(class_members.len(), 1);
+        assert_eq!(class_members[0].member_name, "unusedHelper");
+    }
+
+    #[test]
+    fn ordinary_class_name_member_still_flagged() {
+        // `class Person { name = "x" }` has no Error heritage, so an unused
+        // `name` member must still report (issue #620 explicitly warns against
+        // globally suppressing every member named `name`).
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/person.ts", false)]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_export_with_members(
+            "Person",
+            vec![make_member("name", MemberKind::ClassProperty)],
+            Some(0),
+        )];
+
+        let modules = vec![make_module_with_class_heritage(1, "Person", None, &[])];
+
+        let (_, class_members) = find_unused_members(
+            &graph,
+            &[],
+            &modules,
+            &SuppressionContext::empty(),
+            &FxHashMap::default(),
+            &[],
+            &[],
+        );
+
+        assert_eq!(class_members.len(), 1);
+        assert_eq!(class_members[0].member_name, "name");
+    }
+
+    #[test]
+    fn transitive_error_subclass_name_member_not_flagged() {
+        // `class DomainError extends Error {}` and
+        // `class ApiError extends DomainError {}` in the same file: ApiError's
+        // `name` is credited transitively through the resolved heritage chain.
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/errors.ts", false)]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![
+            make_export_with_members(
+                "DomainError",
+                vec![make_member("name", MemberKind::ClassProperty)],
+                Some(0),
+            ),
+            make_export_with_members(
+                "ApiError",
+                vec![make_member("name", MemberKind::ClassProperty)],
+                Some(0),
+            ),
+        ];
+
+        // build_parent_to_children resolves `extends` clauses through the
+        // ResolvedModule exports (which carry super_class + local_name).
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(1),
+            path: PathBuf::from("/src/errors.ts"),
+            exports: vec![
+                make_export_info("DomainError", Some("Error")),
+                make_export_info("ApiError", Some("DomainError")),
+            ],
+            ..Default::default()
+        }];
+
+        // class_heritage_by_export seeds the direct `extends Error` and resolves
+        // each export's super_class at the decision point.
+        let mut errors_module =
+            make_module_with_class_heritage(1, "DomainError", Some("Error"), &[]);
+        errors_module.class_heritage.push(ClassHeritageInfo {
+            export_name: "ApiError".to_string(),
+            super_class: Some("DomainError".to_string()),
+            implements: Vec::new(),
+            instance_bindings: Vec::new(),
+        });
+        let modules = vec![errors_module];
+
+        let (_, class_members) = find_unused_members(
+            &graph,
+            &resolved_modules,
+            &modules,
+            &SuppressionContext::empty(),
+            &FxHashMap::default(),
+            &[],
+            &[],
+        );
+
+        assert!(
+            class_members.is_empty(),
+            "both DomainError.name and ApiError.name should be credited, got {class_members:?}"
+        );
     }
 
     #[test]

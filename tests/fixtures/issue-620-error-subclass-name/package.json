@@ -1,0 +1,4 @@
+{
+  "name": "issue-620-error-subclass-name-fixture",
+  "main": "src/app.ts"
+}
