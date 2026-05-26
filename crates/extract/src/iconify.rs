@@ -33,6 +33,14 @@ static ICON_PROP: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid icon-prop regex")
 });
 
+/// Matches HTML markup comments so a commented-out icon usage does not credit
+/// its package. Mirrors the comment-strip-before-scan approach in `css.rs` /
+/// `html.rs`. JS/JSX comment forms (`//`, `/* */`, `{/* */}`) are not stripped:
+/// icon props rarely appear inside them and stripping risks mangling real
+/// attribute lines (e.g. a `//` inside a URL).
+static HTML_COMMENT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<!--.*?-->").expect("valid html-comment regex"));
+
 /// File extensions whose source is markup that can carry icon-component props.
 /// Plain `.js`/`.ts`/`.mjs`/`.cjs` are excluded: they have no template markup,
 /// so scanning them would add a regex pass per file on large repos for no gain.
@@ -51,8 +59,9 @@ pub fn extract_iconify_prefixes(path: &Path, source: &str) -> Vec<String> {
         return Vec::new();
     }
 
+    let scanned = HTML_COMMENT.replace_all(source, "");
     let mut prefixes: Vec<String> = ICON_PROP
-        .captures_iter(source)
+        .captures_iter(&scanned)
         .map(|caps| caps[1].to_string())
         .collect();
     prefixes.sort_unstable();
@@ -120,6 +129,15 @@ mod tests {
         // string, so the icon set cannot be inferred and is out of scope.
         assert!(prefixes(r#"<Icon :name="iconExpr" />"#).is_empty());
         assert!(prefixes(r"<Icon name={iconExpr} />").is_empty());
+    }
+
+    #[test]
+    fn ignores_icons_inside_html_comments() {
+        // A commented-out icon must not credit its package.
+        assert!(prefixes(r#"<!-- <Icon name="jam:github" /> -->"#).is_empty());
+        // Multi-line comment block.
+        let source = "<!--\n  <List icon=\"ic:round-home\" />\n-->\n<Icon name=\"mdi:home\" />";
+        assert_eq!(prefixes(source), vec!["mdi"]);
     }
 
     #[test]

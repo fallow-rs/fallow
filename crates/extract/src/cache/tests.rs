@@ -206,12 +206,17 @@ fn module_to_cached_roundtrip_named_export() {
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
-        iconify_prefixes: Vec::new(),
+        iconify_prefixes: vec!["jam".to_string(), "ic".to_string()],
     };
 
     let cached = module_to_cached(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
+    // Non-empty iconify_prefixes must survive the cache round-trip (issue #608).
+    assert_eq!(
+        restored.iconify_prefixes,
+        vec!["jam".to_string(), "ic".to_string()]
+    );
     assert_eq!(restored.exports.len(), 1);
     assert_eq!(
         restored.exports[0].name,
