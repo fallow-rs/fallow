@@ -38,6 +38,13 @@ pub fn augment_external_style_package_usage(
             if !is_trackable_external_style_path(path) {
                 continue;
             }
+            if is_storybook_static_dir_external_style(
+                &module.path,
+                path,
+                &plugin_result.static_dir_mappings,
+            ) {
+                continue;
+            }
 
             synthetic_packages.extend(scanner.scan(path));
         }
@@ -74,6 +81,33 @@ fn is_trackable_external_style_path(path: &Path) -> bool {
             .extension()
             .and_then(|ext| ext.to_str())
             .is_some_and(|ext| matches!(ext, "css" | "scss" | "sass"))
+}
+
+fn is_storybook_preview_html(path: &Path) -> bool {
+    matches!(
+        path.file_name().and_then(|name| name.to_str()),
+        Some("preview-head.html" | "preview-body.html")
+    ) && path
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        == Some(".storybook")
+}
+
+fn is_storybook_static_dir_external_style(
+    module_path: &Path,
+    external_path: &Path,
+    static_dir_mappings: &[(PathBuf, String)],
+) -> bool {
+    if static_dir_mappings.is_empty() || !is_storybook_preview_html(module_path) {
+        return false;
+    }
+    let external =
+        dunce::canonicalize(external_path).unwrap_or_else(|_| external_path.to_path_buf());
+    static_dir_mappings.iter().any(|(from_dir, _)| {
+        let from_dir = dunce::canonicalize(from_dir).unwrap_or_else(|_| from_dir.clone());
+        external.starts_with(from_dir)
+    })
 }
 
 struct ExternalStylePackageScanner<'a> {
@@ -138,6 +172,7 @@ impl<'a> ExternalStylePackageScanner<'a> {
             &self.plugin_result.active_plugins,
             &self.plugin_result.path_aliases,
             &self.plugin_result.scss_include_paths,
+            &self.plugin_result.static_dir_mappings,
             &self.config.root,
             &self.config.resolve.conditions,
         );

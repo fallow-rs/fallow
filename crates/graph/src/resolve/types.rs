@@ -245,6 +245,9 @@ pub(super) struct ResolveContext<'a> {
     /// `@import` / `@use` specifiers. Populated from Angular's
     /// `stylePreprocessorOptions.includePaths` and equivalent settings.
     pub scss_include_paths: &'a [PathBuf],
+    /// Static directory URL mappings from framework config.
+    /// Each tuple is `(absolute_source_dir, normalized_url_mount)`.
+    pub static_dir_mappings: &'a [(PathBuf, String)],
     /// Project root directory.
     pub root: &'a Path,
     /// Lazy canonical path → FileId fallback for intra-project symlinks.

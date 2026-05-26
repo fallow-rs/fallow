@@ -1075,6 +1075,8 @@ fn process_config_result_merges_all_fields() {
         setup_files: vec![PathBuf::from("/project/test/setup.ts")],
         fixture_patterns: vec![],
         scss_include_paths: vec![],
+        static_dir_mappings: vec![],
+        provided_dependencies: vec![],
     };
     process_config_result("test-plugin", config_result, &mut aggregated, None);
 
@@ -1162,6 +1164,8 @@ fn process_config_result_accumulates_across_multiple_calls() {
         setup_files: vec![PathBuf::from("/project/setup-a.ts")],
         fixture_patterns: vec![],
         scss_include_paths: vec![],
+        static_dir_mappings: vec![],
+        provided_dependencies: vec![],
     };
     let result2 = PluginResult {
         entry_patterns: vec![path_rule("b.ts")],
@@ -1175,6 +1179,8 @@ fn process_config_result_accumulates_across_multiple_calls() {
         setup_files: vec![],
         fixture_patterns: vec![],
         scss_include_paths: vec![],
+        static_dir_mappings: vec![],
+        provided_dependencies: vec![],
     };
 
     process_config_result("plugin-a", result1, &mut aggregated, None);

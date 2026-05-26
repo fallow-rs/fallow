@@ -1,0 +1,7 @@
+{
+  "name": "@fixture/ui",
+  "private": true,
+  "devDependencies": {
+    "@storybook/react": "latest"
+  }
+}

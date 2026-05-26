@@ -123,6 +123,12 @@ pub struct PluginResult {
     /// the importing file retry against each include path using the SCSS
     /// partial / directory-index conventions.
     pub scss_include_paths: Vec<PathBuf>,
+    /// URL-to-filesystem static directory mappings discovered from tool config.
+    /// Each tuple is `(absolute_source_dir, normalized_url_mount)`.
+    pub static_dir_mappings: Vec<(PathBuf, String)>,
+    /// File-scoped dependency providers. Matching imports are considered
+    /// available from the framework runtime and are not unlisted dependencies.
+    pub provided_dependencies: Vec<ProvidedDependencyRule>,
 }
 
 impl PluginResult {
@@ -163,6 +169,8 @@ impl PluginResult {
             && self.setup_files.is_empty()
             && self.fixture_patterns.is_empty()
             && self.scss_include_paths.is_empty()
+            && self.static_dir_mappings.is_empty()
+            && self.provided_dependencies.is_empty()
     }
 }
 
@@ -348,6 +356,57 @@ impl PluginUsedExportRule {
             plugin_name: self.plugin_name.clone(),
             rule: self.rule.prefixed(ws_prefix),
         }
+    }
+}
+
+/// A file-scoped dependency provider rule contributed by a framework plugin.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProvidedDependencyRule {
+    pub path: PathRule,
+    pub exact_specifiers: Vec<String>,
+    pub specifier_prefixes: Vec<String>,
+}
+
+impl ProvidedDependencyRule {
+    #[must_use]
+    pub fn new(
+        pattern: impl Into<String>,
+        exact_specifiers: impl IntoIterator<Item = impl Into<String>>,
+        specifier_prefixes: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            path: PathRule::new(pattern),
+            exact_specifiers: exact_specifiers.into_iter().map(Into::into).collect(),
+            specifier_prefixes: specifier_prefixes.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    #[must_use]
+    pub fn prefixed(&self, ws_prefix: &str) -> Self {
+        Self {
+            path: self.path.prefixed(ws_prefix),
+            exact_specifiers: self.exact_specifiers.clone(),
+            specifier_prefixes: self.specifier_prefixes.clone(),
+        }
+    }
+
+    #[must_use]
+    pub fn may_cover_package(&self, package_name: &str) -> bool {
+        self.exact_specifiers
+            .iter()
+            .chain(self.specifier_prefixes.iter())
+            .any(|specifier| crate::resolve::extract_package_name(specifier) == package_name)
+    }
+
+    #[must_use]
+    pub fn covers_specifier(&self, specifier: &str) -> bool {
+        self.exact_specifiers
+            .iter()
+            .any(|allowed| allowed == specifier)
+            || self
+                .specifier_prefixes
+                .iter()
+                .any(|prefix| specifier.starts_with(prefix))
     }
 }
 
@@ -735,6 +794,11 @@ pub trait Plugin: Send + Sync {
         vec![]
     }
 
+    /// File-scoped dependency providers contributed by this framework.
+    fn provided_dependencies(&self) -> Vec<ProvidedDependencyRule> {
+        Vec::new()
+    }
+
     /// Parse a config file's AST to discover additional entries, dependencies, etc.
     ///
     /// Called for each config file matching `config_patterns()`. The source code
@@ -837,6 +901,7 @@ macro_rules! define_plugin {
         $(, virtual_module_prefixes: $virtual:expr)?
         $(, virtual_package_suffixes: $virtual_suffixes:expr)?
         $(, generated_type_import_prefixes: $generated_type_prefixes:expr)?
+        $(, provided_dependencies: $provided_dependencies:expr)?
         $(, used_exports: [$( ($pat:expr, $exports:expr) ),* $(,)?])?
         , resolve_config: imports_only
         $(,)?
@@ -861,6 +926,7 @@ macro_rules! define_plugin {
             $( fn virtual_module_prefixes(&self) -> &'static [&'static str] { $virtual } )?
             $( fn virtual_package_suffixes(&self) -> &'static [&'static str] { $virtual_suffixes } )?
             $( fn generated_type_import_prefixes(&self) -> &'static [&'static str] { $generated_type_prefixes } )?
+            $( fn provided_dependencies(&self) -> Vec<ProvidedDependencyRule> { $provided_dependencies } )?
 
             $(
                 fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
@@ -900,6 +966,7 @@ macro_rules! define_plugin {
         $(, virtual_module_prefixes: $virtual:expr)?
         $(, virtual_package_suffixes: $virtual_suffixes:expr)?
         $(, generated_type_import_prefixes: $generated_type_prefixes:expr)?
+        $(, provided_dependencies: $provided_dependencies:expr)?
         $(, package_json_config_key: $pkg_key:expr)?
         $(, used_exports: [$( ($pat:expr, $exports:expr) ),* $(,)?])?
         , resolve_config($cp:ident, $src:ident, $root:ident) $body:block
@@ -925,6 +992,7 @@ macro_rules! define_plugin {
             $( fn virtual_module_prefixes(&self) -> &'static [&'static str] { $virtual } )?
             $( fn virtual_package_suffixes(&self) -> &'static [&'static str] { $virtual_suffixes } )?
             $( fn generated_type_import_prefixes(&self) -> &'static [&'static str] { $generated_type_prefixes } )?
+            $( fn provided_dependencies(&self) -> Vec<ProvidedDependencyRule> { $provided_dependencies } )?
 
             $(
                 fn package_json_config_key(&self) -> Option<&'static str> {
@@ -961,6 +1029,7 @@ macro_rules! define_plugin {
         $(, virtual_module_prefixes: $virtual:expr)?
         $(, virtual_package_suffixes: $virtual_suffixes:expr)?
         $(, generated_type_import_prefixes: $generated_type_prefixes:expr)?
+        $(, provided_dependencies: $provided_dependencies:expr)?
         $(, used_exports: [$( ($pat:expr, $exports:expr) ),* $(,)?])?
         $(,)?
     ) => {
@@ -984,6 +1053,7 @@ macro_rules! define_plugin {
             $( fn virtual_module_prefixes(&self) -> &'static [&'static str] { $virtual } )?
             $( fn virtual_package_suffixes(&self) -> &'static [&'static str] { $virtual_suffixes } )?
             $( fn generated_type_import_prefixes(&self) -> &'static [&'static str] { $generated_type_prefixes } )?
+            $( fn provided_dependencies(&self) -> Vec<ProvidedDependencyRule> { $provided_dependencies } )?
 
             $(
                 fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {

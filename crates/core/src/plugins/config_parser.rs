@@ -611,6 +611,48 @@ pub fn extract_config_array_object_strings(
     .unwrap_or_default()
 }
 
+/// Extract Storybook-style static directory entries from an array.
+///
+/// Supports string entries and object entries with a string-like `from` plus
+/// optional string-like `to`.
+#[must_use]
+pub fn extract_config_static_dir_entries(
+    source: &str,
+    path: &Path,
+    array_path: &[&str],
+) -> Vec<(String, Option<String>)> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let array_expr = get_nested_expression(obj, array_path)?;
+        let Expression::ArrayExpression(arr) = array_expr else {
+            return None;
+        };
+
+        let mut results = Vec::new();
+        for element in &arr.elements {
+            let Some(expr) = element.as_expression() else {
+                continue;
+            };
+            match expr {
+                Expression::ObjectExpression(item) => {
+                    if let Some(from) = property_string(item, "from") {
+                        let to = property_string(item, "to");
+                        results.push((from, to));
+                    }
+                }
+                _ => {
+                    if let Some(from) = expression_to_path_string(expr) {
+                        results.push((from, None));
+                    }
+                }
+            }
+        }
+
+        (!results.is_empty()).then_some(results)
+    })
+    .unwrap_or_default()
+}
+
 /// Extract paired `(primary, optional secondary)` string values from each object
 /// element of an array at `array_path`.
 ///

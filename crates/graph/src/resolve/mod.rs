@@ -68,6 +68,7 @@ pub fn resolve_all_imports(
     active_plugins: &[String],
     path_aliases: &[(String, String)],
     scss_include_paths: &[PathBuf],
+    static_dir_mappings: &[(PathBuf, String)],
     root: &Path,
     extra_conditions: &[String],
 ) -> Vec<ResolvedModule> {
@@ -172,6 +173,7 @@ pub fn resolve_all_imports(
         condition_names: &condition_names,
         path_aliases,
         scss_include_paths,
+        static_dir_mappings,
         root,
         canonical_fallback: canonical_fallback.as_ref(),
         tsconfig_warned: &tsconfig_warned,

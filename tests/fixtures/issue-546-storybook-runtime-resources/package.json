@@ -1,0 +1,5 @@
+{
+  "name": "issue-546-storybook-runtime-resources",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

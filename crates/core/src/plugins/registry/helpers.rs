@@ -113,6 +113,9 @@ pub fn process_static_patterns(
     for (prefix, replacement) in plugin.path_aliases(root) {
         result.path_aliases.push((prefix.to_string(), replacement));
     }
+    result
+        .provided_dependencies
+        .extend(plugin.provided_dependencies());
     for pat in plugin.fixture_glob_patterns() {
         result
             .fixture_patterns
@@ -441,6 +444,12 @@ pub fn process_config_result(
     result
         .scss_include_paths
         .extend(plugin_result.scss_include_paths);
+    result
+        .static_dir_mappings
+        .extend(plugin_result.static_dir_mappings);
+    result
+        .provided_dependencies
+        .extend(plugin_result.provided_dependencies);
 }
 
 /// Check if a plugin already has a config file matched against discovered files.

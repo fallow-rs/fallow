@@ -1106,6 +1106,7 @@ mod tests {
             condition_names: &condition_names,
             path_aliases: &[],
             scss_include_paths: &[],
+            static_dir_mappings: &[],
             root: &manifests[0].root,
             canonical_fallback: None,
             tsconfig_warned: &tsconfig_warned,

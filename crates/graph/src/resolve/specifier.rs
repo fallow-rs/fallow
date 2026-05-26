@@ -339,6 +339,94 @@ fn same_path(left: &Path, right: &Path) -> bool {
             .is_some_and(|(left, right)| left == right)
 }
 
+fn is_storybook_preview_html(from_file: &Path) -> bool {
+    matches!(
+        from_file.file_name().and_then(|name| name.to_str()),
+        Some("preview-head.html" | "preview-body.html")
+    ) && from_file
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        == Some(".storybook")
+}
+
+fn strip_url_suffix(specifier: &str) -> &str {
+    specifier
+        .find(['?', '#'])
+        .map_or(specifier, |idx| &specifier[..idx])
+}
+
+fn storybook_static_url_path(specifier: &str) -> Option<String> {
+    let lookup = strip_url_suffix(specifier);
+    if lookup.starts_with("../") {
+        return None;
+    }
+    if lookup.starts_with('/') {
+        return Some(lookup.to_string());
+    }
+    lookup
+        .strip_prefix("./")
+        .map(|rest| format!("/{rest}"))
+        .or_else(|| (!lookup.starts_with('.')).then(|| format!("/{lookup}")))
+}
+
+fn static_dir_relative_path<'a>(url_path: &'a str, mount: &str) -> Option<&'a str> {
+    if mount == "/" {
+        return url_path.strip_prefix('/');
+    }
+    if url_path == mount {
+        return Some("");
+    }
+    url_path
+        .strip_prefix(mount)
+        .and_then(|rest| rest.strip_prefix('/'))
+}
+
+fn is_safe_static_dir_relative_path(relative: &str) -> bool {
+    !Path::new(relative)
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+}
+
+fn resolve_filesystem_path(ctx: &ResolveContext<'_>, path: &Path) -> Option<ResolveResult> {
+    if let Some(&file_id) = ctx.raw_path_to_id.get(path) {
+        return Some(ResolveResult::InternalModule(file_id));
+    }
+    let canonical = dunce::canonicalize(path).ok()?;
+    if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
+        return Some(ResolveResult::InternalModule(file_id));
+    }
+    if let Some(fallback) = ctx.canonical_fallback
+        && let Some(file_id) = fallback.get(&canonical)
+    {
+        return Some(ResolveResult::InternalModule(file_id));
+    }
+    path.exists()
+        .then_some(ResolveResult::ExternalFile(canonical))
+}
+
+fn try_storybook_static_dir_mapping(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    if ctx.static_dir_mappings.is_empty() || !is_storybook_preview_html(from_file) {
+        return None;
+    }
+    let url_path = storybook_static_url_path(specifier)?;
+    ctx.static_dir_mappings
+        .iter()
+        .filter_map(|(from_dir, mount)| {
+            let relative = static_dir_relative_path(&url_path, mount)?;
+            if !is_safe_static_dir_relative_path(relative) {
+                return None;
+            }
+            Some((mount.len(), from_dir.join(relative)))
+        })
+        .max_by_key(|(mount_len, _)| *mount_len)
+        .and_then(|(_, path)| resolve_filesystem_path(ctx, &path))
+}
+
 fn resolve_tsconfig_extends_path(base_dir: &Path, extends: &str) -> PathBuf {
     let path = if is_relative_tsconfig_extends(extends) || Path::new(extends).is_absolute() {
         base_dir.join(extends)
@@ -972,6 +1060,10 @@ pub(super) fn resolve_specifier(
     // URL imports (https://, http://, data:) are valid but can't be resolved locally
     if specifier.contains("://") || specifier.starts_with("data:") {
         return ResolveResult::ExternalFile(PathBuf::from(specifier));
+    }
+
+    if let Some(result) = try_storybook_static_dir_mapping(ctx, from_file, specifier) {
+        return result;
     }
 
     // Root-relative paths (`/src/main.tsx`, `/static/style.css`) are a web

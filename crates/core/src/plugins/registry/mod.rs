@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::{EntryPointRole, ExternalPluginDef, PackageJson, UsedClassMemberRule};
 
-use super::{PathRule, Plugin, PluginUsedExportRule};
+use super::{PathRule, Plugin, PluginUsedExportRule, ProvidedDependencyRule};
 
 pub(crate) mod builtin;
 mod helpers;
@@ -84,6 +84,10 @@ pub struct AggregatedPluginResult {
     /// Angular's `stylePreprocessorOptions.includePaths` and equivalent
     /// framework settings. See issue #103.
     pub scss_include_paths: Vec<PathBuf>,
+    /// Static directory mappings contributed by plugins.
+    pub static_dir_mappings: Vec<(PathBuf, String)>,
+    /// File-scoped dependency provider rules from active plugins.
+    pub provided_dependencies: Vec<ProvidedDependencyRule>,
 }
 
 impl PluginRegistry {

@@ -507,6 +507,7 @@ pub fn analyze_with_parse_result(
         &plugin_result.active_plugins,
         &plugin_result.path_aliases,
         &plugin_result.scss_include_paths,
+        &plugin_result.static_dir_mappings,
         &config.root,
         &config.resolve.conditions,
     );
@@ -776,6 +777,7 @@ fn analyze_full(
         &plugin_result.active_plugins,
         &plugin_result.path_aliases,
         &plugin_result.scss_include_paths,
+        &plugin_result.static_dir_mappings,
         &config.root,
         &config.resolve.conditions,
     );
@@ -1184,6 +1186,10 @@ fn append_workspace_package_file_asset_patterns(
 }
 
 /// Run plugins for root project and all workspace packages.
+#[expect(
+    clippy::too_many_lines,
+    reason = "plugin orchestration keeps root and workspace merging in one flow"
+)]
 fn run_plugins(
     config: &ResolvedConfig,
     files: &[discover::DiscoveredFile],
@@ -1321,6 +1327,9 @@ fn run_plugins(
         for rule in &ws_result.used_exports {
             result.used_exports.push(rule.prefixed(&ws_prefix));
         }
+        for rule in &ws_result.provided_dependencies {
+            result.provided_dependencies.push(rule.prefixed(&ws_prefix));
+        }
         // Merge active plugin names (deduplicated via HashSet)
         for plugin_name in ws_result.active_plugins {
             if !seen_plugins.contains(&plugin_name) {
@@ -1336,6 +1345,9 @@ fn run_plugins(
         result
             .tooling_dependencies
             .extend(ws_result.tooling_dependencies);
+        result
+            .static_dir_mappings
+            .extend(ws_result.static_dir_mappings);
         // Virtual import boundaries — prefixes (e.g., Docusaurus `@theme/`),
         // generated import patterns (e.g., SvelteKit `/$types`), generated type
         // prefixes (e.g., React Router `./+types/`), and package-name suffixes

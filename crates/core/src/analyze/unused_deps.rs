@@ -19,6 +19,8 @@ use super::predicates::{
 };
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
+use crate::plugins::{CompiledPathRule, ProvidedDependencyRule};
+
 /// Return `true` if a virtual-module `prefix` from the active plugin set covers
 /// `spec`. Two shapes are recognised:
 ///
@@ -719,6 +721,7 @@ fn has_types_package_for_file(
 /// Look up the import location (line, col) for a given package in a given file.
 ///
 /// Falls back to `(1, 0)` when no source edge span is found.
+#[cfg(test)]
 pub fn find_import_location(
     import_spans_by_file: &FxHashMap<FileId, Vec<(&str, &str, u32)>>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
@@ -737,6 +740,75 @@ pub fn find_import_location(
                 })
         })
         .unwrap_or((1, 0))
+}
+
+fn relative_module_path(module_path: &Path, root: &Path) -> String {
+    module_path
+        .strip_prefix(root)
+        .unwrap_or(module_path)
+        .to_string_lossy()
+        .into_owned()
+}
+
+struct CompiledProvidedDependencyRule<'a> {
+    rule: &'a ProvidedDependencyRule,
+    path_matcher: CompiledPathRule,
+}
+
+fn compile_provided_dependency_rules(
+    rules: &[ProvidedDependencyRule],
+) -> Vec<CompiledProvidedDependencyRule<'_>> {
+    rules
+        .iter()
+        .filter_map(|rule| {
+            CompiledPathRule::for_used_export_rule(&rule.path, "provided dependency")
+                .map(|path_matcher| CompiledProvidedDependencyRule { rule, path_matcher })
+        })
+        .collect()
+}
+
+fn import_is_provided(
+    rules: &[CompiledProvidedDependencyRule<'_>],
+    relative_path: &str,
+    source_specifier: &str,
+) -> bool {
+    rules.iter().any(|rule| {
+        rule.path_matcher.matches(relative_path) && rule.rule.covers_specifier(source_specifier)
+    })
+}
+
+fn package_has_file_scoped_provider(rules: &[ProvidedDependencyRule], package_name: &str) -> bool {
+    rules
+        .iter()
+        .any(|rule| rule.may_cover_package(package_name))
+}
+
+fn find_unprovided_import_location(
+    import_spans_by_file: &FxHashMap<FileId, Vec<(&str, &str, u32)>>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    provided_rules: &[CompiledProvidedDependencyRule<'_>],
+    relative_path: &str,
+    file_id: FileId,
+    package_name: &str,
+) -> Option<(u32, u32)> {
+    import_spans_by_file.get(&file_id).and_then(|spans| {
+        spans
+            .iter()
+            .filter(|(name, _, _)| *name == package_name)
+            .find(|(_, source, _)| {
+                !is_builtin_module(source)
+                    && !import_is_provided(provided_rules, relative_path, source)
+            })
+            .or_else(|| {
+                spans.iter().find(|(name, source, _)| {
+                    *name == package_name
+                        && !import_is_provided(provided_rules, relative_path, source)
+                })
+            })
+            .map(|(_, _, span_start)| {
+                byte_offset_to_line_col(line_offsets_by_file, file_id, *span_start)
+            })
+    })
 }
 
 fn package_imports_are_all_builtin(
@@ -851,6 +923,10 @@ pub fn find_unlisted_dependencies(
     let plugin_tooling: FxHashSet<&str> = plugin_result
         .map(|pr| pr.tooling_dependencies.iter().map(String::as_str).collect())
         .unwrap_or_default();
+    let provided_dependency_rules: &[ProvidedDependencyRule] =
+        plugin_result.map_or(&[], |pr| pr.provided_dependencies.as_slice());
+    let compiled_provided_dependency_rules =
+        compile_provided_dependency_rules(provided_dependency_rules);
 
     // Build a lookup from resolved modules so we can recover the source edge location when building
     // UnlistedDependency results. Keep both the collapsed npm package name and original source
@@ -889,7 +965,9 @@ pub fn find_unlisted_dependencies(
         if ignore_deps.contains(package_name.as_str()) {
             continue;
         }
-        if plugin_tooling.contains(package_name.as_str()) {
+        if plugin_tooling.contains(package_name.as_str())
+            && !package_has_file_scoped_provider(provided_dependency_rules, package_name)
+        {
             continue;
         }
         if virtual_prefixes
@@ -933,12 +1011,17 @@ pub fn find_unlisted_dependencies(
             if has_types_package_for_file(&module.path, package_name, &all_deps, &ws_dep_map) {
                 continue;
             }
-            let (line, col) = find_import_location(
+            let relative_path = relative_module_path(&module.path, &config.root);
+            let Some((line, col)) = find_unprovided_import_location(
                 &import_spans_by_file,
                 line_offsets_by_file,
+                &compiled_provided_dependency_rules,
+                &relative_path,
                 *id,
                 package_name,
-            );
+            ) else {
+                continue;
+            };
             unlisted_sites.push(ImportSite {
                 path: module.path.clone(),
                 line,
