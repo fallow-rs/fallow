@@ -1394,24 +1394,38 @@ fn paths_equal(left: &Path, right: &Path) -> bool {
     }
 }
 
+/// Directories the audit base worktree shares with the host checkout.
+///
+/// `node_modules` is the original case: bare `git worktree add` lacks the
+/// installed dependencies. `.nuxt` / `.astro` extend the same idea to
+/// meta-framework `prepare` / `sync` outputs that the project gitignores;
+/// without them the base pass cannot resolve tsconfig `references` chains
+/// pointing into the generated tsconfigs and falls back to resolver-less
+/// resolution. The trade-off matches `node_modules`: the symlinked dir is
+/// HEAD-shaped, not base-shaped, but the alias resolution accuracy recovered
+/// far outweighs the residual drift.
+const MATERIALIZED_CONTEXT_DIRS: &[&str] = &["node_modules", ".nuxt", ".astro"];
+
 fn materialize_base_dependency_context(repo_root: &Path, worktree_path: &Path) {
-    let source = repo_root.join("node_modules");
-    if !source.is_dir() {
-        return;
-    }
-
-    let destination = worktree_path.join("node_modules");
-    if destination.is_dir() {
-        return;
-    }
-    if let Ok(metadata) = std::fs::symlink_metadata(&destination) {
-        if !metadata.file_type().is_symlink() {
-            return;
+    for name in MATERIALIZED_CONTEXT_DIRS {
+        let source = repo_root.join(name);
+        if !source.is_dir() {
+            continue;
         }
-        let _ = std::fs::remove_file(&destination);
-    }
 
-    let _ = symlink_dependency_dir(&source, &destination);
+        let destination = worktree_path.join(name);
+        if destination.is_dir() {
+            continue;
+        }
+        if let Ok(metadata) = std::fs::symlink_metadata(&destination) {
+            if !metadata.file_type().is_symlink() {
+                continue;
+            }
+            let _ = std::fs::remove_file(&destination);
+        }
+
+        let _ = symlink_dependency_dir(&source, &destination);
+    }
 }
 
 #[cfg(unix)]
@@ -4175,6 +4189,133 @@ mod tests {
                 .join("node_modules/@react-native/typescript-config/tsconfig.json")
                 .is_file(),
             "base worktree should preserve tsconfig extends targets installed in node_modules"
+        );
+    }
+
+    /// Confirms `materialize_base_dependency_context` symlinks the Nuxt
+    /// `.nuxt/` generated dir from the host checkout into the audit base
+    /// worktree. Without this, root `tsconfig.json` `references` entries
+    /// pointing into `.nuxt/tsconfig.app.json` break in the base pass and
+    /// emit "Nuxt project missing .nuxt/tsconfig.json" plus "Broken tsconfig
+    /// chain" warnings. The function is exercised directly here rather than
+    /// through `BaseWorktree::create` to avoid the `git worktree add`
+    /// concurrency-flakiness the worktree-level integration tests already
+    /// exhibit.
+    #[test]
+    fn materialize_base_dependency_context_symlinks_nuxt_generated_dir() {
+        let host = tempfile::TempDir::new().expect("host tempdir should be created");
+        let worktree = tempfile::TempDir::new().expect("worktree tempdir should be created");
+
+        let dot_nuxt = host.path().join(".nuxt");
+        fs::create_dir_all(&dot_nuxt).expect(".nuxt dir should be created");
+        fs::write(dot_nuxt.join("tsconfig.json"), r#"{"compilerOptions":{}}"#)
+            .expect(".nuxt/tsconfig.json should be written");
+        fs::write(
+            dot_nuxt.join("tsconfig.app.json"),
+            r#"{"compilerOptions":{}}"#,
+        )
+        .expect(".nuxt/tsconfig.app.json should be written");
+
+        materialize_base_dependency_context(host.path(), worktree.path());
+
+        let mirrored = worktree.path().join(".nuxt");
+        assert!(
+            mirrored.is_dir(),
+            "base worktree should reuse the ignored .nuxt dir from the host checkout"
+        );
+        let link_meta = fs::symlink_metadata(&mirrored)
+            .expect(".nuxt entry should exist as a symlink in the worktree");
+        assert!(
+            link_meta.file_type().is_symlink(),
+            "base worktree's .nuxt should be a symlink to the host checkout"
+        );
+        assert!(
+            mirrored.join("tsconfig.json").is_file(),
+            "base worktree should expose .nuxt/tsconfig.json so the Nuxt meta-framework \
+             prerequisite check stays quiet"
+        );
+        assert!(
+            mirrored.join("tsconfig.app.json").is_file(),
+            "base worktree should expose .nuxt/tsconfig.app.json so root tsconfig references \
+             resolve without falling back to resolver-less resolution"
+        );
+    }
+
+    /// Confirms the same symlink treatment for Astro's `.astro/` generated
+    /// types directory, which is gitignored by default and would otherwise
+    /// trip the "Astro project missing .astro/" prerequisite check on the
+    /// base pass.
+    #[test]
+    fn materialize_base_dependency_context_symlinks_astro_generated_dir() {
+        let host = tempfile::TempDir::new().expect("host tempdir should be created");
+        let worktree = tempfile::TempDir::new().expect("worktree tempdir should be created");
+
+        let dot_astro = host.path().join(".astro");
+        fs::create_dir_all(&dot_astro).expect(".astro dir should be created");
+        fs::write(dot_astro.join("types.d.ts"), "// generated types\n")
+            .expect(".astro/types.d.ts should be written");
+
+        materialize_base_dependency_context(host.path(), worktree.path());
+
+        let mirrored = worktree.path().join(".astro");
+        assert!(
+            mirrored.is_dir(),
+            "base worktree should reuse the ignored .astro dir from the host checkout"
+        );
+        assert!(
+            mirrored.join("types.d.ts").is_file(),
+            "base worktree should expose generated Astro types so the Astro meta-framework \
+             prerequisite check stays quiet"
+        );
+    }
+
+    /// Confirms the symlink step is a no-op when the host checkout has no
+    /// meta-framework output. We must not fabricate a dangling `.nuxt`
+    /// symlink: the Nuxt prerequisite check would then pass on the base pass
+    /// while the actual `.nuxt/tsconfig.json` still doesn't exist, hiding a
+    /// real "run `nuxt prepare`" warning on the HEAD pass behind a
+    /// process-wide dedupe key.
+    #[test]
+    fn materialize_base_dependency_context_skips_when_host_lacks_meta_framework_dir() {
+        let host = tempfile::TempDir::new().expect("host tempdir should be created");
+        let worktree = tempfile::TempDir::new().expect("worktree tempdir should be created");
+
+        materialize_base_dependency_context(host.path(), worktree.path());
+
+        assert!(
+            !worktree.path().join(".nuxt").exists(),
+            "base worktree should not fabricate a .nuxt symlink when the host has no .nuxt dir"
+        );
+        assert!(
+            !worktree.path().join(".astro").exists(),
+            "base worktree should not fabricate a .astro symlink when the host has no .astro dir"
+        );
+        assert!(
+            !worktree.path().join("node_modules").exists(),
+            "base worktree should not fabricate a node_modules symlink when the host has none"
+        );
+    }
+
+    /// Confirms each entry in `MATERIALIZED_CONTEXT_DIRS` is independent: a
+    /// missing host `.nuxt/` must not prevent `node_modules` from being
+    /// symlinked when only one of the two is present on the host.
+    #[test]
+    fn materialize_base_dependency_context_handles_each_dir_independently() {
+        let host = tempfile::TempDir::new().expect("host tempdir should be created");
+        let worktree = tempfile::TempDir::new().expect("worktree tempdir should be created");
+
+        fs::create_dir_all(host.path().join("node_modules"))
+            .expect("host node_modules should be created");
+
+        materialize_base_dependency_context(host.path(), worktree.path());
+
+        assert!(
+            worktree.path().join("node_modules").is_dir(),
+            "node_modules should still be symlinked even when host has no .nuxt or .astro"
+        );
+        assert!(
+            !worktree.path().join(".nuxt").exists(),
+            "missing host .nuxt should leave the worktree slot empty"
         );
     }
 
