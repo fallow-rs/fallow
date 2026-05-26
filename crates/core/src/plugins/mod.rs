@@ -32,6 +32,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "adonis",
     "angular",
     "astro",
+    "browser-extension",
     "convex",
     "docusaurus",
     "electron",
@@ -1077,6 +1078,7 @@ mod astro;
 mod ava;
 mod babel;
 mod biome;
+mod browser_extension;
 mod bun;
 mod c8;
 mod capacitor;

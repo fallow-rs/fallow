@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Issue 616 extension",
+  "version": "1.0.0",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://example.com/*"],
+      "js": ["content.js"],
+      "css": ["styles/content.css"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup/index.html"
+  },
+  "options_page": "options.html",
+  "web_accessible_resources": [
+    {
+      "resources": ["web-accessible.js"],
+      "matches": ["https://example.com/*"]
+    }
+  ]
+}
