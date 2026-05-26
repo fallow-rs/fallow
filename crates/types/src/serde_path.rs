@@ -1,4 +1,4 @@
-//! Custom serde serializers for `PathBuf` and `Vec<PathBuf>` that always
+//! Custom serde serializers for `PathBuf`, `Option<PathBuf>`, and `Vec<PathBuf>` that always
 //! output forward slashes, regardless of platform. This ensures consistent
 //! JSON/SARIF output on Windows.
 
@@ -13,6 +13,18 @@ use serde::Serializer;
 /// Returns any serializer error produced while writing the normalized path string.
 pub fn serialize<S: Serializer>(path: &Path, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(&path.to_string_lossy().replace('\\', "/"))
+}
+
+/// Serialize an `Option<PathBuf>` with forward slashes for cross-platform consistency.
+///
+/// # Errors
+///
+/// Returns any serializer error produced while writing the normalized optional path.
+pub fn serialize_option<S: Serializer>(path: &Option<PathBuf>, s: S) -> Result<S::Ok, S::Error> {
+    match path {
+        Some(path) => s.serialize_some(&path.to_string_lossy().replace('\\', "/")),
+        None => s.serialize_none(),
+    }
 }
 
 /// Serialize a `Vec<PathBuf>` with forward slashes for cross-platform consistency.
@@ -103,7 +115,8 @@ mod tests {
         assert_eq!(path.replace('\\', "/"), "src/deep/nested/file.ts");
     }
 
-    /// Property tests that drive the real `serialize` / `serialize_vec`
+    /// Property tests that drive the real `serialize` / `serialize_option` /
+    /// `serialize_vec`
     /// functions through `serde_json`, rather than the `normalize` proxy the
     /// example tests above use. The forward-slash output is a load-bearing
     /// cross-platform invariant for JSON/SARIF, and the input space (arbitrary
@@ -118,6 +131,13 @@ mod tests {
         struct ScalarPath {
             #[serde(serialize_with = "crate::serde_path::serialize")]
             path: PathBuf,
+        }
+
+        /// Wrapper that routes its field through the real option serializer.
+        #[derive(Serialize)]
+        struct OptionalPath {
+            #[serde(serialize_with = "crate::serde_path::serialize_option")]
+            path: Option<PathBuf>,
         }
 
         /// Wrapper that routes its field through the real vec serializer.
@@ -145,6 +165,14 @@ mod tests {
             })
             .expect("scalar wrapper serializes");
             value["path"].as_str().expect("path is a string").to_owned()
+        }
+
+        /// Serialize one optional path through `OptionalPath`.
+        fn option_json(path: Option<&str>) -> serde_json::Value {
+            serde_json::to_value(OptionalPath {
+                path: path.map(PathBuf::from),
+            })
+            .expect("option wrapper serializes")
         }
 
         proptest! {
@@ -176,6 +204,22 @@ mod tests {
                 let once = scalar_json(&path);
                 let twice = scalar_json(&once);
                 prop_assert_eq!(once, twice);
+            }
+
+            /// The option serializer keeps `None` as null and normalizes `Some`.
+            #[test]
+            fn serialize_option_normalizes_some(path in path_like()) {
+                let value = option_json(Some(&path));
+                let out = value["path"].as_str().expect("path is a string");
+                prop_assert!(!out.contains('\\'), "output {out:?} still contains a backslash");
+                prop_assert_eq!(out, path.replace('\\', "/"));
+            }
+
+            /// None remains a JSON null rather than a string sentinel.
+            #[test]
+            fn serialize_option_none_is_null(_path in path_like()) {
+                let value = option_json(None);
+                prop_assert!(value["path"].is_null());
             }
 
             /// The vec serializer agrees element-for-element with the scalar

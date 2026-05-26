@@ -22,6 +22,7 @@ use std::process::{Command, ExitCode};
 use fallow_config::{OutputFormat, PackageJson, WorkspaceInfo, atomic_write, discover_workspaces};
 use fallow_core::git_env::clear_ambient_git_env;
 use fallow_license::{DEFAULT_HARD_FAIL_DAYS, LicenseStatus};
+use fallow_types::serde_path;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -219,6 +220,7 @@ struct SetupLicenseState {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct SetupSidecarState {
+    #[serde(serialize_with = "serde_path::serialize")]
     path: PathBuf,
     checksum: String,
     updated_at: i64,
@@ -226,6 +228,7 @@ struct SetupSidecarState {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct SetupRecipeState {
+    #[serde(serialize_with = "serde_path::serialize")]
     path: PathBuf,
     checksum: String,
     context_fingerprint: String,

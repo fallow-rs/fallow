@@ -3,12 +3,14 @@ use std::path::{Path, PathBuf};
 use fallow_types::output_health::{
     UntestedExportAction, UntestedExportActionType, UntestedFileAction, UntestedFileActionType,
 };
+use fallow_types::serde_path;
 
 /// Runtime code that no test dependency path reaches.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UntestedFile {
     /// Absolute file path.
+    #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
     /// Number of value exports declared by the file.
     pub value_export_count: usize,
@@ -19,6 +21,7 @@ pub struct UntestedFile {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UntestedExport {
     /// Absolute file path.
+    #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
     /// Export name.
     pub export_name: String,

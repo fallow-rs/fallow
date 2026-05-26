@@ -216,6 +216,169 @@ struct Example {
     assert!(offenders.is_empty());
 }
 
+#[test]
+fn path_fields_use_serde_path_serializer() {
+    let root = workspace_root();
+    let mut offenders = Vec::new();
+
+    for source_root in [
+        root.join("crates/types/src"),
+        root.join("crates/core/src"),
+        root.join("crates/cli/src"),
+    ] {
+        let mut files = Vec::new();
+        collect_rs_files(&source_root, &mut files);
+
+        for file in files {
+            let source = fs::read_to_string(&file)
+                .unwrap_or_else(|err| panic!("failed to read {}: {err}", file.display()));
+            let syntax = syn::parse_file(&source)
+                .unwrap_or_else(|err| panic!("failed to parse {}: {err}", file.display()));
+            collect_path_field_offenders(&root, &file, &syntax.items, &mut offenders);
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "Serialize-deriving PathBuf fields must use serde_path serializers for cross-platform JSON paths.\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn path_field_gate_reports_missing_scalar_option_and_vec_serializers() {
+    let source = r"#[derive(Serialize)]
+struct Example {
+    file: PathBuf,
+    maybe: Option<PathBuf>,
+    files: Vec<PathBuf>,
+}";
+    let syntax = syn::parse_file(source).expect("synthetic path struct should parse");
+    let root = Path::new("/workspace");
+    let file = root.join("crates/fake/src/lib.rs");
+    let mut offenders = Vec::new();
+
+    collect_path_field_offenders(root, &file, &syntax.items, &mut offenders);
+
+    assert_eq!(
+        offenders,
+        vec![
+            "crates/fake/src/lib.rs:3: Example.file is PathBuf and derives Serialize without a path serializer; use #[serde(serialize_with = \"serde_path::serialize\")]",
+            "crates/fake/src/lib.rs:4: Example.maybe is Option<PathBuf> and derives Serialize without a path serializer; use #[serde(serialize_with = \"serde_path::serialize_option\")]",
+            "crates/fake/src/lib.rs:5: Example.files is Vec<PathBuf> and derives Serialize without a path serializer; use #[serde(serialize_with = \"serde_path::serialize_vec\")]",
+        ]
+    );
+}
+
+#[test]
+fn path_field_gate_handles_fully_qualified_types() {
+    let source = r"#[derive(serde::Serialize)]
+struct Example {
+    file: std::path::PathBuf,
+    maybe: std::option::Option<std::path::PathBuf>,
+    files: std::vec::Vec<std::path::PathBuf>,
+}";
+    let syntax = syn::parse_file(source).expect("synthetic path struct should parse");
+    let root = Path::new("/workspace");
+    let file = root.join("crates/fake/src/lib.rs");
+    let mut offenders = Vec::new();
+
+    collect_path_field_offenders(root, &file, &syntax.items, &mut offenders);
+
+    assert_eq!(offenders.len(), 3);
+    assert!(offenders[0].contains("Example.file is PathBuf"));
+    assert!(offenders[1].contains("Example.maybe is Option<PathBuf>"));
+    assert!(offenders[2].contains("Example.files is Vec<PathBuf>"));
+}
+
+#[test]
+fn path_field_gate_accepts_cfg_attr_serialize_derives() {
+    let source = r#"#[cfg_attr(feature = "schema", derive(Debug, serde::Serialize))]
+struct Example {
+    file: PathBuf,
+}"#;
+    let syntax = syn::parse_file(source).expect("synthetic path struct should parse");
+    let root = Path::new("/workspace");
+    let file = root.join("crates/fake/src/lib.rs");
+    let mut offenders = Vec::new();
+
+    collect_path_field_offenders(root, &file, &syntax.items, &mut offenders);
+
+    assert_eq!(offenders.len(), 1);
+    assert!(offenders[0].contains("Example.file is PathBuf"));
+}
+
+#[test]
+fn path_field_gate_walks_and_skips_enum_struct_variants() {
+    let source = r"#[derive(Serialize)]
+enum Example {
+    Visible {
+        file: PathBuf,
+    },
+    #[serde(skip)]
+    Hidden {
+        file: PathBuf,
+    },
+}";
+    let syntax = syn::parse_file(source).expect("synthetic path enum should parse");
+    let root = Path::new("/workspace");
+    let file = root.join("crates/fake/src/lib.rs");
+    let mut offenders = Vec::new();
+
+    collect_path_field_offenders(root, &file, &syntax.items, &mut offenders);
+
+    assert_eq!(offenders.len(), 1);
+    assert!(offenders[0].contains("Example::Visible.file is PathBuf"));
+}
+
+#[test]
+fn path_field_gate_accepts_skipped_fields_and_custom_scalar_option_serializers() {
+    let source = r#"#[derive(Serialize)]
+struct Example {
+    #[serde(skip)]
+    skipped: PathBuf,
+    #[serde(skip_serializing)]
+    skipped_serializing: PathBuf,
+    #[serde(serialize_with = "custom_path")]
+    file: PathBuf,
+    #[serde(serialize_with = "custom_option_path")]
+    maybe: Option<PathBuf>,
+}"#;
+    let syntax = syn::parse_file(source).expect("synthetic path struct should parse");
+    let root = Path::new("/workspace");
+    let file = root.join("crates/fake/src/lib.rs");
+    let mut offenders = Vec::new();
+
+    collect_path_field_offenders(root, &file, &syntax.items, &mut offenders);
+
+    assert!(offenders.is_empty());
+}
+
+#[test]
+fn path_field_gate_requires_serialize_vec_for_vec_paths() {
+    let source = r#"#[derive(Serialize)]
+struct Example {
+    #[serde(serialize_with = "custom_vec")]
+    custom: Vec<PathBuf>,
+    #[serde(serialize_with = "serde_path::serialize_vec")]
+    local: Vec<PathBuf>,
+    #[serde(serialize_with = "crate::serde_path::serialize_vec")]
+    crate_path: Vec<PathBuf>,
+    #[serde(serialize_with = "fallow_types::serde_path::serialize_vec")]
+    external_path: Vec<PathBuf>,
+}"#;
+    let syntax = syn::parse_file(source).expect("synthetic path struct should parse");
+    let root = Path::new("/workspace");
+    let file = root.join("crates/fake/src/lib.rs");
+    let mut offenders = Vec::new();
+
+    collect_path_field_offenders(root, &file, &syntax.items, &mut offenders);
+
+    assert_eq!(offenders.len(), 1);
+    assert!(offenders[0].contains("Example.custom is Vec<PathBuf>"));
+    assert!(offenders[0].contains("serde_path::serialize_vec"));
+}
+
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -271,6 +434,172 @@ fn collect_schema_default_offenders(
             _ => {}
         }
     }
+}
+
+fn collect_path_field_offenders(
+    root: &Path,
+    file: &Path,
+    items: &[syn::Item],
+    offenders: &mut Vec<String>,
+) {
+    for item in items {
+        match item {
+            syn::Item::Struct(item_struct) if derives_serialize(&item_struct.attrs) => {
+                collect_path_fields_offenders(
+                    root,
+                    file,
+                    &item_struct.fields,
+                    &item_struct.ident.to_string(),
+                    offenders,
+                );
+            }
+            syn::Item::Enum(item_enum) if derives_serialize(&item_enum.attrs) => {
+                for variant in &item_enum.variants {
+                    if matches!(variant.fields, syn::Fields::Named(_))
+                        && !serde_skips_serialization(&variant.attrs)
+                    {
+                        let owner = format!("{}::{}", item_enum.ident, variant.ident);
+                        collect_path_fields_offenders(
+                            root,
+                            file,
+                            &variant.fields,
+                            &owner,
+                            offenders,
+                        );
+                    }
+                }
+            }
+            syn::Item::Mod(item_mod) => {
+                if let Some((_, nested_items)) = &item_mod.content {
+                    collect_path_field_offenders(root, file, nested_items, offenders);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_path_fields_offenders(
+    root: &Path,
+    file: &Path,
+    fields: &syn::Fields,
+    owner: &str,
+    offenders: &mut Vec<String>,
+) {
+    for (index, field) in fields.iter().enumerate() {
+        let Some(kind) = path_field_kind(&field.ty) else {
+            continue;
+        };
+        if serde_skips_serialization(&field.attrs)
+            || path_field_has_valid_serializer(&field.attrs, kind)
+        {
+            continue;
+        }
+
+        let field_name = field
+            .ident
+            .as_ref()
+            .map_or_else(|| index.to_string(), ToString::to_string);
+        let relative = file.strip_prefix(root).unwrap_or(file);
+        let line = field.ident.as_ref().map_or_else(
+            || field.span().start().line,
+            |ident| ident.span().start().line,
+        );
+        offenders.push(format!(
+            "{}:{line}: {owner}.{field_name} is {} and derives Serialize without a path serializer; use {}",
+            relative.display(),
+            kind.label(),
+            kind.fix_hint()
+        ));
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PathFieldKind {
+    Scalar,
+    Option,
+    Vec,
+}
+
+impl PathFieldKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Scalar => "PathBuf",
+            Self::Option => "Option<PathBuf>",
+            Self::Vec => "Vec<PathBuf>",
+        }
+    }
+
+    fn fix_hint(self) -> &'static str {
+        match self {
+            Self::Scalar => "#[serde(serialize_with = \"serde_path::serialize\")]",
+            Self::Option => "#[serde(serialize_with = \"serde_path::serialize_option\")]",
+            Self::Vec => "#[serde(serialize_with = \"serde_path::serialize_vec\")]",
+        }
+    }
+}
+
+fn path_field_kind(ty: &syn::Type) -> Option<PathFieldKind> {
+    if is_pathbuf_type(ty) {
+        return Some(PathFieldKind::Scalar);
+    }
+
+    let syn::Type::Path(type_path) = ty else {
+        return None;
+    };
+    let segment = type_path.path.segments.last()?;
+    let inner = first_angle_bracket_type(segment)?;
+    if !is_pathbuf_type(inner) {
+        return None;
+    }
+    if segment.ident == "Option" {
+        Some(PathFieldKind::Option)
+    } else if segment.ident == "Vec" {
+        Some(PathFieldKind::Vec)
+    } else {
+        None
+    }
+}
+
+fn is_pathbuf_type(ty: &syn::Type) -> bool {
+    let syn::Type::Path(type_path) = ty else {
+        return false;
+    };
+    type_path
+        .path
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == "PathBuf")
+}
+
+fn first_angle_bracket_type(segment: &syn::PathSegment) -> Option<&syn::Type> {
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    args.args.iter().find_map(|arg| match arg {
+        syn::GenericArgument::Type(ty) => Some(ty),
+        _ => None,
+    })
+}
+
+fn path_field_has_valid_serializer(attrs: &[syn::Attribute], kind: PathFieldKind) -> bool {
+    let Some(serializer) = serde_serialize_with(attrs) else {
+        return false;
+    };
+    match kind {
+        PathFieldKind::Scalar | PathFieldKind::Option => true,
+        PathFieldKind::Vec => serializer
+            .rsplit("::")
+            .next()
+            .is_some_and(|segment| segment == "serialize_vec"),
+    }
+}
+
+fn derives_serialize(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("derive") && attr_tokens_contain(attr, "Serialize")
+            || attr.path().is_ident("cfg_attr") && attr_tokens_contain(attr, "Serialize")
+    })
 }
 
 fn collect_fields_offenders(
@@ -359,6 +688,41 @@ fn serde_has_default(attrs: &[syn::Attribute]) -> bool {
             Ok(())
         });
         has_default
+    })
+}
+
+fn serde_skips_serialization(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if !attr.path().is_ident("serde") {
+            return false;
+        }
+        let mut skips = false;
+        let _ = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("skip") || meta.path.is_ident("skip_serializing") {
+                skips = true;
+            }
+            if meta.input.peek(syn::Token![=]) {
+                let _value: syn::Expr = meta.value()?.parse()?;
+            }
+            Ok(())
+        });
+        skips
+    })
+}
+
+fn serde_serialize_with(attrs: &[syn::Attribute]) -> Option<String> {
+    attrs.iter().find_map(|attr| {
+        if !attr.path().is_ident("serde") {
+            return None;
+        }
+        let mut serializer = None;
+        let _ = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("serialize_with") {
+                serializer = Some(meta.value()?.parse::<syn::LitStr>()?.value());
+            }
+            Ok(())
+        });
+        serializer
     })
 }
 

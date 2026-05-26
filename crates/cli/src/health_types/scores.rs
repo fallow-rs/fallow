@@ -246,6 +246,7 @@ pub enum CoverageSource {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ComplexityViolation {
     /// Absolute file path.
+    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     /// Function name, `"<anonymous>"` for unnamed functions/arrows, or
     /// `"<template>"` for synthetic Angular template findings.
@@ -302,7 +303,11 @@ pub struct ComplexityViolation {
     /// to project-relative form just like other path fields. Lets human and
     /// AI consumers explain "the template scored partial because the
     /// component it belongs to is tested" without re-deriving the link.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        serialize_with = "fallow_types::serde_path::serialize_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub inherited_from: Option<std::path::PathBuf>,
     /// Breakdown of a synthetic `<component>` rollup finding into its
     /// worst-class-function and template contributions. Present only on
@@ -515,6 +520,7 @@ pub fn compute_finding_severity(
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct LargeFunctionEntry {
     /// Absolute file path.
+    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     /// Function name, or `"<anonymous>"` for unnamed functions/arrows.
     pub name: String,
@@ -626,6 +632,7 @@ impl Default for HealthSummary {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FileHealthScore {
     /// File path (absolute; stripped to relative in output).
+    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     /// Number of files that import this file.
     pub fan_in: usize,
@@ -696,6 +703,7 @@ pub enum CoverageModel {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HotspotEntry {
     /// File path (absolute; stripped to relative in output).
+    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     /// Hotspot score (0–100). Higher means more risk.
     pub score: f64,

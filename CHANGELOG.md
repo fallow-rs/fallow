@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Serialized `PathBuf` fields are now covered by a drift gate and normalized consistently.** A new schema test walks CLI/core/types `Serialize` structs and enum struct variants to require `serde_path` serializers for `PathBuf`, `Option<PathBuf>`, and `Vec<PathBuf>` fields, with support for skipped serde fields and custom scalar/option serializers. Existing health/runtime-coverage/setup path fields now use those serializers, including optional component-inherited coverage paths, so Windows paths stay slash-normalized in JSON output. (Closes [#615](https://github.com/fallow-rs/fallow/issues/615).)
+
 ## [2.82.0] - 2026-05-26
 
 ### Fixed

@@ -203,6 +203,7 @@ pub struct EvidenceFunction {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RefactoringTarget {
     /// Absolute file path (stripped to relative in output).
+    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
     /// Priority score (0–100, higher = more urgent).
     pub priority: f64,

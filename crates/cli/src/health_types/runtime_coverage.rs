@@ -1,6 +1,8 @@
 use std::fmt;
 use std::path::PathBuf;
 
+use fallow_types::serde_path;
+
 /// Runtime coverage JSON contract version. This is scoped to the
 /// `runtime_coverage` block and is independent of the top-level fallow
 /// JSON `schema_version`.
@@ -332,6 +334,7 @@ pub struct RuntimeCoverageFinding {
     /// is the first 8 hex characters of SHA-256(file + function + line + 'prod').
     pub id: String,
     /// File path relative to the project root.
+    #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
     /// Static function name as reported in the merged coverage result.
     pub function: String,
@@ -356,6 +359,7 @@ pub struct RuntimeCoverageHotPath {
     /// Stable content-hash ID of the form `fallow:hot:<hash>`.
     pub id: String,
     /// File path relative to the project root.
+    #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
     /// Function name for the hot path.
     pub function: String,
@@ -414,6 +418,7 @@ pub struct RuntimeCoverageBlastRadiusEntry {
     /// Stable content-hash ID of the form `fallow:blast:<hash>`.
     pub id: String,
     /// File path relative to the project root.
+    #[serde(serialize_with = "serde_path::serialize")]
     pub file: PathBuf,
     /// Function name for the blast-radius entry.
     pub function: String,
@@ -436,6 +441,7 @@ pub struct RuntimeCoverageImportanceEntry {
     /// Stable content-hash ID of the form `fallow:importance:<hash>`.
     pub id: String,
     /// File path relative to the project root.
+    #[serde(serialize_with = "serde_path::serialize")]
     pub file: PathBuf,
     /// Function name for the importance entry.
     pub function: String,
