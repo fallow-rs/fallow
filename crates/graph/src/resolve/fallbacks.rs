@@ -13,6 +13,20 @@ use fallow_types::discover::FileId;
 use super::path_info::{extract_package_name, is_bare_specifier, is_valid_package_name};
 use super::types::{OUTPUT_DIRS, PackageManifestInfo, ResolveContext, ResolveResult, SOURCE_EXTS};
 
+/// Return the post-prefix remainder when `specifier` matches the alias `prefix`
+/// at a path boundary, else `None`.
+///
+/// The match is segment-aware: a bare exact-key alias (e.g. `@scope/sdk` or
+/// `vscode`) matches only on an exact hit or a `/`-delimited continuation, so it
+/// never captures a longer package that merely shares the prefix
+/// (`@scope/sdk-extra`). Prefixes that already end in `/` (`~/`, `@/`, `$lib/`)
+/// match any continuation by construction, preserving their existing behavior.
+fn alias_match_remainder<'a>(specifier: &'a str, prefix: &str) -> Option<&'a str> {
+    let remainder = specifier.strip_prefix(prefix)?;
+    (remainder.is_empty() || prefix.ends_with('/') || remainder.starts_with('/'))
+        .then_some(remainder)
+}
+
 /// Try resolving a specifier using plugin-provided path aliases.
 ///
 /// Substitutes a matching alias prefix (e.g., `~/`) with a directory relative to the
@@ -24,17 +38,19 @@ pub(super) fn try_path_alias_fallback(
     specifier: &str,
 ) -> Option<ResolveResult> {
     for (prefix, replacement) in ctx.path_aliases {
-        if !specifier.starts_with(prefix.as_str()) {
+        let Some(remainder) = alias_match_remainder(specifier, prefix) else {
             continue;
-        }
+        };
 
-        let remainder = &specifier[prefix.len()..];
-        // Build the substituted path relative to root.
-        // If replacement is empty, remainder is relative to root directly.
-        let substituted = if replacement.is_empty() {
-            format!("./{remainder}")
-        } else {
-            format!("./{replacement}/{remainder}")
+        // Build the substituted path relative to root. An empty remainder is an
+        // exact-key match (the whole specifier equals the alias), so the
+        // replacement must be used verbatim with no trailing slash; appending
+        // `/` would make the resolver treat a file target as a directory and
+        // fail (e.g. `vscode` -> `mock/vscode.js`).
+        let substituted = match (replacement.is_empty(), remainder.is_empty()) {
+            (true, _) => format!("./{remainder}"),
+            (false, true) => format!("./{replacement}"),
+            (false, false) => format!("./{replacement}/{remainder}"),
         };
 
         // Resolve relative to the project root directly. These plugin-provided
@@ -1096,6 +1112,48 @@ mod tests {
         };
 
         f(&ctx, &manifests[0], &manifests[0].root);
+    }
+
+    #[test]
+    fn alias_match_remainder_exact_key() {
+        // Exact-key alias (the whole specifier equals the key): empty remainder.
+        assert_eq!(alias_match_remainder("vscode", "vscode"), Some(""));
+        assert_eq!(alias_match_remainder("@scope/sdk", "@scope/sdk"), Some(""));
+    }
+
+    #[test]
+    fn alias_match_remainder_slash_continuation() {
+        // Slash-delimited continuation matches for both bare and trailing-slash prefixes.
+        assert_eq!(
+            alias_match_remainder("@scope/sdk/sub", "@scope/sdk"),
+            Some("/sub")
+        );
+        assert_eq!(alias_match_remainder("@/foo", "@/"), Some("foo"));
+        assert_eq!(
+            alias_match_remainder("~/components/x", "~/"),
+            Some("components/x")
+        );
+        assert_eq!(alias_match_remainder("$lib/util", "$lib/"), Some("util"));
+    }
+
+    #[test]
+    fn alias_match_remainder_rejects_prefix_collision() {
+        // The collision class: an exact-key alias must NOT capture a longer
+        // package that merely shares the prefix without a path boundary.
+        assert_eq!(
+            alias_match_remainder("@scope/sdk-extra", "@scope/sdk"),
+            None
+        );
+        assert_eq!(
+            alias_match_remainder("vscode-languageserver", "vscode"),
+            None
+        );
+        assert_eq!(alias_match_remainder("#shared-utils", "#shared"), None);
+    }
+
+    #[test]
+    fn alias_match_remainder_non_match() {
+        assert_eq!(alias_match_remainder("react", "vscode"), None);
     }
 
     #[test]

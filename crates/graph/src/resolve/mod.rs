@@ -29,7 +29,9 @@ mod types;
 mod upgrades;
 
 pub use fallbacks::extract_package_name_from_node_modules_path;
-pub use path_info::{extract_package_name, is_bare_specifier, is_path_alias};
+pub use path_info::{
+    extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
+};
 pub use types::{
     ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport, ResolvedSourceEdge,
 };

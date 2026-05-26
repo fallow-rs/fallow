@@ -139,6 +139,8 @@ mod issue_396_397_399_typeof_import_and_new_url;
 mod issue_463_glob_validation;
 #[path = "integration_test/issue_515_re_export_cycles.rs"]
 mod issue_515_re_export_cycles;
+#[path = "integration_test/issue_601_vitest_test_alias.rs"]
+mod issue_601_vitest_test_alias;
 #[path = "integration_test/issue_607_oxlint_js_plugins.rs"]
 mod issue_607_oxlint_js_plugins;
 #[path = "integration_test/issue_624_supabase_edge.rs"]

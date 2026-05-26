@@ -418,6 +418,39 @@ pub fn extract_config_aliases(
     .unwrap_or_default()
 }
 
+/// Extract alias mappings nested inside an array of config objects.
+///
+/// Navigates `array_path` to an array expression, then for each object element
+/// navigates `alias_path` and runs the same object/array alias extraction as
+/// [`extract_config_aliases`]. Useful for Vitest projects/workspaces where the
+/// aliases live one level down:
+/// - `test.projects[*].test.alias`
+#[must_use]
+pub fn extract_config_array_nested_aliases(
+    source: &str,
+    path: &Path,
+    array_path: &[&str],
+    alias_path: &[&str],
+) -> Vec<(String, String)> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let array_expr = get_nested_expression(obj, array_path)?;
+        let Expression::ArrayExpression(arr) = array_expr else {
+            return None;
+        };
+        let mut results = Vec::new();
+        for element in &arr.elements {
+            if let Some(Expression::ObjectExpression(element_obj)) = element.as_expression()
+                && let Some(alias_expr) = get_nested_expression(element_obj, alias_path)
+            {
+                results.extend(expression_to_alias_pairs(alias_expr));
+            }
+        }
+        (!results.is_empty()).then_some(results)
+    })
+    .unwrap_or_default()
+}
+
 /// Extract string values from a nested array, supporting both string elements and
 /// object elements with a named string/path field.
 ///
