@@ -5,8 +5,10 @@
 # (NOT a skip record) for the headline.
 (.fixes | map(select((.skipped // false) == false)) | length) as $fix_attempts |
 ((.skipped_content_changed // 0) | tonumber) as $content_changed |
+((.skipped_mixed_line_endings // 0) | tonumber) as $mixed_eol |
+((.skipped_low_confidence_exports // 0) | tonumber) as $low_confidence |
 
-if $fix_attempts == 0 and $content_changed == 0 then
+if $fix_attempts == 0 and $content_changed == 0 and $mixed_eol == 0 and $low_confidence == 0 then
   "## Fallow — Auto-fix\n\nNo fixable issues found."
 else
   "## Fallow — Auto-fix\n\n" +
@@ -15,6 +17,12 @@ else
   (if .dry_run then "" else " (\(.total_fixed) succeeded)" end) +
   (if $content_changed > 0 then
     ", skipped \($content_changed) file(s) that changed since analysis"
+  else "" end) +
+  (if $mixed_eol > 0 then
+    ", skipped \($mixed_eol) file(s) with mixed line endings"
+  else "" end) +
+  (if $low_confidence > 0 then
+    ", kept exports in \($low_confidence) file(s) where consumers may be hidden from static analysis"
   else "" end) + "\n\n" +
   "| Type | Count |\n|------|-------|\n" +
   (if $exports > 0 then "| Export removals | \($exports) |\n" else "" end) +

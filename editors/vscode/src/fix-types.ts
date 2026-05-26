@@ -52,6 +52,18 @@ export interface FixAction {
    *   differs from the hash captured during analysis; applying offsets
    *   would land on bytes the analysis never saw). Re-run `fallow fix`
    *   to refresh the analysis.
+   * - `mixed_line_endings` (#475: file mixes CRLF and bare-LF line
+   *   endings; not self-healing, normalize with `dos2unix` first).
+   * - `low_confidence_off_graph` (#602: export lives in a test, mock, or
+   *   fixture directory whose consumers fallow's graph cannot see;
+   *   removal withheld. Still reported by `fallow check`).
+   * - `low_confidence_unresolved_imports` (#602: the file has an
+   *   unresolved import, so its usage graph is incomplete; export removal
+   *   withheld).
+   *
+   * The two `low_confidence_*` reasons are INTENTIONAL skips: they do NOT
+   * cause a non-zero exit code (unlike `content_changed` /
+   * `mixed_line_endings`).
    */
   readonly skip_reason?: string;
   /**
@@ -80,4 +92,21 @@ export interface FallowFixResult {
    * `fallow fix` exited 2; consumers re-run after refreshing analysis.
    */
   readonly skipped_content_changed?: number;
+  /**
+   * Count of files skipped because they mix CRLF and bare-LF line
+   * endings (#475). Always present; defaults to 0. A non-zero value
+   * means `fallow fix` exited 2; the file must be normalized first.
+   */
+  readonly skipped_mixed_line_endings?: number;
+  /**
+   * Count of files whose unused-export removals were withheld as low
+   * confidence because consumers may be invisible to static analysis
+   * (#602): the file is under a test/mock/fixture directory, or it has
+   * an unresolved import. Always present; defaults to 0. Unlike the two
+   * counters above, a non-zero value does NOT change the exit code (it
+   * is an intentional, conservative skip). The exports stay reported by
+   * `fallow check`; the per-entry `skip_reason` distinguishes the two
+   * `low_confidence_*` causes.
+   */
+  readonly skipped_low_confidence_exports?: number;
 }

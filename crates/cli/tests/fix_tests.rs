@@ -676,6 +676,141 @@ fn fix_batch_aborts_when_a_target_directory_is_read_only() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// issue #602: low-confidence off-graph export gate
+// ---------------------------------------------------------------------------
+
+/// Build a project where two unused exports are reachable: one in a normal
+/// `src/` file (high confidence) and one in an off-graph `e2e/` directory
+/// (consumers may be invisible to static analysis). Both are genuine
+/// `unused-export` findings; the gate must remove the first and withhold
+/// the second.
+fn write_off_graph_project(root: &std::path::Path) {
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::create_dir_all(root.join("e2e")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"off-graph","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    // Entry imports one export from each module, leaving `deadSrc` and
+    // `deadE2e` unreferenced (and therefore reported as unused-exports),
+    // while keeping both files reachable so neither is an unused-FILE.
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { realUsed } from './lib';\nimport { e2eUsed } from '../e2e/shared';\nconsole.log(realUsed, e2eUsed);\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/lib.ts"),
+        "export const realUsed = 1;\nexport const deadSrc = 2;\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("e2e/shared.ts"),
+        "export const e2eUsed = 1;\nexport const deadE2e = 2;\n",
+    )
+    .unwrap();
+}
+
+#[test]
+fn fix_dry_run_withholds_off_graph_export_but_plans_high_confidence_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_off_graph_project(root);
+
+    let output = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
+    assert_eq!(
+        output.code, 0,
+        "off-graph skips are intentional, dry-run exits 0; stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    let fixes = json["fixes"].as_array().unwrap();
+
+    // The high-confidence src export is planned for removal.
+    let removed_names: Vec<&str> = fixes
+        .iter()
+        .filter(|f| f["type"] == "remove_export")
+        .filter_map(|f| f["name"].as_str())
+        .collect();
+    assert!(
+        removed_names.contains(&"deadSrc"),
+        "high-confidence src export must be planned for removal: {}",
+        output.stdout
+    );
+    assert!(
+        !removed_names.contains(&"deadE2e"),
+        "off-graph e2e export must NOT be planned for removal: {}",
+        output.stdout
+    );
+
+    // The off-graph file surfaces as a low-confidence skip record.
+    let skip = fixes
+        .iter()
+        .find(|f| f["skip_reason"].as_str() == Some("low_confidence_off_graph"));
+    let skip = skip.expect("an off-graph skip record must be present");
+    assert_eq!(
+        skip["path"].as_str().map(|p| p.replace('\\', "/")),
+        Some("e2e/shared.ts".to_string()),
+        "skip record anchors the off-graph file",
+    );
+    assert_eq!(
+        json["skipped_low_confidence_exports"].as_u64(),
+        Some(1),
+        "envelope counts the single low-confidence skip: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn fix_apply_keeps_off_graph_export_and_removes_high_confidence_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_off_graph_project(root);
+
+    let fix = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    assert_eq!(
+        fix.code, 0,
+        "an apply whose only skip is intentional must exit 0; stderr: {}",
+        fix.stderr
+    );
+
+    // High-confidence export removed from disk.
+    let lib = std::fs::read_to_string(root.join("src/lib.ts")).unwrap();
+    assert_eq!(
+        lib, "export const realUsed = 1;\nconst deadSrc = 2;\n",
+        "high-confidence src export should have lost its `export` keyword",
+    );
+    // Off-graph export untouched on disk.
+    let shared = std::fs::read_to_string(root.join("e2e/shared.ts")).unwrap();
+    assert_eq!(
+        shared, "export const e2eUsed = 1;\nexport const deadE2e = 2;\n",
+        "off-graph e2e export must be preserved verbatim",
+    );
+
+    let json = parse_json(&fix);
+    assert_eq!(json["skipped_low_confidence_exports"].as_u64(), Some(1));
+}
+
+#[test]
+fn fix_envelope_always_carries_skipped_low_confidence_exports() {
+    // Presence-of-field contract: consumers (CI jq, MCP, VS Code) gate on
+    // the key existing even when the count is 0.
+    let output = run_fallow(
+        "fix",
+        "basic-project",
+        &["--dry-run", "--format", "json", "--quiet"],
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["skipped_low_confidence_exports"].as_u64(),
+        Some(0),
+        "clean run must still carry the field at 0: {}",
+        output.stdout
+    );
+}
+
 /// Helper: recursively copy a directory tree so we don't mutate the
 /// canonical fixture during the integration test.
 fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {

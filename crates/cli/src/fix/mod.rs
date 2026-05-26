@@ -1,4 +1,4 @@
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -88,6 +88,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
                 "skipped": 0,
                 "skipped_content_changed": 0,
                 "skipped_mixed_line_endings": 0,
+                "skipped_low_confidence_exports": 0,
             })) {
                 Ok(json) => println!("{json}"),
                 Err(e) => {
@@ -114,10 +115,22 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
             .push(&finding.export);
     }
 
+    // Files with at least one unresolved import have an incomplete local
+    // usage graph, so their "this export is unused" findings are lower
+    // confidence; the export fixer withholds removals there (issue #602).
+    // Paths are absolute (the detector stores them absolute; see the
+    // path-anchored-finding convention), matching `UnusedExport.path`.
+    let unresolved_import_files: FxHashSet<PathBuf> = results
+        .unresolved_imports
+        .iter()
+        .map(|finding| finding.import.path.clone())
+        .collect();
+
     exports::apply_export_fixes(
         opts.root,
         &exports_by_file,
         &file_hashes,
+        &unresolved_import_files,
         &mut plan,
         opts.output,
         opts.dry_run,
@@ -200,6 +213,15 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     let plan_skip_records = build_skipped_records(opts.root, plan.skipped(), opts.quiet);
     fixes.extend(plan_skip_records.iter().cloned());
 
+    // A recoverable skip (hash mismatch / mixed line endings) means a fix
+    // the user asked for could not complete; it flips the non-zero exit
+    // code. Intentional skips (low-confidence export preservation, #602) do
+    // NOT, so classify from the enum here before `commit` consumes `plan`.
+    let has_recoverable_skip = plan
+        .skipped()
+        .iter()
+        .any(|skip| !skip.reason.is_intentional());
+
     // Commit the batched plan: stage every queued write, then promote.
     // Stage failure leaves every target file at its original content; rename
     // failure is reported per-path (the rename primitive is per-file atomic
@@ -229,10 +251,24 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
             r.get("skip_reason").and_then(serde_json::Value::as_str) == Some("mixed_line_endings")
         })
         .count();
+    // Low-confidence export skips (issue #602) are INTENTIONAL: the export
+    // was deliberately preserved, so they do NOT flip `had_write_error`
+    // (unlike the two recoverable skips above). The combined counter sums
+    // both off-graph-directory and unresolved-import skips; the per-record
+    // `skip_reason` keeps the two distinguishable for agents.
+    let low_confidence_count = plan_skip_records
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.get("skip_reason").and_then(serde_json::Value::as_str),
+                Some("low_confidence_off_graph" | "low_confidence_unresolved_imports")
+            )
+        })
+        .count();
     if commit_outcome.had_failures() {
         had_write_error = true;
     }
-    if content_changed_count > 0 || mixed_line_endings_count > 0 {
+    if has_recoverable_skip {
         had_write_error = true;
     }
 
@@ -260,7 +296,15 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
                 let reason = f.get("skip_reason").and_then(serde_json::Value::as_str);
-                let is_plan_skip = matches!(reason, Some("content_changed" | "mixed_line_endings"));
+                let is_plan_skip = matches!(
+                    reason,
+                    Some(
+                        "content_changed"
+                            | "mixed_line_endings"
+                            | "low_confidence_off_graph"
+                            | "low_confidence_unresolved_imports"
+                    )
+                );
                 is_skipped && !is_plan_skip
             })
             .count();
@@ -271,6 +315,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
             "skipped": skipped_count,
             "skipped_content_changed": content_changed_count,
             "skipped_mixed_line_endings": mixed_line_endings_count,
+            "skipped_low_confidence_exports": low_confidence_count,
         })) {
             Ok(json) => println!("{json}"),
             Err(e) => {
@@ -287,6 +332,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
             catalog_comment_lines_removed,
             content_changed_count,
             mixed_line_endings_count,
+            low_confidence_count,
         );
     }
 
@@ -389,6 +435,10 @@ fn strip_target_sidechannel(fixes: &mut [serde_json::Value]) {
 /// residual-work warnings. Skipped-entry counts come last because they
 /// describe work the user opted out of rather than work they need to
 /// do right now.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each count drives an independent stderr line; grouping into a struct would just move the same scalars behind a name with no readability gain at the single call site"
+)]
 fn emit_human_summary(
     dry_run: bool,
     fixes: &[serde_json::Value],
@@ -397,6 +447,7 @@ fn emit_human_summary(
     catalog_comment_lines_removed: usize,
     content_changed_count: usize,
     mixed_line_endings_count: usize,
+    low_confidence_count: usize,
 ) {
     if dry_run {
         eprintln!("Dry run complete. No files were modified.");
@@ -455,6 +506,18 @@ fn emit_human_summary(
         };
         eprintln!(
             "Skipped {mixed_line_endings_count} {files_word} with mixed CRLF/LF line endings. Normalize each file (`dos2unix <path>` or `git config core.autocrlf input` + re-checkout) before re-running.",
+        );
+    }
+    if low_confidence_count > 0 {
+        // `low_confidence_count` of 1 is the common case (a single mock /
+        // e2e file), so pluralization matters here.
+        let files_word = if low_confidence_count == 1 {
+            "file"
+        } else {
+            "files"
+        };
+        eprintln!(
+            "Kept unused exports in {low_confidence_count} {files_word} where consumers may be invisible to fallow (test, mock, and fixture directories, or files with unresolved imports). Still listed by `fallow check`; remove by hand if you have confirmed they are unused.",
         );
     }
 }

@@ -1,0 +1,23 @@
+{
+  "dry_run": false,
+  "fixes": [
+    {
+      "type": "remove_export",
+      "path": "src/utils.ts",
+      "line": 3,
+      "name": "unusedHelper",
+      "applied": true
+    },
+    {
+      "type": "skipped",
+      "path": "e2e/utils.ts",
+      "skipped": true,
+      "skip_reason": "low_confidence_off_graph"
+    }
+  ],
+  "total_fixed": 1,
+  "skipped": 0,
+  "skipped_content_changed": 0,
+  "skipped_mixed_line_endings": 0,
+  "skipped_low_confidence_exports": 1
+}

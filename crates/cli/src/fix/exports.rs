@@ -1,10 +1,74 @@
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 use fallow_config::OutputFormat;
 
 use super::enum_helpers::{EnumDeclarationRange, removable_exported_enum_range};
-use super::plan::{CapturedHashes, FixPlan, read_source_with_hash_check, stage_fixed_content};
+use super::plan::{
+    CapturedHashes, FixPlan, SkipReason, read_source_with_hash_check, stage_fixed_content,
+};
+
+/// Directory names whose contents are commonly consumed through paths
+/// fallow's static graph cannot see: Vitest / Jest `__mocks__` aliases,
+/// Playwright / Cypress e2e suites, published-package `examples`, and
+/// fixture / golden harnesses wired up by a build step. Removing an
+/// `export` from a file under any of these is low confidence; `fallow fix`
+/// withholds the rewrite (see [`SkipReason::LowConfidenceOffGraph`]).
+///
+/// Matched against every directory component of the file's
+/// project-root-relative path.
+///
+/// Deliberately EXCLUDED (documented so the set does not silently grow):
+/// `test` / `tests` / `__tests__` (genuinely-dead test helpers are common
+/// and SHOULD auto-remove), bare `mocks` (too generic), `stories` /
+/// `.storybook` (frequently a declared entry point, so skipping would
+/// regress). Issue #602.
+const OFF_GRAPH_CONSUMER_DIRS: &[&str] = &[
+    "__mocks__",
+    "__fixtures__",
+    "fixtures",
+    "e2e",
+    "e2e-tests",
+    "cypress",
+    "playwright",
+    "examples",
+    "evals",
+    "golden",
+];
+
+/// True when any directory component of `relative` is an off-graph
+/// consumer surface (see [`OFF_GRAPH_CONSUMER_DIRS`]). The final component
+/// (the file name) is matched too, which is harmless: source files are not
+/// named exactly `e2e` / `golden` / etc. in practice, and a directory by
+/// that name anywhere in the path is the signal we want.
+fn is_off_graph_consumer_path(relative: &Path) -> bool {
+    relative.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(|segment| OFF_GRAPH_CONSUMER_DIRS.contains(&segment))
+    })
+}
+
+/// Decide whether export removals in `path` should be withheld as low
+/// confidence, and why. Off-graph directory membership is checked first
+/// (more specific, names the surface for the user); a file that itself has
+/// an unresolved import is the second-tier signal (its local usage graph is
+/// incomplete). Returns `None` when the file is high confidence and the
+/// fixer should proceed normally. Issue #602.
+fn low_confidence_skip_reason(
+    relative: &Path,
+    absolute: &Path,
+    unresolved_import_files: &FxHashSet<PathBuf>,
+) -> Option<SkipReason> {
+    if is_off_graph_consumer_path(relative) {
+        return Some(SkipReason::LowConfidenceOffGraph);
+    }
+    if unresolved_import_files.contains(absolute) {
+        return Some(SkipReason::LowConfidenceUnresolvedImports);
+    }
+    None
+}
 
 pub(super) struct ExportFix {
     line_idx: usize,
@@ -126,16 +190,41 @@ fn push_export_fix_json(
 /// stage failure in any fixer leaves the project untouched. Hash mismatch
 /// against `hashes` (captured during the in-process analysis read) marks
 /// the file as skipped instead of overwriting bytes the analysis never saw.
+///
+/// `unresolved_import_files` is the set of absolute paths that have at
+/// least one unresolved import. A file in that set, or under an off-graph
+/// consumer directory, has its export removals withheld as low confidence
+/// (issue #602): the rewrite would risk breaking a consumer fallow's graph
+/// cannot see. The skip is recorded on `plan` so the orchestrator surfaces
+/// it; the export stays reported by `fallow check`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "per-file fixer threads root + grouped findings + the confidence-gate set + the shared plan + output mode + sink; bundling into a context struct would not reduce the irreducible inputs and hurts locality with the sibling fixers"
+)]
 pub(super) fn apply_export_fixes(
     root: &Path,
     exports_by_file: &FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedExport>>,
     hashes: &CapturedHashes,
+    unresolved_import_files: &FxHashSet<PathBuf>,
     plan: &mut FixPlan,
     output: OutputFormat,
     dry_run: bool,
     fixes: &mut Vec<serde_json::Value>,
 ) {
     for (path, file_exports) in exports_by_file {
+        let relative = path.strip_prefix(root).unwrap_or(path);
+
+        // Confidence gate (issue #602): withhold export removals in files
+        // whose consumers may be invisible to static analysis. Runs BEFORE
+        // the source read because the decision needs only the path; the
+        // skip is recorded on `plan` and surfaced by the orchestrator's
+        // `build_skipped_records`. Conservative by design: it can only
+        // decline a removal `fix` would otherwise do, never mutate wrongly.
+        if let Some(reason) = low_confidence_skip_reason(relative, path, unresolved_import_files) {
+            plan.skip(path.clone(), reason);
+            continue;
+        }
+
         let Some((content, meta)) = read_source_with_hash_check(root, path, hashes, plan) else {
             continue;
         };
@@ -211,8 +300,6 @@ pub(super) fn apply_export_fixes(
             }
             grouped.push((fix.line_idx, vec![fix.export_name.clone()]));
         }
-
-        let relative = path.strip_prefix(root).unwrap_or(path);
 
         if dry_run {
             for fix in &line_fixes {
@@ -349,7 +436,16 @@ mod tests {
         let mut fixes = Vec::new();
         let mut plan = FixPlan::new();
         let hashes = capture_hashes(&[file]);
-        apply_export_fixes(root, &map, &hashes, &mut plan, format, dry_run, &mut fixes);
+        apply_export_fixes(
+            root,
+            &map,
+            &hashes,
+            &FxHashSet::default(),
+            &mut plan,
+            format,
+            dry_run,
+            &mut fixes,
+        );
         let had_error = if dry_run {
             false
         } else {
@@ -511,6 +607,7 @@ mod tests {
             &root,
             &exports_by_file,
             &hashes,
+            &FxHashSet::default(),
             &mut plan,
             OutputFormat::Human,
             false,
@@ -560,6 +657,7 @@ mod tests {
             root,
             &exports_by_file,
             &hashes,
+            &FxHashSet::default(),
             &mut plan,
             OutputFormat::Human,
             false,
@@ -733,6 +831,7 @@ mod tests {
             root,
             &exports_by_file,
             &hashes,
+            &FxHashSet::default(),
             &mut plan,
             OutputFormat::Human,
             false,
@@ -764,6 +863,7 @@ mod tests {
             root,
             &exports_by_file,
             &hashes,
+            &FxHashSet::default(),
             &mut plan,
             OutputFormat::Human,
             false,
@@ -837,6 +937,7 @@ mod tests {
             root,
             &exports_by_file,
             &hashes,
+            &FxHashSet::default(),
             &mut plan,
             OutputFormat::Human,
             true,
@@ -927,6 +1028,7 @@ mod tests {
             root,
             &exports_by_file,
             &hashes,
+            &FxHashSet::default(),
             &mut plan,
             OutputFormat::Human,
             false,
@@ -1000,5 +1102,211 @@ mod tests {
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(content, "export { Bar } from \"./bar\";\n");
+    }
+
+    // ── issue #602: low-confidence off-graph gate ──
+
+    #[test]
+    fn is_off_graph_consumer_path_matches_every_listed_dir() {
+        for dir in OFF_GRAPH_CONSUMER_DIRS {
+            let p = PathBuf::from(format!("src/{dir}/file.ts"));
+            assert!(is_off_graph_consumer_path(&p), "{dir} should match");
+        }
+        // Matches a directory at any depth.
+        assert!(is_off_graph_consumer_path(Path::new(
+            "packages/app/e2e/utils/helper.ts"
+        )));
+        assert!(is_off_graph_consumer_path(Path::new(
+            "src/components/__mocks__/api.ts"
+        )));
+    }
+
+    #[test]
+    fn is_off_graph_consumer_path_rejects_normal_and_excluded_dirs() {
+        // Component equality, not substring: `fixtured` is not `fixtures`.
+        for p in [
+            "src/utils.ts",
+            "src/components/App.tsx",
+            "test/foo.ts",
+            "tests/foo.ts",
+            "__tests__/foo.ts",
+            "src/stories/Button.stories.ts",
+            "src/mocks/handlers.ts",
+            "src/fixtured/data.ts",
+            "src/golden-path/route.ts",
+        ] {
+            assert!(!is_off_graph_consumer_path(Path::new(p)), "{p} matched");
+        }
+    }
+
+    #[test]
+    fn low_confidence_reason_prefers_off_graph_over_unresolved() {
+        let abs = PathBuf::from("/proj/e2e/foo.ts");
+        let mut unresolved = FxHashSet::default();
+        unresolved.insert(abs.clone());
+        assert_eq!(
+            low_confidence_skip_reason(Path::new("e2e/foo.ts"), &abs, &unresolved),
+            Some(SkipReason::LowConfidenceOffGraph)
+        );
+    }
+
+    #[test]
+    fn low_confidence_reason_unresolved_when_not_off_graph() {
+        let abs = PathBuf::from("/proj/src/foo.ts");
+        let mut unresolved = FxHashSet::default();
+        unresolved.insert(abs.clone());
+        assert_eq!(
+            low_confidence_skip_reason(Path::new("src/foo.ts"), &abs, &unresolved),
+            Some(SkipReason::LowConfidenceUnresolvedImports)
+        );
+    }
+
+    #[test]
+    fn low_confidence_reason_none_for_clean_file() {
+        let abs = PathBuf::from("/proj/src/foo.ts");
+        assert_eq!(
+            low_confidence_skip_reason(Path::new("src/foo.ts"), &abs, &FxHashSet::default()),
+            None
+        );
+    }
+
+    #[test]
+    fn off_graph_file_export_removal_is_withheld() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("e2e")).unwrap();
+        let file = root.join("e2e/utils.ts");
+        let original = "export function helper() {}\n";
+        std::fs::write(&file, original).unwrap();
+
+        let export = make_export(&file, "helper", 1);
+        let mut map: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
+        map.insert(file.clone(), vec![&export]);
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
+        apply_export_fixes(
+            root,
+            &map,
+            &hashes,
+            &FxHashSet::default(),
+            &mut plan,
+            OutputFormat::Human,
+            false,
+            &mut fixes,
+        );
+
+        // No remove_export fix; one off-graph skip on the plan. Inspect the
+        // plan BEFORE `commit` consumes it.
+        assert!(fixes.is_empty());
+        assert_eq!(plan.skipped().len(), 1);
+        assert_eq!(plan.skipped()[0].reason, SkipReason::LowConfidenceOffGraph);
+        let _ = plan.commit();
+
+        // Source untouched.
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+    }
+
+    #[test]
+    fn off_graph_file_export_removal_withheld_in_dry_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("__mocks__")).unwrap();
+        let file = root.join("__mocks__/sdk.ts");
+        let original = "export const client = {};\n";
+        std::fs::write(&file, original).unwrap();
+
+        let (_, fixes) = fix_single(root, &file, "client", 1, true);
+
+        // Dry-run never writes; the gate also produces no remove_export entry.
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+        assert!(fixes.is_empty());
+    }
+
+    #[test]
+    fn unresolved_import_file_export_removal_is_withheld() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let file = root.join("src/foo.ts");
+        let original = "export function bar() {}\n";
+        std::fs::write(&file, original).unwrap();
+
+        let export = make_export(&file, "bar", 1);
+        let mut map: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
+        map.insert(file.clone(), vec![&export]);
+        let mut unresolved = FxHashSet::default();
+        unresolved.insert(file.clone());
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
+        apply_export_fixes(
+            root,
+            &map,
+            &hashes,
+            &unresolved,
+            &mut plan,
+            OutputFormat::Human,
+            false,
+            &mut fixes,
+        );
+
+        assert!(fixes.is_empty());
+        assert_eq!(plan.skipped().len(), 1);
+        assert_eq!(
+            plan.skipped()[0].reason,
+            SkipReason::LowConfidenceUnresolvedImports
+        );
+        let _ = plan.commit();
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+    }
+
+    #[test]
+    fn normal_file_still_fixed_alongside_off_graph_skip() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("e2e")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let e2e_file = root.join("e2e/utils.ts");
+        let src_file = root.join("src/utils.ts");
+        std::fs::write(&e2e_file, "export function helper() {}\n").unwrap();
+        std::fs::write(&src_file, "export function realDead() {}\n").unwrap();
+
+        let e1 = make_export(&e2e_file, "helper", 1);
+        let e2 = make_export(&src_file, "realDead", 1);
+        let mut map: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
+        map.insert(e2e_file.clone(), vec![&e1]);
+        map.insert(src_file.clone(), vec![&e2]);
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&e2e_file, &src_file]);
+        apply_export_fixes(
+            root,
+            &map,
+            &hashes,
+            &FxHashSet::default(),
+            &mut plan,
+            OutputFormat::Human,
+            false,
+            &mut fixes,
+        );
+
+        // One remove_export fix (the src file), one off-graph skip on the plan.
+        assert_eq!(fixes.len(), 1);
+        assert_eq!(fixes[0]["name"], "realDead");
+        assert_eq!(plan.skipped().len(), 1);
+        assert_eq!(plan.skipped()[0].reason, SkipReason::LowConfidenceOffGraph);
+        let _ = plan.commit();
+
+        // Off-graph export kept; high-confidence src export removed.
+        assert_eq!(
+            std::fs::read_to_string(&e2e_file).unwrap(),
+            "export function helper() {}\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&src_file).unwrap(),
+            "function realDead() {}\n"
+        );
     }
 }

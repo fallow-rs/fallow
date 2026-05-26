@@ -436,6 +436,24 @@ OUT_UNKNOWN_KIND_SUMMARY=$(jq '.unused_files = [] | .unused_exports = [] | .unus
 assert_contains "$OUT_UNKNOWN_KIND_SUMMARY" 'unknown kind' "summary unknown kind: prefix renders"
 assert_contains "$OUT_UNKNOWN_KIND_SUMMARY" 'complexity-typo' "summary unknown kind: verbatim token renders"
 
+echo "  summary-fix.jq:"
+OUT=$(jq -r -f "$JQ_DIR/summary-fix.jq" "$FIXTURES/fix.json" 2>&1)
+assert_valid_markdown "$OUT" "produces output"
+assert_contains "$OUT" "Auto-fix" "has title"
+assert_contains "$OUT" "1 fixes" "counts the real fix attempt, not the skip record"
+assert_contains "$OUT" "Export removals | 1" "lists the export removal count"
+# Issue #602: low-confidence off-graph skips surface in the headline and
+# are NOT counted as fix attempts (the skip record carries skipped: true).
+assert_contains "$OUT" "kept exports in 1 file" "surfaces low-confidence skip count"
+assert_not_contains "$OUT" "2 fixes" "skip record does not inflate the fix-attempt headline"
+
+# A run whose ONLY outcome is a low-confidence skip must still suppress the
+# "No fixable issues found" headline (issue #602): exports were found, just
+# not auto-removed.
+OUT_ONLY_SKIP=$(jq '.fixes = [.fixes[1]] | .total_fixed = 0' "$FIXTURES/fix.json" | jq -r -f "$JQ_DIR/summary-fix.jq" 2>&1)
+assert_not_contains "$OUT_ONLY_SKIP" "No fixable issues found" "low-confidence-only run is not reported as clean"
+assert_contains "$OUT_ONLY_SKIP" "kept exports in 1 file" "low-confidence-only run surfaces the skip"
+
 echo "  summary-dupes.jq:"
 OUT=$(jq -r -f "$JQ_DIR/summary-dupes.jq" "$FIXTURES/dupes.json" 2>&1)
 assert_valid_markdown "$OUT" "produces output"
