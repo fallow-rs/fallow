@@ -17,8 +17,8 @@ const VERSION_FILE = ".fallow-version";
 const SIGNATURE_SUFFIX = ".sig";
 const SHA256_SUFFIX = ".sha256";
 const BINARY_SIGNING_PUBLIC_KEY = Buffer.from([
-  131, 78, 111, 215, 115, 51, 230, 238, 223, 119, 147, 71, 199, 16, 172, 180, 3, 210, 216, 35,
-  77, 85, 159, 94, 215, 200, 126, 85, 42, 222, 11, 209,
+  131, 78, 111, 215, 115, 51, 230, 238, 223, 119, 147, 71, 199, 16, 172, 180, 3, 210, 216, 35, 77,
+  85, 159, 94, 215, 200, 126, 85, 42, 222, 11, 209,
 ]);
 const ED25519_SPKI_HEADER = Buffer.from([
   0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
@@ -35,10 +35,7 @@ interface GithubRelease {
 
 const REQUEST_HEADERS = { "User-Agent": "fallow-vscode" };
 
-export const platformTargetFor = (
-  platform: NodeJS.Platform,
-  arch: string
-): string | null => {
+export const platformTargetFor = (platform: NodeJS.Platform, arch: string): string | null => {
   if (platform === "darwin" && arch === "arm64") return "darwin-arm64";
   if (platform === "darwin" && arch === "x64") return "darwin-x64";
   if (platform === "linux" && arch === "x64") return "linux-x64-gnu";
@@ -49,41 +46,33 @@ export const platformTargetFor = (
   return null;
 };
 
-const getPlatformTarget = (): string | null =>
-  platformTargetFor(os.platform(), os.arch());
+const getPlatformTarget = (): string | null => platformTargetFor(os.platform(), os.arch());
 
 const withRedirects = <T>(
   url: string,
-  handleResponse: (response: IncomingMessage) => Promise<T>
+  handleResponse: (response: IncomingMessage) => Promise<T>,
 ): Promise<T> =>
   new Promise((resolve, reject) => {
-    const request = https.get(
-      url,
-      { headers: REQUEST_HEADERS },
-      (response) => {
-        if (
-          response.statusCode &&
-          response.statusCode >= 300 &&
-          response.statusCode < 400 &&
-          response.headers.location
-        ) {
-          response.resume();
-          withRedirects(response.headers.location, handleResponse).then(
-            resolve,
-            reject
-          );
-          return;
-        }
-
-        if (response.statusCode && response.statusCode >= 400) {
-          response.resume();
-          reject(new Error(`HTTP ${response.statusCode}`));
-          return;
-        }
-
-        void handleResponse(response).then(resolve, reject);
+    const request = https.get(url, { headers: REQUEST_HEADERS }, (response) => {
+      if (
+        response.statusCode &&
+        response.statusCode >= 300 &&
+        response.statusCode < 400 &&
+        response.headers.location
+      ) {
+        response.resume();
+        withRedirects(response.headers.location, handleResponse).then(resolve, reject);
+        return;
       }
-    );
+
+      if (response.statusCode && response.statusCode >= 400) {
+        response.resume();
+        reject(new Error(`HTTP ${response.statusCode}`));
+        return;
+      }
+
+      void handleResponse(response).then(resolve, reject);
+    });
 
     request.on("error", reject);
   });
@@ -114,7 +103,7 @@ const httpsDownload = (url: string, dest: string): Promise<void> =>
           fs.unlink(dest, () => {});
           reject(err);
         });
-      })
+      }),
   );
 
 const getInstallDir = (context: vscode.ExtensionContext): string => {
@@ -125,26 +114,18 @@ const getInstallDir = (context: vscode.ExtensionContext): string => {
   return dir;
 };
 
-const getSignaturePath = (binaryPath: string): string =>
-  `${binaryPath}${SIGNATURE_SUFFIX}`;
+const getSignaturePath = (binaryPath: string): string => `${binaryPath}${SIGNATURE_SUFFIX}`;
 
-const getDigestPath = (binaryPath: string): string =>
-  `${binaryPath}${SHA256_SUFFIX}`;
+const getDigestPath = (binaryPath: string): string => `${binaryPath}${SHA256_SUFFIX}`;
 
-const getManagedBinaryPaths = (
-  dir: string
-): ReadonlyArray<string> => [
+const getManagedBinaryPaths = (dir: string): ReadonlyArray<string> => [
   path.join(dir, `${LSP_BINARY_NAME}${getExecutableExtension()}`),
   path.join(dir, `${CLI_BINARY_NAME}${getExecutableExtension()}`),
 ];
 
 const purgeManagedBinaries = (dir: string): void => {
   for (const binaryPath of getManagedBinaryPaths(dir)) {
-    for (const candidate of [
-      binaryPath,
-      getSignaturePath(binaryPath),
-      getDigestPath(binaryPath),
-    ]) {
+    for (const candidate of [binaryPath, getSignaturePath(binaryPath), getDigestPath(binaryPath)]) {
       try {
         if (fs.existsSync(candidate)) {
           fs.unlinkSync(candidate);
@@ -240,17 +221,14 @@ const writeDigestMarker = (binaryPath: string, digest: string): void => {
 const readDigestMarker = (binaryPath: string): string | null => {
   try {
     return normalizeSha256Digest(
-      `sha256:${fs.readFileSync(getDigestPath(binaryPath), "utf-8").trim()}`
+      `sha256:${fs.readFileSync(getDigestPath(binaryPath), "utf-8").trim()}`,
     );
   } catch {
     return null;
   }
 };
 
-export const verifyBinaryDigest = (
-  binaryPath: string,
-  expectedDigest: string
-): boolean => {
+export const verifyBinaryDigest = (binaryPath: string, expectedDigest: string): boolean => {
   try {
     const normalized = normalizeSha256Digest(`sha256:${expectedDigest}`);
     if (!normalized) {
@@ -269,7 +247,7 @@ const ensureManagedBinaryTrusted = (
   dir: string,
   binaryPath: string,
   label: string,
-  outputChannel?: vscode.OutputChannel
+  outputChannel?: vscode.OutputChannel,
 ): boolean => {
   const signaturePath = getSignaturePath(binaryPath);
   if (fs.existsSync(signaturePath)) {
@@ -278,7 +256,7 @@ const ensureManagedBinaryTrusted = (
     }
 
     outputChannel?.appendLine(
-      `Fallow: installed ${label} binary failed Ed25519 signature verification. Re-downloading.`
+      `Fallow: installed ${label} binary failed Ed25519 signature verification. Re-downloading.`,
     );
     purgeManagedBinaries(dir);
     return false;
@@ -287,13 +265,13 @@ const ensureManagedBinaryTrusted = (
   const expectedDigest = readDigestMarker(binaryPath);
   if (expectedDigest && verifyBinaryDigest(binaryPath, expectedDigest)) {
     outputChannel?.appendLine(
-      `Fallow: installed ${label} binary reused via stored SHA-256 digest verification.`
+      `Fallow: installed ${label} binary reused via stored SHA-256 digest verification.`,
     );
     return true;
   }
 
   outputChannel?.appendLine(
-    `Fallow: installed ${label} binary is neither signature-verified nor digest-verified. Re-downloading.`
+    `Fallow: installed ${label} binary is neither signature-verified nor digest-verified. Re-downloading.`,
   );
   purgeManagedBinaries(dir);
   return false;
@@ -303,11 +281,10 @@ const matchesExtensionVersion = (
   dir: string,
   binaryPath: string,
   label: string,
-  outputChannel?: vscode.OutputChannel
+  outputChannel?: vscode.OutputChannel,
 ): boolean => {
-  const extensionVersion =
-    vscode.extensions.getExtension("fallow-rs.fallow-vscode")?.packageJSON
-      ?.version as string | undefined;
+  const extensionVersion = vscode.extensions.getExtension("fallow-rs.fallow-vscode")?.packageJSON
+    ?.version as string | undefined;
   if (!extensionVersion) {
     return true;
   }
@@ -318,7 +295,7 @@ const matchesExtensionVersion = (
   }
 
   outputChannel?.appendLine(
-    `Fallow: installed ${label} binary is v${binaryVersion ?? "unknown"}, extension is v${extensionVersion}. Re-downloading.`
+    `Fallow: installed ${label} binary is v${binaryVersion ?? "unknown"}, extension is v${extensionVersion}. Re-downloading.`,
   );
   purgeManagedBinaries(dir);
   return false;
@@ -328,13 +305,10 @@ const getManagedBinaryPath = (
   context: vscode.ExtensionContext,
   binaryName: string,
   label: string,
-  outputChannel?: vscode.OutputChannel
+  outputChannel?: vscode.OutputChannel,
 ): string | null => {
   const dir = getInstallDir(context);
-  const binaryPath = path.join(
-    dir,
-    `${binaryName}${getExecutableExtension()}`
-  );
+  const binaryPath = path.join(dir, `${binaryName}${getExecutableExtension()}`);
   if (!fs.existsSync(binaryPath)) {
     return null;
   }
@@ -352,22 +326,20 @@ const getManagedBinaryPath = (
 
 export const getInstalledBinaryPath = (
   context: vscode.ExtensionContext,
-  outputChannel?: vscode.OutputChannel
-): string | null =>
-  getManagedBinaryPath(context, LSP_BINARY_NAME, "LSP", outputChannel);
+  outputChannel?: vscode.OutputChannel,
+): string | null => getManagedBinaryPath(context, LSP_BINARY_NAME, "LSP", outputChannel);
 
 export const getInstalledCliPath = (
   context: vscode.ExtensionContext,
-  outputChannel?: vscode.OutputChannel
-): string | null =>
-  getManagedBinaryPath(context, CLI_BINARY_NAME, "CLI", outputChannel);
+  outputChannel?: vscode.OutputChannel,
+): string | null => getManagedBinaryPath(context, CLI_BINARY_NAME, "CLI", outputChannel);
 
 /** Download a single binary asset from a GitHub release. Returns the dest path or null. */
 const downloadAsset = async (
   release: GithubRelease,
   binaryName: string,
   target: string,
-  dir: string
+  dir: string,
 ): Promise<string | null> => {
   const extension = getExecutableExtension();
   const assetName = `${binaryName}-${target}${extension}`;
@@ -378,7 +350,7 @@ const downloadAsset = async (
   }
 
   const signatureAsset = release.assets.find(
-    (candidate) => candidate.name === `${assetName}${SIGNATURE_SUFFIX}`
+    (candidate) => candidate.name === `${assetName}${SIGNATURE_SUFFIX}`,
   );
   const expectedDigest = normalizeSha256Digest(asset.digest);
 
@@ -406,9 +378,7 @@ const downloadAsset = async (
 
       writeDigestMarker(destPath, expectedDigest);
     } else {
-      throw new Error(
-        `${assetName} is missing both a signature asset and a GitHub release digest`
-      );
+      throw new Error(`${assetName} is missing both a signature asset and a GitHub release digest`);
     }
 
     if (os.platform() !== "win32") {
@@ -430,13 +400,11 @@ const downloadAsset = async (
   return destPath;
 };
 
-export const downloadBinary = async (
-  context: vscode.ExtensionContext
-): Promise<string | null> => {
+export const downloadBinary = async (context: vscode.ExtensionContext): Promise<string | null> => {
   const target = getPlatformTarget();
   if (!target) {
     void vscode.window.showErrorMessage(
-      `Fallow: unsupported platform ${os.platform()}-${os.arch()}`
+      `Fallow: unsupported platform ${os.platform()}-${os.arch()}`,
     );
     return null;
   }
@@ -450,7 +418,7 @@ export const downloadBinary = async (
     async () => {
       try {
         const releaseJson = await httpsGet(
-          `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`
+          `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
         );
         const release: GithubRelease = JSON.parse(releaseJson);
         const dir = getInstallDir(context);
@@ -459,16 +427,15 @@ export const downloadBinary = async (
         const lspPath = await downloadAsset(release, LSP_BINARY_NAME, target, dir);
         if (!lspPath) {
           void vscode.window.showErrorMessage(
-            `Fallow: no LSP binary found for ${target} in release ${release.tag_name}`
+            `Fallow: no LSP binary found for ${target} in release ${release.tag_name}`,
           );
           return null;
         }
 
         // Write version marker so future activations can detect stale binaries
         // without needing to execute them.
-        const extensionVersion =
-          vscode.extensions.getExtension("fallow-rs.fallow-vscode")?.packageJSON
-            ?.version as string | undefined;
+        const extensionVersion = vscode.extensions.getExtension("fallow-rs.fallow-vscode")
+          ?.packageJSON?.version as string | undefined;
         if (extensionVersion) {
           writeVersionMarker(dir, extensionVersion);
         }
@@ -478,30 +445,25 @@ export const downloadBinary = async (
         try {
           cliPath = await downloadAsset(release, CLI_BINARY_NAME, target, dir);
         } catch (cliErr) {
-          const cliMessage =
-            cliErr instanceof Error ? cliErr.message : String(cliErr);
-          void vscode.window.showWarningMessage(
-            `Fallow: CLI download skipped: ${cliMessage}`
-          );
+          const cliMessage = cliErr instanceof Error ? cliErr.message : String(cliErr);
+          void vscode.window.showWarningMessage(`Fallow: CLI download skipped: ${cliMessage}`);
         }
         if (cliPath) {
           void vscode.window.showInformationMessage(
-            `Fallow: ${release.tag_name} installed (LSP + CLI).`
+            `Fallow: ${release.tag_name} installed (LSP + CLI).`,
           );
         } else {
           void vscode.window.showInformationMessage(
-            `Fallow: LSP ${release.tag_name} installed. CLI binary not found in release — tree views require the fallow CLI in PATH.`
+            `Fallow: LSP ${release.tag_name} installed. CLI binary not found in release — tree views require the fallow CLI in PATH.`,
           );
         }
 
         return lspPath;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        void vscode.window.showErrorMessage(
-          `Fallow: failed to download binaries: ${message}`
-        );
+        void vscode.window.showErrorMessage(`Fallow: failed to download binaries: ${message}`);
         return null;
       }
-    }
+    },
   );
 };

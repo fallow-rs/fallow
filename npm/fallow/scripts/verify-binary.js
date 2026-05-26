@@ -24,13 +24,13 @@
 //
 // No external dependencies: uses node:crypto and node:fs only.
 
-const crypto = require('node:crypto');
-const fs = require('node:fs');
-const https = require('node:https');
-const path = require('node:path');
-const { getPlatformPackage } = require('./platform-package');
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const https = require("node:https");
+const path = require("node:path");
+const { getPlatformPackage } = require("./platform-package");
 
-const GITHUB_REPO = 'fallow-rs/fallow';
+const GITHUB_REPO = "fallow-rs/fallow";
 const DIGEST_TIMEOUT_MS = 10000;
 
 // 32-byte Ed25519 public key, identical to BINARY_SIGNING_PUBLIC_KEY in
@@ -39,8 +39,8 @@ const DIGEST_TIMEOUT_MS = 10000;
 // works offline and cannot be silently downgraded by tampering with the network
 // path.
 const EMBEDDED_PUBLIC_KEY = Buffer.from([
-  131, 78, 111, 215, 115, 51, 230, 238, 223, 119, 147, 71, 199, 16, 172, 180, 3, 210, 216, 35,
-  77, 85, 159, 94, 215, 200, 126, 85, 42, 222, 11, 209,
+  131, 78, 111, 215, 115, 51, 230, 238, 223, 119, 147, 71, 199, 16, 172, 180, 3, 210, 216, 35, 77,
+  85, 159, 94, 215, 200, 126, 85, 42, 222, 11, 209,
 ]);
 
 // SPKI DER header for Ed25519 (RFC 8410). 12 bytes prepended to a 32-byte raw
@@ -50,14 +50,14 @@ const ED25519_SPKI_HEADER = Buffer.from([
   0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
 ]);
 
-const SKIP_ENV = 'FALLOW_SKIP_BINARY_VERIFY';
+const SKIP_ENV = "FALLOW_SKIP_BINARY_VERIFY";
 
 function buildPublicKey(rawPubKey) {
   if (!Buffer.isBuffer(rawPubKey) || rawPubKey.length !== 32) {
-    throw new Error('expected 32-byte raw Ed25519 public key');
+    throw new Error("expected 32-byte raw Ed25519 public key");
   }
   const spki = Buffer.concat([ED25519_SPKI_HEADER, rawPubKey]);
-  return crypto.createPublicKey({ key: spki, format: 'der', type: 'spki' });
+  return crypto.createPublicKey({ key: spki, format: "der", type: "spki" });
 }
 
 function _verifyWithKey(binaryPath, rawPubKey) {
@@ -65,10 +65,14 @@ function _verifyWithKey(binaryPath, rawPubKey) {
   try {
     binaryBytes = fs.readFileSync(binaryPath);
   } catch (err) {
-    if (err && err.code === 'ENOENT') {
-      return { ok: false, code: 'binary-missing', message: `binary not found at ${binaryPath}` };
+    if (err && err.code === "ENOENT") {
+      return { ok: false, code: "binary-missing", message: `binary not found at ${binaryPath}` };
     }
-    return { ok: false, code: 'read-error', message: `cannot read binary at ${binaryPath}: ${err.message}` };
+    return {
+      ok: false,
+      code: "read-error",
+      message: `cannot read binary at ${binaryPath}: ${err.message}`,
+    };
   }
 
   const sigPath = `${binaryPath}.sig`;
@@ -76,31 +80,47 @@ function _verifyWithKey(binaryPath, rawPubKey) {
   try {
     signature = fs.readFileSync(sigPath);
   } catch (err) {
-    if (err && err.code === 'ENOENT') {
-      return { ok: false, code: 'sig-missing', message: `signature not found at ${sigPath}` };
+    if (err && err.code === "ENOENT") {
+      return { ok: false, code: "sig-missing", message: `signature not found at ${sigPath}` };
     }
-    return { ok: false, code: 'read-error', message: `cannot read signature at ${sigPath}: ${err.message}` };
+    return {
+      ok: false,
+      code: "read-error",
+      message: `cannot read signature at ${sigPath}: ${err.message}`,
+    };
   }
 
   if (signature.length !== 64) {
-    return { ok: false, code: 'sig-invalid', message: `signature at ${sigPath} has unexpected length ${signature.length} (want 64)` };
+    return {
+      ok: false,
+      code: "sig-invalid",
+      message: `signature at ${sigPath} has unexpected length ${signature.length} (want 64)`,
+    };
   }
 
   let publicKey;
   try {
     publicKey = buildPublicKey(rawPubKey);
   } catch (err) {
-    return { ok: false, code: 'key-invalid', message: `cannot construct public key: ${err.message}` };
+    return {
+      ok: false,
+      code: "key-invalid",
+      message: `cannot construct public key: ${err.message}`,
+    };
   }
 
   let valid;
   try {
     valid = crypto.verify(null, binaryBytes, publicKey, signature);
   } catch (err) {
-    return { ok: false, code: 'sig-invalid', message: `crypto.verify threw: ${err.message}` };
+    return { ok: false, code: "sig-invalid", message: `crypto.verify threw: ${err.message}` };
   }
   if (!valid) {
-    return { ok: false, code: 'sig-invalid', message: `Ed25519 verification failed for ${binaryPath}` };
+    return {
+      ok: false,
+      code: "sig-invalid",
+      message: `Ed25519 verification failed for ${binaryPath}`,
+    };
   }
   return { ok: true };
 }
@@ -110,29 +130,40 @@ function verifyBinaryAt(binaryPath) {
 }
 
 function normalizeDigest(digest) {
-  if (typeof digest !== 'string') {
+  if (typeof digest !== "string") {
     return null;
   }
   const lower = digest.trim().toLowerCase();
-  const value = lower.startsWith('sha256:') ? lower.slice('sha256:'.length) : lower;
+  const value = lower.startsWith("sha256:") ? lower.slice("sha256:".length) : lower;
   return /^[0-9a-f]{64}$/.test(value) ? value : null;
 }
 
 function sha256Hex(binaryPath) {
   try {
-    return { ok: true, digest: crypto.createHash('sha256').update(fs.readFileSync(binaryPath)).digest('hex') };
+    return {
+      ok: true,
+      digest: crypto.createHash("sha256").update(fs.readFileSync(binaryPath)).digest("hex"),
+    };
   } catch (err) {
-    if (err && err.code === 'ENOENT') {
-      return { ok: false, code: 'binary-missing', message: `binary not found at ${binaryPath}` };
+    if (err && err.code === "ENOENT") {
+      return { ok: false, code: "binary-missing", message: `binary not found at ${binaryPath}` };
     }
-    return { ok: false, code: 'read-error', message: `cannot read binary at ${binaryPath}: ${err.message}` };
+    return {
+      ok: false,
+      code: "read-error",
+      message: `cannot read binary at ${binaryPath}: ${err.message}`,
+    };
   }
 }
 
 function verifyDigestAt(binaryPath, expectedDigest) {
   const normalized = normalizeDigest(expectedDigest);
   if (!normalized) {
-    return { ok: false, code: 'digest-invalid', message: `invalid SHA-256 digest '${expectedDigest}'` };
+    return {
+      ok: false,
+      code: "digest-invalid",
+      message: `invalid SHA-256 digest '${expectedDigest}'`,
+    };
   }
 
   const actual = sha256Hex(binaryPath);
@@ -142,7 +173,7 @@ function verifyDigestAt(binaryPath, expectedDigest) {
   if (actual.digest !== normalized) {
     return {
       ok: false,
-      code: 'digest-mismatch',
+      code: "digest-mismatch",
       message: `SHA-256 digest mismatch for ${binaryPath}: got ${actual.digest}, want ${normalized}`,
     };
   }
@@ -153,7 +184,7 @@ function httpsJson(url, redirects = 0) {
   return new Promise((resolve, reject) => {
     const request = https.get(
       url,
-      { headers: { 'User-Agent': 'fallow-binary-verifier' }, timeout: DIGEST_TIMEOUT_MS },
+      { headers: { "User-Agent": "fallow-binary-verifier" }, timeout: DIGEST_TIMEOUT_MS },
       (response) => {
         if (
           response.statusCode &&
@@ -168,11 +199,15 @@ function httpsJson(url, redirects = 0) {
         }
 
         const chunks = [];
-        response.on('data', (chunk) => chunks.push(chunk));
-        response.on('end', () => {
-          const body = Buffer.concat(chunks).toString('utf8');
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("end", () => {
+          const body = Buffer.concat(chunks).toString("utf8");
           if (!response.statusCode || response.statusCode >= 400) {
-            reject(new Error(`GitHub release API returned HTTP ${response.statusCode || 'unknown'}: ${body.slice(0, 200)}`));
+            reject(
+              new Error(
+                `GitHub release API returned HTTP ${response.statusCode || "unknown"}: ${body.slice(0, 200)}`,
+              ),
+            );
             return;
           }
           try {
@@ -183,8 +218,10 @@ function httpsJson(url, redirects = 0) {
         });
       },
     );
-    request.on('timeout', () => request.destroy(new Error(`timed out after ${DIGEST_TIMEOUT_MS}ms`)));
-    request.on('error', reject);
+    request.on("timeout", () =>
+      request.destroy(new Error(`timed out after ${DIGEST_TIMEOUT_MS}ms`)),
+    );
+    request.on("error", reject);
   });
 }
 
@@ -226,20 +263,20 @@ function platformPackageDir(pkg, resolveFrom) {
 // when the manifest does not exist, cannot be parsed, lacks the field, or
 // the value is malformed. Refs #597.
 function readEmbeddedDigest(manifestPath, binaryFileName) {
-  if (typeof manifestPath !== 'string' || manifestPath.length === 0) {
+  if (typeof manifestPath !== "string" || manifestPath.length === 0) {
     return null;
   }
   let manifest;
   try {
-    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   } catch {
     return null;
   }
-  if (!manifest || typeof manifest !== 'object') {
+  if (!manifest || typeof manifest !== "object") {
     return null;
   }
   const digests = manifest.fallowDigests;
-  if (!digests || typeof digests !== 'object') {
+  if (!digests || typeof digests !== "object") {
     return null;
   }
   return normalizeDigest(digests[binaryFileName]);
@@ -250,8 +287,8 @@ function binaryTargetsForPlatform(platformId) {
   // process.platform. Production callers pass `<platform>-<arch>...` strings
   // that already encode windows-ness (`win32-x64-msvc`, `win32-arm64-msvc`),
   // and tests can synthesize a Windows verify without running on Windows.
-  const isWindows = typeof platformId === 'string' && platformId.startsWith('win32');
-  const ext = isWindows ? '.exe' : '';
+  const isWindows = typeof platformId === "string" && platformId.startsWith("win32");
+  const ext = isWindows ? ".exe" : "";
   return [
     { binary: `fallow${ext}`, asset: `fallow-${platformId}${ext}` },
     { binary: `fallow-lsp${ext}`, asset: `fallow-lsp-${platformId}${ext}` },
@@ -261,16 +298,16 @@ function binaryTargetsForPlatform(platformId) {
 
 function isSkipRequested() {
   const v = process.env[SKIP_ENV];
-  return v === '1' || v === 'true' || v === 'yes';
+  return v === "1" || v === "true" || v === "yes";
 }
 
 function currentPlatformPackageName() {
-  if (process.platform !== 'linux') {
+  if (process.platform !== "linux") {
     return getPlatformPackage(process.platform, process.arch);
   }
   let libcFamily;
   try {
-    libcFamily = require('detect-libc').familySync();
+    libcFamily = require("detect-libc").familySync();
   } catch {
     libcFamily = undefined;
   }
@@ -280,20 +317,20 @@ function currentPlatformPackageName() {
 function readManifestForPackage(manifestPath, pkg) {
   let version;
   try {
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
     version = manifest.version;
   } catch (err) {
     return {
       ok: false,
-      code: 'manifest-invalid',
+      code: "manifest-invalid",
       message: `cannot read platform package manifest for ${pkg}: ${err.message}`,
       package: pkg,
     };
   }
-  if (typeof version !== 'string' || !version.trim()) {
+  if (typeof version !== "string" || !version.trim()) {
     return {
       ok: false,
-      code: 'manifest-invalid',
+      code: "manifest-invalid",
       message: `platform package ${pkg} does not declare a version`,
       package: pkg,
     };
@@ -306,14 +343,14 @@ function readManifestForPackage(manifestPath, pkg) {
 // or { ok: false, code, message, package? } matching verifyInstalled's error
 // shape. dirOverride is a test-only knob; production callers must not set it.
 function resolvePlatformPackageForVerify(opts) {
-  if (typeof opts.dirOverride === 'string' && opts.dirOverride.length > 0) {
+  if (typeof opts.dirOverride === "string" && opts.dirOverride.length > 0) {
     return {
       ok: true,
       dir: opts.dirOverride,
-      manifestPath: path.join(opts.dirOverride, 'package.json'),
-      pkg: '<override>',
-      version: opts.version || '0.0.0',
-      platformId: opts.platformId || 'test-platform',
+      manifestPath: path.join(opts.dirOverride, "package.json"),
+      pkg: "<override>",
+      version: opts.version || "0.0.0",
+      platformId: opts.platformId || "test-platform",
     };
   }
 
@@ -321,7 +358,7 @@ function resolvePlatformPackageForVerify(opts) {
   if (!pkg) {
     return {
       ok: false,
-      code: 'platform-unsupported',
+      code: "platform-unsupported",
       message: `no prebuilt binary for ${process.platform}-${process.arch}`,
     };
   }
@@ -333,7 +370,7 @@ function resolvePlatformPackageForVerify(opts) {
   } catch (err) {
     return {
       ok: false,
-      code: 'platform-package-missing',
+      code: "platform-package-missing",
       message: `platform package ${pkg} not installed: ${err.message}`,
       package: pkg,
     };
@@ -348,7 +385,7 @@ function resolvePlatformPackageForVerify(opts) {
     manifestPath,
     pkg,
     version: manifest.version,
-    platformId: pkg.replace(/^@fallow-cli\//, ''),
+    platformId: pkg.replace(/^@fallow-cli\//, ""),
   };
 }
 
@@ -370,11 +407,15 @@ async function verifyOneBinary(target, dir, pkg, manifestPath, verifyFn, digestP
   let expectedDigest = manifestPath ? readEmbeddedDigest(manifestPath, target.binary) : null;
   if (!expectedDigest && digestProvider) {
     try {
-      expectedDigest = await digestProvider({ assetName: target.asset, binaryPath, packageName: pkg });
+      expectedDigest = await digestProvider({
+        assetName: target.asset,
+        binaryPath,
+        packageName: pkg,
+      });
     } catch (err) {
       return {
         ok: false,
-        code: 'digest-unavailable',
+        code: "digest-unavailable",
         message: `cannot load SHA-256 digest for ${target.asset}: ${err.message}`,
         binary: binaryPath,
         package: pkg,
@@ -382,7 +423,13 @@ async function verifyOneBinary(target, dir, pkg, manifestPath, verifyFn, digestP
     }
   }
   if (!expectedDigest) {
-    return { ok: false, code: 'digest-unavailable', message: 'no digest', binary: binaryPath, package: pkg };
+    return {
+      ok: false,
+      code: "digest-unavailable",
+      message: "no digest",
+      binary: binaryPath,
+      package: pkg,
+    };
   }
   const digestResult = verifyDigestAt(binaryPath, expectedDigest);
   if (!digestResult.ok) {
@@ -415,10 +462,11 @@ async function verifyInstalled(options) {
     return { ok: true, skipped: true, reason: `${SKIP_ENV} is set` };
   }
 
-  const verify = typeof opts.verifyFn === 'function' ? opts.verifyFn : verifyBinaryAt;
-  const digestProvider = typeof opts.digestProvider === 'function'
-    ? opts.digestProvider
-    : ({ assetName, version }) => fetchReleaseDigest(version, assetName);
+  const verify = typeof opts.verifyFn === "function" ? opts.verifyFn : verifyBinaryAt;
+  const digestProvider =
+    typeof opts.digestProvider === "function"
+      ? opts.digestProvider
+      : ({ assetName, version }) => fetchReleaseDigest(version, assetName);
 
   const resolved = resolvePlatformPackageForVerify(opts);
   if (!resolved.ok) return resolved;
@@ -462,8 +510,8 @@ function verifyInstalledSync(options) {
     return { ok: true, skipped: true, reason: `${SKIP_ENV} is set` };
   }
 
-  const verify = typeof opts.verifyFn === 'function' ? opts.verifyFn : verifyBinaryAt;
-  const digestProvider = typeof opts.digestProvider === 'function' ? opts.digestProvider : null;
+  const verify = typeof opts.verifyFn === "function" ? opts.verifyFn : verifyBinaryAt;
+  const digestProvider = typeof opts.digestProvider === "function" ? opts.digestProvider : null;
 
   const resolved = resolvePlatformPackageForVerify(opts);
   if (!resolved.ok) return resolved;
@@ -494,7 +542,7 @@ function verifyOneBinarySync(target, dir, pkg, manifestPath, verifyFn, digestPro
     } catch (err) {
       return {
         ok: false,
-        code: 'digest-unavailable',
+        code: "digest-unavailable",
         message: `cannot load SHA-256 digest for ${target.asset}: ${err.message}`,
         binary: binaryPath,
         package: pkg,
@@ -504,7 +552,7 @@ function verifyOneBinarySync(target, dir, pkg, manifestPath, verifyFn, digestPro
   if (!expectedDigest) {
     return {
       ok: false,
-      code: 'digest-unavailable',
+      code: "digest-unavailable",
       message:
         `no embedded SHA-256 digest for ${target.binary} in ${pkg} ` +
         `(platform package predates fallow 2.78.1). ` +

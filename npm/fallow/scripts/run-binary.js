@@ -8,23 +8,23 @@
 //    posture (replaces the install-time confirmation message removed when
 //    postinstall verification was retired for RFC 868 readiness).
 
-const { execFileSync } = require('node:child_process');
-const path = require('node:path');
-const fs = require('node:fs');
+const { execFileSync } = require("node:child_process");
+const path = require("node:path");
+const fs = require("node:fs");
 
-const { getPlatformPackage } = require('./platform-package');
-const { ensureVerified } = require('./lazy-verify');
+const { getPlatformPackage } = require("./platform-package");
+const { ensureVerified } = require("./lazy-verify");
 
 function resolvePlatformPackageName() {
-  if (process.platform !== 'linux') {
+  if (process.platform !== "linux") {
     return getPlatformPackage(process.platform, process.arch);
   }
   try {
-    const { familySync } = require('detect-libc');
+    const { familySync } = require("detect-libc");
     return getPlatformPackage(process.platform, process.arch, familySync());
   } catch {
     // musl binaries are statically linked and work on both glibc and musl
-    return getPlatformPackage(process.platform, process.arch, 'musl');
+    return getPlatformPackage(process.platform, process.arch, "musl");
   }
 }
 
@@ -32,7 +32,7 @@ function isVersionQuery(argv) {
   // clap registers both --version and -V on the root command.
   const tail = argv.slice(2);
   if (tail.length === 0) return false;
-  return tail[0] === '--version' || tail[0] === '-V';
+  return tail[0] === "--version" || tail[0] === "-V";
 }
 
 function describeVerified(result) {
@@ -46,7 +46,7 @@ function describeVerified(result) {
     if (result.sentinelPath) {
       return `verified: yes (sentinel ${result.sentinelPath})`;
     }
-    return 'verified: yes (sentinel not persisted)';
+    return "verified: yes (sentinel not persisted)";
   }
   return `verified: no (${result.code})`;
 }
@@ -71,11 +71,11 @@ function resolvePlatformPaths() {
 }
 
 function printVerifyError(verifyResult) {
-  const where = verifyResult.binary ? ` ${verifyResult.binary}` : '';
+  const where = verifyResult.binary ? ` ${verifyResult.binary}` : "";
   process.stderr.write(
     `fallow: binary verification failed${where} (${verifyResult.code}): ${verifyResult.message}\n` +
-    `See https://github.com/fallow-rs/fallow/blob/main/SECURITY.md for the trust model. ` +
-    `Set FALLOW_SKIP_BINARY_VERIFY=1 only when you deliberately replace the published binary.\n`,
+      `See https://github.com/fallow-rs/fallow/blob/main/SECURITY.md for the trust model. ` +
+      `Set FALLOW_SKIP_BINARY_VERIFY=1 only when you deliberately replace the published binary.\n`,
   );
 }
 
@@ -88,7 +88,7 @@ function writeVerifiedLineIfVersionQuery(verifyResult) {
 function runBinary(binaryBaseName) {
   const { pkg, manifestPath, platformPkgDir } = resolvePlatformPaths();
 
-  const binaryName = process.platform === 'win32' ? `${binaryBaseName}.exe` : binaryBaseName;
+  const binaryName = process.platform === "win32" ? `${binaryBaseName}.exe` : binaryBaseName;
   const binaryPath = path.join(platformPkgDir, binaryName);
   if (!fs.existsSync(binaryPath)) {
     process.stderr.write(`Binary not found at ${binaryPath}\n`);
@@ -103,7 +103,7 @@ function runBinary(binaryBaseName) {
   }
 
   try {
-    execFileSync(binaryPath, process.argv.slice(2), { stdio: 'inherit' });
+    execFileSync(binaryPath, process.argv.slice(2), { stdio: "inherit" });
   } catch (e) {
     if (e.status === undefined) throw e;
     // Child has already written its --version line via inherited stdio;
@@ -118,5 +118,5 @@ function runBinary(binaryBaseName) {
 module.exports = {
   runBinary,
   describeVerified, // test-only
-  isVersionQuery,   // test-only
+  isVersionQuery, // test-only
 };

@@ -26,13 +26,10 @@ const FALLOW_LANGUAGES = [
 const labelFor = (code: string): string =>
   getDiagnosticCategories().find((c) => c.code === code)?.label ?? code;
 
-const categoryWord = (count: number): string =>
-  count === 1 ? "category" : "categories";
+const categoryWord = (count: number): string => (count === 1 ? "category" : "categories");
 
 const muteScopeTooltip = (filter: DiagnosticFilter): vscode.MarkdownString => {
-  const muted = Array.from(filter.mutedCategoriesSnapshot())
-    .map(labelFor)
-    .sort();
+  const muted = Array.from(filter.mutedCategoriesSnapshot()).map(labelFor).toSorted();
   const mutedAll = filter.isMutedAll();
   const lines: string[] = [];
   if (mutedAll) {
@@ -47,11 +44,8 @@ const muteScopeTooltip = (filter: DiagnosticFilter): vscode.MarkdownString => {
     lines.push("All Fallow findings visible.");
   }
   lines.push("");
-  lines.push(
-    "Local view filter only. CI and `fallow check` still report every finding."
-  );
-  lines.push("To disable a rule project-wide, edit your fallow config."
-  );
+  lines.push("Local view filter only. CI and `fallow check` still report every finding.");
+  lines.push("To disable a rule project-wide, edit your fallow config.");
   const md = new vscode.MarkdownString(lines.join("\n"));
   md.isTrusted = false;
   md.supportThemeIcons = true;
@@ -70,9 +64,7 @@ const summaryText = (filter: DiagnosticFilter): string => {
  *  Severity is `Warning` whenever anything is muted, otherwise the item is
  *  hidden. Click opens the manage-mutes QuickPick. A secondary command
  *  clears all mutes in one click. */
-const createLanguageStatus = (
-  filter: DiagnosticFilter
-): vscode.LanguageStatusItem => {
+const createLanguageStatus = (filter: DiagnosticFilter): vscode.LanguageStatusItem => {
   const selector = FALLOW_LANGUAGES.map((language) => ({
     scheme: "file",
     language,
@@ -127,8 +119,7 @@ const TITLE_BUTTONS = {
 const showManageQuickPick = async (filter: DiagnosticFilter): Promise<void> => {
   const pick = vscode.window.createQuickPick<ManagePickItem>();
   pick.title = "Fallow: manage diagnostic mutes (CI is unaffected)";
-  pick.placeholder =
-    "Check categories to hide them in the editor. Press Enter to apply.";
+  pick.placeholder = "Check categories to hide them in the editor. Press Enter to apply.";
   pick.canSelectMany = true;
   pick.matchOnDetail = true;
   pick.buttons = [TITLE_BUTTONS.toggleAll, TITLE_BUTTONS.clearAll];
@@ -165,9 +156,7 @@ const showManageQuickPick = async (filter: DiagnosticFilter): Promise<void> => {
     pick.onDidAccept(() => {
       const globalSelected = pick.selectedItems.some((i) => i.code === null);
       const selected = new Set(
-        pick.selectedItems
-          .map((i) => i.code)
-          .filter((code): code is string => code !== null)
+        pick.selectedItems.map((i) => i.code).filter((code): code is string => code !== null),
       );
       if (globalSelected) {
         filter.setMutedAll(true);
@@ -191,24 +180,22 @@ const updateContextKey = (filter: DiagnosticFilter): void => {
   void vscode.commands.executeCommand(
     "setContext",
     "fallow.duplicatesMuted",
-    filter.isCategoryMuted(DUPLICATE_CODE) || filter.isMutedAll()
+    filter.isCategoryMuted(DUPLICATE_CODE) || filter.isMutedAll(),
   );
   void vscode.commands.executeCommand(
     "setContext",
     "fallow.allDiagnosticsMuted",
-    filter.isMutedAll()
+    filter.isMutedAll(),
   );
 };
 
 class FallowMuteCodeActions implements vscode.CodeActionProvider {
-  public static readonly providedKinds: ReadonlyArray<vscode.CodeActionKind> = [
-    CODE_ACTION_KIND,
-  ];
+  public static readonly providedKinds: ReadonlyArray<vscode.CodeActionKind> = [CODE_ACTION_KIND];
 
   public provideCodeActions(
     _document: vscode.TextDocument,
     _range: vscode.Range | vscode.Selection,
-    context: vscode.CodeActionContext
+    context: vscode.CodeActionContext,
   ): vscode.CodeAction[] {
     const seen = new Set<string>();
     const actions: vscode.CodeAction[] = [];
@@ -224,7 +211,7 @@ class FallowMuteCodeActions implements vscode.CodeActionProvider {
       const label = labelFor(code);
       const action = new vscode.CodeAction(
         `Mute Fallow ${label.toLowerCase()} findings in this workspace`,
-        CODE_ACTION_KIND
+        CODE_ACTION_KIND,
       );
       action.command = {
         command: "fallow.muteDiagnosticCategory",
@@ -240,20 +227,18 @@ class FallowMuteCodeActions implements vscode.CodeActionProvider {
 
 export const registerDiagnosticMuteUi = (
   context: vscode.ExtensionContext,
-  filter: DiagnosticFilter
+  filter: DiagnosticFilter,
 ): void => {
   const statusItem = createLanguageStatus(filter);
   context.subscriptions.push(statusItem);
 
-  context.subscriptions.push(
-    filter.onDidChange(() => updateContextKey(filter))
-  );
+  context.subscriptions.push(filter.onDidChange(() => updateContextKey(filter)));
   updateContextKey(filter);
 
   context.subscriptions.push(
     vscode.workspace.onDidCloseTextDocument((doc) => {
       filter.evictUri(doc.uri);
-    })
+    }),
   );
 
   context.subscriptions.push(
@@ -263,47 +248,39 @@ export const registerDiagnosticMuteUi = (
         nowMuted
           ? "Fallow: muted code-duplication findings (CI is unaffected)"
           : "Fallow: showing code-duplication findings",
-        4000
+        4000,
       );
-    })
+    }),
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.toggleAllDiagnostics", () => {
       const nowMuted = filter.toggleMutedAll();
       void vscode.window.setStatusBarMessage(
-        nowMuted
-          ? "Fallow: muted all findings (CI is unaffected)"
-          : "Fallow: showing all findings",
-        4000
+        nowMuted ? "Fallow: muted all findings (CI is unaffected)" : "Fallow: showing all findings",
+        4000,
       );
-    })
+    }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "fallow.manageDiagnosticMutes",
-      async () => {
-        await showManageQuickPick(filter);
-      }
-    )
+    vscode.commands.registerCommand("fallow.manageDiagnosticMutes", async () => {
+      await showManageQuickPick(filter);
+    }),
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.clearDiagnosticMutes", () => {
       filter.clearAllMutes();
-    })
+    }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
-      "fallow.muteDiagnosticCategory",
-      (code: unknown) => {
-        if (typeof code === "string" && code.length > 0) {
-          filter.setCategoryMuted(code, true);
-        }
+    vscode.commands.registerCommand("fallow.muteDiagnosticCategory", (code: unknown) => {
+      if (typeof code === "string" && code.length > 0) {
+        filter.setCategoryMuted(code, true);
       }
-    )
+    }),
   );
 
   for (const language of FALLOW_LANGUAGES) {
@@ -311,8 +288,8 @@ export const registerDiagnosticMuteUi = (
       vscode.languages.registerCodeActionsProvider(
         { scheme: "file", language },
         new FallowMuteCodeActions(),
-        { providedCodeActionKinds: FallowMuteCodeActions.providedKinds }
-      )
+        { providedCodeActionKinds: FallowMuteCodeActions.providedKinds },
+      ),
     );
   }
 };

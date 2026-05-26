@@ -1,0 +1,88 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/target/**",
+    "**/.fallow/**",
+    "**/coverage/**",
+    "**/.cache/**",
+    "**/*.min.js",
+    "**/*.bundle.js",
+    "reference/**",
+    "benchmarks/fixtures/**",
+    "benchmarks/knip6/**",
+    "tests/fixtures/**",
+    "tests/conformance/fixtures/**",
+    "editors/vscode/test/integration/fixtures/**",
+    "editors/vscode/dist/**",
+    "editors/vscode/out/**",
+    "editors/vscode/src/generated/**",
+    "npm/fallow/types/**",
+    "npm/fallow/skills/**",
+    "crates/napi/types/**",
+    "crates/napi/index.js",
+    "crates/napi/index.d.ts",
+    "quality/**",
+    ".internal/**"
+  ],
+  "plugins": [
+    "import",
+    "node",
+    "promise",
+    "unicorn"
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "warn"
+  },
+  "rules": {
+    "no-unused-vars": [
+      "error",
+      {
+        "args": "after-used",
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_",
+        "ignoreRestSiblings": true
+      }
+    ],
+    "no-console": "off",
+    "no-empty": ["error", { "allowEmptyCatch": true }],
+    "no-underscore-dangle": "off",
+    "no-await-in-loop": "off",
+    "unicorn/prefer-node-protocol": "error",
+    "unicorn/no-empty-file": "error",
+    "unicorn/no-array-sort": "error",
+    "unicorn/consistent-function-scoping": "off"
+  },
+  "overrides": [
+    {
+      "files": ["**/*.test.{js,mjs,cjs,ts,tsx}", "**/*.spec.{js,mjs,cjs,ts,tsx}"],
+      "rules": {
+        "no-unused-vars": [
+          "error",
+          {
+            "args": "after-used",
+            "argsIgnorePattern": "^_",
+            "varsIgnorePattern": "^_",
+            "caughtErrorsIgnorePattern": "^_"
+          }
+        ]
+      }
+    },
+    {
+      "files": ["npm/fallow/bin/*"],
+      "rules": {
+        "unicorn/prefer-node-protocol": "off"
+      }
+    },
+    {
+      "files": ["editors/vscode/**/*.ts", "editors/vscode/**/*.tsx"],
+      "rules": {
+        "unicorn/prefer-node-protocol": "off"
+      }
+    }
+  ]
+}

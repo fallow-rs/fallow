@@ -24,21 +24,13 @@ import {
   resetDiagnosticCategories,
   setDiagnosticCategories,
 } from "./diagnosticFilter.js";
-import {
-  downloadBinary,
-  getBinaryVersion,
-  getInstalledBinaryPath,
-} from "./download.js";
+import { downloadBinary, getBinaryVersion, getInstalledBinaryPath } from "./download.js";
 
 let client: LanguageClient | null = null;
 
-const warnIfVersionMismatch = (
-  binaryPath: string,
-  outputChannel?: vscode.OutputChannel
-): void => {
-  const extensionVersion =
-    vscode.extensions.getExtension("fallow-rs.fallow-vscode")?.packageJSON
-      ?.version as string | undefined;
+const warnIfVersionMismatch = (binaryPath: string, outputChannel?: vscode.OutputChannel): void => {
+  const extensionVersion = vscode.extensions.getExtension("fallow-rs.fallow-vscode")?.packageJSON
+    ?.version as string | undefined;
   if (!extensionVersion) return;
 
   const binaryVersion = getBinaryVersion(binaryPath);
@@ -51,7 +43,7 @@ const warnIfVersionMismatch = (
 
 const resolveBinaryPath = async (
   context: vscode.ExtensionContext,
-  outputChannel?: vscode.OutputChannel
+  outputChannel?: vscode.OutputChannel,
 ): Promise<string | null> => {
   const configPath = getLspPath();
   if (configPath) {
@@ -60,7 +52,7 @@ const resolveBinaryPath = async (
       return configPath;
     }
     void vscode.window.showWarningMessage(
-      `Fallow: configured LSP path "${configPath}" does not exist.`
+      `Fallow: configured LSP path "${configPath}" does not exist.`,
     );
     return null;
   }
@@ -82,7 +74,9 @@ const resolveBinaryPath = async (
 
   const installed = getInstalledBinaryPath(context, outputChannel);
   if (installed) {
-    outputChannel?.appendLine(`Binary resolution: using previously downloaded binary: ${installed}`);
+    outputChannel?.appendLine(
+      `Binary resolution: using previously downloaded binary: ${installed}`,
+    );
     return installed;
   }
 
@@ -94,7 +88,7 @@ const resolveBinaryPath = async (
     "Fallow: fallow-lsp binary not found. Would you like to download it?",
     "Download",
     "Set Path",
-    "Cancel"
+    "Cancel",
   );
 
   if (choice === "Download") {
@@ -102,10 +96,7 @@ const resolveBinaryPath = async (
   }
 
   if (choice === "Set Path") {
-    void vscode.commands.executeCommand(
-      "workbench.action.openSettings",
-      "fallow.lspPath"
-    );
+    void vscode.commands.executeCommand("workbench.action.openSettings", "fallow.lspPath");
   }
 
   return null;
@@ -113,7 +104,7 @@ const resolveBinaryPath = async (
 
 export const loadDiagnosticCategories = async (
   lspClient: LanguageClient,
-  outputChannel: vscode.OutputChannel
+  outputChannel: vscode.OutputChannel,
 ): Promise<void> => {
   try {
     const response = await lspClient.sendRequest<unknown>("fallow/issueTypes");
@@ -121,19 +112,17 @@ export const loadDiagnosticCategories = async (
     if (!categories) {
       resetDiagnosticCategories();
       outputChannel.appendLine(
-        "fallow/issueTypes returned an invalid response; using bundled diagnostic categories."
+        "fallow/issueTypes returned an invalid response; using bundled diagnostic categories.",
       );
       return;
     }
     setDiagnosticCategories(categories);
-    outputChannel.appendLine(
-      `Loaded ${categories.length} diagnostic categories from fallow-lsp.`
-    );
+    outputChannel.appendLine(`Loaded ${categories.length} diagnostic categories from fallow-lsp.`);
   } catch (err) {
     resetDiagnosticCategories();
     const message = err instanceof Error ? err.message : String(err);
     outputChannel.appendLine(
-      `fallow/issueTypes unavailable (${message}); using bundled diagnostic categories.`
+      `fallow/issueTypes unavailable (${message}); using bundled diagnostic categories.`,
     );
   }
 };
@@ -141,7 +130,7 @@ export const loadDiagnosticCategories = async (
 export const startClient = async (
   context: vscode.ExtensionContext,
   outputChannel: vscode.OutputChannel,
-  diagnosticFilter?: DiagnosticFilter
+  diagnosticFilter?: DiagnosticFilter,
 ): Promise<LanguageClient | null> => {
   const binaryPath = await resolveBinaryPath(context, outputChannel);
   if (!binaryPath) {
@@ -181,27 +170,15 @@ export const startClient = async (
           handleDiagnostics: (uri, diagnostics, next) =>
             diagnosticFilter.handleDiagnostics(uri, diagnostics, next),
           provideDiagnostics: (document, previousResultId, token, next) =>
-            diagnosticFilter.provideDiagnostics(
-              document,
-              previousResultId,
-              token,
-              next
-            ),
+            diagnosticFilter.provideDiagnostics(document, previousResultId, token, next),
         }
       : undefined,
   };
 
-  client = new LanguageClient(
-    "fallow",
-    "Fallow Language Server",
-    serverOptions,
-    clientOptions
-  );
+  client = new LanguageClient("fallow", "Fallow Language Server", serverOptions, clientOptions);
 
   if (traceLevel !== "off") {
-    void client.setTrace(
-      traceLevel === "verbose" ? Trace.Verbose : Trace.Messages
-    );
+    void client.setTrace(traceLevel === "verbose" ? Trace.Verbose : Trace.Messages);
   }
 
   try {
@@ -212,7 +189,7 @@ export const startClient = async (
     const message = err instanceof Error ? err.message : String(err);
     outputChannel.appendLine(`Failed to start language server: ${message}`);
     void vscode.window.showErrorMessage(
-      `Fallow: failed to start language server. Check the output channel for details.`
+      `Fallow: failed to start language server. Check the output channel for details.`,
     );
     client = null;
     return null;
@@ -233,7 +210,7 @@ export const stopClient = async (): Promise<void> => {
 export const restartClient = async (
   context: vscode.ExtensionContext,
   outputChannel: vscode.OutputChannel,
-  diagnosticFilter?: DiagnosticFilter
+  diagnosticFilter?: DiagnosticFilter,
 ): Promise<LanguageClient | null> => {
   // Detach BEFORE stop so a user toggle that fires during the gap can't
   // call refresh() against a disposed DiagnosticCollection. startClient

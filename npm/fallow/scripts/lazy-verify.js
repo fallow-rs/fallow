@@ -19,18 +19,18 @@
 //
 // No external deps beyond node:fs / node:path / node:crypto.
 
-const fs = require('node:fs');
-const path = require('node:path');
-const crypto = require('node:crypto');
+const fs = require("node:fs");
+const path = require("node:path");
+const crypto = require("node:crypto");
 
-const { resolveSentinelPath } = require('./sentinel-path');
-const { verifyInstalledSync, SKIP_ENV } = require('./verify-binary');
+const { resolveSentinelPath } = require("./sentinel-path");
+const { verifyInstalledSync, SKIP_ENV } = require("./verify-binary");
 
 // Bumped to 2 when SHA-256 + platformPkgDir binding landed (closes the
 // cross-install reuse gap in the shared $XDG fallback cache). v1 sentinels
 // without these fields are invalidated automatically.
 const SENTINEL_SCHEMA_VERSION = 2;
-const VERIFY_LOG_ENV = 'FALLOW_VERIFY_LOG';
+const VERIFY_LOG_ENV = "FALLOW_VERIFY_LOG";
 
 // One-shot warning state: each warning class fires once per process,
 // keyed by `code` so independent failure modes are still surfaced.
@@ -46,9 +46,9 @@ function warnOnce(code, message) {
 
 function isVerifyLogEnabled(env) {
   const v = (env || process.env)[VERIFY_LOG_ENV];
-  if (typeof v !== 'string') return false;
+  if (typeof v !== "string") return false;
   const lower = v.trim().toLowerCase();
-  return lower === '1' || lower === 'true' || lower === 'yes';
+  return lower === "1" || lower === "true" || lower === "yes";
 }
 
 function emitVerifyLog(env, payload) {
@@ -56,17 +56,17 @@ function emitVerifyLog(env, payload) {
   // Stable single-line format. Fields are space-separated key=value pairs.
   // Order matters for log-grep ergonomics; do not reorder casually.
   const parts = [];
-  for (const key of ['outcome', 'cache', 'sentinel', 'reason', 'code', 'binary']) {
+  for (const key of ["outcome", "cache", "sentinel", "reason", "code", "binary"]) {
     if (payload[key] !== undefined && payload[key] !== null) {
-      const v = String(payload[key]).replace(/[\s"]/g, '_');
+      const v = String(payload[key]).replace(/[\s"]/g, "_");
       parts.push(`${key}=${v}`);
     }
   }
-  process.stderr.write(`fallow-verify ${parts.join(' ')}\n`);
+  process.stderr.write(`fallow-verify ${parts.join(" ")}\n`);
 }
 
 function binaryTargetsForPlatform(platform) {
-  const ext = platform === 'win32' ? '.exe' : '';
+  const ext = platform === "win32" ? ".exe" : "";
   return [`fallow${ext}`, `fallow-lsp${ext}`, `fallow-mcp${ext}`];
 }
 
@@ -80,8 +80,8 @@ function statMtimeMs(absPath) {
 
 function readManifestVersion(manifestPath) {
   try {
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    if (typeof manifest.version === 'string' && manifest.version.length > 0) {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    if (typeof manifest.version === "string" && manifest.version.length > 0) {
       return { version: manifest.version, name: manifest.name };
     }
   } catch {}
@@ -91,18 +91,18 @@ function readManifestVersion(manifestPath) {
 // Parse the sentinel JSON file, returning the parsed object or null on any
 // failure (missing file, IO error, malformed JSON, non-object value).
 function readSentinelFile(sentinelPath) {
-  if (typeof sentinelPath !== 'string' || sentinelPath.length === 0) {
+  if (typeof sentinelPath !== "string" || sentinelPath.length === 0) {
     return null;
   }
   let raw;
   try {
-    raw = fs.readFileSync(sentinelPath, 'utf8');
+    raw = fs.readFileSync(sentinelPath, "utf8");
   } catch {
     return null;
   }
   try {
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : null;
+    return parsed && typeof parsed === "object" ? parsed : null;
   } catch {
     return null;
   }
@@ -123,7 +123,7 @@ function sentinelStructureMatches(parsed, manifest, platformPkgDir) {
   if (parsed.packageVersion !== manifest.version) return false;
   if (parsed.packageName !== manifest.name) return false;
   if (parsed.platformPkgDir !== platformPkgDir) return false;
-  return parsed.binaries && typeof parsed.binaries === 'object';
+  return parsed.binaries && typeof parsed.binaries === "object";
 }
 
 // Compute a hex SHA-256 of a file's bytes. Used to bind the sentinel to the
@@ -131,7 +131,7 @@ function sentinelStructureMatches(parsed, manifest, platformPkgDir) {
 // same mtime cannot ride a stale cache entry.
 function sha256OfFile(absPath) {
   try {
-    return crypto.createHash('sha256').update(fs.readFileSync(absPath)).digest('hex');
+    return crypto.createHash("sha256").update(fs.readFileSync(absPath)).digest("hex");
   } catch {
     return null;
   }
@@ -144,8 +144,8 @@ function sha256OfFile(absPath) {
 function sentinelBinariesMatch(parsed, platformPkgDir, platform) {
   for (const target of binaryTargetsForPlatform(platform)) {
     const recorded = parsed.binaries[target];
-    if (!recorded || typeof recorded.mtimeMs !== 'number') return false;
-    if (typeof recorded.sha256 !== 'string' || recorded.sha256.length !== 64) return false;
+    if (!recorded || typeof recorded.mtimeMs !== "number") return false;
+    if (typeof recorded.sha256 !== "string" || recorded.sha256.length !== 64) return false;
     const binaryPath = path.join(platformPkgDir, target);
     const current = statMtimeMs(binaryPath);
     if (current === null) return false;
@@ -195,22 +195,24 @@ function buildSentinelPayload(platformPkgDir, manifest, platform) {
 // differs, which is informational).
 function writeSentinel(sentinelPath, payload) {
   const dir = path.dirname(sentinelPath);
-  const tmpName = `${path.basename(sentinelPath)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+  const tmpName = `${path.basename(sentinelPath)}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`;
   const tmpPath = path.join(dir, tmpName);
   try {
-    fs.writeFileSync(tmpPath, JSON.stringify(payload), { flag: 'wx' });
+    fs.writeFileSync(tmpPath, JSON.stringify(payload), { flag: "wx" });
     fs.renameSync(tmpPath, sentinelPath);
     return { ok: true };
   } catch (err) {
     // Best-effort cleanup; ignore unlink errors.
-    try { fs.unlinkSync(tmpPath); } catch {}
-    return { ok: false, code: err.code || 'unknown', message: err.message };
+    try {
+      fs.unlinkSync(tmpPath);
+    } catch {}
+    return { ok: false, code: err.code || "unknown", message: err.message };
   }
 }
 
 function isSkipRequested(env) {
   const v = (env || process.env)[SKIP_ENV];
-  return v === '1' || v === 'true' || v === 'yes';
+  return v === "1" || v === "true" || v === "yes";
 }
 
 // Main entry point. Synchronous by design: bin/fallow runs this before
@@ -241,10 +243,10 @@ function buildVerifyOptions(input, manifest) {
   const opts = {
     dirOverride: input.platformPkgDir,
     version: manifest.version,
-    platformId: (input.packageName || '').replace(/^@fallow-cli\//, '') || 'unknown',
+    platformId: (input.packageName || "").replace(/^@fallow-cli\//, "") || "unknown",
   };
-  if (typeof input.verifyFn === 'function') opts.verifyFn = input.verifyFn;
-  if (typeof input.digestProvider === 'function') opts.digestProvider = input.digestProvider;
+  if (typeof input.verifyFn === "function") opts.verifyFn = input.verifyFn;
+  if (typeof input.digestProvider === "function") opts.digestProvider = input.digestProvider;
   return opts;
 }
 
@@ -253,11 +255,11 @@ function buildVerifyOptions(input, manifest) {
 function persistSentinel(sentinel, platformPkgDir, manifest, platform) {
   if (!sentinel.path) {
     warnOnce(
-      'sentinel-no-writable-location',
+      "sentinel-no-writable-location",
       `no writable cache location for verify sentinel (platform pkg dir read-only, ` +
-      `$FALLOW_VERIFY_CACHE_DIR unset, $XDG_CACHE_HOME / %LOCALAPPDATA% unavailable). ` +
-      `Binary verification will re-run on every invocation. Set ${SKIP_ENV}=1 to ` +
-      `bypass verification entirely.`,
+        `$FALLOW_VERIFY_CACHE_DIR unset, $XDG_CACHE_HOME / %LOCALAPPDATA% unavailable). ` +
+        `Binary verification will re-run on every invocation. Set ${SKIP_ENV}=1 to ` +
+        `bypass verification entirely.`,
     );
     return;
   }
@@ -266,10 +268,10 @@ function persistSentinel(sentinel, platformPkgDir, manifest, platform) {
   const write = writeSentinel(sentinel.path, payload);
   if (write.ok) return;
   warnOnce(
-    'sentinel-write-failed',
+    "sentinel-write-failed",
     `could not persist verify sentinel at ${sentinel.path} (${write.code}): ` +
-    `verification will re-run on next invocation. Set FALLOW_VERIFY_CACHE_DIR ` +
-    `to a writable location to enable caching.`,
+      `verification will re-run on next invocation. Set FALLOW_VERIFY_CACHE_DIR ` +
+      `to a writable location to enable caching.`,
   );
 }
 
@@ -288,24 +290,24 @@ function ensureVerified(input) {
     // vendor audits regardless of whether the user runs `--version` or
     // sets FALLOW_VERIFY_LOG. Documented in SECURITY.md.
     warnOnce(
-      'skip-binary-verify-set',
+      "skip-binary-verify-set",
       `${SKIP_ENV} is set; binary verification is skipped. ` +
-      `Unset the variable to re-enable Ed25519 + SHA-256 verification. ` +
-      `See SECURITY.md for the trust model.`,
+        `Unset the variable to re-enable Ed25519 + SHA-256 verification. ` +
+        `See SECURITY.md for the trust model.`,
     );
-    emitVerifyLog(env, { outcome: 'skipped', reason });
+    emitVerifyLog(env, { outcome: "skipped", reason });
     return { ok: true, skipped: true, reason };
   }
 
-  if (typeof platformPkgDir !== 'string' || platformPkgDir.length === 0) {
-    return { ok: false, code: 'platform-package-missing', message: 'platformPkgDir is required' };
+  if (typeof platformPkgDir !== "string" || platformPkgDir.length === 0) {
+    return { ok: false, code: "platform-package-missing", message: "platformPkgDir is required" };
   }
 
   const manifest = manifestPath ? readManifestVersion(manifestPath) : null;
   if (!manifest) {
     return {
       ok: false,
-      code: 'manifest-invalid',
+      code: "manifest-invalid",
       message: `cannot read platform package manifest at ${manifestPath}`,
     };
   }
@@ -314,7 +316,7 @@ function ensureVerified(input) {
 
   // Cache hit: sentinel exists, schema matches, mtimes match, version matches.
   if (sentinel.path && isSentinelValid(sentinel.path, platformPkgDir, manifest, platform)) {
-    emitVerifyLog(env, { outcome: 'ok', cache: 'hit', sentinel: sentinel.path });
+    emitVerifyLog(env, { outcome: "ok", cache: "hit", sentinel: sentinel.path });
     return { ok: true, cached: true, sentinelPath: sentinel.path };
   }
 
@@ -323,8 +325,8 @@ function ensureVerified(input) {
 
   if (!result.ok) {
     emitVerifyLog(env, {
-      outcome: 'fail',
-      cache: 'miss',
+      outcome: "fail",
+      cache: "miss",
       code: result.code,
       binary: result.binary,
     });
@@ -332,7 +334,7 @@ function ensureVerified(input) {
   }
 
   persistSentinel(sentinel, platformPkgDir, manifest, platform);
-  emitVerifyLog(env, { outcome: 'ok', cache: 'miss', sentinel: sentinel.path || '<none>' });
+  emitVerifyLog(env, { outcome: "ok", cache: "miss", sentinel: sentinel.path || "<none>" });
   return { ok: true, cached: false, sentinelPath: sentinel.path };
 }
 

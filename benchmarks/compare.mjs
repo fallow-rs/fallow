@@ -3,22 +3,29 @@
  * Deep comparison of fallow vs knip results on real-world projects.
  * Outputs detailed diffs per issue category.
  */
-import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, writeFileSync } from 'node:fs';
-import { join, resolve, dirname, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { spawnSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
+import { join, resolve, dirname, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const rootDir = resolve(__dirname, '..');
-const fallowBin = join(rootDir, 'target', 'release', 'fallow');
-const knipBin = join(__dirname, 'node_modules', '.bin', 'knip');
+const rootDir = resolve(__dirname, "..");
+const fallowBin = join(rootDir, "target", "release", "fallow");
+const knipBin = join(__dirname, "node_modules", ".bin", "knip");
 
 function run(cmd, args, cwd) {
   const result = spawnSync(cmd, args, {
-    cwd, stdio: 'pipe', timeout: 300000, maxBuffer: 50 * 1024 * 1024,
-    env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
+    cwd,
+    stdio: "pipe",
+    timeout: 300000,
+    maxBuffer: 50 * 1024 * 1024,
+    env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
   });
-  return { stdout: result.stdout?.toString() ?? '', stderr: result.stderr?.toString() ?? '', status: result.status };
+  return {
+    stdout: result.stdout?.toString() ?? "",
+    stderr: result.stderr?.toString() ?? "",
+    status: result.status,
+  };
 }
 
 function parseFallow(stdout, projectDir) {
@@ -35,18 +42,32 @@ function parseFallow(stdout, projectDir) {
     duplicate_exports: new Set(),
   };
   for (const f of data.unused_files ?? []) result.unused_files.add(relative(projectDir, f.path));
-  for (const e of data.unused_exports ?? []) result.unused_exports.add(`${relative(projectDir, e.path)}:${e.export_name}`);
-  for (const t of data.unused_types ?? []) result.unused_types.add(`${relative(projectDir, t.path)}:${t.export_name}`);
-  for (const d of data.unused_dependencies ?? []) result.unused_dependencies.add(d.package_name ?? d.name);
-  for (const d of data.unused_dev_dependencies ?? []) result.unused_dev_dependencies.add(d.package_name ?? d.name);
-  for (const u of data.unresolved_imports ?? []) result.unresolved_imports.add(`${relative(projectDir, u.path)}:${u.specifier}`);
-  for (const u of data.unlisted_dependencies ?? []) result.unlisted_dependencies.add(u.package_name ?? `${relative(projectDir, u.path)}:${u.specifier}`);
-  for (const e of data.unused_enum_members ?? []) result.unused_enum_members.add(`${relative(projectDir, e.path)}:${e.enum_name}.${e.member_name}`);
-  for (const d of data.duplicate_exports ?? []) result.duplicate_exports.add(`${d.export_name}@${(d.locations ?? d.files ?? []).map(f => relative(projectDir, f)).join(',')}`);
+  for (const e of data.unused_exports ?? [])
+    result.unused_exports.add(`${relative(projectDir, e.path)}:${e.export_name}`);
+  for (const t of data.unused_types ?? [])
+    result.unused_types.add(`${relative(projectDir, t.path)}:${t.export_name}`);
+  for (const d of data.unused_dependencies ?? [])
+    result.unused_dependencies.add(d.package_name ?? d.name);
+  for (const d of data.unused_dev_dependencies ?? [])
+    result.unused_dev_dependencies.add(d.package_name ?? d.name);
+  for (const u of data.unresolved_imports ?? [])
+    result.unresolved_imports.add(`${relative(projectDir, u.path)}:${u.specifier}`);
+  for (const u of data.unlisted_dependencies ?? [])
+    result.unlisted_dependencies.add(
+      u.package_name ?? `${relative(projectDir, u.path)}:${u.specifier}`,
+    );
+  for (const e of data.unused_enum_members ?? [])
+    result.unused_enum_members.add(
+      `${relative(projectDir, e.path)}:${e.enum_name}.${e.member_name}`,
+    );
+  for (const d of data.duplicate_exports ?? [])
+    result.duplicate_exports.add(
+      `${d.export_name}@${(d.locations ?? d.files ?? []).map((f) => relative(projectDir, f)).join(",")}`,
+    );
   return result;
 }
 
-function parseKnip(stdout, projectDir) {
+function parseKnip(stdout, _projectDir) {
   const data = JSON.parse(stdout);
   const result = {
     unused_files: new Set(),
@@ -67,10 +88,13 @@ function parseKnip(stdout, projectDir) {
     for (const d of issue.devDependencies ?? []) result.unused_dev_dependencies.add(d.name);
     for (const e of issue.exports ?? []) result.unused_exports.add(`${issue.file}:${e.name}`);
     for (const t of issue.types ?? []) result.unused_types.add(`${issue.file}:${t.name}`);
-    for (const u of issue.unresolved ?? []) result.unresolved_imports.add(`${issue.file}:${u.name}`);
-    for (const u of issue.unlisted ?? []) result.unlisted_dependencies.add(`${issue.file}:${u.name}`);
+    for (const u of issue.unresolved ?? [])
+      result.unresolved_imports.add(`${issue.file}:${u.name}`);
+    for (const u of issue.unlisted ?? [])
+      result.unlisted_dependencies.add(`${issue.file}:${u.name}`);
     for (const [enumName, members] of Object.entries(issue.enumMembers ?? {})) {
-      for (const m of members) result.unused_enum_members.add(`${issue.file}:${enumName}.${m.name}`);
+      for (const m of members)
+        result.unused_enum_members.add(`${issue.file}:${enumName}.${m.name}`);
     }
     for (const d of issue.duplicates ?? []) result.duplicate_exports.add(`${d.name}@${issue.file}`);
   }
@@ -78,9 +102,9 @@ function parseKnip(stdout, projectDir) {
 }
 
 function diffSets(fallowSet, knipSet) {
-  const onlyFallow = [...fallowSet].filter(x => !knipSet.has(x)).sort();
-  const onlyKnip = [...knipSet].filter(x => !fallowSet.has(x)).sort();
-  const both = [...fallowSet].filter(x => knipSet.has(x)).sort();
+  const onlyFallow = [...fallowSet].filter((x) => !knipSet.has(x)).toSorted();
+  const onlyKnip = [...knipSet].filter((x) => !fallowSet.has(x)).toSorted();
+  const both = [...fallowSet].filter((x) => knipSet.has(x)).toSorted();
   return { onlyFallow, onlyKnip, both };
 }
 
@@ -88,7 +112,9 @@ function printCategory(name, fallowSet, knipSet) {
   const { onlyFallow, onlyKnip, both } = diffSets(fallowSet, knipSet);
   if (both.length === 0 && onlyFallow.length === 0 && onlyKnip.length === 0) return;
   console.log(`\n  ### ${name}`);
-  console.log(`  Both: ${both.length} | Only fallow: ${onlyFallow.length} | Only knip: ${onlyKnip.length}`);
+  console.log(
+    `  Both: ${both.length} | Only fallow: ${onlyFallow.length} | Only knip: ${onlyKnip.length}`,
+  );
   if (onlyFallow.length > 0) {
     console.log(`  --- Only in fallow (${onlyFallow.length}):`);
     for (const item of onlyFallow.slice(0, 30)) console.log(`    + ${item}`);
@@ -102,25 +128,46 @@ function printCategory(name, fallowSet, knipSet) {
 }
 
 function compareProject(name, dir) {
-  console.log(`\n${'='.repeat(60)}`);
+  console.log(`\n${"=".repeat(60)}`);
   console.log(`PROJECT: ${name}`);
-  console.log(`${'='.repeat(60)}`);
+  console.log(`${"=".repeat(60)}`);
 
-  const fr = run(fallowBin, ['dead-code', '--quiet', '--format', 'json', '--no-cache'], dir);
-  const kr = run(knipBin, ['--reporter', 'json'], dir);
+  const fr = run(fallowBin, ["dead-code", "--quiet", "--format", "json", "--no-cache"], dir);
+  const kr = run(knipBin, ["--reporter", "json"], dir);
 
-  if (fr.status === 2) { console.log(`  fallow ERROR: ${fr.stderr.slice(0, 200)}`); return null; }
-  if (!kr.stdout) { console.log(`  knip ERROR: ${kr.stderr.slice(0, 200)}`); return null; }
+  if (fr.status === 2) {
+    console.log(`  fallow ERROR: ${fr.stderr.slice(0, 200)}`);
+    return null;
+  }
+  if (!kr.stdout) {
+    console.log(`  knip ERROR: ${kr.stderr.slice(0, 200)}`);
+    return null;
+  }
 
   let fallow, knip;
-  try { fallow = parseFallow(fr.stdout, dir); } catch (e) { console.log(`  fallow parse error: ${e.message}`); return null; }
-  try { knip = parseKnip(kr.stdout, dir); } catch (e) { console.log(`  knip parse error: ${e.message}`); return null; }
+  try {
+    fallow = parseFallow(fr.stdout, dir);
+  } catch (e) {
+    console.log(`  fallow parse error: ${e.message}`);
+    return null;
+  }
+  try {
+    knip = parseKnip(kr.stdout, dir);
+  } catch (e) {
+    console.log(`  knip parse error: ${e.message}`);
+    return null;
+  }
 
   const categories = [
-    'unused_files', 'unused_exports', 'unused_types',
-    'unused_dependencies', 'unused_dev_dependencies',
-    'unresolved_imports', 'unlisted_dependencies',
-    'unused_enum_members', 'duplicate_exports',
+    "unused_files",
+    "unused_exports",
+    "unused_types",
+    "unused_dependencies",
+    "unused_dev_dependencies",
+    "unresolved_imports",
+    "unlisted_dependencies",
+    "unused_enum_members",
+    "duplicate_exports",
   ];
 
   const summary = {};
@@ -133,26 +180,34 @@ function compareProject(name, dir) {
 }
 
 // Run on all real-world projects
-const d = join(__dirname, 'fixtures', 'real-world');
-if (!existsSync(d)) { console.error('No real-world fixtures. Run: npm run download-fixtures'); process.exit(1); }
+const d = join(__dirname, "fixtures", "real-world");
+if (!existsSync(d)) {
+  console.error("No real-world fixtures. Run: npm run download-fixtures");
+  process.exit(1);
+}
 
 const allSummaries = {};
-for (const p of readdirSync(d).filter(x => existsSync(join(d, x, 'package.json'))).sort()) {
+for (const p of readdirSync(d)
+  .filter((x) => existsSync(join(d, x, "package.json")))
+  .toSorted()) {
   allSummaries[p] = compareProject(p, join(d, p));
 }
 
 // Final summary table
-console.log(`\n${'='.repeat(60)}`);
-console.log('OVERALL SUMMARY');
-console.log(`${'='.repeat(60)}\n`);
+console.log(`\n${"=".repeat(60)}`);
+console.log("OVERALL SUMMARY");
+console.log(`${"=".repeat(60)}\n`);
 for (const [project, summary] of Object.entries(allSummaries)) {
   if (!summary) continue;
   console.log(`${project}:`);
   for (const [cat, counts] of Object.entries(summary)) {
     if (counts.both === 0 && counts.onlyFallow === 0 && counts.onlyKnip === 0) continue;
-    const pct = counts.both + counts.onlyFallow + counts.onlyKnip > 0
-      ? ((counts.both / (counts.both + counts.onlyKnip)) * 100).toFixed(0)
-      : '100';
-    console.log(`  ${cat}: agree=${counts.both} fallow-only=${counts.onlyFallow} knip-only=${counts.onlyKnip} (${pct}% knip coverage)`);
+    const pct =
+      counts.both + counts.onlyFallow + counts.onlyKnip > 0
+        ? ((counts.both / (counts.both + counts.onlyKnip)) * 100).toFixed(0)
+        : "100";
+    console.log(
+      `  ${cat}: agree=${counts.both} fallow-only=${counts.onlyFallow} knip-only=${counts.onlyKnip} (${pct}% knip coverage)`,
+    );
   }
 }

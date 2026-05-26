@@ -11,18 +11,18 @@
 //
 // Refs RFC 868 (npm/cli#9360). See .plans/rfc-868-lazy-binary-verify.md.
 
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
-const SENTINEL_FILENAME = '.fallow-verified';
+const SENTINEL_FILENAME = ".fallow-verified";
 
 // Returns true when the directory exists and the current process can create
 // a file in it. Tries an atomic O_CREAT|O_EXCL write so we never disturb an
 // existing sentinel during the writability probe. Falls back to fs.accessSync
 // when mkdtempSync fails for non-permission reasons.
 function isWritable(dir) {
-  if (typeof dir !== 'string' || dir.length === 0) {
+  if (typeof dir !== "string" || dir.length === 0) {
     return false;
   }
   let stat;
@@ -40,7 +40,7 @@ function isWritable(dir) {
   const probe = path.join(dir, `.fallow-verify-probe-${process.pid}-${Date.now()}`);
   let fd;
   try {
-    fd = fs.openSync(probe, 'wx');
+    fd = fs.openSync(probe, "wx");
     fs.closeSync(fd);
     fs.unlinkSync(probe);
     return true;
@@ -64,23 +64,23 @@ function ensureDirExists(dir) {
 }
 
 function xdgCacheRoot(env, homeDir, platformId) {
-  if (platformId === 'win32') {
+  if (platformId === "win32") {
     return env.LOCALAPPDATA && env.LOCALAPPDATA.length > 0 ? env.LOCALAPPDATA : null;
   }
   if (env.XDG_CACHE_HOME && env.XDG_CACHE_HOME.length > 0) {
     return env.XDG_CACHE_HOME;
   }
-  return homeDir ? path.join(homeDir, '.cache') : null;
+  return homeDir ? path.join(homeDir, ".cache") : null;
 }
 
 // Convert an npm package name like "@fallow-cli/darwin-arm64" into a stable
 // filesystem-safe identifier used as the sentinel's file basename when the
 // sentinel lives outside the platform package directory.
 function packageIdToFilename(packageName) {
-  if (typeof packageName !== 'string' || packageName.length === 0) {
-    return 'unknown.json';
+  if (typeof packageName !== "string" || packageName.length === 0) {
+    return "unknown.json";
   }
-  return `${packageName.replace(/^@/, '').replace(/[\/\\]/g, '__')}.json`;
+  return `${packageName.replace(/^@/, "").replace(/[/\\]/g, "__")}.json`;
 }
 
 // Each cascade step is a small helper that returns a resolved sentinel
@@ -88,7 +88,7 @@ function packageIdToFilename(packageName) {
 // itself a flat for-loop so cyclomatic complexity stays low.
 
 function tryPlatformPkgDir(platformPkgDir, writableProbe) {
-  if (typeof platformPkgDir !== 'string' || platformPkgDir.length === 0) {
+  if (typeof platformPkgDir !== "string" || platformPkgDir.length === 0) {
     return null;
   }
   if (!writableProbe(platformPkgDir)) {
@@ -96,7 +96,7 @@ function tryPlatformPkgDir(platformPkgDir, writableProbe) {
   }
   return {
     path: path.join(platformPkgDir, SENTINEL_FILENAME),
-    location: 'platform-pkg',
+    location: "platform-pkg",
     writable: true,
   };
 }
@@ -105,18 +105,18 @@ function tryCacheDirEnv(env, filename, ensureDir, writableProbe) {
   const dir = env.FALLOW_VERIFY_CACHE_DIR;
   if (!dir || dir.length === 0) return null;
   if (!ensureDir(dir) || !writableProbe(dir)) return null;
-  return { path: path.join(dir, filename), location: 'cache-dir-env', writable: true };
+  return { path: path.join(dir, filename), location: "cache-dir-env", writable: true };
 }
 
 function xdgLocationLabel(env, platformId) {
-  if (platformId === 'win32') return 'localappdata';
-  return env.XDG_CACHE_HOME ? 'xdg' : 'home-cache';
+  if (platformId === "win32") return "localappdata";
+  return env.XDG_CACHE_HOME ? "xdg" : "home-cache";
 }
 
 function tryXdgFallback(env, homeDir, platformId, filename, ensureDir, writableProbe) {
   const root = xdgCacheRoot(env, homeDir, platformId);
   if (!root) return null;
-  const dir = path.join(root, 'fallow', 'sentinels');
+  const dir = path.join(root, "fallow", "sentinels");
   if (!ensureDir(dir) || !writableProbe(dir)) return null;
   return {
     path: path.join(dir, filename),
@@ -139,10 +139,10 @@ function resolveSentinelPath(options) {
   const env = opts.env || process.env;
   // Using `in` so an explicit `homedir: undefined` opts out of the os.homedir()
   // fallback (tests rely on this to exercise the "no cache home" branch).
-  const homeDir = 'homedir' in opts ? opts.homedir : os.homedir();
+  const homeDir = "homedir" in opts ? opts.homedir : os.homedir();
   const platformId = opts.platform || process.platform;
-  const writableProbe = typeof opts.isWritable === 'function' ? opts.isWritable : isWritable;
-  const ensureDir = typeof opts.ensureDir === 'function' ? opts.ensureDir : ensureDirExists;
+  const writableProbe = typeof opts.isWritable === "function" ? opts.isWritable : isWritable;
+  const ensureDir = typeof opts.ensureDir === "function" ? opts.ensureDir : ensureDirExists;
   const filename = packageIdToFilename(opts.packageName);
 
   return (
@@ -150,7 +150,7 @@ function resolveSentinelPath(options) {
     tryCacheDirEnv(env, filename, ensureDir, writableProbe) ||
     tryXdgFallback(env, homeDir, platformId, filename, ensureDir, writableProbe) || {
       path: null,
-      location: 'none',
+      location: "none",
       writable: false,
     }
   );

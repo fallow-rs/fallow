@@ -36,7 +36,7 @@ export interface AnalysisCompleteParams {
  */
 export const buildParamsFromCli = (
   check: FallowCheckResult | null,
-  dupes: FallowDupesResult | null
+  dupes: FallowDupesResult | null,
 ): AnalysisCompleteParams => ({
   totalIssues: countCheckIssues(check),
   unusedFiles: check?.unused_files.length ?? 0,
@@ -58,19 +58,14 @@ export const buildParamsFromCli = (
   boundaryViolations: check?.boundary_violations?.length ?? 0,
   staleSuppressions: check?.stale_suppressions?.length ?? 0,
   unusedCatalogEntries: check?.unused_catalog_entries?.length ?? 0,
-  unresolvedCatalogReferences:
-    check?.unresolved_catalog_references?.length ?? 0,
-  unusedDependencyOverrides:
-    check?.unused_dependency_overrides?.length ?? 0,
-  misconfiguredDependencyOverrides:
-    check?.misconfigured_dependency_overrides?.length ?? 0,
+  unresolvedCatalogReferences: check?.unresolved_catalog_references?.length ?? 0,
+  unusedDependencyOverrides: check?.unused_dependency_overrides?.length ?? 0,
+  misconfiguredDependencyOverrides: check?.misconfigured_dependency_overrides?.length ?? 0,
   duplicationPercentage: dupes?.stats.duplication_percentage ?? 0,
   cloneGroups: dupes?.stats.clone_groups ?? 0,
 });
 
-type SeverityKey =
-  | "statusBarItem.errorBackground"
-  | "statusBarItem.warningBackground";
+type SeverityKey = "statusBarItem.errorBackground" | "statusBarItem.warningBackground";
 
 interface BreakdownLine {
   readonly count: keyof AnalysisCompleteParams;
@@ -179,20 +174,15 @@ const BREAKDOWN_LINES: ReadonlyArray<BreakdownLine> = [
   },
 ];
 
-export const getDuplicationPercentage = (
-  duplicationPercentage: number
-): number => (Number.isFinite(duplicationPercentage) ? duplicationPercentage : 0);
+export const getDuplicationPercentage = (duplicationPercentage: number): number =>
+  Number.isFinite(duplicationPercentage) ? duplicationPercentage : 0;
 
-export const buildStatusBarPartsFromLsp = (
-  params: AnalysisCompleteParams
-): string[] => [
+export const buildStatusBarPartsFromLsp = (params: AnalysisCompleteParams): string[] => [
   `${params.totalIssues} issues`,
   `${getDuplicationPercentage(params.duplicationPercentage).toFixed(1)}% duplication`,
 ];
 
-export const getStatusBarSeverityKey = (
-  params: AnalysisCompleteParams
-): SeverityKey | null => {
+export const getStatusBarSeverityKey = (params: AnalysisCompleteParams): SeverityKey | null => {
   if (params.unresolvedImports > 0) {
     return "statusBarItem.errorBackground";
   }
@@ -204,14 +194,11 @@ export const getStatusBarSeverityKey = (
   return null;
 };
 
-const normalizeInlineText = (value: string): string =>
-  value.replace(/\s+/g, " ").trim();
+const normalizeInlineText = (value: string): string => value.replace(/\s+/g, " ").trim();
 
 export const formatChangedSinceRefForStatusBar = (ref: string): string => {
   const normalized = normalizeInlineText(ref);
-  return normalized.length > 48
-    ? `${normalized.slice(0, 45).trimEnd()}...`
-    : normalized;
+  return normalized.length > 48 ? `${normalized.slice(0, 45).trimEnd()}...` : normalized;
 };
 
 /**
@@ -229,10 +216,7 @@ export const formatChangedSinceRefForStatusBar = (ref: string): string => {
  * Pure: takes the resolved ref so it can be unit-tested without a vscode
  * mock. Callers in `statusBar.ts` pass `getChangedSince()` or `null`.
  */
-export const renderStatusBarText = (
-  base: string,
-  changedSince: string | null
-): string => {
+export const renderStatusBarText = (base: string, changedSince: string | null): string => {
   if (!changedSince) {
     return base;
   }
@@ -244,17 +228,13 @@ const escapeMarkdownText = (value: string): string =>
 
 export const buildStatusBarTooltipMarkdown = (
   params: AnalysisCompleteParams,
-  changedSinceRef: string | null = null
+  changedSinceRef: string | null = null,
 ): string => {
   const lines: string[] = ["**Fallow** - Analysis Results\n"];
-  const duplicationPercentage = getDuplicationPercentage(
-    params.duplicationPercentage
-  );
+  const duplicationPercentage = getDuplicationPercentage(params.duplicationPercentage);
 
   if (changedSinceRef) {
-    lines.push(
-      `$(git-branch) Scoped to changes since ${escapeMarkdownText(changedSinceRef)}`
-    );
+    lines.push(`$(git-branch) Scoped to changes since ${escapeMarkdownText(changedSinceRef)}`);
   }
 
   for (const line of BREAKDOWN_LINES) {
@@ -266,7 +246,7 @@ export const buildStatusBarTooltipMarkdown = (
 
   if (params.cloneGroups > 0) {
     lines.push(
-      `$(copy) ${params.cloneGroups} clone groups (${duplicationPercentage.toFixed(1)}% duplication)`
+      `$(copy) ${params.cloneGroups} clone groups (${duplicationPercentage.toFixed(1)}% duplication)`,
     );
   }
 
@@ -276,7 +256,7 @@ export const buildStatusBarTooltipMarkdown = (
 
   lines.push("\n---\n");
   lines.push(
-    "[$(play) Run Analysis](command:fallow.analyze) · [$(wrench) Auto-Fix](command:fallow.fix) · [$(output) Output](command:fallow.showOutput)"
+    "[$(play) Run Analysis](command:fallow.analyze) · [$(wrench) Auto-Fix](command:fallow.fix) · [$(output) Output](command:fallow.showOutput)",
   );
 
   return lines.join("\n\n");

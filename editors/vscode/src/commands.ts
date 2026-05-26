@@ -16,11 +16,7 @@ import {
 import { countCheckIssues } from "./analysis-utils.js";
 import { findBinaryInPath, findLocalBinary, getExecutableExtension } from "./binary-utils.js";
 import { getInstalledCliPath } from "./download.js";
-import {
-  buildFixArgs,
-  createFixPreviewItems,
-  resolveFixLocation,
-} from "./fix-utils.js";
+import { buildFixArgs, createFixPreviewItems, resolveFixLocation } from "./fix-utils.js";
 import type {
   FallowCheckResult,
   FallowCombinedResult,
@@ -60,7 +56,7 @@ const findCliBinary = (context: vscode.ExtensionContext): string | null => {
 const execFallow = (
   context: vscode.ExtensionContext,
   args: ReadonlyArray<string>,
-  cwd: string
+  cwd: string,
 ): Promise<string> =>
   new Promise((resolve, reject) => {
     const binary = findCliBinary(context);
@@ -98,11 +94,7 @@ const execFallow = (
       }
 
       if (code !== null && code !== 0 && code !== 1) {
-        reject(
-          new Error(
-            stderr.trim() || `fallow exited with code ${code}`
-          )
-        );
+        reject(new Error(stderr.trim() || `fallow exited with code ${code}`));
         return;
       }
 
@@ -121,7 +113,9 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     private_type_leaks: types["private-type-leaks"] ? result.private_type_leaks : [],
     unused_dependencies: types["unused-dependencies"] ? result.unused_dependencies : [],
     unused_dev_dependencies: types["unused-dev-dependencies"] ? result.unused_dev_dependencies : [],
-    unused_optional_dependencies: types["unused-optional-dependencies"] ? result.unused_optional_dependencies : [],
+    unused_optional_dependencies: types["unused-optional-dependencies"]
+      ? result.unused_optional_dependencies
+      : [],
     unused_enum_members: types["unused-enum-members"] ? result.unused_enum_members : [],
     unused_class_members: types["unused-class-members"] ? result.unused_class_members : [],
     unresolved_imports: types["unresolved-imports"] ? result.unresolved_imports : [],
@@ -133,18 +127,14 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     re_export_cycles: types["re-export-cycles"] ? result.re_export_cycles : [],
     boundary_violations: types["boundary-violation"] ? result.boundary_violations : [],
     stale_suppressions: types["stale-suppressions"] ? result.stale_suppressions : [],
-    unused_catalog_entries: types["unused-catalog-entries"]
-      ? result.unused_catalog_entries
-      : [],
+    unused_catalog_entries: types["unused-catalog-entries"] ? result.unused_catalog_entries : [],
     unresolved_catalog_references: types["unresolved-catalog-references"]
       ? result.unresolved_catalog_references
       : [],
     unused_dependency_overrides: types["unused-dependency-overrides"]
       ? result.unused_dependency_overrides
       : [],
-    misconfigured_dependency_overrides: types[
-      "misconfigured-dependency-overrides"
-    ]
+    misconfigured_dependency_overrides: types["misconfigured-dependency-overrides"]
       ? result.misconfigured_dependency_overrides
       : [],
   };
@@ -172,12 +162,9 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     stale_suppressions: filtered.stale_suppressions?.length ?? 0,
     unused_catalog_entries: filtered.unused_catalog_entries?.length ?? 0,
     empty_catalog_groups: filtered.empty_catalog_groups?.length ?? 0,
-    unresolved_catalog_references:
-      filtered.unresolved_catalog_references?.length ?? 0,
-    unused_dependency_overrides:
-      filtered.unused_dependency_overrides?.length ?? 0,
-    misconfigured_dependency_overrides:
-      filtered.misconfigured_dependency_overrides?.length ?? 0,
+    unresolved_catalog_references: filtered.unresolved_catalog_references?.length ?? 0,
+    unused_dependency_overrides: filtered.unused_dependency_overrides?.length ?? 0,
+    misconfigured_dependency_overrides: filtered.misconfigured_dependency_overrides?.length ?? 0,
   };
   return {
     ...filtered,
@@ -203,16 +190,13 @@ const confirmApplyFixes = async (): Promise<boolean> => {
   const confirm = await vscode.window.showWarningMessage(
     "Fallow: This will unexport unused exports (keeps the code) and remove unused dependencies from package.json. Continue?",
     "Yes",
-    "No"
+    "No",
   );
 
   return confirm === "Yes";
 };
 
-const openFixLocation = async (
-  root: string,
-  fix: FixAction | undefined
-): Promise<void> => {
+const openFixLocation = async (root: string, fix: FixAction | undefined): Promise<void> => {
   if (!fix) {
     return;
   }
@@ -227,10 +211,7 @@ const openFixLocation = async (
   });
 };
 
-const showDryRunPreview = async (
-  root: string,
-  result: FallowFixResult
-): Promise<void> => {
+const showDryRunPreview = async (root: string, result: FallowFixResult): Promise<void> => {
   if (result.fixes.length === 0) {
     void vscode.window.showInformationMessage("Fallow: no fixes available.");
     return;
@@ -263,8 +244,7 @@ const showDryRunPreview = async (
 
   const picked = await vscode.window.showQuickPick(quickPickItems, {
     title: `Fallow: ${result.fixes.length} fix${result.fixes.length === 1 ? "" : "es"} available`,
-    placeHolder:
-      "Review fixes — select 'Apply all fixes' to apply, or click a fix to navigate",
+    placeHolder: "Review fixes — select 'Apply all fixes' to apply, or click a fix to navigate",
   });
 
   if (!picked) {
@@ -280,7 +260,7 @@ const showDryRunPreview = async (
 };
 
 export const runAnalysis = async (
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
 ): Promise<{
   check: FallowCheckResult | null;
   dupes: FallowDupesResult | null;
@@ -336,7 +316,7 @@ export const runAnalysis = async (
 
 export const runFix = async (
   context: vscode.ExtensionContext,
-  dryRun: boolean
+  dryRun: boolean,
 ): Promise<FallowFixResult | null> => {
   const root = getWorkspaceRoot();
   if (!root) {
@@ -355,11 +335,7 @@ export const runFix = async (
       fixArgs.push("--config", configPath);
     }
 
-    const output = await execFallow(
-      context,
-      fixArgs,
-      root
-    );
+    const output = await execFallow(context, fixArgs, root);
     const result = JSON.parse(output) as FallowFixResult;
 
     if (dryRun) {
@@ -367,7 +343,7 @@ export const runFix = async (
     } else {
       const fixCount = result.fixes.length;
       void vscode.window.showInformationMessage(
-        `Fallow: applied ${fixCount} fix${fixCount === 1 ? "" : "es"}.`
+        `Fallow: applied ${fixCount} fix${fixCount === 1 ? "" : "es"}.`,
       );
     }
 

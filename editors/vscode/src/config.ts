@@ -6,13 +6,11 @@ import type { DuplicationMode, IssueTypeConfig, TraceLevel } from "./types.js";
 
 const SECTION = "fallow";
 
-const getConfig = (): vscode.WorkspaceConfiguration =>
-  vscode.workspace.getConfiguration(SECTION);
+const getConfig = (): vscode.WorkspaceConfiguration => vscode.workspace.getConfiguration(SECTION);
 
 export const getLspPath = (): string => getConfig().get<string>("lspPath", "");
 
-const getConfigPath = (): string =>
-  getConfig().get<string>("configPath", "").trim();
+const getConfigPath = (): string => getConfig().get<string>("configPath", "").trim();
 
 export const getResolvedConfigPath = (): string => {
   const configPath = getConfigPath();
@@ -24,8 +22,7 @@ export const getResolvedConfigPath = (): string => {
   return workspaceRoot ? path.resolve(workspaceRoot, configPath) : configPath;
 };
 
-export const getAutoDownload = (): boolean =>
-  getConfig().get<boolean>("autoDownload", true);
+export const getAutoDownload = (): boolean => getConfig().get<boolean>("autoDownload", true);
 
 export const getIssueTypes = (): IssueTypeConfig =>
   getConfig().get<IssueTypeConfig>("issueTypes", {
@@ -59,17 +56,14 @@ export const getDuplicationThreshold = (): number =>
 export const getDuplicationMode = (): DuplicationMode =>
   getConfig().get<DuplicationMode>("duplication.mode", "mild");
 
-export const getProduction = (): boolean =>
-  getConfig().get<boolean>("production", false);
+export const getProduction = (): boolean => getConfig().get<boolean>("production", false);
 
-export const getChangedSince = (): string =>
-  getConfig().get<string>("changedSince", "").trim();
+export const getChangedSince = (): string => getConfig().get<string>("changedSince", "").trim();
 
-export const getTraceLevel = (): TraceLevel =>
-  getConfig().get<TraceLevel>("trace.server", "off");
+export const getTraceLevel = (): TraceLevel => getConfig().get<TraceLevel>("trace.server", "off");
 
 export const onConfigChange = (
-  callback: (e: vscode.ConfigurationChangeEvent) => void
+  callback: (e: vscode.ConfigurationChangeEvent) => void,
 ): vscode.Disposable =>
   vscode.workspace.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration(SECTION)) {

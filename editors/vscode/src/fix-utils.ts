@@ -17,10 +17,7 @@ interface FixPreviewApplyAllItem {
 
 type FixPreviewItem = FixPreviewNavigateItem | FixPreviewApplyAllItem;
 
-export const buildFixArgs = (
-  dryRun: boolean,
-  production: boolean
-): string[] => {
+export const buildFixArgs = (dryRun: boolean, production: boolean): string[] => {
   const args = dryRun
     ? ["fix", "--dry-run", "--format", "json", "--quiet"]
     : ["fix", "--yes", "--format", "json", "--quiet"];
@@ -32,15 +29,12 @@ export const buildFixArgs = (
   return args;
 };
 
-const getFixLabel = (fix: FixAction): string =>
-  fix.name ?? fix.package ?? fix.file ?? "unknown";
+const getFixLabel = (fix: FixAction): string => fix.name ?? fix.package ?? fix.file ?? "unknown";
 
 const getFixDetail = (fix: FixAction): string =>
-  fix.path ? `${fix.path}${fix.line ? `:${fix.line}` : ""}` : fix.location ?? "";
+  fix.path ? `${fix.path}${fix.line ? `:${fix.line}` : ""}` : (fix.location ?? "");
 
-export const createFixPreviewItems = (
-  fixes: ReadonlyArray<FixAction>
-): FixPreviewItem[] => [
+export const createFixPreviewItems = (fixes: ReadonlyArray<FixAction>): FixPreviewItem[] => [
   ...fixes.map((fix) => ({
     label: getFixLabel(fix),
     description: fix.type.replace(/_/g, " "),
@@ -57,7 +51,7 @@ export const createFixPreviewItems = (
 
 export const resolveFixLocation = (
   root: string,
-  fix: FixAction
+  fix: FixAction,
 ): { absolutePath: string; line: number } | null => {
   const filePath = fix.path ?? fix.file;
   if (!filePath) {
@@ -65,9 +59,7 @@ export const resolveFixLocation = (
   }
 
   return {
-    absolutePath: path.isAbsolute(filePath)
-      ? filePath
-      : path.resolve(root, filePath),
+    absolutePath: path.isAbsolute(filePath) ? filePath : path.resolve(root, filePath),
     line: Math.max(0, (fix.line ?? 1) - 1),
   };
 };

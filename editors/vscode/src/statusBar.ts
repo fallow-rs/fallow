@@ -18,15 +18,9 @@ let statusBarItem: vscode.StatusBarItem | null = null;
 const liveChangedSince = (): string | null => getChangedSince() || null;
 
 export const createStatusBar = (): vscode.StatusBarItem => {
-  statusBarItem = vscode.window.createStatusBarItem(
-    vscode.StatusBarAlignment.Left,
-    50
-  );
+  statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
   statusBarItem.command = "fallow.analyze";
-  statusBarItem.text = renderStatusBarText(
-    "$(search) Fallow",
-    liveChangedSince()
-  );
+  statusBarItem.text = renderStatusBarText("$(search) Fallow", liveChangedSince());
   statusBarItem.show();
   return statusBarItem;
 };
@@ -34,7 +28,7 @@ export const createStatusBar = (): vscode.StatusBarItem => {
 /** Update the status bar from CLI-driven analysis results. */
 export const updateStatusBar = (
   checkResult: FallowCheckResult | null,
-  dupesResult: FallowDupesResult | null
+  dupesResult: FallowDupesResult | null,
 ): void => {
   if (!statusBarItem) {
     return;
@@ -69,12 +63,10 @@ const applyTooltipAndSeverity = (params: AnalysisCompleteParams): void => {
   }
 
   const severity = getStatusBarSeverityKey(params);
-  statusBarItem.backgroundColor = severity
-    ? new vscode.ThemeColor(severity)
-    : undefined;
+  statusBarItem.backgroundColor = severity ? new vscode.ThemeColor(severity) : undefined;
 
   const tooltip = new vscode.MarkdownString(
-    buildStatusBarTooltipMarkdown(params, getChangedSince() || null)
+    buildStatusBarTooltipMarkdown(params, getChangedSince() || null),
   );
   tooltip.isTrusted = true;
   // Required so `$(name)` codicons in the markdown render as icons rather
@@ -88,10 +80,7 @@ const applyStatusBarText = (parts: string[]): void => {
   if (!statusBarItem) {
     return;
   }
-  const base =
-    parts.length > 0
-      ? `$(search) Fallow: ${parts.join(" | ")}`
-      : "$(search) Fallow";
+  const base = parts.length > 0 ? `$(search) Fallow: ${parts.join(" | ")}` : "$(search) Fallow";
   statusBarItem.text = renderStatusBarText(base, liveChangedSince());
 };
 
@@ -99,17 +88,14 @@ export const setStatusBarAnalyzing = (): void => {
   if (statusBarItem) {
     statusBarItem.text = renderStatusBarText(
       "$(loading~spin) Fallow: Analyzing...",
-      liveChangedSince()
+      liveChangedSince(),
     );
   }
 };
 
 export const setStatusBarError = (): void => {
   if (statusBarItem) {
-    statusBarItem.text = renderStatusBarText(
-      "$(error) Fallow: Error",
-      liveChangedSince()
-    );
+    statusBarItem.text = renderStatusBarText("$(error) Fallow: Error", liveChangedSince());
   }
 };
 

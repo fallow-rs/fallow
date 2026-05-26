@@ -1,8 +1,8 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { strict as assert } from 'node:assert';
-import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { strict as assert } from "node:assert";
+import { execFileSync } from "node:child_process";
 
 import {
   computeComplexity,
@@ -11,41 +11,41 @@ import {
   detectCircularDependencies,
   detectDeadCode,
   detectDuplication,
-} from './index.js';
+} from "./index.js";
 
 function makeFixture() {
-  const root = mkdtempSync(join(tmpdir(), 'fallow-node-'));
-  mkdirSync(join(root, 'src', 'application'), { recursive: true });
-  mkdirSync(join(root, 'src', 'domain'), { recursive: true });
+  const root = mkdtempSync(join(tmpdir(), "fallow-node-"));
+  mkdirSync(join(root, "src", "application"), { recursive: true });
+  mkdirSync(join(root, "src", "domain"), { recursive: true });
 
   writeFileSync(
-    join(root, 'package.json'),
+    join(root, "package.json"),
     JSON.stringify(
       {
-        name: 'fallow-node-fixture',
-        version: '1.0.0',
-        main: 'src/main.ts',
+        name: "fallow-node-fixture",
+        version: "1.0.0",
+        main: "src/main.ts",
       },
       null,
       2,
-    ) + '\n',
+    ) + "\n",
   );
 
   writeFileSync(
-    join(root, '.fallowrc.json'),
+    join(root, ".fallowrc.json"),
     JSON.stringify(
       {
         boundaries: {
-          preset: 'layered',
+          preset: "layered",
         },
       },
       null,
       2,
-    ) + '\n',
+    ) + "\n",
   );
 
   writeFileSync(
-    join(root, 'src', 'main.ts'),
+    join(root, "src", "main.ts"),
     `
 import { usedThing } from './application/service';
 import './cycle-a';
@@ -60,7 +60,7 @@ run();
   );
 
   writeFileSync(
-    join(root, 'src', 'application', 'service.ts'),
+    join(root, "src", "application", "service.ts"),
     `
 export function usedThing() {
   return 'ok';
@@ -84,7 +84,7 @@ export function complexPath(input: number) {
   );
 
   writeFileSync(
-    join(root, 'src', 'domain', 'model.ts'),
+    join(root, "src", "domain", "model.ts"),
     `
 import { usedThing } from '../application/service';
 
@@ -93,7 +93,7 @@ export const domainValue = usedThing();
   );
 
   writeFileSync(
-    join(root, 'src', 'cycle-a.ts'),
+    join(root, "src", "cycle-a.ts"),
     `
 import { cycleB } from './cycle-b';
 
@@ -102,7 +102,7 @@ export const cycleA = cycleB + 1;
   );
 
   writeFileSync(
-    join(root, 'src', 'cycle-b.ts'),
+    join(root, "src", "cycle-b.ts"),
     `
 import { cycleA } from './cycle-a';
 
@@ -111,7 +111,7 @@ export const cycleB = cycleA + 1;
   );
 
   writeFileSync(
-    join(root, 'src', 'dup-one.ts'),
+    join(root, "src", "dup-one.ts"),
     `
 export function duplicatedOne(items: number[]) {
   let total = 0;
@@ -130,7 +130,7 @@ export function duplicatedOne(items: number[]) {
   );
 
   writeFileSync(
-    join(root, 'src', 'dup-two.ts'),
+    join(root, "src", "dup-two.ts"),
     `
 export function duplicatedTwo(items: number[]) {
   let total = 0;
@@ -148,44 +148,44 @@ export function duplicatedTwo(items: number[]) {
 `.trimStart(),
   );
 
-  execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
-  execFileSync('git', ['config', 'user.name', 'Fallow Node Test'], { cwd: root, stdio: 'ignore' });
-  execFileSync('git', ['config', 'user.email', 'fallow-node@example.com'], {
+  execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+  execFileSync("git", ["config", "user.name", "Fallow Node Test"], { cwd: root, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "fallow-node@example.com"], {
     cwd: root,
-    stdio: 'ignore',
+    stdio: "ignore",
   });
-  execFileSync('git', ['add', '.'], { cwd: root, stdio: 'ignore' });
-  execFileSync('git', ['commit', '-m', 'fixture'], { cwd: root, stdio: 'ignore' });
+  execFileSync("git", ["add", "."], { cwd: root, stdio: "ignore" });
+  execFileSync("git", ["commit", "-m", "fixture"], { cwd: root, stdio: "ignore" });
 
   return root;
 }
 
-console.log('Testing @fallow-cli/fallow-node...\n');
+console.log("Testing @fallow-cli/fallow-node...\n");
 
 const root = makeFixture();
-const serviceDiff = join(root, 'service.diff');
+const serviceDiff = join(root, "service.diff");
 writeFileSync(
   serviceDiff,
   [
-    'diff --git a/src/application/service.ts b/src/application/service.ts',
-    '--- a/src/application/service.ts',
-    '+++ b/src/application/service.ts',
-    '@@ -1,5 +1,5 @@',
-    ' export function usedThing() {',
+    "diff --git a/src/application/service.ts b/src/application/service.ts",
+    "--- a/src/application/service.ts",
+    "+++ b/src/application/service.ts",
+    "@@ -1,5 +1,5 @@",
+    " export function usedThing() {",
     "   return 'ok';",
-    ' }',
-    ' ',
-    '+export const unusedThing = 42;',
-    '',
-  ].join('\n'),
+    " }",
+    " ",
+    "+export const unusedThing = 42;",
+    "",
+  ].join("\n"),
 );
 
 {
   const report = await detectDeadCode({ root, explain: true });
   assert.equal(report.schema_version, 6);
   assert.ok(report._meta);
-  assert.ok(report.unused_exports.some((item) => item.export_name === 'unusedThing'));
-  console.log('  [PASS] detectDeadCode');
+  assert.ok(report.unused_exports.some((item) => item.export_name === "unusedThing"));
+  console.log("  [PASS] detectDeadCode");
 }
 
 {
@@ -197,9 +197,9 @@ writeFileSync(
   });
   assert.deepEqual(
     report.unused_exports.map((item) => item.export_name),
-    ['unusedThing'],
+    ["unusedThing"],
   );
-  console.log('  [PASS] detectDeadCode diffFile');
+  console.log("  [PASS] detectDeadCode diffFile");
 }
 
 {
@@ -207,7 +207,7 @@ writeFileSync(
   assert.equal(report.summary.circular_dependencies, 1);
   assert.equal(report.summary.total_issues, 1);
   assert.equal(report.boundary_violations.length, 0);
-  console.log('  [PASS] detectCircularDependencies');
+  console.log("  [PASS] detectCircularDependencies");
 }
 
 {
@@ -215,18 +215,18 @@ writeFileSync(
   assert.equal(report.summary.boundary_violations, 1);
   assert.equal(report.summary.total_issues, 1);
   assert.equal(report.circular_dependencies.length, 0);
-  console.log('  [PASS] detectBoundaryViolations');
+  console.log("  [PASS] detectBoundaryViolations");
 }
 
 {
   const report = await detectDuplication({
     root,
-    mode: 'mild',
+    mode: "mild",
     minTokens: 10,
     minLines: 3,
   });
   assert.ok(report.clone_groups.length >= 1);
-  console.log('  [PASS] detectDuplication');
+  console.log("  [PASS] detectDuplication");
 }
 
 {
@@ -235,11 +235,11 @@ writeFileSync(
     complexity: true,
     score: true,
     maxCyclomatic: 1,
-    sort: 'cyclomatic',
+    sort: "cyclomatic",
   });
   assert.ok(report.findings.length >= 1);
   assert.ok(report.health_score);
-  console.log('  [PASS] computeComplexity');
+  console.log("  [PASS] computeComplexity");
 }
 
 {
@@ -247,28 +247,28 @@ writeFileSync(
     root,
     score: true,
     targets: true,
-    effort: 'low',
+    effort: "low",
     ownership: true,
-    ownershipEmails: 'handle',
+    ownershipEmails: "handle",
   });
   assert.ok(report.health_score);
-  console.log('  [PASS] computeHealth');
+  console.log("  [PASS] computeHealth");
 }
 
 {
   let error = null;
   try {
-    await detectDeadCode({ root: join(root, 'missing-root') });
+    await detectDeadCode({ root: join(root, "missing-root") });
   } catch (caught) {
     error = caught;
   }
   assert.ok(error);
-  assert.equal(error.name, 'FallowNodeError');
+  assert.equal(error.name, "FallowNodeError");
   assert.equal(error.exitCode, 2);
-  assert.equal(error.code, 'FALLOW_INVALID_ROOT');
-  assert.equal(error.context, 'analysis.root');
+  assert.equal(error.code, "FALLOW_INVALID_ROOT");
+  assert.equal(error.context, "analysis.root");
   assert.match(error.message, /analysis root does not exist/);
-  console.log('  [PASS] structured errors');
+  console.log("  [PASS] structured errors");
 }
 
-console.log('\nAll tests passed.');
+console.log("\nAll tests passed.");

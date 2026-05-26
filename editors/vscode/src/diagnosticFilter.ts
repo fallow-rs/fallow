@@ -66,8 +66,7 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   },
 ];
 
-let activeDiagnosticCategories: ReadonlyArray<DiagnosticCategory> =
-  DIAGNOSTIC_CATEGORIES;
+let activeDiagnosticCategories: ReadonlyArray<DiagnosticCategory> = DIAGNOSTIC_CATEGORIES;
 
 const isDiagnosticCategory = (value: unknown): value is DiagnosticCategory => {
   if (typeof value !== "object" || value === null) {
@@ -83,7 +82,7 @@ const isDiagnosticCategory = (value: unknown): value is DiagnosticCategory => {
 };
 
 export const parseDiagnosticCategories = (
-  value: unknown
+  value: unknown,
 ): ReadonlyArray<DiagnosticCategory> | null => {
   if (!Array.isArray(value)) {
     return null;
@@ -95,9 +94,7 @@ export const parseDiagnosticCategories = (
   return categories.map(({ code, label }) => ({ code, label }));
 };
 
-export const setDiagnosticCategories = (
-  categories: ReadonlyArray<DiagnosticCategory>
-): void => {
+export const setDiagnosticCategories = (categories: ReadonlyArray<DiagnosticCategory>): void => {
   if (categories.length === 0) {
     return;
   }
@@ -108,8 +105,8 @@ export const resetDiagnosticCategories = (): void => {
   activeDiagnosticCategories = DIAGNOSTIC_CATEGORIES;
 };
 
-export const getDiagnosticCategories =
-  (): ReadonlyArray<DiagnosticCategory> => activeDiagnosticCategories;
+export const getDiagnosticCategories = (): ReadonlyArray<DiagnosticCategory> =>
+  activeDiagnosticCategories;
 
 interface PersistedState {
   readonly mutedAll?: boolean;
@@ -123,8 +120,7 @@ interface FilterClient {
 /** LSP diagnostics get tagged with `source: "fallow"` (see
  *  `crates/lsp/src/diagnostics/*.rs`). Anything else flows through
  *  the filter untouched so we never affect TypeScript or ESLint. */
-export const isFallowDiagnostic = (d: vscode.Diagnostic): boolean =>
-  d.source === FALLOW_SOURCE;
+export const isFallowDiagnostic = (d: vscode.Diagnostic): boolean => d.source === FALLOW_SOURCE;
 
 /** `Diagnostic.code` per VSCode types is `string | number | { value, target }`,
  *  and may be absent. Returns `null` when there's nothing to match against. */
@@ -157,8 +153,7 @@ export class DiagnosticFilter {
   private readonly cache = new Map<string, vscode.Diagnostic[]>();
   private client: FilterClient | null = null;
   private persistQueue: Promise<void> = Promise.resolve();
-  private readonly emitter =
-    new vscode.EventEmitter<DiagnosticFilterStateChange>();
+  private readonly emitter = new vscode.EventEmitter<DiagnosticFilterStateChange>();
 
   public readonly onDidChange = this.emitter.event;
 
@@ -274,9 +269,7 @@ export class DiagnosticFilter {
     this.cache.delete(uri.toString());
   }
 
-  public applyFilter(
-    diagnostics: ReadonlyArray<vscode.Diagnostic>
-  ): vscode.Diagnostic[] {
+  public applyFilter(diagnostics: ReadonlyArray<vscode.Diagnostic>): vscode.Diagnostic[] {
     if (!this.anythingMuted()) {
       return diagnostics.slice();
     }
@@ -299,7 +292,7 @@ export class DiagnosticFilter {
   public handleDiagnostics(
     uri: vscode.Uri,
     diagnostics: vscode.Diagnostic[],
-    next: HandleDiagnosticsSignature
+    next: HandleDiagnosticsSignature,
   ): void {
     const key = uri.toString();
     this.evictIfFull(key);
@@ -314,7 +307,7 @@ export class DiagnosticFilter {
     document: vscode.TextDocument | vscode.Uri,
     previousResultId: string | undefined,
     token: vscode.CancellationToken,
-    next: ProvideDiagnosticSignature
+    next: ProvideDiagnosticSignature,
   ): Promise<vsdiag.DocumentDiagnosticReport | undefined | null> {
     const result = await next(document, previousResultId, token);
     if (!result) {
@@ -327,9 +320,7 @@ export class DiagnosticFilter {
     // a bare Uri does not. Structural detection works for both real and
     // mocked Uri objects (mocks aren't `instanceof vscode.Uri`).
     const uri =
-      "uri" in document && document.uri !== undefined
-        ? document.uri
-        : (document as vscode.Uri);
+      "uri" in document && document.uri !== undefined ? document.uri : (document as vscode.Uri);
     const key = uri.toString();
     this.evictIfFull(key);
     this.cache.set(key, result.items.slice());
@@ -373,7 +364,7 @@ export class DiagnosticFilter {
     };
     this.persistQueue = this.persistQueue.then(
       () => Promise.resolve(this.memento.update(STATE_KEY, payload)),
-      () => Promise.resolve(this.memento.update(STATE_KEY, payload))
+      () => Promise.resolve(this.memento.update(STATE_KEY, payload)),
     );
   }
 

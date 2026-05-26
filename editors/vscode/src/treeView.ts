@@ -6,12 +6,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { countCheckIssues } from "./analysis-utils.js";
 import { resolveFilePath as resolveFilePathPure } from "./treeView-utils.js";
-import type {
-  CloneGroup,
-  FallowCheckResult,
-  FallowDupesResult,
-  IssueCategory,
-} from "./types.js";
+import type { CloneGroup, FallowCheckResult, FallowDupesResult, IssueCategory } from "./types.js";
 import { ISSUE_CATEGORY_LABELS } from "./types.js";
 
 const resolveFilePath = (filePath: string | undefined) =>
@@ -70,15 +65,13 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
 };
 
 const staleSuppressionLabel = (
-  origin: NonNullable<FallowCheckResult["stale_suppressions"]>[number]["origin"]
+  origin: NonNullable<FallowCheckResult["stale_suppressions"]>[number]["origin"],
 ): string => {
   if (origin.type === "jsdoc_tag") {
     return `@expected-unused ${origin.export_name}`;
   }
   if (origin.issue_kind) {
-    return origin.is_file_level
-      ? `file ${origin.issue_kind}`
-      : origin.issue_kind;
+    return origin.is_file_level ? `file ${origin.issue_kind}` : origin.issue_kind;
   }
   return origin.is_file_level ? "file suppression" : "line suppression";
 };
@@ -90,11 +83,11 @@ class CategoryItem extends vscode.TreeItem {
 
   constructor(
     readonly category: IssueCategory,
-    issues: ReadonlyArray<IssueItem>
+    issues: ReadonlyArray<IssueItem>,
   ) {
     super(
       `${ISSUE_CATEGORY_LABELS[category]} (${issues.length})`,
-      vscode.TreeItemCollapsibleState.Collapsed
+      vscode.TreeItemCollapsibleState.Collapsed,
     );
     this.issues = issues;
     this.contextValue = "category";
@@ -108,7 +101,7 @@ class IssueItem extends vscode.TreeItem {
     readonly filePath: string,
     readonly line: number,
     readonly col: number,
-    category: IssueCategory
+    category: IssueCategory,
   ) {
     super(label, vscode.TreeItemCollapsibleState.None);
 
@@ -124,12 +117,7 @@ class IssueItem extends vscode.TreeItem {
       arguments: [
         vscode.Uri.file(absolute),
         {
-          selection: new vscode.Range(
-            Math.max(0, line - 1),
-            col,
-            Math.max(0, line - 1),
-            col
-          ),
+          selection: new vscode.Range(Math.max(0, line - 1), col, Math.max(0, line - 1), col),
         },
       ],
     };
@@ -138,9 +126,7 @@ class IssueItem extends vscode.TreeItem {
   }
 }
 
-export class DeadCodeTreeProvider
-  implements vscode.TreeDataProvider<DeadCodeItem>
-{
+export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeItem> {
   private result: FallowCheckResult | null = null;
   private view: vscode.TreeView<DeadCodeItem> | null = null;
 
@@ -169,9 +155,8 @@ export class DeadCodeTreeProvider
     }
     const count = countCheckIssues(this.result);
 
-    this.view.badge = count > 0
-      ? { value: count, tooltip: `${count} issue${count === 1 ? "" : "s"}` }
-      : undefined;
+    this.view.badge =
+      count > 0 ? { value: count, tooltip: `${count} issue${count === 1 ? "" : "s"}` } : undefined;
   }
 
   getTreeItem(element: DeadCodeItem): vscode.TreeItem {
@@ -189,10 +174,7 @@ export class DeadCodeTreeProvider
 
     const categories: DeadCodeItem[] = [];
 
-    const addCategory = (
-      category: IssueCategory,
-      items: ReadonlyArray<IssueItem>
-    ): void => {
+    const addCategory = (category: IssueCategory, items: ReadonlyArray<IssueItem>): void => {
       if (items.length > 0) {
         categories.push(new CategoryItem(category, items));
       }
@@ -201,22 +183,22 @@ export class DeadCodeTreeProvider
     addCategory(
       "unused-files",
       this.result.unused_files.map(
-        (f) => new IssueItem(path.basename(f.path), f.path, 1, 0, "unused-files")
-      )
+        (f) => new IssueItem(path.basename(f.path), f.path, 1, 0, "unused-files"),
+      ),
     );
 
     addCategory(
       "unused-exports",
       this.result.unused_exports.map(
-        (e) => new IssueItem(e.export_name, e.path, e.line, e.col, "unused-exports")
-      )
+        (e) => new IssueItem(e.export_name, e.path, e.line, e.col, "unused-exports"),
+      ),
     );
 
     addCategory(
       "unused-types",
       this.result.unused_types.map(
-        (e) => new IssueItem(e.export_name, e.path, e.line, e.col, "unused-types")
-      )
+        (e) => new IssueItem(e.export_name, e.path, e.line, e.col, "unused-types"),
+      ),
     );
 
     addCategory(
@@ -228,31 +210,31 @@ export class DeadCodeTreeProvider
             l.path,
             l.line,
             l.col,
-            "private-type-leaks"
-          )
-      )
+            "private-type-leaks",
+          ),
+      ),
     );
 
     addCategory(
       "unused-dependencies",
       this.result.unused_dependencies.map(
-        (d) => new IssueItem(d.package_name, d.path, d.line, 0, "unused-dependencies")
-      )
+        (d) => new IssueItem(d.package_name, d.path, d.line, 0, "unused-dependencies"),
+      ),
     );
 
     addCategory(
       "unused-dev-dependencies",
       this.result.unused_dev_dependencies.map(
-        (d) => new IssueItem(d.package_name, d.path, d.line, 0, "unused-dev-dependencies")
-      )
+        (d) => new IssueItem(d.package_name, d.path, d.line, 0, "unused-dev-dependencies"),
+      ),
     );
 
     if (this.result.unused_optional_dependencies) {
       addCategory(
         "unused-optional-dependencies",
         this.result.unused_optional_dependencies.map(
-          (d) => new IssueItem(d.package_name, d.path, d.line, 0, "unused-optional-dependencies")
-        )
+          (d) => new IssueItem(d.package_name, d.path, d.line, 0, "unused-optional-dependencies"),
+        ),
       );
     }
 
@@ -260,49 +242,62 @@ export class DeadCodeTreeProvider
       "unused-enum-members",
       this.result.unused_enum_members.map(
         (m) =>
-          new IssueItem(`${m.parent_name}.${m.member_name}`, m.path, m.line, m.col, "unused-enum-members")
-      )
+          new IssueItem(
+            `${m.parent_name}.${m.member_name}`,
+            m.path,
+            m.line,
+            m.col,
+            "unused-enum-members",
+          ),
+      ),
     );
 
     addCategory(
       "unused-class-members",
       this.result.unused_class_members.map(
         (m) =>
-          new IssueItem(`${m.parent_name}.${m.member_name}`, m.path, m.line, m.col, "unused-class-members")
-      )
+          new IssueItem(
+            `${m.parent_name}.${m.member_name}`,
+            m.path,
+            m.line,
+            m.col,
+            "unused-class-members",
+          ),
+      ),
     );
 
     addCategory(
       "unresolved-imports",
       this.result.unresolved_imports.map(
-        (i) => new IssueItem(i.specifier, i.path, i.line, i.col, "unresolved-imports")
-      )
+        (i) => new IssueItem(i.specifier, i.path, i.line, i.col, "unresolved-imports"),
+      ),
     );
 
     addCategory(
       "unlisted-dependencies",
       this.result.unlisted_dependencies.flatMap((d) =>
         d.imported_from.map(
-          (site) => new IssueItem(d.package_name, site.path, site.line, site.col, "unlisted-dependencies")
-        )
-      )
+          (site) =>
+            new IssueItem(d.package_name, site.path, site.line, site.col, "unlisted-dependencies"),
+        ),
+      ),
     );
 
     addCategory(
       "duplicate-exports",
       this.result.duplicate_exports.flatMap((d) =>
         d.locations.map(
-          (loc) => new IssueItem(d.export_name, loc.path, loc.line, loc.col, "duplicate-exports")
-        )
-      )
+          (loc) => new IssueItem(d.export_name, loc.path, loc.line, loc.col, "duplicate-exports"),
+        ),
+      ),
     );
 
     if (this.result.type_only_dependencies) {
       addCategory(
         "type-only-dependencies",
         this.result.type_only_dependencies.map(
-          (d) => new IssueItem(d.package_name, d.path, d.line, 0, "type-only-dependencies")
-        )
+          (d) => new IssueItem(d.package_name, d.path, d.line, 0, "type-only-dependencies"),
+        ),
       );
     }
 
@@ -310,8 +305,8 @@ export class DeadCodeTreeProvider
       addCategory(
         "test-only-dependencies",
         this.result.test_only_dependencies.map(
-          (d) => new IssueItem(d.package_name, d.path, d.line, 0, "test-only-dependencies")
-        )
+          (d) => new IssueItem(d.package_name, d.path, d.line, 0, "test-only-dependencies"),
+        ),
       );
     }
 
@@ -319,14 +314,15 @@ export class DeadCodeTreeProvider
       addCategory(
         "circular-dependencies",
         this.result.circular_dependencies.map(
-          (c) => new IssueItem(
-            `${c.length} files`,
-            c.files[0] ?? "",
-            c.line,
-            c.col,
-            "circular-dependencies"
-          )
-        )
+          (c) =>
+            new IssueItem(
+              `${c.length} files`,
+              c.files[0] ?? "",
+              c.line,
+              c.col,
+              "circular-dependencies",
+            ),
+        ),
       );
     }
 
@@ -334,16 +330,15 @@ export class DeadCodeTreeProvider
       addCategory(
         "re-export-cycles",
         this.result.re_export_cycles.map(
-          (c) => new IssueItem(
-            c.kind === "self-loop"
-              ? "Self-loop"
-              : `${c.files.length} files`,
-            c.files[0] ?? "",
-            1,
-            0,
-            "re-export-cycles"
-          )
-        )
+          (c) =>
+            new IssueItem(
+              c.kind === "self-loop" ? "Self-loop" : `${c.files.length} files`,
+              c.files[0] ?? "",
+              1,
+              0,
+              "re-export-cycles",
+            ),
+        ),
       );
     }
 
@@ -357,9 +352,9 @@ export class DeadCodeTreeProvider
               v.from_path,
               v.line,
               v.col,
-              "boundary-violation"
-            )
-        )
+              "boundary-violation",
+            ),
+        ),
       );
     }
 
@@ -373,9 +368,9 @@ export class DeadCodeTreeProvider
               s.path,
               s.line,
               s.col,
-              "stale-suppressions"
-            )
-        )
+              "stale-suppressions",
+            ),
+        ),
       );
     }
 
@@ -391,9 +386,9 @@ export class DeadCodeTreeProvider
               entry.path,
               entry.line,
               0,
-              "unused-catalog-entries"
-            )
-        )
+              "unused-catalog-entries",
+            ),
+        ),
       );
     }
 
@@ -409,9 +404,9 @@ export class DeadCodeTreeProvider
               finding.path,
               finding.line,
               0,
-              "unresolved-catalog-references"
-            )
-        )
+              "unresolved-catalog-references",
+            ),
+        ),
       );
     }
 
@@ -425,9 +420,9 @@ export class DeadCodeTreeProvider
               finding.path,
               finding.line,
               0,
-              "unused-dependency-overrides"
-            )
-        )
+              "unused-dependency-overrides",
+            ),
+        ),
       );
     }
 
@@ -441,9 +436,9 @@ export class DeadCodeTreeProvider
               finding.path,
               finding.line,
               0,
-              "misconfigured-dependency-overrides"
-            )
-        )
+              "misconfigured-dependency-overrides",
+            ),
+        ),
       );
     }
 
@@ -462,11 +457,11 @@ class CloneFamilyItem extends vscode.TreeItem {
 
   constructor(group: CloneGroup, index: number) {
     const instanceItems = group.instances.map(
-      (inst) => new CloneInstanceItem(inst.file, inst.start_line, inst.end_line)
+      (inst) => new CloneInstanceItem(inst.file, inst.start_line, inst.end_line),
     );
     super(
       `Clone #${index + 1} (${group.line_count} lines, ${group.instances.length} instances)`,
-      vscode.TreeItemCollapsibleState.Collapsed
+      vscode.TreeItemCollapsibleState.Collapsed,
     );
     this.instances = instanceItems;
     this.contextValue = "cloneFamily";
@@ -478,13 +473,10 @@ class CloneInstanceItem extends vscode.TreeItem {
   constructor(
     readonly filePath: string,
     readonly startLine: number,
-    readonly endLine: number
+    readonly endLine: number,
   ) {
     const basename = path.basename(filePath);
-    super(
-      `${basename}:${startLine}-${endLine}`,
-      vscode.TreeItemCollapsibleState.None
-    );
+    super(`${basename}:${startLine}-${endLine}`, vscode.TreeItemCollapsibleState.None);
 
     const { absolute, relative } = resolveFilePath(filePath);
 
@@ -498,12 +490,7 @@ class CloneInstanceItem extends vscode.TreeItem {
       arguments: [
         vscode.Uri.file(absolute),
         {
-          selection: new vscode.Range(
-            Math.max(0, startLine - 1),
-            0,
-            Math.max(0, endLine - 1),
-            0
-          ),
+          selection: new vscode.Range(Math.max(0, startLine - 1), 0, Math.max(0, endLine - 1), 0),
         },
       ],
     };
@@ -512,9 +499,7 @@ class CloneInstanceItem extends vscode.TreeItem {
   }
 }
 
-export class DuplicatesTreeProvider
-  implements vscode.TreeDataProvider<DuplicateItem>
-{
+export class DuplicatesTreeProvider implements vscode.TreeDataProvider<DuplicateItem> {
   private result: FallowDupesResult | null = null;
 
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
@@ -540,9 +525,7 @@ export class DuplicatesTreeProvider
       return [];
     }
 
-    return this.result.clone_groups.map(
-      (group, i) => new CloneFamilyItem(group, i)
-    );
+    return this.result.clone_groups.map((group, i) => new CloneFamilyItem(group, i));
   }
 
   dispose(): void {

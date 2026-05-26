@@ -28,9 +28,7 @@ export interface ExtensionApi {
   readonly runFix: typeof runFix;
 }
 
-export const activate = async (
-  context: vscode.ExtensionContext
-): Promise<ExtensionApi> => {
+export const activate = async (context: vscode.ExtensionContext): Promise<ExtensionApi> => {
   outputChannel = vscode.window.createOutputChannel("Fallow");
   context.subscriptions.push(outputChannel);
 
@@ -63,32 +61,29 @@ export const activate = async (
           lastCheckResult = check;
           lastDupesResult = dupes;
           updateViews();
-          void vscode.commands.executeCommand(
-            "setContext",
-            "fallow.hasAnalyzed",
-            true
-          );
+          void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
 
           const issueCount = countCheckIssues(check);
 
           if (issueCount > 0) {
-            void vscode.window.showInformationMessage(
-              `Fallow: found ${issueCount} issue${issueCount === 1 ? "" : "s"}. Open the Fallow sidebar to explore.`,
-              "Open Sidebar"
-            ).then((choice) => {
-              if (choice === "Open Sidebar") {
-                void vscode.commands.executeCommand("fallow.deadCode.focus");
-              }
-            });
+            void vscode.window
+              .showInformationMessage(
+                `Fallow: found ${issueCount} issue${issueCount === 1 ? "" : "s"}. Open the Fallow sidebar to explore.`,
+                "Open Sidebar",
+              )
+              .then((choice) => {
+                if (choice === "Open Sidebar") {
+                  void vscode.commands.executeCommand("fallow.deadCode.focus");
+                }
+                return undefined;
+              });
           } else {
-            void vscode.window.showInformationMessage(
-              "Fallow: no issues found."
-            );
+            void vscode.window.showInformationMessage("Fallow: no issues found.");
           }
         } catch {
           setStatusBarError();
         }
-      }
+      },
     );
   };
 
@@ -114,14 +109,14 @@ export const activate = async (
       if (e.visible) {
         onViewVisible();
       }
-    })
+    }),
   );
   context.subscriptions.push(
     duplicatesView.onDidChangeVisibility((e) => {
       if (e.visible) {
         onViewVisible();
       }
-    })
+    }),
   );
 
   const updateViews = (): void => {
@@ -135,7 +130,7 @@ export const activate = async (
     vscode.commands.registerCommand("fallow.analyze", async () => {
       cliAnalysisRan = true;
       await triggerCliAnalysis();
-    })
+    }),
   );
 
   context.subscriptions.push(
@@ -149,49 +144,44 @@ export const activate = async (
       // Re-run CLI analysis for tree views
       cliAnalysisRan = true;
       await triggerCliAnalysis();
-    })
+    }),
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.fixDryRun", async () => {
       await runFix(context, true);
-    })
+    }),
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.restart", async () => {
       outputChannel.appendLine("Restarting language server...");
       await restartClient(context, outputChannel, diagnosticFilter);
-    })
+    }),
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.showOutput", () => {
       outputChannel.show();
-    })
+    }),
   );
 
   // Open the Fallow sidebar (used by walkthrough completion event)
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.openSidebar", () => {
       void vscode.commands.executeCommand("fallow.deadCode.focus");
-    })
+    }),
   );
 
   // Open Fallow settings (used by walkthrough completion event)
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.openSettings", () => {
-      void vscode.commands.executeCommand(
-        "workbench.action.openSettings",
-        "fallow"
-      );
-    })
+      void vscode.commands.executeCommand("workbench.action.openSettings", "fallow");
+    }),
   );
 
   // Fallback command for Code Lens items with 0 references (display-only)
-  context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.noop", () => {})
-  );
+  context.subscriptions.push(vscode.commands.registerCommand("fallow.noop", () => {}));
 
   // Watch for config changes
   context.subscriptions.push(
@@ -220,7 +210,7 @@ export const activate = async (
         // (sequenced after LSP restart if both apply)
         void triggerCliAnalysis();
       }
-    })
+    }),
   );
 
   // Start LSP client
@@ -234,26 +224,20 @@ export const activate = async (
       "fallow/analysisComplete",
       (params: AnalysisCompleteParams) => {
         updateStatusBarFromLsp(params);
-        void vscode.commands.executeCommand(
-          "setContext",
-          "fallow.hasAnalyzed",
-          true
-        );
-      }
+        void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
+      },
     );
     context.subscriptions.push(notificationDisposable);
   }
 
   // Show walkthrough on first install
-  const walkthroughShown = context.globalState.get<boolean>(
-    "fallow.walkthroughShown"
-  );
+  const walkthroughShown = context.globalState.get<boolean>("fallow.walkthroughShown");
   if (!walkthroughShown) {
     void context.globalState.update("fallow.walkthroughShown", true);
     void vscode.commands.executeCommand(
       "workbench.action.openWalkthrough",
       "fallow-rs.fallow-vscode#fallow.gettingStarted",
-      false
+      false,
     );
   }
 

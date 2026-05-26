@@ -5,8 +5,7 @@ import * as path from "node:path";
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 
-export const getExecutableExtension = (): string =>
-  os.platform() === "win32" ? ".exe" : "";
+export const getExecutableExtension = (): string => (os.platform() === "win32" ? ".exe" : "");
 
 /**
  * Look for a locally installed binary in the workspace's node_modules/.bin.
@@ -19,12 +18,7 @@ export const findLocalBinary = (name: string): string | null => {
   }
 
   const executableName = `${name}${getExecutableExtension()}`;
-  const candidate = path.join(
-    folders[0].uri.fsPath,
-    "node_modules",
-    ".bin",
-    executableName
-  );
+  const candidate = path.join(folders[0].uri.fsPath, "node_modules", ".bin", executableName);
 
   if (fs.existsSync(candidate)) {
     return candidate;
