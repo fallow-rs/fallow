@@ -36,6 +36,8 @@ mod framework_convention_coverage_common;
 mod framework_convention_coverage_docusaurus;
 #[path = "integration_test/framework_convention_coverage_expo_tanstack.rs"]
 mod framework_convention_coverage_expo_tanstack;
+#[path = "integration_test/framework_convention_coverage_mintlify.rs"]
+mod framework_convention_coverage_mintlify;
 #[path = "integration_test/framework_convention_coverage_router.rs"]
 mod framework_convention_coverage_router;
 #[path = "integration_test/framework_convention_coverage_vitepress.rs"]

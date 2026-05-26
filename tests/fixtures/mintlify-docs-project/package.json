@@ -1,0 +1,7 @@
+{
+  "name": "mintlify-docs-project",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ]
+}

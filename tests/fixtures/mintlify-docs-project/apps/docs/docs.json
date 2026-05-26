@@ -1,0 +1,12 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "Example Docs",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Getting Started",
+        "pages": ["introduction", "guides/quickstart"]
+      }
+    ]
+  }
+}

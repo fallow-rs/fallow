@@ -1,0 +1,9 @@
+{
+  "name": "@mintlify-docs-project/docs",
+  "scripts": {
+    "docs": "mint dev"
+  },
+  "devDependencies": {
+    "mint": "^4.0.0"
+  }
+}

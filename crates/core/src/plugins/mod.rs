@@ -74,6 +74,7 @@ const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
     "i18next",
     "knex",
     "kysely",
+    "mintlify",
     "msw",
     "opencode",
     "prisma",
@@ -1025,6 +1026,7 @@ mod lexical;
 mod lint_staged;
 mod lit;
 mod markdownlint;
+mod mintlify;
 mod mocha;
 mod msw;
 mod nestjs;
