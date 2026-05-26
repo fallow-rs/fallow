@@ -1,0 +1,9 @@
+{
+  "name": "issue-621-playwright-webserver-nested",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "tsx": "^4.19.0"
+  }
+}
