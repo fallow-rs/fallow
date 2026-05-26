@@ -140,6 +140,10 @@ struct HealthPipelineTimings {
     config: f64,
     discover: f64,
     parse: f64,
+    /// Summed parse CPU time across rayon workers; `0.0` when parse was reused.
+    parse_cpu: f64,
+    /// True when discover + parse were reused from the upstream check pass.
+    shared_parse: bool,
 }
 
 struct HealthPipelineInput {
@@ -159,6 +163,10 @@ pub fn execute_health_with_shared_parse(
 ) -> Result<HealthResult, ExitCode> {
     scoring::validate_coverage_root_absolute(opts.coverage_root)
         .map_err(|e| emit_error(&e, 2, opts.output))?;
+    // Health re-derives its own config even when parse is reused, so measure
+    // it for real rather than reporting 0.0. Only discover + parse are
+    // genuinely reused from the upstream check pass.
+    let t = Instant::now();
     let config = crate::load_config_for_analysis(
         opts.root,
         opts.config_path,
@@ -170,6 +178,7 @@ pub fn execute_health_with_shared_parse(
         opts.quiet,
         fallow_config::ProductionAnalysis::Health,
     )?;
+    let config_ms = t.elapsed().as_secs_f64() * 1000.0;
     execute_health_inner(
         opts,
         HealthPipelineInput {
@@ -177,9 +186,11 @@ pub fn execute_health_with_shared_parse(
             files: shared.files,
             modules: shared.modules,
             timings: HealthPipelineTimings {
-                config: 0.0,
+                config: config_ms,
                 discover: 0.0,
                 parse: 0.0,
+                parse_cpu: 0.0,
+                shared_parse: true,
             },
             pre_computed_analysis: shared.analysis_output,
         },
@@ -220,6 +231,7 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     let t = Instant::now();
     let parse_result = fallow_core::extract::parse_all_files(&files, cache.as_ref(), true);
     let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let parse_cpu_ms = parse_result.parse_cpu_ms;
 
     execute_health_inner(
         opts,
@@ -231,6 +243,8 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
                 config: config_ms,
                 discover: discover_ms,
                 parse: parse_ms,
+                parse_cpu: parse_cpu_ms,
+                shared_parse: false,
             },
             pre_computed_analysis: None,
         },
@@ -255,6 +269,8 @@ fn execute_health_inner(
                 config: config_ms,
                 discover: discover_ms,
                 parse: parse_ms,
+                parse_cpu: parse_cpu_ms,
+                shared_parse,
             },
         pre_computed_analysis,
     } = input;
@@ -821,10 +837,18 @@ fn execute_health_inner(
     );
 
     let timings = if opts.performance {
+        // `start` begins at the top of this inner function, after config /
+        // discover / parse already ran in the caller. Fold those measured
+        // stages into TOTAL so the rendered rows sum to it (reused stages are
+        // 0.0 and stay excluded). Without this, TOTAL covered only the inner
+        // work and the table never reconciled. See issue #481.
+        let inner_ms = start.elapsed().as_secs_f64() * 1000.0;
+        let total_ms = config_ms + discover_ms + parse_ms + inner_ms;
         Some(HealthTimings {
             config_ms,
             discover_ms,
             parse_ms,
+            parse_cpu_ms,
             complexity_ms,
             file_scores_ms,
             git_churn_ms,
@@ -832,7 +856,8 @@ fn execute_health_inner(
             hotspots_ms,
             duplication_ms,
             targets_ms,
-            total_ms: start.elapsed().as_secs_f64() * 1000.0,
+            total_ms,
+            shared_parse,
         })
     } else {
         None

@@ -149,6 +149,12 @@ pub struct PipelineTimings {
     pub plugins_ms: f64,
     pub script_analysis_ms: f64,
     pub parse_extract_ms: f64,
+    /// Summed wall-clock time of the actual AST parses across all rayon
+    /// workers (the parse stage's CPU cost). `parse_extract_ms` is the
+    /// stage's wall-clock time; this is the work done in parallel within it.
+    /// Observational and non-deterministic (varies run to run); do not assert
+    /// against it.
+    pub parse_cpu_ms: f64,
     pub module_count: usize,
     /// Number of files whose parse results were loaded from cache (skipped parsing).
     pub cache_hits: usize,

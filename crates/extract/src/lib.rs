@@ -124,14 +124,24 @@ pub fn parse_all_files(
     cache: Option<&CacheStore>,
     need_complexity: bool,
 ) -> ParseResult {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     let cache_hits = AtomicUsize::new(0);
     let cache_misses = AtomicUsize::new(0);
+    // Summed nanoseconds spent in the actual AST parse (cache-miss path only).
+    // Lets the perf renderer report parse CPU time vs the stage's wall-clock.
+    let parse_cpu_nanos = AtomicU64::new(0);
 
     let modules: Vec<ModuleInfo> = files
         .par_iter()
         .filter_map(|file| {
-            parse_single_file_cached(file, cache, &cache_hits, &cache_misses, need_complexity)
+            parse_single_file_cached(
+                file,
+                cache,
+                &cache_hits,
+                &cache_misses,
+                &parse_cpu_nanos,
+                need_complexity,
+            )
         })
         .collect();
 
@@ -149,6 +159,7 @@ pub fn parse_all_files(
         modules,
         cache_hits: hits,
         cache_misses: misses,
+        parse_cpu_ms: parse_cpu_nanos.load(Ordering::Relaxed) as f64 / 1_000_000.0,
     }
 }
 
@@ -165,6 +176,7 @@ fn parse_single_file_cached(
     cache: Option<&CacheStore>,
     cache_hits: &std::sync::atomic::AtomicUsize,
     cache_misses: &std::sync::atomic::AtomicUsize,
+    parse_cpu_nanos: &std::sync::atomic::AtomicU64,
     need_complexity: bool,
 ) -> Option<ModuleInfo> {
     use std::sync::atomic::Ordering;
@@ -213,14 +225,17 @@ fn parse_single_file_cached(
     }
     cache_misses.fetch_add(1, Ordering::Relaxed);
 
-    // Cache miss, do a full parse
-    Some(parse_source_to_module(
-        file.id,
-        &file.path,
-        source,
-        content_hash,
-        need_complexity,
-    ))
+    // Cache miss, do a full parse. Time just this AST parse so the perf
+    // renderer can report parse CPU time (summed across workers) vs the
+    // stage's wall-clock. File read + hash above are deliberately excluded:
+    // the figure is "parse work", not IO.
+    let parse_start = std::time::Instant::now();
+    let module = parse_source_to_module(file.id, &file.path, source, content_hash, need_complexity);
+    parse_cpu_nanos.fetch_add(
+        u64::try_from(parse_start.elapsed().as_nanos()).unwrap_or(u64::MAX),
+        Ordering::Relaxed,
+    );
+    Some(module)
 }
 
 /// Extract mtime (seconds since epoch) from file metadata.

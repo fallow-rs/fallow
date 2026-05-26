@@ -30,6 +30,11 @@ pub struct HealthTimings {
     pub config_ms: f64,
     pub discover_ms: f64,
     pub parse_ms: f64,
+    /// Summed wall-clock time of the actual AST parses across all rayon
+    /// workers (the parse stage's CPU cost). `parse_ms` is the stage's
+    /// wall-clock time. Observational and non-deterministic; do not assert
+    /// against it. `0.0` when `shared_parse` is true (parse was reused).
+    pub parse_cpu_ms: f64,
     pub complexity_ms: f64,
     pub file_scores_ms: f64,
     pub git_churn_ms: f64,
@@ -38,6 +43,11 @@ pub struct HealthTimings {
     pub duplication_ms: f64,
     pub targets_ms: f64,
     pub total_ms: f64,
+    /// True when discover + parse were reused from the upstream dead-code
+    /// (check) pass in combined mode, so their timings are `0.0` here and
+    /// the cost is attributed to the `Pipeline Performance` table instead.
+    /// The renderer shows those two stages as `(measured above)`.
+    pub shared_parse: bool,
 }
 
 /// Auditable breadcrumb recording when health-finding `suppress-line`

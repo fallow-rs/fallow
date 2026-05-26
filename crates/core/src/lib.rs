@@ -589,7 +589,8 @@ pub fn analyze_with_parse_result(
         workspace_count: workspaces.len(),
         plugins_ms,
         script_analysis_ms: scripts_ms,
-        parse_extract_ms: 0.0, // Skipped — modules were reused
+        parse_extract_ms: 0.0, // Skipped: modules were reused
+        parse_cpu_ms: 0.0,     // Skipped: modules were reused
         module_count: modules.len(),
         cache_hits: 0,
         cache_misses: 0,
@@ -735,6 +736,7 @@ fn analyze_full(
     let modules = parse_result.modules;
     let cache_hits = parse_result.cache_hits;
     let cache_misses = parse_result.cache_misses;
+    let parse_cpu_ms = parse_result.parse_cpu_ms;
     let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     // Update cache with freshly parsed modules and refresh stale mtime/size entries.
@@ -871,6 +873,7 @@ fn analyze_full(
             plugins_ms,
             script_analysis_ms: scripts_ms,
             parse_extract_ms: parse_ms,
+            parse_cpu_ms,
             module_count: modules.len(),
             cache_hits,
             cache_misses,

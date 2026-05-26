@@ -648,6 +648,12 @@ pub struct ParseResult {
     pub cache_hits: usize,
     /// Number of files that required a full parse (new or changed).
     pub cache_misses: usize,
+    /// Summed wall-clock time of the actual AST parses, across all rayon
+    /// workers (cache hits and file IO excluded). Divided by the parse
+    /// stage's own wall-clock time this yields the effective parallelism of
+    /// the parse work. Observational only: a wall-clock-derived figure that
+    /// varies run to run; do not assert against it.
+    pub parse_cpu_ms: f64,
 }
 
 #[cfg(test)]
