@@ -905,6 +905,29 @@ impl ModuleInfoExtractor {
                 });
                 return;
             }
+            // Constructor root: `new Class(...).first().<...>.this_method()`.
+            // The constructor always returns a `Class` instance, so there is no
+            // root method to validate. The first instance method off the
+            // constructor (`inner_member.property.name`) is itself a chain step
+            // that must be `is_self_returning` to reach `this_method`, so it is
+            // pushed into the chain prefix before encoding. See issue #605.
+            if let Expression::NewExpression(new_expr) = &inner_member.object
+                && let Expression::Identifier(class_id) = &new_expr.callee
+            {
+                chain_prefix_reversed.push(inner_member.property.name.to_string());
+                chain_prefix_reversed.reverse();
+                let chain_prefix = chain_prefix_reversed.join(",");
+                self.member_accesses.push(MemberAccess {
+                    object: format!(
+                        "{}{}:{}",
+                        crate::FLUENT_CHAIN_NEW_SENTINEL,
+                        class_id.name,
+                        chain_prefix,
+                    ),
+                    member: this_method.to_string(),
+                });
+                return;
+            }
             chain_prefix_reversed.push(inner_member.property.name.to_string());
             current = &inner_member.object;
         }
@@ -2764,6 +2787,23 @@ fn static_member_object_name(expr: &Expression<'_>) -> Option<String> {
         Expression::CallExpression(call) if call.arguments.is_empty() => {
             Some(format!("{}()", static_member_object_name(&call.callee)?))
         }
+        // `new Class(...).method()`: credit the method on the constructed
+        // class. The receiver `new Class(...)` resolves to the bare class name
+        // so the surrounding member access is recorded as `Class.method` and
+        // credited through the same `local_to_export_keys` path as a direct
+        // static access. The bare identifier is recorded UNCONDITIONALLY, even
+        // for builtin-shaped names: distinguishing a global `new Map()` from a
+        // user `class Map {}` is the analyze layer's job, not extraction's. A
+        // global resolves to no user export there and drops silently, while a
+        // user-defined class named `URL` / `Request` / `Map` is credited
+        // correctly. Guarding on `is_builtin_constructor` here would silently
+        // re-introduce the issue-605 false positive for those classes.
+        // Member-expression callees (`new ns.Class()`) are out of scope.
+        // See issue #605.
+        Expression::NewExpression(new_expr) => match &new_expr.callee {
+            Expression::Identifier(callee) => Some(callee.name.to_string()),
+            _ => None,
+        },
         // `(this.vc()?.method)` and similar optional chains wrap the
         // member-access in a `ChainExpression`; descend into the wrapped form
         // so `this.vc()?.refresh()` resolves the same way as `this.vc().refresh()`.

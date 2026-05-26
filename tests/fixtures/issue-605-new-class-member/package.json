@@ -1,0 +1,5 @@
+{
+  "name": "issue-605-new-class-member",
+  "private": true,
+  "main": "src/index.ts"
+}

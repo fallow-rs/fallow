@@ -65,7 +65,12 @@ use crate::MemberKind;
 /// targets now emit `DynamicImportInfo` entries for local runner files.
 /// Pre-fix entries omit those dynamic imports, so forked script files can be
 /// reported as unused until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 98;
+///
+/// Bumped to 99 for issue #605: methods reached via `new Class(...).method()`
+/// receivers (direct and fluent-chain) now emit member accesses crediting the
+/// constructed class. Pre-fix entries lack those accesses, so such methods can
+/// be reported as unused class members until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 99;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

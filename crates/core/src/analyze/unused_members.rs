@@ -6,9 +6,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::discover::FileId;
 use crate::extract::{
-    ANGULAR_TPL_SENTINEL, ExportName, FACTORY_CALL_SENTINEL, FLUENT_CHAIN_SENTINEL,
-    INSTANCE_EXPORT_SENTINEL, MemberKind, ModuleInfo, PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
-    PLAYWRIGHT_FIXTURE_USE_SENTINEL,
+    ANGULAR_TPL_SENTINEL, ExportName, FACTORY_CALL_SENTINEL, FLUENT_CHAIN_NEW_SENTINEL,
+    FLUENT_CHAIN_SENTINEL, INSTANCE_EXPORT_SENTINEL, MemberKind, ModuleInfo,
+    PLAYWRIGHT_FIXTURE_DEF_SENTINEL, PLAYWRIGHT_FIXTURE_USE_SENTINEL,
 };
 use crate::graph::{ModuleGraph, ReferenceKind};
 use crate::resolve::ResolvedModule;
@@ -870,6 +870,7 @@ fn propagate_accesses_through_typed_instance_bindings(
             if access.object.starts_with(INSTANCE_EXPORT_SENTINEL)
                 || access.object.starts_with(FACTORY_CALL_SENTINEL)
                 || access.object.starts_with(FLUENT_CHAIN_SENTINEL)
+                || access.object.starts_with(FLUENT_CHAIN_NEW_SENTINEL)
                 || access.object.starts_with(PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
                 || access.object.starts_with(PLAYWRIGHT_FIXTURE_USE_SENTINEL)
                 || access.object == ANGULAR_TPL_SENTINEL
@@ -1087,6 +1088,114 @@ fn propagate_fluent_chain_accesses(
                     let chain_valid = origin_module.exports.iter().any(|export| {
                         export_validates_fluent_chain(export, &origin, root_method, &chain)
                     });
+                    if !chain_valid {
+                        continue;
+                    }
+                    accessed_members
+                        .entry(origin)
+                        .or_default()
+                        .insert(access.member.clone());
+                }
+            }
+        }
+    }
+}
+
+/// Decode a `FLUENT_CHAIN_NEW_SENTINEL{class}:{chain}` access object into its
+/// `(class, chain)` components. `chain` is a comma-separated list of the
+/// intermediate method names walked between the constructor and the credited
+/// member. The visitor always emits at least the first instance method, so an
+/// empty chain is treated as malformed and returns `None`: crediting `member`
+/// on a constructor root with no validated self-returning step would be a
+/// vacuous over-credit (`chain.iter().all(...)` is `true` on an empty slice).
+/// Returns `None` when the object is not sentinel-prefixed or the structure is
+/// malformed. See issue #605.
+fn parse_fluent_chain_new_sentinel(object: &str) -> Option<(&str, Vec<&str>)> {
+    let payload = object.strip_prefix(FLUENT_CHAIN_NEW_SENTINEL)?;
+    let (class, chain_str) = payload.split_once(':')?;
+    if chain_str.is_empty() {
+        return None;
+    }
+    Some((class, chain_str.split(',').collect()))
+}
+
+/// Validate a constructor-rooted fluent chain against a single class export:
+/// the export must match the resolved origin name and contain every `chain`
+/// step as an `is_self_returning` `ClassMethod`. Unlike the static-factory
+/// chain, there is no root method to validate: `new <class>()` always returns a
+/// `<class>` instance. See issue #605.
+fn export_validates_fluent_chain_new(
+    export: &crate::extract::ExportInfo,
+    origin: &ExportKey,
+    chain: &[&str],
+) -> bool {
+    if !export.name.matches_str(origin.export_name.as_str()) {
+        return false;
+    }
+    chain.iter().all(|step| {
+        export.members.iter().any(|member| {
+            member.kind == MemberKind::ClassMethod
+                && member.name == *step
+                && member.is_self_returning
+        })
+    })
+}
+
+/// Credit member accesses produced by fluent chains rooted at a `new`
+/// expression.
+///
+/// At extract time, each call expression chained off a `new <class>(...)`
+/// receiver emits a `FLUENT_CHAIN_NEW_SENTINEL:<class>:<chain>` access with
+/// `member` set to the method being called now. This pass:
+///
+/// 1. Resolves `<class>` through each consumer's `local_to_export_keys`
+///    (covering both same-file local classes and cross-file imports).
+/// 2. Walks the matched `ExportKey` through `walk_re_export_origins` to reach
+///    every defining-site class export.
+/// 3. Requires every `<chain>` step to exist on the origin class as an
+///    `is_self_returning` `ClassMethod`. If any step is absent or
+///    non-self-returning, the chain has left the class type and the credit is
+///    skipped (the same #387 safety check, minus the static-factory-method
+///    validation a constructor root does not need).
+/// 4. Credits the access's `member` on the origin class only when every check
+///    above passes.
+///
+/// The first method directly off the constructor is credited separately by the
+/// `static_member_object_name` `NewExpression` arm, so the empty-chain case
+/// never reaches this pass. Origins that turn out not to name a class with the
+/// chained self-returning methods drop here silently. See issue #605.
+fn propagate_fluent_chain_new_accesses(
+    graph: &ModuleGraph,
+    resolved_modules: &[ResolvedModule],
+    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
+) {
+    let module_by_id: FxHashMap<FileId, &ResolvedModule> = resolved_modules
+        .iter()
+        .map(|module| (module.file_id, module))
+        .collect();
+
+    for resolved in resolved_modules {
+        let local_to_export_keys = build_local_to_export_keys(resolved);
+        for access in &resolved.member_accesses {
+            let Some((class_local, chain)) =
+                parse_fluent_chain_new_sentinel(access.object.as_str())
+            else {
+                continue;
+            };
+            let Some(seed_keys) = local_to_export_keys.get(class_local) else {
+                continue;
+            };
+            for seed_key in seed_keys {
+                for origin in
+                    walk_re_export_origins(graph, seed_key.file_id, seed_key.export_name.as_str())
+                {
+                    let Some(origin_module) = module_by_id.get(&origin.file_id) else {
+                        continue;
+                    };
+                    let chain_valid = origin_module
+                        .exports
+                        .iter()
+                        .any(|export| export_validates_fluent_chain_new(export, &origin, &chain));
                     if !chain_valid {
                         continue;
                     }
@@ -1349,6 +1458,7 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
             if access.object.starts_with(INSTANCE_EXPORT_SENTINEL)
                 || access.object.starts_with(FACTORY_CALL_SENTINEL)
                 || access.object.starts_with(FLUENT_CHAIN_SENTINEL)
+                || access.object.starts_with(FLUENT_CHAIN_NEW_SENTINEL)
             {
                 continue;
             }
@@ -1384,6 +1494,7 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
     propagate_playwright_fixture_accesses(graph, resolved_modules, &mut accessed_members);
     propagate_factory_call_accesses(graph, resolved_modules, &mut accessed_members);
     propagate_fluent_chain_accesses(graph, resolved_modules, &mut accessed_members);
+    propagate_fluent_chain_new_accesses(graph, resolved_modules, &mut accessed_members);
     propagate_accesses_through_typed_instance_bindings(
         graph,
         resolved_modules,
@@ -1472,6 +1583,7 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
                         && !a.object.starts_with(INSTANCE_EXPORT_SENTINEL)
                         && !a.object.starts_with(FACTORY_CALL_SENTINEL)
                         && !a.object.starts_with(FLUENT_CHAIN_SENTINEL)
+                        && !a.object.starts_with(FLUENT_CHAIN_NEW_SENTINEL)
                 })
                 .map(|a| (a.object.as_str(), a.member.as_str()))
                 .collect();

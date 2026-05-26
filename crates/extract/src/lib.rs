@@ -91,6 +91,22 @@ pub const FACTORY_CALL_SENTINEL: &str = "__fallow_factory_call__:";
 /// when the chain remains on the class type. See issue #387.
 pub const FLUENT_CHAIN_SENTINEL: &str = "__fallow_fluent_chain__:";
 
+/// Synthetic member-access object prefix for fluent chains rooted at a `new`
+/// expression.
+///
+/// `MemberAccess { object: format!("{FLUENT_CHAIN_NEW_SENTINEL}{class}:{chain}"), member }`
+/// means a chain `new <class>(...).<...chain>.<member>` was observed. Unlike
+/// `FLUENT_CHAIN_SENTINEL`, there is no root method: a constructor always
+/// returns an instance of `class`, so no `is_instance_returning_static` check
+/// applies. `chain` is a comma-separated list of the intermediate method names
+/// between the constructor and `member` (it always contains at least the first
+/// method, which must be `is_self_returning` to reach `member`). The analyze
+/// layer resolves `class` to a class export, requires every `chain` segment to
+/// be `is_self_returning` on the class, and credits `member` on the class.
+/// The first method directly off the constructor is credited separately via
+/// the `static_member_object_name` `NewExpression` arm. See issue #605.
+pub const FLUENT_CHAIN_NEW_SENTINEL: &str = "__fallow_fluent_chain_new__:";
+
 use parse::parse_source_to_module;
 
 /// Leading UTF-8 byte order mark codepoint.

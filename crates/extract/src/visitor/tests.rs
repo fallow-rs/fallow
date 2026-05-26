@@ -2954,6 +2954,104 @@ fn fluent_chain_emits_sentinel_member_access() {
 }
 
 #[test]
+fn new_expression_direct_member_access_recorded() {
+    // Issue #605: a method reached through a freshly-constructed instance must
+    // credit the class. `new Repo(client).search(data)` resolves the receiver
+    // to the bare class name, so the member access is keyed on `Repo`.
+    let info = parse(
+        r"
+        import { Repo } from './repo';
+        new Repo(client).search(data);
+        ",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Repo" && a.member == "search"),
+        "new Repo(client).search() should record a member access keyed on the class, found: {:?}",
+        info.member_accesses,
+    );
+}
+
+#[test]
+fn new_expression_fluent_chain_emits_new_sentinel() {
+    // Issue #605: a fluent chain rooted at a constructor encodes a separate
+    // sentinel (no root method, since the constructor always returns an
+    // instance). The first method off the constructor is a plain class-keyed
+    // access; downstream methods carry the new sentinel with the prior chain.
+    let info = parse(
+        r"
+        import { OptionBuilder } from './option-builder';
+        new OptionBuilder().addDefault(a).addFromCli(b).build();
+        ",
+    );
+
+    // First method directly off the constructor: plain class-keyed access.
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "OptionBuilder" && a.member == "addDefault"),
+        "first method off `new OptionBuilder()` should be a class-keyed access, found: {:?}",
+        info.member_accesses,
+    );
+    // Second method: new sentinel with chain prefix "addDefault".
+    assert!(
+        info.member_accesses.iter().any(|a| a.object
+            == format!(
+                "{}OptionBuilder:addDefault",
+                crate::FLUENT_CHAIN_NEW_SENTINEL
+            )
+            && a.member == "addFromCli"),
+        "second chained call should encode the first method in the chain prefix, found: {:?}",
+        info.member_accesses,
+    );
+    // Terminal `.build()`: new sentinel with chain prefix "addDefault,addFromCli".
+    assert!(
+        info.member_accesses.iter().any(|a| a.object
+            == format!(
+                "{}OptionBuilder:addDefault,addFromCli",
+                crate::FLUENT_CHAIN_NEW_SENTINEL
+            )
+            && a.member == "build"),
+        "terminal call should encode the full prior chain, found: {:?}",
+        info.member_accesses,
+    );
+}
+
+#[test]
+fn new_expression_records_bare_identifier_even_for_builtin_shaped_names() {
+    // Issue #605: extraction is name-agnostic. `new Map().set(k, v)` records a
+    // `Map`-keyed access UNCONDITIONALLY; disambiguating a global `Map` from a
+    // user `class Map {}` is the analyze layer's job (a global resolves to no
+    // user export and drops, a user class is credited). Guarding on
+    // `is_builtin_constructor` here would silently drop the access for a
+    // user-defined class named like a builtin, re-introducing the #605 false
+    // positive (caught by Codex's parallel review for `class URL`).
+    let info = parse(
+        r"
+        new Map().set(k, v);
+        new URL().parse();
+        ",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Map" && a.member == "set"),
+        "builtin-shaped constructor receivers should still record the bare-identifier access, found: {:?}",
+        info.member_accesses,
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "URL" && a.member == "parse"),
+        "a user class named like a builtin must record its access for analyze-layer crediting, found: {:?}",
+        info.member_accesses,
+    );
+}
+
+#[test]
 fn self_returning_instance_method_flagged() {
     let info = parse(
         r"

@@ -100,6 +100,8 @@ mod workspace_internal_deps;
 mod inheritance_members;
 #[path = "integration_test/issue_346_static_factory_method.rs"]
 mod issue_346_static_factory_method;
+#[path = "integration_test/issue_605_new_class_member.rs"]
+mod issue_605_new_class_member;
 #[path = "integration_test/lit_custom_element.rs"]
 mod lit_custom_element;
 #[path = "integration_test/scoped_used_class_members.rs"]
