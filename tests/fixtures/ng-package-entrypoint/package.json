@@ -1,0 +1,11 @@
+{
+  "name": "@acme/ng-lib",
+  "version": "1.0.0",
+  "private": true,
+  "peerDependencies": {
+    "@angular/core": "^20.0.0"
+  },
+  "devDependencies": {
+    "@angular/core": "^20.0.0"
+  }
+}
