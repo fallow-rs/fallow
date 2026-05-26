@@ -450,6 +450,102 @@ test('ensureVerified is idempotent under concurrent first-runs', async (t) => {
   assert.deepEqual(tmps, [], 'no leftover temp files from concurrent writes');
 });
 
+// ---- cross-install sentinel reuse (security regression test) ----------
+
+test('ensureVerified rejects a sentinel written for a different install dir', (t) => {
+  _resetWarningState();
+  if (process.platform === 'win32') {
+    t.skip('chmod-based read-only platform pkg dir is not portable on Windows');
+    return;
+  }
+  // Two installs of the same package + version. install A is clean and writes
+  // a sentinel to a shared cache; install B has a tampered binary at the same
+  // package name + version. B must NOT trust A's sentinel via cache hit even
+  // when the recorded mtimes happen to match B's binary mtimes.
+  const { privateKey, rawPub } = makeKeypair();
+  const installA = mkPlatformDir(privateKey);
+  const installB = mkPlatformDir(privateKey);
+  // Tamper install B's fallow binary AFTER mkPlatformDir wrote a valid sig
+  // for the original bytes (mkPlatformDir does not expose a corrupt-binary
+  // option, so simulate the attack by overwriting bytes here).
+  fs.writeFileSync(path.join(installB, `fallow${ext()}`), Buffer.from('tampered bytes'));
+  const sharedCache = fs.mkdtempSync(path.join(os.tmpdir(), 'fallow-shared-cache-'));
+
+  // Force the shared-cache cascade by making both platform pkg dirs
+  // non-writable (simulates yarn PnP / Docker layered images / pnpm
+  // verify-store invariants).
+  fs.chmodSync(installA, 0o555);
+  fs.chmodSync(installB, 0o555);
+  t.after(() => {
+    fs.chmodSync(installA, 0o755);
+    fs.chmodSync(installB, 0o755);
+    cleanup(installA); cleanup(installB); cleanup(sharedCache);
+  });
+
+  // Install A: clean verify. Sentinel lands in the shared cache because the
+  // platform pkg dir is read-only.
+  const resultA = ensureVerified({
+    ...baseInput(installA, (p) => _verifyWithKey(p, rawPub)),
+    env: { FALLOW_VERIFY_CACHE_DIR: sharedCache },
+  });
+  assert.equal(resultA.ok, true);
+  assert.match(resultA.sentinelPath, new RegExp(sharedCache.replace(/\\/g, '\\\\')));
+
+  // Attacker on install B copies install A's mtimes onto B's binaries so the
+  // mtime pre-filter would have matched. With only mtime + name + version
+  // gates this would produce a cache hit and skip verify; the platformPkgDir
+  // + SHA-256 binding must prevent that.
+  for (const name of binaryNames()) {
+    const aStat = fs.statSync(path.join(installA, name));
+    fs.chmodSync(path.join(installB, name), 0o644);
+    fs.utimesSync(path.join(installB, name), aStat.atime, aStat.mtime);
+  }
+
+  let verifyCallCount = 0;
+  const resultB = ensureVerified({
+    ...baseInput(installB, (p) => { verifyCallCount += 1; return _verifyWithKey(p, rawPub); }),
+    env: { FALLOW_VERIFY_CACHE_DIR: sharedCache },
+  });
+  assert.equal(resultB.ok, false);
+  assert.equal(resultB.code, 'sig-invalid');
+  assert.ok(verifyCallCount > 0, 'expected re-verify on cross-install sentinel read');
+});
+
+test('ensureVerified rejects a sentinel where bytes drift but mtime stays', (t) => {
+  _resetWarningState();
+  const { privateKey, rawPub } = makeKeypair();
+  const dir = mkPlatformDir(privateKey);
+  t.after(() => cleanup(dir));
+
+  // First invocation writes a sentinel with the clean SHA-256.
+  ensureVerified(baseInput(dir, (p) => _verifyWithKey(p, rawPub)));
+
+  // Tamper the binary in place AND restore the prior mtime, so the mtime
+  // pre-filter matches but the bytes do not.
+  const binPath = path.join(dir, `fallow${ext()}`);
+  const before = fs.statSync(binPath);
+  fs.writeFileSync(binPath, Buffer.from('tampered'));
+  fs.utimesSync(binPath, before.atime, before.mtime);
+
+  let verifyCallCount = 0;
+  const result = ensureVerified(baseInput(dir, (p) => { verifyCallCount += 1; return _verifyWithKey(p, rawPub); }));
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'sig-invalid');
+  assert.ok(verifyCallCount > 0, 'expected re-verify when bytes diverge from sentinel SHA');
+});
+
+// ---- FALLOW_SKIP_BINARY_VERIFY warning (regression test for documented contract) ----
+
+test('ensureVerified warns once on stderr when FALLOW_SKIP_BINARY_VERIFY is set', (t) => {
+  _resetWarningState();
+  const stderr = captureStderr(t);
+  const env = { [SKIP_ENV]: '1' };
+  ensureVerified({ platformPkgDir: '/x', packageName: '@fallow-cli/y', manifestPath: '/z', env });
+  ensureVerified({ platformPkgDir: '/x', packageName: '@fallow-cli/y', manifestPath: '/z', env });
+  const warnings = stderr.lines.filter((l) => l.includes(`${SKIP_ENV} is set`) && l.includes('verification is skipped'));
+  assert.equal(warnings.length, 1, 'warning should fire exactly once per process');
+});
+
 // ---- VERIFY_LOG_ENV export ------------------------------------------------
 
 test('VERIFY_LOG_ENV is exported with the documented name', () => {

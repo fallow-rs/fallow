@@ -26,7 +26,10 @@ const crypto = require('node:crypto');
 const { resolveSentinelPath } = require('./sentinel-path');
 const { verifyInstalledSync, SKIP_ENV } = require('./verify-binary');
 
-const SENTINEL_SCHEMA_VERSION = 1;
+// Bumped to 2 when SHA-256 + platformPkgDir binding landed (closes the
+// cross-install reuse gap in the shared $XDG fallback cache). v1 sentinels
+// without these fields are invalidated automatically.
+const SENTINEL_SCHEMA_VERSION = 2;
 const VERIFY_LOG_ENV = 'FALLOW_VERIFY_LOG';
 
 // One-shot warning state: each warning class fires once per process,
@@ -105,53 +108,83 @@ function readSentinelFile(sentinelPath) {
   }
 }
 
-// True when the structural fields (schema, version, name, binaries map) all
-// match. Mtime check is in a separate helper to keep both functions flat.
-function sentinelStructureMatches(parsed, manifest) {
+// True when the structural fields (schema, version, name, binaries map,
+// install identity) all match. Mtime + bytes checks are in separate helpers
+// to keep each function flat.
+//
+// `platformPkgDir` binds the sentinel to a specific install location. This
+// matters when the sentinel lives in the shared $XDG fallback cache: two
+// installs of the same package + version on the same host would otherwise
+// share a sentinel keyed only by name/version, and an attacker who can write
+// to one install's binary could ride the other install's sentinel state.
+function sentinelStructureMatches(parsed, manifest, platformPkgDir) {
   if (!parsed) return false;
   if (parsed.schemaVersion !== SENTINEL_SCHEMA_VERSION) return false;
   if (parsed.packageVersion !== manifest.version) return false;
   if (parsed.packageName !== manifest.name) return false;
+  if (parsed.platformPkgDir !== platformPkgDir) return false;
   return parsed.binaries && typeof parsed.binaries === 'object';
 }
 
-// True when every recorded binary mtime still matches the on-disk mtime within
-// the 1ms rounding tolerance some filesystems (NFS, FAT) introduce.
-function sentinelMtimesMatch(parsed, platformPkgDir, platform) {
+// Compute a hex SHA-256 of a file's bytes. Used to bind the sentinel to the
+// exact binary bytes that passed verification, so a tampered binary with the
+// same mtime cannot ride a stale cache entry.
+function sha256OfFile(absPath) {
+  try {
+    return crypto.createHash('sha256').update(fs.readFileSync(absPath)).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+// True when every recorded binary still matches the on-disk state. The mtime
+// check is a cheap pre-filter; the SHA-256 check is the load-bearing
+// integrity gate that defends against same-mtime cross-install reuse where a
+// tampered binary happens to land with the recorded mtime.
+function sentinelBinariesMatch(parsed, platformPkgDir, platform) {
   for (const target of binaryTargetsForPlatform(platform)) {
     const recorded = parsed.binaries[target];
     if (!recorded || typeof recorded.mtimeMs !== 'number') return false;
-    const current = statMtimeMs(path.join(platformPkgDir, target));
+    if (typeof recorded.sha256 !== 'string' || recorded.sha256.length !== 64) return false;
+    const binaryPath = path.join(platformPkgDir, target);
+    const current = statMtimeMs(binaryPath);
     if (current === null) return false;
+    // 1ms tolerance covers NFS / FAT mtime rounding.
     if (Math.abs(current - recorded.mtimeMs) > 1) return false;
+    const sha = sha256OfFile(binaryPath);
+    if (sha !== recorded.sha256) return false;
   }
   return true;
 }
 
 // Read and validate the sentinel. Returns true when the sentinel is valid for
-// the current platform package state (binary mtimes + version + package name
-// all match). Any failure mode (missing file, malformed JSON, schema drift,
-// stale mtime, mismatched name/version) returns false, triggering re-verify.
+// the current platform package state (binary mtimes + bytes + version +
+// package name + install identity all match). Any failure mode (missing file,
+// malformed JSON, schema drift, stale mtime, mismatched bytes / name /
+// version, install-dir mismatch) returns false, triggering re-verify.
 function isSentinelValid(sentinelPath, platformPkgDir, manifest, platform) {
   const parsed = readSentinelFile(sentinelPath);
-  if (!sentinelStructureMatches(parsed, manifest)) return false;
-  return sentinelMtimesMatch(parsed, platformPkgDir, platform);
+  if (!sentinelStructureMatches(parsed, manifest, platformPkgDir)) return false;
+  return sentinelBinariesMatch(parsed, platformPkgDir, platform);
 }
 
 function buildSentinelPayload(platformPkgDir, manifest, platform) {
   const binaries = {};
   for (const target of binaryTargetsForPlatform(platform)) {
-    const mtimeMs = statMtimeMs(path.join(platformPkgDir, target));
-    if (mtimeMs === null) {
+    const binaryPath = path.join(platformPkgDir, target);
+    const mtimeMs = statMtimeMs(binaryPath);
+    const sha256 = sha256OfFile(binaryPath);
+    if (mtimeMs === null || sha256 === null) {
       return null;
     }
-    binaries[target] = { mtimeMs };
+    binaries[target] = { mtimeMs, sha256 };
   }
   return {
     schemaVersion: SENTINEL_SCHEMA_VERSION,
     verifiedAt: new Date().toISOString(),
     packageVersion: manifest.version,
     packageName: manifest.name,
+    platformPkgDir,
     binaries,
   };
 }
@@ -251,6 +284,15 @@ function ensureVerified(input) {
 
   if (isSkipRequested(env)) {
     const reason = `${SKIP_ENV} is set`;
+    // Warn once per process so the bypass stays visible in CI logs and
+    // vendor audits regardless of whether the user runs `--version` or
+    // sets FALLOW_VERIFY_LOG. Documented in SECURITY.md.
+    warnOnce(
+      'skip-binary-verify-set',
+      `${SKIP_ENV} is set; binary verification is skipped. ` +
+      `Unset the variable to re-enable Ed25519 + SHA-256 verification. ` +
+      `See SECURITY.md for the trust model.`,
+    );
     emitVerifyLog(env, { outcome: 'skipped', reason });
     return { ok: true, skipped: true, reason };
   }
