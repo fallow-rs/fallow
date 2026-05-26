@@ -856,6 +856,40 @@ mod tests {
     }
 
     #[test]
+    fn test_alias_projects_nested_new_url_pathname() {
+        // Vitest's own workspace fixtures use `new URL(..., import.meta.url).pathname`
+        // for project-level test.alias replacements.
+        let source = r#"
+            export default {
+                test: {
+                    projects: [
+                        {
+                            test: {
+                                alias: {
+                                    "test-alias-from-vitest": new URL("./space/test-alias-to.ts", import.meta.url).pathname
+                                }
+                            }
+                        }
+                    ]
+                }
+            };
+        "#;
+        let result = resolve_abs(source);
+        assert_eq!(
+            result.path_aliases,
+            vec![(
+                "test-alias-from-vitest".to_string(),
+                "space/test-alias-to.ts".to_string()
+            )]
+        );
+        assert!(
+            result
+                .setup_files
+                .contains(&std::path::PathBuf::from("/project/space/test-alias-to.ts"))
+        );
+    }
+
+    #[test]
     fn test_alias_directory_target_not_seeded_as_entry_point() {
         // A directory alias (`@/` -> `src`) is a path alias whose target has no
         // file extension; it must NOT be seeded as a support entry point.

@@ -993,6 +993,9 @@ pub(crate) fn expression_to_path_string(expr: &Expression) -> Option<String> {
         Expression::ParenthesizedExpression(paren) => expression_to_path_string(&paren.expression),
         Expression::TSAsExpression(ts_as) => expression_to_path_string(&ts_as.expression),
         Expression::TSSatisfiesExpression(ts_sat) => expression_to_path_string(&ts_sat.expression),
+        Expression::StaticMemberExpression(member) if member.property.name == "pathname" => {
+            expression_to_path_string(&member.object)
+        }
         Expression::CallExpression(call) => call_expression_to_path_string(call),
         Expression::NewExpression(new_expr) => new_expression_to_path_string(new_expr),
         _ => expression_to_string(expr),
