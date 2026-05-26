@@ -41,6 +41,8 @@ pub mod output_dead_code;
 /// [`output_health::UntestedFileAction`]); the `schemars::JsonSchema`
 /// derive is gated per-struct on the `schema` feature.
 pub mod output_health;
+/// Cross-platform path classification helpers.
+pub mod path_util;
 /// Analysis result types: unused files, exports, dependencies, and members.
 pub mod results;
 /// Custom serde serializers for cross-platform path output.

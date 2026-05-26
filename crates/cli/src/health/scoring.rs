@@ -770,7 +770,7 @@ pub fn resolve_relative_to_root(
     path: &std::path::Path,
     project_root: Option<&std::path::Path>,
 ) -> std::path::PathBuf {
-    if path.is_absolute() {
+    if crate::path_util::is_absolute_path_any_platform(path) {
         return path.to_path_buf();
     }
     match project_root {
@@ -3771,6 +3771,22 @@ mod tests {
             resolved,
             std::path::PathBuf::from("/tmp/coverage-final.json")
         );
+    }
+
+    #[test]
+    fn resolve_relative_to_root_returns_windows_absolute_unchanged_on_any_host() {
+        let path = std::path::Path::new(r"C:\coverage\coverage-final.json");
+        let resolved = resolve_relative_to_root(path, Some(std::path::Path::new("/work/my-app")));
+        assert_eq!(resolved, path);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolve_relative_to_root_returns_posix_rooted_path_unchanged_on_windows() {
+        let path = std::path::Path::new(r"/ci/workspace/coverage-final.json");
+        let resolved =
+            resolve_relative_to_root(path, Some(std::path::Path::new(r"C:\work\my-app")));
+        assert_eq!(resolved, path);
     }
 
     #[test]

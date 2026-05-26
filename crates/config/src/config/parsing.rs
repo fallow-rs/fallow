@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use fallow_types::path_util::is_absolute_path_any_platform;
 use rustc_hash::FxHashSet;
 
 use super::FallowConfig;
@@ -605,7 +606,7 @@ fn resolve_extends_file(
             let npm_path = resolve_npm_package(config_dir, npm_specifier, path)?;
             resolve_extends_file(&npm_path, visited, depth + 1)?
         } else {
-            if Path::new(extend_path_str).is_absolute() {
+            if is_absolute_path_any_platform(Path::new(extend_path_str)) {
                 return Err(miette::miette!(
                     "extends paths must be relative, got absolute path: {} (in {})",
                     extend_path_str,
@@ -2633,6 +2634,45 @@ minTokens = 100
 
         let json = format!(r#"{{"extends": ["{}"]}}"#, abs_path.replace('\\', "\\\\"));
         std::fs::write(dir.path().join(".fallowrc.json"), json).unwrap();
+
+        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("must be relative"),
+            "Expected 'must be relative' error, got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn extends_windows_drive_absolute_path_rejected_on_any_host() {
+        let dir = test_dir("extends-windows-absolute");
+
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"extends": ["C:\\absolute\\path\\config.json"]}"#,
+        )
+        .unwrap();
+
+        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("must be relative"),
+            "Expected 'must be relative' error, got: {err_msg}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn extends_posix_rooted_absolute_path_rejected_on_windows() {
+        let dir = test_dir("extends-posix-rooted-absolute");
+
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"extends": ["/absolute/path/config.json"]}"#,
+        )
+        .unwrap();
 
         let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
         assert!(result.is_err());

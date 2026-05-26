@@ -4,6 +4,7 @@ use super::parse_scripts::extract_script_file_refs;
 use super::walk::SOURCE_EXTENSIONS;
 use fallow_config::{EntryPointRole, PackageJson, ResolvedConfig};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
+use fallow_types::path_util::is_absolute_path_any_platform;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Known output directory names from exports maps.
@@ -939,11 +940,7 @@ pub fn discover_plugin_entry_point_sets(
 
     // Add setup files (absolute paths from plugin config parsing)
     for (setup_file, pname) in &plugin_result.setup_files {
-        let resolved = if setup_file.is_absolute() {
-            setup_file.clone()
-        } else {
-            config.root.join(setup_file)
-        };
+        let resolved = resolve_plugin_setup_file(&config.root, setup_file);
         if resolved.exists() {
             entries.push_support(EntryPoint {
                 path: resolved,
@@ -969,6 +966,14 @@ pub fn discover_plugin_entry_point_sets(
     }
 
     entries.dedup()
+}
+
+fn resolve_plugin_setup_file(root: &Path, setup_file: &Path) -> PathBuf {
+    if is_absolute_path_any_platform(setup_file) {
+        setup_file.to_path_buf()
+    } else {
+        root.join(setup_file)
+    }
 }
 
 /// Discover entry points from `dynamicallyLoaded` config patterns.
@@ -1269,6 +1274,29 @@ mod tests {
                 .iter()
                 .any(|entry| entry.path.ends_with("src/setup.ts")),
             "support entries should not bleed into test reachability"
+        );
+    }
+
+    #[test]
+    fn resolve_plugin_setup_file_preserves_windows_absolute_path_on_any_host() {
+        let root = Path::new("/workspace/project");
+        let setup_file = Path::new(r"C:\workspace\project\setup.ts");
+
+        assert_eq!(
+            resolve_plugin_setup_file(root, setup_file),
+            setup_file.to_path_buf()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolve_plugin_setup_file_preserves_posix_rooted_path_on_windows() {
+        let root = Path::new(r"C:\workspace\project");
+        let setup_file = Path::new(r"/workspace/project/setup.ts");
+
+        assert_eq!(
+            resolve_plugin_setup_file(root, setup_file),
+            setup_file.to_path_buf()
         );
     }
 
