@@ -24,8 +24,11 @@ pub fn is_builtin_module(name: &str) -> bool {
     if name.starts_with("sass:") {
         return true;
     }
-    // Deno standard library — imported as bare `std` or subpaths like `std/path`
-    // (Deno also uses `jsr:@std/` but that would be extracted differently)
+    // Deno standard library, imported as bare `std` or subpaths like `std/path`.
+    // The `jsr:` / `npm:` Deno import schemes (e.g. `jsr:@std/path`) are handled
+    // earlier, in the resolver: `jsr:` and URL specifiers resolve to an external
+    // file and `npm:<pkg>` normalizes to its package name, so neither reaches the
+    // unresolved-import path that consults this predicate. See issue #624.
     if name == "std" || name.starts_with("std/") {
         return true;
     }

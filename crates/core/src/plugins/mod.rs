@@ -56,6 +56,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "rsbuild",
     "rspack",
     "sanity",
+    "supabase",
     "sveltekit",
     "tanstack-router",
     "tsdown",
@@ -1083,6 +1084,7 @@ mod simple_git_hooks;
 mod storybook;
 mod stryker;
 mod stylelint;
+mod supabase;
 mod sveltekit;
 mod svgo;
 mod svgr;

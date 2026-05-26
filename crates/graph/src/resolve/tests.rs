@@ -1385,6 +1385,64 @@ fn specifier_custom_protocol_returns_external_file() {
 }
 
 // -----------------------------------------------------------------------
+// resolve_specifier: Deno jsr: and npm: schemes (issue #624)
+// -----------------------------------------------------------------------
+
+#[test]
+fn specifier_jsr_scheme_returns_external_file() {
+    with_empty_ctx(|ctx| {
+        let file = Path::new("/project/supabase/functions/hello/index.ts");
+        let result = specifier::resolve_specifier(ctx, file, "jsr:@std/path", false);
+
+        // JSR is a separate registry; treated as external so it is never reported
+        // as an unresolved import or misclassified as an npm dependency.
+        assert!(
+            matches!(result, ResolveResult::ExternalFile(ref p) if p.to_str().unwrap() == "jsr:@std/path")
+        );
+    });
+}
+
+#[test]
+fn specifier_npm_scheme_scoped_credits_package() {
+    with_empty_ctx(|ctx| {
+        let file = Path::new("/project/supabase/functions/hello/index.ts");
+        let result = specifier::resolve_specifier(ctx, file, "npm:@supabase/supabase-js@2", false);
+
+        // `npm:` is stripped and the version selector dropped, so the package is
+        // credited under its bare npm name.
+        assert!(
+            matches!(result, ResolveResult::NpmPackage(ref name) if name == "@supabase/supabase-js"),
+            "expected NpmPackage(@supabase/supabase-js), got {result:?}"
+        );
+    });
+}
+
+#[test]
+fn specifier_npm_scheme_unscoped_credits_package() {
+    with_empty_ctx(|ctx| {
+        let file = Path::new("/project/supabase/functions/hello/index.ts");
+        let result = specifier::resolve_specifier(ctx, file, "npm:zod@3", false);
+
+        assert!(
+            matches!(result, ResolveResult::NpmPackage(ref name) if name == "zod"),
+            "expected NpmPackage(zod), got {result:?}"
+        );
+    });
+}
+
+#[test]
+fn specifier_bare_npm_scheme_returns_external_file() {
+    with_empty_ctx(|ctx| {
+        let file = Path::new("/project/supabase/functions/hello/index.ts");
+        // A bare `npm:` (empty body) is malformed; treated as external rather than
+        // producing an `unresolved-import` finding for the empty specifier.
+        let result = specifier::resolve_specifier(ctx, file, "npm:", false);
+
+        assert!(matches!(result, ResolveResult::ExternalFile(_)));
+    });
+}
+
+// -----------------------------------------------------------------------
 // resolve_specifier: HTML root-relative paths
 // -----------------------------------------------------------------------
 

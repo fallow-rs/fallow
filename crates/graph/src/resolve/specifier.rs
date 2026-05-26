@@ -16,6 +16,7 @@ use super::fallbacks::{
 };
 use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
+    normalize_npm_specifier,
 };
 use super::react_native::{build_condition_names, build_extensions};
 use super::types::{ResolveContext, ResolveResult};
@@ -943,6 +944,31 @@ pub(super) fn resolve_specifier(
     specifier: &str,
     from_style: bool,
 ) -> ResolveResult {
+    // Deno import schemes. `jsr:<spec>` names the JSR registry, which is not npm
+    // and cannot be accounted for against package.json, so treat it like a URL
+    // import: external and never reported. `npm:<pkg>[@version][/subpath]` names
+    // an npm package, so strip the scheme and the `@version` selector and resolve
+    // the remainder as a normal bare specifier. A declared/installed dependency is
+    // then credited, and the original `npm:` source string is preserved on the
+    // ImportInfo for the unlisted-dependency carve-out. These schemes never appear
+    // in Node projects, so this leaves non-Deno resolution unchanged. See #624.
+    if specifier.starts_with("jsr:") {
+        return ResolveResult::ExternalFile(PathBuf::from(specifier));
+    }
+    let npm_normalized;
+    let specifier = if let Some(rest) = specifier.strip_prefix("npm:") {
+        npm_normalized = normalize_npm_specifier(rest);
+        // A bare `npm:` (empty body) is malformed Deno syntax; treat it as an
+        // external runtime import rather than emitting an `unresolved-import`
+        // finding for the empty specifier.
+        if npm_normalized.is_empty() {
+            return ResolveResult::ExternalFile(PathBuf::from(specifier));
+        }
+        npm_normalized.as_str()
+    } else {
+        specifier
+    };
+
     // URL imports (https://, http://, data:) are valid but can't be resolved locally
     if specifier.contains("://") || specifier.starts_with("data:") {
         return ResolveResult::ExternalFile(PathBuf::from(specifier));

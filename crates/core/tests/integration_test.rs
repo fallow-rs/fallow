@@ -139,6 +139,8 @@ mod issue_463_glob_validation;
 mod issue_515_re_export_cycles;
 #[path = "integration_test/issue_607_oxlint_js_plugins.rs"]
 mod issue_607_oxlint_js_plugins;
+#[path = "integration_test/issue_624_supabase_edge.rs"]
+mod issue_624_supabase_edge;
 #[path = "integration_test/issue_625_k6_plugin.rs"]
 mod issue_625_k6_plugin;
 #[path = "integration_test/issue_629_opencode_plugin.rs"]

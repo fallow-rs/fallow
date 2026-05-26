@@ -92,6 +92,43 @@ pub fn extract_package_name(specifier: &str) -> String {
     }
 }
 
+/// Normalize the body of a Deno `npm:` specifier into a plain npm package
+/// reference by dropping the `@<version>` selector while preserving the package
+/// name (including scope) and any subpath.
+///
+/// `rest` is the substring after the `npm:` scheme. Deno `npm:` specifiers are
+/// `<package>[@<version>][/<subpath>]`, so the version selector is the first
+/// `@` that follows the package name (after the scope's own `@scope/` for
+/// scoped packages). Examples:
+/// `@supabase/supabase-js@2` -> `@supabase/supabase-js`,
+/// `preact@10/hooks` -> `preact/hooks`, `express@^4.18.0` -> `express`,
+/// `foo` -> `foo`.
+#[must_use]
+pub fn normalize_npm_specifier(rest: &str) -> String {
+    // For scoped packages, skip past the `@scope/` segment so the leading scope
+    // `@` is not mistaken for the version selector.
+    let search_from = if rest.starts_with('@') {
+        match rest.find('/') {
+            Some(slash) => slash + 1,
+            // `@scope` alone carries no version or subpath.
+            None => return rest.to_string(),
+        }
+    } else {
+        0
+    };
+
+    let Some(at_rel) = rest[search_from..].find('@') else {
+        return rest.to_string();
+    };
+    let at = search_from + at_rel;
+    // The version runs from the `@` until the next `/` (a subpath) or the end.
+    let end = rest[at..].find('/').map_or(rest.len(), |slash| at + slash);
+    let mut out = String::with_capacity(rest.len() - (end - at));
+    out.push_str(&rest[..at]);
+    out.push_str(&rest[end..]);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,6 +139,49 @@ mod tests {
         assert_eq!(extract_package_name("lodash/merge"), "lodash");
         assert_eq!(extract_package_name("@scope/pkg"), "@scope/pkg");
         assert_eq!(extract_package_name("@scope/pkg/foo"), "@scope/pkg");
+    }
+
+    #[test]
+    fn normalize_npm_specifier_scoped_with_version() {
+        assert_eq!(
+            normalize_npm_specifier("@supabase/supabase-js@2"),
+            "@supabase/supabase-js"
+        );
+    }
+
+    #[test]
+    fn normalize_npm_specifier_unscoped_with_version() {
+        assert_eq!(normalize_npm_specifier("express@^4.18.0"), "express");
+    }
+
+    #[test]
+    fn normalize_npm_specifier_version_then_subpath() {
+        // Deno places the version before the subpath: `<pkg>@<ver>/<subpath>`.
+        assert_eq!(normalize_npm_specifier("preact@10/hooks"), "preact/hooks");
+        assert_eq!(
+            normalize_npm_specifier("@scope/name@1.2.3/sub"),
+            "@scope/name/sub"
+        );
+    }
+
+    #[test]
+    fn normalize_npm_specifier_no_version() {
+        assert_eq!(normalize_npm_specifier("foo"), "foo");
+        assert_eq!(normalize_npm_specifier("lodash/merge"), "lodash/merge");
+        assert_eq!(normalize_npm_specifier("@scope/pkg/sub"), "@scope/pkg/sub");
+    }
+
+    #[test]
+    fn normalize_npm_specifier_scope_only() {
+        // A bare scope with no `/name` is degenerate but must not panic.
+        assert_eq!(normalize_npm_specifier("@scope"), "@scope");
+    }
+
+    #[test]
+    fn normalize_npm_specifier_empty() {
+        // A bare `npm:` body normalizes to empty; the resolver maps this to an
+        // external file rather than emitting a finding for the empty specifier.
+        assert_eq!(normalize_npm_specifier(""), "");
     }
 
     #[test]

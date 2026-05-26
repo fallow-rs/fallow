@@ -761,6 +761,38 @@ fn package_imports_are_all_builtin(
     saw_package
 }
 
+/// A package whose every import in this file used the Deno `npm:` scheme is
+/// self-declaring: Supabase Edge Functions and Deno deliberately inline the
+/// dependency in the specifier instead of listing it in package.json, so it
+/// must not surface as an unlisted dependency. Mirrors the per-file `bun:`
+/// carve-out (`package_imports_are_all_builtin`) and stays conservative: a
+/// package also imported via a bare specifier (e.g. `import 'foo'` in a Node
+/// file) is NOT all-`npm:`, so the genuine missing-dependency report survives.
+/// The resolver normalizes `npm:<pkg>` to its package name for usage crediting
+/// but leaves the original `npm:` prefix on `ImportInfo.source`, which is the
+/// string compared here. See issue #624.
+fn package_imports_are_all_npm_scheme(
+    import_spans_by_file: &FxHashMap<FileId, Vec<(&str, &str, u32)>>,
+    file_id: FileId,
+    package_name: &str,
+) -> bool {
+    let Some(imports) = import_spans_by_file.get(&file_id) else {
+        return false;
+    };
+
+    let mut saw_package = false;
+    for (name, source, _) in imports {
+        if *name == package_name {
+            saw_package = true;
+            if !source.starts_with("npm:") {
+                return false;
+            }
+        }
+    }
+
+    saw_package
+}
+
 /// Find dependencies used in imports but not listed in package.json.
 pub fn find_unlisted_dependencies(
     graph: &ModuleGraph,
@@ -885,6 +917,11 @@ pub fn find_unlisted_dependencies(
             if package_name == "bun"
                 && package_imports_are_all_builtin(&import_spans_by_file, *id, package_name)
             {
+                continue;
+            }
+            // Deno/Supabase `npm:<pkg>` imports declare the dependency inline, so
+            // do not report it as unlisted for files that only import it that way.
+            if package_imports_are_all_npm_scheme(&import_spans_by_file, *id, package_name) {
                 continue;
             }
             if is_package_listed_for_file(&module.path, package_name, &all_deps, &ws_dep_map) {
