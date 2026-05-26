@@ -145,6 +145,8 @@ mod issue_515_re_export_cycles;
 mod issue_601_vitest_test_alias;
 #[path = "integration_test/issue_607_oxlint_js_plugins.rs"]
 mod issue_607_oxlint_js_plugins;
+#[path = "integration_test/issue_621_playwright_webserver.rs"]
+mod issue_621_playwright_webserver;
 #[path = "integration_test/issue_624_supabase_edge.rs"]
 mod issue_624_supabase_edge;
 #[path = "integration_test/issue_625_k6_plugin.rs"]

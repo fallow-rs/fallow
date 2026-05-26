@@ -1,0 +1,13 @@
+{
+  "name": "issue-621-playwright-webserver-command",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "srvx": "^0.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "tsx": "^4.19.0",
+    "unused-control": "^1.0.0"
+  }
+}

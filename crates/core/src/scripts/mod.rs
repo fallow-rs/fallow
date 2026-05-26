@@ -169,42 +169,68 @@ pub fn analyze_scripts(
     let mut result = ScriptAnalysis::default();
 
     for script_value in scripts.values() {
-        // Track env wrapper packages (cross-env, dotenv) as used before parsing
-        for wrapper in ENV_WRAPPERS {
-            if script_value
-                .split_whitespace()
-                .any(|token| token == *wrapper)
-            {
-                let pkg = resolve_binary_to_package(wrapper, root, bin_map);
-                if !is_builtin_command(wrapper) {
-                    result.used_packages.insert(pkg);
-                }
-            }
-        }
-
-        let commands = parse_script(script_value);
-
-        for cmd in commands {
-            // Map binary to package name and track as used
-            if !cmd.binary.is_empty() && !is_builtin_command(&cmd.binary) {
-                if NODE_RUNNERS.contains(&cmd.binary.as_str()) {
-                    // Node runners themselves are packages (node excluded)
-                    if cmd.binary != "node" && cmd.binary != "bun" {
-                        let pkg = resolve_binary_to_package(&cmd.binary, root, bin_map);
-                        result.used_packages.insert(pkg);
-                    }
-                } else {
-                    let pkg = resolve_binary_to_package(&cmd.binary, root, bin_map);
-                    result.used_packages.insert(pkg);
-                }
-            }
-
-            result.config_files.extend(cmd.config_args);
-            result.entry_files.extend(cmd.file_args);
-        }
+        accumulate_command(script_value, root, bin_map, &mut result);
     }
 
     result
+}
+
+/// Analyze a single shell command string into used packages, config files, and
+/// entry files.
+///
+/// Shares the exact binary-to-package mapping, builtin filtering, node-runner
+/// handling, and config/file argument extraction used for package.json scripts.
+/// Lets non-script command sources (e.g. a Playwright `webServer.command`) credit
+/// invoked binaries as referenced dependencies and seed local file arguments as
+/// entry/setup files identically to how the same command would behave in a script.
+#[must_use]
+pub fn analyze_command(
+    command: &str,
+    root: &Path,
+    bin_map: &FxHashMap<String, String>,
+) -> ScriptAnalysis {
+    let mut result = ScriptAnalysis::default();
+    accumulate_command(command, root, bin_map, &mut result);
+    result
+}
+
+/// Parse one command string and fold its binaries, config args, and file args
+/// into `result`. Shared by [`analyze_scripts`] (per script value) and
+/// [`analyze_command`] (single command).
+fn accumulate_command(
+    command: &str,
+    root: &Path,
+    bin_map: &FxHashMap<String, String>,
+    result: &mut ScriptAnalysis,
+) {
+    // Track env wrapper packages (cross-env, dotenv) as used before parsing
+    for wrapper in ENV_WRAPPERS {
+        if command.split_whitespace().any(|token| token == *wrapper) {
+            let pkg = resolve_binary_to_package(wrapper, root, bin_map);
+            if !is_builtin_command(wrapper) {
+                result.used_packages.insert(pkg);
+            }
+        }
+    }
+
+    for cmd in parse_script(command) {
+        // Map binary to package name and track as used
+        if !cmd.binary.is_empty() && !is_builtin_command(&cmd.binary) {
+            if NODE_RUNNERS.contains(&cmd.binary.as_str()) {
+                // Node runners themselves are packages (node excluded)
+                if cmd.binary != "node" && cmd.binary != "bun" {
+                    let pkg = resolve_binary_to_package(&cmd.binary, root, bin_map);
+                    result.used_packages.insert(pkg);
+                }
+            } else {
+                let pkg = resolve_binary_to_package(&cmd.binary, root, bin_map);
+                result.used_packages.insert(pkg);
+            }
+        }
+
+        result.config_files.extend(cmd.config_args);
+        result.entry_files.extend(cmd.file_args);
+    }
 }
 
 /// Parse a single script value into one or more commands.

@@ -589,6 +589,51 @@ pub fn extract_config_array_object_strings(
     .unwrap_or_default()
 }
 
+/// Extract paired `(primary, optional secondary)` string values from each object
+/// element of an array at `array_path`.
+///
+/// Mirrors [`extract_config_array_object_strings`] but keeps a per-element
+/// secondary value alongside the primary one, so correlated fields stay paired.
+/// An element is included only when its `primary_key` resolves to a recoverable
+/// path string; the `secondary_key` is `None` when absent or non-recoverable.
+///
+/// Used for Playwright's `webServer: [{ command, cwd }]` form where each
+/// `command` must be resolved relative to its own `cwd`.
+#[must_use]
+pub fn extract_config_array_object_string_pairs(
+    source: &str,
+    path: &Path,
+    array_path: &[&str],
+    primary_key: &str,
+    secondary_key: &str,
+) -> Vec<(String, Option<String>)> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let array_expr = get_nested_expression(obj, array_path)?;
+        let Expression::ArrayExpression(arr) = array_expr else {
+            return None;
+        };
+
+        let mut results = Vec::new();
+        for element in &arr.elements {
+            let Some(Expression::ObjectExpression(item)) = element.as_expression() else {
+                continue;
+            };
+            let Some(primary) = find_property(item, primary_key)
+                .and_then(|prop| expression_to_path_string(&prop.value))
+            else {
+                continue;
+            };
+            let secondary = find_property(item, secondary_key)
+                .and_then(|prop| expression_to_path_string(&prop.value));
+            results.push((primary, secondary));
+        }
+
+        (!results.is_empty()).then_some(results)
+    })
+    .unwrap_or_default()
+}
+
 /// Extract static specifiers from thunk-wrapped dynamic imports inside an
 /// array property.
 ///
@@ -2188,6 +2233,77 @@ mod tests {
                 "@/feature-components".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn extract_array_object_string_pairs_with_and_without_secondary() {
+        let source = r#"
+            export default {
+                webServer: [
+                    { command: "tsx scripts/api.ts", cwd: "packages/api" },
+                    { command: "tsx scripts/web.ts" }
+                ]
+            };
+        "#;
+
+        let pairs = extract_config_array_object_string_pairs(
+            source,
+            &ts_path(),
+            &["webServer"],
+            "command",
+            "cwd",
+        );
+        assert_eq!(
+            pairs,
+            vec![
+                (
+                    "tsx scripts/api.ts".to_string(),
+                    Some("packages/api".to_string())
+                ),
+                ("tsx scripts/web.ts".to_string(), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_array_object_string_pairs_skips_elements_missing_primary() {
+        let source = r#"
+            export default {
+                webServer: [
+                    { cwd: "packages/api" },
+                    { command: "srvx --port 3000" }
+                ]
+            };
+        "#;
+
+        let pairs = extract_config_array_object_string_pairs(
+            source,
+            &ts_path(),
+            &["webServer"],
+            "command",
+            "cwd",
+        );
+        assert_eq!(pairs, vec![("srvx --port 3000".to_string(), None)]);
+    }
+
+    #[test]
+    fn extract_array_object_string_pairs_empty_for_object_form() {
+        // Object (non-array) value at the path yields no pairs; the object form
+        // is handled separately by `extract_config_string`.
+        let source = r#"
+            export default {
+                webServer: { command: "srvx --port 3000" }
+            };
+        "#;
+
+        let pairs = extract_config_array_object_string_pairs(
+            source,
+            &ts_path(),
+            &["webServer"],
+            "command",
+            "cwd",
+        );
+        assert!(pairs.is_empty());
     }
 
     #[test]
