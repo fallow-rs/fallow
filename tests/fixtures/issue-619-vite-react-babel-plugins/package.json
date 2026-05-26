@@ -1,0 +1,20 @@
+{
+  "name": "issue-619-vite-react-babel-plugins",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest",
+    "vitest": "latest"
+  },
+  "devDependencies": {
+    "@babel/preset-react": "latest",
+    "@preact/signals-react-transform": "latest",
+    "babel-plugin-plain": "latest",
+    "unused-control": "latest"
+  }
+}

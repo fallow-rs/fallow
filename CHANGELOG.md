@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **React Compiler's Babel plugin is no longer reported as unused when consumed through explicit Next.js or Vite compiler config.** Before, projects that followed the documented Next.js `reactCompiler` option or Vite `@vitejs/plugin-react` Babel plugin configuration still saw `babel-plugin-react-compiler` as an unused dependency because the package is consumed by the framework/compiler pipeline rather than by app imports. After, the Next plugin credits `babel-plugin-react-compiler` for `reactCompiler: true` and object-valued `reactCompiler` config, and the Vite plugin credits explicit React Compiler Babel plugin strings inside provenance-checked `@vitejs/plugin-react` / documented Babel integration calls. Disabled, missing, unrelated, and arbitrary nested string shapes still report the dependency as unused. (Closes [#623](https://github.com/fallow-rs/fallow/issues/623).)
 
+- **Babel plugins configured through `@vitejs/plugin-react` no longer report as unused dependencies.** Before, packages loaded only from `react({ babel: { plugins, presets } })` in `vite.config.*` or `vitest.config.*`, such as `@preact/signals-react-transform`, had no static import edge and could surface as unused. After, the Vite and Vitest plugins parse static React plugin option objects, credit plain string and tuple-form Babel plugin and preset entries, and normalize `module:` specifiers before dependency matching. Dynamic option variables and spreads remain out of scope. (Closes [#619](https://github.com/fallow-rs/fallow/issues/619).)
+
 ## [2.82.0] - 2026-05-26
 
 ### Fixed

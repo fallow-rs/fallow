@@ -812,6 +812,43 @@ pub fn extract_config_plugin_option_string_from_paths(
     })
 }
 
+/// Extract Babel plugin and preset package names configured through
+/// `@vitejs/plugin-react` options in a Vite-style `plugins` array.
+#[must_use]
+pub fn extract_vite_react_babel_dependencies(source: &str, path: &Path) -> Vec<String> {
+    extract_from_source(source, path, |program| {
+        let react_plugin_imports = collect_vite_react_plugin_imports(program);
+        if react_plugin_imports.is_empty() {
+            return None;
+        }
+
+        let obj = find_config_object(program)?;
+        let plugins = get_nested_expression(obj, &["plugins"])?;
+        let Expression::ArrayExpression(plugin_array) = plugins else {
+            return None;
+        };
+
+        let mut deps = Vec::new();
+        for element in &plugin_array.elements {
+            let Some(Expression::CallExpression(call)) = element.as_expression() else {
+                continue;
+            };
+            if !is_vite_react_plugin_call(call, &react_plugin_imports) {
+                continue;
+            }
+            let Some(Expression::ObjectExpression(options)) =
+                call.arguments.first().and_then(Argument::as_expression)
+            else {
+                continue;
+            };
+            collect_vite_react_babel_dependencies(options, &mut deps);
+        }
+
+        (!deps.is_empty()).then_some(deps)
+    })
+    .unwrap_or_default()
+}
+
 /// Normalize a config-relative path string to a project-root-relative path.
 ///
 /// Handles values extracted from config files such as `"./src"`, `"src/lib"`,
@@ -870,7 +907,102 @@ pub(crate) fn extract_from_source<T>(
     extractor(&parsed.program)
 }
 
-/// Find the "config object" — the object expression in the default export or module.exports.
+#[derive(Default)]
+struct ViteReactPluginImports {
+    callables: Vec<String>,
+    namespaces: Vec<String>,
+}
+
+impl ViteReactPluginImports {
+    fn is_empty(&self) -> bool {
+        self.callables.is_empty() && self.namespaces.is_empty()
+    }
+}
+
+fn collect_vite_react_plugin_imports(program: &Program<'_>) -> ViteReactPluginImports {
+    let mut imports = ViteReactPluginImports::default();
+
+    for stmt in &program.body {
+        let Statement::ImportDeclaration(decl) = stmt else {
+            continue;
+        };
+        if decl.source.value != "@vitejs/plugin-react" {
+            continue;
+        }
+        let Some(specifiers) = &decl.specifiers else {
+            continue;
+        };
+        for specifier in specifiers {
+            match specifier {
+                ImportDeclarationSpecifier::ImportDefaultSpecifier(specifier) => {
+                    push_unique_string(&mut imports.callables, specifier.local.name.to_string());
+                }
+                ImportDeclarationSpecifier::ImportSpecifier(specifier)
+                    if specifier.imported.name().as_ref() == "default" =>
+                {
+                    push_unique_string(&mut imports.callables, specifier.local.name.to_string());
+                }
+                ImportDeclarationSpecifier::ImportNamespaceSpecifier(specifier) => {
+                    push_unique_string(&mut imports.namespaces, specifier.local.name.to_string());
+                }
+                ImportDeclarationSpecifier::ImportSpecifier(_) => {}
+            }
+        }
+    }
+
+    imports
+}
+
+fn is_vite_react_plugin_call(call: &CallExpression<'_>, imports: &ViteReactPluginImports) -> bool {
+    match &call.callee {
+        Expression::Identifier(identifier) => imports
+            .callables
+            .iter()
+            .any(|name| name == identifier.name.as_str()),
+        Expression::StaticMemberExpression(member) if matches!(&member.object, Expression::Identifier(object) if imports.namespaces.iter().any(|name| name == object.name.as_str())) => {
+            member.property.name == "default"
+        }
+        _ => false,
+    }
+}
+
+fn collect_vite_react_babel_dependencies(options: &ObjectExpression<'_>, deps: &mut Vec<String>) {
+    let Some(babel) = property_object(options, "babel") else {
+        return;
+    };
+    for key in ["plugins", "presets"] {
+        let Some(prop) = find_property(babel, key) else {
+            continue;
+        };
+        for raw in collect_shallow_string_values(&prop.value) {
+            if let Some(dep) = vite_react_babel_dependency_name(&raw) {
+                push_unique_string(deps, dep);
+            }
+        }
+    }
+}
+
+fn vite_react_babel_dependency_name(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    let specifier = raw.strip_prefix("module:").unwrap_or(raw).trim();
+    if specifier.is_empty()
+        || specifier.starts_with('.')
+        || specifier.starts_with('/')
+        || specifier.contains(':')
+        || specifier.contains('\\')
+    {
+        return None;
+    }
+    Some(crate::resolve::extract_package_name(specifier))
+}
+
+fn push_unique_string(items: &mut Vec<String>, value: String) {
+    if !items.contains(&value) {
+        items.push(value);
+    }
+}
+
+/// Find the "config object": the object expression in the default export or module.exports.
 ///
 /// Handles these patterns:
 /// - `export default { ... }`
@@ -2410,6 +2542,101 @@ mod tests {
         );
 
         assert_eq!(value, None);
+    }
+
+    #[test]
+    fn vite_react_babel_dependencies_extract_plain_tuple_and_prefixed_entries() {
+        let source = r#"
+            import react from "@vitejs/plugin-react";
+
+            export default defineConfig({
+                plugins: [
+                    react({
+                        babel: {
+                            plugins: [
+                                "babel-plugin-plain",
+                                ["module:@preact/signals-react-transform", { mode: "auto" }],
+                            ],
+                            presets: [["@babel/preset-react", { runtime: "automatic" }]],
+                        },
+                    }),
+                ],
+            });
+        "#;
+
+        let deps = extract_vite_react_babel_dependencies(source, &ts_path());
+
+        assert_eq!(
+            deps,
+            vec![
+                "babel-plugin-plain".to_string(),
+                "@preact/signals-react-transform".to_string(),
+                "@babel/preset-react".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn vite_react_babel_dependencies_support_default_alias_import() {
+        let source = r#"
+            import { default as viteReact } from "@vitejs/plugin-react";
+
+            export default {
+                plugins: [
+                    viteReact({
+                        babel: {
+                            plugins: [["module:@scope/pkg/plugin", {}]],
+                        },
+                    }),
+                ],
+            };
+        "#;
+
+        let deps = extract_vite_react_babel_dependencies(source, &ts_path());
+
+        assert_eq!(deps, vec!["@scope/pkg".to_string()]);
+    }
+
+    #[test]
+    fn vite_react_babel_dependencies_ignore_unrelated_plugin_calls() {
+        let source = r#"
+            import vue from "@vitejs/plugin-vue";
+
+            export default {
+                plugins: [
+                    vue({
+                        babel: {
+                            plugins: ["@preact/signals-react-transform"],
+                        },
+                    }),
+                ],
+            };
+        "#;
+
+        let deps = extract_vite_react_babel_dependencies(source, &ts_path());
+
+        assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn vite_react_babel_dependencies_skip_relative_and_protocol_entries() {
+        let source = r#"
+            import react from "@vitejs/plugin-react";
+
+            export default {
+                plugins: [
+                    react({
+                        babel: {
+                            plugins: ["./local-plugin", "module:./local-prefixed", "http://example.com/plugin"],
+                        },
+                    }),
+                ],
+            };
+        "#;
+
+        let deps = extract_vite_react_babel_dependencies(source, &ts_path());
+
+        assert!(deps.is_empty());
     }
 
     #[test]

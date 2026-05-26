@@ -121,6 +121,9 @@ define_plugin!(
             let dep = crate::resolve::extract_package_name(imp);
             result.referenced_dependencies.push(dep);
         }
+        result.referenced_dependencies.extend(
+            config_parser::extract_vite_react_babel_dependencies(source, config_path),
+        );
 
         for dep in extract_react_compiler_plugin_dependencies(source, config_path) {
             result.referenced_dependencies.push(dep);
@@ -422,6 +425,40 @@ mod tests {
         let deps = &result.referenced_dependencies;
         assert!(deps.contains(&"react".to_string()));
         assert!(deps.contains(&"@my/heavy-dep".to_string()));
+    }
+
+    #[test]
+    fn resolve_config_credits_react_babel_plugin_dependencies() {
+        let source = r#"
+            import { defineConfig } from "vite";
+            import react from "@vitejs/plugin-react";
+
+            export default defineConfig({
+                plugins: [
+                    react({
+                        babel: {
+                            plugins: [["module:@preact/signals-react-transform", {}]],
+                            presets: ["@babel/preset-react"],
+                        },
+                    }),
+                ],
+            });
+        "#;
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        let deps = &result.referenced_dependencies;
+        assert!(
+            deps.contains(&"@preact/signals-react-transform".to_string()),
+            "React Babel plugin dependency should be credited: {deps:?}"
+        );
+        assert!(
+            deps.contains(&"@babel/preset-react".to_string()),
+            "React Babel preset dependency should be credited: {deps:?}"
+        );
     }
 
     #[test]

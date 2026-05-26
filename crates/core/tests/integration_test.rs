@@ -149,6 +149,8 @@ mod issue_515_re_export_cycles;
 mod issue_601_vitest_test_alias;
 #[path = "integration_test/issue_607_oxlint_js_plugins.rs"]
 mod issue_607_oxlint_js_plugins;
+#[path = "integration_test/issue_619_vite_react_babel_plugins.rs"]
+mod issue_619_vite_react_babel_plugins;
 #[path = "integration_test/issue_621_playwright_webserver.rs"]
 mod issue_621_playwright_webserver;
 #[path = "integration_test/issue_624_supabase_edge.rs"]
