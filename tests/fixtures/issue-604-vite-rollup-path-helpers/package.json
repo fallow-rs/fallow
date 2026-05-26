@@ -1,0 +1,11 @@
+{
+  "name": "issue-604-vite-rollup-path-helpers",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "vite": "5.0.0"
+  }
+}

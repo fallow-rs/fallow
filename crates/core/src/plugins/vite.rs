@@ -388,6 +388,87 @@ mod tests {
     }
 
     #[test]
+    fn resolve_config_rollup_input_evaluates_path_helpers() {
+        // Issue #604: rollupOptions.input values written as path-helper calls
+        // (resolve(__dirname, "..."), path.resolve(...), join(...),
+        // import.meta.dirname equivalents) must be evaluated to project-relative
+        // entry patterns. CSS entries are preserved like any other entry.
+        let source = r#"
+            import { resolve, join } from "node:path";
+            import path from "node:path";
+            import { defineConfig } from "vite";
+
+            export default defineConfig({
+                build: {
+                    rollupOptions: {
+                        input: {
+                            app: resolve(__dirname, "src/app.ts"),
+                            modal: path.resolve(__dirname, "src/modal.ts"),
+                            tabs: join(__dirname, "src/tabs.ts"),
+                            timetable: resolve(import.meta.dirname, "src/timetable.ts"),
+                            styles: resolve(__dirname, "src/index.css"),
+                        },
+                    },
+                },
+            });
+        "#;
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        let patterns: Vec<&str> = result
+            .entry_patterns
+            .iter()
+            .map(|rule| rule.pattern.as_str())
+            .collect();
+        for expected in [
+            "src/app.ts",
+            "src/modal.ts",
+            "src/tabs.ts",
+            "src/timetable.ts",
+            "src/index.css",
+        ] {
+            assert!(
+                patterns.contains(&expected),
+                "rollupOptions.input path-helper entry {expected} should be extracted: {patterns:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_config_lib_entry_evaluates_path_helper() {
+        // build.lib.entry as a single top-level path-helper call.
+        let source = r#"
+            import { resolve } from "node:path";
+            import { defineConfig } from "vite";
+
+            export default defineConfig({
+                build: {
+                    lib: {
+                        entry: resolve(__dirname, "src/index.ts"),
+                    },
+                },
+            });
+        "#;
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .any(|rule| rule.pattern == "src/index.ts"),
+            "build.lib.entry path-helper call should be extracted: {:?}",
+            result.entry_patterns
+        );
+    }
+
+    #[test]
     fn resolve_config_additional_data_keeps_existing_local_style_entries() {
         let tmp = tempfile::tempdir().expect("create temp dir");
         std::fs::create_dir_all(tmp.path().join("src/styles")).expect("create styles dir");

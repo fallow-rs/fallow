@@ -1118,7 +1118,7 @@ fn call_expression_to_path_string(call: &CallExpression) -> Option<String> {
     for (index, arg) in call.arguments.iter().enumerate() {
         let expr = arg.as_expression()?;
 
-        if matches!(expr, Expression::Identifier(id) if id.name == "__dirname") {
+        if is_dirname_anchor(expr) {
             if index == 0 {
                 continue;
             }
@@ -1129,6 +1129,28 @@ fn call_expression_to_path_string(call: &CallExpression) -> Option<String> {
     }
 
     (!segments.is_empty()).then(|| join_path_segments(&segments))
+}
+
+/// True when an expression is a "current directory" anchor: the `__dirname`
+/// CommonJS global or its ESM equivalent `import.meta.dirname` (Node 20.11+).
+/// As the leading argument of `resolve(...)` / `join(...)` it is dropped so the
+/// remaining literal segments yield a config-directory-relative path.
+fn is_dirname_anchor(expr: &Expression) -> bool {
+    match expr {
+        Expression::Identifier(id) => id.name == "__dirname",
+        Expression::StaticMemberExpression(member) => {
+            member.property.name == "dirname" && is_import_meta_expression(&member.object)
+        }
+        _ => false,
+    }
+}
+
+/// True for the `import.meta` meta-property, distinct from `new.target`.
+fn is_import_meta_expression(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::MetaProperty(meta) if meta.meta.name == "import" && meta.property.name == "meta"
+    )
 }
 
 fn new_expression_to_path_string(new_expr: &NewExpression) -> Option<String> {
@@ -1541,7 +1563,12 @@ fn expression_to_string_or_array(expr: &Expression) -> Vec<String> {
                 Expression::ObjectExpression(obj) => find_property(obj, "input")
                     .map(|p| expression_to_string_or_array(&p.value))
                     .unwrap_or_default(),
-                _ => expression_to_string(e).into_iter().collect(),
+                // `expression_to_path_string` is a superset of `expression_to_string`
+                // (it falls through to it for string/template literals) that also
+                // evaluates statically recoverable path-helper calls such as
+                // `resolve(__dirname, "src/app.ts")`, `path.resolve(...)`, `join(...)`,
+                // `fileURLToPath(...)`, and `new URL(...)`. See issue #604.
+                _ => expression_to_path_string(e).into_iter().collect(),
             })
             .collect(),
         Expression::ObjectExpression(obj) => obj
@@ -1558,14 +1585,15 @@ fn expression_to_string_or_array(expr: &Expression) -> Vec<String> {
                                 })
                                 .unwrap_or_default()
                         }
-                        _ => expression_to_string(&p.value).into_iter().collect(),
+                        _ => expression_to_path_string(&p.value).into_iter().collect(),
                     }
                 } else {
                     Vec::new()
                 }
             })
             .collect(),
-        _ => vec![],
+        // A single top-level path-helper call, e.g. `lib.entry: resolve(__dirname, "src/x.ts")`.
+        _ => expression_to_path_string(expr).into_iter().collect(),
     }
 }
 
@@ -1941,6 +1969,94 @@ mod tests {
         let source = r"export default { entry: `./src/index.js` };";
         let result = extract_config_string_or_array(source, &js_path(), &["entry"]);
         assert_eq!(result, vec!["./src/index.js"]);
+    }
+
+    #[test]
+    fn string_or_array_object_path_helper_values() {
+        // Issue #604: object values written as path-helper calls are evaluated,
+        // with the leading __dirname / path.resolve / join anchor dropped.
+        let source = r#"
+            import { resolve, join } from "node:path";
+            import path from "node:path";
+            export default {
+                build: {
+                    rollupOptions: {
+                        input: {
+                            app: resolve(__dirname, "src/app.ts"),
+                            modal: path.resolve(__dirname, "src/modal.ts"),
+                            tabs: join(__dirname, "src/tabs.ts"),
+                            styles: resolve(__dirname, "src/index.css"),
+                        },
+                    },
+                },
+            };
+        "#;
+        let result = extract_config_string_or_array(
+            source,
+            &js_path(),
+            &["build", "rollupOptions", "input"],
+        );
+        assert_eq!(
+            result,
+            vec!["src/app.ts", "src/modal.ts", "src/tabs.ts", "src/index.css"]
+        );
+    }
+
+    #[test]
+    fn string_or_array_array_path_helper_values() {
+        let source = r#"
+            import { resolve } from "node:path";
+            export default {
+                build: {
+                    rollupOptions: {
+                        input: [resolve(__dirname, "src/a.ts"), "./src/b.ts"],
+                    },
+                },
+            };
+        "#;
+        let result = extract_config_string_or_array(
+            source,
+            &js_path(),
+            &["build", "rollupOptions", "input"],
+        );
+        assert_eq!(result, vec!["src/a.ts", "./src/b.ts"]);
+    }
+
+    #[test]
+    fn string_or_array_top_level_path_helper_call() {
+        let source = r#"
+            import { resolve } from "node:path";
+            export default { build: { lib: { entry: resolve(__dirname, "src/index.ts") } } };
+        "#;
+        let result = extract_config_string_or_array(source, &js_path(), &["build", "lib", "entry"]);
+        assert_eq!(result, vec!["src/index.ts"]);
+    }
+
+    #[test]
+    fn string_or_array_import_meta_dirname_anchor() {
+        let source = r#"
+            import { resolve } from "node:path";
+            export default {
+                build: { lib: { entry: resolve(import.meta.dirname, "src/index.ts") } },
+            };
+        "#;
+        let result = extract_config_string_or_array(source, &ts_path(), &["build", "lib", "entry"]);
+        assert_eq!(result, vec!["src/index.ts"]);
+    }
+
+    #[test]
+    fn string_or_array_non_literal_path_helper_args_dropped() {
+        // A path-helper call with a non-literal, non-anchor argument is not
+        // statically recoverable and must be dropped, not guessed.
+        let source = r#"
+            import { resolve } from "node:path";
+            export default { build: { lib: { entry: resolve(baseDir, "src/index.ts") } } };
+        "#;
+        let result = extract_config_string_or_array(source, &js_path(), &["build", "lib", "entry"]);
+        assert!(
+            result.is_empty(),
+            "non-literal path-helper args must be dropped: {result:?}"
+        );
     }
 
     // ── extract_config_require_strings tests ────────────────────────
