@@ -329,7 +329,7 @@ fn alias_target_is_source_file(normalized: &str) -> bool {
 ///
 /// Package-to-package aliases (`'lodash-es' -> 'lodash'`, where BOTH sides are
 /// bare npm packages) are special-cased: the replacement is not a filesystem
-/// path, so `normalize_config_path` would mis-handle it and pushing a path alias
+/// path, so `normalize_config_path` would treat it as a local path and pushing a path alias
 /// would turn the source import `Unresolvable` in a no-`node_modules` run.
 /// Instead both package names are credited as referenced and no path alias is
 /// emitted. A bare directory replacement (`'@/' -> 'src'`) is not affected
