@@ -11,7 +11,7 @@ paths:
 ## Rich config parsing (22 plugins)
 
 - **ESLint**: Legacy plugin/extends/parser short-name resolution (top-level AND inside `overrides[*]`), flat config plugin keys, JSON config, shared config following (reads imported config packages' entry points one level deep to discover peer deps), relative-path `extends` chain following (`./config/base.js`, `../shared/eslintrc.json`) with cycle protection and depth cap, settings["import/resolver"] (string/array/object formats)
-- **Vite**: rollupOptions.input, lib.entry, optimizeDeps include/exclude, ssr.external/noExternal, resolve.alias (path-alias-only); embedded Vitest `test.alias` + `test.projects[*]` test.alias/resolve.alias (vite.config.* commonly hosts the Vitest config)
+- **Vite**: rollupOptions.input, lib.entry (string/array/object literals AND path-helper calls: `resolve(__dirname, ...)`, `path.resolve(...)`, `join(...)`, `import.meta.dirname` equivalents, evaluated by the shared `expression_to_string_or_array`), optimizeDeps include/exclude, ssr.external/noExternal, resolve.alias (path-alias-only); embedded Vitest `test.alias` + `test.projects[*]` test.alias/resolve.alias (vite.config.* commonly hosts the Vitest config)
 - **Jest**: preset, setupFiles, globalSetup/Teardown, testMatch, transform, reporters, testEnvironment, watchPlugins, resolver, snapshotSerializers, testRunner, runner, JSON config
 - **Storybook**: addons, framework (string/object), stories, core.builder, typescript.reactDocgen
 - **Tailwind**: content globs, plugins (require/strings), presets
