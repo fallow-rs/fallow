@@ -1675,8 +1675,8 @@ fn external_plugin_multiple_used_exports() {
 #[test]
 fn default_registry_has_all_builtin_plugins() {
     let registry = PluginRegistry::default();
-    // Verify we have the expected number of built-in plugins (93 as per docs)
-    // We test a representative sample to avoid brittle exact count checks.
+    // Verify representative built-in plugins are discoverable without relying
+    // on a brittle exact count check.
     let pkg = make_pkg(&[
         "next",
         "vitest",
@@ -2207,6 +2207,21 @@ fn vitest_activates_by_config_file_existence() {
 }
 
 #[test]
+fn wxt_activates_by_config_file_existence() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("wxt.config.ts"), "").unwrap();
+
+    let registry = PluginRegistry::default();
+    let pkg = PackageJson::default();
+    let result = registry.run(&pkg, root, &[]);
+    assert!(
+        result.active_plugins.contains(&"wxt".to_string()),
+        "wxt should activate when wxt.config.ts exists on disk"
+    );
+}
+
+#[test]
 fn eslint_activates_by_config_file_existence() {
     // ESLint also has file-based activation
     let tmp = tempfile::tempdir().unwrap();
@@ -2670,9 +2685,18 @@ fn framework_plugins_have_correct_enablers() {
     let result = registry.run(&redwoodsdk_pkg, Path::new("/project"), &[]);
     assert!(result.active_plugins.contains(&"redwoodsdk".to_string()));
 
+    let wxt_pkg = make_pkg(&["wxt"]);
+    let result = registry.run(&wxt_pkg, Path::new("/project"), &[]);
+    assert!(result.active_plugins.contains(&"wxt".to_string()));
+
+    let wxt_module_pkg = make_pkg(&["@wxt-dev/module-svelte"]);
+    let result = registry.run(&wxt_module_pkg, Path::new("/project"), &[]);
+    assert!(result.active_plugins.contains(&"wxt".to_string()));
+
     let plain_vite_pkg = make_pkg(&["vite"]);
     let result = registry.run(&plain_vite_pkg, Path::new("/project"), &[]);
     assert!(!result.active_plugins.contains(&"redwoodsdk".to_string()));
+    assert!(!result.active_plugins.contains(&"wxt".to_string()));
 }
 
 #[test]

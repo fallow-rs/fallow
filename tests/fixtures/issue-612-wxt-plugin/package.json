@@ -1,0 +1,10 @@
+{
+  "name": "issue-612-wxt-plugin",
+  "version": "1.0.0",
+  "devDependencies": {
+    "@wxt-dev/i18n": "1.0.0",
+    "@wxt-dev/module-svelte": "1.0.0",
+    "unused-control": "1.0.0",
+    "wxt": "1.0.0"
+  }
+}

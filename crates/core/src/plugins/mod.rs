@@ -66,6 +66,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "vitepress",
     "webpack",
     "wrangler",
+    "wxt",
 ];
 
 #[cfg(test)]
@@ -1182,6 +1183,7 @@ mod webdriverio;
 mod webpack;
 mod wrangler;
 mod wuchale;
+mod wxt;
 
 #[cfg(test)]
 mod tests {
