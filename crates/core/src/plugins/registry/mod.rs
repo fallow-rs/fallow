@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::{EntryPointRole, ExternalPluginDef, PackageJson, UsedClassMemberRule};
 
+use crate::scripts;
+
 use super::{PathRule, Plugin, PluginUsedExportRule, ProvidedDependencyRule};
 
 pub(crate) mod builtin;
@@ -162,10 +164,14 @@ impl PluginRegistry {
         // Phase 1: Determine which plugins are active
         // Compute deps once to avoid repeated Vec<String> allocation per plugin
         let all_deps = pkg.all_dependency_names();
+        let script_packages = script_activation_packages(pkg, root, &all_deps, production_mode);
         let active: Vec<&dyn Plugin> = self
             .plugins
             .iter()
-            .filter(|p| p.is_enabled_with_files(&all_deps, root, discovered_files))
+            .filter(|p| {
+                p.is_enabled_with_files(&all_deps, root, discovered_files)
+                    || p.is_enabled_with_scripts(&script_packages, root)
+            })
             .map(AsRef::as_ref)
             .collect();
 
@@ -358,6 +364,7 @@ impl PluginRegistry {
 
         // Phase 1: Determine which plugins are active (with pre-computed deps)
         let all_deps = pkg.all_dependency_names();
+        let script_packages = script_activation_packages(pkg, root, &all_deps, production_mode);
         let workspace_files: Vec<PathBuf> = relative_files
             .iter()
             .map(|(abs_path, _)| abs_path.clone())
@@ -366,7 +373,10 @@ impl PluginRegistry {
         let active: Vec<&dyn Plugin> = self
             .plugins
             .iter()
-            .filter(|p| p.is_enabled_with_files(&all_deps, root, &workspace_files))
+            .filter(|p| {
+                p.is_enabled_with_files(&all_deps, root, &workspace_files)
+                    || p.is_enabled_with_scripts(&script_packages, root)
+            })
             .map(AsRef::as_ref)
             .collect();
 
@@ -861,6 +871,31 @@ fn check_meta_framework_prerequisites(active_plugins: &[&dyn Plugin], root: &Pat
             tracing::warn!("{}", warning.message);
         }
     }
+}
+
+fn script_activation_packages(
+    pkg: &PackageJson,
+    root: &Path,
+    all_deps: &[String],
+    production_mode: bool,
+) -> FxHashSet<String> {
+    let Some(pkg_scripts) = pkg.scripts.as_ref() else {
+        return FxHashSet::default();
+    };
+
+    let scripts_to_analyze = if production_mode {
+        scripts::filter_production_scripts(pkg_scripts)
+    } else {
+        pkg_scripts.clone()
+    };
+
+    let mut nm_roots = Vec::new();
+    if root.join("node_modules").is_dir() {
+        nm_roots.push(root);
+    }
+    let bin_map = scripts::build_bin_to_package_map(&nm_roots, all_deps);
+
+    scripts::analyze_scripts(&scripts_to_analyze, root, &bin_map).used_packages
 }
 
 #[cfg(test)]

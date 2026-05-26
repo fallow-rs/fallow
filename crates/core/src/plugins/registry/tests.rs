@@ -45,6 +45,16 @@ fn make_pkg_dev(deps: &[&str]) -> PackageJson {
     serde_json::from_value(json).unwrap()
 }
 
+fn make_pkg_with_script(script: &str) -> PackageJson {
+    let json = serde_json::json!({
+        "dependencies": deps_json(&["next"]),
+        "scripts": {
+            "deploy": script
+        }
+    });
+    serde_json::from_value(json).unwrap()
+}
+
 fn path_rule(pattern: &str) -> PathRule {
     PathRule::new(pattern)
 }
@@ -82,6 +92,48 @@ fn nextjs_not_detected_without_next() {
     assert!(
         !result.active_plugins.contains(&"nextjs".to_string()),
         "nextjs plugin should not be active without 'next' in deps"
+    );
+}
+
+#[test]
+fn opennext_cloudflare_detected_from_adapter_dev_dependency() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg_dev(&["@opennextjs/cloudflare"]);
+    let result = registry.run(&pkg, Path::new("/project"), &[]);
+
+    assert!(
+        result
+            .active_plugins
+            .contains(&"opennext-cloudflare".to_string()),
+        "OpenNext Cloudflare plugin should activate from @opennextjs/cloudflare devDependency"
+    );
+}
+
+#[test]
+fn opennext_cloudflare_detected_from_adapter_script() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg_with_script("opennextjs-cloudflare build && opennextjs-cloudflare deploy");
+    let result = registry.run(&pkg, Path::new("/project"), &[]);
+
+    assert!(
+        result
+            .active_plugins
+            .contains(&"opennext-cloudflare".to_string()),
+        "OpenNext Cloudflare plugin should activate from opennextjs-cloudflare scripts"
+    );
+}
+
+#[test]
+fn opennext_cloudflare_not_detected_for_plain_nextjs_project() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg(&["next"]);
+    let result = registry.run(&pkg, Path::new("/project"), &[]);
+
+    assert!(
+        !result
+            .active_plugins
+            .contains(&"opennext-cloudflare".to_string()),
+        "OpenNext Cloudflare plugin should not activate for plain Next.js projects"
     );
 }
 
@@ -1824,6 +1876,30 @@ fn run_workspace_fast_detects_active_plugins() {
     );
     assert!(result.active_plugins.contains(&"nextjs".to_string()));
     assert!(!result.entry_patterns.is_empty());
+}
+
+#[test]
+fn run_workspace_fast_detects_script_activated_plugins() {
+    let registry = PluginRegistry::default();
+    let matchers = registry.precompile_config_matchers();
+    let pkg = make_pkg_with_script("opennextjs-cloudflare build");
+    let relative_files = vec![];
+    let result = registry.run_workspace_fast(
+        &pkg,
+        Path::new("/workspace/pkg"),
+        Path::new("/workspace"),
+        &matchers,
+        &relative_files,
+        &FxHashSet::default(),
+        false,
+    );
+
+    assert!(
+        result
+            .active_plugins
+            .contains(&"opennext-cloudflare".to_string()),
+        "workspace fast path should activate plugins from workspace package scripts"
+    );
 }
 
 #[test]

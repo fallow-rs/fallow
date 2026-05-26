@@ -1,0 +1,7 @@
+{
+  "name": "issue-613-opennext-cloudflare-workspace-script-root",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ]
+}

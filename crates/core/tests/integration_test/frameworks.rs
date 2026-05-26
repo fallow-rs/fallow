@@ -173,6 +173,153 @@ fn nextjs_config_referenced_dependencies_are_not_flagged_unused() {
 }
 
 #[test]
+fn issue_613_opennext_cloudflare_config_is_framework_used() {
+    let root = fixture_path("issue-613-opennext-cloudflare");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| {
+            file.file
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&file.file.path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "dashboard/open-next.config.ts"),
+        "nested OpenNext config should be treated as framework-used, unused files: {unused_files:?}"
+    );
+    assert!(
+        !unused_dep_names.contains(&"@opennextjs/aws"),
+        "@opennextjs/aws should be treated as used through open-next.config.ts imports: {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"left-pad"),
+        "left-pad should remain unused as a control dependency: {unused_dep_names:?}"
+    );
+}
+
+#[test]
+fn issue_613_opennext_cloudflare_script_activates_config_handling() {
+    let root = fixture_path("issue-613-opennext-cloudflare-script");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| {
+            file.file
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&file.file.path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "dashboard/open-next.config.ts"),
+        "opennextjs-cloudflare scripts should activate nested config handling, unused files: {unused_files:?}"
+    );
+    assert!(
+        !unused_dep_names.contains(&"@opennextjs/aws"),
+        "@opennextjs/aws should be treated as used through script-activated open-next.config.ts imports: {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"left-pad"),
+        "left-pad should remain unused as a control dependency: {unused_dep_names:?}"
+    );
+}
+
+#[test]
+fn issue_613_opennext_cloudflare_workspace_script_activates_config_handling() {
+    let root = fixture_path("issue-613-opennext-cloudflare-workspace-script");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| {
+            file.file
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&file.file.path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "apps/site/dashboard/open-next.config.ts"),
+        "workspace opennextjs-cloudflare scripts should activate nested config handling, unused files: {unused_files:?}"
+    );
+    assert!(
+        !unused_dep_names.contains(&"@opennextjs/aws"),
+        "@opennextjs/aws should be treated as used through workspace open-next.config.ts imports: {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"left-pad"),
+        "left-pad should remain unused as a workspace control dependency: {unused_dep_names:?}"
+    );
+}
+
+#[test]
+fn issue_613_plain_nextjs_does_not_claim_opennext_config() {
+    let root = fixture_path("issue-613-plain-nextjs-opennext-config");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| {
+            file.file
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&file.file.path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+
+    assert!(
+        unused_files
+            .iter()
+            .any(|path| path == "open-next.config.ts"),
+        "plain Next.js projects should not activate OpenNext Cloudflare config handling: {unused_files:?}"
+    );
+}
+
+#[test]
 fn issue_623_nextjs_react_compiler_dependency_is_not_flagged_unused() {
     let root = fixture_path("issue-623-next-react-compiler");
     let config = create_config(root);

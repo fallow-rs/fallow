@@ -6,9 +6,9 @@ paths:
 
 # Plugin system
 
-109 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
+110 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
 
-## Rich config parsing (24 plugins)
+## Rich config parsing (25 plugins)
 
 - **ESLint**: Legacy plugin/extends/parser short-name resolution (top-level AND inside `overrides[*]`), flat config plugin keys, JSON config, shared config following (reads imported config packages' entry points one level deep to discover peer deps), relative-path `extends` chain following (`./config/base.js`, `../shared/eslintrc.json`) with cycle protection and depth cap, settings["import/resolver"] (string/array/object formats)
 - **Vite**: rollupOptions.input, lib.entry (string/array/object literals AND path-helper calls: `resolve(__dirname, ...)`, `path.resolve(...)`, `join(...)`, `import.meta.dirname` equivalents, evaluated by the shared `expression_to_string_or_array`), optimizeDeps include/exclude, ssr.external/noExternal, resolve.alias (path-alias-only); embedded Vitest `test.alias` + `test.projects[*]` test.alias/resolve.alias (vite.config.* commonly hosts the Vitest config)

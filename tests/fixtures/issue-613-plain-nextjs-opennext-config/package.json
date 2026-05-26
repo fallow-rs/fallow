@@ -1,0 +1,7 @@
+{
+  "name": "issue-613-plain-nextjs-opennext-config",
+  "private": true,
+  "dependencies": {
+    "next": "15.0.0"
+  }
+}

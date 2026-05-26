@@ -663,6 +663,32 @@ pub trait Plugin: Send + Sync {
         self.is_enabled_with_deps(deps, root)
     }
 
+    /// Package-script binary/package names that can activate this plugin.
+    fn script_enablers(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Check whether this plugin should be active from package.json scripts.
+    fn is_enabled_with_scripts(
+        &self,
+        script_packages: &rustc_hash::FxHashSet<String>,
+        _root: &Path,
+    ) -> bool {
+        let enablers = self.script_enablers();
+        if enablers.is_empty() {
+            return false;
+        }
+        enablers.iter().any(|enabler| {
+            if enabler.ends_with('/') {
+                script_packages
+                    .iter()
+                    .any(|package| package.starts_with(enabler))
+            } else {
+                script_packages.contains(*enabler)
+            }
+        })
+    }
+
     /// Default glob patterns for entry point files.
     fn entry_patterns(&self) -> &'static [&'static str] {
         &[]
@@ -1128,6 +1154,7 @@ mod nx;
 mod nyc;
 mod openapi_ts;
 mod opencode;
+mod opennext_cloudflare;
 mod oxlint;
 mod pandacss;
 mod parcel;
