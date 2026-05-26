@@ -10,6 +10,8 @@ use std::path::Path;
 use super::config_parser;
 use super::{Plugin, PluginResult};
 
+const REACT_COMPILER_BABEL_PLUGIN: &str = "babel-plugin-react-compiler";
+
 // Used exports for App Router page files
 const PAGE_EXPORTS: &[&str] = &[
     "default",
@@ -302,6 +304,16 @@ define_plugin!(
                 .push(crate::resolve::extract_package_name(package));
         }
 
+        if config_parser::extract_config_truthy_bool_or_object(
+            source,
+            config_path,
+            &["reactCompiler"],
+        ) {
+            result
+                .referenced_dependencies
+                .push(REACT_COMPILER_BABEL_PLUGIN.to_string());
+        }
+
         result
     },
 );
@@ -557,6 +569,98 @@ mod tests {
             result
                 .referenced_dependencies
                 .contains(&"lodash-es".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_react_compiler_true_references_babel_plugin() {
+        let source = r#"
+            import { defineConfig } from "next/config";
+
+            export default defineConfig({
+                reactCompiler: true,
+            });
+        "#;
+        let plugin = NextJsPlugin;
+        let result =
+            plugin.resolve_config(Path::new("next.config.ts"), source, Path::new("/project"));
+
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_react_compiler_object_references_babel_plugin() {
+        let source = r#"
+            module.exports = {
+                reactCompiler: { compilationMode: "annotation" },
+            };
+        "#;
+        let plugin = NextJsPlugin;
+        let result =
+            plugin.resolve_config(Path::new("next.config.js"), source, Path::new("/project"));
+
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_react_compiler_false_does_not_reference_babel_plugin() {
+        let source = r"
+            export default {
+                reactCompiler: false,
+            };
+        ";
+        let plugin = NextJsPlugin;
+        let result =
+            plugin.resolve_config(Path::new("next.config.ts"), source, Path::new("/project"));
+
+        assert!(
+            !result
+                .referenced_dependencies
+                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_react_compiler_null_does_not_reference_babel_plugin() {
+        let source = r"
+            export default {
+                reactCompiler: null,
+            };
+        ";
+        let plugin = NextJsPlugin;
+        let result =
+            plugin.resolve_config(Path::new("next.config.ts"), source, Path::new("/project"));
+
+        assert!(
+            !result
+                .referenced_dependencies
+                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_without_react_compiler_does_not_reference_babel_plugin() {
+        let source = r"
+            export default {
+                reactStrictMode: true,
+            };
+        ";
+        let plugin = NextJsPlugin;
+        let result =
+            plugin.resolve_config(Path::new("next.config.ts"), source, Path::new("/project"));
+
+        assert!(
+            !result
+                .referenced_dependencies
+                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
         );
     }
 

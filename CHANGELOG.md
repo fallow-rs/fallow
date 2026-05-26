@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Serialized `PathBuf` fields are now covered by a drift gate and normalized consistently.** A new schema test walks CLI/core/types `Serialize` structs and enum struct variants to require `serde_path` serializers for `PathBuf`, `Option<PathBuf>`, and `Vec<PathBuf>` fields, with support for skipped serde fields and custom scalar/option serializers. Existing health/runtime-coverage/setup path fields now use those serializers, including optional component-inherited coverage paths, so Windows paths stay slash-normalized in JSON output. (Closes [#615](https://github.com/fallow-rs/fallow/issues/615).)
 
+- **React Compiler's Babel plugin is no longer reported as unused when consumed through explicit Next.js or Vite compiler config.** Before, projects that followed the documented Next.js `reactCompiler` option or Vite `@vitejs/plugin-react` Babel plugin configuration still saw `babel-plugin-react-compiler` as an unused dependency because the package is consumed by the framework/compiler pipeline rather than by app imports. After, the Next plugin credits `babel-plugin-react-compiler` for `reactCompiler: true` and object-valued `reactCompiler` config, and the Vite plugin credits explicit React Compiler Babel plugin strings inside provenance-checked `@vitejs/plugin-react` / documented Babel integration calls. Disabled, missing, unrelated, and arbitrary nested string shapes still report the dependency as unused. (Closes [#623](https://github.com/fallow-rs/fallow/issues/623).)
+
 ## [2.82.0] - 2026-05-26
 
 ### Fixed

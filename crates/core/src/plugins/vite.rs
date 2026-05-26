@@ -5,8 +5,21 @@
 
 use super::config_parser;
 use super::{Plugin, PluginResult};
+use oxc_ast::ast::{
+    Argument, ArrayExpression, ArrayExpressionElement, CallExpression, Expression,
+    ImportDeclarationSpecifier, ObjectExpression, Program, Statement,
+};
 
 const CONFIG_EXPORTS: &[&str] = &["default"];
+const REACT_COMPILER_BABEL_PLUGIN: &str = "babel-plugin-react-compiler";
+const VITE_REACT_PLUGIN_SOURCE: &str = "@vitejs/plugin-react";
+const ROLLDOWN_BABEL_PLUGIN_SOURCE: &str = "@rolldown/plugin-babel";
+
+#[derive(Default)]
+struct ReactCompilerPluginLocals {
+    react_calls: Vec<String>,
+    babel_calls: Vec<String>,
+}
 
 fn additional_data_entry_pattern(
     root: &std::path::Path,
@@ -106,6 +119,10 @@ define_plugin!(
         let imports = config_parser::extract_imports(source, config_path);
         for imp in &imports {
             let dep = crate::resolve::extract_package_name(imp);
+            result.referenced_dependencies.push(dep);
+        }
+
+        for dep in extract_react_compiler_plugin_dependencies(source, config_path) {
             result.referenced_dependencies.push(dep);
         }
 
@@ -219,6 +236,146 @@ define_plugin!(
         result
     },
 );
+
+fn extract_react_compiler_plugin_dependencies(source: &str, path: &std::path::Path) -> Vec<String> {
+    config_parser::extract_from_source(source, path, |program| {
+        let config = config_parser::find_config_object_pub(program)?;
+        let plugins = config_parser::property_expr(config, "plugins")
+            .and_then(config_parser::array_expression)?;
+        let locals = collect_react_compiler_plugin_locals(program);
+        let mut deps = Vec::new();
+
+        for element in &plugins.elements {
+            let Some(Expression::CallExpression(call)) = element.as_expression() else {
+                continue;
+            };
+
+            if is_local_call(call, &locals.react_calls) {
+                collect_from_plugin_call_option_path(call, &["babel", "plugins"], &mut deps);
+            } else if is_local_call(call, &locals.babel_calls) {
+                collect_from_plugin_call_option_path(call, &["plugins"], &mut deps);
+                collect_from_plugin_call_option_path(call, &["babel", "plugins"], &mut deps);
+            }
+        }
+
+        (!deps.is_empty()).then_some(deps)
+    })
+    .unwrap_or_default()
+}
+
+fn collect_react_compiler_plugin_locals(program: &Program<'_>) -> ReactCompilerPluginLocals {
+    let mut locals = ReactCompilerPluginLocals::default();
+
+    for stmt in &program.body {
+        let Statement::ImportDeclaration(decl) = stmt else {
+            continue;
+        };
+        let Some(specifiers) = &decl.specifiers else {
+            continue;
+        };
+
+        for specifier in specifiers {
+            match specifier {
+                ImportDeclarationSpecifier::ImportDefaultSpecifier(default)
+                    if decl.source.value == VITE_REACT_PLUGIN_SOURCE =>
+                {
+                    push_unique(&mut locals.react_calls, default.local.name.to_string());
+                }
+                ImportDeclarationSpecifier::ImportSpecifier(specifier)
+                    if decl.source.value == VITE_REACT_PLUGIN_SOURCE
+                        && specifier.imported.name() == "react" =>
+                {
+                    push_unique(&mut locals.react_calls, specifier.local.name.to_string());
+                }
+                ImportDeclarationSpecifier::ImportDefaultSpecifier(default)
+                    if decl.source.value == ROLLDOWN_BABEL_PLUGIN_SOURCE =>
+                {
+                    push_unique(&mut locals.babel_calls, default.local.name.to_string());
+                }
+                ImportDeclarationSpecifier::ImportSpecifier(specifier)
+                    if decl.source.value == ROLLDOWN_BABEL_PLUGIN_SOURCE
+                        && specifier.imported.name() == "babel" =>
+                {
+                    push_unique(&mut locals.babel_calls, specifier.local.name.to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    locals
+}
+
+fn collect_from_plugin_call_option_path(
+    call: &CallExpression<'_>,
+    option_path: &[&str],
+    deps: &mut Vec<String>,
+) {
+    let Some(options) = call
+        .arguments
+        .first()
+        .and_then(Argument::as_expression)
+        .and_then(config_parser::object_expression)
+    else {
+        return;
+    };
+    let Some(plugins) = nested_array_expression(options, option_path) else {
+        return;
+    };
+
+    for plugin_name in collect_babel_plugin_names(plugins) {
+        if super::babel::resolve_babel_plugin_name(&plugin_name) == REACT_COMPILER_BABEL_PLUGIN {
+            push_unique(deps, REACT_COMPILER_BABEL_PLUGIN.to_string());
+        }
+    }
+}
+
+fn nested_array_expression<'a>(
+    obj: &'a ObjectExpression<'a>,
+    path: &[&str],
+) -> Option<&'a ArrayExpression<'a>> {
+    let mut current_obj = obj;
+    for (index, key) in path.iter().enumerate() {
+        let expr = config_parser::property_expr(current_obj, key)?;
+        if index == path.len() - 1 {
+            return config_parser::array_expression(expr);
+        }
+        current_obj = config_parser::object_expression(expr)?;
+    }
+    None
+}
+
+fn collect_babel_plugin_names(plugins: &ArrayExpression<'_>) -> Vec<String> {
+    plugins
+        .elements
+        .iter()
+        .filter_map(|element| {
+            let expr = element.as_expression()?;
+            config_parser::expression_to_string(expr).or_else(|| {
+                let tuple = config_parser::array_expression(expr)?;
+                tuple
+                    .elements
+                    .first()
+                    .and_then(ArrayExpressionElement::as_expression)
+                    .and_then(config_parser::expression_to_string)
+            })
+        })
+        .collect()
+}
+
+fn is_local_call(call: &CallExpression<'_>, locals: &[String]) -> bool {
+    matches!(
+        &call.callee,
+        Expression::Identifier(identifier)
+            if locals.iter().any(|local| local == identifier.name.as_str())
+    )
+}
+
+fn push_unique<T: Eq>(items: &mut Vec<T>, item: T) {
+    if !items.contains(&item) {
+        items.push(item);
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -465,6 +622,187 @@ mod tests {
                 .any(|rule| rule.pattern == "src/index.ts"),
             "build.lib.entry path-helper call should be extracted: {:?}",
             result.entry_patterns
+        );
+    }
+
+    #[test]
+    fn resolve_config_react_babel_plugin_references_react_compiler_dependency() {
+        let source = r#"
+            import { defineConfig } from "vite";
+            import react from "@vitejs/plugin-react";
+
+            export default defineConfig({
+                plugins: [
+                    react({
+                        babel: {
+                            plugins: ["babel-plugin-react-compiler"],
+                        },
+                    }),
+                ],
+            });
+        "#;
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_react_babel_plugin_tuple_references_react_compiler_dependency() {
+        let source = r#"
+            import { defineConfig } from "vite";
+            import react from "@vitejs/plugin-react";
+
+            export default defineConfig({
+                plugins: [
+                    react({
+                        babel: {
+                            plugins: [["react-compiler", { target: "19" }]],
+                        },
+                    }),
+                ],
+            });
+        "#;
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_rolldown_babel_plugin_references_react_compiler_dependency() {
+        let source = r#"
+            import { defineConfig } from "vite";
+            import { babel } from "@rolldown/plugin-babel";
+
+            export default defineConfig({
+                plugins: [
+                    babel({
+                        babel: {
+                            plugins: ["babel-plugin-react-compiler"],
+                        },
+                    }),
+                ],
+            });
+        "#;
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_unrelated_string_does_not_reference_react_compiler_dependency() {
+        let source = r#"
+            import { defineConfig } from "vite";
+            import react from "@vitejs/plugin-react";
+
+            export default defineConfig({
+                plugins: [
+                    react({
+                        notes: "babel-plugin-react-compiler",
+                        babel: {
+                            plugins: [["other-plugin", { note: "babel-plugin-react-compiler" }]],
+                        },
+                    }),
+                ],
+            });
+        "#;
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert!(
+            !result
+                .referenced_dependencies
+                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_requires_imported_vite_plugin_call_provenance() {
+        let source = r#"
+            import { defineConfig } from "vite";
+
+            function react(options) {
+                return options;
+            }
+
+            export default defineConfig({
+                plugins: [
+                    react({
+                        babel: {
+                            plugins: ["babel-plugin-react-compiler"],
+                        },
+                    }),
+                ],
+            });
+        "#;
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert!(
+            !result
+                .referenced_dependencies
+                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_local_react_compiler_preset_call_does_not_reference_dependency() {
+        let source = r#"
+            import { defineConfig } from "vite";
+
+            function reactCompilerPreset() {
+                return {};
+            }
+
+            export default defineConfig({
+                plugins: [reactCompilerPreset()],
+            });
+        "#;
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert!(
+            !result
+                .referenced_dependencies
+                .contains(&REACT_COMPILER_BABEL_PLUGIN.to_string())
         );
     }
 

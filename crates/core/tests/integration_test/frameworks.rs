@@ -173,6 +173,86 @@ fn nextjs_config_referenced_dependencies_are_not_flagged_unused() {
 }
 
 #[test]
+fn issue_623_nextjs_react_compiler_dependency_is_not_flagged_unused() {
+    let root = fixture_path("issue-623-next-react-compiler");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_dep_names.contains(&"babel-plugin-react-compiler"),
+        "React Compiler dependency should be used via next.config reactCompiler: {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"left-pad"),
+        "left-pad should remain unused as a control dependency: {unused_dep_names:?}"
+    );
+}
+
+#[test]
+fn issue_623_nextjs_disabled_react_compiler_dependency_is_flagged_unused() {
+    let root = fixture_path("issue-623-next-react-compiler-disabled");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        unused_dep_names.contains(&"babel-plugin-react-compiler"),
+        "disabled React Compiler config should not credit the dependency: {unused_dep_names:?}"
+    );
+}
+
+#[test]
+fn issue_623_vite_react_compiler_dependency_is_not_flagged_unused() {
+    let root = fixture_path("issue-623-vite-react-compiler");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_dep_names.contains(&"babel-plugin-react-compiler"),
+        "React Compiler dependency should be used via Vite Babel plugin config: {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"left-pad"),
+        "left-pad should remain unused as a control dependency: {unused_dep_names:?}"
+    );
+}
+
+#[test]
+fn issue_623_vite_no_react_compiler_config_dependency_is_flagged_unused() {
+    let root = fixture_path("issue-623-vite-react-compiler-control");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        unused_dep_names.contains(&"babel-plugin-react-compiler"),
+        "Vite projects without explicit React Compiler plugin config should not credit the dependency: {unused_dep_names:?}"
+    );
+}
+
+#[test]
 fn turborepo_generator_config_is_used_without_globbing_generator_directory() {
     let tmp = tempfile::tempdir().expect("failed to create temp dir");
     let root = tmp.path().to_path_buf();

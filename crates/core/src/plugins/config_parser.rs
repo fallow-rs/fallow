@@ -234,6 +234,28 @@ pub(crate) fn is_disabled_expression(expr: &Expression<'_>) -> bool {
         || matches!(expr, Expression::NullLiteral(_))
 }
 
+/// True when a nested config property is a static `true` boolean or object value.
+#[must_use]
+pub fn extract_config_truthy_bool_or_object(source: &str, path: &Path, prop_path: &[&str]) -> bool {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let expr = get_nested_expression(obj, prop_path)?;
+        Some(is_truthy_bool_or_object(expr))
+    })
+    .unwrap_or(false)
+}
+
+fn is_truthy_bool_or_object(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::BooleanLiteral(boolean) => boolean.value,
+        Expression::ObjectExpression(_) => true,
+        Expression::ParenthesizedExpression(paren) => is_truthy_bool_or_object(&paren.expression),
+        Expression::TSSatisfiesExpression(ts_sat) => is_truthy_bool_or_object(&ts_sat.expression),
+        Expression::TSAsExpression(ts_as) => is_truthy_bool_or_object(&ts_as.expression),
+        _ => false,
+    }
+}
+
 /// Extract keys of an object property at a nested path.
 ///
 /// Useful for `PostCSS` config: `{ plugins: { autoprefixer: {}, tailwindcss: {} } }`
@@ -825,7 +847,7 @@ pub fn normalize_config_path(raw: &str, config_path: &Path, root: &Path) -> Opti
 /// parentheses to produce an AST compatible with `find_config_object`. The native
 /// JSON source type in Oxc produces a different AST structure that our helpers
 /// don't handle.
-fn extract_from_source<T>(
+pub(crate) fn extract_from_source<T>(
     source: &str,
     path: &Path,
     extractor: impl FnOnce(&Program) -> Option<T>,

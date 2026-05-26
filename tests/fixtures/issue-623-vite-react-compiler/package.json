@@ -1,0 +1,12 @@
+{
+  "name": "issue-623-vite-react-compiler",
+  "private": true,
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "babel-plugin-react-compiler": "1.0.0",
+    "left-pad": "1.3.0",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "vite": "latest"
+  }
+}

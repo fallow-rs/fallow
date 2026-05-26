@@ -115,7 +115,7 @@ fn resolve_babel_preset_name(name: &str) -> String {
 /// - `"@babel/plugin-transform-runtime"` → `"@babel/plugin-transform-runtime"` (already full)
 /// - `"babel-plugin-foo"` → `"babel-plugin-foo"` (already full)
 /// - `"module:my-plugin"` → `"my-plugin"` (module: prefix)
-fn resolve_babel_plugin_name(name: &str) -> String {
+pub(super) fn resolve_babel_plugin_name(name: &str) -> String {
     let name = name.strip_prefix("module:").unwrap_or(name);
 
     if name.starts_with("babel-plugin-") || name.contains("/plugin-") {
