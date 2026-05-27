@@ -1048,10 +1048,11 @@ fn runtime_coverage_finding_key(
     _root: &Path,
 ) -> String {
     // Writer key. Prefer the cross-surface join key (`fallow:fn:<hash>`) when
-    // present: it hashes file + name + start_line (NOT the line position), so a
-    // function that only moved lines keeps the same key and stays suppressed
-    // without a re-baseline. Fall back to the legacy per-finding suppression id
-    // (`fallow:prod:<hash>`) for 0.5-shape findings that carry no identity.
+    // present so the baseline keys on the same identity the cloud and the other
+    // coverage surfaces use; fall back to the legacy per-finding suppression id
+    // (`fallow:prod:<hash>`) for 0.5-shape findings that carry no identity. Both
+    // forms hash the function's start line, so a moved function gets a new key
+    // under either; the grace-window reader accepts both forms.
     finding
         .stable_id
         .clone()

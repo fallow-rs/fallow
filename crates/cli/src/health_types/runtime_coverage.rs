@@ -336,11 +336,14 @@ pub struct RuntimeCoverageFinding {
     pub id: String,
     /// Cross-surface join key of the form `fallow:fn:<hash>`
     /// (`fallow_cov_protocol::function_identity_id`, hashes file + name +
-    /// start_line, NOT the line). Stable across line moves; the same function
-    /// shares this value across findings, hot paths, blast-radius, and
-    /// importance entries. `null` when the producing surface (or an un-migrated
-    /// cloud) supplied no `FunctionIdentity`. New baselines key on this when
-    /// present so suppressions survive line shifts.
+    /// start_line). The same function shares ONE value across findings, hot
+    /// paths, blast-radius, and importance entries (the per-finding `id` uses a
+    /// per-surface salt, so it differs by surface), and across V8, Istanbul,
+    /// and oxc producers (columns are excluded from the hash). Like `id`, it
+    /// changes when the function's file, name, or start line changes; it is a
+    /// cross-surface / cross-producer join key, not a line-move-immune one.
+    /// `null` when the producing surface (or an un-migrated cloud) supplied no
+    /// `FunctionIdentity`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub stable_id: Option<String>,

@@ -1622,7 +1622,7 @@
             "string",
             "null"
           ],
-          "description": "Cross-surface join key of the form `fallow:fn:<hash>`\n(`fallow_cov_protocol::function_identity_id`, hashes file + name +\nstart_line, NOT the line). Stable across line moves; the same function\nshares this value across findings, hot paths, blast-radius, and\nimportance entries. `null` when the producing surface (or an un-migrated\ncloud) supplied no `FunctionIdentity`. New baselines key on this when\npresent so suppressions survive line shifts."
+          "description": "Cross-surface join key of the form `fallow:fn:<hash>`\n(`fallow_cov_protocol::function_identity_id`, hashes file + name +\nstart_line). The same function shares ONE value across findings, hot\npaths, blast-radius, and importance entries (the per-finding `id` uses a\nper-surface salt, so it differs by surface), and across V8, Istanbul,\nand oxc producers (columns are excluded from the hash). Like `id`, it\nchanges when the function's file, name, or start line changes; it is a\ncross-surface / cross-producer join key, not a line-move-immune one.\n`null` when the producing surface (or an un-migrated cloud) supplied no\n`FunctionIdentity`."
         },
         "path": {
           "type": "string",
@@ -8084,7 +8084,7 @@
         "specifier_col",
         "actions"
       ],
-      "description": "Wire-shape envelope for an [`UnresolvedImport`] finding. Mirrors\n[`UnusedFileFinding`]: flattens the bare finding and carries a typed\n`actions` array (`resolve-import` primary plus `suppress-line`\nsecondary)."
+      "description": "Wire-shape envelope for an [`UnresolvedImport`] finding. Mirrors\n[`UnusedFileFinding`]: flattens the bare finding and carries a typed\n`actions` array (`resolve-import` primary plus config and inline\nsuppression actions)."
     },
     "UnlistedDependencyFinding": {
       "type": "object",
