@@ -231,6 +231,14 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "note": "Verify the module path and check tsconfig paths configuration"
         },
         {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Add \"./missing-module\" to ignoreUnresolvedImports in fallow config",
+          "config_key": "ignoreUnresolvedImports",
+          "value": "./missing-module",
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreUnresolvedImports/items"
+        },
+        {
           "type": "suppress-line",
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the line",
