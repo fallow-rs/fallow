@@ -1,0 +1,11 @@
+{
+  // Keep renderer.html because the framework loads it at runtime.
+  "entry": ["src/main.ts", "renderer.html"],
+  "ignoreDependencies": ["electron"],
+  "rules": {
+    "unused-files": "warn"
+  },
+  "audit": {
+    "gate": "new-only"
+  }
+}

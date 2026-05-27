@@ -1,0 +1,4 @@
+# Manual workaround for plugin generated routes.
+entry = ["src/server.ts"]
+ignorePatterns = ["src/routeTree.gen.ts"]
+dynamicallyLoaded = ["./plugins/runtime"]

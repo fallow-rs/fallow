@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Public Fallow config corpus tooling makes recurring workaround mining repeatable.** Maintainers can now run `scripts/public-config-corpus.py` to search public `.fallowrc.json`, `.fallowrc.jsonc`, and `fallow.toml` files with `gh`, cache pinned config snapshots under `.fallow/public-config-corpus/`, and write a deterministic markdown report plus manifest. The manifest records repo/path identity, blob URL, raw URL, blob SHA, URL ref fallback, byte count, `sha256`, parse status, search query, cap, fetch time, `gh` version, and fetch failures, so a report can be reviewed instead of trusted as an ad hoc scrape. `docs/public-config-corpus.md` documents the maintainer workflow, privacy boundaries, and the first seeded public-config research pass that led to #546, #586, #588, #589, #590, #600, #601, and #602. The fixture harness `scripts/test-public-config-corpus.sh` verifies deterministic offline output without GitHub access. (Closes [#603](https://github.com/fallow-rs/fallow/issues/603).)
+
 ### Fixed
 
 - **Workspace packages without `exports` now resolve missing prebuild output back to source.** Before, a sibling workspace package that omitted `exports` but pointed `module` or `types` at missing `dist/` files could surface as both an unresolved import and an unused dependency before the package was built. After, bare workspace package imports without an `exports` map use the same source fallback as prebuild package-map targets, so `@example/lib` resolves to `packages/lib/src/index.ts` and dependency usage is credited. (Closes [#725](https://github.com/fallow-rs/fallow/issues/725).)

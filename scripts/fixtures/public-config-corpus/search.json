@@ -1,0 +1,55 @@
+{
+  "queries": [
+    {
+      "query": "filename:.fallowrc.jsonc",
+      "results": [
+        {
+          "path": ".fallowrc.jsonc",
+          "repository": {
+            "nameWithOwner": "alpha/app",
+            "url": "https://github.com/alpha/app"
+          },
+          "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "url": "https://github.com/alpha/app/blob/1111111111111111111111111111111111111111/.fallowrc.jsonc"
+        }
+      ]
+    },
+    {
+      "query": "filename:fallow.toml",
+      "results": [
+        {
+          "path": "config/fallow.toml",
+          "repository": {
+            "nameWithOwner": "beta/tool",
+            "url": "https://github.com/beta/tool"
+          },
+          "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "url": "https://github.com/beta/tool/blob/2222222222222222222222222222222222222222/config/fallow.toml"
+        }
+      ]
+    },
+    {
+      "query": "filename:.fallowrc.json",
+      "results": [
+        {
+          "path": ".fallowrc.json",
+          "repository": {
+            "nameWithOwner": "bad/invalid",
+            "url": "https://github.com/bad/invalid"
+          },
+          "sha": "cccccccccccccccccccccccccccccccccccccccc",
+          "url": "https://github.com/bad/invalid/blob/3333333333333333333333333333333333333333/.fallowrc.json"
+        },
+        {
+          "path": ".fallowrc.json",
+          "repository": {
+            "nameWithOwner": "missing/cache",
+            "url": "https://github.com/missing/cache"
+          },
+          "sha": "dddddddddddddddddddddddddddddddddddddddd",
+          "url": "https://github.com/missing/cache/blob/4444444444444444444444444444444444444444/.fallowrc.json"
+        }
+      ]
+    }
+  ]
+}
