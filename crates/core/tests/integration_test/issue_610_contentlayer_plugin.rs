@@ -3,13 +3,20 @@ use super::common::{create_config, fixture_path};
 #[test]
 fn contentlayer_plugin_marks_config_content_generated_output_and_processors_used() {
     let root = fixture_path("issue-610-contentlayer-plugin");
-    let config = create_config(root);
+    let config = create_config(root.clone());
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
-        .map(|file| file.file.path.to_string_lossy().into_owned())
+        .map(|file| {
+            file.file
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&file.file.path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
         .collect();
 
     for path in [
