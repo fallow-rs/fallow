@@ -1404,10 +1404,16 @@ fn paths_equal(left: &Path, right: &Path) -> bool {
 /// resolution. The trade-off matches `node_modules`: the symlinked dir is
 /// HEAD-shaped, not base-shaped, but the alias resolution accuracy recovered
 /// far outweighs the residual drift.
+///
+/// The meta-framework entries must stay aligned with the set recognized by
+/// `missing_meta_framework_prerequisites` in `fallow_core`'s plugin registry.
+/// Adding a framework's prepare-dir warning there without extending this list
+/// silently reintroduces the broken-tsconfig-chain bug on the base pass for
+/// that framework.
 const MATERIALIZED_CONTEXT_DIRS: &[&str] = &["node_modules", ".nuxt", ".astro"];
 
 fn materialize_base_dependency_context(repo_root: &Path, worktree_path: &Path) {
-    for name in MATERIALIZED_CONTEXT_DIRS {
+    for &name in MATERIALIZED_CONTEXT_DIRS {
         let source = repo_root.join(name);
         if !source.is_dir() {
             continue;
@@ -4316,6 +4322,43 @@ mod tests {
         assert!(
             !worktree.path().join(".nuxt").exists(),
             "missing host .nuxt should leave the worktree slot empty"
+        );
+    }
+
+    /// Confirms a real (non-symlink) generated dir already present in the base
+    /// worktree is preserved, not clobbered by a host symlink. A base commit
+    /// that genuinely tracks `.nuxt/` is base-shaped and authoritative; the
+    /// host-symlink shortcut only fills the gap when the worktree slot is
+    /// empty (or a stale dangling symlink), so the `destination.is_dir()`
+    /// early-continue must keep the worktree's own contents.
+    #[test]
+    fn materialize_base_dependency_context_preserves_real_worktree_dir() {
+        let host = tempfile::TempDir::new().expect("host tempdir should be created");
+        let worktree = tempfile::TempDir::new().expect("worktree tempdir should be created");
+
+        let host_nuxt = host.path().join(".nuxt");
+        fs::create_dir_all(&host_nuxt).expect("host .nuxt dir should be created");
+        fs::write(host_nuxt.join("tsconfig.json"), r#"{"_source":"host"}"#)
+            .expect("host .nuxt/tsconfig.json should be written");
+
+        let worktree_nuxt = worktree.path().join(".nuxt");
+        fs::create_dir_all(&worktree_nuxt).expect("worktree .nuxt dir should be created");
+        fs::write(worktree_nuxt.join("tsconfig.json"), r#"{"_source":"base"}"#)
+            .expect("worktree .nuxt/tsconfig.json should be written");
+
+        materialize_base_dependency_context(host.path(), worktree.path());
+
+        let link_meta = fs::symlink_metadata(&worktree_nuxt)
+            .expect(".nuxt entry should still exist in the worktree");
+        assert!(
+            !link_meta.file_type().is_symlink(),
+            "a real base-tracked .nuxt dir must not be replaced by a host symlink"
+        );
+        let contents =
+            fs::read_to_string(worktree_nuxt.join("tsconfig.json")).expect("tsconfig should read");
+        assert!(
+            contents.contains("base"),
+            "base worktree's own .nuxt contents must survive, not be overwritten by the host's"
         );
     }
 

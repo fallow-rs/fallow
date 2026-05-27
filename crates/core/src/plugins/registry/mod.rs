@@ -820,6 +820,11 @@ struct MetaFrameworkWarning {
 /// config/types directory under `root`. Separated from emission so the
 /// detection logic is unit-testable without a tracing subscriber or the
 /// process-wide dedupe set.
+///
+/// When adding a framework here, also extend `MATERIALIZED_CONTEXT_DIRS` in
+/// `fallow-cli`'s `audit.rs` with its generated dir, otherwise `fallow audit`'s
+/// base worktree will not symlink that dir and the broken-tsconfig-chain bug
+/// resurfaces on the base pass for the new framework.
 fn missing_meta_framework_prerequisites(
     active_plugins: &[&dyn Plugin],
     root: &Path,
