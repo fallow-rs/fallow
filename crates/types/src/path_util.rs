@@ -76,6 +76,7 @@ mod tests {
         assert!(!is_absolute_path_any_platform(Path::new("")));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn host_absolute_works_through_is_absolute() {
         let cwd = std::env::current_dir().expect("current_dir");
