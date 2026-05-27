@@ -105,6 +105,7 @@ def main() -> int:
     )
     parser.add_argument("--timeout", type=float, default=15.0, help="Raw fetch timeout in seconds")
     parser.add_argument("--retries", type=int, default=2, help="Raw fetch retry count")
+    parser.add_argument("--search-timeout", type=float, default=30.0, help="GitHub code search timeout in seconds")
     parser.add_argument(
         "--fetched-at",
         help="Override fetch timestamp for deterministic fixture tests",
@@ -119,6 +120,8 @@ def main() -> int:
         parser.error("--limit must be >= 1")
     if args.retries < 0:
         parser.error("--retries must be >= 0")
+    if args.search_timeout <= 0:
+        parser.error("--search-timeout must be > 0")
 
     args.cache_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = args.manifest or args.cache_dir / "manifest.json"
@@ -133,7 +136,11 @@ def main() -> int:
         return 2
 
     if search_groups is None:
-        search_groups = run_live_searches(args.limit)
+        try:
+            search_groups = run_live_searches(args.limit, args.search_timeout)
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
+            print(f"error: failed to run GitHub code search: {error}", file=sys.stderr)
+            return 2
 
     entries: list[dict[str, Any]] = []
     seen_items: set[tuple[str, str, str]] = set()
@@ -233,7 +240,7 @@ def load_search_groups(path: Path | None, limit: int) -> list[tuple[str, list[di
     return groups
 
 
-def run_live_searches(limit: int) -> list[tuple[str, list[dict[str, Any]]]]:
+def run_live_searches(limit: int, search_timeout: float) -> list[tuple[str, list[dict[str, Any]]]]:
     groups: list[tuple[str, list[dict[str, Any]]]] = []
     for filename in CONFIG_FILENAMES:
         query = f"filename:{filename}"
@@ -254,6 +261,7 @@ def run_live_searches(limit: int) -> list[tuple[str, list[dict[str, Any]]]]:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            timeout=search_timeout,
         )
         groups.append((query, json.loads(result.stdout)))
     return groups

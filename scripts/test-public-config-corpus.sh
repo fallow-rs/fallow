@@ -19,6 +19,11 @@ python3 "$ROOT/scripts/public-config-corpus.py" \
   --fetched-at "2026-05-27T00:00:00Z" \
   --gh-version "gh version fixture"
 
+if python3 "$ROOT/scripts/public-config-corpus.py" --search-timeout 0 >/dev/null 2>&1; then
+  echo "expected --search-timeout 0 to fail" >&2
+  exit 1
+fi
+
 python3 - "$TMP_DIR/manifest.json" "$TMP_DIR/report.md" <<'PY'
 import json
 import sys

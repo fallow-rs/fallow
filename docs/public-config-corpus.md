@@ -17,6 +17,8 @@ Run a capped live pass:
 ```bash
 python3 scripts/public-config-corpus.py \
   --limit 40 \
+  --search-timeout 30 \
+  --timeout 15 \
   --output docs/public-config-corpus.md
 ```
 
