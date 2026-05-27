@@ -1,0 +1,13 @@
+{
+  "name": "issue-610-contentlayer-plugin",
+  "type": "module",
+  "dependencies": {
+    "contentlayer2": "0.0.0",
+    "next-contentlayer2": "0.0.0",
+    "rehype-katex": "0.0.0",
+    "rehype-slug": "0.0.0",
+    "remark-gfm": "0.0.0",
+    "remark-math": "0.0.0",
+    "unused-control": "0.0.0"
+  }
+}

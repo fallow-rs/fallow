@@ -73,6 +73,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
 #[cfg(test)]
 const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
     "content-collections",
+    "contentlayer",
     "danger",
     "drizzle",
     "fumadocs",
@@ -1114,6 +1115,7 @@ mod changesets;
 mod commitizen;
 mod commitlint;
 mod content_collections;
+mod contentlayer;
 mod convex;
 mod cspell;
 mod cucumber;
@@ -1656,6 +1658,7 @@ mod tests {
             &rollup::RollupPlugin,
             &sveltekit::SvelteKitPlugin,
             &prettier::PrettierPlugin,
+            &contentlayer::ContentlayerPlugin,
         ];
         for plugin in plugins {
             assert!(
@@ -1678,6 +1681,7 @@ mod tests {
             &danger::DangerPlugin,
             &stryker::StrykerPlugin,
             &wuchale::WuchalePlugin,
+            &contentlayer::ContentlayerPlugin,
         ];
         for plugin in plugins {
             let tooling = plugin.tooling_dependencies();

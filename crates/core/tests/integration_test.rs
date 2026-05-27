@@ -155,6 +155,8 @@ mod issue_515_re_export_cycles;
 mod issue_601_vitest_test_alias;
 #[path = "integration_test/issue_607_oxlint_js_plugins.rs"]
 mod issue_607_oxlint_js_plugins;
+#[path = "integration_test/issue_610_contentlayer_plugin.rs"]
+mod issue_610_contentlayer_plugin;
 #[path = "integration_test/issue_612_wxt_plugin.rs"]
 mod issue_612_wxt_plugin;
 #[path = "integration_test/issue_619_vite_react_babel_plugins.rs"]
