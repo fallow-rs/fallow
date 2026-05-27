@@ -2533,8 +2533,8 @@ vital_signs?: (VitalSigns | null)
 health_score?: (HealthScore | null)
 /**
  * Per-file health scores. Only present when --file-scores is used. Sorted
- * by maintainability_index ascending (worst first). Zero-function files
- * (barrels) are excluded by default.
+ * by risk-aware triage concern, combining low maintainability and high
+ * CRAP risk. Zero-function files (barrels) are excluded by default.
  */
 file_scores?: FileHealthScore[]
 /**
@@ -4939,8 +4939,8 @@ vital_signs?: (VitalSigns | null)
 health_score?: (HealthScore | null)
 /**
  * Per-file health scores. Only present when --file-scores is used. Sorted
- * by maintainability_index ascending (worst first). Zero-function files
- * (barrels) are excluded by default.
+ * by risk-aware triage concern, combining low maintainability and high
+ * CRAP risk. Zero-function files (barrels) are excluded by default.
  */
 file_scores?: FileHealthScore[]
 /**

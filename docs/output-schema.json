@@ -1022,7 +1022,7 @@
           "items": {
             "$ref": "#/definitions/FileHealthScore"
           },
-          "description": "Per-file health scores. Only present when --file-scores is used. Sorted\nby maintainability_index ascending (worst first). Zero-function files\n(barrels) are excluded by default."
+          "description": "Per-file health scores. Only present when --file-scores is used. Sorted\nby risk-aware triage concern, combining low maintainability and high\nCRAP risk. Zero-function files (barrels) are excluded by default."
         },
         "coverage_gaps": {
           "anyOf": [
@@ -1898,7 +1898,7 @@
           "items": {
             "$ref": "#/definitions/FileHealthScore"
           },
-          "description": "Per-file health scores. Only present when --file-scores is used. Sorted\nby maintainability_index ascending (worst first). Zero-function files\n(barrels) are excluded by default."
+          "description": "Per-file health scores. Only present when --file-scores is used. Sorted\nby risk-aware triage concern, combining low maintainability and high\nCRAP risk. Zero-function files (barrels) are excluded by default."
         },
         "coverage_gaps": {
           "anyOf": [
