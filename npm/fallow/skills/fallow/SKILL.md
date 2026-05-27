@@ -331,6 +331,7 @@ Fallow reads config from project root: `.fallowrc.json` > `.fallowrc.jsonc` > `f
   "entry": ["src/index.ts"],
   "ignorePatterns": ["**/*.generated.ts"],
   "ignoreDependencies": ["autoprefixer"],
+  "ignoreUnresolvedImports": ["@example/icons", "@example/icons/**"],
   "ignoreExportsUsedInFile": true,
   "publicPackages": ["@myorg/shared-lib"],
   "dynamicallyLoaded": ["plugins/**/*.ts"],
@@ -342,6 +343,8 @@ Fallow reads config from project root: `.fallowrc.json` > `.fallowrc.jsonc` > `f
   }
 }
 ```
+
+`ignoreUnresolvedImports` matches raw import specifier strings, not paths. Use it for expected generated or runtime-provided unresolved imports, keep patterns narrow, and list exact specifiers separately from subpath globs when both should be ignored.
 
 Rules: `"error"` (fail CI), `"warn"` (report only), `"off"` (skip detection).
 

@@ -1048,7 +1048,7 @@ pub fn find_unlisted_dependencies(
 /// Find imports that could not be resolved.
 pub fn find_unresolved_imports(
     resolved_modules: &[ResolvedModule],
-    _config: &ResolvedConfig,
+    config: &ResolvedConfig,
     suppressions: &SuppressionContext<'_>,
     virtual_prefixes: &[&str],
     generated_patterns: &[&str],
@@ -1106,6 +1106,13 @@ pub fn find_unresolved_imports(
                     && generated_type_prefixes
                         .iter()
                         .any(|prefix| spec.starts_with(prefix))
+                {
+                    continue;
+                }
+                if config
+                    .ignore_unresolved_imports
+                    .iter()
+                    .any(|matcher| matcher.is_match(spec))
                 {
                     continue;
                 }

@@ -83,6 +83,7 @@ fn ignore_exports_wildcard() {
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
+        ignore_unresolved_imports: vec![],
         ignore_exports: vec![fallow_config::IgnoreExportRule {
             file: "src/utils.ts".to_string(),
             exports: vec!["*".to_string()],
@@ -142,6 +143,7 @@ fn ignore_exports_specific() {
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
+        ignore_unresolved_imports: vec![],
         ignore_exports: vec![fallow_config::IgnoreExportRule {
             file: "src/utils.ts".to_string(),
             exports: vec!["ignored".to_string()],
@@ -325,6 +327,7 @@ fn ignore_dependencies_config() {
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec!["unused-dep".to_string()],
+        ignore_unresolved_imports: vec![],
         ignore_exports: vec![],
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],

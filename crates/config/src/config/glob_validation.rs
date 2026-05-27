@@ -1,6 +1,6 @@
 //! Validation of user-supplied glob patterns from the config file.
 //!
-//! Fallow accepts glob patterns in several config fields (`entry`,
+//! Fallow accepts filesystem glob patterns in several config fields (`entry`,
 //! `ignorePatterns`, `dynamicallyLoaded`, `duplicates.ignore`, `health.ignore`,
 //! `boundaries.zones[].patterns`, `overrides[].files`, `ignoreExports[].file`,
 //! `ignoreCatalogReferences[].consumer`). All of these are matched against
@@ -159,6 +159,40 @@ pub fn compile_user_glob(pattern: &str, field: &'static str) -> Result<Glob, Glo
         pattern: pattern.to_owned(),
         source,
     })
+}
+
+/// Validate a glob pattern that matches a raw import specifier, not a
+/// filesystem path.
+///
+/// Specifiers such as `../generated/foo` are valid import strings, so this
+/// intentionally skips the absolute-path and traversal-segment checks used for
+/// project-root-relative file globs.
+///
+/// # Errors
+///
+/// Returns `InvalidSyntax` if `globset::Glob::new` rejects the pattern.
+pub fn compile_user_specifier_glob(
+    pattern: &str,
+    field: &'static str,
+) -> Result<Glob, GlobValidationError> {
+    Glob::new(pattern).map_err(|source| GlobValidationError::InvalidSyntax {
+        field,
+        pattern: pattern.to_owned(),
+        source,
+    })
+}
+
+/// Validate a slice of import-specifier patterns, accumulating syntax errors.
+pub fn validate_user_specifier_globs(
+    patterns: &[String],
+    field: &'static str,
+    errors: &mut Vec<GlobValidationError>,
+) {
+    for pattern in patterns {
+        if let Err(e) = compile_user_specifier_glob(pattern, field) {
+            errors.push(e);
+        }
+    }
 }
 
 /// Validate a slice of patterns, accumulating ALL errors so the user sees

@@ -117,6 +117,7 @@ fn ignore_dependencies_config_filters_deps() {
 
     let config = FallowConfig {
         ignore_dependencies: vec!["my-internal-pkg".to_string()],
+        ignore_unresolved_imports: vec![],
         ..Default::default()
     }
     .resolve(

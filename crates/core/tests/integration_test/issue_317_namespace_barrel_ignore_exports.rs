@@ -20,6 +20,7 @@ fn make_config(
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
+        ignore_unresolved_imports: vec![],
         ignore_exports,
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],

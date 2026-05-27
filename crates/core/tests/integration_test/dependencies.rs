@@ -1,3 +1,5 @@
+use std::fs;
+
 use fallow_config::{FallowConfig, OutputFormat, RulesConfig};
 
 use super::common::{create_config, fixture_path};
@@ -128,6 +130,76 @@ fn unresolved_imports_detected() {
     assert!(
         unresolved_specifiers.contains(&"./missing-star-re-export"),
         "star re-export source should be detected as unresolved import, found: {unresolved_specifiers:?}"
+    );
+}
+
+#[test]
+fn ignore_unresolved_imports_config_suppresses_matching_specifiers() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    fs::create_dir_all(root.join("src")).expect("create src dir");
+    fs::create_dir_all(root.join("node_modules/@example/icons")).expect("create package dir");
+    fs::write(
+        root.join("package.json"),
+        r#"{
+  "name": "ignore-unresolved-imports-config",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@example/icons": "1.0.0"
+  }
+}"#,
+    )
+    .expect("write package.json");
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{
+  "ignoreUnresolvedImports": [
+    "@example/icons",
+    "@example/icons/**",
+    "../generated/**"
+  ]
+}"#,
+    )
+    .expect("write fallow config");
+    fs::write(
+        root.join("node_modules/@example/icons/package.json"),
+        r#"{
+  "name": "@example/icons",
+  "version": "1.0.0",
+  "exports": {
+    ".": "./dist/index.js",
+    "./metadata": "./dist/metadata.js"
+  }
+}"#,
+    )
+    .expect("write package manifest");
+    fs::write(
+        root.join("src/index.ts"),
+        r#"import { Icon } from "@example/icons";
+import { metadata } from "@example/icons/metadata";
+import { generated } from "../generated/client";
+import { local } from "./still-missing";
+
+export const main = () => [Icon, metadata, generated, local];
+"#,
+    )
+    .expect("write source");
+
+    let (loaded, _) = FallowConfig::find_and_load(root)
+        .expect("config discovery should succeed")
+        .expect("fixture config should be discovered");
+    let config = loaded.resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true, None);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+
+    assert_eq!(
+        unresolved_specifiers,
+        vec!["./still-missing"],
+        "config-loaded ignoreUnresolvedImports should suppress bare package, package subpath, and parent-relative generated specifiers"
     );
 }
 
@@ -596,6 +668,7 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
+        ignore_unresolved_imports: vec![],
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],

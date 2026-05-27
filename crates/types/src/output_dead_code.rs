@@ -16,8 +16,8 @@
 //! `serde_json` dependency cost because `IssueAction` transitively
 //! references `AddToConfigValue::RuleObject(serde_json::Map<...>)`. The
 //! variants the wrappers actually emit (`Fix`, `SuppressLine`,
-//! `SuppressFile`) are small, but reusing the existing enum keeps the
-//! wire-shape contract identical to the legacy post-pass.
+//! `SuppressFile`, `AddToConfig`) are small, but reusing the existing enum
+//! keeps the wire-shape contract identical to the legacy post-pass.
 //!
 //! `introduced` is typed as `Option<AuditIntroduced>` (transparent newtype
 //! over `bool`) so the regenerated schema renders the field via
@@ -167,8 +167,8 @@ impl PrivateTypeLeakFinding {
 
 /// Wire-shape envelope for an [`UnresolvedImport`] finding. Mirrors
 /// [`UnusedFileFinding`]: flattens the bare finding and carries a typed
-/// `actions` array (`resolve-import` primary plus `suppress-line`
-/// secondary).
+/// `actions` array (`resolve-import` primary plus config and inline
+/// suppression actions).
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnresolvedImportFinding {
@@ -198,6 +198,20 @@ impl UnresolvedImportFinding {
                 ),
                 available_in_catalogs: None,
                 suggested_target: None,
+            }),
+            IssueAction::AddToConfig(AddToConfigAction {
+                kind: AddToConfigKind::AddToConfig,
+                auto_fixable: false,
+                description: format!(
+                    "Add \"{}\" to ignoreUnresolvedImports in fallow config",
+                    import.specifier
+                ),
+                config_key: "ignoreUnresolvedImports".to_string(),
+                value: AddToConfigValue::Scalar(import.specifier.clone()),
+                value_schema: Some(
+                    "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreUnresolvedImports/items"
+                        .to_string(),
+                ),
             }),
             IssueAction::SuppressLine(SuppressLineAction {
                 kind: SuppressLineKind::SuppressLine,
@@ -1446,6 +1460,36 @@ mod position_0_invariants {
             IssueAction::SuppressFile(_) => "suppress-file",
             IssueAction::AddToConfig(_) => "add-to-config",
         }
+    }
+
+    #[test]
+    fn unresolved_import_actions_include_ignore_unresolved_imports_config_suppress() {
+        let inner = UnresolvedImport {
+            specifier: "@example/icons".to_string(),
+            path: PathBuf::from("src/index.ts"),
+            line: 4,
+            col: 12,
+            specifier_col: 18,
+        };
+        let finding = UnresolvedImportFinding::with_actions(inner);
+
+        assert_eq!(action_type(&finding.actions[0]), "resolve-import");
+        assert_eq!(action_type(&finding.actions[1]), "add-to-config");
+        let IssueAction::AddToConfig(action) = &finding.actions[1] else {
+            panic!("position-1 should be AddToConfig");
+        };
+        assert!(!action.auto_fixable);
+        assert_eq!(action.config_key, "ignoreUnresolvedImports");
+        let AddToConfigValue::Scalar(value) = &action.value else {
+            panic!("ignoreUnresolvedImports action should carry a scalar value");
+        };
+        assert_eq!(value, "@example/icons");
+        assert_eq!(
+            action.value_schema.as_deref(),
+            Some(
+                "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreUnresolvedImports/items"
+            )
+        );
     }
 
     /// Invariant: when no other catalog declares the package, position 0

@@ -208,6 +208,17 @@ pub struct FallowConfig {
     #[serde(default)]
     pub ignore_dependencies: Vec<String>,
 
+    /// Import specifier glob patterns whose `unresolved-import` findings are
+    /// expected and should be suppressed.
+    ///
+    /// Matching is against the raw import specifier string, not a filesystem
+    /// path. Exact specifiers and subpaths must be listed separately when both
+    /// should be ignored, for example `["@example/icons", "@example/icons/**"]`.
+    /// Broad patterns such as `"**"` can hide real missing modules, so keep
+    /// this list focused on generated or runtime-provided specifiers.
+    #[serde(default)]
+    pub ignore_unresolved_imports: Vec<String>,
+
     /// Export ignore rules.
     #[serde(default)]
     pub ignore_exports: Vec<IgnoreExportRule>,

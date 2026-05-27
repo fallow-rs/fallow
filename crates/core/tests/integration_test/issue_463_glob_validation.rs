@@ -44,6 +44,35 @@ fn entry_invalid_glob_syntax_rejected() {
     assert!(msg.contains("[invalid"), "msg: {msg}");
 }
 
+// ── ignoreUnresolvedImports ─────────────────────────────────────────────
+
+#[test]
+fn ignore_unresolved_imports_invalid_glob_syntax_rejected() {
+    let msg = load_err(r#"{ "ignoreUnresolvedImports": ["[bad-syntax"] }"#);
+    assert!(msg.contains("ignoreUnresolvedImports"), "msg: {msg}");
+    assert!(msg.contains("[bad-syntax"), "msg: {msg}");
+}
+
+#[test]
+fn ignore_unresolved_imports_parent_relative_specifier_accepted() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let path = write_config(
+        tmp.path(),
+        r#"{
+            "ignoreUnresolvedImports": [
+                "@example/icons",
+                "@example/icons/**",
+                "../generated/**"
+            ]
+        }"#,
+    );
+    let config = FallowConfig::load(&path).expect("specifier glob config should load");
+    assert_eq!(
+        config.ignore_unresolved_imports,
+        vec!["@example/icons", "@example/icons/**", "../generated/**"]
+    );
+}
+
 // ── ignorePatterns ──────────────────────────────────────────────────────
 
 #[test]

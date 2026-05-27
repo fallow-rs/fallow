@@ -64,6 +64,14 @@
       },
       "default": []
     },
+    "ignoreUnresolvedImports": {
+      "description": "Import specifier glob patterns whose `unresolved-import` findings are\nexpected and should be suppressed.\n\nMatching is against the raw import specifier string, not a filesystem\npath. Exact specifiers and subpaths must be listed separately when both\nshould be ignored, for example `[\"@example/icons\", \"@example/icons/**\"]`.\nBroad patterns such as `\"**\"` can hide real missing modules, so keep\nthis list focused on generated or runtime-provided specifiers.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
     "ignoreExports": {
       "description": "Export ignore rules.",
       "type": "array",

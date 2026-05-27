@@ -2,6 +2,21 @@ use super::helpers::*;
 
 // ---- find_unresolved_imports tests ----
 
+fn unresolved_import(specifier: &str) -> ResolvedImport {
+    ResolvedImport {
+        info: ImportInfo {
+            source: specifier.to_string(),
+            imported_name: ImportedName::Named("value".to_string()),
+            local_name: "value".to_string(),
+            is_type_only: false,
+            from_style: false,
+            span: oxc_span::Span::default(),
+            source_span: oxc_span::Span::default(),
+        },
+        target: ResolveResult::Unresolvable(specifier.to_string()),
+    }
+}
+
 #[test]
 fn unresolved_import_detected() {
     let resolved_modules = vec![ResolvedModule {
@@ -49,6 +64,65 @@ fn unresolved_import_detected() {
 
     assert_eq!(unresolved.len(), 1);
     assert_eq!(unresolved[0].specifier, "./missing-file");
+}
+
+#[test]
+fn ignore_unresolved_imports_filters_raw_specifier_globs() {
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/src/index.ts"),
+        exports: vec![],
+        re_exports: vec![],
+        resolved_imports: vec![
+            unresolved_import("@example/icons"),
+            unresolved_import("@example/icons/metadata"),
+            unresolved_import("../generated/client"),
+            unresolved_import("@example/icons-extra"),
+            unresolved_import("./still-missing"),
+        ],
+        resolved_dynamic_imports: vec![unresolved_import("@example/icons/dynamic")],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        has_cjs_exports: false,
+        has_angular_component_template_url: false,
+        unused_import_bindings: FxHashSet::default(),
+        type_referenced_import_bindings: vec![],
+        value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
+    }];
+
+    let mut config = test_config(PathBuf::from("/project"));
+    config.ignore_unresolved_imports = ["@example/icons", "@example/icons/**", "../generated/**"]
+        .into_iter()
+        .map(|pattern| {
+            globset::Glob::new(pattern)
+                .expect("test glob should compile")
+                .compile_matcher()
+        })
+        .collect();
+    let suppressions = SuppressionContext::empty();
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unresolved = find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &[],
+        &[],
+        &[],
+        &line_offsets,
+    );
+    let specifiers: Vec<&str> = unresolved
+        .iter()
+        .map(|import| import.specifier.as_str())
+        .collect();
+
+    assert_eq!(
+        specifiers,
+        vec!["@example/icons-extra", "./still-missing"],
+        "only configured raw specifier globs should be suppressed"
+    );
 }
 
 #[test]

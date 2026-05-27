@@ -835,14 +835,18 @@ impl FallowConfig {
     /// sees ALL offending values in one run rather than fixing them one at a
     /// time.
     ///
-    /// Covered glob fields: `entry`, `ignorePatterns`, `dynamicallyLoaded`,
-    /// `duplicates.ignore`, `health.ignore`, `overrides[].files`,
-    /// `ignoreExports[].file`, `ignoreCatalogReferences[].consumer`,
-    /// `boundaries.zones[].patterns`, plus every glob-bearing field on
-    /// inline `framework[]` plugin definitions (entry points, always-used,
-    /// config patterns, used-exports patterns, and `fileExists` detection
-    /// patterns; the last reaches `glob::glob` on disk so a `..` segment
-    /// there is a real path traversal).
+    /// Covered filesystem glob fields: `entry`, `ignorePatterns`,
+    /// `dynamicallyLoaded`, `duplicates.ignore`, `health.ignore`,
+    /// `overrides[].files`, `ignoreExports[].file`,
+    /// `ignoreCatalogReferences[].consumer`, `boundaries.zones[].patterns`,
+    /// plus every glob-bearing field on inline `framework[]` plugin
+    /// definitions (entry points, always-used, config patterns, used-exports
+    /// patterns, and `fileExists` detection patterns; the last reaches
+    /// `glob::glob` on disk so a `..` segment there is a real path traversal).
+    ///
+    /// Covered specifier glob fields: `ignoreUnresolvedImports`. These match
+    /// raw import strings, so parent-relative specifiers like `../generated/**`
+    /// are valid and only glob syntax is checked.
     ///
     /// Covered directory-path fields: `boundaries.zones[].root` and
     /// `boundaries.zones[].autoDiscover`. These are literal paths (not
@@ -858,6 +862,7 @@ impl FallowConfig {
     ) -> Result<(), Vec<super::glob_validation::GlobValidationError>> {
         use super::glob_validation::{
             compile_user_glob, validate_user_globs, validate_user_path, validate_user_paths,
+            validate_user_specifier_globs,
         };
 
         let mut errors = Vec::new();
@@ -865,6 +870,11 @@ impl FallowConfig {
         validate_user_globs(&self.entry, "entry", &mut errors);
         validate_user_globs(&self.ignore_patterns, "ignorePatterns", &mut errors);
         validate_user_globs(&self.dynamically_loaded, "dynamicallyLoaded", &mut errors);
+        validate_user_specifier_globs(
+            &self.ignore_unresolved_imports,
+            "ignoreUnresolvedImports",
+            &mut errors,
+        );
         validate_user_globs(&self.duplicates.ignore, "duplicates.ignore", &mut errors);
         validate_user_globs(&self.health.ignore, "health.ignore", &mut errors);
 
@@ -1095,6 +1105,18 @@ ignoreDependencies = ["autoprefixer", "postcss"]
 "#;
         let config: FallowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.ignore_dependencies, vec!["autoprefixer", "postcss"]);
+    }
+
+    #[test]
+    fn fallow_config_deserialize_ignore_unresolved_imports() {
+        let toml_str = r#"
+ignoreUnresolvedImports = ["@example/icons", "@example/icons/**", "../generated/**"]
+"#;
+        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            config.ignore_unresolved_imports,
+            vec!["@example/icons", "@example/icons/**", "../generated/**"]
+        );
     }
 
     #[test]
@@ -1411,6 +1433,16 @@ unknown_field = true
         let json_str = r#"{"ignoreDependencies": ["autoprefixer", "postcss"]}"#;
         let config: FallowConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(config.ignore_dependencies, vec!["autoprefixer", "postcss"]);
+    }
+
+    #[test]
+    fn json_config_ignore_unresolved_imports_camel_case() {
+        let json_str = r#"{"ignoreUnresolvedImports": ["@example/icons", "@example/icons/**"]}"#;
+        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+        assert_eq!(
+            config.ignore_unresolved_imports,
+            vec!["@example/icons", "@example/icons/**"]
+        );
     }
 
     #[test]

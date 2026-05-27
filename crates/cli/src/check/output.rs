@@ -215,6 +215,7 @@ mod tests {
             threads: 1,
             no_cache: true,
             ignore_dependencies: vec![],
+            ignore_unresolved_imports: vec![],
             ignore_export_rules: vec![],
             compiled_ignore_exports: vec![],
             compiled_ignore_catalog_references: vec![],

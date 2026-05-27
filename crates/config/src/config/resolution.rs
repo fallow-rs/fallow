@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::{Glob, GlobMatcher, GlobSet, GlobSetBuilder};
 use rustc_hash::FxHashSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -248,6 +248,9 @@ pub struct ResolvedConfig {
     /// is disabled).
     pub cache_config_hash: u64,
     pub ignore_dependencies: Vec<String>,
+    /// Pre-compiled raw import specifier patterns for suppressing
+    /// `unresolved-import` findings.
+    pub ignore_unresolved_imports: Vec<GlobMatcher>,
     pub ignore_export_rules: Vec<IgnoreExportRule>,
     /// Pre-compiled glob matchers for `ignoreExports`.
     ///
@@ -382,6 +385,15 @@ impl FallowConfig {
         }
 
         let compiled_ignore_patterns = ignore_builder.build().unwrap_or_default();
+        let ignore_unresolved_imports: Vec<GlobMatcher> = self
+            .ignore_unresolved_imports
+            .iter()
+            .map(|pattern| {
+                Glob::new(pattern)
+                    .expect("ignoreUnresolvedImports entry was validated at config load time")
+                    .compile_matcher()
+            })
+            .collect();
         let cache_dir = root.join(".fallow");
 
         let mut rules = self.rules;
@@ -565,6 +577,7 @@ impl FallowConfig {
             cache_max_size_mb,
             cache_config_hash,
             ignore_dependencies: self.ignore_dependencies,
+            ignore_unresolved_imports,
             ignore_export_rules: self.ignore_exports,
             compiled_ignore_exports,
             compiled_ignore_catalog_references,
@@ -656,6 +669,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
@@ -703,6 +717,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
@@ -763,6 +778,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
@@ -836,6 +852,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
@@ -945,6 +962,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
@@ -1005,6 +1023,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
             ignore_dependency_overrides: vec![],
@@ -1308,6 +1327,63 @@ mod tests {
             resolved.ignore_dependencies,
             vec!["postcss", "autoprefixer"]
         );
+    }
+
+    #[test]
+    fn resolve_compiles_ignore_unresolved_imports_as_raw_specifier_globs() {
+        let mut config = make_config(false);
+        config.ignore_unresolved_imports = vec![
+            "@example/icons".to_string(),
+            "@example/icons/**".to_string(),
+            "../generated/**".to_string(),
+        ];
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+
+        assert!(
+            resolved
+                .ignore_unresolved_imports
+                .iter()
+                .any(|matcher| matcher.is_match("@example/icons"))
+        );
+        assert!(
+            resolved
+                .ignore_unresolved_imports
+                .iter()
+                .any(|matcher| matcher.is_match("@example/icons/metadata"))
+        );
+        assert!(
+            resolved
+                .ignore_unresolved_imports
+                .iter()
+                .any(|matcher| matcher.is_match("../generated/client"))
+        );
+    }
+
+    #[test]
+    fn ignore_unresolved_imports_subpath_glob_does_not_match_bare_specifier() {
+        let mut config = make_config(false);
+        config.ignore_unresolved_imports = vec!["@example/icons/**".to_string()];
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+
+        assert!(
+            !resolved.ignore_unresolved_imports[0].is_match("@example/icons"),
+            "globset treats @example/icons/** as subpaths only; list the bare specifier separately"
+        );
+        assert!(resolved.ignore_unresolved_imports[0].is_match("@example/icons/metadata"));
     }
 
     #[test]

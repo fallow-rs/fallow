@@ -18,6 +18,7 @@ pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConf
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
+        ignore_unresolved_imports: vec![],
         ignore_exports: vec![],
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
