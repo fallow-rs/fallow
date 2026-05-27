@@ -482,6 +482,12 @@ steps:
     command: audit
     changed-workspaces: origin/main
 
+# Keep generated action artifacts out of the workspace root
+- uses: fallow-rs/fallow@v2
+  with:
+    command: audit
+    artifacts-dir: .var/fallow
+
 # Coverage-backed CRAP scoring in audit
 - uses: fallow-rs/fallow@v2
   with:
@@ -507,6 +513,8 @@ Action outputs include:
 - `results` / `sarif` -- generated artifact paths
 - `changed-files-unavailable` -- `true` if PR file enumeration degraded and analysis ran less scoped than expected
 - `dedup-lookup-failed` / `post-skipped-reason` -- comment/review posting degradation signals
+
+Set `artifacts-dir` to write generated files such as `fallow-results.json`, `fallow-results.sarif`, `fallow-stderr.log`, and `fallow-analysis-args.sh` under a project-local generated directory. The default is `.` for backward compatibility, and the `results` / `sarif` outputs report the resolved paths for downstream steps.
 
 SARIF upload requires GitHub Code Scanning, which is available on public repositories and on private repositories with GitHub Advanced Security enabled. If it is unavailable, the Action skips upload with a warning and leaves the job summary, annotations, comments, and JSON output intact.
 

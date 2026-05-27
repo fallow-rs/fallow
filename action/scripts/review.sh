@@ -4,7 +4,7 @@ set -euo pipefail
 # Post review comments with rich markdown formatting
 # Required env: GH_TOKEN, PR_NUMBER, GH_REPO, FALLOW_COMMAND, FALLOW_ROOT,
 #   MAX_COMMENTS
-# Optional env: CHANGED_SINCE (for scoping results to changed files)
+# Optional env: CHANGED_SINCE, FALLOW_ANALYSIS_ARGS_FILE, FALLOW_ARTIFACTS_DIR
 
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${PR_NUMBER:?PR_NUMBER is required}"
@@ -66,12 +66,24 @@ fi
 _FALLOW_TMPS=()
 trap 'rm -f "${_FALLOW_TMPS[@]:-}"' EXIT
 
+artifact_path() {
+  local filename=$1
+  local dir="${FALLOW_ARTIFACTS_DIR:-.}"
+  if [ "$dir" = "." ]; then
+    printf '%s\n' "$filename"
+  else
+    mkdir -p "$dir"
+    printf '%s/%s\n' "$dir" "$filename"
+  fi
+}
+
 render_with_fallow() {
   local format=$1
   local output=$2
-  [ -f fallow-analysis-args.sh ] || return 1
+  local analysis_args_file="${FALLOW_ANALYSIS_ARGS_FILE:-fallow-analysis-args.sh}"
+  [ -f "$analysis_args_file" ] || return 1
   # shellcheck disable=SC1091
-  source fallow-analysis-args.sh
+  source "$analysis_args_file"
   local args=("${FALLOW_ANALYSIS_ARGS[@]}")
   local replaced=false
   for i in "${!args[@]}"; do
@@ -85,15 +97,17 @@ render_with_fallow() {
     args+=(--format "$format")
   fi
   if [ -z "${FALLOW_DIFF_FILE:-}" ] && [ -n "${GH_REPO:-}" ] && [ -n "${PR_NUMBER:-}" ]; then
-    if gh pr diff "$PR_NUMBER" --repo "$GH_REPO" > fallow-pr.diff 2>fallow-pr-diff-stderr.log; then
-      export FALLOW_DIFF_FILE="$PWD/fallow-pr.diff"
+    diff_file=$(artifact_path fallow-pr.diff)
+    diff_stderr_file=$(artifact_path fallow-pr-diff-stderr.log)
+    if gh pr diff "$PR_NUMBER" --repo "$GH_REPO" > "$diff_file" 2>"$diff_stderr_file"; then
+      export FALLOW_DIFF_FILE="$PWD/$diff_file"
     else
       echo "::warning::Failed to fetch PR diff; diff filter disabled, reporting all findings"
-      rm -f fallow-pr.diff
+      rm -f "$diff_file"
     fi
   fi
   export FALLOW_DIFF_FILTER="${FALLOW_DIFF_FILTER:-added}"
-  FALLOW_MAX_COMMENTS="$MAX" fallow "${args[@]}" > "$output" 2> fallow-review-stderr.log || true
+  FALLOW_MAX_COMMENTS="$MAX" fallow "${args[@]}" > "$output" 2> "$(artifact_path fallow-review-stderr.log)" || true
   # Surface fallow's structured-error envelope before the schema check so the
   # CLI message lands in the workflow log rather than a generic warning.
   if jq -e '.error == true' "$output" > /dev/null 2>&1; then
@@ -114,15 +128,21 @@ render_with_fallow() {
   ' "$output" > /dev/null 2>&1
 }
 
-if render_with_fallow review-github fallow-review.json; then
+REVIEW_FILE=$(artifact_path fallow-review.json)
+RECONCILE_FILE=$(artifact_path fallow-review-reconcile.json)
+RECONCILE_STDERR_FILE=$(artifact_path fallow-review-reconcile-stderr.log)
+NEW_REVIEW_FILE=$(artifact_path fallow-review-new.json)
+PAYLOAD_FILE=$(artifact_path fallow-review-payload.json)
+
+if render_with_fallow review-github "$REVIEW_FILE"; then
   reconcile_review() {
     if fallow ci reconcile-review \
       --provider github \
       --pr "$PR_NUMBER" \
       --repo "$GH_REPO" \
-      --envelope fallow-review.json > fallow-review-reconcile.json 2> fallow-review-reconcile-stderr.log; then
-      if jq -e '(.apply_errors // []) | length > 0' fallow-review-reconcile.json > /dev/null 2>&1; then
-        HINT=$(jq -r '.apply_hint // "refresh provider state and rerun the job"' fallow-review-reconcile.json)
+      --envelope "$REVIEW_FILE" > "$RECONCILE_FILE" 2> "$RECONCILE_STDERR_FILE"; then
+      if jq -e '(.apply_errors // []) | length > 0' "$RECONCILE_FILE" > /dev/null 2>&1; then
+        HINT=$(jq -r '.apply_hint // "refresh provider state and rerun the job"' "$RECONCILE_FILE")
         echo "::warning::fallow reconcile-review apply incomplete: $HINT"
       fi
     else
@@ -130,9 +150,9 @@ if render_with_fallow review-github fallow-review.json; then
     fi
   }
 
-  TOTAL=$(jq '.comments | length' fallow-review.json)
+  TOTAL=$(jq '.comments | length' "$REVIEW_FILE")
   if [ "$TOTAL" -eq 0 ]; then
-    BODY=$(jq -r '.body' fallow-review.json)
+    BODY=$(jq -r '.body' "$REVIEW_FILE")
     # Summary-only path: a dedup-lookup failure here means we cannot tell
     # whether a previous summary comment exists. Posting anyway (creating a
     # duplicate) is less bad than not posting at all, since a missing
@@ -217,18 +237,18 @@ if render_with_fallow review-github fallow-review.json; then
   fi
   jq --argjson existing "${EXISTING_FPS:-[]}" '
     .comments |= map(select((.fingerprint as $fp | $existing | index($fp)) | not))
-  ' fallow-review.json > fallow-review-new.json
-  NEW_TOTAL=$(jq '.comments | length' fallow-review-new.json)
+  ' "$REVIEW_FILE" > "$NEW_REVIEW_FILE"
+  NEW_TOTAL=$(jq '.comments | length' "$NEW_REVIEW_FILE")
   if [ "$NEW_TOTAL" -eq 0 ]; then
     reconcile_review
     echo "No new review comments to post"
     exit 0
   fi
 
-  jq '{event, body, comments: [.comments[] | {path, line, side, body}]}' fallow-review-new.json > fallow-review-payload.json
+  jq '{event, body, comments: [.comments[] | {path, line, side, body}]}' "$NEW_REVIEW_FILE" > "$PAYLOAD_FILE"
   gh_api_retry "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews" \
     --method POST \
-    --input fallow-review-payload.json > /dev/null 2>&1 \
+    --input "$PAYLOAD_FILE" > /dev/null 2>&1 \
     && echo "Posted review with ${NEW_TOTAL} inline comments" \
     || echo "::warning::Failed to post review comments"
   reconcile_review

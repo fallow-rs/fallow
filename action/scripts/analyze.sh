@@ -19,7 +19,16 @@ set +e -o pipefail
 #   INPUT_MIN_OBSERVATION_VOLUME, INPUT_LOW_TRAFFIC_THRESHOLD,
 #   INPUT_GATE, INPUT_DEAD_CODE_BASELINE, INPUT_HEALTH_BASELINE, INPUT_DUPES_BASELINE,
 #   INPUT_SCORE, INPUT_SAVE_SNAPSHOT, INPUT_TREND, INPUT_ISSUE_TYPES, INPUT_NO_CACHE, INPUT_THREADS,
-#   INPUT_ONLY, INPUT_SKIP
+#   INPUT_ONLY, INPUT_SKIP, INPUT_ARTIFACTS_DIR
+
+artifact_path() {
+  local filename=$1
+  if [ "$ARTIFACTS_DIR" = "." ]; then
+    printf '%s\n' "$filename"
+  else
+    printf '%s/%s\n' "$ARTIFACTS_DIR" "$filename"
+  fi
+}
 
 # --- Shared argument building functions ---
 # Uses global ARGS array (avoids bash nameref compatibility issues)
@@ -57,7 +66,7 @@ build_command_args() {
   case "$INPUT_COMMAND" in
     dead-code|check)
       if [ "${INPUT_FORMAT:-}" = "sarif" ] && [ "${HAS_SARIF_FILE:-false}" = "true" ]; then
-        ARGS+=(--sarif-file fallow-results.sarif)
+        ARGS+=(--sarif-file "$SARIF_FILE")
       fi
       if [ -n "${INPUT_ISSUE_TYPES:-}" ]; then
         IFS=',' read -ra TYPES <<< "$INPUT_ISSUE_TYPES"
@@ -133,7 +142,7 @@ build_command_args() {
       ;;
     "")
       if [ "${INPUT_FORMAT:-}" = "sarif" ] && [ "${HAS_SARIF_FILE:-false}" = "true" ]; then
-        ARGS+=(--sarif-file fallow-results.sarif)
+        ARGS+=(--sarif-file "$SARIF_FILE")
       fi
       [ "${INPUT_SCORE:-}" = "true" ] && ARGS+=(--score)
       [ "${INPUT_TREND:-}" = "true" ] && ARGS+=(--trend)
@@ -187,6 +196,43 @@ if [ -n "${INPUT_MAX_CRAP:-}" ] && ! [[ "$INPUT_MAX_CRAP" =~ ^[0-9]+\.?[0-9]*$ ]
 fi
 if [ -n "${INPUT_LOW_TRAFFIC_THRESHOLD:-}" ] && ! [[ "$INPUT_LOW_TRAFFIC_THRESHOLD" =~ ^[0-9]+\.?[0-9]*$ ]]; then
   echo "::error::low-traffic-threshold must be a non-negative number, got: ${INPUT_LOW_TRAFFIC_THRESHOLD}"; exit 2
+fi
+
+# --- Resolve artifact paths ---
+
+ARTIFACTS_DIR="${INPUT_ARTIFACTS_DIR:-.}"
+if [ -z "$ARTIFACTS_DIR" ]; then
+  ARTIFACTS_DIR="."
+fi
+if [[ "$ARTIFACTS_DIR" = /* ]] || [[ "$ARTIFACTS_DIR" = -* ]] || \
+   [[ "$ARTIFACTS_DIR" == *$'\n'* ]] || [[ "$ARTIFACTS_DIR" == *$'\r'* ]] || \
+   [[ "$ARTIFACTS_DIR" =~ (^|/)\.\.(/|$) ]]; then
+  echo "::error::artifacts-dir must be a relative path inside the workspace, got: ${ARTIFACTS_DIR}"
+  exit 2
+fi
+if ! mkdir -p "$ARTIFACTS_DIR"; then
+  echo "::error::Failed to create artifacts-dir: ${ARTIFACTS_DIR}"
+  exit 2
+fi
+
+RESULTS_FILE=$(artifact_path fallow-results.json)
+RESULTS_RAW_FILE=$(artifact_path fallow-results-raw.json)
+SCOPED_RESULTS_FILE=$(artifact_path fallow-results-scoped.json)
+SARIF_FILE=$(artifact_path fallow-results.sarif)
+STDERR_FILE=$(artifact_path fallow-stderr.log)
+ANALYSIS_ARGS_FILE=$(artifact_path fallow-analysis-args.sh)
+CHANGED_FILES_FILE=$(artifact_path fallow-changed-files.json)
+AUTO_DIFF_FILE="$PWD/$(artifact_path fallow-pr.diff)"
+
+if [ -n "${GITHUB_ENV:-}" ]; then
+  {
+    echo "FALLOW_RESULTS_FILE=${RESULTS_FILE}"
+    echo "FALLOW_SCOPED_RESULTS_FILE=${SCOPED_RESULTS_FILE}"
+    echo "FALLOW_ANALYSIS_ARGS_FILE=${ANALYSIS_ARGS_FILE}"
+    echo "FALLOW_CHANGED_FILES_FILE=${CHANGED_FILES_FILE}"
+    echo "FALLOW_SARIF_FILE=${SARIF_FILE}"
+    echo "FALLOW_ARTIFACTS_DIR=${ARTIFACTS_DIR}"
+  } >> "$GITHUB_ENV"
 fi
 
 # --- Check for --sarif-file support ---
@@ -271,7 +317,7 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
   fi
 
   if [ -n "$_CHANGED" ]; then
-    echo "$_CHANGED" | jq -R -s 'split("\n") | map(select(length > 0))' > fallow-changed-files.json
+    echo "$_CHANGED" | jq -R -s 'split("\n") | map(select(length > 0))' > "$CHANGED_FILES_FILE"
   else
     echo "::warning::Could not determine changed files for --changed-since scoping. Use fetch-depth: 0 in actions/checkout for best results."
   fi
@@ -305,7 +351,7 @@ fi
 
 if [ -n "${INPUT_CHANGED_SINCE:-}" ] && [ -z "${FALLOW_DIFF_FILE:-}" ]; then
   _ROOT="${INPUT_ROOT:-.}"
-  _DIFF_PATH="$PWD/fallow-pr.diff"
+  _DIFF_PATH="$AUTO_DIFF_FILE"
 
   # Three-dot diff (precise: changes since merge-base, needs full history).
   if (cd "$_ROOT" && git diff --unified=0 --relative "${INPUT_CHANGED_SINCE}...HEAD" -- .) > "$_DIFF_PATH" 2>/dev/null; then
@@ -363,21 +409,21 @@ fi
   printf 'FALLOW_ANALYSIS_ARGS=('
   printf '%q ' "${ARGS[@]}" "${EXTRA_ARGS[@]}"
   printf ')\n'
-} > fallow-analysis-args.sh
+} > "$ANALYSIS_ARGS_FILE"
 
-if ! fallow "${ARGS[@]}" "${EXTRA_ARGS[@]}" > fallow-results-raw.json 2> fallow-stderr.log; then
-  if [ ! -s fallow-results-raw.json ] || ! jq -e '.' fallow-results-raw.json > /dev/null 2>&1; then
+if ! fallow "${ARGS[@]}" "${EXTRA_ARGS[@]}" > "$RESULTS_RAW_FILE" 2> "$STDERR_FILE"; then
+  if [ ! -s "$RESULTS_RAW_FILE" ] || ! jq -e '.' "$RESULTS_RAW_FILE" > /dev/null 2>&1; then
     echo "::error::Fallow failed to run"
-    [ -s fallow-stderr.log ] && cat fallow-stderr.log
-    [ -s fallow-results-raw.json ] && cat fallow-results-raw.json
+    [ -s "$STDERR_FILE" ] && cat "$STDERR_FILE"
+    [ -s "$RESULTS_RAW_FILE" ] && cat "$RESULTS_RAW_FILE"
     exit 2
   fi
 fi
-jq -s 'last' fallow-results-raw.json > fallow-results.json
-rm -f fallow-results-raw.json
-if jq -e '.error == true' fallow-results.json > /dev/null 2>&1; then
-  MESSAGE=$(jq -r '.message // "Fallow failed"' fallow-results.json)
-  EXIT_CODE=$(jq -r '.exit_code // 2' fallow-results.json)
+jq -s 'last' "$RESULTS_RAW_FILE" > "$RESULTS_FILE"
+rm -f "$RESULTS_RAW_FILE"
+if jq -e '.error == true' "$RESULTS_FILE" > /dev/null 2>&1; then
+  MESSAGE=$(jq -r '.message // "Fallow failed"' "$RESULTS_FILE")
+  EXIT_CODE=$(jq -r '.exit_code // 2' "$RESULTS_FILE")
   echo "::error::${MESSAGE}"
   exit "$EXIT_CODE"
 fi
@@ -386,22 +432,22 @@ fi
 
 if { [ "${INPUT_FORMAT:-}" = "sarif" ] || [ "${INPUT_SARIF:-}" = "true" ]; } && \
    [ "$INPUT_COMMAND" != "fix" ] && \
-   { [ ! -f fallow-results.sarif ] || ! jq -e '.' fallow-results.sarif > /dev/null 2>&1; }; then
+   { [ ! -f "$SARIF_FILE" ] || ! jq -e '.' "$SARIF_FILE" > /dev/null 2>&1; }; then
   ARGS=()
   build_common_args sarif
   build_command_args false  # omit --top for SARIF
 
-  if ! fallow "${ARGS[@]}" "${EXTRA_ARGS[@]}" > fallow-results.sarif 2>/dev/null; then
+  if ! fallow "${ARGS[@]}" "${EXTRA_ARGS[@]}" > "$SARIF_FILE" 2>/dev/null; then
     echo "::warning::SARIF generation failed"
   fi
 fi
 
 # --- Surface warnings from stderr ---
 
-if [ -s fallow-stderr.log ]; then
+if [ -s "$STDERR_FILE" ]; then
   while IFS= read -r line; do
     echo "::debug::${line}"
-  done < fallow-stderr.log
+  done < "$STDERR_FILE"
 fi
 
 # --- Extract verdict / gate (audit only) and issue count ---
@@ -412,17 +458,17 @@ fi
 VERDICT=""
 GATE=""
 if [ "$INPUT_COMMAND" = "audit" ]; then
-  VERDICT=$(jq -r '.verdict // ""' fallow-results.json)
-  GATE=$(jq -r '.attribution.gate // ""' fallow-results.json)
+  VERDICT=$(jq -r '.verdict // ""' "$RESULTS_FILE")
+  GATE=$(jq -r '.attribution.gate // ""' "$RESULTS_FILE")
 fi
 
 case "$INPUT_COMMAND" in
-  dead-code|check) ISSUES=$(jq -r '.total_issues' fallow-results.json) ;;
-  dupes)           ISSUES=$(jq -r '.stats.clone_groups' fallow-results.json) ;;
-  health)          ISSUES=$(jq -r '((.summary.functions_above_threshold // 0) + ((.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
-  audit)           ISSUES=$(jq -r 'if (.attribution.gate // "new-only") == "all" then ((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0)) else ((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0)) end' fallow-results.json) ;;
-  fix)             ISSUES=$(jq -r '(.fixes | length)' fallow-results.json) ;;
-  "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (.dupes.stats.clone_groups // 0) + (.health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
+  dead-code|check) ISSUES=$(jq -r '.total_issues' "$RESULTS_FILE") ;;
+  dupes)           ISSUES=$(jq -r '.stats.clone_groups' "$RESULTS_FILE") ;;
+  health)          ISSUES=$(jq -r '((.summary.functions_above_threshold // 0) + ((.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' "$RESULTS_FILE") ;;
+  audit)           ISSUES=$(jq -r 'if (.attribution.gate // "new-only") == "all" then ((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0)) else ((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0)) end' "$RESULTS_FILE") ;;
+  fix)             ISSUES=$(jq -r '(.fixes | length)' "$RESULTS_FILE") ;;
+  "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (.dupes.stats.clone_groups // 0) + (.health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' "$RESULTS_FILE") ;;
 esac
 
 if ! [[ "$ISSUES" =~ ^[0-9]+$ ]]; then
@@ -431,13 +477,13 @@ if ! [[ "$ISSUES" =~ ^[0-9]+$ ]]; then
 fi
 
 echo "issues=${ISSUES}" >> "$GITHUB_OUTPUT"
-echo "results=fallow-results.json" >> "$GITHUB_OUTPUT"
+echo "results=${RESULTS_FILE}" >> "$GITHUB_OUTPUT"
 echo "command=${INPUT_COMMAND}" >> "$GITHUB_OUTPUT"
 echo "verdict=${VERDICT}" >> "$GITHUB_OUTPUT"
 echo "gate=${GATE}" >> "$GITHUB_OUTPUT"
 
-if [ -f fallow-results.sarif ]; then
-  echo "sarif=fallow-results.sarif" >> "$GITHUB_OUTPUT"
+if [ -f "$SARIF_FILE" ]; then
+  echo "sarif=${SARIF_FILE}" >> "$GITHUB_OUTPUT"
 fi
 
 if [ "$ISSUES" -gt 0 ]; then

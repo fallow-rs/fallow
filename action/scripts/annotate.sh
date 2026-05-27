@@ -3,7 +3,8 @@ set -eo pipefail
 
 # Emit inline PR annotations via workflow commands
 # Required env: FALLOW_COMMAND, MAX_ANNOTATIONS, ACTION_JQ_DIR
-# Optional env: CHANGED_SINCE, INPUT_ROOT (for scoping results to changed files)
+# Optional env: CHANGED_SINCE, INPUT_ROOT, FALLOW_RESULTS_FILE,
+#   FALLOW_SCOPED_RESULTS_FILE, FALLOW_CHANGED_FILES_FILE
 
 MAX="${MAX_ANNOTATIONS:-50}"
 if ! [[ "$MAX" =~ ^[0-9]+$ ]]; then
@@ -22,13 +23,15 @@ fi
 export PKG_MANAGER
 
 # Scope results to changed files when --changed-since is active
-RESULTS_FILE="fallow-results.json"
+RESULTS_FILE="${FALLOW_RESULTS_FILE:-fallow-results.json}"
+SCOPED_RESULTS_FILE="${FALLOW_SCOPED_RESULTS_FILE:-fallow-results-scoped.json}"
+CHANGED_FILES_FILE="${FALLOW_CHANGED_FILES_FILE:-fallow-changed-files.json}"
 if [ -n "${CHANGED_SINCE:-}" ]; then
   CHANGED_JSON=""
 
   # Prefer pre-computed list from analyze step (handles shallow clones via API fallback)
-  if [ -f fallow-changed-files.json ]; then
-    CHANGED_JSON=$(cat fallow-changed-files.json)
+  if [ -f "$CHANGED_FILES_FILE" ]; then
+    CHANGED_JSON=$(cat "$CHANGED_FILES_FILE")
   else
     # Fallback: compute locally (for standalone usage outside the action)
     _ROOT="${INPUT_ROOT:-.}"
@@ -39,8 +42,8 @@ if [ -n "${CHANGED_SINCE:-}" ]; then
   fi
 
   if [ -n "$CHANGED_JSON" ] && [ "$CHANGED_JSON" != "[]" ]; then
-    if jq --argjson changed "$CHANGED_JSON" -f "${ACTION_JQ_DIR}/filter-changed.jq" fallow-results.json > fallow-results-scoped.json 2>/dev/null; then
-      RESULTS_FILE="fallow-results-scoped.json"
+    if jq --argjson changed "$CHANGED_JSON" -f "${ACTION_JQ_DIR}/filter-changed.jq" "$RESULTS_FILE" > "$SCOPED_RESULTS_FILE" 2>/dev/null; then
+      RESULTS_FILE="$SCOPED_RESULTS_FILE"
     fi
   fi
 fi

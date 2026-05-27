@@ -67,6 +67,10 @@ inputs:
     description: 'Additional arguments to pass to fallow (space-separated)'
     required: false
     default: ''
+  artifacts-dir:
+    description: 'Directory for generated action artifacts such as fallow-results.json, fallow-results.sarif, fallow-stderr.log, and fallow-analysis-args.sh. Relative to the workflow workspace.'
+    required: false
+    default: '.'
   comment:
     description: 'Post results as a PR comment (requires pull-requests: write permission)'
     required: false
@@ -390,10 +394,11 @@ runs:
         INPUT_THREADS: ${{ inputs.threads }}
         INPUT_ONLY: ${{ inputs.only }}
         INPUT_SKIP: ${{ inputs.skip }}
+        INPUT_ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
         # User-supplied diff overrides the analyze step's auto-generation
         # below; analyze.sh leaves it untouched when the user already
         # supplied a path. When the user did not, analyze.sh writes
-        # fallow-pr.diff and exports it via $GITHUB_ENV so subsequent
+        # the diff under artifacts-dir and exports it via $GITHUB_ENV so subsequent
         # steps (comment.sh, review.sh) skip their own `gh pr diff`
         # fetch and reuse the same file.
         FALLOW_DIFF_FILE: ${{ inputs.diff-file }}
@@ -454,7 +459,7 @@ runs:
         always()
       uses: github/codeql-action/upload-sarif@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4
       with:
-        sarif_file: fallow-results.sarif
+        sarif_file: ${{ steps.analyze.outputs.sarif }}
         category: fallow
         token: ${{ inputs.github-token }}
 

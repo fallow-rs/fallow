@@ -410,6 +410,64 @@ cd "$DIR"
 VERDICT=$(grep '^verdict=' "$ANALYZE_TMP/output" | cut -d= -f2)
 [ -z "$VERDICT" ] && pass "analyze: verdict empty for non-audit command" || fail "analyze: non-audit verdict" "expected empty, got '$VERDICT'"
 
+# Issue #735: generated artifacts can be moved out of the workspace root.
+cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *"--help"*)
+    printf '%s\n' 'Usage: fallow dead-code --sarif-file <PATH>'
+    ;;
+  *"--format sarif"*)
+    printf '%s\n' '{"version":"2.1.0","runs":[]}'
+    ;;
+  *)
+    printf '%s\n' '{"total_issues":0}'
+    ;;
+esac
+SH
+chmod +x "$ANALYZE_TMP/bin/fallow"
+
+CUSTOM_WORK="$ANALYZE_TMP/custom-artifacts"
+mkdir -p "$CUSTOM_WORK"
+cd "$CUSTOM_WORK" && rm -f "$ANALYZE_TMP/output" "$ANALYZE_TMP/env"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" GITHUB_ENV="$ANALYZE_TMP/env" \
+  INPUT_ROOT="." INPUT_COMMAND="dead-code" INPUT_FORMAT="sarif" INPUT_SARIF="true" INPUT_ARTIFACTS_DIR=".var/fallow" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+assert_contains "$(grep '^results=' "$ANALYZE_TMP/output")" "results=.var/fallow/fallow-results.json" "analyze: custom artifacts-dir emits results path"
+assert_contains "$(grep '^sarif=' "$ANALYZE_TMP/output")" "sarif=.var/fallow/fallow-results.sarif" "analyze: custom artifacts-dir emits sarif path"
+[ -f "$CUSTOM_WORK/.var/fallow/fallow-results.json" ] && pass "analyze: custom artifacts-dir writes results file" || fail "analyze: custom artifacts-dir writes results file" "missing results file"
+[ -f "$CUSTOM_WORK/.var/fallow/fallow-stderr.log" ] && pass "analyze: custom artifacts-dir writes stderr log" || fail "analyze: custom artifacts-dir writes stderr log" "missing stderr log"
+[ -f "$CUSTOM_WORK/.var/fallow/fallow-analysis-args.sh" ] && pass "analyze: custom artifacts-dir writes args file" || fail "analyze: custom artifacts-dir writes args file" "missing args file"
+[ ! -e "$CUSTOM_WORK/fallow-results.json" ] && pass "analyze: custom artifacts-dir keeps root clean" || fail "analyze: custom artifacts-dir keeps root clean" "root results file exists"
+assert_contains "$(cat "$ANALYZE_TMP/env")" "FALLOW_ANALYSIS_ARGS_FILE=.var/fallow/fallow-analysis-args.sh" "analyze: custom artifacts-dir propagates args path"
+assert_contains "$(cat "$CUSTOM_WORK/.var/fallow/fallow-analysis-args.sh")" "--sarif-file .var/fallow/fallow-results.sarif" "analyze: custom artifacts-dir passes sarif path to fallow"
+
+DEFAULT_WORK="$ANALYZE_TMP/default-artifacts"
+mkdir -p "$DEFAULT_WORK"
+cd "$DEFAULT_WORK" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="dead-code" INPUT_FORMAT="json" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+assert_contains "$(grep '^results=' "$ANALYZE_TMP/output")" "results=fallow-results.json" "analyze: default artifacts path is unchanged"
+[ -f "$DEFAULT_WORK/fallow-results.json" ] && pass "analyze: default writes root results file" || fail "analyze: default writes root results file" "missing root results file"
+
+INVALID_WORK="$ANALYZE_TMP/invalid-artifacts"
+mkdir -p "$INVALID_WORK"
+cd "$INVALID_WORK" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="dead-code" INPUT_FORMAT="json" INPUT_ARTIFACTS_DIR="../outside" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1)
+cmd_status=$?
+cd "$DIR"
+if [ "$cmd_status" -eq 2 ]; then
+  pass "analyze: artifacts-dir rejects traversal"
+else
+  fail "analyze: artifacts-dir rejects traversal" "expected exit 2, got $cmd_status"
+fi
+assert_contains "$OUT" "artifacts-dir must be a relative path inside the workspace" "analyze: artifacts-dir traversal error is clear"
+
 # --- Summary jq tests ---
 
 echo ""
@@ -1450,6 +1508,46 @@ OUT=$(cd "$WORK_DIR" && \
     jq -r ".total_issues" "$RESULTS_FILE"
   ' 2>&1)
 [ "$OUT" = "$EXPECTED_TOTAL" ] && pass "no CHANGED_SINCE skips filtering" || fail "no CHANGED_SINCE guard" "expected $EXPECTED_TOTAL, got $OUT"
+
+echo "  summary.sh and annotate.sh with custom artifact paths:"
+CUSTOM_ARTIFACTS="$WORK_DIR/.var/fallow"
+mkdir -p "$CUSTOM_ARTIFACTS"
+cp "$FIXTURES/check.json" "$CUSTOM_ARTIFACTS/fallow-results.json"
+echo '["src/helpers/api.ts"]' > "$CUSTOM_ARTIFACTS/fallow-changed-files.json"
+SUMMARY_FILE="$WORK_DIR/summary.md"
+OUT=$(cd "$WORK_DIR" && \
+  GITHUB_STEP_SUMMARY="$SUMMARY_FILE" \
+  FALLOW_COMMAND="dead-code" \
+  ACTION_JQ_DIR="$JQ_DIR" \
+  CHANGED_SINCE="abc123" \
+  FALLOW_RESULTS_FILE=".var/fallow/fallow-results.json" \
+  FALLOW_SCOPED_RESULTS_FILE=".var/fallow/fallow-results-scoped.json" \
+  FALLOW_CHANGED_FILES_FILE=".var/fallow/fallow-changed-files.json" \
+  bash "$SCRIPTS_DIR/summary.sh" 2>&1)
+cmd_status=$?
+if [ "$cmd_status" -eq 0 ] && [ -f "$CUSTOM_ARTIFACTS/fallow-results-scoped.json" ]; then
+  pass "summary.sh: custom artifacts path writes scoped results beside source"
+else
+  fail "summary.sh: custom artifacts path writes scoped results beside source" "exit $cmd_status, output: $OUT"
+fi
+assert_contains "$(cat "$SUMMARY_FILE")" "Issue counts scoped" "summary.sh: custom artifacts path still appends scoping note"
+
+OUT=$(cd "$WORK_DIR" && \
+  FALLOW_COMMAND="dead-code" \
+  MAX_ANNOTATIONS="3" \
+  ACTION_JQ_DIR="$JQ_DIR" \
+  CHANGED_SINCE="abc123" \
+  FALLOW_RESULTS_FILE=".var/fallow/fallow-results.json" \
+  FALLOW_SCOPED_RESULTS_FILE=".var/fallow/fallow-results-scoped.json" \
+  FALLOW_CHANGED_FILES_FILE=".var/fallow/fallow-changed-files.json" \
+  bash "$SCRIPTS_DIR/annotate.sh" 2>&1)
+cmd_status=$?
+if [ "$cmd_status" -eq 0 ]; then
+  pass "annotate.sh: custom artifacts path succeeds"
+else
+  fail "annotate.sh: custom artifacts path succeeds" "exit $cmd_status, output: $OUT"
+fi
+assert_contains "$OUT" "::" "annotate.sh: custom artifacts path emits annotations"
 
 rm -rf "$WORK_DIR"
 
