@@ -412,6 +412,48 @@ fn workspace_missing_dist_exports_resolve_to_source() {
     );
 }
 
+#[test]
+fn workspace_package_without_exports_resolves_missing_dist_to_source() {
+    let root = fixture_path("workspace-no-exports-missing-dist");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specifiers.contains(&"@example/lib"),
+        "workspace package without exports should resolve to source: {unresolved_specifiers:?}"
+    );
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dep_names.contains(&"@example/lib"),
+        "declared workspace dependency should receive usage credit: {unused_dep_names:?}"
+    );
+
+    assert!(
+        !results
+            .unused_files
+            .iter()
+            .any(|f| f.file.path.ends_with("packages/lib/src/index.ts")),
+        "workspace source entry should be reachable"
+    );
+    assert!(
+        results
+            .unused_files
+            .iter()
+            .any(|f| f.file.path.ends_with("packages/lib/src/orphan.ts")),
+        "unrelated workspace source file should remain unused"
+    );
+}
+
 // ── Workspace nested exports map ──────────────────────────────
 
 #[test]

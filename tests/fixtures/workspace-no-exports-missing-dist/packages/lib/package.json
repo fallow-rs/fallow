@@ -1,0 +1,6 @@
+{
+  "name": "@example/lib",
+  "version": "1.0.0",
+  "module": "dist/esm2022/index.js",
+  "types": "dist/index.d.ts"
+}

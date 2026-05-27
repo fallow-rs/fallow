@@ -954,11 +954,12 @@ pub(super) fn try_pnpm_workspace_fallback(
 ///    workspace's source file.
 ///
 /// Strategy: prefer a matching package `exports` target when the manifest has
-/// one, then strip the package name prefix and resolve the remainder as a
-/// relative path from inside the package root. The manifest branch covers
-/// source-only workspaces whose `exports` point at missing `dist` output.
+/// one, then try the package source layout directly when no `exports` map exists,
+/// and finally resolve the stripped subpath as a relative path from inside the
+/// package root. The manifest branches cover source-only workspaces whose
+/// package metadata points at missing `dist` output.
 ///
-/// See issues #106 and #641.
+/// See issues #106, #641, and #725.
 pub(super) fn try_workspace_package_fallback(
     ctx: &ResolveContext<'_>,
     specifier: &str,
@@ -1000,6 +1001,11 @@ pub(super) fn try_workspace_package_fallback(
                 }
                 PackageMapTarget::NoMatch | PackageMapTarget::Blocked => return None,
             }
+        } else if let Some(file_id) = try_source_subpath(ctx, manifest, source_subpath.as_path()) {
+            return Some(ResolveResult::InternalPackageModule {
+                file_id,
+                package_name: pkg_name,
+            });
         }
     }
 

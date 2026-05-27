@@ -1,0 +1,7 @@
+{
+  "name": "workspace-no-exports-missing-dist",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ]
+}
