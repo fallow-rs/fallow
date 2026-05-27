@@ -113,6 +113,7 @@ pub fn process_static_patterns(
     for (prefix, replacement) in plugin.path_aliases(root) {
         result.path_aliases.push((prefix.to_string(), replacement));
     }
+    result.auto_imports.extend(plugin.auto_imports(root));
     result
         .provided_dependencies
         .extend(plugin.provided_dependencies());

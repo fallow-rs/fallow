@@ -8,12 +8,28 @@
 //! Also detects Nuxt **module** authoring projects (using `@nuxt/kit`) and marks
 //! `src/runtime/` components, composables, plugins, and utils as entry points.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use fallow_config::{AutoImportKind, AutoImportRule};
 
 use super::config_parser;
 use super::{Plugin, PluginResult};
 
 const ENABLERS: &[&str] = &["nuxt"];
+
+/// Directories Nuxt auto-imports components from, relative to the project root.
+/// Nuxt 4 uses `app/components`; Nuxt 3 uses top-level `components`. Both are
+/// scanned when present. Custom `components: [...]` dirs in `nuxt.config` are out
+/// of scope (the entry-pattern fallback keeps those files alive). See issue #704.
+const COMPONENT_DIRS: &[&str] = &["components", "app/components"];
+
+/// File extensions Nuxt treats as components, matching the component entry glob.
+const COMPONENT_EXTS: &[&str] = &["vue", "ts", "tsx", "js", "jsx"];
+
+/// Filename suffixes Nuxt strips before deriving the component name
+/// (`Comments.client.vue` and `Comments.server.vue` both become `<Comments>`;
+/// `Foo.global.vue` becomes `<Foo>`).
+const COMPONENT_NAME_SUFFIXES: &[&str] = &["client", "server", "global"];
 
 /// Secondary enabler for Nuxt module authoring projects.
 /// `@nuxt/kit` is the standard API for building Nuxt modules.
@@ -227,6 +243,17 @@ impl Plugin for NuxtPlugin {
         aliases.push(("#shared", "shared".to_string()));
         aliases.push(("#server", "server".to_string()));
         aliases
+    }
+
+    fn auto_imports(&self, root: &Path) -> Vec<AutoImportRule> {
+        let mut rules = Vec::new();
+        for dir in COMPONENT_DIRS {
+            let base = root.join(dir);
+            if base.is_dir() {
+                collect_component_auto_imports(&base, &base, &mut rules);
+            }
+        }
+        rules
     }
 
     fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
@@ -607,6 +634,228 @@ fn prefix_with_src_dir(src_dir: &str, path: &str) -> String {
         format!("{src_dir}/{path}")
     }
 }
+
+/// Recursively walk a components directory, emitting an [`AutoImportRule`] (plus
+/// its implicit `Lazy`-prefixed variant) for every component file found.
+///
+/// `base` is the components root (used to compute the relative path that drives
+/// the name); `dir` is the directory currently being scanned.
+fn collect_component_auto_imports(base: &Path, dir: &Path, rules: &mut Vec<AutoImportRule>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            collect_component_auto_imports(base, &path, rules);
+            continue;
+        }
+        if !has_component_extension(&path) {
+            continue;
+        }
+        let Ok(rel) = path.strip_prefix(base) else {
+            continue;
+        };
+        let Some(name) = derive_component_name(rel) else {
+            continue;
+        };
+        push_component_rule(rules, name, path);
+    }
+}
+
+/// Push the canonical rule and its `Lazy`-prefixed dynamic-import variant.
+fn push_component_rule(rules: &mut Vec<AutoImportRule>, name: String, source: PathBuf) {
+    let lazy = format!("Lazy{name}");
+    rules.push(AutoImportRule {
+        name,
+        source: source.clone(),
+        kind: AutoImportKind::DefaultComponent,
+    });
+    rules.push(AutoImportRule {
+        name: lazy,
+        source,
+        kind: AutoImportKind::DefaultComponent,
+    });
+}
+
+/// Whether the path has a component file extension (case-insensitive).
+fn has_component_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| COMPONENT_EXTS.iter().any(|c| ext.eq_ignore_ascii_case(c)))
+}
+
+/// Derive the Nuxt component name from a path relative to the components root.
+///
+/// Mirrors Nuxt's directory-prefixed PascalCase convention with the
+/// prefix-overlap dedup: `base/foo/Button.vue` becomes `BaseFooButton`,
+/// `foo/Foo.vue` becomes `Foo` (not `FooFoo`), and `base/BaseButton.vue` becomes
+/// `BaseButton` (not `BaseBaseButton`). `.client` / `.server` / `.global`
+/// suffixes are stripped before deriving so paired files map to one name.
+fn derive_component_name(rel: &Path) -> Option<String> {
+    let stem = rel.file_stem().and_then(|s| s.to_str())?;
+    // Strip a trailing `.client` / `.server` / `.global` segment from the stem.
+    let stem = strip_component_suffix(stem);
+    if stem.is_empty() {
+        return None;
+    }
+    let dir_segments: Vec<&str> = rel
+        .parent()
+        .map(|parent| {
+            parent
+                .components()
+                .filter_map(|c| c.as_os_str().to_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(resolve_component_name(&dir_segments, stem))
+}
+
+/// Strip a single trailing `.client` / `.server` / `.global` segment.
+fn strip_component_suffix(stem: &str) -> &str {
+    if let Some((head, tail)) = stem.rsplit_once('.')
+        && COMPONENT_NAME_SUFFIXES
+            .iter()
+            .any(|s| tail.eq_ignore_ascii_case(s))
+    {
+        return head;
+    }
+    stem
+}
+
+/// Combine PascalCase directory segments with the filename, removing the overlap
+/// where the filename already restates the trailing directory segments. This is
+/// a port of Nuxt's `resolveComponentName` dedup.
+fn resolve_component_name(dir_segments: &[&str], file_stem: &str) -> String {
+    let prefix_parts: Vec<String> = dir_segments
+        .iter()
+        .map(|seg| pascal_segment(seg))
+        .filter(|p| !p.is_empty())
+        .collect();
+    let file_words = split_words(file_stem);
+    let file_lower = file_words.join("/").to_lowercase();
+
+    let mut kept = prefix_parts.len();
+    let mut matched_suffix: Vec<String> = Vec::new();
+    let mut index = prefix_parts.len();
+    while index > 0 {
+        index -= 1;
+        let mut words: Vec<String> = split_words(&prefix_parts[index])
+            .into_iter()
+            .map(|w| w.to_lowercase())
+            .collect();
+        words.extend(matched_suffix.iter().cloned());
+        matched_suffix = words;
+        let matched_content = matched_suffix.join("/");
+        if file_lower == matched_content || file_lower.starts_with(&format!("{matched_content}/")) {
+            kept = index;
+        }
+    }
+
+    let mut name = String::new();
+    for part in &prefix_parts[..kept] {
+        name.push_str(part);
+    }
+    name.push_str(&pascal_segment(file_stem));
+    name
+}
+
+/// Split a string into lowercase word parts on separators (`-`, `_`, ` `, `.`)
+/// and lower-to-upper case transitions. `BaseButton` -> `["base", "button"]`,
+/// `my-widget` -> `["my", "widget"]`, `Card001` -> `["card001"]`.
+fn split_words(input: &str) -> Vec<String> {
+    let mut words: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut prev_lower = false;
+    for ch in input.chars() {
+        if ch == '-' || ch == '_' || ch == ' ' || ch == '.' {
+            if !current.is_empty() {
+                words.push(std::mem::take(&mut current));
+            }
+            prev_lower = false;
+            continue;
+        }
+        if ch.is_ascii_uppercase() && prev_lower && !current.is_empty() {
+            words.push(std::mem::take(&mut current));
+        }
+        current.push(ch.to_ascii_lowercase());
+        prev_lower = ch.is_ascii_lowercase() || ch.is_ascii_digit();
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+
+/// PascalCase a path segment by capitalizing the first letter of each
+/// separator-delimited part while PRESERVING the existing internal casing, so
+/// acronyms survive: `UICard` -> `UICard`, `card001` -> `Card001`, `my-widget`
+/// -> `MyWidget`, `base` -> `Base`. Routing through the lowercasing `split_words`
+/// instead would collapse `UICard` to `Uicard` and break the table-key match
+/// against the `<UICard />` tag the scanner captures verbatim. See issue #704.
+fn pascal_segment(seg: &str) -> String {
+    let mut out = String::new();
+    for part in seg.split(['-', '_', ' ', '.']) {
+        let mut chars = part.chars();
+        if let Some(first) = chars.next() {
+            out.extend(first.to_uppercase());
+            out.push_str(chars.as_str());
+        }
+    }
+    out
+}
+
+/// Whether an aggregated entry-pattern glob is one of the Nuxt CONSUMER component
+/// directories (`components/**`, `app/components/**`, including workspace-prefixed
+/// forms). These are the patterns `auto_imports` resolves, so the `autoImports`
+/// flag drops them. Module-authoring `src/runtime/components` patterns are
+/// intentionally NOT matched: `auto_imports` does not scan them, so they keep
+/// their entry-pattern protection. See issue #704.
+pub fn is_component_entry_pattern(pattern: &str) -> bool {
+    const SUFFIX: &str = "components/**/*.{vue,ts,tsx,js,jsx}";
+    let Some(prefix) = pattern.strip_suffix(SUFFIX) else {
+        return false;
+    };
+    let valid_prefix = prefix.is_empty() || prefix.ends_with('/');
+    valid_prefix && !prefix.contains("runtime/")
+}
+
+/// Conservative guard for the `autoImports` flag: whether the root `nuxt.config`
+/// declares a `components:` key. When it does, custom `prefix` / `pathPrefix` /
+/// `dirs` settings (which `auto_imports` does not model) may be in play, so the
+/// component entry patterns are kept rather than dropped, avoiding false
+/// `unused-file` reports. Conservative on purpose: any `components:` property key
+/// keeps the patterns. See issue #704.
+pub fn config_declares_components(root: &Path) -> bool {
+    for name in ["nuxt.config.ts", "nuxt.config.js"] {
+        let path = root.join(name);
+        let Ok(source) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if source_has_components_key(&source) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether the source declares a `components` property key in any position.
+///
+/// Tolerant on purpose: matches `components:`, `"components":`, `'components':`,
+/// and inline shapes like `defineNuxtConfig({ components: [...] })` regardless of
+/// line position or quoting. It can also match `components:` inside a comment or
+/// string literal, but that only keeps the entry patterns (the safe direction:
+/// no false `unused-file` reports), so over-matching is acceptable. See issue #704.
+fn source_has_components_key(source: &str) -> bool {
+    COMPONENTS_KEY_RE.is_match(source)
+}
+
+static COMPONENTS_KEY_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r#"["']?\bcomponents\b["']?\s*:"#).expect("valid regex")
+});
 
 #[cfg(test)]
 mod tests {
@@ -1353,5 +1602,181 @@ mod tests {
             "nuxt.config.ts should not add runtime patterns: {:?}",
             result.entry_patterns
         );
+    }
+
+    // --- auto-import component name derivation (issue #704) ---
+
+    fn name_of(rel: &str) -> String {
+        derive_component_name(Path::new(rel)).expect("component name")
+    }
+
+    #[test]
+    fn component_name_flat() {
+        assert_eq!(name_of("Card001.vue"), "Card001");
+    }
+
+    #[test]
+    fn component_name_directory_prefix_concat() {
+        assert_eq!(name_of("base/foo/Button.vue"), "BaseFooButton");
+    }
+
+    #[test]
+    fn component_name_dedups_repeated_segment() {
+        // `foo/Foo.vue` is `<Foo>`, not `<FooFoo>`.
+        assert_eq!(name_of("foo/Foo.vue"), "Foo");
+    }
+
+    #[test]
+    fn component_name_dedups_filename_prefix_overlap() {
+        // `base/BaseButton.vue` is `<BaseButton>`, not `<BaseBaseButton>`.
+        assert_eq!(name_of("base/BaseButton.vue"), "BaseButton");
+    }
+
+    #[test]
+    fn component_name_kebab_directory_segments() {
+        assert_eq!(name_of("my-widget/Header.vue"), "MyWidgetHeader");
+    }
+
+    #[test]
+    fn component_name_preserves_consecutive_uppercase_acronyms() {
+        // Acronym-prefixed names must keep their casing so the derived table key
+        // matches the verbatim `<UICard />` / `<APIClient />` tag the scanner
+        // captures. Lowercasing would yield `Uicard` and break the match.
+        assert_eq!(name_of("UICard.vue"), "UICard");
+        assert_eq!(name_of("APIClient.vue"), "APIClient");
+        assert_eq!(name_of("base/HTTPForm.vue"), "BaseHTTPForm");
+    }
+
+    #[test]
+    fn component_name_strips_client_server_global_suffixes() {
+        assert_eq!(name_of("Comments.client.vue"), "Comments");
+        assert_eq!(name_of("Comments.server.vue"), "Comments");
+        assert_eq!(name_of("Banner.global.vue"), "Banner");
+    }
+
+    #[test]
+    fn auto_imports_emits_canonical_and_lazy_variants() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("components/base")).unwrap();
+        std::fs::write(root.join("components/Card001.vue"), "<template></template>").unwrap();
+        std::fs::write(
+            root.join("components/base/Button.vue"),
+            "<template></template>",
+        )
+        .unwrap();
+
+        let rules = NuxtPlugin.auto_imports(root);
+        let names: std::collections::BTreeSet<&str> =
+            rules.iter().map(|r| r.name.as_str()).collect();
+
+        assert!(names.contains("Card001"));
+        assert!(names.contains("LazyCard001"));
+        assert!(names.contains("BaseButton"));
+        assert!(names.contains("LazyBaseButton"));
+        assert!(
+            rules
+                .iter()
+                .all(|r| matches!(r.kind, AutoImportKind::DefaultComponent)),
+            "component rules are DefaultComponent kind"
+        );
+        // The `Card001` rule's source points at the real file on disk.
+        let card = rules.iter().find(|r| r.name == "Card001").unwrap();
+        assert_eq!(card.source, root.join("components/Card001.vue"));
+    }
+
+    #[test]
+    fn auto_imports_paired_client_server_share_a_name_with_distinct_sources() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("app/components")).unwrap();
+        std::fs::write(
+            root.join("app/components/Comments.client.vue"),
+            "<template></template>",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("app/components/Comments.server.vue"),
+            "<template></template>",
+        )
+        .unwrap();
+
+        let rules = NuxtPlugin.auto_imports(root);
+        let comments_sources: std::collections::BTreeSet<_> = rules
+            .iter()
+            .filter(|r| r.name == "Comments")
+            .map(|r| r.source.clone())
+            .collect();
+        // Both the client and server file map to the single `<Comments>` name.
+        assert_eq!(comments_sources.len(), 2);
+    }
+
+    #[test]
+    fn auto_imports_empty_without_component_dirs() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        assert!(NuxtPlugin.auto_imports(tmp.path()).is_empty());
+    }
+
+    // --- entry-pattern gating predicates (issue #704) ---
+
+    #[test]
+    fn component_entry_pattern_matches_consumer_dirs_only() {
+        assert!(is_component_entry_pattern(
+            "components/**/*.{vue,ts,tsx,js,jsx}"
+        ));
+        assert!(is_component_entry_pattern(
+            "app/components/**/*.{vue,ts,tsx,js,jsx}"
+        ));
+        assert!(is_component_entry_pattern(
+            "packages/web/components/**/*.{vue,ts,tsx,js,jsx}"
+        ));
+        // Module-authoring runtime components keep their entry-pattern protection.
+        assert!(!is_component_entry_pattern(
+            "src/runtime/components/**/*.{vue,ts,tsx,js,jsx}"
+        ));
+        // Non-component patterns are untouched.
+        assert!(!is_component_entry_pattern(
+            "pages/**/*.{vue,ts,tsx,js,jsx}"
+        ));
+    }
+
+    #[test]
+    fn config_declares_components_detects_key() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::write(
+            root.join("nuxt.config.ts"),
+            "export default defineNuxtConfig({\n  components: [{ path: '~/ui', prefix: 'U' }],\n})\n",
+        )
+        .unwrap();
+        assert!(config_declares_components(root));
+    }
+
+    #[test]
+    fn config_declares_components_detects_inline_and_quoted_keys() {
+        // The guard must catch the common single-line config shape and quoted keys,
+        // not just a `components:` key at the start of its own line.
+        assert!(source_has_components_key(
+            "export default defineNuxtConfig({ components: [{ path: '~/ui' }] })"
+        ));
+        assert!(source_has_components_key(
+            r#"export default { "components": [{ path: "~/ui" }] }"#
+        ));
+        assert!(source_has_components_key("  components : [\n  ]"));
+        assert!(!source_has_components_key(
+            "export default defineNuxtConfig({ modules: ['@nuxt/image'] })"
+        ));
+    }
+
+    #[test]
+    fn config_declares_components_false_without_key() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::write(
+            root.join("nuxt.config.ts"),
+            "export default defineNuxtConfig({\n  modules: ['@nuxt/image'],\n})\n",
+        )
+        .unwrap();
+        assert!(!config_declares_components(root));
     }
 }

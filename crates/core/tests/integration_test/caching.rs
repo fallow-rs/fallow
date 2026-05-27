@@ -45,6 +45,7 @@ fn cache_roundtrip() {
         public_signature_type_references: vec![],
         namespace_object_aliases: vec![],
         iconify_prefixes: vec![],
+        auto_import_candidates: Vec::new(),
     };
 
     store.insert(std::path::Path::new("test.ts"), cached);
@@ -203,6 +204,7 @@ fn incremental_cache_prune_stale_entries() {
         public_signature_type_references: vec![],
         namespace_object_aliases: vec![],
         iconify_prefixes: vec![],
+        auto_import_candidates: Vec::new(),
     };
 
     store.insert(std::path::Path::new("/project/existing.ts"), make_module());

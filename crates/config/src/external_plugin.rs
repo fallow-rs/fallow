@@ -21,6 +21,40 @@ pub enum EntryPointRole {
     Support,
 }
 
+/// Which export shape a convention auto-import credits when its name is
+/// referenced without an explicit `import` statement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoImportKind {
+    /// `import { name } from source` (named export, e.g. a Nuxt composable/util).
+    Named,
+    /// `import name from source` (default export).
+    Default,
+    /// SFC default export consumed by a template tag (Nuxt `components/`).
+    DefaultComponent,
+}
+
+/// A single convention-based auto-import: a bare identifier name that resolves
+/// to an export in `source` by framework convention, with no explicit `import`
+/// statement in the consuming file.
+///
+/// Built by `Plugin::auto_imports` from a filesystem scan (e.g. Nuxt scanning
+/// `components/`), and consumed at graph-build time: the resolver matches a
+/// file's captured `auto_import_candidates` against these rules and synthesizes
+/// an edge to `source`. The table is a function of which files exist on disk,
+/// not of any single file's bytes, so it is computed fresh per run and never
+/// cached as part of per-file extraction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoImportRule {
+    /// Bare identifier name (e.g. `useCounter`, `Card001`, `BaseButton`,
+    /// `LazyCard001`). Component names are canonical PascalCase; the consuming
+    /// scanner normalizes kebab-case tags before matching.
+    pub name: String,
+    /// Absolute path to the source file providing the export.
+    pub source: PathBuf,
+    /// Which export to credit when the name is referenced.
+    pub kind: AutoImportKind,
+}
+
 /// How to detect if a plugin should be activated.
 ///
 /// When set on an `ExternalPluginDef`, this takes priority over `enablers`.

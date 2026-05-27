@@ -34,10 +34,11 @@ pub(super) fn collect_template_usage_with_bound_targets(
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
 ) -> TemplateUsage {
-    if imported_bindings.is_empty() && bound_targets.is_empty() {
-        return TemplateUsage::default();
-    }
-
+    // No early-return on empty imports: a Nuxt page may reference only convention
+    // auto-imported components (`<Card001 />`) with no import or bound target, and
+    // the scan still needs to capture those unmatched tags as auto-import
+    // candidates. With empty imports the used-binding / member-access outputs stay
+    // empty, so only unresolved tag-name capture is added. See issue #704.
     let comment_ranges: Vec<(usize, usize)> = HTML_COMMENT_RE
         .find_iter(source)
         .map(|m| (m.start(), m.end()))
@@ -423,7 +424,10 @@ mod tests {
             &imported(&["item"]),
         );
 
-        assert!(usage.is_empty());
+        // The shadowed `item` import must not be credited. `<List>` is captured
+        // as an auto-import candidate (it matches no import), which is expected.
+        assert!(usage.used_bindings.is_empty());
+        assert!(usage.member_accesses.is_empty());
     }
 
     #[test]
@@ -499,7 +503,11 @@ mod tests {
             &imported(&["Item"]),
         );
 
-        assert!(usage.is_empty());
+        // The locally-shadowed `Item` import must not be credited; `<Item>` is a
+        // slot-scope local so it is not captured. `<List>` (no import) is captured
+        // as an auto-import candidate, which is expected.
+        assert!(usage.used_bindings.is_empty());
+        assert!(usage.member_accesses.is_empty());
     }
 
     #[test]
@@ -595,8 +603,10 @@ mod tests {
             &imported(&["data"]),
         );
 
-        // data is shadowed by the slot binding
-        assert!(usage.is_empty());
+        // data is shadowed by the slot binding, so the import is not credited.
+        // `<List>` (no import) is captured as an auto-import candidate.
+        assert!(usage.used_bindings.is_empty());
+        assert!(usage.member_accesses.is_empty());
     }
 
     #[test]

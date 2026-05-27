@@ -309,6 +309,13 @@ pub struct ResolvedConfig {
     /// `--include-entry-exports` or via `includeEntryExports: true` in the fallow
     /// config file; the CLI flag ORs with the config value (CLI wins when set).
     pub include_entry_exports: bool,
+    /// When true, framework plugins drop the convention entry patterns they can
+    /// resolve via `auto_imports` (today: Nuxt component directories), so
+    /// genuinely-unreferenced convention files are reported as `unused-file`.
+    /// Auto-import edge synthesis runs regardless of this flag; it only gates the
+    /// entry-pattern removal. Set via `autoImports: true` in the config. See
+    /// issue #704.
+    pub auto_imports: bool,
 }
 
 /// Compute the cache-invalidation hash over extraction-affecting config
@@ -602,6 +609,7 @@ impl FallowConfig {
             fix: self.fix,
             resolve: self.resolve,
             include_entry_exports: self.include_entry_exports,
+            auto_imports: self.auto_imports,
         }
     }
 }
@@ -693,6 +701,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            auto_imports: false,
             cache: CacheConfig::default(),
         };
         let resolved = config.resolve(
@@ -747,6 +756,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            auto_imports: false,
             cache: CacheConfig::default(),
         };
         let resolved = config.resolve(
@@ -817,6 +827,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            auto_imports: false,
             cache: CacheConfig::default(),
         };
         let resolved = config.resolve(
@@ -883,6 +894,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            auto_imports: false,
             cache: CacheConfig::default(),
         };
         let resolved = config.resolve(
@@ -992,6 +1004,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            auto_imports: false,
             cache: CacheConfig::default(),
         };
         for _ in 0..10 {
@@ -1047,6 +1060,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            auto_imports: false,
             cache: CacheConfig::default(),
         }
     }

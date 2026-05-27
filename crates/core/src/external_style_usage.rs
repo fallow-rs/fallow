@@ -171,6 +171,9 @@ impl<'a> ExternalStylePackageScanner<'a> {
             self.workspaces,
             &self.plugin_result.active_plugins,
             &self.plugin_result.path_aliases,
+            // Style-package probe resolves a single synthetic module; convention
+            // auto-imports do not apply here.
+            &[],
             &self.plugin_result.scss_include_paths,
             &self.plugin_result.static_dir_mappings,
             &self.config.root,

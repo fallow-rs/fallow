@@ -377,6 +377,28 @@ pub struct FallowConfig {
     #[serde(default)]
     pub include_entry_exports: bool,
 
+    /// Resolve framework convention auto-imports (Nuxt components) as real
+    /// module-graph edges, and stop treating the covered convention directories
+    /// as always-used entry points.
+    ///
+    /// When `false` (default), auto-import edges are still synthesized additively
+    /// (so a component's default export consumed via a `<Card />` template tag is
+    /// credited under `includeEntryExports`), but the convention directories stay
+    /// registered as entry points, so genuinely-unreferenced components are never
+    /// reported as `unused-file`.
+    ///
+    /// When `true`, the Nuxt plugin drops its component entry patterns
+    /// (`components/**`, `app/components/**`) so an unreferenced component is
+    /// reported as `unused-file`. This is opt-in because non-flat projects
+    /// (custom `prefix` / `pathPrefix` / `dirs` in `nuxt.config`, dynamic
+    /// `<component :is>`, `@nuxt/content` MDC) are not fully modeled yet and could
+    /// produce false positives. As a guard, if `nuxt.config` declares a
+    /// `components:` key the entry patterns are kept regardless. Composable and
+    /// util entry patterns are unaffected until convention resolution covers
+    /// them. See issue #704.
+    #[serde(default)]
+    pub auto_imports: bool,
+
     /// Incremental cache tuning. Today the only knob is `maxSizeMb`, which
     /// caps the on-disk cache and triggers LRU eviction during save. See
     /// [`CacheConfig`].

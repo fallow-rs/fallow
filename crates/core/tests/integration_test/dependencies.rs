@@ -692,6 +692,7 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
         resolve: fallow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        auto_imports: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);

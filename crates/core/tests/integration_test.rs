@@ -187,3 +187,6 @@ mod ember_classic;
 
 #[path = "integration_test/issue_620_error_subclass_name.rs"]
 mod issue_620_error_subclass_name;
+
+#[path = "integration_test/issue_704_auto_import_components.rs"]
+mod issue_704_auto_import_components;

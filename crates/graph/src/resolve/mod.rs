@@ -42,8 +42,10 @@ use std::sync::Mutex;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use fallow_config::{AutoImportKind, AutoImportRule};
 use fallow_types::discover::{DiscoveredFile, FileId};
-use fallow_types::extract::ModuleInfo;
+use fallow_types::extract::{ImportInfo, ImportedName, ModuleInfo};
+use oxc_span::Span;
 
 use dynamic_imports::{resolve_dynamic_imports, resolve_dynamic_patterns};
 use re_exports::resolve_re_exports;
@@ -67,6 +69,7 @@ pub fn resolve_all_imports(
     workspaces: &[fallow_config::WorkspaceInfo],
     active_plugins: &[String],
     path_aliases: &[(String, String)],
+    auto_imports: &[AutoImportRule],
     scss_include_paths: &[PathBuf],
     static_dir_mappings: &[(PathBuf, String)],
     root: &Path,
@@ -242,5 +245,104 @@ pub fn resolve_all_imports(
 
     apply_specifier_upgrades(&mut resolved);
 
+    synthesize_auto_import_edges(
+        &mut resolved,
+        modules,
+        auto_imports,
+        &path_to_id,
+        &raw_path_to_id,
+    );
+
     resolved
+}
+
+/// Synthesize module-graph edges for convention auto-imports.
+///
+/// For each module, every captured `auto_import_candidates` name is matched
+/// against the active plugins' auto-import table; on a hit a synthetic
+/// [`ResolvedImport`] to the providing file is appended so the existing graph
+/// builder credits the edge. Name collisions across files (e.g. `Comments`
+/// declared in both `Comments.client.vue` and `Comments.server.vue`) over-credit
+/// every match, keeping each provider reachable. Resolution is recomputed every
+/// run from the live file index, so it is never folded into per-file caching.
+/// See issue #704.
+fn synthesize_auto_import_edges(
+    resolved: &mut [ResolvedModule],
+    modules: &[ModuleInfo],
+    auto_imports: &[AutoImportRule],
+    path_to_id: &FxHashMap<&Path, FileId>,
+    raw_path_to_id: &FxHashMap<&Path, FileId>,
+) {
+    if auto_imports.is_empty() {
+        return;
+    }
+
+    // Name -> providing files. Built from the live file index, so a rule whose
+    // source file was not discovered is skipped rather than synthesizing a dangling edge.
+    let mut table: FxHashMap<&str, Vec<(FileId, AutoImportKind)>> = FxHashMap::default();
+    for rule in auto_imports {
+        let source = rule.source.as_path();
+        let Some(file_id) = raw_path_to_id
+            .get(source)
+            .or_else(|| path_to_id.get(source))
+            .copied()
+        else {
+            continue;
+        };
+        table
+            .entry(rule.name.as_str())
+            .or_default()
+            .push((file_id, rule.kind));
+    }
+    if table.is_empty() {
+        return;
+    }
+
+    // Captured candidate names keyed by the file that referenced them.
+    let candidates: FxHashMap<FileId, &[String]> = modules
+        .iter()
+        .filter(|module| !module.auto_import_candidates.is_empty())
+        .map(|module| (module.file_id, module.auto_import_candidates.as_slice()))
+        .collect();
+    if candidates.is_empty() {
+        return;
+    }
+
+    for module in resolved.iter_mut() {
+        let Some(names) = candidates.get(&module.file_id) else {
+            continue;
+        };
+        for name in *names {
+            let Some(targets) = table.get(name.as_str()) else {
+                continue;
+            };
+            for (target_id, kind) in targets {
+                if *target_id == module.file_id {
+                    continue;
+                }
+                module.resolved_imports.push(ResolvedImport {
+                    info: synthetic_auto_import_info(name, *kind),
+                    target: ResolveResult::InternalModule(*target_id),
+                });
+            }
+        }
+    }
+}
+
+/// Build a synthetic [`ImportInfo`] for a convention auto-import. Component and
+/// default kinds credit the default export; named kinds credit the named export.
+fn synthetic_auto_import_info(name: &str, kind: AutoImportKind) -> ImportInfo {
+    let imported_name = match kind {
+        AutoImportKind::Named => ImportedName::Named(name.to_string()),
+        AutoImportKind::Default | AutoImportKind::DefaultComponent => ImportedName::Default,
+    };
+    ImportInfo {
+        source: format!("<auto-import:{name}>"),
+        imported_name,
+        local_name: name.to_string(),
+        is_type_only: false,
+        from_style: false,
+        span: Span::default(),
+        source_span: Span::default(),
+    }
 }

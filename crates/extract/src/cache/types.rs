@@ -75,7 +75,12 @@ use crate::MemberKind;
 /// `name="ic:round-home"`) in markup now populate `iconify_prefixes` so the
 /// `@iconify-json/<prefix>` package is credited. Pre-fix entries omit the field,
 /// so icon-set packages can be reported as unused until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 100;
+///
+/// Bumped to 101 for issue #704: SFC template tags that match no import now
+/// populate `auto_import_candidates` for convention auto-import resolution.
+/// Pre-fix entries omit the field, so Nuxt components consumed only via template
+/// tags are not edge-credited until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 101;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -118,7 +123,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 544);
+assert_cached_type_size!(CachedModule, 568);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -203,6 +208,10 @@ pub struct CachedModule {
     pub namespace_object_aliases: Vec<CachedNamespaceObjectAlias>,
     /// Iconify collection prefixes found in static icon props (issue #608).
     pub iconify_prefixes: Vec<String>,
+    /// Bare identifier names that are candidates for convention auto-import
+    /// resolution (issue #704). Content-local, so they round-trip through the
+    /// cache; resolution against the plugin table happens at graph-build time.
+    pub auto_import_candidates: Vec<String>,
 }
 
 /// Cached namespace-object alias.

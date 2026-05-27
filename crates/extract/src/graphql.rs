@@ -100,6 +100,7 @@ pub(crate) fn parse_graphql_to_module(
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        auto_import_candidates: Vec::new(),
     }
 }
 

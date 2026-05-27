@@ -285,6 +285,11 @@
       "type": "boolean",
       "default": false
     },
+    "autoImports": {
+      "description": "Resolve framework convention auto-imports (Nuxt components) as real\nmodule-graph edges, and stop treating the covered convention directories\nas always-used entry points.\n\nWhen `false` (default), auto-import edges are still synthesized additively\n(so a component's default export consumed via a `<Card />` template tag is\ncredited under `includeEntryExports`), but the convention directories stay\nregistered as entry points, so genuinely-unreferenced components are never\nreported as `unused-file`.\n\nWhen `true`, the Nuxt plugin drops its component entry patterns\n(`components/**`, `app/components/**`) so an unreferenced component is\nreported as `unused-file`. This is opt-in because non-flat projects\n(custom `prefix` / `pathPrefix` / `dirs` in `nuxt.config`, dynamic\n`<component :is>`, `@nuxt/content` MDC) are not fully modeled yet and could\nproduce false positives. As a guard, if `nuxt.config` declares a\n`components:` key the entry patterns are kept regardless. Composable and\nutil entry patterns are unaffected until convention resolution covers\nthem. See issue #704.",
+      "type": "boolean",
+      "default": false
+    },
     "cache": {
       "description": "Incremental cache tuning. Today the only knob is `maxSizeMb`, which\ncaps the on-disk cache and triggers LRU eviction during save. See\n[`CacheConfig`].",
       "$ref": "#/$defs/CacheConfig"

@@ -1212,3 +1212,73 @@ fn sfc_vue_with_leading_bom_produces_same_script_line_numbers_as_without_bom() {
         "BOM must not change the import count",
     );
 }
+
+// --- convention auto-import candidate capture (issue #704) ---
+
+#[test]
+fn captures_unresolved_pascal_tags_with_zero_imports() {
+    // A Nuxt page may reference only convention auto-imported components, with
+    // no `import` statement at all.
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts"></script>
+<template>
+  <Card001 />
+  <BaseButton>hi</BaseButton>
+  <div><span /></div>
+</template>
+"#,
+        "pages/index.vue",
+    );
+    assert!(info.imports.is_empty(), "fixture has no imports");
+    assert!(info.auto_import_candidates.contains(&"Card001".to_string()));
+    assert!(
+        info.auto_import_candidates
+            .contains(&"BaseButton".to_string())
+    );
+    // Native lowercase HTML elements are never captured.
+    assert!(!info.auto_import_candidates.contains(&"div".to_string()));
+    assert!(!info.auto_import_candidates.contains(&"span".to_string()));
+}
+
+#[test]
+fn captures_kebab_tag_as_pascal_candidate() {
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts"></script>
+<template><base-button /></template>
+"#,
+        "pages/about.vue",
+    );
+    // Only the canonical Pascal form is captured, not the raw kebab or camel form.
+    assert!(
+        info.auto_import_candidates
+            .contains(&"BaseButton".to_string())
+    );
+    assert!(
+        !info
+            .auto_import_candidates
+            .contains(&"base-button".to_string())
+    );
+    assert!(
+        !info
+            .auto_import_candidates
+            .contains(&"baseButton".to_string())
+    );
+}
+
+#[test]
+fn imported_component_tag_is_not_an_auto_import_candidate() {
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+import Card001 from './Card001.vue';
+</script>
+<template><Card001 /></template>
+"#,
+        "pages/index.vue",
+    );
+    // An explicitly imported tag is credited as a used import, not captured as
+    // an auto-import candidate.
+    assert!(!info.auto_import_candidates.contains(&"Card001".to_string()));
+}

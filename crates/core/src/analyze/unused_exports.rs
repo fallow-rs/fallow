@@ -1896,6 +1896,7 @@ mod tests {
             generated_import_patterns: vec![],
             generated_type_import_prefixes: vec![],
             path_aliases: vec![],
+            auto_imports: vec![],
             active_plugins: vec![],
             fixture_patterns: vec![],
             static_dir_mappings: vec![],

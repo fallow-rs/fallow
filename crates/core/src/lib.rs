@@ -506,6 +506,7 @@ pub fn analyze_with_parse_result(
         workspaces,
         &plugin_result.active_plugins,
         &plugin_result.path_aliases,
+        &plugin_result.auto_imports,
         &plugin_result.scss_include_paths,
         &plugin_result.static_dir_mappings,
         &config.root,
@@ -776,6 +777,7 @@ fn analyze_full(
         workspaces,
         &plugin_result.active_plugins,
         &plugin_result.path_aliases,
+        &plugin_result.auto_imports,
         &plugin_result.scss_include_paths,
         &plugin_result.static_dir_mappings,
         &config.root,
@@ -1220,6 +1222,7 @@ fn run_plugins(
     }
 
     if workspaces.is_empty() {
+        gate_auto_import_entry_patterns(&mut result, config, workspaces);
         return result;
     }
 
@@ -1380,9 +1383,46 @@ fn run_plugins(
                 .path_aliases
                 .push((prefix, format!("{ws_prefix}/{replacement}")));
         }
+        // Auto-import rules carry absolute `source` paths (built from the
+        // workspace package root), so they are already correct per-package and
+        // need no prefixing, just merging. See issue #704.
+        result.auto_imports.extend(ws_result.auto_imports);
     }
 
+    gate_auto_import_entry_patterns(&mut result, config, workspaces);
+
     result
+}
+
+/// When `autoImports` is enabled, drop the Nuxt component entry patterns so
+/// genuinely-unreferenced components are reported as `unused-file` (their
+/// reachability now comes from synthesized auto-import edges instead). Guarded by
+/// `config_declares_components`: if the root OR any workspace package's
+/// `nuxt.config` declares a `components:` key, the patterns are kept, because
+/// custom `prefix` / `pathPrefix` / `dirs` are not yet modeled and dropping the
+/// protection would risk false positives. Auto-import edge synthesis itself is
+/// unconditional; only this entry-pattern removal is flag-gated. See issue #704.
+fn gate_auto_import_entry_patterns(
+    result: &mut plugins::AggregatedPluginResult,
+    config: &ResolvedConfig,
+    workspaces: &[fallow_config::WorkspaceInfo],
+) {
+    if !config.auto_imports {
+        return;
+    }
+    if !result.active_plugins.iter().any(|name| name == "nuxt") {
+        return;
+    }
+    if plugins::nuxt::config_declares_components(&config.root)
+        || workspaces
+            .iter()
+            .any(|ws| plugins::nuxt::config_declares_components(&ws.root))
+    {
+        return;
+    }
+    result.entry_patterns.retain(|(rule, plugin)| {
+        !(plugin == "nuxt" && plugins::nuxt::is_component_entry_pattern(&rule.pattern))
+    });
 }
 
 fn bucket_files_by_workspace(

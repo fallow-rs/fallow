@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{EntryPointRole, PackageJson, UsedClassMemberRule};
+use fallow_config::{AutoImportRule, EntryPointRole, PackageJson, UsedClassMemberRule};
 use regex::Regex;
 
 const TEST_ENTRY_POINT_PLUGINS: &[&str] = &[
@@ -824,6 +824,22 @@ pub trait Plugin: Send + Sync {
         vec![]
     }
 
+    /// Convention-based auto-imports provided by this framework.
+    ///
+    /// Returns the names this framework exposes to user code by filesystem
+    /// convention with no explicit `import` statement (e.g. Nuxt `components/`
+    /// resolved by `<Card001 />` template tags), each mapped to the source file
+    /// providing the export. When a file references one of these names without an
+    /// import, the resolver synthesizes a graph edge to `source`.
+    ///
+    /// Called once when plugins are activated. The project `root` is provided so
+    /// plugins can scan the convention directories on the filesystem. The table is
+    /// a function of which files exist on disk, so it is rebuilt every run and is
+    /// never folded into per-file extraction caching. See issue #704.
+    fn auto_imports(&self, _root: &Path) -> Vec<AutoImportRule> {
+        Vec::new()
+    }
+
     /// File-scoped dependency providers contributed by this framework.
     fn provided_dependencies(&self) -> Vec<ProvidedDependencyRule> {
         Vec::new()
@@ -1153,7 +1169,7 @@ mod next_intl;
 mod nextjs;
 mod nitro;
 mod nodemon;
-mod nuxt;
+pub(crate) mod nuxt;
 mod nx;
 mod nyc;
 mod obsidian;

@@ -3,7 +3,9 @@
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
-use fallow_config::{EntryPointRole, ExternalPluginDef, PackageJson, UsedClassMemberRule};
+use fallow_config::{
+    AutoImportRule, EntryPointRole, ExternalPluginDef, PackageJson, UsedClassMemberRule,
+};
 
 use crate::scripts;
 
@@ -77,6 +79,10 @@ pub struct AggregatedPluginResult {
     /// Path alias mappings from active plugins (prefix → replacement directory).
     /// Used by the resolver to substitute import prefixes before re-resolving.
     pub path_aliases: Vec<(String, String)>,
+    /// Convention-based auto-import rules from active plugins (Nuxt components).
+    /// The resolver matches each file's captured `auto_import_candidates` against
+    /// these and synthesizes a graph edge to the rule's source. See issue #704.
+    pub auto_imports: Vec<AutoImportRule>,
     /// Names of active plugins.
     pub active_plugins: Vec<String>,
     /// Test fixture glob patterns from active plugins: (pattern, plugin_name).

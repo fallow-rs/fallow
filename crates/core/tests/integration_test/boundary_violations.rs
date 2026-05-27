@@ -52,6 +52,7 @@ fn create_boundary_config_with_entry(
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        auto_imports: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
@@ -206,6 +207,7 @@ fn no_violations_when_rule_is_off() {
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        auto_imports: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
@@ -262,6 +264,7 @@ fn preset_detects_boundary_violation() {
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        auto_imports: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
@@ -358,6 +361,7 @@ fn root_field_classifies_per_subtree() {
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        auto_imports: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
@@ -465,6 +469,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        auto_imports: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root.clone(), OutputFormat::Human, 4, true, true, None);
@@ -532,6 +537,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        auto_imports: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
@@ -664,6 +670,7 @@ fn bulletproof_preset_detects_violation() {
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        auto_imports: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
@@ -765,6 +772,7 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
         resolve: ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        auto_imports: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);

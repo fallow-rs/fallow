@@ -2765,6 +2765,7 @@ minTokens = 100
     fn include_entry_exports_propagates_through_resolve() {
         let config = FallowConfig {
             include_entry_exports: true,
+            auto_imports: false,
             cache: CacheConfig::default(),
             ..Default::default()
         };

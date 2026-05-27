@@ -196,7 +196,11 @@ pub(super) fn merge_component_tag_usage(
     allow_kebab_case: bool,
 ) {
     let tag_name = tag_name.trim();
-    if tag_name.is_empty() || imported_bindings.is_empty() {
+    // Note: no `imported_bindings.is_empty()` short-circuit. A file with zero
+    // imports can still reference framework convention auto-imports (a Nuxt page
+    // using only `<Card001 />`), so unmatched tags must reach the capture path
+    // below regardless of whether any imports exist. See issue #704.
+    if tag_name.is_empty() {
         return;
     }
 
@@ -223,14 +227,30 @@ fn mark_binding_used(
     imported_bindings: &FxHashSet<String>,
     locals: &[String],
 ) {
-    if binding.is_empty()
-        || locals.iter().any(|local| local == binding)
-        || !imported_bindings.contains(binding)
-    {
+    if binding.is_empty() || locals.iter().any(|local| local == binding) {
         return;
     }
 
-    usage.used_bindings.insert(binding.to_string());
+    if imported_bindings.contains(binding) {
+        usage.used_bindings.insert(binding.to_string());
+        return;
+    }
+
+    // No matching import and no local binding: a candidate for framework
+    // convention auto-import resolution. Only PascalCase names are component
+    // references (native HTML elements are lowercase), so capturing those keeps
+    // the candidate set tight. For kebab tags only the derived Pascal form lands
+    // here; the raw and camel forms are lowercase-first and skipped. The graph
+    // layer matches these against the active plugins' auto-import table and
+    // synthesizes an edge on a hit; non-matches resolve to nothing and are
+    // harmless. See issue #704.
+    if binding
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_uppercase())
+    {
+        usage.unresolved_tag_names.insert(binding.to_string());
+    }
 }
 
 fn kebab_to_camel_case(source: &str) -> String {

@@ -299,6 +299,7 @@ fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleI
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        auto_import_candidates: Vec::new(),
     }
 }
 
@@ -504,10 +505,12 @@ fn apply_template_usage(
     template_visible_bound_targets: &FxHashMap<String, String>,
     combined: &mut ModuleInfo,
 ) {
-    if template_visible_imports.is_empty() && template_visible_bound_targets.is_empty() {
-        return;
-    }
-
+    // The scan must run even when there are no imports or bound targets: a Nuxt
+    // page may reference only convention auto-imported components (`<Card001 />`)
+    // with no `import` statement, and those unmatched tags are captured for
+    // graph-build-time auto-import resolution. With empty imports the
+    // used-bindings / member-access / whole-object outputs stay empty, so the
+    // only added work is collecting unresolved tag names. See issue #704.
     let template_usage = collect_template_usage_with_bound_targets(
         kind,
         source,
@@ -523,6 +526,12 @@ fn apply_template_usage(
     combined
         .whole_object_uses
         .extend(template_usage.whole_object_uses);
+    if !template_usage.unresolved_tag_names.is_empty() {
+        let mut names: Vec<String> = template_usage.unresolved_tag_names.into_iter().collect();
+        names.sort_unstable();
+        combined.auto_import_candidates.extend(names);
+        combined.auto_import_candidates.dedup();
+    }
 }
 
 fn is_template_visible_script(kind: SfcKind, script: &SfcScript) -> bool {

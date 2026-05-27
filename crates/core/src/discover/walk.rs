@@ -848,6 +848,7 @@ mod tests {
                 resolve: ResolveConfig::default(),
                 sealed: false,
                 include_entry_exports: false,
+                auto_imports: false,
                 cache: fallow_config::CacheConfig::default(),
             }
             .resolve(root, OutputFormat::Human, 1, true, true, None)

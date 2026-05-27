@@ -1,0 +1,7 @@
+{
+  "name": "nuxt-auto-import-components",
+  "private": true,
+  "dependencies": {
+    "nuxt": "^3.0.0"
+  }
+}

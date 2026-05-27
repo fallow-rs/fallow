@@ -98,6 +98,16 @@ pub struct ModuleInfo {
     /// icon-set packages consumed only through build-time string names are not
     /// flagged as unused. Populated for markup/JSX file kinds only. See issue #608.
     pub iconify_prefixes: Vec<String>,
+    /// Bare identifier names referenced in this file that matched no local
+    /// binding and no explicit import, and are therefore candidates for
+    /// framework convention auto-import resolution (Nuxt `<Card001 />` template
+    /// tags today; script-level composable/util identifiers later). Captured
+    /// from this file's own bytes only (content-local, so it round-trips through
+    /// the per-file extraction cache). Resolution against the active plugins'
+    /// `auto_imports` table happens at graph-build time and is never cached as an
+    /// edge, so adding a new convention target file re-credits unchanged
+    /// consumers on the next run. See issue #704.
+    pub auto_import_candidates: Vec<String>,
 }
 
 /// One alias entry tying an exported object's dotted property path to a
@@ -589,7 +599,7 @@ const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 // `ModuleInfo` is the per-file extraction result, stored in a Vec during parallel parsing.
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 520);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 544);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]

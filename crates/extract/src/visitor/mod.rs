@@ -833,6 +833,7 @@ impl ModuleInfoExtractor {
             namespace_object_aliases,
             // Populated by `parse_source_to_module` from the raw markup (issue #608).
             iconify_prefixes: Vec::new(),
+            auto_import_candidates: Vec::new(),
         }
     }
 

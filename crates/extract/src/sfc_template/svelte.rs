@@ -776,7 +776,10 @@ mod tests {
             &imported(&["item"]),
         );
 
-        assert!(usage.is_empty());
+        // The `let:item` binding shadows the import, so it is not credited.
+        // `<Slot>` (no import) is captured as an auto-import candidate.
+        assert!(usage.used_bindings.is_empty());
+        assert!(usage.member_accesses.is_empty());
     }
 
     #[test]
@@ -786,7 +789,10 @@ mod tests {
             &imported(&["Item"]),
         );
 
-        assert!(usage.is_empty());
+        // `let:Item` shadows the import; `<Item>` is the shadowed local so it is
+        // not credited or captured. `<Slot>` (no import) is captured.
+        assert!(usage.used_bindings.is_empty());
+        assert!(usage.member_accesses.is_empty());
     }
 
     // --- Early returns ---
