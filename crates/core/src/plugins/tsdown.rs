@@ -8,9 +8,9 @@ use super::{Plugin, PluginResult};
 
 const ENABLERS: &[&str] = &["tsdown"];
 
-const CONFIG_PATTERNS: &[&str] = &["tsdown.config.{ts,js,cjs,mjs}"];
+const CONFIG_PATTERNS: &[&str] = &["tsdown.config.{ts,mts,cts,js,cjs,mjs}"];
 
-const ALWAYS_USED: &[&str] = &["tsdown.config.{ts,js,cjs,mjs}"];
+const ALWAYS_USED: &[&str] = &["tsdown.config.{ts,mts,cts,js,cjs,mjs}"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["tsdown"];
 

@@ -1,0 +1,7 @@
+{
+  "name": "issue-744-tsdown-mts-cts-configs",
+  "version": "1.0.0",
+  "devDependencies": {
+    "tsdown": "1.0.0"
+  }
+}
