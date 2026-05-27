@@ -876,6 +876,7 @@ mod tests {
                 },
                 findings: vec![RuntimeCoverageFinding {
                     id: "fallow:prod:deadbeef".to_owned(),
+                    stable_id: None,
                     path: root.join("src/cold.ts"),
                     function: "coldPath".to_owned(),
                     line: 12,
@@ -899,6 +900,7 @@ mod tests {
                 }],
                 hot_paths: vec![RuntimeCoverageHotPath {
                     id: "fallow:hot:cafebabe".to_owned(),
+                    stable_id: None,
                     path: root.join("src/hot.ts"),
                     function: "hotPath".to_owned(),
                     line: 3,

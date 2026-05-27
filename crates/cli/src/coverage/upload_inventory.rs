@@ -22,6 +22,7 @@ use std::process::{Command, ExitCode};
 use fallow_config::{FallowConfig, ResolvedConfig};
 use fallow_core::extract::inventory::{InventoryEntry, walk_source};
 use fallow_core::git_env::clear_ambient_git_env;
+use fallow_cov_protocol::{FunctionIdentity, IdentityResolution, function_identity_id};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
@@ -456,14 +457,18 @@ fn collect_inventory(
         let repo_relative = to_posix_string(&rel);
         let posix_path = match path_prefix {
             Some(prefix) => format!("{prefix}/{repo_relative}"),
-            None => repo_relative,
+            None => repo_relative.clone(),
         };
         for entry in walk_source(&file.path, &source) {
             let dedupe_key = (posix_path.clone(), entry.name.clone(), entry.line);
             if !seen.insert(dedupe_key) {
                 continue;
             }
-            out.push(InventoryFunction::from_entry(&posix_path, entry));
+            out.push(InventoryFunction::from_entry(
+                &posix_path,
+                &repo_relative,
+                entry,
+            ));
         }
     }
     out.sort_by(|a, b| {
@@ -563,14 +568,44 @@ struct InventoryFunction {
     function_name: String,
     #[serde(rename = "lineNumber")]
     line_number: u32,
+    /// Cross-surface `FunctionIdentity` v2 (protocol 0.6+), carried alongside
+    /// the legacy `(filePath, functionName, lineNumber)` join key so the cloud
+    /// can migrate to the stable-id join without a CLI change.
+    ///
+    /// Computed over the REPO-RELATIVE path, NOT the `--path-prefix`-prefixed
+    /// `filePath`: the protocol contract is `FunctionIdentity.file` is relative
+    /// to the project root, and fallow's own consumer (`coverage analyze`)
+    /// computes its static index over the repo-relative path. If the identity
+    /// hashed the prefixed path, the producer and consumer `stable_id` values
+    /// would diverge and the join would silently break. `--path-prefix` only
+    /// affects the legacy `filePath`, never the identity hash.
+    identity: FunctionIdentity,
 }
 
 impl InventoryFunction {
-    fn from_entry(posix_path: &str, entry: InventoryEntry) -> Self {
+    fn from_entry(posix_path: &str, repo_relative: &str, entry: InventoryEntry) -> Self {
+        let stable_id = function_identity_id(repo_relative, &entry.name, entry.line);
+        let identity = FunctionIdentity {
+            file: repo_relative.to_owned(),
+            name: entry.name.clone(),
+            start_line: entry.line,
+            start_column: Some(entry.start_column),
+            end_line: Some(entry.end_line),
+            end_column: Some(entry.end_column),
+            // source_hash is an optional cross-producer tiebreaker; the static
+            // inventory does not emit it yet (the cloud join does not consume
+            // it, and it is excluded from `stable_id`). Resolution stays
+            // `Resolved` because byte-accurate UTF-16 columns satisfy that
+            // contract independently of `source_hash`.
+            source_hash: None,
+            resolution: IdentityResolution::Resolved,
+            stable_id,
+        };
         Self {
             file_path: posix_path.to_owned(),
             function_name: entry.name,
             line_number: entry.line,
+            identity,
         }
     }
 }
@@ -1323,5 +1358,68 @@ mod tests {
             .status()
             .expect("run git");
         assert!(status.success(), "git {args:?} failed");
+    }
+
+    fn sample_entry() -> InventoryEntry {
+        InventoryEntry {
+            name: "render".to_owned(),
+            line: 42,
+            start_column: 1,
+            end_line: 50,
+            end_column: 2,
+        }
+    }
+
+    #[test]
+    fn identity_stable_id_is_repo_relative_not_prefixed() {
+        // The legacy filePath carries the container prefix; the identity must
+        // be computed over the repo-relative path so it matches the protocol's
+        // project-root-relative contract AND fallow's own consumer-side
+        // identity. Hashing the prefixed path here would silently break the
+        // cross-surface join.
+        let func =
+            InventoryFunction::from_entry("/app/src/render.tsx", "src/render.tsx", sample_entry());
+        assert_eq!(func.file_path, "/app/src/render.tsx");
+        assert_eq!(func.identity.file, "src/render.tsx");
+        assert_eq!(
+            func.identity.stable_id,
+            function_identity_id("src/render.tsx", "render", 42)
+        );
+    }
+
+    #[test]
+    fn identity_stable_id_unchanged_by_path_prefix() {
+        // With and without --path-prefix, the identity (and stable_id) stay
+        // pinned to the repo-relative path; only filePath moves.
+        let with_prefix =
+            InventoryFunction::from_entry("/app/src/render.tsx", "src/render.tsx", sample_entry());
+        let without_prefix =
+            InventoryFunction::from_entry("src/render.tsx", "src/render.tsx", sample_entry());
+        assert_ne!(with_prefix.file_path, without_prefix.file_path);
+        assert_eq!(
+            with_prefix.identity.stable_id,
+            without_prefix.identity.stable_id
+        );
+        assert_eq!(with_prefix.identity.file, without_prefix.identity.file);
+    }
+
+    #[test]
+    fn identity_matches_protocol_conformance_fixture() {
+        // Pin the cross-producer join key to the protocol's anchor fixture so
+        // a divergent helper change is caught in fallow CI, not at join time.
+        assert_eq!(
+            function_identity_id("src/render.tsx", "render", 42),
+            "fallow:fn:43629542"
+        );
+    }
+
+    #[test]
+    fn inventory_function_emits_resolved_columns() {
+        let func = InventoryFunction::from_entry("src/a.ts", "src/a.ts", sample_entry());
+        assert_eq!(func.identity.resolution, IdentityResolution::Resolved);
+        assert_eq!(func.identity.start_column, Some(1));
+        assert_eq!(func.identity.end_line, Some(50));
+        assert_eq!(func.identity.end_column, Some(2));
+        assert_eq!(func.identity.source_hash, None);
     }
 }

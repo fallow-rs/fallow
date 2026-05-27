@@ -2390,6 +2390,7 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
         findings: vec![
             RuntimeCoverageFinding {
                 id: "fallow:prod:deadbeef".to_string(),
+                stable_id: Some("fallow:fn:00000001".to_string()),
                 path: root.join("src/cold.ts"),
                 function: "coldPath".to_string(),
                 line: 14,
@@ -2412,6 +2413,9 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
             },
             RuntimeCoverageFinding {
                 id: "fallow:prod:feedface".to_string(),
+                // Left absent to exercise the "stable identity where available"
+                // path: an older sidecar / un-migrated cloud supplies no identity.
+                stable_id: None,
                 path: root.join("src/unknown.ts"),
                 function: "lateBound".to_string(),
                 line: 8,
@@ -2435,6 +2439,7 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
         ],
         hot_paths: vec![RuntimeCoverageHotPath {
             id: "fallow:hot:cafebabe".to_string(),
+            stable_id: Some("fallow:fn:00000002".to_string()),
             path: root.join("src/hot.ts"),
             function: "hotPath".to_string(),
             line: 3,

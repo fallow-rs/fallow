@@ -8,8 +8,9 @@ use std::{collections::BTreeMap, fs};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use fallow_config::OutputFormat;
 use fallow_cov_protocol::{
-    CaptureQuality, Confidence, CoverageSource, Evidence, PROTOCOL_VERSION, ReportVerdict, Request,
-    Response, RiskBand, StaticFile, StaticFindings, StaticFunction, Verdict, Watermark,
+    CaptureQuality, Confidence, CoverageSource, Evidence, FunctionIdentity, IdentityResolution,
+    PROTOCOL_VERSION, ReportVerdict, Request, Response, RiskBand, StaticFile, StaticFindings,
+    StaticFunction, Verdict, Watermark, function_identity_id,
 };
 use fallow_license::{
     DEFAULT_HARD_FAIL_DAYS, Feature, LicenseStatus, load_and_verify, load_raw_jwt,
@@ -122,8 +123,12 @@ struct AccumulatedFunction {
     hits: u32,
 }
 
+/// Dedup key for merging V8-remapped functions across overlapping script
+/// dumps. NOT the protocol's `fallow_cov_protocol::FunctionIdentity` (the
+/// cross-surface join key); this is a purely local position-based key used to
+/// coalesce the same physical function seen in multiple coverage scripts.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct FunctionIdentity {
+struct RemappedFnKey {
     name: String,
     decl_start: (u32, u32),
     loc_start: (u32, u32),
@@ -146,8 +151,8 @@ enum PackageManagerOutput {
 }
 
 impl RemappedFunction {
-    fn identity(&self) -> FunctionIdentity {
-        FunctionIdentity {
+    fn key(&self) -> RemappedFnKey {
+        RemappedFnKey {
             name: self.name.clone(),
             decl_start: (self.decl.start.line, self.decl.start.column),
             loc_start: (self.loc.start.line, self.loc.start.column),
@@ -679,6 +684,68 @@ impl LocalPackageManager {
     }
 }
 
+/// Construct a protocol [`StaticFunction`] carrying a v2 [`FunctionIdentity`].
+///
+/// [`StaticFunction`] is `#[non_exhaustive]` in protocol 0.6+ and the crate
+/// ships no constructor, so an external producer cannot use struct-literal
+/// syntax. We round-trip a `serde_json` object through the derived
+/// `Deserialize` (generated inside the protocol crate, which bypasses the
+/// non-exhaustive construction restriction). This function fully controls the
+/// shape, so the deserialize is infallible today; if a future protocol
+/// revision adds a required-without-default field, the `static_function_round_trips`
+/// unit test fails in CI rather than this `.expect()` panicking in the paid
+/// runtime-coverage path.
+///
+/// `stable_id` is computed over the repo-relative posix path so it matches the
+/// static-inventory producer and the `coverage analyze` consumer (columns are
+/// not part of the hash). Resolution is [`IdentityResolution::Unresolved`], NOT
+/// `Fallback`: the health path never had column precision by design
+/// (`FunctionComplexity` carries only a byte column and source is not retained
+/// here), so the identity is resolved no further than `file` / `name` /
+/// `start_line`, which is exactly the `Unresolved` contract. The join is
+/// unaffected because columns are excluded from `stable_id`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the protocol StaticFunction field set, which has no builder"
+)]
+fn static_function(
+    relative_posix: &str,
+    name: &str,
+    start_line: u32,
+    end_line: u32,
+    cyclomatic: u32,
+    static_used: bool,
+    test_covered: bool,
+    caller_count: u32,
+    owner_count: Option<u32>,
+) -> StaticFunction {
+    let identity = FunctionIdentity {
+        file: relative_posix.to_owned(),
+        name: name.to_owned(),
+        start_line,
+        start_column: None,
+        end_line: None,
+        end_column: None,
+        source_hash: None,
+        resolution: IdentityResolution::Unresolved,
+        stable_id: function_identity_id(relative_posix, name, start_line),
+    };
+    serde_json::from_value(serde_json::json!({
+        "name": name,
+        "start_line": start_line,
+        "end_line": end_line,
+        "cyclomatic": cyclomatic,
+        "static_used": static_used,
+        "test_covered": test_covered,
+        "caller_count": caller_count,
+        "owner_count": owner_count,
+        "identity": identity,
+    }))
+    .expect(
+        "StaticFunction is built with the exact protocol field shape and cannot fail to deserialize; a future required-without-default protocol field would fail static_function_round_trips in CI",
+    )
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "request assembly mirrors the health analysis filter context plus prepared coverage inputs"
@@ -738,6 +805,14 @@ fn build_request(
         if module.complexity.is_empty() {
             continue;
         }
+        // Forward-slash repo-relative path. Used BOTH as the sidecar
+        // `StaticFile.path` AND as the `FunctionIdentity.file` / `stable_id`
+        // input, so the identity fallow produces here agrees with the
+        // static-inventory producer and the `coverage analyze` consumer (both
+        // hash the repo-relative path). Sidecar wire format uses forward
+        // slashes regardless of host OS so a Windows-hosted run interoperates
+        // with a sidecar on a different machine.
+        let relative_posix = relative.to_string_lossy().replace('\\', "/");
         let functions = module
             .complexity
             .iter()
@@ -751,34 +826,33 @@ fn build_request(
                     static_signals,
                     istanbul_coverage,
                 );
-                StaticFunction {
-                    name: function.name.clone(),
-                    start_line: function.line,
-                    end_line: function.line.saturating_add(function.line_count),
-                    cyclomatic: u32::from(function.cyclomatic),
-                    // Export-level dead-code signals are reliable enough to mark
-                    // unreferenced exports as statically unused. Internal-only
-                    // functions still default to `true` until fallow grows an
-                    // intra-file call graph; that avoids false `safe_to_delete`
-                    // verdicts when a private helper is only called locally.
+                // Export-level dead-code signals are reliable enough to mark
+                // unreferenced exports as statically unused. Internal-only
+                // functions still default to `true` until fallow grows an
+                // intra-file call graph; that avoids false `safe_to_delete`
+                // verdicts when a private helper is only called locally.
+                //
+                // Join real test evidence when available: Istanbul per-function
+                // hits first, then direct test-reachable export references as a
+                // conservative fallback. We intentionally do not infer "covered"
+                // for every function in a test-reachable file.
+                static_function(
+                    &relative_posix,
+                    &function.name,
+                    function.line,
+                    function.line.saturating_add(function.line_count),
+                    u32::from(function.cyclomatic),
                     static_used,
-                    // Join real test evidence when available: Istanbul per-function
-                    // hits first, then direct test-reachable export references as a
-                    // conservative fallback. We intentionally do not infer "covered"
-                    // for every function in a test-reachable file.
                     test_covered,
                     caller_count,
                     owner_count,
-                }
+                )
             })
             .collect();
         files.push(StaticFile {
-            // Sidecar wire format uses forward-slash paths regardless of
-            // host OS so a Windows-hosted CLI run interoperates with a
-            // sidecar (or downstream consumer) on a different machine.
             // Matches the existing convention in `report::ci::diff_filter`
             // and `crates/cli/src/health/mod.rs::relative_to_root`.
-            path: relative.to_string_lossy().replace('\\', "/"),
+            path: relative_posix,
             functions,
         });
     }
@@ -1074,7 +1148,7 @@ fn preprocess_v8_coverage_file(
         return Ok(None);
     };
 
-    let mut remapped_files: BTreeMap<PathBuf, BTreeMap<FunctionIdentity, AccumulatedFunction>> =
+    let mut remapped_files: BTreeMap<PathBuf, BTreeMap<RemappedFnKey, AccumulatedFunction>> =
         BTreeMap::new();
     let mut residual_scripts = Vec::new();
 
@@ -1375,13 +1449,13 @@ fn resolve_virtual_candidate(candidates: &[PathBuf], base_dir: &Path) -> Option<
 }
 
 fn merge_remapped_functions(
-    target: &mut BTreeMap<PathBuf, BTreeMap<FunctionIdentity, AccumulatedFunction>>,
+    target: &mut BTreeMap<PathBuf, BTreeMap<RemappedFnKey, AccumulatedFunction>>,
     functions: Vec<RemappedFunction>,
 ) {
     for function in functions {
-        let identity = function.identity();
+        let key = function.key();
         let file = target.entry(function.path).or_default();
-        let entry = file.entry(identity).or_insert_with(|| AccumulatedFunction {
+        let entry = file.entry(key).or_insert_with(|| AccumulatedFunction {
             entry: FnEntry {
                 name: function.name.clone(),
                 line: function.decl.start.line,
@@ -1406,7 +1480,7 @@ fn location_precedes(left: &Position, right: &Position) -> bool {
 
 fn write_istanbul_coverage_file(
     output_path: &Path,
-    files: &BTreeMap<PathBuf, BTreeMap<FunctionIdentity, AccumulatedFunction>>,
+    files: &BTreeMap<PathBuf, BTreeMap<RemappedFnKey, AccumulatedFunction>>,
 ) -> Result<(), String> {
     let mut root = BTreeMap::new();
     for (path, functions) in files {
@@ -1659,6 +1733,10 @@ fn stderr_message(stderr: &[u8], fallback: &str) -> String {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "flat mapping of four response collections (findings/hot_paths/blast/importance) into output structs plus their sort comparators; splitting would scatter the closely-coupled field mapping"
+)]
 fn convert_response(
     response: Response,
     _locations: &FunctionLocations,
@@ -1674,6 +1752,10 @@ fn convert_response(
             }
             Some(RuntimeCoverageFinding {
                 id: finding.id,
+                // Cross-surface join key from the sidecar's FunctionIdentity
+                // when present; `None` for 0.5-shape responses (legacy
+                // fallback). Baseline keying prefers this over `id`.
+                stable_id: finding.identity.map(|identity| identity.stable_id),
                 path: PathBuf::from(finding.file),
                 function: finding.function,
                 line: finding.line,
@@ -1706,6 +1788,7 @@ fn convert_response(
         .into_iter()
         .map(|entry| RuntimeCoverageHotPath {
             id: entry.id,
+            stable_id: entry.identity.map(|identity| identity.stable_id),
             path: PathBuf::from(entry.file),
             function: entry.function,
             line: entry.line,
@@ -1736,6 +1819,7 @@ fn convert_response(
         .map(
             |entry| crate::health_types::RuntimeCoverageBlastRadiusEntry {
                 id: entry.id,
+                stable_id: entry.identity.map(|identity| identity.stable_id),
                 file: PathBuf::from(entry.file),
                 function: entry.function,
                 line: entry.line,
@@ -1765,6 +1849,7 @@ fn convert_response(
         .map(
             |entry| crate::health_types::RuntimeCoverageImportanceEntry {
                 id: entry.id,
+                stable_id: entry.identity.map(|identity| identity.stable_id),
                 file: PathBuf::from(entry.file),
                 function: entry.function,
                 line: entry.line,
@@ -1842,8 +1927,12 @@ fn apply_top_limit(report: &mut RuntimeCoverageReport, top: Option<usize>) {
 const fn map_risk_band(risk_band: RiskBand) -> RuntimeCoverageRiskBand {
     match risk_band {
         RiskBand::Low => RuntimeCoverageRiskBand::Low,
-        RiskBand::Medium => RuntimeCoverageRiskBand::Medium,
         RiskBand::High => RuntimeCoverageRiskBand::High,
+        // Medium, plus the forward-compat `Unknown` sentinel (protocol 0.7.0):
+        // a sidecar on a newer protocol emitted a risk band this CLI has not
+        // seen yet. Map it to the neutral middle rather than dropping the
+        // entry; fallow's own output enum carries only Low/Medium/High.
+        RiskBand::Medium | RiskBand::Unknown => RuntimeCoverageRiskBand::Medium,
     }
 }
 
@@ -1936,18 +2025,19 @@ const fn verdict_rank(verdict: RuntimeCoverageVerdict) -> u8 {
 )]
 mod tests {
     use super::{
-        AccumulatedFunction, BINARY_SIGNING_VERIFY_KEY, FunctionIdentity, PackageManagerOutput,
+        AccumulatedFunction, BINARY_SIGNING_VERIFY_KEY, PackageManagerOutput, RemappedFnKey,
         RemappedFunction, StaticSignalIndex, build_request, build_static_signal_index,
         convert_response, discover_sidecar, looks_like_istanbul, merge_remapped_functions,
         path_binary_candidates, prepare_coverage_sources, resolve_original_source_path,
-        resolve_sidecar_via_command, sidecar_binary_name, verify_sidecar_signature,
-        write_istanbul_coverage_file,
+        resolve_sidecar_via_command, sidecar_binary_name, static_function,
+        verify_sidecar_signature, write_istanbul_coverage_file,
     };
     use crate::health::RuntimeCoverageOptions;
     use fallow_config::{FallowConfig, OutputFormat};
     use fallow_cov_protocol::{
-        Confidence, CoverageSource, DiagnosticMessage, Evidence, Finding, HotPath, ReportVerdict,
-        Response, Summary, Verdict,
+        Confidence, CoverageSource, DiagnosticMessage, Evidence, Finding, FunctionIdentity,
+        HotPath, IdentityResolution, PROTOCOL_VERSION, ReportVerdict, Response, Summary, Verdict,
+        function_identity_id,
     };
     use globset::GlobSetBuilder;
     use oxc_coverage_instrument::{Location, Position};
@@ -2455,6 +2545,131 @@ mod tests {
     }
 
     #[test]
+    fn static_function_round_trips() {
+        // Pins the `static_function` serde round-trip shape. If a future
+        // protocol revision adds a required-without-default field to
+        // StaticFunction, this fails in CI rather than the `.expect()`
+        // panicking in the paid runtime-coverage path.
+        let sf = static_function("src/render.tsx", "render", 42, 50, 4, true, false, 0, None);
+        let value = serde_json::to_value(&sf).expect("serialize StaticFunction");
+        assert_eq!(value["name"], "render");
+        assert_eq!(value["start_line"], 42);
+        assert_eq!(value["end_line"], 50);
+        assert_eq!(value["identity"]["resolution"], "unresolved");
+        assert_eq!(value["identity"]["stable_id"], "fallow:fn:43629542");
+        // Columns are deliberately absent on the health path (Unresolved).
+        assert!(value["identity"].get("start_column").is_none());
+    }
+
+    /// Build a protocol [`Finding`] in tests. `Finding` is `#[non_exhaustive]`
+    /// with no constructor, so we round-trip through serde (the enum / nested
+    /// values are serialized from constructible typed values to avoid guessing
+    /// wire reprs). `identity` lets a test exercise the v2 join-key threading.
+    fn proto_finding(identity: Option<&FunctionIdentity>) -> Finding {
+        serde_json::from_value(serde_json::json!({
+            "id": "fallow:prod:abc12345",
+            "file": "src/app.ts",
+            "function": "alpha",
+            "line": 8,
+            "verdict": serde_json::to_value(Verdict::ReviewRequired).unwrap(),
+            "invocations": 0,
+            "confidence": serde_json::to_value(Confidence::Medium).unwrap(),
+            "evidence": serde_json::to_value(Evidence {
+                static_status: "used".to_owned(),
+                test_coverage: "not_covered".to_owned(),
+                v8_tracking: "tracked".to_owned(),
+                untracked_reason: None,
+                observation_days: 7,
+                deployments_observed: 2,
+            })
+            .unwrap(),
+            "actions": [],
+            "identity": identity,
+        }))
+        .expect("valid Finding json")
+    }
+
+    fn proto_hot_path() -> HotPath {
+        serde_json::from_value(serde_json::json!({
+            "id": "fallow:hot:def67890",
+            "file": "src/app.ts",
+            "function": "alpha",
+            "line": 8,
+            "end_line": 12,
+            "invocations": 20,
+            "percentile": 50,
+        }))
+        .expect("valid HotPath json")
+    }
+
+    #[test]
+    fn convert_response_threads_identity_stable_id() {
+        let identity = FunctionIdentity {
+            file: "src/app.ts".to_owned(),
+            name: "alpha".to_owned(),
+            start_line: 8,
+            start_column: None,
+            end_line: None,
+            end_column: None,
+            source_hash: None,
+            resolution: IdentityResolution::Resolved,
+            stable_id: function_identity_id("src/app.ts", "alpha", 8),
+        };
+        let response = Response {
+            protocol_version: PROTOCOL_VERSION.to_owned(),
+            verdict: ReportVerdict::ColdCodeDetected,
+            summary: Summary {
+                functions_tracked: 1,
+                functions_hit: 0,
+                functions_unhit: 1,
+                functions_untracked: 0,
+                coverage_percent: 0.0,
+                trace_count: 1,
+                period_days: 1,
+                deployments_seen: 1,
+                capture_quality: None,
+            },
+            findings: vec![proto_finding(Some(&identity))],
+            hot_paths: vec![],
+            blast_radius: vec![],
+            importance: vec![],
+            watermark: None,
+            errors: vec![],
+            warnings: vec![],
+        };
+        let report = convert_response(response, &FxHashMap::default(), None);
+        assert_eq!(report.findings[0].stable_id, Some(identity.stable_id));
+    }
+
+    #[test]
+    fn convert_response_finding_without_identity_has_no_stable_id() {
+        let response = Response {
+            protocol_version: PROTOCOL_VERSION.to_owned(),
+            verdict: ReportVerdict::ColdCodeDetected,
+            summary: Summary {
+                functions_tracked: 1,
+                functions_hit: 0,
+                functions_unhit: 1,
+                functions_untracked: 0,
+                coverage_percent: 0.0,
+                trace_count: 1,
+                period_days: 1,
+                deployments_seen: 1,
+                capture_quality: None,
+            },
+            findings: vec![proto_finding(None)],
+            hot_paths: vec![],
+            blast_radius: vec![],
+            importance: vec![],
+            watermark: None,
+            errors: vec![],
+            warnings: vec![],
+        };
+        let report = convert_response(response, &FxHashMap::default(), None);
+        assert_eq!(report.findings[0].stable_id, None);
+    }
+
+    #[test]
     fn convert_response_round_trips_ids_and_evidence() {
         let locations = FxHashMap::default();
 
@@ -2473,33 +2688,8 @@ mod tests {
                     deployments_seen: 2,
                     capture_quality: None,
                 },
-                findings: vec![Finding {
-                    id: "fallow:prod:abc12345".to_owned(),
-                    file: "src/app.ts".to_owned(),
-                    function: "alpha".to_owned(),
-                    line: 8,
-                    verdict: Verdict::ReviewRequired,
-                    invocations: Some(0),
-                    confidence: Confidence::Medium,
-                    evidence: Evidence {
-                        static_status: "used".to_owned(),
-                        test_coverage: "not_covered".to_owned(),
-                        v8_tracking: "tracked".to_owned(),
-                        untracked_reason: None,
-                        observation_days: 7,
-                        deployments_observed: 2,
-                    },
-                    actions: vec![],
-                }],
-                hot_paths: vec![HotPath {
-                    id: "fallow:hot:def67890".to_owned(),
-                    file: "src/app.ts".to_owned(),
-                    function: "alpha".to_owned(),
-                    line: 8,
-                    end_line: 12,
-                    invocations: 20,
-                    percentile: 50,
-                }],
+                findings: vec![proto_finding(None)],
+                hot_paths: vec![proto_hot_path()],
                 blast_radius: vec![],
                 importance: vec![],
                 watermark: None,
@@ -3138,7 +3328,7 @@ mod tests {
             .unwrap_or_else(|_| root.clone())
             .join("app.ts");
 
-        let mut files: BTreeMap<PathBuf, BTreeMap<FunctionIdentity, AccumulatedFunction>> =
+        let mut files: BTreeMap<PathBuf, BTreeMap<RemappedFnKey, AccumulatedFunction>> =
             BTreeMap::new();
         merge_remapped_functions(
             &mut files,

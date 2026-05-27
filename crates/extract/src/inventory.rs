@@ -35,20 +35,33 @@ use oxc_parser::Parser;
 use oxc_semantic::ScopeFlags;
 use oxc_span::{SourceType, Span};
 
-/// A single static-inventory entry: `(name, line)` for one function.
+/// A single static-inventory entry for one function.
 ///
 /// `name` is beacon-compatible (see the module docs for the naming rule).
-/// `line` is 1-based, matching the AST span start.
+/// `line` is 1-based, matching the AST span start. The `start_column` /
+/// `end_line` / `end_column` fields carry the function-node span in the
+/// 1-indexed UTF-16 convention the cross-surface `FunctionIdentity` join key
+/// expects (see `fallow_cov_protocol::FunctionIdentity::start_column`). They
+/// are descriptive metadata: the join hash is `(file, name, line)` only, so
+/// column fidelity never affects the join, only display / same-line
+/// disambiguation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InventoryEntry {
     /// Beacon-compatible function name.
     pub name: String,
-    /// 1-based source line of the function declaration.
+    /// 1-based source line of the function declaration (node `span.start`).
     pub line: u32,
+    /// 1-indexed UTF-16 column of the function node start.
+    pub start_column: u32,
+    /// 1-based source line where the function node ends.
+    pub end_line: u32,
+    /// 1-indexed UTF-16 column of the function node end.
+    pub end_column: u32,
 }
 
 /// Visitor that collects [`InventoryEntry`] values in file traversal order.
 struct InventoryVisitor<'a> {
+    source: &'a str,
     line_offsets: &'a [u32],
     entries: Vec<InventoryEntry>,
     /// Parent-provided name override (method key, variable binding, etc.).
@@ -58,8 +71,9 @@ struct InventoryVisitor<'a> {
 }
 
 impl<'a> InventoryVisitor<'a> {
-    const fn new(line_offsets: &'a [u32]) -> Self {
+    const fn new(source: &'a str, line_offsets: &'a [u32]) -> Self {
         Self {
+            source,
             line_offsets,
             entries: Vec::new(),
             pending_name: None,
@@ -89,9 +103,41 @@ impl<'a> InventoryVisitor<'a> {
     }
 
     fn record(&mut self, name: String, span: Span) {
-        let (line, _col) =
-            fallow_types::extract::byte_offset_to_line_col(self.line_offsets, span.start);
-        self.entries.push(InventoryEntry { name, line });
+        let (line, start_column) = self.line_col_utf16(span.start);
+        let (end_line, end_column) = self.line_col_utf16(span.end);
+        self.entries.push(InventoryEntry {
+            name,
+            line,
+            start_column,
+            end_line,
+            end_column,
+        });
+    }
+
+    /// Map a UTF-8 byte offset to `(1-based line, 1-indexed UTF-16 column)`.
+    ///
+    /// The line comes from the precomputed offset table; the column counts
+    /// UTF-16 code units from the line start to `byte_offset`, matching the
+    /// `FunctionIdentity` column convention (Istanbul / V8 / oxc all normalize
+    /// to 1-indexed UTF-16). A byte offset that does not fall on a char
+    /// boundary (it always should for an AST span) clamps to the nearest
+    /// boundary at or before it rather than panicking.
+    fn line_col_utf16(&self, byte_offset: u32) -> (u32, u32) {
+        let line_idx = match self.line_offsets.binary_search(&byte_offset) {
+            Ok(idx) => idx,
+            Err(idx) => idx.saturating_sub(1),
+        };
+        let line = line_idx as u32 + 1;
+        let line_start = self.line_offsets[line_idx] as usize;
+        let mut end = byte_offset as usize;
+        while end > line_start && !self.source.is_char_boundary(end) {
+            end -= 1;
+        }
+        let col_utf16 = self
+            .source
+            .get(line_start..end)
+            .map_or(0, |slice| slice.encode_utf16().count());
+        (line, col_utf16 as u32 + 1)
     }
 }
 
@@ -169,7 +215,7 @@ pub fn walk_source(path: &Path, source: &str) -> Vec<InventoryEntry> {
     let parser_return = Parser::new(&allocator, source, source_type).parse();
 
     let line_offsets = fallow_types::extract::compute_line_offsets(source);
-    let mut visitor = InventoryVisitor::new(&line_offsets);
+    let mut visitor = InventoryVisitor::new(source, &line_offsets);
     visitor.visit_program(&parser_return.program);
 
     // If the initial parse found nothing, retry with JSX/TSX source type
@@ -184,7 +230,7 @@ pub fn walk_source(path: &Path, source: &str) -> Vec<InventoryEntry> {
         };
         let allocator2 = Allocator::default();
         let retry_return = Parser::new(&allocator2, source, jsx_type).parse();
-        let mut retry_visitor = InventoryVisitor::new(&line_offsets);
+        let mut retry_visitor = InventoryVisitor::new(source, &line_offsets);
         retry_visitor.visit_program(&retry_return.program);
         if !retry_visitor.entries.is_empty() {
             return retry_visitor.entries;
@@ -374,5 +420,58 @@ mod tests {
         );
         let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, vec!["(anonymous_0)"]);
+    }
+
+    #[test]
+    fn records_one_indexed_utf16_columns() {
+        // `function foo` starts at byte 0, so UTF-16 column 1.
+        let entries = walk("function foo() { return 1; }");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].start_column, 1);
+        assert_eq!(entries[0].end_line, 1);
+        // Single-line function: end column is past the closing brace.
+        assert!(entries[0].end_column > entries[0].start_column);
+    }
+
+    #[test]
+    fn utf16_column_counts_code_units_not_bytes() {
+        // A 4-byte emoji (2 UTF-16 code units) sits before the arrow function.
+        // A byte-based column would be 4 higher than the UTF-16 column; assert
+        // the column stays well under the prefix byte length to prove code-unit
+        // counting.
+        let entries = walk("const e = \"\u{1F600}\"; const f = () => 1;");
+        let f = entries.iter().find(|e| e.name == "f").expect("f present");
+        let byte_prefix_len = "const e = \"\u{1F600}\"; const f = ".len() as u32;
+        assert!(f.start_column < byte_prefix_len + 1);
+    }
+
+    #[test]
+    fn same_line_distinct_named_functions_have_distinct_positions() {
+        // Two functions on one line with different names. The (name) differs,
+        // so the cross-surface stable_id (file+name+line) differs; their
+        // columns also differ for display disambiguation.
+        let entries = walk("function a() {} function b() {}");
+        let a = entries.iter().find(|e| e.name == "a").expect("a present");
+        let b = entries.iter().find(|e| e.name == "b").expect("b present");
+        assert_eq!(a.line, b.line, "both on line 1");
+        assert_ne!(
+            a.start_column, b.start_column,
+            "same-line functions are column-disambiguated"
+        );
+    }
+
+    #[test]
+    fn same_line_anonymous_functions_stay_distinct_via_counter() {
+        // Two anonymous arrows on one line get distinct names from the
+        // file-scoped counter, so their stable_ids (file+name+line) differ even
+        // though file and line are identical.
+        let entries = walk("const xs = [() => 1, () => 2];");
+        let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["(anonymous_0)", "(anonymous_1)"]);
+        assert_eq!(entries[0].line, entries[1].line, "both on line 1");
+        assert_ne!(
+            entries[0].name, entries[1].name,
+            "counter keeps them distinct"
+        );
     }
 }

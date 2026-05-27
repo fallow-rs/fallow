@@ -1,6 +1,5 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 2137
 expression: redact_version(&json_str)
 ---
 {
@@ -65,6 +64,7 @@ expression: redact_version(&json_str)
     "findings": [
       {
         "id": "fallow:prod:deadbeef",
+        "stable_id": "fallow:fn:00000001",
         "path": "src/cold.ts",
         "function": "coldPath",
         "line": 14,
@@ -113,6 +113,7 @@ expression: redact_version(&json_str)
     "hot_paths": [
       {
         "id": "fallow:hot:cafebabe",
+        "stable_id": "fallow:fn:00000002",
         "path": "src/hot.ts",
         "function": "hotPath",
         "line": 3,

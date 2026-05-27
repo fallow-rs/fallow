@@ -138,6 +138,12 @@ pub struct CloudRuntimeSummary {
 pub struct CloudRuntimeFunction {
     pub file_path: String,
     pub function_name: String,
+    /// Cross-surface `FunctionIdentity` join key (`fallow:fn:<hash>`) when the
+    /// cloud has been migrated to emit it (fallow-cloud#63). `None` for the
+    /// current un-migrated cloud, in which case the join falls back to
+    /// `(file_path, function_name, line)` and the fuzzy line tier.
+    #[serde(default, rename = "stableId")]
+    pub stable_id: Option<String>,
     #[serde(default)]
     pub line_number: Option<u32>,
     #[serde(default)]
@@ -157,6 +163,10 @@ pub struct CloudRuntimeFunction {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CloudRuntimeBlastRadiusEntry {
     pub id: String,
+    /// Cross-surface `FunctionIdentity` join key when the cloud emits it
+    /// (fallow-cloud#63). `None` for the current un-migrated cloud.
+    #[serde(default, rename = "stableId")]
+    pub stable_id: Option<String>,
     pub file: String,
     pub function: String,
     pub line: u32,
@@ -180,6 +190,10 @@ pub enum CloudRuntimeRiskBand {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CloudRuntimeImportanceEntry {
     pub id: String,
+    /// Cross-surface `FunctionIdentity` join key when the cloud emits it
+    /// (fallow-cloud#63). `None` for the current un-migrated cloud.
+    #[serde(default, rename = "stableId")]
+    pub stable_id: Option<String>,
     pub file: String,
     pub function: String,
     pub line: u32,

@@ -3740,10 +3740,21 @@ untracked_ratio_percent: number
 }
 export interface RuntimeCoverageFinding {
 /**
- * Stable content-hash ID of the form `fallow:prod:<hash>`, where `<hash>`
- * is the first 8 hex characters of SHA-256(file + function + line + 'prod').
+ * Per-finding suppression key of the form `fallow:prod:<hash>` (first 8 hex
+ * of SHA-256(file + function + line + 'prod')). Hashes the current line, so
+ * it changes when the function moves. Use this to suppress one finding.
  */
 id: string
+/**
+ * Cross-surface join key of the form `fallow:fn:<hash>`
+ * (`fallow_cov_protocol::function_identity_id`, hashes file + name +
+ * start_line, NOT the line). Stable across line moves; the same function
+ * shares this value across findings, hot paths, blast-radius, and
+ * importance entries. `null` when the producing surface (or an un-migrated
+ * cloud) supplied no `FunctionIdentity`. New baselines key on this when
+ * present so suppressions survive line shifts.
+ */
+stable_id?: (string | null)
 /**
  * File path relative to the project root.
  */
@@ -3826,6 +3837,12 @@ export interface RuntimeCoverageHotPath {
  */
 id: string
 /**
+ * Cross-surface join key (`fallow:fn:<hash>`) for the hot function. Stable
+ * across line moves; shared with the same function's findings / blast /
+ * importance entries. `null` when no `FunctionIdentity` was supplied.
+ */
+stable_id?: (string | null)
+/**
  * File path relative to the project root.
  */
 path: string
@@ -3866,6 +3883,12 @@ export interface RuntimeCoverageBlastRadiusEntry {
  */
 id: string
 /**
+ * Cross-surface join key (`fallow:fn:<hash>`) for the function. Stable
+ * across line moves; shared with the same function's findings / hot-path /
+ * importance entries. `null` when no `FunctionIdentity` was supplied.
+ */
+stable_id?: (string | null)
+/**
  * File path relative to the project root.
  */
 file: string
@@ -3897,6 +3920,12 @@ export interface RuntimeCoverageImportanceEntry {
  * Stable content-hash ID of the form `fallow:importance:<hash>`.
  */
 id: string
+/**
+ * Cross-surface join key (`fallow:fn:<hash>`) for the function. Stable
+ * across line moves; shared with the same function's findings / hot-path /
+ * blast-radius entries. `null` when no `FunctionIdentity` was supplied.
+ */
+stable_id?: (string | null)
 /**
  * File path relative to the project root.
  */

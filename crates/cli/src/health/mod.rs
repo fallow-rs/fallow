@@ -3473,6 +3473,7 @@ mod tests {
             findings: vec![
                 crate::health_types::RuntimeCoverageFinding {
                     id: "fallow:prod:aaaaaaaa".to_owned(),
+                    stable_id: None,
                     path: PathBuf::from("/project/src/a.ts"),
                     function: "alpha".to_owned(),
                     line: 10,
@@ -3484,6 +3485,7 @@ mod tests {
                 },
                 crate::health_types::RuntimeCoverageFinding {
                     id: "fallow:prod:bbbbbbbb".to_owned(),
+                    stable_id: None,
                     path: PathBuf::from("/project/src/b.ts"),
                     function: "beta".to_owned(),
                     line: 20,
@@ -3495,6 +3497,7 @@ mod tests {
                 },
                 crate::health_types::RuntimeCoverageFinding {
                     id: "fallow:prod:cccccccc".to_owned(),
+                    stable_id: None,
                     path: PathBuf::from("/project/src/c.ts"),
                     function: "gamma".to_owned(),
                     line: 30,
@@ -3508,6 +3511,7 @@ mod tests {
             hot_paths: vec![
                 crate::health_types::RuntimeCoverageHotPath {
                     id: "fallow:hot:11111111".to_owned(),
+                    stable_id: None,
                     path: PathBuf::from("/project/src/hot-a.ts"),
                     function: "hotAlpha".to_owned(),
                     line: 1,
@@ -3518,6 +3522,7 @@ mod tests {
                 },
                 crate::health_types::RuntimeCoverageHotPath {
                     id: "fallow:hot:22222222".to_owned(),
+                    stable_id: None,
                     path: PathBuf::from("/project/src/hot-b.ts"),
                     function: "hotBeta".to_owned(),
                     line: 2,
@@ -3571,6 +3576,7 @@ mod tests {
             summary: fx_summary(2, 1, 1, 0),
             findings: vec![crate::health_types::RuntimeCoverageFinding {
                 id: "fallow:prod:aaaaaaaa".to_owned(),
+                stable_id: None,
                 path: PathBuf::from("/project/src/a.ts"),
                 function: "alpha".to_owned(),
                 line: 10,
@@ -3617,6 +3623,7 @@ mod tests {
             findings: vec![],
             hot_paths: vec![crate::health_types::RuntimeCoverageHotPath {
                 id: "fallow:hot:33333333".to_owned(),
+                stable_id: None,
                 path: PathBuf::from("/project/src/hot.ts"),
                 function: "renderHotPath".to_owned(),
                 line: 7,
@@ -3655,6 +3662,7 @@ mod tests {
             findings: vec![],
             hot_paths: vec![crate::health_types::RuntimeCoverageHotPath {
                 id: "fallow:hot:44444444".to_owned(),
+                stable_id: None,
                 path: PathBuf::from("/project/src/hot.ts"),
                 function: "renderHotPath".to_owned(),
                 line: 7,
@@ -3706,6 +3714,7 @@ mod tests {
     ) -> crate::health_types::RuntimeCoverageHotPath {
         crate::health_types::RuntimeCoverageHotPath {
             id: id.to_owned(),
+            stable_id: None,
             path: PathBuf::from(path),
             function: "renderHotPath".to_owned(),
             line,
@@ -3924,6 +3933,7 @@ mod tests {
             summary: fx_summary(2, 1, 1, 0),
             findings: vec![crate::health_types::RuntimeCoverageFinding {
                 id: "fallow:prod:cold0001".to_owned(),
+                stable_id: None,
                 path: PathBuf::from("/project/src/cold.ts"),
                 function: "coldFn".to_owned(),
                 line: 4,
@@ -3973,6 +3983,7 @@ mod tests {
             summary: fx_summary(2, 1, 1, 0),
             findings: vec![crate::health_types::RuntimeCoverageFinding {
                 id: "fallow:prod:cold0002".to_owned(),
+                stable_id: None,
                 path: PathBuf::from("/project/src/cold.ts"),
                 function: "coldFn".to_owned(),
                 line: 4,
@@ -4122,6 +4133,7 @@ mod tests {
                     summary: fx_summary(1, 0, 1, 0),
                     findings: vec![crate::health_types::RuntimeCoverageFinding {
                         id: "fallow:prod:lowtraffic".to_owned(),
+                        stable_id: None,
                         path: PathBuf::from("/project/src/cold.ts"),
                         function: "coldPath".to_owned(),
                         line: 14,

@@ -1615,7 +1615,14 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Stable content-hash ID of the form `fallow:prod:<hash>`, where `<hash>`\nis the first 8 hex characters of SHA-256(file + function + line + 'prod')."
+          "description": "Per-finding suppression key of the form `fallow:prod:<hash>` (first 8 hex\nof SHA-256(file + function + line + 'prod')). Hashes the current line, so\nit changes when the function moves. Use this to suppress one finding."
+        },
+        "stable_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Cross-surface join key of the form `fallow:fn:<hash>`\n(`fallow_cov_protocol::function_identity_id`, hashes file + name +\nstart_line, NOT the line). Stable across line moves; the same function\nshares this value across findings, hot paths, blast-radius, and\nimportance entries. `null` when the producing surface (or an un-migrated\ncloud) supplied no `FunctionIdentity`. New baselines key on this when\npresent so suppressions survive line shifts."
         },
         "path": {
           "type": "string",
@@ -1669,6 +1676,13 @@
         "id": {
           "type": "string",
           "description": "Stable content-hash ID of the form `fallow:hot:<hash>`."
+        },
+        "stable_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Cross-surface join key (`fallow:fn:<hash>`) for the hot function. Stable\nacross line moves; shared with the same function's findings / blast /\nimportance entries. `null` when no `FunctionIdentity` was supplied."
         },
         "path": {
           "type": "string",
@@ -1728,6 +1742,13 @@
           "type": "string",
           "description": "Stable content-hash ID of the form `fallow:blast:<hash>`."
         },
+        "stable_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Cross-surface join key (`fallow:fn:<hash>`) for the function. Stable\nacross line moves; shared with the same function's findings / hot-path /\nimportance entries. `null` when no `FunctionIdentity` was supplied."
+        },
         "file": {
           "type": "string",
           "description": "File path relative to the project root."
@@ -1775,6 +1796,13 @@
         "id": {
           "type": "string",
           "description": "Stable content-hash ID of the form `fallow:importance:<hash>`."
+        },
+        "stable_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Cross-surface join key (`fallow:fn:<hash>`) for the function. Stable\nacross line moves; shared with the same function's findings / hot-path /\nblast-radius entries. `null` when no `FunctionIdentity` was supplied."
         },
         "file": {
           "type": "string",

@@ -2179,6 +2179,7 @@ mod tests {
             },
             findings: vec![crate::health_types::RuntimeCoverageFinding {
                 id: "fallow:prod:deadbeef".to_owned(),
+                stable_id: None,
                 path: root.join("src/cold.ts"),
                 function: "coldPath".to_owned(),
                 line: 14,
@@ -2197,6 +2198,7 @@ mod tests {
             }],
             hot_paths: vec![crate::health_types::RuntimeCoverageHotPath {
                 id: "fallow:hot:cafebabe".to_owned(),
+                stable_id: None,
                 path: root.join("src/hot.ts"),
                 function: "hotPath".to_owned(),
                 line: 3,

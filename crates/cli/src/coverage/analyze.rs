@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use fallow_config::OutputFormat;
 use fallow_core::git_env::clear_ambient_git_env;
+use fallow_cov_protocol::function_identity_id;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::coverage::RunContext;
@@ -319,12 +320,24 @@ struct StaticFunctionInfo {
     cyclomatic: u32,
     caller_count: u32,
     owner_count: Option<u32>,
+    /// Cross-surface join key (`fallow:fn:<hash>`) computed over the
+    /// repo-relative `path`. Agrees with the static-inventory producer's
+    /// `stable_id` for the same function, so a cloud function carrying a
+    /// `stable_id` joins here directly.
+    stable_id: String,
 }
 
 #[derive(Default)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "the `by_<key>` prefix names the lookup dimension of each index map; it is the clearest convention for a multi-index struct"
+)]
 struct StaticIndex {
     by_key: FxHashMap<(String, String, u32), StaticFunctionInfo>,
     by_path_name: FxHashMap<(String, String), Vec<StaticFunctionInfo>>,
+    /// Stable-id join tier: the strongest match, tried before
+    /// `(path, name, line)` and the fuzzy line fallback.
+    by_stable_id: FxHashMap<String, StaticFunctionInfo>,
 }
 
 fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIndex, ExitCode> {
@@ -415,6 +428,9 @@ fn build_index_from_analysis(
                 && !unused_export_lines
                     .get(*path)
                     .is_some_and(|lines| lines.contains(&function.line));
+            // Computed over the repo-relative `rel` so it agrees with the
+            // static-inventory producer's stable_id for the same function.
+            let stable_id = function_identity_id(&rel, &function.name, function.line);
             let info = StaticFunctionInfo {
                 path: PathBuf::from(&rel),
                 name: function.name.clone(),
@@ -425,11 +441,13 @@ fn build_index_from_analysis(
                 cyclomatic: u32::from(function.cyclomatic),
                 caller_count,
                 owner_count,
+                stable_id: stable_id.clone(),
             };
             out.by_key.insert(
                 (rel.clone(), function.name.clone(), function.line),
                 info.clone(),
             );
+            out.by_stable_id.insert(stable_id, info.clone());
             out.by_path_name
                 .entry((rel.clone(), function.name.clone()))
                 .or_default()
@@ -491,6 +509,7 @@ fn merge_cloud_snapshot(
             .map(
                 |entry| crate::health_types::RuntimeCoverageBlastRadiusEntry {
                     id: entry.id.clone(),
+                    stable_id: entry.stable_id.clone(),
                     file: PathBuf::from(&entry.file),
                     function: entry.function.clone(),
                     line: entry.line,
@@ -511,6 +530,7 @@ fn merge_cloud_snapshot(
             .map(
                 |entry| crate::health_types::RuntimeCoverageImportanceEntry {
                     id: entry.id.clone(),
+                    stable_id: entry.stable_id.clone(),
                     file: PathBuf::from(&entry.file),
                     function: entry.function.clone(),
                     line: entry.line,
@@ -559,6 +579,7 @@ fn merge_cloud_snapshot(
 fn cloud_hot_path(local: &StaticFunctionInfo, invocations: u64) -> RuntimeCoverageHotPath {
     RuntimeCoverageHotPath {
         id: stable_runtime_id("hot", &local.path, &local.name, local.start_line),
+        stable_id: Some(local.stable_id.clone()),
         path: local.path.clone(),
         function: local.name.clone(),
         line: local.start_line,
@@ -577,6 +598,7 @@ fn cloud_blast_radius(
     let weighted = invocations.saturating_mul(u64::from(local.caller_count));
     crate::health_types::RuntimeCoverageBlastRadiusEntry {
         id: stable_runtime_id("blast", &local.path, &local.name, local.start_line),
+        stable_id: Some(local.stable_id.clone()),
         file: local.path.clone(),
         function: local.name.clone(),
         line: local.start_line,
@@ -598,6 +620,7 @@ fn cloud_importance(
     (
         crate::health_types::RuntimeCoverageImportanceEntry {
             id: stable_runtime_id("importance", &local.path, &local.name, local.start_line),
+            stable_id: Some(local.stable_id.clone()),
             file: local.path.clone(),
             function: local.name.clone(),
             line: local.start_line,
@@ -619,6 +642,7 @@ fn cloud_finding(
     let (verdict, confidence, invocations) = cloud_finding_decision(function, local);
     RuntimeCoverageFinding {
         id: stable_runtime_id("prod", &local.path, &local.name, local.start_line),
+        stable_id: Some(local.stable_id.clone()),
         path: local.path.clone(),
         function: local.name.clone(),
         line: local.start_line,
@@ -868,15 +892,41 @@ fn match_cloud_function(
     function: &CloudRuntimeFunction,
     static_index: &StaticIndex,
 ) -> Option<StaticFunctionInfo> {
+    // Tier 1: cross-surface stable-id join. Strongest match, survives line
+    // moves. Only fires when the cloud has been migrated to emit `stableId`
+    // (fallow-cloud#63); `None` for the current cloud.
+    if let Some(stable_id) = function.stable_id.as_deref()
+        && let Some(info) = static_index.by_stable_id.get(stable_id)
+    {
+        return Some(info.clone());
+    }
     let path = normalize_runtime_path(Path::new(&function.file_path));
     let line = function.start_line.or(function.line_number)?;
+    // Tier 2: exact (path, name, line).
     if let Some(info) =
         static_index
             .by_key
             .get(&(path.clone(), function.function_name.clone(), line))
     {
+        // Diagnostic: the cloud carried a stable_id that did NOT join in tier 1
+        // yet (path, name, line) did. This means the producer and consumer
+        // disagree on the identity hash (typically a path-space divergence).
+        // Surface it under RUST_LOG so the silent fuzzy-tier masking is
+        // field-observable instead of invisible.
+        if let Some(stable_id) = function.stable_id.as_deref()
+            && stable_id != info.stable_id
+        {
+            tracing::debug!(
+                cloud_stable_id = stable_id,
+                local_stable_id = %info.stable_id,
+                path = %path,
+                function = %function.function_name,
+                "stable_id present on both sides but diverged; matched by path/name/line"
+            );
+        }
         return Some(info.clone());
     }
+    // Tier 3: fuzzy nearest candidate within a line tolerance.
     static_index
         .by_path_name
         .get(&(path, function.function_name.clone()))
@@ -1161,11 +1211,15 @@ mod tests {
             cyclomatic: 4,
             caller_count: 0,
             owner_count: None,
+            stable_id: function_identity_id("src/a.ts", "oldFlow", 10),
         };
         static_index.by_key.insert(
             ("src/a.ts".to_owned(), "oldFlow".to_owned(), 10),
             info.clone(),
         );
+        static_index
+            .by_stable_id
+            .insert(info.stable_id.clone(), info.clone());
         static_index
             .by_path_name
             .entry(("src/a.ts".to_owned(), "oldFlow".to_owned()))
@@ -1190,6 +1244,7 @@ mod tests {
                 CloudRuntimeFunction {
                     file_path: "src/a.ts".to_owned(),
                     function_name: "oldFlow".to_owned(),
+                    stable_id: None,
                     line_number: Some(10),
                     start_line: Some(10),
                     end_line: Some(20),
@@ -1201,6 +1256,7 @@ mod tests {
                 CloudRuntimeFunction {
                     file_path: "src/missing.ts".to_owned(),
                     function_name: "missingInAst".to_owned(),
+                    stable_id: None,
                     line_number: Some(1),
                     start_line: Some(1),
                     end_line: Some(3),
@@ -1470,6 +1526,7 @@ mod tests {
     fn runtime_finding(id: &str) -> RuntimeCoverageFinding {
         RuntimeCoverageFinding {
             id: id.to_owned(),
+            stable_id: None,
             path: PathBuf::from("src/a.ts"),
             function: "a".to_owned(),
             line: 1,
@@ -1489,6 +1546,7 @@ mod tests {
     }
 
     fn static_info(path: &str, name: &str, start_line: u32, end_line: u32) -> StaticFunctionInfo {
+        let rel = normalize_runtime_path(Path::new(path));
         StaticFunctionInfo {
             path: PathBuf::from(path),
             name: name.to_owned(),
@@ -1499,6 +1557,7 @@ mod tests {
             cyclomatic: 1,
             caller_count: 0,
             owner_count: None,
+            stable_id: function_identity_id(&rel, name, start_line),
         }
     }
 
@@ -1510,6 +1569,9 @@ mod tests {
                 (path.clone(), function.name.clone(), function.start_line),
                 function.clone(),
             );
+            static_index
+                .by_stable_id
+                .insert(function.stable_id.clone(), function.clone());
             static_index
                 .by_path_name
                 .entry((path, function.name.clone()))
@@ -1529,6 +1591,7 @@ mod tests {
         CloudRuntimeFunction {
             file_path: path.to_owned(),
             function_name: name.to_owned(),
+            stable_id: None,
             line_number,
             start_line,
             end_line,
@@ -1542,6 +1605,7 @@ mod tests {
     fn runtime_hot_path(id: &str) -> RuntimeCoverageHotPath {
         RuntimeCoverageHotPath {
             id: id.to_owned(),
+            stable_id: None,
             path: PathBuf::from("src/a.ts"),
             function: "a".to_owned(),
             line: 1,
@@ -1555,6 +1619,7 @@ mod tests {
     fn runtime_blast_radius(id: &str) -> RuntimeCoverageBlastRadiusEntry {
         RuntimeCoverageBlastRadiusEntry {
             id: id.to_owned(),
+            stable_id: None,
             file: PathBuf::from("src/a.ts"),
             function: "a".to_owned(),
             line: 1,
@@ -1568,6 +1633,7 @@ mod tests {
     fn runtime_importance(id: &str) -> RuntimeCoverageImportanceEntry {
         RuntimeCoverageImportanceEntry {
             id: id.to_owned(),
+            stable_id: None,
             file: PathBuf::from("src/a.ts"),
             function: "a".to_owned(),
             line: 1,

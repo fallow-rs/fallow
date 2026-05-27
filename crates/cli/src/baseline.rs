@@ -747,7 +747,7 @@ pub fn recompute_stats(report: &DuplicationReport) -> fallow_core::duplicates::D
 /// line shifts do not leak pre-existing findings. Legacy baselines with
 /// `findings: ["path:name:line"]` still load so users can refresh them in
 /// place with `--save-baseline`.
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct HealthBaselineData {
     /// Legacy health baseline keys: `relative_path:function_name:line`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1047,11 +1047,15 @@ fn runtime_coverage_finding_key(
     finding: &crate::health_types::RuntimeCoverageFinding,
     _root: &Path,
 ) -> String {
-    // Use the stable content-hash ID from the sidecar (e.g.
-    // `fallow:prod:a7f3b2c1`). Line and path changes produce a new ID —
-    // that's the correct behaviour for baseline dedup: a moved function
-    // should appear as a fresh finding until re-baselined.
-    finding.id.clone()
+    // Writer key. Prefer the cross-surface join key (`fallow:fn:<hash>`) when
+    // present: it hashes file + name + start_line (NOT the line position), so a
+    // function that only moved lines keeps the same key and stays suppressed
+    // without a re-baseline. Fall back to the legacy per-finding suppression id
+    // (`fallow:prod:<hash>`) for 0.5-shape findings that carry no identity.
+    finding
+        .stable_id
+        .clone()
+        .unwrap_or_else(|| finding.id.clone())
 }
 
 /// Filter health findings to only include those not present in the baseline.
@@ -1087,7 +1091,7 @@ pub fn filter_new_health_findings(
 pub fn filter_new_runtime_coverage_findings(
     mut findings: Vec<crate::health_types::RuntimeCoverageFinding>,
     baseline: &HealthBaselineData,
-    root: &Path,
+    _root: &Path,
 ) -> Vec<crate::health_types::RuntimeCoverageFinding> {
     let baseline_keys: FxHashSet<&str> = baseline
         .runtime_coverage_findings
@@ -1095,8 +1099,17 @@ pub fn filter_new_runtime_coverage_findings(
         .map(String::as_str)
         .collect();
     findings.retain(|finding| {
-        let key = runtime_coverage_finding_key(finding, root);
-        !baseline_keys.contains(key.as_str())
+        // Grace window: a finding counts as baselined if EITHER its stable_id
+        // (baselines written on this version) OR its legacy `fallow:prod:` id
+        // (baselines written before the upgrade) is present. Retain (report as
+        // new) only when NEITHER matches. Readers MUST accept both forms during
+        // the grace window per the protocol's suppression-vs-join-key contract.
+        let suppressed_by_stable_id = finding
+            .stable_id
+            .as_deref()
+            .is_some_and(|id| baseline_keys.contains(id));
+        let suppressed_by_legacy_id = baseline_keys.contains(finding.id.as_str());
+        !(suppressed_by_stable_id || suppressed_by_legacy_id)
     });
     findings
 }
@@ -2445,5 +2458,89 @@ mod tests {
         assert!(filtered.unused_class_members.is_empty(), "class members");
         assert!(filtered.unresolved_imports.is_empty(), "unresolved imports");
         assert!(filtered.duplicate_exports.is_empty(), "duplicate exports");
+    }
+
+    fn runtime_finding(
+        id: &str,
+        stable_id: Option<&str>,
+        line: u32,
+    ) -> crate::health_types::RuntimeCoverageFinding {
+        crate::health_types::RuntimeCoverageFinding {
+            id: id.to_owned(),
+            stable_id: stable_id.map(str::to_owned),
+            path: PathBuf::from("src/a.ts"),
+            function: "alpha".to_owned(),
+            line,
+            verdict: crate::health_types::RuntimeCoverageVerdict::ReviewRequired,
+            invocations: Some(0),
+            confidence: crate::health_types::RuntimeCoverageConfidence::Medium,
+            evidence: crate::health_types::RuntimeCoverageEvidence {
+                static_status: "used".to_owned(),
+                test_coverage: "not_covered".to_owned(),
+                v8_tracking: "tracked".to_owned(),
+                untracked_reason: None,
+                observation_days: 1,
+                deployments_observed: 1,
+            },
+            actions: vec![],
+        }
+    }
+
+    #[test]
+    fn legacy_prod_baseline_still_suppresses_finding() {
+        // A baseline written before the v2 upgrade holds only `fallow:prod:`
+        // ids. A finding carrying a stable_id MUST still be suppressed by its
+        // legacy id during the grace window.
+        let baseline = HealthBaselineData {
+            runtime_coverage_findings: vec!["fallow:prod:deadbeef".to_owned()],
+            ..HealthBaselineData::default()
+        };
+        let findings = vec![runtime_finding(
+            "fallow:prod:deadbeef",
+            Some("fallow:fn:00000001"),
+            14,
+        )];
+        let filtered =
+            filter_new_runtime_coverage_findings(findings, &baseline, Path::new("/repo"));
+        assert!(filtered.is_empty(), "legacy prod id must still suppress");
+    }
+
+    #[test]
+    fn stable_id_baseline_survives_line_move() {
+        // A baseline written on this version holds the `fallow:fn:` stable_id.
+        // After the function moves lines (new `fallow:prod:` id), the finding
+        // MUST stay suppressed because its stable_id is unchanged.
+        let baseline = HealthBaselineData {
+            runtime_coverage_findings: vec!["fallow:fn:00000001".to_owned()],
+            ..HealthBaselineData::default()
+        };
+        // Moved from line 14 to 40: new prod id, same stable_id.
+        let findings = vec![runtime_finding(
+            "fallow:prod:99999999",
+            Some("fallow:fn:00000001"),
+            40,
+        )];
+        let filtered =
+            filter_new_runtime_coverage_findings(findings, &baseline, Path::new("/repo"));
+        assert!(
+            filtered.is_empty(),
+            "stable_id baseline must survive a line move"
+        );
+    }
+
+    #[test]
+    fn unbaselined_finding_is_reported() {
+        let baseline = HealthBaselineData {
+            runtime_coverage_findings: vec!["fallow:fn:00000001".to_owned()],
+            ..HealthBaselineData::default()
+        };
+        let findings = vec![runtime_finding(
+            "fallow:prod:abc1234d",
+            Some("fallow:fn:beefcafe"),
+            7,
+        )];
+        let filtered =
+            filter_new_runtime_coverage_findings(findings, &baseline, Path::new("/repo"));
+        assert_eq!(filtered.len(), 1, "a brand-new finding must be reported");
     }
 }
