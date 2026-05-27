@@ -1,0 +1,7 @@
+{
+  "id": "work-terminal",
+  "name": "Work Terminal",
+  "version": "1.0.0",
+  "minAppVersion": "1.5.0",
+  "description": "Issue 617 fixture"
+}

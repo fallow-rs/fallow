@@ -112,6 +112,8 @@ mod issue_604_vite_rollup_path_helpers;
 mod issue_605_new_class_member;
 #[path = "integration_test/issue_616_browser_extension_manifest.rs"]
 mod issue_616_browser_extension_manifest;
+#[path = "integration_test/issue_617_obsidian_plugin.rs"]
+mod issue_617_obsidian_plugin;
 #[path = "integration_test/lit_custom_element.rs"]
 mod lit_custom_element;
 #[path = "integration_test/scoped_used_class_members.rs"]

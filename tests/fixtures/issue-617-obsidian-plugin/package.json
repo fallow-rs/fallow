@@ -1,0 +1,7 @@
+{
+  "name": "issue-617-obsidian-plugin",
+  "version": "1.0.0",
+  "dependencies": {
+    "obsidian": "^1.5.0"
+  }
+}

@@ -46,6 +46,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "nextjs",
     "nitro",
     "nuxt",
+    "obsidian",
     "parcel",
     "qwik",
     "react-native",
@@ -1153,6 +1154,7 @@ mod nodemon;
 mod nuxt;
 mod nx;
 mod nyc;
+mod obsidian;
 mod openapi_ts;
 mod opencode;
 mod opennext_cloudflare;
@@ -1250,6 +1252,10 @@ mod tests {
         assert_eq!(
             storybook::StorybookPlugin.entry_point_role(),
             EntryPointRole::Support
+        );
+        assert_eq!(
+            obsidian::ObsidianPlugin.entry_point_role(),
+            EntryPointRole::Runtime
         );
         assert_eq!(knex::KnexPlugin.entry_point_role(), EntryPointRole::Support);
     }

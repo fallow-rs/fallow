@@ -1,0 +1,6 @@
+{
+  "name": "Plain web app",
+  "version": "1.0.0",
+  "start_url": "/",
+  "display": "standalone"
+}
