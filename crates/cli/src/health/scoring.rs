@@ -1154,6 +1154,36 @@ pub(super) fn compute_maintainability_index(
     score.clamp(0.0, 100.0)
 }
 
+fn file_score_structural_concern(score: &FileHealthScore) -> f64 {
+    (100.0 - score.maintainability_index).clamp(0.0, 100.0)
+}
+
+fn file_score_crap_concern(crap_max: f64) -> f64 {
+    if crap_max <= 0.0 {
+        0.0
+    } else if crap_max < 15.0 {
+        (crap_max / 15.0) * 45.0
+    } else if crap_max < CRAP_THRESHOLD {
+        ((crap_max - 15.0) / 15.0).mul_add(30.0, 45.0)
+    } else if crap_max < 100.0 {
+        ((crap_max - CRAP_THRESHOLD) / (100.0 - CRAP_THRESHOLD)).mul_add(25.0, 75.0)
+    } else {
+        100.0
+    }
+}
+
+fn file_score_triage_concern(score: &FileHealthScore) -> f64 {
+    file_score_structural_concern(score).max(file_score_crap_concern(score.crap_max))
+}
+
+fn compare_file_score_triage(a: &FileHealthScore, b: &FileHealthScore) -> std::cmp::Ordering {
+    file_score_triage_concern(b)
+        .total_cmp(&file_score_triage_concern(a))
+        .then_with(|| a.maintainability_index.total_cmp(&b.maintainability_index))
+        .then_with(|| b.crap_max.total_cmp(&a.crap_max))
+        .then_with(|| a.path.cmp(&b.path))
+}
+
 /// Compute per-file health scores using a pre-computed analysis output.
 ///
 /// The caller provides an `AnalysisOutput` (with graph and dead code results)
@@ -1446,12 +1476,8 @@ pub(super) fn compute_file_scores(
     // metric. They pollute the rankings and obscure actually complex files.
     scores.retain(|s| s.function_count > 0);
 
-    // Sort by maintainability index ascending (worst files first)
-    scores.sort_by(|a, b| {
-        a.maintainability_index
-            .partial_cmp(&b.maintainability_index)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    // Sort by triage concern so high CRAP risk can outrank a slightly worse MI.
+    scores.sort_by(compare_file_score_triage);
 
     // Compute aggregate counts for vital signs
     let total_exports: usize = graph.modules.iter().map(|m| m.exports.len()).sum();
@@ -2178,6 +2204,73 @@ mod tests {
         }
     }
 
+    fn make_file_score(path: &str, maintainability_index: f64, crap_max: f64) -> FileHealthScore {
+        FileHealthScore {
+            path: std::path::PathBuf::from(path),
+            fan_in: 0,
+            fan_out: 0,
+            dead_code_ratio: 0.0,
+            complexity_density: 0.0,
+            maintainability_index,
+            total_cyclomatic: 0,
+            total_cognitive: 0,
+            function_count: 1,
+            lines: 1,
+            crap_max,
+            crap_above_threshold: usize::from(crap_max >= CRAP_THRESHOLD),
+        }
+    }
+
+    #[test]
+    fn file_score_crap_concern_tracks_crap_risk_bands() {
+        assert!((file_score_crap_concern(0.0) - 0.0).abs() < f64::EPSILON);
+        assert!((file_score_crap_concern(15.0) - 45.0).abs() < f64::EPSILON);
+        assert!((file_score_crap_concern(CRAP_THRESHOLD) - 75.0).abs() < f64::EPSILON);
+        assert!((file_score_crap_concern(100.0) - 100.0).abs() < f64::EPSILON);
+        assert!((file_score_crap_concern(552.0) - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn file_score_triage_sort_prioritizes_high_crap_over_slightly_lower_mi() {
+        let low_mi_low_risk = make_file_score("/src/low-mi-low-risk.ts", 81.7, 2.0);
+        let higher_mi_high_risk = make_file_score("/src/higher-mi-high-risk.ts", 84.8, 552.0);
+
+        let mut scores = [low_mi_low_risk, higher_mi_high_risk];
+        scores.sort_by(compare_file_score_triage);
+
+        assert_eq!(
+            scores[0].path,
+            std::path::Path::new("/src/higher-mi-high-risk.ts")
+        );
+        assert_eq!(
+            scores[1].path,
+            std::path::Path::new("/src/low-mi-low-risk.ts")
+        );
+    }
+
+    #[test]
+    fn file_score_triage_sort_uses_mi_crap_and_path_tie_breakers() {
+        let mut scores = [
+            make_file_score("/src/b.ts", 70.0, 1.0),
+            make_file_score("/src/a.ts", 70.0, 1.0),
+            make_file_score("/src/higher-crap.ts", 70.0, 2.0),
+            make_file_score("/src/lower-concern.ts", 80.0, 1.0),
+        ];
+
+        scores.sort_by(compare_file_score_triage);
+
+        let paths: Vec<_> = scores.iter().map(|score| score.path.as_path()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                std::path::Path::new("/src/higher-crap.ts"),
+                std::path::Path::new("/src/a.ts"),
+                std::path::Path::new("/src/b.ts"),
+                std::path::Path::new("/src/lower-concern.ts"),
+            ]
+        );
+    }
+
     #[test]
     fn compute_file_scores_empty_graph() {
         let files: Vec<fallow_core::discover::DiscoveredFile> = vec![];
@@ -2471,7 +2564,7 @@ mod tests {
     }
 
     #[test]
-    fn compute_file_scores_sorted_by_maintainability_ascending() {
+    fn compute_file_scores_sorted_by_triage_concern() {
         let path_a = std::path::PathBuf::from("/src/a.ts");
         let path_b = std::path::PathBuf::from("/src/b.ts");
         let files = vec![
@@ -2559,7 +2652,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.scores.len(), 2);
-        // Sorted ascending: worst (lowest MI) first
+        // Worst structural concern still comes first when CRAP concern agrees.
         assert!(result.scores[0].maintainability_index <= result.scores[1].maintainability_index);
         // File a (high complexity) should come first
         assert_eq!(result.scores[0].path, path_a);

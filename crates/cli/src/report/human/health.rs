@@ -1184,7 +1184,7 @@ fn render_file_scores(
     };
     lines.push(format!(
         "  {}",
-        format!("Composite file quality scores based on complexity, coupling, and dead code. Risk: low <15, moderate 15-30, high >=30. {crap_note} {DOCS_HEALTH}#file-health-scores").dimmed()
+        format!("Sorted by triage concern: the larger of low-MI concern and CRAP risk. MI reflects complexity, coupling, and dead code. Risk reflects untested complexity and can diverge from MI. Risk: low <15, moderate 15-30, high >=30. {crap_note} {DOCS_HEALTH}#file-health-scores").dimmed()
     ));
     lines.push(String::new());
 }

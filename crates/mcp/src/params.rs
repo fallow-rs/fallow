@@ -478,7 +478,8 @@ pub struct HealthParams {
     /// Show only complexity findings. By default all sections are shown; use this to select only complexity.
     pub complexity: Option<bool>,
 
-    /// Show only per-file health scores (fan-in, fan-out, dead code ratio, maintainability index).
+    /// Show only per-file health scores, sorted by risk-aware triage concern:
+    /// lower maintainability index and higher CRAP risk first.
     pub file_scores: Option<bool>,
 
     /// Show only hotspots: files that are both complex and frequently changing.

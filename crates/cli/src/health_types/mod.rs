@@ -96,8 +96,8 @@ pub struct HealthReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_score: Option<HealthScore>,
     /// Per-file health scores. Only present when --file-scores is used. Sorted
-    /// by maintainability_index ascending (worst first). Zero-function files
-    /// (barrels) are excluded by default.
+    /// by risk-aware triage concern, combining low maintainability and high
+    /// CRAP risk. Zero-function files (barrels) are excluded by default.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub file_scores: Vec<FileHealthScore>,
     /// Static coverage gaps.

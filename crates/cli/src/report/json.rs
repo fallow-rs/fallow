@@ -548,9 +548,10 @@ pub(super) fn print_health_json(
 ///
 /// - `grouped_by`: the resolver mode (`"package"`, `"owner"`, etc.).
 /// - `groups`: one entry per resolver bucket. Each entry carries its own
-///   `vital_signs`, `health_score`, `findings`, `file_scores`, `hotspots`,
-///   `large_functions`, `targets`, plus `key`, `owners` (section mode), and
-///   the per-group `files_analyzed` / `functions_above_threshold` counts.
+///   `vital_signs`, `health_score`, `findings`, `file_scores` sorted by
+///   risk-aware triage concern, `hotspots`, `large_functions`, `targets`, plus
+///   `key`, `owners` (section mode), and the per-group `files_analyzed` /
+///   `functions_above_threshold` counts.
 ///
 /// Paths inside groups are relativised the same way as the project-level
 /// payload.

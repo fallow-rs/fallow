@@ -1230,10 +1230,14 @@ fn write_metric_legend(out: &mut String, report: &crate::health_types::HealthRep
     out.push_str("\n---\n\n<details><summary>Metric definitions</summary>\n\n");
     if has_scores {
         out.push_str("- **MI**: Maintainability Index (0\u{2013}100, higher is better)\n");
+        out.push_str("- **Order**: risk-aware triage order using the larger of low-MI concern and CRAP risk\n");
         out.push_str("- **Fan-in**: files that import this file (blast radius)\n");
         out.push_str("- **Fan-out**: files this file imports (coupling)\n");
         out.push_str("- **Dead Code**: % of value exports with zero references\n");
         out.push_str("- **Density**: cyclomatic complexity / lines of code\n");
+        out.push_str(
+            "- **Risk**: max CRAP score for the file; low <15, moderate 15-30, high >=30\n",
+        );
     }
     if has_coverage {
         out.push_str(
