@@ -8,6 +8,7 @@ use super::{
     MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, relative_path,
     split_dir_filename, thousands,
 };
+use crate::health::scoring::{FileScoreConcern, file_score_concern_axis};
 
 /// Docs base URL for health explanations.
 const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
@@ -1096,11 +1097,12 @@ fn render_file_scores(
     }
 
     lines.push(format!(
-        "{} {}",
+        "{} {} {}",
         "\u{25cf}".cyan(),
         format!("File health scores ({} files)", report.file_scores.len())
             .cyan()
-            .bold()
+            .bold(),
+        "\u{b7} sorted by triage concern".dimmed(),
     ));
     lines.push(String::new());
 
@@ -1122,8 +1124,46 @@ fn render_file_scores(
         // Path: dim directory, normal filename
         let (dir, filename) = split_dir_filename(&file_str);
 
-        // Line 1: MI score + path
-        lines.push(format!("  {}    {}{}", mi_colored, dir.dimmed(), filename));
+        // Concern tag: which signal placed this file at its rank. Coloured to
+        // match the metric it points at, so a red "risk" tag reads with the red
+        // CRAP number and a red "structure" tag reads with the red MI number.
+        let concern = file_score_concern_axis(score);
+        let label = concern.label();
+        let concern_colored = match concern {
+            FileScoreConcern::Risk => {
+                if score.crap_max >= 30.0 {
+                    label.red().bold().to_string()
+                } else if score.crap_max >= 15.0 {
+                    label.yellow().to_string()
+                } else {
+                    label.dimmed().to_string()
+                }
+            }
+            FileScoreConcern::Structural => {
+                if mi < 50.0 {
+                    label.red().bold().to_string()
+                } else if mi < 80.0 {
+                    label.yellow().to_string()
+                } else {
+                    label.dimmed().to_string()
+                }
+            }
+        };
+
+        // Line 1: MI score + path + concern tag (aligned to a fixed column,
+        // falling back to a two-space gap when the path runs long).
+        const CONCERN_TAG_COLUMN: usize = 48;
+        let pad = CONCERN_TAG_COLUMN
+            .saturating_sub(file_str.chars().count())
+            .max(2);
+        lines.push(format!(
+            "  {}    {}{}{}{}",
+            mi_colored,
+            dir.dimmed(),
+            filename,
+            " ".repeat(pad),
+            concern_colored,
+        ));
 
         // Line 2: metrics (indented, dimmed) with optional CRAP risk
         let risk_suffix = if score.crap_max > 0.0 {
@@ -1184,7 +1224,7 @@ fn render_file_scores(
     };
     lines.push(format!(
         "  {}",
-        format!("Sorted by triage concern: the larger of low-MI concern and CRAP risk. MI reflects complexity, coupling, and dead code. Risk reflects untested complexity and can diverge from MI. Risk: low <15, moderate 15-30, high >=30. {crap_note} {DOCS_HEALTH}#file-health-scores").dimmed()
+        format!("Sorted by triage concern: the larger of low-MI concern and CRAP risk. The risk / structure tag marks which one placed each file. MI reflects complexity, coupling, and dead code; risk reflects untested complexity (CRAP) and can diverge from MI. Risk: low <15, moderate 15-30, high >=30. {crap_note} {DOCS_HEALTH}#file-health-scores").dimmed()
     ));
     lines.push(String::new());
 }
@@ -2933,6 +2973,61 @@ mod tests {
         assert!(text.contains("3 fan-out"));
         assert!(text.contains("15% dead"));
         assert!(text.contains("0.42 density"));
+    }
+
+    #[test]
+    fn file_scores_concern_tag_marks_risk_vs_structure() {
+        let root = PathBuf::from("/project");
+        let mut report = empty_report();
+        report.file_scores = vec![
+            // Risk-driven: high CRAP, fine MI.
+            crate::health_types::FileHealthScore {
+                path: root.join("src/risky.ts"),
+                fan_in: 0,
+                fan_out: 0,
+                dead_code_ratio: 0.0,
+                complexity_density: 0.2,
+                maintainability_index: 85.0,
+                total_cyclomatic: 10,
+                total_cognitive: 8,
+                function_count: 1,
+                lines: 100,
+                crap_max: 552.0,
+                crap_above_threshold: 1,
+            },
+            // Structure-driven: low MI, near-zero CRAP.
+            crate::health_types::FileHealthScore {
+                path: root.join("src/messy.ts"),
+                fan_in: 0,
+                fan_out: 0,
+                dead_code_ratio: 0.0,
+                complexity_density: 0.3,
+                maintainability_index: 30.0,
+                total_cyclomatic: 5,
+                total_cognitive: 3,
+                function_count: 1,
+                lines: 100,
+                crap_max: 2.0,
+                crap_above_threshold: 0,
+            },
+        ];
+        let text = plain(&build_health_human_lines(&report, &root));
+        let risky_line = text
+            .lines()
+            .find(|l| l.contains("risky.ts"))
+            .expect("risky path line");
+        assert!(
+            risky_line.trim_end().ends_with("risk"),
+            "expected risk tag, got: {risky_line:?}"
+        );
+        let messy_line = text
+            .lines()
+            .find(|l| l.contains("messy.ts"))
+            .expect("messy path line");
+        assert!(
+            messy_line.trim_end().ends_with("structure"),
+            "expected structure tag, got: {messy_line:?}"
+        );
     }
 
     #[test]

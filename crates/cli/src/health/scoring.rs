@@ -1176,11 +1176,50 @@ fn file_score_triage_concern(score: &FileHealthScore) -> f64 {
     file_score_structural_concern(score).max(file_score_crap_concern(score.crap_max))
 }
 
+/// Which signal places a file at its triage rank: its structural quality (low
+/// maintainability index) or its untested complexity (CRAP risk). Surfaced per
+/// row so the human file-scores table can label why a file sits where it does
+/// when the two axes disagree (e.g. a low-CRAP file outranking a higher-CRAP
+/// one because its MI is the worse signal).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileScoreConcern {
+    Structural,
+    Risk,
+}
+
+impl FileScoreConcern {
+    /// Short lowercase label for the human file-scores table.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Structural => "structure",
+            Self::Risk => "risk",
+        }
+    }
+}
+
+/// Classify which concern drove `score` to its rank. A file with no CRAP risk
+/// is always `Structural`; otherwise the larger concern wins, with ties (and
+/// the boundary where the two are equal) resolving to `Risk` because untested
+/// complexity is the more urgent signal to act on.
+pub fn file_score_concern_axis(score: &FileHealthScore) -> FileScoreConcern {
+    if score.crap_max <= 0.0 {
+        FileScoreConcern::Structural
+    } else if file_score_crap_concern(score.crap_max) >= file_score_structural_concern(score) {
+        FileScoreConcern::Risk
+    } else {
+        FileScoreConcern::Structural
+    }
+}
+
 fn compare_file_score_triage(a: &FileHealthScore, b: &FileHealthScore) -> std::cmp::Ordering {
+    // CRAP concern saturates at 100, so many high-CRAP files tie on overall
+    // concern. Break those ties by raw CRAP descending (the number shown in the
+    // Risk column) before MI, so the visible Risk column reads monotonically
+    // within a concern tier instead of looking scrambled.
     file_score_triage_concern(b)
         .total_cmp(&file_score_triage_concern(a))
-        .then_with(|| a.maintainability_index.total_cmp(&b.maintainability_index))
         .then_with(|| b.crap_max.total_cmp(&a.crap_max))
+        .then_with(|| a.maintainability_index.total_cmp(&b.maintainability_index))
         .then_with(|| a.path.cmp(&b.path))
 }
 
@@ -2231,6 +2270,36 @@ mod tests {
     }
 
     #[test]
+    fn file_score_concern_axis_labels_dominant_signal() {
+        // High CRAP, decent MI: risk drives the rank.
+        let risk_driven = make_file_score("/src/risk.ts", 84.8, 552.0);
+        assert_eq!(
+            file_score_concern_axis(&risk_driven),
+            FileScoreConcern::Risk
+        );
+        assert_eq!(file_score_concern_axis(&risk_driven).label(), "risk");
+
+        // Low MI, near-zero CRAP: structure drives the rank even though the
+        // file still sorts above higher-CRAP files because its MI is worse.
+        let structure_driven = make_file_score("/src/structure.ts", 30.0, 8.0);
+        assert_eq!(
+            file_score_concern_axis(&structure_driven),
+            FileScoreConcern::Structural
+        );
+        assert_eq!(
+            file_score_concern_axis(&structure_driven).label(),
+            "structure"
+        );
+
+        // No CRAP risk at all is always structural, even at a perfect MI.
+        let no_risk = make_file_score("/src/clean.ts", 100.0, 0.0);
+        assert_eq!(
+            file_score_concern_axis(&no_risk),
+            FileScoreConcern::Structural
+        );
+    }
+
+    #[test]
     fn file_score_triage_sort_prioritizes_high_crap_over_slightly_lower_mi() {
         let low_mi_low_risk = make_file_score("/src/low-mi-low-risk.ts", 81.7, 2.0);
         let higher_mi_high_risk = make_file_score("/src/higher-mi-high-risk.ts", 84.8, 552.0);
@@ -2246,6 +2315,22 @@ mod tests {
             scores[1].path,
             std::path::Path::new("/src/low-mi-low-risk.ts")
         );
+    }
+
+    #[test]
+    fn file_score_triage_sort_orders_saturated_crap_by_raw_crap_descending() {
+        // Both files saturate crap_concern at 100, so their overall concern
+        // ties. The higher raw CRAP (the number shown in the Risk column) must
+        // sort first even though its MI is better, so the visible Risk column
+        // stays monotonic within the tier instead of looking scrambled.
+        let lower_crap_worse_mi = make_file_score("/src/a.ts", 84.8, 106.0);
+        let higher_crap_better_mi = make_file_score("/src/b.ts", 96.7, 552.0);
+
+        let mut scores = [lower_crap_worse_mi, higher_crap_better_mi];
+        scores.sort_by(compare_file_score_triage);
+
+        assert_eq!(scores[0].path, std::path::Path::new("/src/b.ts"));
+        assert_eq!(scores[1].path, std::path::Path::new("/src/a.ts"));
     }
 
     #[test]
