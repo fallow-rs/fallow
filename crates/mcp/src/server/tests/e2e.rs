@@ -228,8 +228,9 @@ async fn e2e_trace_clone_returns_json() {
     let bin = fallow_binary();
     let root = fixture_path("duplicate-code");
     let args = build_trace_clone_args(&crate::params::TraceCloneParams {
-        file: "src/original.ts".to_string(),
-        line: 2,
+        file: Some("src/original.ts".to_string()),
+        line: Some(2),
+        fingerprint: None,
         root: Some(root.to_string_lossy().to_string()),
         config: None,
         workspace: None,

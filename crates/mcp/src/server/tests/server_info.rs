@@ -488,6 +488,7 @@ fn trace_clone_schema_contains_expected_properties() {
     for prop in [
         "file",
         "line",
+        "fingerprint",
         "root",
         "config",
         "workspace",
@@ -506,19 +507,18 @@ fn trace_clone_schema_contains_expected_properties() {
             "trace_clone schema should contain property '{prop}'"
         );
     }
+    // No required fields: file+line and fingerprint are two optional addressing
+    // forms; the exactly-one-of rule is enforced in build_trace_clone_args, not
+    // the schema. Confirm neither addressing field is marked required.
     let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
-    assert_required_fields(&schema, &["file", "line"]);
-    assert_eq!(
-        schema
-            .pointer("/properties/file/minLength")
-            .and_then(|v| v.as_u64()),
-        Some(1)
-    );
-    assert_eq!(
-        schema
-            .pointer("/properties/line/minimum")
-            .and_then(|v| v.as_u64()),
-        Some(1)
+    let required: Vec<&str> = schema
+        .get("required")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+    assert!(
+        !required.contains(&"file") && !required.contains(&"line"),
+        "file/line must be optional now, got required: {required:?}"
     );
 }
 

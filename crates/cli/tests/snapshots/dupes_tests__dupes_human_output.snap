@@ -4,11 +4,11 @@ expression: redacted
 ---
 ● Duplicates (2 clone groups)
 
-     27 lines  2 instances
+     27 lines  2 instances  dup:16773053
     src/copy1.ts:1-27
     src/original.ts:1-27
 
-     21 lines  3 instances
+     21 lines  3 instances  dup:94b2bdeb
     src/copy1.ts:1-21
     src/original.ts:1-21
     src/partial.ts:2-17

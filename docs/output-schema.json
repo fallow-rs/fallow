@@ -9015,6 +9015,10 @@
           },
           "description": "Each instance carries its own `owner` field alongside the standard\nCloneInstance shape."
         },
+        "fingerprint": {
+          "type": "string",
+          "description": "Stable content fingerprint (`dup:<8hex>`), addressable via\n`fallow dupes --trace dup:<fp>`. Computed from the group's instances,\nso it matches the top-level `clone_groups[].fingerprint` for the same\nclone."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -9028,6 +9032,7 @@
         "token_count",
         "line_count",
         "instances",
+        "fingerprint",
         "actions"
       ],
       "description": "Wire-shape envelope for an [`AttributedCloneGroup`] finding (per-bucket\nduplication attribution emitted under `fallow dupes --group-by`).\nFlattens the attributed group and carries the same typed\n`CloneGroupAction` array as [`CloneGroupFinding`]; no `introduced`\nfield because `fallow audit` does not run on grouped output."
@@ -9135,6 +9140,10 @@
           "type": "integer",
           "description": "Number of lines in the duplicated block."
         },
+        "fingerprint": {
+          "type": "string",
+          "description": "Stable content fingerprint (`dup:<8hex>`). Addressable via\n`fallow dupes --trace dup:<fp>` (and the `trace_clone` MCP tool) to\ndeep-dive this group; shown alongside each group in the human listing."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -9158,6 +9167,7 @@
         "instances",
         "token_count",
         "line_count",
+        "fingerprint",
         "actions"
       ],
       "description": "Wire-shape envelope for a [`CloneGroup`] finding. Flattens the bare\ngroup via `#[serde(flatten)]` and carries a typed `actions` array plus\nthe optional audit-mode `introduced` flag. Replaces the legacy\npost-pass injection in `crates/cli/src/report/json.rs::inject_dupes_actions`."

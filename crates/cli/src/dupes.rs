@@ -93,6 +93,40 @@ fn parse_trace_spec(spec: &str) -> Result<(&str, usize), &'static str> {
     Ok((file_path, line))
 }
 
+/// Resolve a `--trace` spec, print the clone-trace deep-dive, and return the
+/// process exit code. Two address forms: `dup:<fp>` resolves a clone group by
+/// its stable content fingerprint (discoverable from the listing or
+/// `--format json`); `FILE:LINE` resolves the clone(s) containing a source
+/// location.
+fn run_clone_trace(
+    report: &fallow_core::duplicates::DuplicationReport,
+    root: &std::path::Path,
+    trace_spec: &str,
+    output: OutputFormat,
+) -> ExitCode {
+    let (trace_result, not_found) =
+        if let Some(fp) = trace_spec.strip_prefix(fallow_core::duplicates::FINGERPRINT_PREFIX) {
+            let fingerprint = format!("{}{fp}", fallow_core::duplicates::FINGERPRINT_PREFIX);
+            let result = fallow_core::trace::trace_clone_by_fingerprint(report, root, &fingerprint);
+            (
+                result,
+                format!("no clone group with fingerprint {fingerprint}"),
+            )
+        } else {
+            let (file_path, line) = match parse_trace_spec(trace_spec) {
+                Ok(parsed) => parsed,
+                Err(msg) => return emit_error(msg, 2, output),
+            };
+            let result = fallow_core::trace::trace_clone(report, root, file_path, line);
+            (result, format!("no clone found at {file_path}:{line}"))
+        };
+    if trace_result.matched_instance.is_none() {
+        return emit_error(&not_found, 2, output);
+    }
+    crate::report::print_clone_trace(&trace_result, root, output);
+    ExitCode::SUCCESS
+}
+
 /// Build a `DuplicatesConfig` from CLI options, merging with values from the config file.
 ///
 /// CLI scalar fields (`mode`, `min_tokens`, `min_lines`, `threshold`) are
@@ -270,22 +304,14 @@ fn execute_dupes_inner(
         effective_changed_files,
     );
 
-    // Handle trace (diagnostic mode — early return)
+    // Handle trace (diagnostic mode, early return).
     if let Some(trace_spec) = opts.trace {
-        let (file_path, line) = match parse_trace_spec(trace_spec) {
-            Ok(parsed) => parsed,
-            Err(msg) => return Err(emit_error(msg, 2, opts.output)),
-        };
-        let trace_result = fallow_core::trace::trace_clone(&report, &config.root, file_path, line);
-        if trace_result.matched_instance.is_none() {
-            return Err(emit_error(
-                &format!("no clone found at {file_path}:{line}"),
-                2,
-                opts.output,
-            ));
-        }
-        crate::report::print_clone_trace(&trace_result, &config.root, opts.output);
-        return Err(ExitCode::SUCCESS);
+        return Err(run_clone_trace(
+            &report,
+            &config.root,
+            trace_spec,
+            opts.output,
+        ));
     }
 
     // Save baseline

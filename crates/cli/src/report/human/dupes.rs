@@ -145,10 +145,11 @@ fn build_duplication_human_lines_with_explain(
         };
 
         lines.push(format!(
-            "  {} lines  {} instance{}",
+            "  {} lines  {} instance{}  {}",
             lc_colored,
             instance_count,
-            plural(instance_count)
+            plural(instance_count),
+            fallow_core::duplicates::clone_fingerprint(&group.instances).dimmed(),
         ));
 
         for instance in &group.instances {

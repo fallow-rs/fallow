@@ -204,8 +204,9 @@ pub(in crate::report) fn print_clone_trace_human(trace: &CloneTrace, root: &Path
     for (i, group) in trace.clone_groups.iter().enumerate() {
         eprintln!();
         eprintln!(
-            "  {} ({} lines, {} tokens, {} instance{})",
+            "  {}  {} ({} lines, {} tokens, {} instance{})",
             format!("Clone group {}", i + 1).bold(),
+            group.fingerprint.dimmed(),
             group.line_count,
             group.token_count,
             group.instances.len(),
@@ -231,6 +232,19 @@ pub(in crate::report) fn print_clone_trace_human(trace: &CloneTrace, root: &Path
                 instance.end_line
             );
         }
+        eprintln!("    {}", "Suggested refactor".bold());
+        eprintln!(
+            "      Extract function, saves ~{} line{}",
+            group.suggestion.estimated_savings,
+            plural(group.suggestion.estimated_savings),
+        );
+        if let Some(ref name) = group.suggested_name {
+            eprintln!(
+                "      Proposed name: {}  {}",
+                name,
+                "(best-effort, verify before applying)".dimmed(),
+            );
+        }
     }
     if let Some(ref matched) = trace.matched_instance {
         eprintln!();
@@ -243,5 +257,11 @@ pub(in crate::report) fn print_clone_trace_human(trace: &CloneTrace, root: &Path
             );
         }
     }
+    eprintln!();
+    eprintln!(
+        "  {} {}",
+        "Docs:".dimmed(),
+        "https://docs.fallow.tools/explanations/duplication".dimmed()
+    );
     eprintln!();
 }

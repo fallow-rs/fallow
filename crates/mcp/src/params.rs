@@ -391,15 +391,24 @@ pub struct TraceDependencyParams {
     pub threads: Option<usize>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, JsonSchema)]
 pub struct TraceCloneParams {
     /// File containing the clone candidate, relative to the project root.
-    #[schemars(length(min = 1))]
-    pub file: String,
+    /// Provide `file` + `line` to trace a location, OR `fingerprint` to trace a
+    /// clone group by id; exactly one of the two addressing forms is required.
+    #[serde(default)]
+    pub file: Option<String>,
 
-    /// 1-based line number inside the clone candidate.
-    #[schemars(range(min = 1))]
-    pub line: usize,
+    /// 1-based line number inside the clone candidate. Required with `file`.
+    #[serde(default)]
+    pub line: Option<usize>,
+
+    /// Stable clone-group fingerprint (`dup:<8hex>`) from a prior `find_dupes`
+    /// result (`clone_groups[].fingerprint`). Deep-dives that group directly:
+    /// returns its locations, an extract-function suggestion with estimated
+    /// savings, and a best-effort suggested name. Use instead of `file` + `line`.
+    #[serde(default)]
+    pub fingerprint: Option<String>,
 
     /// Root directory of the project. Defaults to current working directory.
     pub root: Option<String>,

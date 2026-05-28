@@ -784,8 +784,9 @@ fn trace_dependency_args_minimal() {
 #[test]
 fn trace_clone_args_with_all_options() {
     let args = build_trace_clone_args(&TraceCloneParams {
-        file: "src/original.ts".to_string(),
-        line: 12,
+        file: Some("src/original.ts".to_string()),
+        fingerprint: None,
+        line: Some(12),
         root: Some("/repo".to_string()),
         config: Some("fallow.toml".to_string()),
         workspace: Some("packages/ui".to_string()),
@@ -835,10 +836,50 @@ fn trace_clone_args_with_all_options() {
 }
 
 #[test]
+fn trace_clone_args_by_fingerprint() {
+    let args = build_trace_clone_args(&TraceCloneParams {
+        fingerprint: Some("dup:7f3a2c1e".to_string()),
+        ..Default::default()
+    })
+    .expect("fingerprint-only is a valid addressing form");
+    assert_eq!(
+        args,
+        vec![
+            "dupes".to_string(),
+            "--format".to_string(),
+            "json".to_string(),
+            "--quiet".to_string(),
+            "--trace".to_string(),
+            "dup:7f3a2c1e".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn trace_clone_args_both_addressing_forms_is_error() {
+    let err = build_trace_clone_args(&TraceCloneParams {
+        file: Some("src/original.ts".to_string()),
+        line: Some(12),
+        fingerprint: Some("dup:7f3a2c1e".to_string()),
+        ..Default::default()
+    })
+    .expect_err("file+line and fingerprint together must be rejected");
+    assert!(err.contains("not both"), "unexpected error: {err}");
+}
+
+#[test]
+fn trace_clone_args_no_addressing_form_is_error() {
+    let err = build_trace_clone_args(&TraceCloneParams::default())
+        .expect_err("neither file+line nor fingerprint must be rejected");
+    assert!(err.contains("fingerprint"), "unexpected error: {err}");
+}
+
+#[test]
 fn trace_clone_args_invalid_mode_returns_error() {
     let err = build_trace_clone_args(&TraceCloneParams {
-        file: "src/original.ts".to_string(),
-        line: 2,
+        file: Some("src/original.ts".to_string()),
+        fingerprint: None,
+        line: Some(2),
         root: None,
         config: None,
         workspace: None,
@@ -925,8 +966,9 @@ fn trace_args_reject_blank_required_values() {
 #[test]
 fn trace_clone_args_reject_zero_line() {
     let err = build_trace_clone_args(&TraceCloneParams {
-        file: "src/original.ts".to_string(),
-        line: 0,
+        file: Some("src/original.ts".to_string()),
+        fingerprint: None,
+        line: Some(0),
         root: None,
         config: None,
         workspace: None,
@@ -951,8 +993,9 @@ fn trace_clone_args_reject_zero_line() {
 #[test]
 fn trace_clone_args_min_occurrences_forwards_flag() {
     let args = build_trace_clone_args(&TraceCloneParams {
-        file: "src/original.ts".to_string(),
-        line: 42,
+        file: Some("src/original.ts".to_string()),
+        fingerprint: None,
+        line: Some(42),
         root: None,
         config: None,
         workspace: None,
@@ -977,8 +1020,9 @@ fn trace_clone_args_min_occurrences_forwards_flag() {
 #[test]
 fn trace_clone_args_min_occurrences_rejects_one() {
     let err = build_trace_clone_args(&TraceCloneParams {
-        file: "src/original.ts".to_string(),
-        line: 42,
+        file: Some("src/original.ts".to_string()),
+        fingerprint: None,
+        line: Some(42),
         root: None,
         config: None,
         workspace: None,
@@ -1007,8 +1051,9 @@ fn validation_errors_use_structured_json_body() {
     // for both error sources. `exit_code` is 0 on validation paths (no subprocess).
     let errors = [
         build_trace_clone_args(&TraceCloneParams {
-            file: "src/original.ts".to_string(),
-            line: 0,
+            file: Some("src/original.ts".to_string()),
+            fingerprint: None,
+            line: Some(0),
             root: None,
             config: None,
             workspace: None,
@@ -1291,8 +1336,9 @@ fn all_arg_builders_include_format_json_and_quiet() {
     })
     .unwrap();
     let trace_clone = build_trace_clone_args(&TraceCloneParams {
-        file: "src/original.ts".to_string(),
-        line: 2,
+        file: Some("src/original.ts".to_string()),
+        fingerprint: None,
+        line: Some(2),
         root: None,
         config: None,
         workspace: None,
@@ -1414,8 +1460,9 @@ fn each_tool_uses_correct_subcommand() {
     );
     assert_eq!(
         build_trace_clone_args(&TraceCloneParams {
-            file: "src/original.ts".to_string(),
-            line: 2,
+            file: Some("src/original.ts".to_string()),
+            fingerprint: None,
+            line: Some(2),
             root: None,
             config: None,
             workspace: None,
@@ -1615,8 +1662,9 @@ fn trace_tools_do_not_include_explain() {
     })
     .unwrap();
     let clone = build_trace_clone_args(&TraceCloneParams {
-        file: "src/original.ts".to_string(),
-        line: 2,
+        file: Some("src/original.ts".to_string()),
+        fingerprint: None,
+        line: Some(2),
         root: None,
         config: None,
         workspace: None,

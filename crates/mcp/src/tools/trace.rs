@@ -80,10 +80,42 @@ pub fn build_trace_dependency_args(params: &TraceDependencyParams) -> Result<Vec
 
 /// Build CLI arguments for the `trace_clone` tool.
 pub fn build_trace_clone_args(params: &TraceCloneParams) -> Result<Vec<String>, String> {
-    require_non_empty("file", &params.file)?;
-    if params.line == 0 {
-        return Err(validation_error_body("line must be greater than 0"));
-    }
+    // Exactly one addressing form: file+line (a location) OR fingerprint (a
+    // dup:<id> from a prior find_dupes result).
+    let has_location = params.file.is_some() || params.line.is_some();
+    let has_fingerprint = params
+        .fingerprint
+        .as_deref()
+        .is_some_and(|fp| !fp.trim().is_empty());
+    let trace_spec = match (has_location, has_fingerprint) {
+        (true, true) => {
+            return Err(validation_error_body(
+                "provide either file + line OR fingerprint, not both",
+            ));
+        }
+        (false, false) => {
+            return Err(validation_error_body(
+                "provide file + line (a clone location) or fingerprint (a dup:<id> from find_dupes)",
+            ));
+        }
+        (true, false) => {
+            let file = params.file.as_deref().unwrap_or_default();
+            if file.trim().is_empty() {
+                return Err(validation_error_body("file must not be empty"));
+            }
+            match params.line {
+                None => return Err(validation_error_body("line is required with file")),
+                Some(0) => return Err(validation_error_body("line must be greater than 0")),
+                Some(line) => format!("{file}:{line}"),
+            }
+        }
+        (false, true) => params
+            .fingerprint
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+    };
 
     let mut args = vec![
         "dupes".to_string(),
@@ -136,10 +168,7 @@ pub fn build_trace_clone_args(params: &TraceCloneParams) -> Result<Vec<String>, 
     if params.ignore_imports == Some(true) {
         args.push("--ignore-imports".to_string());
     }
-    args.extend([
-        "--trace".to_string(),
-        format!("{}:{}", params.file, params.line),
-    ]);
+    args.extend(["--trace".to_string(), trace_spec]);
 
     Ok(args)
 }

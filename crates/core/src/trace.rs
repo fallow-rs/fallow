@@ -4,7 +4,10 @@ use fallow_types::serde_path;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 
-use crate::duplicates::{CloneInstance, DuplicationReport};
+use crate::duplicates::{
+    CloneGroup, CloneInstance, DuplicationReport, RefactoringSuggestion, clone_fingerprint,
+    dominant_identifier, group_refactoring_suggestion,
+};
 use crate::graph::{ModuleGraph, ReferenceKind};
 
 /// Match a user-provided file path against a module's actual path.
@@ -450,9 +453,37 @@ pub struct CloneTrace {
 
 #[derive(Debug, Serialize)]
 pub struct TracedCloneGroup {
+    /// Stable content fingerprint (`dup:<8hex>`); addressable via
+    /// `fallow dupes --trace dup:<fp>` and shown in the `dupes` listing.
+    pub fingerprint: String,
     pub token_count: usize,
     pub line_count: usize,
     pub instances: Vec<CloneInstance>,
+    /// Group-level extract-function suggestion with estimated line savings.
+    pub suggestion: RefactoringSuggestion,
+    /// Best-effort name for the extracted function, derived from the dominant
+    /// non-generic identifier. `null` when no confident name exists; advisory
+    /// only (verify before applying).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggested_name: Option<String>,
+}
+
+/// Build a [`TracedCloneGroup`] from a raw clone group, computing the
+/// fingerprint, group-level suggestion, and dominant-identifier name and
+/// relativizing every instance path against `root`.
+fn build_traced_group(group: &CloneGroup, root: &Path) -> TracedCloneGroup {
+    TracedCloneGroup {
+        fingerprint: clone_fingerprint(&group.instances),
+        token_count: group.token_count,
+        line_count: group.line_count,
+        instances: group
+            .instances
+            .iter()
+            .map(|inst| relativize_instance(inst, root))
+            .collect(),
+        suggestion: group_refactoring_suggestion(group),
+        suggested_name: dominant_identifier(group),
+    }
 }
 
 #[must_use]
@@ -477,15 +508,7 @@ pub fn trace_clone(
             if matched_instance.is_none() {
                 matched_instance = Some(relativize_instance(matched, root));
             }
-            clone_groups.push(TracedCloneGroup {
-                token_count: group.token_count,
-                line_count: group.line_count,
-                instances: group
-                    .instances
-                    .iter()
-                    .map(|inst| relativize_instance(inst, root))
-                    .collect(),
-            });
+            clone_groups.push(build_traced_group(group, root));
         }
     }
 
@@ -494,6 +517,49 @@ pub fn trace_clone(
         line,
         matched_instance,
         clone_groups,
+    }
+}
+
+/// Trace a clone group by its stable content fingerprint (`dup:<8hex>`).
+///
+/// Returns a [`CloneTrace`] whose single `clone_groups` entry is the matched
+/// group and whose `file` / `line` / `matched_instance` come from that group's
+/// representative (first) instance. `matched_instance` is `None` (and
+/// `clone_groups` empty) when no group matches the fingerprint.
+#[must_use]
+pub fn trace_clone_by_fingerprint(
+    report: &DuplicationReport,
+    root: &Path,
+    fingerprint: &str,
+) -> CloneTrace {
+    let matched = report
+        .clone_groups
+        .iter()
+        .find(|group| clone_fingerprint(&group.instances) == fingerprint);
+
+    let Some(group) = matched else {
+        return CloneTrace {
+            file: PathBuf::new(),
+            line: 0,
+            matched_instance: None,
+            clone_groups: Vec::new(),
+        };
+    };
+
+    let representative = group
+        .instances
+        .first()
+        .map(|inst| relativize_instance(inst, root));
+    let (file, line) = representative.as_ref().map_or_else(
+        || (PathBuf::new(), 0),
+        |inst| (inst.file.clone(), inst.start_line),
+    );
+
+    CloneTrace {
+        file,
+        line,
+        matched_instance: representative,
+        clone_groups: vec![build_traced_group(group, root)],
     }
 }
 
@@ -845,6 +911,55 @@ mod tests {
         assert!(trace.matched_instance.is_some());
         assert_eq!(trace.clone_groups.len(), 1);
         assert_eq!(trace.clone_groups[0].instances.len(), 2);
+        // The enriched trace carries the fingerprint + group-level suggestion.
+        assert!(trace.clone_groups[0].fingerprint.starts_with("dup:"));
+        assert_eq!(trace.clone_groups[0].suggestion.estimated_savings, 11);
+    }
+
+    #[test]
+    fn trace_clone_by_fingerprint_resolves_and_misses() {
+        use crate::duplicates::{
+            CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, clone_fingerprint,
+        };
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![
+                    CloneInstance {
+                        file: PathBuf::from("/project/src/a.ts"),
+                        start_line: 10,
+                        end_line: 20,
+                        start_col: 0,
+                        end_col: 0,
+                        fragment: "fn buildInvoice() {}".to_string(),
+                    },
+                    CloneInstance {
+                        file: PathBuf::from("/project/src/b.ts"),
+                        start_line: 5,
+                        end_line: 15,
+                        start_col: 0,
+                        end_col: 0,
+                        fragment: "fn buildInvoice() {}".to_string(),
+                    },
+                ],
+                token_count: 60,
+                line_count: 11,
+            }],
+            clone_families: vec![],
+            mirrored_directories: vec![],
+            stats: DuplicationStats::default(),
+        };
+        let fp = clone_fingerprint(&report.clone_groups[0].instances);
+
+        let hit = trace_clone_by_fingerprint(&report, Path::new("/project"), &fp);
+        assert!(hit.matched_instance.is_some());
+        assert_eq!(hit.clone_groups.len(), 1);
+        assert_eq!(hit.clone_groups[0].fingerprint, fp);
+        // Representative location flows onto the trace header.
+        assert_eq!(hit.line, 10);
+
+        let miss = trace_clone_by_fingerprint(&report, Path::new("/project"), "dup:deadbeef");
+        assert!(miss.matched_instance.is_none());
+        assert!(miss.clone_groups.is_empty());
     }
 
     #[test]

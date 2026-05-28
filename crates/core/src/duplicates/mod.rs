@@ -6,6 +6,7 @@
 //! matching that ignores identifier names and literal values).
 
 mod cache;
+pub mod deepdive;
 pub mod detect;
 pub mod families;
 pub mod normalize;
@@ -24,6 +25,10 @@ use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 
 use cache::{TokenCache, TokenCacheEntry, TokenCacheMode};
+pub use deepdive::{
+    FINGERPRINT_PREFIX, clone_fingerprint, dominant_identifier, fingerprint_for_fragment,
+    group_refactoring_suggestion,
+};
 use detect::CloneDetector;
 use normalize::normalize_and_hash_resolved;
 use tokenize::{tokenize_file, tokenize_file_cross_language};

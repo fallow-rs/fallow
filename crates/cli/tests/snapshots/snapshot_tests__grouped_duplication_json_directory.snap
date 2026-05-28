@@ -36,6 +36,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
       ],
       "token_count": 25,
       "line_count": 11,
+      "fingerprint": "dup:77353011",
       "actions": [
         {
           "type": "extract-shared",
@@ -71,6 +72,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
       ],
       "token_count": 18,
       "line_count": 8,
+      "fingerprint": "dup:71c373ff",
       "actions": [
         {
           "type": "extract-shared",
@@ -139,6 +141,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               "owner": "lib"
             }
           ],
+          "fingerprint": "dup:71c373ff",
           "actions": [
             {
               "type": "extract-shared",
@@ -203,6 +206,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               "owner": "lib"
             }
           ],
+          "fingerprint": "dup:77353011",
           "actions": [
             {
               "type": "extract-shared",

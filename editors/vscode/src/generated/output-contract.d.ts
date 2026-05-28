@@ -2282,6 +2282,12 @@ token_count: number
  */
 line_count: number
 /**
+ * Stable content fingerprint (`dup:<8hex>`). Addressable via
+ * `fallow dupes --trace dup:<fp>` (and the `trace_clone` MCP tool) to
+ * deep-dive this group; shown alongside each group in the human listing.
+ */
+fingerprint: string
+/**
  * Suggested next steps: an `extract-shared` primary and a
  * `suppress-line` secondary. Always emitted (possibly empty for
  * forward-compat).
@@ -5271,6 +5277,13 @@ line_count: number
  * CloneInstance shape.
  */
 instances: AttributedInstance[]
+/**
+ * Stable content fingerprint (`dup:<8hex>`), addressable via
+ * `fallow dupes --trace dup:<fp>`. Computed from the group's instances,
+ * so it matches the top-level `clone_groups[].fingerprint` for the same
+ * clone.
+ */
+fingerprint: string
 /**
  * Suggested next steps. Always emitted.
  */

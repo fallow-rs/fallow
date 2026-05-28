@@ -95,7 +95,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Find code duplication across the project. Detects clone groups (identical or similar code blocks) with configurable detection modes and thresholds. Returns clone families with refactoring suggestions. Set top=N to show only the N largest clone groups. Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" (GitLab CODEOWNERS `[Section]` headers, with `owners` metadata per group) to partition results. explain_skipped only changes the human-format skipped-default-ignores note (human/markdown CLI output); MCP JSON responses stay clean. Supports config, workspace scoping, baseline comparisons, and performance tuning (no_cache, threads).",
+        description = "Find code duplication across the project. Detects clone groups (identical or similar code blocks) with configurable detection modes and thresholds. Returns clone families with refactoring suggestions. Each clone_groups[] entry carries a stable `fingerprint` (dup:<id>); pass it to the trace_clone tool to deep-dive that group (locations, an extract-function suggestion with estimated savings, and a best-effort suggested name). Set top=N to show only the N largest clone groups. Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" (GitLab CODEOWNERS `[Section]` headers, with `owners` metadata per group) to partition results. explain_skipped only changes the human-format skipped-default-ignores note (human/markdown CLI output); MCP JSON responses stay clean. Supports config, workspace scoping, baseline comparisons, and performance tuning (no_cache, threads).",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn find_dupes(
@@ -182,7 +182,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Trace duplicate-code groups containing a given file and line. Returns the matched clone instance plus every clone group that contains it. Useful when an agent wants to consolidate duplication but needs the exact sibling locations first.",
+        description = "Deep-dive a duplicate-code clone group. Address it either by a source location (file + line) or by a stable fingerprint (fingerprint=\"dup:<id>\" from a find_dupes clone_groups[].fingerprint). Returns the matched clone instance, every sibling clone group / location, plus per group an extract-function suggestion with estimated line savings and a best-effort suggested_name (null when no confident name; advisory, verify before applying). Provide exactly one addressing form. Use after find_dupes when consolidating duplication and you need exact sibling locations and a refactor target.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn trace_clone(

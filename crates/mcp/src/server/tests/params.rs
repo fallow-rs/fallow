@@ -239,10 +239,16 @@ fn trace_dependency_params_require_package_name() {
 }
 
 #[test]
-fn trace_clone_params_require_file_and_line() {
-    let json = "{}";
-    let result: Result<TraceCloneParams, _> = serde_json::from_str(json);
-    assert!(result.is_err());
+fn trace_clone_params_optional_addressing() {
+    // No required fields: the addressing form (file+line vs fingerprint) is
+    // validated at build_trace_clone_args time, not deserialization. See the
+    // args::trace_clone_args_* tests for the exactly-one-of enforcement.
+    let empty: TraceCloneParams = serde_json::from_str("{}").unwrap();
+    assert!(empty.file.is_none() && empty.line.is_none() && empty.fingerprint.is_none());
+
+    let by_fp: TraceCloneParams =
+        serde_json::from_str(r#"{"fingerprint": "dup:7f3a2c1e"}"#).unwrap();
+    assert_eq!(by_fp.fingerprint.as_deref(), Some("dup:7f3a2c1e"));
 
     let json = r#"{
         "file": "src/original.ts",
@@ -252,8 +258,8 @@ fn trace_clone_params_require_file_and_line() {
         "skip_local": true
     }"#;
     let params: TraceCloneParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.file, "src/original.ts");
-    assert_eq!(params.line, 2);
+    assert_eq!(params.file.as_deref(), Some("src/original.ts"));
+    assert_eq!(params.line, Some(2));
     assert_eq!(params.mode.as_deref(), Some("semantic"));
     assert_eq!(params.min_tokens, Some(80));
     assert_eq!(params.skip_local, Some(true));
