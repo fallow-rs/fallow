@@ -124,6 +124,12 @@ fn identifier_words(source: &str) -> impl Iterator<Item = &str> {
 /// Identifiers too generic to make a useful extracted-function name, plus the
 /// reserved words that show up as bare tokens in a fragment.
 fn is_generic_identifier(word: &str) -> bool {
+    // Single-character names are never useful as an extracted-function name:
+    // loop counters (`i`, `n`), lambda params (`x`), and generic type params
+    // (`T`, `U`, `K`, `V`) all collapse here regardless of case.
+    if word.chars().count() == 1 {
+        return true;
+    }
     matches!(
         word,
         // generic value / collection names
@@ -221,6 +227,16 @@ mod tests {
     #[test]
     fn dominant_identifier_none_on_generic() {
         let g = group(&["const data = result.map((item) => item.value);"], 3);
+        assert_eq!(dominant_identifier(&g), None);
+    }
+
+    #[test]
+    fn dominant_identifier_none_on_single_letter_type_param() {
+        // A generic type param repeated many times must not become the name.
+        let g = group(
+            &["function id<T>(x: T): T { const a: T = x; return a as T; }"],
+            3,
+        );
         assert_eq!(dominant_identifier(&g), None);
     }
 
