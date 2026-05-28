@@ -713,6 +713,124 @@ mod tests {
         assert_eq!(output, input);
     }
 
+    #[test]
+    fn token_leak_authenticated_ureq_paths_stay_sanitized() {
+        const CLOUD_CLIENT: &str = include_str!("coverage/cloud_client.rs");
+        const UPLOAD_INVENTORY: &str = include_str!("coverage/upload_inventory.rs");
+        const UPLOAD_SOURCE_MAPS: &str = include_str!("coverage/upload_source_maps.rs");
+        const LICENSE: &str = include_str!("license/mod.rs");
+        const CI: &str = include_str!("ci.rs");
+
+        assert_eq!(
+            count_occurrences(CLOUD_CLIENT, ".header(\"Authorization\""),
+            1,
+            "update this guard when cloud runtime-context auth paths change"
+        );
+        assert_contains(
+            CLOUD_CLIENT,
+            "sanitize_network_error(&format!(\"{err}\"))",
+            "cloud runtime-context transport errors must be sanitized",
+        );
+
+        assert_eq!(
+            count_occurrences(UPLOAD_INVENTORY, ".header(\"Authorization\""),
+            1,
+            "update this guard when inventory upload auth paths change"
+        );
+        assert_contains(
+            UPLOAD_INVENTORY,
+            "UploadError::Network(sanitize_network_error(&format!(\"network error: {err}\")))",
+            "inventory upload transport errors must be sanitized",
+        );
+
+        assert_eq!(
+            count_occurrences(UPLOAD_SOURCE_MAPS, ".header(\"Authorization\""),
+            1,
+            "update this guard when source-map upload auth paths change"
+        );
+        assert_contains(
+            UPLOAD_SOURCE_MAPS,
+            "message: sanitize_network_error(&format!(\"network error: {err}\"))",
+            "source-map upload transport errors must be sanitized",
+        );
+
+        assert_eq!(
+            count_occurrences(LICENSE, ".header(\"Authorization\""),
+            1,
+            "update this guard when license refresh auth paths change"
+        );
+        assert_contains(
+            LICENSE,
+            "sanitize_network_error(&format!(\"failed to refresh the current license: {err}\"))",
+            "license refresh transport errors must be sanitized",
+        );
+
+        assert_eq!(
+            count_occurrences(CI, ".header(\"Authorization\""),
+            2,
+            "update this guard when GitHub reconciliation auth paths change"
+        );
+        assert_eq!(
+            count_occurrences(CI, ".header(\"PRIVATE-TOKEN\""),
+            3,
+            "update this guard when GitLab reconciliation auth paths change"
+        );
+        assert_contains(
+            CI,
+            "return Err(sanitize_network_error(&format!(",
+            "CI reconciliation retry wrapper must sanitize transport errors",
+        );
+    }
+
+    #[test]
+    fn token_leak_credential_debug_impls_stay_redacted() {
+        const ANALYZE: &str = include_str!("coverage/analyze.rs");
+        const CLOUD_CLIENT: &str = include_str!("coverage/cloud_client.rs");
+        const UPLOAD_INVENTORY: &str = include_str!("coverage/upload_inventory.rs");
+        const LICENSE: &str = include_str!("license/mod.rs");
+
+        assert_manual_debug_mask(
+            ANALYZE,
+            "AnalyzeArgs",
+            r#".field("api_key", &self.api_key.as_ref().map(|_| "***"))"#,
+        );
+        assert_manual_debug_mask(CLOUD_CLIENT, "CloudRequest", r#".field("api_key", &"***")"#);
+        assert_manual_debug_mask(
+            UPLOAD_INVENTORY,
+            "UploadInventoryArgs",
+            r#".field("api_key", &self.api_key.as_ref().map(|_| "***"))"#,
+        );
+        assert_manual_debug_mask(
+            LICENSE,
+            "ActivateArgs",
+            r#".field("raw_jwt", &self.raw_jwt.as_ref().map(|_| "***"))"#,
+        );
+    }
+
+    fn count_occurrences(haystack: &str, needle: &str) -> usize {
+        haystack.match_indices(needle).count()
+    }
+
+    fn assert_contains(source: &str, needle: &str, message: &str) {
+        assert!(
+            source.contains(needle),
+            "{message}; expected source to contain `{needle}`"
+        );
+    }
+
+    fn assert_manual_debug_mask(source: &str, type_name: &str, mask_snippet: &str) {
+        assert!(
+            source.contains(&format!("impl fmt::Debug for {type_name}"))
+                || source.contains(&format!("impl std::fmt::Debug for {type_name}")),
+            "{type_name} must keep a manual Debug impl"
+        );
+        assert_contains(
+            source,
+            mask_snippet,
+            &format!("{type_name} Debug impl must mask credential fields"),
+        );
+    }
+
     // Env-var assertions run in one test to avoid interleaving with parallel
     // tests that also touch `FALLOW_API_URL`. Restores the prior value.
     #[test]
