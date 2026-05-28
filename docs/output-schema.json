@@ -9039,7 +9039,7 @@
         },
         "fingerprint": {
           "type": "string",
-          "description": "Stable content fingerprint (`dup:<8hex>`), addressable via\n`fallow dupes --trace dup:<fp>`. Computed from the group's instances,\nso it matches the top-level `clone_groups[].fingerprint` for the same\nclone."
+          "description": "Stable content fingerprint, usually `dup:<8hex>` and widened on rare\nreport collisions. Addressable via `fallow dupes --trace dup:<fp>`.\nComputed from the group's instances, so it matches the top-level\n`clone_groups[].fingerprint` for the same clone."
         },
         "actions": {
           "type": "array",
@@ -9164,7 +9164,7 @@
         },
         "fingerprint": {
           "type": "string",
-          "description": "Stable content fingerprint (`dup:<8hex>`). Addressable via\n`fallow dupes --trace dup:<fp>` (and the `trace_clone` MCP tool) to\ndeep-dive this group; shown alongside each group in the human listing."
+          "description": "Stable content fingerprint, usually `dup:<8hex>` and widened on rare\nreport collisions. Addressable via `fallow dupes --trace dup:<fp>` (and\nthe `trace_clone` MCP tool) to deep-dive this group; shown alongside\neach group in the human listing."
         },
         "actions": {
           "type": "array",

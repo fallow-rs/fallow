@@ -14,7 +14,9 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
+use fallow_core::duplicates::{
+    CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
+};
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 
@@ -106,6 +108,15 @@ impl AttributedCloneGroup {
             instances,
         }
     }
+
+    fn fingerprint(&self, fingerprints: &CloneFingerprintSet) -> String {
+        let instances: Vec<_> = self
+            .instances
+            .iter()
+            .map(|instance| instance.instance.clone())
+            .collect();
+        fingerprints.fingerprint_for_parts(&instances, self.token_count, self.line_count)
+    }
 }
 
 /// A single grouped duplication bucket. Per-group `stats` are dedup-aware and
@@ -147,6 +158,7 @@ pub fn build_duplication_grouping(
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> DuplicationGrouping {
+    let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
     // Bucket clone groups by largest owner.
     let mut buckets: BTreeMap<String, Vec<AttributedCloneGroup>> = BTreeMap::new();
     for group in &report.clone_groups {
@@ -205,13 +217,15 @@ pub fn build_duplication_grouping(
                 .clone_families
                 .iter()
                 .filter(|f| f.files.iter().any(|fp| bucket_files.contains(fp.as_path())))
-                .cloned()
-                .map(CloneFamilyFinding::with_actions)
+                .map(|family| CloneFamilyFinding::with_fingerprints(family.clone(), &fingerprints))
                 .collect();
 
             let clone_groups: Vec<AttributedCloneGroupFinding> = attributed_groups
                 .into_iter()
-                .map(AttributedCloneGroupFinding::with_actions)
+                .map(|group| {
+                    let fingerprint = group.fingerprint(&fingerprints);
+                    AttributedCloneGroupFinding::with_fingerprint(group, fingerprint)
+                })
                 .collect();
 
             DuplicationGroup {

@@ -403,10 +403,11 @@ pub struct TraceCloneParams {
     #[serde(default)]
     pub line: Option<usize>,
 
-    /// Stable clone-group fingerprint (`dup:<8hex>`) from a prior `find_dupes`
-    /// result (`clone_groups[].fingerprint`). Deep-dives that group directly:
-    /// returns its locations, an extract-function suggestion with estimated
-    /// savings, and a best-effort suggested name. Use instead of `file` + `line`.
+    /// Stable clone-group fingerprint from a prior `find_dupes` result
+    /// (`clone_groups[].fingerprint`). Usually `dup:<8hex>`, widened only when
+    /// a report collision requires it. Deep-dives that group directly: returns
+    /// its locations, an extract-function suggestion with estimated savings,
+    /// and a best-effort suggested name. Use instead of `file` + `line`.
     #[serde(default)]
     pub fingerprint: Option<String>,
 

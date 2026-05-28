@@ -182,7 +182,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Deep-dive a duplicate-code clone group. Address it either by a source location (file + line) or by a stable fingerprint (fingerprint=\"dup:<id>\" from a find_dupes clone_groups[].fingerprint). Returns the matched clone instance, every sibling clone group / location, plus per group an extract-function suggestion with estimated line savings and a best-effort suggested_name (the field is omitted, not null, when there is no confident name, so branch on key presence; advisory, verify before applying, never auto-apply). Provide exactly one addressing form. Use after find_dupes when consolidating duplication and you need exact sibling locations and a refactor target.",
+        description = "Deep-dive a duplicate-code clone group. Address it either by a source location (file + line) or by a stable fingerprint (fingerprint=\"dup:<id>\" from a find_dupes clone_groups[].fingerprint, usually dup:<8hex> and widened only on rare report collisions). Returns the matched clone instance, every sibling clone group / location, plus per group an extract-function suggestion with estimated line savings and a best-effort suggested_name (the field is omitted, not null, when there is no confident name, so branch on key presence; advisory, verify before applying, never auto-apply). Provide exactly one addressing form. Use after find_dupes when consolidating duplication and you need exact sibling locations and a refactor target.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn trace_clone(

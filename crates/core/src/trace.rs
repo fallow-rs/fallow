@@ -5,7 +5,7 @@ use rustc_hash::FxHashSet;
 use serde::Serialize;
 
 use crate::duplicates::{
-    CloneGroup, CloneInstance, DuplicationReport, RefactoringSuggestion, clone_fingerprint,
+    CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport, RefactoringSuggestion,
     dominant_identifier, group_refactoring_suggestion,
 };
 use crate::graph::{ModuleGraph, ReferenceKind};
@@ -453,8 +453,9 @@ pub struct CloneTrace {
 
 #[derive(Debug, Serialize)]
 pub struct TracedCloneGroup {
-    /// Stable content fingerprint (`dup:<8hex>`); addressable via
-    /// `fallow dupes --trace dup:<fp>` and shown in the `dupes` listing.
+    /// Stable content fingerprint, usually `dup:<8hex>` and widened on rare
+    /// report collisions; addressable via `fallow dupes --trace dup:<fp>` and
+    /// shown in the `dupes` listing.
     pub fingerprint: String,
     pub token_count: usize,
     pub line_count: usize,
@@ -471,9 +472,13 @@ pub struct TracedCloneGroup {
 /// Build a [`TracedCloneGroup`] from a raw clone group, computing the
 /// fingerprint, group-level suggestion, and dominant-identifier name and
 /// relativizing every instance path against `root`.
-fn build_traced_group(group: &CloneGroup, root: &Path) -> TracedCloneGroup {
+fn build_traced_group(
+    group: &CloneGroup,
+    root: &Path,
+    fingerprints: &CloneFingerprintSet,
+) -> TracedCloneGroup {
     TracedCloneGroup {
-        fingerprint: clone_fingerprint(&group.instances),
+        fingerprint: fingerprints.fingerprint_for_group(group),
         token_count: group.token_count,
         line_count: group.line_count,
         instances: group
@@ -496,6 +501,7 @@ pub fn trace_clone(
     let resolved = root.join(file_path);
     let mut matched_instance = None;
     let mut clone_groups = Vec::new();
+    let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
 
     for group in &report.clone_groups {
         let matching = group.instances.iter().find(|inst| {
@@ -508,7 +514,7 @@ pub fn trace_clone(
             if matched_instance.is_none() {
                 matched_instance = Some(relativize_instance(matched, root));
             }
-            clone_groups.push(build_traced_group(group, root));
+            clone_groups.push(build_traced_group(group, root, &fingerprints));
         }
     }
 
@@ -520,7 +526,10 @@ pub fn trace_clone(
     }
 }
 
-/// Trace a clone group by its stable content fingerprint (`dup:<8hex>`).
+/// Trace a clone group by its stable content fingerprint.
+///
+/// Fingerprints are usually `dup:<8hex>` and widen only when needed to avoid a
+/// collision inside the same report.
 ///
 /// Returns a [`CloneTrace`] whose single `clone_groups` entry is the matched
 /// group and whose `file` / `line` / `matched_instance` come from that group's
@@ -532,10 +541,8 @@ pub fn trace_clone_by_fingerprint(
     root: &Path,
     fingerprint: &str,
 ) -> CloneTrace {
-    let matched = report
-        .clone_groups
-        .iter()
-        .find(|group| clone_fingerprint(&group.instances) == fingerprint);
+    let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
+    let matched = fingerprints.find_group(&report.clone_groups, fingerprint);
 
     let Some(group) = matched else {
         return CloneTrace {
@@ -559,7 +566,7 @@ pub fn trace_clone_by_fingerprint(
         file,
         line,
         matched_instance: representative,
-        clone_groups: vec![build_traced_group(group, root)],
+        clone_groups: vec![build_traced_group(group, root, &fingerprints)],
     }
 }
 

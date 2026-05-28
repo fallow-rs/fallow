@@ -296,6 +296,9 @@ fallow dupes --trace src/utils.ts:42      # Show all clones of code at this loca
 fallow dupes --trace dup:7f3a2c1e         # Deep-dive a clone group by its dup:<id> fingerprint
 ```
 
+Clone fingerprints are usually short `dup:<8hex>` ids and widen only when a
+rare report collision requires it.
+
 Four detection modes: **strict** (exact tokens), **mild** (default, AST-based), **weak** (different string literals), **semantic** (renamed variables and literals).
 
 ## Complexity

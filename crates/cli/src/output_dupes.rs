@@ -22,8 +22,8 @@
 use std::path::PathBuf;
 
 use fallow_core::duplicates::{
-    CloneFamily, CloneGroup, DuplicationReport, DuplicationStats, MirroredDirectory,
-    RefactoringSuggestion,
+    CloneFamily, CloneFingerprintSet, CloneGroup, DuplicationReport, DuplicationStats,
+    MirroredDirectory, RefactoringSuggestion,
 };
 use fallow_types::envelope::AuditIntroduced;
 use fallow_types::serde_path;
@@ -122,9 +122,10 @@ pub struct CloneGroupFinding {
     /// The underlying clone group.
     #[serde(flatten)]
     pub group: CloneGroup,
-    /// Stable content fingerprint (`dup:<8hex>`). Addressable via
-    /// `fallow dupes --trace dup:<fp>` (and the `trace_clone` MCP tool) to
-    /// deep-dive this group; shown alongside each group in the human listing.
+    /// Stable content fingerprint, usually `dup:<8hex>` and widened on rare
+    /// report collisions. Addressable via `fallow dupes --trace dup:<fp>` (and
+    /// the `trace_clone` MCP tool) to deep-dive this group; shown alongside
+    /// each group in the human listing.
     pub fingerprint: String,
     /// Suggested next steps: an `extract-shared` primary and a
     /// `suppress-line` secondary. Always emitted (possibly empty for
@@ -140,8 +141,19 @@ impl CloneGroupFinding {
     /// Build the wrapper from a raw [`CloneGroup`], computing the typed
     /// `actions` array inline. `introduced` stays `None` and is set later
     /// by `annotate_dupes_json` if the audit pass runs.
+    #[allow(
+        dead_code,
+        reason = "kept for focused wrapper tests and non-report construction paths"
+    )]
     #[must_use]
     pub fn with_actions(group: CloneGroup) -> Self {
+        let fingerprint = fallow_core::duplicates::clone_fingerprint(&group.instances);
+        Self::with_fingerprint(group, fingerprint)
+    }
+
+    /// Build the wrapper with a precomputed report-scoped fingerprint.
+    #[must_use]
+    pub fn with_fingerprint(group: CloneGroup, fingerprint: String) -> Self {
         let line_count = group.line_count;
         let instance_count = group.instances.len();
         let actions = vec![
@@ -162,7 +174,7 @@ impl CloneGroupFinding {
             },
         ];
         Self {
-            fingerprint: fallow_core::duplicates::clone_fingerprint(&group.instances),
+            fingerprint,
             group,
             actions,
             introduced: None,
@@ -207,8 +219,20 @@ impl CloneFamilyFinding {
     /// Build the wrapper from a raw [`CloneFamily`], computing the typed
     /// `actions` array inline and wrapping each inner clone group with its
     /// own typed actions.
+    #[allow(
+        dead_code,
+        reason = "kept for focused wrapper tests and non-report construction paths"
+    )]
     #[must_use]
     pub fn with_actions(family: CloneFamily) -> Self {
+        let fingerprints = CloneFingerprintSet::from_groups(&family.groups);
+        Self::with_fingerprints(family, &fingerprints)
+    }
+
+    /// Build the wrapper using the report-scoped fingerprint assignment shared
+    /// by all duplication output surfaces.
+    #[must_use]
+    pub fn with_fingerprints(family: CloneFamily, fingerprints: &CloneFingerprintSet) -> Self {
         let actions = build_clone_family_actions(
             &family.groups,
             family.total_duplicated_lines,
@@ -219,7 +243,10 @@ impl CloneFamilyFinding {
             groups: family
                 .groups
                 .into_iter()
-                .map(CloneGroupFinding::with_actions)
+                .map(|group| {
+                    let fingerprint = fingerprints.fingerprint_for_group(&group);
+                    CloneGroupFinding::with_fingerprint(group, fingerprint)
+                })
                 .collect(),
             total_duplicated_lines: family.total_duplicated_lines,
             total_duplicated_tokens: family.total_duplicated_tokens,
@@ -279,10 +306,10 @@ pub struct AttributedCloneGroupFinding {
     /// The underlying attributed clone group.
     #[serde(flatten)]
     pub group: AttributedCloneGroup,
-    /// Stable content fingerprint (`dup:<8hex>`), addressable via
-    /// `fallow dupes --trace dup:<fp>`. Computed from the group's instances,
-    /// so it matches the top-level `clone_groups[].fingerprint` for the same
-    /// clone.
+    /// Stable content fingerprint, usually `dup:<8hex>` and widened on rare
+    /// report collisions. Addressable via `fallow dupes --trace dup:<fp>`.
+    /// Computed from the group's instances, so it matches the top-level
+    /// `clone_groups[].fingerprint` for the same clone.
     pub fingerprint: String,
     /// Suggested next steps. Always emitted.
     pub actions: Vec<CloneGroupAction>,
@@ -292,8 +319,22 @@ impl AttributedCloneGroupFinding {
     /// Build the wrapper from an [`AttributedCloneGroup`], computing the
     /// typed `actions` array inline from the attributed group's
     /// `line_count` and instance count.
+    #[allow(
+        dead_code,
+        reason = "kept for focused wrapper tests and non-report construction paths"
+    )]
     #[must_use]
     pub fn with_actions(group: AttributedCloneGroup) -> Self {
+        let fingerprint = group.instances.first().map_or_else(
+            || fallow_core::duplicates::fingerprint_for_fragment(""),
+            |ai| fallow_core::duplicates::fingerprint_for_fragment(&ai.instance.fragment),
+        );
+        Self::with_fingerprint(group, fingerprint)
+    }
+
+    /// Build the wrapper with a precomputed report-scoped fingerprint.
+    #[must_use]
+    pub fn with_fingerprint(group: AttributedCloneGroup, fingerprint: String) -> Self {
         let line_count = group.line_count;
         let instance_count = group.instances.len();
         let actions = vec![
@@ -314,18 +355,8 @@ impl AttributedCloneGroupFinding {
             },
         ];
         Self {
-            // Hash the representative instance's fragment, same as the bare
-            // `CloneGroupFinding`. `AttributedCloneGroup::from_group` preserves
-            // the base group's `(file, line)` instance order, so `first()` here
-            // is the same `CloneInstance` and the fingerprint matches the
-            // top-level `clone_groups[].fingerprint` for the same clone. If that
-            // grouping ever re-sorts instances, this must switch to hashing the
-            // base group to keep the two surfaces in agreement.
-            fingerprint: group.instances.first().map_or_else(
-                || fallow_core::duplicates::fingerprint_for_fragment(""),
-                |ai| fallow_core::duplicates::fingerprint_for_fragment(&ai.instance.fragment),
-            ),
             group,
+            fingerprint,
             actions,
         }
     }
@@ -366,18 +397,22 @@ impl DupesReportPayload {
     /// `mirrored_directories` and `stats` through unchanged.
     #[must_use]
     pub fn from_report(report: &DuplicationReport) -> Self {
+        let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
         Self {
             clone_groups: report
                 .clone_groups
                 .iter()
-                .cloned()
-                .map(CloneGroupFinding::with_actions)
+                .map(|group| {
+                    CloneGroupFinding::with_fingerprint(
+                        group.clone(),
+                        fingerprints.fingerprint_for_group(group),
+                    )
+                })
                 .collect(),
             clone_families: report
                 .clone_families
                 .iter()
-                .cloned()
-                .map(CloneFamilyFinding::with_actions)
+                .map(|family| CloneFamilyFinding::with_fingerprints(family.clone(), &fingerprints))
                 .collect(),
             mirrored_directories: report.mirrored_directories.clone(),
             stats: report.stats.clone(),

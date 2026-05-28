@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use colored::Colorize;
-use fallow_core::duplicates::DuplicationReport;
+use fallow_core::duplicates::{CloneFingerprintSet, DuplicationReport};
 
 use super::{
     MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, relative_path,
@@ -111,6 +111,7 @@ fn build_duplication_human_lines_with_explain(
     let mut sorted_groups: Vec<&fallow_core::duplicates::CloneGroup> =
         report.clone_groups.iter().collect();
     sorted_groups.sort_by_key(|b| std::cmp::Reverse(b.line_count));
+    let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
 
     let total_groups = sorted_groups.len();
     let shown = total_groups.min(MAX_CLONE_GROUPS);
@@ -149,7 +150,7 @@ fn build_duplication_human_lines_with_explain(
             lc_colored,
             instance_count,
             plural(instance_count),
-            fallow_core::duplicates::clone_fingerprint(&group.instances).dimmed(),
+            fingerprints.fingerprint_for_group(group).dimmed(),
         ));
 
         for instance in &group.instances {
