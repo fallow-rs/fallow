@@ -32,6 +32,38 @@ export default {};
 }
 
 #[test]
+fn vue_script_import_spans_are_original_source_offsets() {
+    let source = r#"<template><div /></template>
+
+<script lang="ts">
+import { helper } from './utils';
+export const value = helper();
+</script>
+"#;
+    let info = parse_sfc(source, "App.vue");
+    let import = info
+        .imports
+        .iter()
+        .find(|i| i.source == "./utils")
+        .expect("script import extracted");
+    let export = info
+        .exports
+        .iter()
+        .find(|e| matches!(&e.name, crate::ExportName::Named(name) if name == "value"))
+        .expect("script export extracted");
+    let (import_line, _) =
+        fallow_types::extract::byte_offset_to_line_col(&info.line_offsets, import.span.start);
+    let (export_line, _) =
+        fallow_types::extract::byte_offset_to_line_col(&info.line_offsets, export.span.start);
+    assert_eq!(import_line, 4);
+    assert_eq!(export_line, 5);
+    assert_eq!(
+        &source[import.source_span.start as usize..import.source_span.end as usize],
+        "'./utils'"
+    );
+}
+
+#[test]
 fn extracts_vue_script_setup_imports() {
     let info = parse_sfc(
         r#"
@@ -505,6 +537,53 @@ const counter = new Counter();
             .any(|access| access.object == "Counter" && access.member == "bump"),
         "event handler method call should be resolved to Counter.bump, got: {:?}",
         info.member_accesses
+    );
+}
+
+#[test]
+fn svelte_derived_rune_member_call_marks_bound_class_member_usage() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import { Counter } from './counter';
+const counter = $derived(new Counter());
+</script>
+<button onclick={() => counter.bump()}>Increment</button>
+"#,
+        "App.svelte",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Counter" && access.member == "bump"),
+        "$derived(new Counter()) should still resolve template member usage, got: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn svelte_effect_and_inspect_runes_credit_import_usage() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import { track, debug } from './utils';
+$effect(() => track());
+$inspect(debug());
+</script>
+"#,
+        "App.svelte",
+    );
+
+    assert!(
+        !info.unused_import_bindings.contains(&"track".to_string()),
+        "$effect callback should credit track, got: {:?}",
+        info.unused_import_bindings
+    );
+    assert!(
+        !info.unused_import_bindings.contains(&"debug".to_string()),
+        "$inspect argument should credit debug, got: {:?}",
+        info.unused_import_bindings
     );
 }
 

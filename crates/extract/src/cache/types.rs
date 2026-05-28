@@ -90,7 +90,13 @@ use crate::MemberKind;
 /// (`let { resultState }: Props = $props()`, `function f({ x }: Props)`) now
 /// populate `binding_target_names`, which changes the `member_accesses` emitted
 /// for those files. Pre-fix cache entries lack the additional member accesses.
-pub(super) const CACHE_VERSION: u32 = 103;
+///
+/// Bumped to 104 for issue #445: MDX, Astro, Vue/Svelte SFC, and CSS/SCSS
+/// container extraction now remaps source-authored spans back to the original
+/// file byte offsets. Pre-fix entries can carry synthetic extracted-buffer
+/// positions, so diagnostics can point at line 1 or compacted MDX lines until
+/// the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 104;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -913,6 +913,36 @@ impl ModuleInfoExtractor {
         }
     }
 
+    fn svelte_derived_new_class(init: &Expression<'_>) -> Option<String> {
+        let Expression::CallExpression(call) = init else {
+            return None;
+        };
+        if !Self::is_svelte_derived_call(call) {
+            return None;
+        }
+
+        if let Some(expr) = call.arguments.first().and_then(Argument::as_expression)
+            && let Expression::NewExpression(new_expr) = expr
+            && let Expression::Identifier(callee) = &new_expr.callee
+            && !super::helpers::is_builtin_constructor(callee.name.as_str())
+        {
+            return Some(callee.name.to_string());
+        }
+
+        super::helpers::try_extract_factory_new_class(&call.arguments)
+    }
+
+    fn is_svelte_derived_call(call: &CallExpression<'_>) -> bool {
+        match &call.callee {
+            Expression::Identifier(id) => id.name == "$derived",
+            Expression::StaticMemberExpression(member) => {
+                member.property.name == "by"
+                    && matches!(&member.object, Expression::Identifier(id) if id.name == "$derived")
+            }
+            _ => false,
+        }
+    }
+
     /// Substitute a class type-parameter with its constraint when the visitor
     /// is currently inside a class that declares `<T extends Foo>`.
     /// Returns `Some(constraint)` for a constrained parameter, `None` for an
@@ -2156,6 +2186,16 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     .insert(id.name.to_string(), callee.name.to_string());
                 // No `continue` — falls through to dynamic import detection (which
                 // won't match NewExpression) and then the loop continues.
+            }
+
+            // Svelte 5 `$derived(new ClassName(...))` / `$derived.by(() => new ClassName(...))`
+            // creates a reactive binding whose template member accesses should
+            // still credit the underlying class members.
+            if let BindingPattern::BindingIdentifier(id) = &declarator.id
+                && let Some(class_name) = Self::svelte_derived_new_class(init)
+            {
+                self.binding_target_names
+                    .insert(id.name.to_string(), class_name);
             }
 
             // `const [x] = wrapper(() => new ClassName(...))` — instance creation

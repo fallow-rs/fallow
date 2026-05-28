@@ -298,6 +298,62 @@ impl ModuleInfoExtractor {
         self.local_declaration_names.insert(name.to_string());
     }
 
+    pub(crate) fn remap_spans_with(&mut self, mut remap: impl FnMut(Span) -> Span) {
+        for export in &mut self.exports {
+            export.span = remap(export.span);
+            for member in &mut export.members {
+                member.span = remap(member.span);
+            }
+        }
+        for import in &mut self.imports {
+            import.span = remap(import.span);
+            import.source_span = remap(import.source_span);
+        }
+        for re_export in &mut self.re_exports {
+            re_export.span = remap(re_export.span);
+        }
+        for dynamic_import in &mut self.dynamic_imports {
+            dynamic_import.span = remap(dynamic_import.span);
+        }
+        for pattern in &mut self.dynamic_import_patterns {
+            pattern.span = remap(pattern.span);
+        }
+        for require_call in &mut self.require_calls {
+            require_call.span = remap(require_call.span);
+        }
+        for declaration in &mut self.local_type_declarations {
+            declaration.span = remap(declaration.span);
+        }
+        for reference in &mut self.public_signature_type_references {
+            reference.span = remap(reference.span);
+        }
+        for reference in &mut self.local_signature_type_references {
+            reference.span = remap(reference.span);
+        }
+        for specifier in &mut self.pending_local_export_specifiers {
+            specifier.span = remap(specifier.span);
+        }
+        for class in self.local_class_exports.values_mut() {
+            for member in &mut class.members {
+                member.span = remap(member.span);
+            }
+        }
+        self.handled_require_spans = self
+            .handled_require_spans
+            .iter()
+            .map(|span| remap(*span))
+            .collect();
+        self.handled_import_spans = self
+            .handled_import_spans
+            .iter()
+            .map(|span| remap(*span))
+            .collect();
+        for finding in &mut self.inline_template_findings {
+            finding.decorator_start =
+                remap(Span::new(finding.decorator_start, finding.decorator_start)).start;
+        }
+    }
+
     pub(crate) fn resolve_pending_local_export_specifiers(&mut self) {
         let pending = std::mem::take(&mut self.pending_local_export_specifiers);
         for spec in pending {

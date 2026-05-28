@@ -87,6 +87,8 @@ pub struct CssImportSource {
     pub normalized: String,
     /// Whether this source came from Tailwind CSS `@plugin`.
     pub is_plugin: bool,
+    /// Span of the source specifier in the original CSS/SCSS input.
+    pub span: Span,
 }
 
 fn is_css_module_file(path: &Path) -> bool {
@@ -160,6 +162,7 @@ fn is_style_extension(ext: &str) -> bool {
 }
 
 /// Strip comments from CSS/SCSS source to avoid matching directives inside comments.
+#[cfg(test)]
 fn strip_css_comments(source: &str, is_scss: bool) -> String {
     let stripped = CSS_COMMENT_RE.replace_all(source, "");
     if is_scss {
@@ -167,6 +170,14 @@ fn strip_css_comments(source: &str, is_scss: bool) -> String {
     } else {
         stripped.into_owned()
     }
+}
+
+fn mask_css_comments(source: &str, is_scss: bool) -> String {
+    let mut masked = mask_with_whitespace(source, &CSS_COMMENT_RE);
+    if is_scss {
+        masked = mask_with_whitespace(&masked, &SCSS_LINE_COMMENT_RE);
+    }
+    masked
 }
 
 /// Normalize a Tailwind CSS `@plugin` target.
@@ -185,35 +196,33 @@ fn normalize_css_plugin_path(path: String) -> String {
 /// when only the normalized form is needed.
 #[must_use]
 pub fn extract_css_import_sources(source: &str, is_scss: bool) -> Vec<CssImportSource> {
-    let stripped = strip_css_comments(source, is_scss);
+    let stripped = mask_css_comments(source, is_scss);
     let mut out = Vec::new();
 
     for cap in CSS_IMPORT_RE.captures_iter(&stripped) {
-        let raw = cap
-            .get(1)
-            .or_else(|| cap.get(2))
-            .or_else(|| cap.get(3))
-            .map(|m| m.as_str().trim().to_string());
-        if let Some(src) = raw
-            && !src.is_empty()
-            && !is_css_url_import(&src)
-        {
-            out.push(CssImportSource {
-                normalized: normalize_css_import_path(src.clone(), is_scss),
-                raw: src,
-                is_plugin: false,
-            });
+        let raw = cap.get(1).or_else(|| cap.get(2)).or_else(|| cap.get(3));
+        if let Some(m) = raw {
+            let (src, span) = trimmed_match_with_span(m);
+            if !src.is_empty() && !is_css_url_import(&src) {
+                out.push(CssImportSource {
+                    normalized: normalize_css_import_path(src.clone(), is_scss),
+                    raw: src,
+                    is_plugin: false,
+                    span,
+                });
+            }
         }
     }
 
     if is_scss {
         for cap in SCSS_USE_RE.captures_iter(&stripped) {
             if let Some(m) = cap.get(1) {
-                let raw = m.as_str().to_string();
+                let (raw, span) = trimmed_match_with_span(m);
                 out.push(CssImportSource {
                     normalized: normalize_css_import_path(raw.clone(), true),
                     raw,
                     is_plugin: false,
+                    span,
                 });
             }
         }
@@ -221,18 +230,28 @@ pub fn extract_css_import_sources(source: &str, is_scss: bool) -> Vec<CssImportS
 
     for cap in CSS_PLUGIN_RE.captures_iter(&stripped) {
         if let Some(m) = cap.get(1) {
-            let raw = m.as_str().trim().to_string();
+            let (raw, span) = trimmed_match_with_span(m);
             if !raw.is_empty() && !is_css_url_import(&raw) {
                 out.push(CssImportSource {
                     normalized: normalize_css_plugin_path(raw.clone()),
                     raw,
                     is_plugin: true,
+                    span,
                 });
             }
         }
     }
 
     out
+}
+
+fn trimmed_match_with_span(m: regex::Match<'_>) -> (String, Span) {
+    let raw = m.as_str();
+    let trimmed_start = raw.len() - raw.trim_start().len();
+    let trimmed_end = raw.trim_end().len();
+    let start = m.start() + trimmed_start;
+    let end = m.start() + trimmed_end;
+    (raw.trim().to_string(), Span::new(start as u32, end as u32))
 }
 
 /// Extract normalized `@import` / `@use` / `@forward` / `@plugin` source paths from a CSS/SCSS string.
@@ -334,71 +353,26 @@ pub(crate) fn parse_css_to_module(
         .and_then(|e| e.to_str())
         .is_some_and(|ext| ext == "scss");
 
-    // Strip comments before matching to avoid false positives from commented-out code.
-    let stripped = strip_css_comments(source, is_scss);
+    // Mask comments before matching to avoid false positives while preserving
+    // directive byte offsets for diagnostics.
+    let stripped = mask_css_comments(source, is_scss);
 
     let mut imports = Vec::new();
 
-    // Extract @import statements
-    for cap in CSS_IMPORT_RE.captures_iter(&stripped) {
-        let source_path = cap
-            .get(1)
-            .or_else(|| cap.get(2))
-            .or_else(|| cap.get(3))
-            .map(|m| m.as_str().trim().to_string());
-        if let Some(src) = source_path
-            && !src.is_empty()
-            && !is_css_url_import(&src)
-        {
-            // CSS/SCSS @import resolves relative paths without ./ prefix,
-            // so normalize to ./ to avoid bare-specifier misclassification
-            let src = normalize_css_import_path(src, is_scss);
-            imports.push(ImportInfo {
-                source: src,
-                imported_name: ImportedName::SideEffect,
-                local_name: String::new(),
-                is_type_only: false,
-                from_style: false,
-                span: Span::default(),
-                source_span: Span::default(),
-            });
-        }
-    }
-
-    // Extract SCSS @use/@forward statements
-    if is_scss {
-        for cap in SCSS_USE_RE.captures_iter(&stripped) {
-            if let Some(m) = cap.get(1) {
-                imports.push(ImportInfo {
-                    source: normalize_css_import_path(m.as_str().to_string(), true),
-                    imported_name: ImportedName::SideEffect,
-                    local_name: String::new(),
-                    is_type_only: false,
-                    from_style: false,
-                    span: Span::default(),
-                    source_span: Span::default(),
-                });
-            }
-        }
-    }
-
-    // Extract Tailwind CSS @plugin directives. These can reference npm packages
-    // (e.g. `@plugin "daisyui"`) or explicit local plugin files.
-    for cap in CSS_PLUGIN_RE.captures_iter(&stripped) {
-        if let Some(m) = cap.get(1) {
-            let source = m.as_str().trim().to_string();
-            if !source.is_empty() && !is_css_url_import(&source) {
-                imports.push(ImportInfo {
-                    source: normalize_css_plugin_path(source),
-                    imported_name: ImportedName::Default,
-                    local_name: String::new(),
-                    is_type_only: false,
-                    from_style: false,
-                    span: Span::default(),
-                    source_span: Span::default(),
-                });
-            }
-        }
+    for source in extract_css_import_sources(source, is_scss) {
+        imports.push(ImportInfo {
+            source: source.normalized,
+            imported_name: if source.is_plugin {
+                ImportedName::Default
+            } else {
+                ImportedName::SideEffect
+            },
+            local_name: String::new(),
+            is_type_only: false,
+            from_style: false,
+            span: source.span,
+            source_span: source.span,
+        });
     }
 
     // If @apply or @tailwind directives exist, create a synthetic import to tailwindcss

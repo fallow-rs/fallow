@@ -105,6 +105,31 @@ More content.
 }
 
 #[test]
+fn mdx_import_spans_preserve_original_lines() {
+    let source = r"import { Header } from './Header'
+
+# Section 1
+
+Some content.
+
+import { Footer } from './Footer'
+";
+    let info = parse_source_to_module(FileId(0), Path::new("mixed.mdx"), source, 0, false);
+    let footer = info
+        .imports
+        .iter()
+        .find(|i| i.source == "./Footer")
+        .expect("Footer import extracted");
+    let (line, _col) =
+        fallow_types::extract::byte_offset_to_line_col(&info.line_offsets, footer.span.start);
+    assert_eq!(line, 7);
+    assert_eq!(
+        &source[footer.source_span.start as usize..footer.source_span.end as usize],
+        "'./Footer'"
+    );
+}
+
+#[test]
 fn mdx_ignores_imports_inside_code_fences() {
     let info = parse_source_to_module(
         FileId(0),

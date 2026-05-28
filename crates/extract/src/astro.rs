@@ -17,6 +17,7 @@ use oxc_span::{SourceType, Span};
 use crate::asset_url::normalize_asset_url;
 use crate::html::is_remote_url;
 use crate::sfc::SfcScript;
+use crate::source_map::ExtractionResult;
 use crate::visitor::ModuleInfoExtractor;
 use crate::{ImportInfo, ImportedName, ModuleInfo};
 use fallow_types::discover::FileId;
@@ -63,6 +64,7 @@ pub fn extract_astro_frontmatter(source: &str) -> Option<SfcScript> {
             is_jsx: false,
             byte_offset: body_match.map_or(0, |m| m.start()),
             src: None,
+            src_span: None,
             is_setup: false,
             is_context_module: false,
             generic_attr: None,
@@ -99,12 +101,14 @@ pub(crate) fn parse_astro_to_module(
         let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
         let mut extractor = ModuleInfoExtractor::new();
         extractor.visit_program(&parser_return.program);
+        let extraction = ExtractionResult::contiguous(&script.body, script.byte_offset);
+        extractor.remap_spans_with(|span| extraction.remap_span(span));
         extractor
     } else {
         ModuleInfoExtractor::new()
     };
 
-    extend_imports_from_template(&mut extractor.imports, template);
+    extend_imports_from_template(&mut extractor.imports, template, template_offset);
 
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
     info.line_offsets = line_offsets;
@@ -113,29 +117,50 @@ pub(crate) fn parse_astro_to_module(
 
 /// Append imports discovered in the Astro template body: `<script src="...">`
 /// references and ESM `import` statements inside inline `<script>` blocks.
-fn extend_imports_from_template(imports: &mut Vec<ImportInfo>, template: &str) {
+fn extend_imports_from_template(
+    imports: &mut Vec<ImportInfo>,
+    template: &str,
+    template_offset: usize,
+) {
     if template.is_empty() {
         return;
     }
 
-    let stripped = HTML_COMMENT_RE.replace_all(template, "");
+    let comment_ranges: Vec<(usize, usize)> = HTML_COMMENT_RE
+        .find_iter(template)
+        .map(|m| (m.start(), m.end()))
+        .collect();
 
     // External script references (`<script src="..."></script>`). Astro only
     // processes a `src` script when `src` is the tag's only attribute.
     // Attributed scripts (`is:inline`, `type="module"`, `defer`, etc.) are
     // rendered as authored and do not resolve imports relative to the `.astro`
     // file, so they must not create reachability edges.
-    for cap in SCRIPT_OPEN_RE.captures_iter(&stripped) {
+    for cap in SCRIPT_OPEN_RE.captures_iter(template) {
+        let open = cap.get(0).expect("full match exists");
+        if comment_ranges
+            .iter()
+            .any(|&(start, end)| open.start() >= start && open.start() < end)
+        {
+            continue;
+        }
         let attrs = cap.name("attrs").map_or("", |m| m.as_str());
-        if let Some(raw) = processed_script_src(attrs) {
+        if let Some((raw, source_span)) = processed_script_src_with_span(attrs, cap.name("attrs")) {
+            let tag_span = Span::new(
+                (template_offset + open.start()) as u32,
+                (template_offset + open.end()) as u32,
+            );
             imports.push(ImportInfo {
                 source: normalize_asset_url(raw),
                 imported_name: ImportedName::SideEffect,
                 local_name: String::new(),
                 is_type_only: false,
                 from_style: false,
-                span: Span::default(),
-                source_span: Span::default(),
+                span: tag_span,
+                source_span: Span::new(
+                    template_offset as u32 + source_span.start,
+                    template_offset as u32 + source_span.end,
+                ),
             });
         }
     }
@@ -144,12 +169,22 @@ fn extend_imports_from_template(imports: &mut Vec<ImportInfo>, template: &str) {
     // TypeScript, so ES module imports referenced inside them contribute to
     // the component's reachability set. Any attribute opts out of processing
     // except for `src`, which is handled by the opening-tag scan above.
-    for cap in SCRIPT_BLOCK_RE.captures_iter(&stripped) {
+    for cap in SCRIPT_BLOCK_RE.captures_iter(template) {
+        let open = cap.get(0).expect("full match exists");
+        if comment_ranges
+            .iter()
+            .any(|&(start, end)| open.start() >= start && open.start() < end)
+        {
+            continue;
+        }
         let attrs = cap.name("attrs").map_or("", |m| m.as_str());
         if !attrs.trim().is_empty() {
             continue;
         }
-        let body = cap.name("body").map_or("", |m| m.as_str());
+        let Some(body_match) = cap.name("body") else {
+            continue;
+        };
+        let body = body_match.as_str();
         if body.trim().is_empty() {
             continue;
         }
@@ -158,13 +193,19 @@ fn extend_imports_from_template(imports: &mut Vec<ImportInfo>, template: &str) {
         let parser_return = Parser::new(&allocator, body, SourceType::ts()).parse();
         let mut inline_extractor = ModuleInfoExtractor::new();
         inline_extractor.visit_program(&parser_return.program);
+        let extraction = ExtractionResult::contiguous(body, template_offset + body_match.start());
+        inline_extractor.remap_spans_with(|span| extraction.remap_span(span));
         imports.append(&mut inline_extractor.imports);
     }
 }
 
-fn processed_script_src(attrs: &str) -> Option<&str> {
+fn processed_script_src_with_span<'a>(
+    attrs: &'a str,
+    attrs_match: Option<regex::Match<'_>>,
+) -> Option<(&'a str, Span)> {
     let cap = SRC_ATTR_RE.captures(attrs)?;
-    let src = cap.name("src")?.as_str().trim();
+    let src_match = cap.name("src")?;
+    let src = src_match.as_str().trim();
     if src.is_empty() || is_remote_url(src) {
         return None;
     }
@@ -172,11 +213,18 @@ fn processed_script_src(attrs: &str) -> Option<&str> {
     let without_src = SRC_ATTR_RE.replace(attrs, "");
     let extra_attrs = without_src.trim();
     let extra_attrs = extra_attrs.strip_suffix('/').unwrap_or(extra_attrs).trim();
-    if extra_attrs.is_empty() {
-        Some(src)
-    } else {
-        None
+    if !extra_attrs.is_empty() {
+        return None;
     }
+
+    let attrs_start = attrs_match.map_or(0, |m| m.start());
+    Some((
+        src,
+        Span::new(
+            (attrs_start + src_match.start()) as u32,
+            (attrs_start + src_match.end()) as u32,
+        ),
+    ))
 }
 
 // Astro tests exercise regex-based frontmatter extraction — no unsafe code,

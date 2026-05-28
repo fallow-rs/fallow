@@ -19,6 +19,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::asset_url::normalize_asset_url;
 use crate::parse::compute_import_binding_usage;
 use crate::sfc_template::{SfcKind, collect_template_usage_with_bound_targets};
+use crate::source_map::ExtractionResult;
 use crate::visitor::ModuleInfoExtractor;
 use crate::{ImportInfo, ImportedName, ModuleInfo};
 use fallow_types::discover::FileId;
@@ -93,6 +94,8 @@ pub struct SfcScript {
     pub byte_offset: usize,
     /// External script source path from `src` attribute.
     pub src: Option<String>,
+    /// Span of the `src` attribute value in the full SFC source.
+    pub src_span: Option<Span>,
     /// Whether this script is a Vue `<script setup>` block.
     pub is_setup: bool,
     /// Whether this script is a Svelte module-context block.
@@ -136,6 +139,13 @@ pub fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
                 .captures(attrs)
                 .and_then(|c| c.get(1))
                 .map(|m| m.as_str().to_string());
+            let attrs_start = cap.name("attrs").map_or(0, |m| m.start());
+            let src_span = SRC_ATTR_RE.captures(attrs).and_then(|c| c.get(1)).map(|m| {
+                Span::new(
+                    (attrs_start + m.start()) as u32,
+                    (attrs_start + m.end()) as u32,
+                )
+            });
             let is_setup = SETUP_ATTR_RE.is_match(attrs);
             let is_context_module = CONTEXT_MODULE_ATTR_RE.is_match(attrs);
             let generic_attr = VUE_GENERIC_ATTR_RE
@@ -150,6 +160,7 @@ pub fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
                 is_jsx,
                 byte_offset,
                 src,
+                src_span,
                 is_setup,
                 is_context_module,
                 generic_attr,
@@ -167,6 +178,10 @@ pub struct SfcStyle {
     pub lang: Option<String>,
     /// External style source path from the `src` attribute (`<style src="./theme.scss">`).
     pub src: Option<String>,
+    /// Span of the `src` attribute value in the full SFC source.
+    pub src_span: Option<Span>,
+    /// Byte offset of the style body within the full SFC source.
+    pub byte_offset: usize,
 }
 
 /// Extract all `<style>` blocks from a Vue/Svelte SFC source string.
@@ -192,6 +207,7 @@ pub fn extract_sfc_styles(source: &str) -> Vec<SfcStyle> {
         .map(|cap| {
             let attrs = cap.name("attrs").map_or("", |m| m.as_str());
             let body = cap.name("body").map_or("", |m| m.as_str()).to_string();
+            let byte_offset = cap.name("body").map_or(0, |m| m.start());
             let lang = LANG_ATTR_RE
                 .captures(attrs)
                 .and_then(|c| c.get(1))
@@ -200,7 +216,20 @@ pub fn extract_sfc_styles(source: &str) -> Vec<SfcStyle> {
                 .captures(attrs)
                 .and_then(|c| c.get(1))
                 .map(|m| m.as_str().to_string());
-            SfcStyle { body, lang, src }
+            let attrs_start = cap.name("attrs").map_or(0, |m| m.start());
+            let src_span = SRC_ATTR_RE.captures(attrs).and_then(|c| c.get(1)).map(|m| {
+                Span::new(
+                    (attrs_start + m.start()) as u32,
+                    (attrs_start + m.end()) as u32,
+                )
+            });
+            SfcStyle {
+                body,
+                lang,
+                src,
+                src_span,
+                byte_offset,
+            }
         })
         .collect()
 }
@@ -312,7 +341,7 @@ fn merge_script_into_module(
     need_complexity: bool,
 ) {
     if let Some(src) = &script.src {
-        add_script_src_import(combined, src);
+        add_script_src_import(combined, src, script.src_span);
     }
 
     let allocator = Allocator::default();
@@ -320,6 +349,8 @@ fn merge_script_into_module(
         Parser::new(&allocator, &script.body, source_type_for_script(script)).parse();
     let mut extractor = ModuleInfoExtractor::new();
     extractor.visit_program(&parser_return.program);
+    let extraction = ExtractionResult::contiguous(&script.body, script.byte_offset);
+    extractor.remap_spans_with(|span| extraction.remap_span(span));
     // Resolve typed destructure bindings (`let { resultState }: Props = $props()`)
     // into `binding_target_names` BEFORE the template-visible read below, so the
     // template scanner credits `resultState.pin(...)` member access in markup.
@@ -412,17 +443,18 @@ fn translate_script_complexity(
     complexity
 }
 
-fn add_script_src_import(module: &mut ModuleInfo, source: &str) {
+fn add_script_src_import(module: &mut ModuleInfo, source: &str, source_span: Option<Span>) {
     // Normalize bare filenames (e.g., `<script src="logic.ts">`) so the
     // resolver treats them as file-relative references, not npm packages.
+    let span = source_span.unwrap_or_default();
     module.imports.push(ImportInfo {
         source: normalize_asset_url(source),
         imported_name: ImportedName::SideEffect,
         local_name: String::new(),
         is_type_only: false,
         from_style: false,
-        span: Span::default(),
-        source_span: Span::default(),
+        span,
+        source_span: span,
     });
 }
 
@@ -445,14 +477,15 @@ fn merge_style_into_module(style: &SfcStyle, combined: &mut ModuleInfo) {
     // partial / include-path / node_modules fallbacks because `from_style` is
     // set on the import.
     if let Some(src) = &style.src {
+        let span = style.src_span.unwrap_or_default();
         combined.imports.push(ImportInfo {
             source: normalize_asset_url(src),
             imported_name: ImportedName::SideEffect,
             local_name: String::new(),
             is_type_only: false,
             from_style: true,
-            span: Span::default(),
-            source_span: Span::default(),
+            span,
+            source_span: span,
         });
     }
 
@@ -464,6 +497,10 @@ fn merge_style_into_module(style: &SfcStyle, combined: &mut ModuleInfo) {
     }
 
     for source in crate::css::extract_css_import_sources(&style.body, is_scss) {
+        let source_span = Span::new(
+            style.byte_offset as u32 + source.span.start,
+            style.byte_offset as u32 + source.span.end,
+        );
         combined.imports.push(ImportInfo {
             source: source.normalized,
             imported_name: if source.is_plugin {
@@ -474,8 +511,8 @@ fn merge_style_into_module(style: &SfcStyle, combined: &mut ModuleInfo) {
             local_name: String::new(),
             is_type_only: false,
             from_style: true,
-            span: Span::default(),
-            source_span: Span::default(),
+            span: source_span,
+            source_span,
         });
     }
 }
