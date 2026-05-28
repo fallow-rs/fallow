@@ -628,7 +628,8 @@ fn handle_baseline(
     if let Some(baseline_path) = save_path {
         let baseline_data = BaselineData::from_results(results, root);
         match serde_json::to_string_pretty(&baseline_data) {
-            Ok(json) => {
+            Ok(mut json) => {
+                json.push('\n');
                 if let Some(parent) = baseline_path.parent()
                     && !parent.as_os_str().is_empty()
                     && let Err(e) = std::fs::create_dir_all(parent)
@@ -843,6 +844,27 @@ mod tests {
                 ],
             }));
         r
+    }
+
+    #[test]
+    fn save_baseline_writes_trailing_newline() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let baseline_path = dir.path().join("baseline.json");
+        let mut results = make_results();
+
+        handle_baseline(
+            &mut results,
+            Some(&baseline_path),
+            None,
+            std::path::Path::new("/project"),
+            true,
+            OutputFormat::Json,
+        )
+        .expect("baseline save succeeds");
+
+        let saved = std::fs::read_to_string(&baseline_path).expect("baseline is written");
+        assert!(saved.ends_with('\n'));
+        assert!(!saved.ends_with("\n\n"));
     }
 
     // ── IssueFilters::any_active ─────────────────────────────────

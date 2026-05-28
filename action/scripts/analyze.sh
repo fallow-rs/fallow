@@ -30,6 +30,75 @@ artifact_path() {
   fi
 }
 
+is_dead_code_baseline_command() {
+  [ -n "${INPUT_BASELINE:-}" ] || return 1
+  case "${INPUT_COMMAND:-}" in
+    ""|dead-code|check) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+normalize_changed_path() {
+  local path=$1
+  local root="${INPUT_ROOT:-.}"
+
+  path="${path#./}"
+  root="${root#./}"
+
+  if [ "$root" != "." ] && [[ "$path" == "$root/"* ]]; then
+    path="${path#"$root/"}"
+  fi
+
+  printf '%s\n' "$path"
+}
+
+normalize_config_path() {
+  local path=$1
+  local root="${INPUT_ROOT:-.}"
+
+  path="${path#./}"
+  root="${root#./}"
+
+  if [[ "$path" = /* ]]; then
+    local abs_root
+    abs_root=$(cd "${INPUT_ROOT:-.}" 2>/dev/null && pwd -P)
+    if [ -n "$abs_root" ] && [[ "$path" == "$abs_root/"* ]]; then
+      path="${path#"$abs_root/"}"
+    fi
+  elif [ "$root" != "." ] && [[ "$path" == "$root/"* ]]; then
+    path="${path#"$root/"}"
+  fi
+
+  printf '%s\n' "$path"
+}
+
+find_changed_fallow_config() {
+  local changed_files=$1
+  local explicit_config=""
+
+  if [ -n "${INPUT_CONFIG:-}" ]; then
+    explicit_config=$(normalize_config_path "$INPUT_CONFIG")
+  fi
+
+  while IFS= read -r changed_file; do
+    [ -n "$changed_file" ] || continue
+    changed_file=$(normalize_changed_path "$changed_file")
+    case "$changed_file" in
+      .fallowrc.json|.fallowrc.jsonc|fallow.toml|.fallow.toml)
+        printf '%s\n' "$changed_file"
+        return 0
+        ;;
+    esac
+
+    if [ -n "$explicit_config" ] && [ "$changed_file" = "$explicit_config" ]; then
+      printf '%s\n' "$changed_file"
+      return 0
+    fi
+  done <<< "$changed_files"
+
+  return 1
+}
+
 # --- Shared argument building functions ---
 # Uses global ARGS array (avoids bash nameref compatibility issues)
 
@@ -249,15 +318,17 @@ fi
 
 # --- Auto-detect changed-since in PR context ---
 
+AUTO_CHANGED_SINCE=false
+USER_DIFF_FILE=false
+[ -n "${FALLOW_DIFF_FILE:-}" ] && USER_DIFF_FILE=true
+
 if [ -z "${INPUT_CHANGED_SINCE:-}" ] && [ "${INPUT_AUTO_CHANGED_SINCE:-}" = "true" ] && \
    { [ "${EVENT_NAME:-}" = "pull_request" ] || [ "${EVENT_NAME:-}" = "pull_request_target" ]; } && \
    [ -n "${PR_BASE_SHA:-}" ]; then
   INPUT_CHANGED_SINCE="$PR_BASE_SHA"
+  AUTO_CHANGED_SINCE=true
   echo "::notice::Auto-scoping analysis to files changed since PR base (${PR_BASE_SHA:0:7})"
 fi
-
-# Propagate the effective changed-since value so downstream steps can filter
-echo "changed_since=${INPUT_CHANGED_SINCE:-}" >> "$GITHUB_OUTPUT"
 
 # --- Pre-compute changed files list for downstream filtering ---
 # Downstream scripts (comment, summary, annotations, review) need the list of
@@ -270,7 +341,11 @@ echo "changed_since=${INPUT_CHANGED_SINCE:-}" >> "$GITHUB_OUTPUT"
 # requested. Without this, `if:` conditions using
 # `outputs.changed_files_unavailable == 'false'` as a positive signal see an
 # absent field instead of false when changed-since is not set.
-[ -n "${GITHUB_OUTPUT:-}" ] && echo "changed_files_unavailable=false" >> "$GITHUB_OUTPUT"
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "changed_files_unavailable=false" >> "$GITHUB_OUTPUT"
+fi
+
+_CHANGED=""
 
 if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
   _ROOT="${INPUT_ROOT:-.}"
@@ -321,6 +396,29 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
   else
     echo "::warning::Could not determine changed files for --changed-since scoping. Use fetch-depth: 0 in actions/checkout for best results."
   fi
+fi
+
+if is_dead_code_baseline_command && [ -n "$_CHANGED" ]; then
+  CONFIG_SCOPE_TRIGGER=$(find_changed_fallow_config "$_CHANGED" || true)
+  if [ -n "$CONFIG_SCOPE_TRIGGER" ]; then
+    if [ "$AUTO_CHANGED_SINCE" = "true" ]; then
+      if [ "$USER_DIFF_FILE" = "true" ]; then
+        echo "::warning::fallow: '${CONFIG_SCOPE_TRIGGER}' changed, so auto changed-since scoping is disabled for dead-code baseline comparison. The explicit diff file remains active and may still hide baseline drift until an unscoped run." >&2
+      else
+        echo "::warning::fallow: dead-code baseline comparison is running unscoped because '${CONFIG_SCOPE_TRIGGER}' changed. Fallow config can change baseline membership; downstream PR filtering is disabled for this run." >&2
+      fi
+      INPUT_CHANGED_SINCE=""
+      rm -f "$CHANGED_FILES_FILE" "$AUTO_DIFF_FILE"
+    else
+      echo "::warning::fallow: '${CONFIG_SCOPE_TRIGGER}' changed while dead-code baseline comparison is explicitly scoped. Fallow config can change baseline membership, so baseline drift may stay hidden until an unscoped run." >&2
+    fi
+  fi
+fi
+
+# Propagate the effective changed-since value after config safety logic so
+# downstream steps do not reapply stale PR scope.
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "changed_since=${INPUT_CHANGED_SINCE:-}" >> "$GITHUB_OUTPUT"
 fi
 
 # --- Pre-compute unified diff for line-level hot-path scoping ---

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **GitHub Action baseline checks now catch config-only baseline drift.** Before, pull request runs using the default `auto-changed-since: true` plus a generic dead-code baseline could hide baseline membership changes when the PR only changed fallow config, then fail later on the unscoped default-branch run. After, baseline-active dead-code/check action runs disable auto-derived PR scoping when a fallow config file changes, while preserving explicit `changed-since` and `diff-file` overrides. Saved generic baselines also keep pretty JSON and now end with a trailing newline. (Closes [#746](https://github.com/fallow-rs/fallow/issues/746).)
+
 ## [2.84.0] - 2026-05-28
 
 ### Fixed

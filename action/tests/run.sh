@@ -364,6 +364,137 @@ else
 fi
 assert_contains "$OUT" "dead-code-baseline" "analyze: baseline error points to audit baselines"
 
+cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *"--help"*)
+    printf '%s\n' 'Usage: fallow dead-code --sarif-file <PATH>'
+    ;;
+  *)
+    printf '%s\n' '{"total_issues":0}'
+    ;;
+esac
+SH
+chmod +x "$ANALYZE_TMP/bin/fallow"
+
+cat > "$ANALYZE_TMP/bin/git" <<'SH'
+#!/usr/bin/env bash
+case "$1" in
+  diff)
+    shift
+    for arg in "$@"; do
+      if [ "$arg" = "--name-only" ]; then
+        printf '%s\n' "${FAKE_CHANGED_FILES:-src/a.ts}"
+        exit 0
+      fi
+    done
+    printf '%s\n' 'diff --git a/src/a.ts b/src/a.ts'
+    printf '%s\n' '--- a/src/a.ts'
+    printf '%s\n' '+++ b/src/a.ts'
+    printf '%s\n' '@@ -0,0 +1 @@'
+    printf '%s\n' '+export const a = 1;'
+    ;;
+  cat-file)
+    exit 0
+    ;;
+  fetch)
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+SH
+chmod +x "$ANALYZE_TMP/bin/git"
+
+run_analyze_scope_case() {
+  local case_name=$1
+  local changed_files=$2
+  local baseline=$3
+  local changed_since=$4
+  local diff_file=$5
+  local root=${6:-.}
+  local config=${7:-}
+  local work="$ANALYZE_TMP/scope-$case_name"
+  mkdir -p "$work/$root"
+  rm -f "$ANALYZE_TMP/output-$case_name" "$ANALYZE_TMP/env-$case_name"
+  if [ -n "$diff_file" ]; then
+    printf '%s\n' 'diff --git a/src/a.ts b/src/a.ts' > "$diff_file"
+  fi
+
+  (
+    cd "$work" || exit 1
+    PATH="$ANALYZE_TMP/bin:$PATH" \
+      FAKE_CHANGED_FILES="$changed_files" \
+      GITHUB_OUTPUT="$ANALYZE_TMP/output-$case_name" \
+      GITHUB_ENV="$ANALYZE_TMP/env-$case_name" \
+      INPUT_ROOT="$root" \
+      INPUT_CONFIG="$config" \
+      INPUT_COMMAND="dead-code" \
+      INPUT_FORMAT="json" \
+      INPUT_AUTO_CHANGED_SINCE="true" \
+      INPUT_CHANGED_SINCE="$changed_since" \
+      EVENT_NAME="pull_request" \
+      PR_BASE_SHA="base1234" \
+      INPUT_BASELINE="$baseline" \
+      FALLOW_DIFF_FILE="$diff_file" \
+      bash "$DIR/../scripts/analyze.sh"
+  ) 2>&1
+}
+
+OUT=$(run_analyze_scope_case "config-baseline-auto" ".fallowrc.json" "baseline.json" "" "")
+ARGS=$(cat "$ANALYZE_TMP/scope-config-baseline-auto/fallow-analysis-args.sh")
+OUTPUTS=$(cat "$ANALYZE_TMP/output-config-baseline-auto")
+ENV_OUT=$(cat "$ANALYZE_TMP/env-config-baseline-auto")
+assert_not_contains "$ARGS" "--changed-since" "analyze: config baseline auto-scope removes changed-since"
+if grep -qx 'changed_since=' "$ANALYZE_TMP/output-config-baseline-auto"; then
+  pass "analyze: config baseline auto-scope clears changed_since output"
+else
+  fail "analyze: config baseline auto-scope clears changed_since output" "outputs were: $OUTPUTS"
+fi
+assert_not_contains "$ENV_OUT" "FALLOW_DIFF_FILE=" "analyze: config baseline auto-scope skips auto diff file"
+assert_contains "$OUT" "dead-code baseline comparison is running unscoped because '.fallowrc.json' changed" "analyze: config baseline auto-scope warns"
+
+OUT=$(run_analyze_scope_case "source-baseline-auto" "src/a.ts" "baseline.json" "" "")
+ARGS=$(cat "$ANALYZE_TMP/scope-source-baseline-auto/fallow-analysis-args.sh")
+OUTPUTS=$(cat "$ANALYZE_TMP/output-source-baseline-auto")
+ENV_OUT=$(cat "$ANALYZE_TMP/env-source-baseline-auto")
+assert_contains "$ARGS" "--changed-since base1234" "analyze: source baseline auto-scope keeps changed-since"
+assert_contains "$OUTPUTS" "changed_since=base1234" "analyze: source baseline auto-scope keeps changed_since output"
+assert_contains "$ENV_OUT" "FALLOW_DIFF_FILE=" "analyze: source baseline auto-scope writes auto diff file"
+
+OUT=$(run_analyze_scope_case "config-no-baseline" ".fallowrc.json" "" "" "")
+ARGS=$(cat "$ANALYZE_TMP/scope-config-no-baseline/fallow-analysis-args.sh")
+OUTPUTS=$(cat "$ANALYZE_TMP/output-config-no-baseline")
+assert_contains "$ARGS" "--changed-since base1234" "analyze: config without baseline keeps changed-since"
+assert_contains "$OUTPUTS" "changed_since=base1234" "analyze: config without baseline keeps changed_since output"
+
+OUT=$(run_analyze_scope_case "explicit-config-root-prefix" "packages/app/config/fallow.jsonc" "baseline.json" "" "" "packages/app" "config/fallow.jsonc")
+ARGS=$(cat "$ANALYZE_TMP/scope-explicit-config-root-prefix/fallow-analysis-args.sh")
+assert_not_contains "$ARGS" "--changed-since" "analyze: explicit config path with root prefix removes auto changed-since"
+assert_contains "$OUT" "because 'config/fallow.jsonc' changed" "analyze: explicit config path warning uses root-relative path"
+
+OUT=$(run_analyze_scope_case "config-explicit-changed-since" ".fallowrc.json" "baseline.json" "manual-base" "")
+ARGS=$(cat "$ANALYZE_TMP/scope-config-explicit-changed-since/fallow-analysis-args.sh")
+OUTPUTS=$(cat "$ANALYZE_TMP/output-config-explicit-changed-since")
+assert_contains "$ARGS" "--changed-since manual-base" "analyze: explicit changed-since is preserved"
+assert_contains "$OUTPUTS" "changed_since=manual-base" "analyze: explicit changed-since output is preserved"
+assert_contains "$OUT" "explicitly scoped" "analyze: explicit changed-since warns about baseline drift"
+
+EXPLICIT_DIFF="$ANALYZE_TMP/user.diff"
+OUT=$(run_analyze_scope_case "config-explicit-diff" ".fallowrc.json" "baseline.json" "" "$EXPLICIT_DIFF")
+ARGS=$(cat "$ANALYZE_TMP/scope-config-explicit-diff/fallow-analysis-args.sh")
+OUTPUTS=$(cat "$ANALYZE_TMP/output-config-explicit-diff")
+ENV_OUT=$(cat "$ANALYZE_TMP/env-config-explicit-diff")
+assert_not_contains "$ARGS" "--changed-since base1234" "analyze: explicit diff still clears auto changed-since"
+if grep -qx 'changed_since=' "$ANALYZE_TMP/output-config-explicit-diff"; then
+  pass "analyze: explicit diff clears auto changed_since output"
+else
+  fail "analyze: explicit diff clears auto changed_since output" "outputs were: $OUTPUTS"
+fi
+assert_contains "$ENV_OUT" "FALLOW_DIFF_FILE=$EXPLICIT_DIFF" "analyze: explicit diff file is preserved"
+assert_contains "$OUT" "explicit diff file remains active" "analyze: explicit diff warns about remaining scope"
+
 # Audit verdict + gate are emitted to GITHUB_OUTPUT for the Check threshold step.
 # Without this, the threshold step gates on raw introduced count, re-introducing
 # the issue #302 bug where warn-tier findings fail CI.
