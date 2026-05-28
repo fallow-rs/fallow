@@ -261,7 +261,7 @@ pub(in crate::report) fn print_clone_trace_human(trace: &CloneTrace, root: &Path
     eprintln!(
         "  {} {}",
         "Docs:".dimmed(),
-        "https://docs.fallow.tools/explanations/duplication".dimmed()
+        super::dupes::DOCS_DUPLICATION.dimmed()
     );
     eprintln!();
 }

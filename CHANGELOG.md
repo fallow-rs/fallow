@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Clone groups now have a stable fingerprint, and `fallow dupes --trace` can deep-dive one by id.** Every clone group in `fallow dupes` now carries a content-derived fingerprint (`dup:<8hex>`), shown beside each group in the human listing and emitted on every `clone_groups[]` entry (plus nested `clone_families[].groups[]` and the per-bucket `--group-by` output) in `--format json`. `fallow dupes --trace` now accepts that fingerprint (`fallow dupes --trace dup:7f3a2c1e`) in addition to the existing `FILE:LINE` form, so you can deep-dive a specific group without hunting for one of its line numbers. The trace output now also shows, per group, an extract-function suggestion with estimated line savings, a best-effort proposed function name (derived from the dominant identifier; omitted when it would be generic), and a docs link. The fingerprint is derived from the group's source content, so it is stable across runs and editing one clone group never changes another's id. The MCP `trace_clone` tool gained an optional `fingerprint` parameter (`file`/`line` are now optional, exactly one addressing form required), so an AI agent can read a fingerprint from `find_dupes` and deep-dive that group in a single follow-up call.
+
 ### Fixed
 
 - **GitHub Action baseline checks now catch config-only baseline drift.** Before, pull request runs using the default `auto-changed-since: true` plus a generic dead-code baseline could hide baseline membership changes when the PR only changed fallow config, then fail later on the unscoped default-branch run. After, baseline-active dead-code/check action runs disable auto-derived PR scoping when a fallow config file changes, while preserving explicit `changed-since` and `diff-file` overrides. Saved generic baselines also keep pretty JSON and now end with a trailing newline. (Closes [#746](https://github.com/fallow-rs/fallow/issues/746).)

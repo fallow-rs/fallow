@@ -11,7 +11,7 @@ use super::{
 use crate::report::dupes_grouping::DuplicationGrouping;
 
 /// Docs base URL for duplication explanations.
-const DOCS_DUPLICATION: &str = "https://docs.fallow.tools/explanations/duplication";
+pub(super) const DOCS_DUPLICATION: &str = "https://docs.fallow.tools/explanations/duplication";
 
 /// Maximum clone groups shown in duplication output.
 const MAX_CLONE_GROUPS: usize = 10;

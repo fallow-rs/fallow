@@ -28,8 +28,9 @@ pub const FINGERPRINT_PREFIX: &str = "dup:";
 /// - collision-free within a report (two groups with identical representative
 ///   content would have clustered into one group).
 ///
-/// Returns `dup:00000000` for an empty group (never produced by the detector,
-/// which guarantees `>= 2` instances).
+/// Hashes the empty string for an empty group (never produced by the detector,
+/// which guarantees `>= 2` instances), so the result is still a well-formed
+/// `dup:<8hex>` handle.
 #[must_use]
 pub fn clone_fingerprint(instances: &[CloneInstance]) -> String {
     let representative = instances.first().map_or("", |inst| inst.fragment.as_str());

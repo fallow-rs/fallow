@@ -314,6 +314,13 @@ impl AttributedCloneGroupFinding {
             },
         ];
         Self {
+            // Hash the representative instance's fragment, same as the bare
+            // `CloneGroupFinding`. `AttributedCloneGroup::from_group` preserves
+            // the base group's `(file, line)` instance order, so `first()` here
+            // is the same `CloneInstance` and the fingerprint matches the
+            // top-level `clone_groups[].fingerprint` for the same clone. If that
+            // grouping ever re-sorts instances, this must switch to hashing the
+            // base group to keep the two surfaces in agreement.
             fingerprint: group.instances.first().map_or_else(
                 || fallow_core::duplicates::fingerprint_for_fragment(""),
                 |ai| fallow_core::duplicates::fingerprint_for_fragment(&ai.instance.fragment),
