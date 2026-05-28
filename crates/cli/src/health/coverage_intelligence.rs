@@ -87,8 +87,6 @@ fn build_risky_change_findings(
             let matched = match_complexity(
                 report,
                 root,
-                hot_path.stable_id.as_deref(),
-                None,
                 &hot_path.path,
                 &hot_path.function,
                 hot_path.line,
@@ -244,8 +242,6 @@ fn build_refactor_findings(
             let matched = match_complexity(
                 report,
                 root,
-                hot_path.stable_id.as_deref(),
-                None,
                 &hot_path.path,
                 &hot_path.function,
                 hot_path.line,
@@ -294,25 +290,14 @@ struct MatchedComplexity<'a> {
     confidence: CoverageIntelligenceMatchConfidence,
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "matching joins several independent identity hints"
-)]
 fn match_complexity<'a>(
     report: &'a HealthReport,
     root: &Path,
-    stable_id: Option<&str>,
-    source_hash: Option<&str>,
     path: &Path,
     function: &str,
     line: u32,
     skipped_ambiguous_matches: &mut usize,
 ) -> Option<MatchedComplexity<'a>> {
-    if stable_id.is_some() || source_hash.is_some() {
-        // Complexity findings do not carry function identities today; reserve
-        // the high-confidence tiers for future producers instead of pretending.
-    }
-
     let path_key = normalize_path(root, path);
     let function_matches: Vec<_> = report
         .findings
@@ -531,9 +516,7 @@ fn confidence_from_match(
     confidence: CoverageIntelligenceMatchConfidence,
 ) -> CoverageIntelligenceConfidence {
     match confidence {
-        CoverageIntelligenceMatchConfidence::StableId
-        | CoverageIntelligenceMatchConfidence::SourceHash
-        | CoverageIntelligenceMatchConfidence::Direct => CoverageIntelligenceConfidence::High,
+        CoverageIntelligenceMatchConfidence::Direct => CoverageIntelligenceConfidence::High,
         CoverageIntelligenceMatchConfidence::PathFunctionLine => {
             CoverageIntelligenceConfidence::Medium
         }
@@ -580,7 +563,7 @@ fn is_test_covered(finding: &HealthFinding) -> bool {
 }
 
 fn is_high_crap(finding: &HealthFinding) -> bool {
-    finding.crap.is_some()
+    finding.exceeded.includes_crap()
 }
 
 fn coverage_tier_label(tier: CoverageTier) -> &'static str {

@@ -1594,14 +1594,23 @@ fn append_coverage_intelligence_sarif_results(
             identity, finding.verdict, finding.recommendation, signals,
         );
         let source_snippet = snippets.line(&finding.path, finding.line);
-        sarif_results.push(sarif_result_with_snippet(
+        let mut result = sarif_result_with_snippet(
             rule_id,
             level,
             &message,
             &uri,
             Some((finding.line, 1)),
             source_snippet.as_deref(),
-        ));
+        );
+        result["properties"] = serde_json::json!({
+            "coverage_intelligence_id": &finding.id,
+            "verdict": finding.verdict,
+            "recommendation": finding.recommendation,
+            "confidence": finding.confidence,
+            "signals": &finding.signals,
+            "related_ids": &finding.related_ids,
+        });
+        sarif_results.push(result);
     }
 }
 
@@ -2025,6 +2034,75 @@ mod tests {
             .as_array()
             .unwrap();
         assert_eq!(rules.len(), 16);
+    }
+
+    #[test]
+    fn health_sarif_coverage_intelligence_preserves_structured_properties() {
+        use crate::health_types::{
+            CoverageIntelligenceAction, CoverageIntelligenceConfidence,
+            CoverageIntelligenceEvidence, CoverageIntelligenceFinding,
+            CoverageIntelligenceMatchConfidence, CoverageIntelligenceRecommendation,
+            CoverageIntelligenceReport, CoverageIntelligenceSchemaVersion,
+            CoverageIntelligenceSignal, CoverageIntelligenceSummary, CoverageIntelligenceVerdict,
+            HealthReport, HealthSummary,
+        };
+
+        let root = PathBuf::from("/project");
+        let report = HealthReport {
+            summary: HealthSummary {
+                files_analyzed: 10,
+                functions_analyzed: 50,
+                ..Default::default()
+            },
+            coverage_intelligence: Some(CoverageIntelligenceReport {
+                schema_version: CoverageIntelligenceSchemaVersion::V1,
+                verdict: CoverageIntelligenceVerdict::HighConfidenceDelete,
+                summary: CoverageIntelligenceSummary {
+                    findings: 1,
+                    high_confidence_deletes: 1,
+                    ..Default::default()
+                },
+                findings: vec![CoverageIntelligenceFinding {
+                    id: "fallow:coverage-intel:abc123".to_owned(),
+                    path: root.join("src/dead.ts"),
+                    identity: Some("deadPath".to_owned()),
+                    line: 9,
+                    verdict: CoverageIntelligenceVerdict::HighConfidenceDelete,
+                    signals: vec![CoverageIntelligenceSignal::RuntimeCold],
+                    recommendation: CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner,
+                    confidence: CoverageIntelligenceConfidence::High,
+                    related_ids: vec!["fallow:prod:deadbeef".to_owned()],
+                    evidence: CoverageIntelligenceEvidence {
+                        match_confidence: CoverageIntelligenceMatchConfidence::Direct,
+                        ..Default::default()
+                    },
+                    actions: vec![CoverageIntelligenceAction {
+                        kind: "delete-after-confirming-owner".to_owned(),
+                        description: "Confirm ownership".to_owned(),
+                        auto_fixable: false,
+                    }],
+                }],
+            }),
+            ..Default::default()
+        };
+
+        let sarif = build_health_sarif(&report, &root);
+        let result = &sarif["runs"][0]["results"][0];
+        assert_eq!(result["ruleId"], "fallow/coverage-intelligence-delete");
+        assert_eq!(
+            result["properties"]["coverage_intelligence_id"],
+            "fallow:coverage-intel:abc123"
+        );
+        assert_eq!(
+            result["properties"]["recommendation"],
+            "delete-after-confirming-owner"
+        );
+        assert_eq!(result["properties"]["confidence"], "high");
+        assert_eq!(result["properties"]["signals"][0], "runtime_cold");
+        assert_eq!(
+            result["properties"]["related_ids"][0],
+            "fallow:prod:deadbeef"
+        );
     }
 
     #[test]

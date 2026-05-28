@@ -514,7 +514,7 @@ export type CoverageIntelligenceConfidence = ("high" | "medium" | "low")
 /**
  * Confidence tier for the cross-surface evidence match.
  */
-export type CoverageIntelligenceMatchConfidence = ("stable-id" | "source-hash" | "path-function-line" | "path-line" | "direct")
+export type CoverageIntelligenceMatchConfidence = ("path-function-line" | "path-line" | "direct")
 /**
  * Category of refactoring recommendation.
  */

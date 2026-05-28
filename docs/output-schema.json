@@ -9719,8 +9719,6 @@
     "CoverageIntelligenceMatchConfidence": {
       "type": "string",
       "enum": [
-        "stable-id",
-        "source-hash",
         "path-function-line",
         "path-line",
         "direct"

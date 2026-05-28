@@ -331,36 +331,8 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
         }
     }
     if let Some(ref intelligence) = report.coverage_intelligence {
-        println!(
-            "coverage-intelligence-summary:verdict={},findings={},risky_changes={},high_confidence_deletes={},review_required={},refactor_carefully={},skipped_ambiguous_matches={}",
-            intelligence.verdict,
-            intelligence.summary.findings,
-            intelligence.summary.risky_changes,
-            intelligence.summary.high_confidence_deletes,
-            intelligence.summary.review_required,
-            intelligence.summary.refactor_carefully,
-            intelligence.summary.skipped_ambiguous_matches,
-        );
-        for finding in &intelligence.findings {
-            let relative = normalize_uri(&relative_path(&finding.path, root).display().to_string());
-            let identity = finding.identity.as_deref().unwrap_or("-");
-            let signals = finding
-                .signals
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("+");
-            println!(
-                "coverage-intelligence:{}:{}:{}:id={},verdict={},recommendation={},confidence={},signals={}",
-                relative,
-                finding.line,
-                identity,
-                finding.id,
-                finding.verdict,
-                finding.recommendation,
-                finding.confidence,
-                signals,
-            );
+        for line in build_coverage_intelligence_compact_lines(intelligence, root) {
+            println!("{line}");
         }
     }
     for entry in &report.hotspots {
@@ -476,6 +448,44 @@ fn build_runtime_coverage_compact_lines(
         lines.push(format!(
             "production-hot-path:{}:{}:{}:id={},invocations={},percentile={}",
             relative, entry.line, entry.function, entry.id, entry.invocations, entry.percentile,
+        ));
+    }
+    lines
+}
+
+fn build_coverage_intelligence_compact_lines(
+    intelligence: &crate::health_types::CoverageIntelligenceReport,
+    root: &Path,
+) -> Vec<String> {
+    let mut lines = vec![format!(
+        "coverage-intelligence-summary:verdict={},findings={},risky_changes={},high_confidence_deletes={},review_required={},refactor_carefully={},skipped_ambiguous_matches={}",
+        intelligence.verdict,
+        intelligence.summary.findings,
+        intelligence.summary.risky_changes,
+        intelligence.summary.high_confidence_deletes,
+        intelligence.summary.review_required,
+        intelligence.summary.refactor_carefully,
+        intelligence.summary.skipped_ambiguous_matches,
+    )];
+    for finding in &intelligence.findings {
+        let relative = normalize_uri(&relative_path(&finding.path, root).display().to_string());
+        let identity = finding.identity.as_deref().unwrap_or("-");
+        let signals = finding
+            .signals
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("+");
+        lines.push(format!(
+            "coverage-intelligence:{}:{}:{}:id={},verdict={},recommendation={},confidence={},signals={}",
+            relative,
+            finding.line,
+            identity,
+            finding.id,
+            finding.verdict,
+            finding.recommendation,
+            finding.confidence,
+            signals,
         ));
     }
     lines
@@ -633,6 +643,61 @@ mod tests {
         assert_eq!(
             lines[2],
             "production-hot-path:src/hot.ts:3:hotPath:id=fallow:hot:cafebabe,invocations=250,percentile=99"
+        );
+    }
+
+    #[test]
+    fn compact_health_includes_coverage_intelligence_lines() {
+        use crate::health_types::{
+            CoverageIntelligenceAction, CoverageIntelligenceConfidence,
+            CoverageIntelligenceEvidence, CoverageIntelligenceFinding,
+            CoverageIntelligenceMatchConfidence, CoverageIntelligenceRecommendation,
+            CoverageIntelligenceReport, CoverageIntelligenceSchemaVersion,
+            CoverageIntelligenceSignal, CoverageIntelligenceSummary, CoverageIntelligenceVerdict,
+        };
+
+        let root = PathBuf::from("/project");
+        let report = CoverageIntelligenceReport {
+            schema_version: CoverageIntelligenceSchemaVersion::V1,
+            verdict: CoverageIntelligenceVerdict::HighConfidenceDelete,
+            summary: CoverageIntelligenceSummary {
+                findings: 1,
+                high_confidence_deletes: 1,
+                ..Default::default()
+            },
+            findings: vec![CoverageIntelligenceFinding {
+                id: "fallow:coverage-intel:abc123".to_owned(),
+                path: root.join("src/dead.ts"),
+                identity: Some("deadPath".to_owned()),
+                line: 9,
+                verdict: CoverageIntelligenceVerdict::HighConfidenceDelete,
+                signals: vec![
+                    CoverageIntelligenceSignal::StaticUnused,
+                    CoverageIntelligenceSignal::RuntimeCold,
+                ],
+                recommendation: CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner,
+                confidence: CoverageIntelligenceConfidence::High,
+                related_ids: vec!["fallow:prod:deadbeef".to_owned()],
+                evidence: CoverageIntelligenceEvidence {
+                    match_confidence: CoverageIntelligenceMatchConfidence::Direct,
+                    ..Default::default()
+                },
+                actions: vec![CoverageIntelligenceAction {
+                    kind: "delete-after-confirming-owner".to_owned(),
+                    description: "Confirm ownership".to_owned(),
+                    auto_fixable: false,
+                }],
+            }],
+        };
+
+        let lines = build_coverage_intelligence_compact_lines(&report, &root);
+        assert_eq!(
+            lines[0],
+            "coverage-intelligence-summary:verdict=high-confidence-delete,findings=1,risky_changes=0,high_confidence_deletes=1,review_required=0,refactor_carefully=0,skipped_ambiguous_matches=0"
+        );
+        assert_eq!(
+            lines[1],
+            "coverage-intelligence:src/dead.ts:9:deadPath:id=fallow:coverage-intel:abc123,verdict=high-confidence-delete,recommendation=delete-after-confirming-owner,confidence=high,signals=static_unused+runtime_cold"
         );
     }
 

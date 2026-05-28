@@ -696,9 +696,6 @@ fn write_coverage_intelligence_section(
     let Some(ref intelligence) = report.coverage_intelligence else {
         return;
     };
-    if intelligence.findings.is_empty() {
-        return;
-    }
     if !out.is_empty() && !out.ends_with("\n\n") {
         out.push('\n');
     }
@@ -709,6 +706,21 @@ fn write_coverage_intelligence_section(
         intelligence.summary.findings,
         intelligence.summary.skipped_ambiguous_matches,
     );
+    if intelligence.findings.is_empty() {
+        if intelligence.summary.skipped_ambiguous_matches > 0 {
+            let match_phrase = if intelligence.summary.skipped_ambiguous_matches == 1 {
+                "evidence match was"
+            } else {
+                "evidence matches were"
+            };
+            let _ = writeln!(
+                out,
+                "No actionable findings were emitted because {} ambiguous {match_phrase} skipped.\n",
+                intelligence.summary.skipped_ambiguous_matches,
+            );
+        }
+        return;
+    }
     out.push_str("| ID | Path | Identity | Verdict | Recommendation | Confidence | Signals |\n");
     out.push_str("|:---|:-----|:---------|:--------|:---------------|:-----------|:--------|\n");
     for finding in &intelligence.findings {
@@ -1703,6 +1715,76 @@ mod tests {
         assert!(md.contains("| 80 |"));
         // CRAP column renders `-` when the finding didn't trigger on CRAP.
         assert!(md.contains("| - |"));
+    }
+
+    #[test]
+    fn health_markdown_includes_coverage_intelligence_and_ambiguity_summary() {
+        use crate::health_types::{
+            CoverageIntelligenceAction, CoverageIntelligenceConfidence,
+            CoverageIntelligenceEvidence, CoverageIntelligenceFinding,
+            CoverageIntelligenceMatchConfidence, CoverageIntelligenceRecommendation,
+            CoverageIntelligenceReport, CoverageIntelligenceSchemaVersion,
+            CoverageIntelligenceSignal, CoverageIntelligenceSummary, CoverageIntelligenceVerdict,
+            HealthReport, HealthSummary,
+        };
+
+        let root = PathBuf::from("/project");
+        let mut report = HealthReport {
+            summary: HealthSummary {
+                files_analyzed: 10,
+                functions_analyzed: 50,
+                ..Default::default()
+            },
+            coverage_intelligence: Some(CoverageIntelligenceReport {
+                schema_version: CoverageIntelligenceSchemaVersion::V1,
+                verdict: CoverageIntelligenceVerdict::HighConfidenceDelete,
+                summary: CoverageIntelligenceSummary {
+                    findings: 1,
+                    high_confidence_deletes: 1,
+                    ..Default::default()
+                },
+                findings: vec![CoverageIntelligenceFinding {
+                    id: "fallow:coverage-intel:abc123".to_owned(),
+                    path: root.join("src/dead.ts"),
+                    identity: Some("deadPath".to_owned()),
+                    line: 9,
+                    verdict: CoverageIntelligenceVerdict::HighConfidenceDelete,
+                    signals: vec![CoverageIntelligenceSignal::RuntimeCold],
+                    recommendation: CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner,
+                    confidence: CoverageIntelligenceConfidence::High,
+                    related_ids: vec!["fallow:prod:deadbeef".to_owned()],
+                    evidence: CoverageIntelligenceEvidence {
+                        match_confidence: CoverageIntelligenceMatchConfidence::Direct,
+                        ..Default::default()
+                    },
+                    actions: vec![CoverageIntelligenceAction {
+                        kind: "delete-after-confirming-owner".to_owned(),
+                        description: "Confirm ownership".to_owned(),
+                        auto_fixable: false,
+                    }],
+                }],
+            }),
+            ..Default::default()
+        };
+
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("## Coverage Intelligence"));
+        assert!(md.contains("fallow:coverage-intel:abc123"));
+        assert!(md.contains("delete-after-confirming-owner"));
+        assert!(md.contains("runtime_cold"));
+
+        report.coverage_intelligence = Some(CoverageIntelligenceReport {
+            schema_version: CoverageIntelligenceSchemaVersion::V1,
+            verdict: CoverageIntelligenceVerdict::Clean,
+            summary: CoverageIntelligenceSummary {
+                skipped_ambiguous_matches: 2,
+                ..Default::default()
+            },
+            findings: vec![],
+        });
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("2 ambiguous evidence matches were skipped"));
+        assert!(!md.contains("| ID | Path |"));
     }
 
     #[test]

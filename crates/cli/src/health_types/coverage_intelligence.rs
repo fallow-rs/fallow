@@ -151,16 +151,6 @@ impl fmt::Display for CoverageIntelligenceConfidence {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum CoverageIntelligenceMatchConfidence {
-    #[allow(
-        dead_code,
-        reason = "reserved for producers that carry cross-surface stable function IDs"
-    )]
-    StableId,
-    #[allow(
-        dead_code,
-        reason = "reserved for producers that carry line-move-stable source hashes"
-    )]
-    SourceHash,
     PathFunctionLine,
     PathLine,
     #[default]
@@ -171,8 +161,6 @@ impl CoverageIntelligenceMatchConfidence {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::StableId => "stable-id",
-            Self::SourceHash => "source-hash",
             Self::PathFunctionLine => "path-function-line",
             Self::PathLine => "path-line",
             Self::Direct => "direct",
