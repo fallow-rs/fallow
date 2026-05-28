@@ -154,6 +154,8 @@ The action exposes `outputs.verdict` (`pass`/`warn`/`fail`) and `outputs.gate` f
   run: exit 1
 ```
 
+Three additional outputs surface silent failures in the action's PR comment / review steps. `outputs.changed-files-unavailable` (`true`/`false`, default `false`) signals that the analyze step could not enumerate PR-changed files (transient GitHub API failure, expired token, missing permissions), so analysis ran against the full codebase. `outputs.post-skipped-reason` (`none`/`pagination_failure`) signals the Post review comments step aborted to avoid duplicate threads. `outputs.dedup-lookup-failed` (`true`/`false`) signals a dedup lookup failed on either the Post PR comment or Post review comments step. All three are always emitted regardless of which failure path was taken, so downstream `if:` gates can match positively without absent-vs-false ambiguity. Gate on these to detect degraded posting state and re-run the action.
+
 ### GitHub Actions: Inline PR Annotations (No Advanced Security)
 
 The official action supports inline PR annotations via GitHub workflow commands. This does not require Advanced Security (unlike SARIF upload) and works on any GitHub plan.
@@ -226,9 +228,10 @@ fallow:
   extends: .fallow
   variables:
     FALLOW_COMMENT: "true"
+    FALLOW_SUMMARY_SCOPE: "diff"
 ```
 
-Posts a summary comment on the MR with issue counts and findings. In MR pipelines, `--changed-since` is auto-detected from `$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`, so only issues from changed files are reported. Requires `GITLAB_TOKEN` CI/CD variable (project access token with `api` scope); `CI_JOB_TOKEN` is read-only for MR notes in the official GitLab API.
+Posts a summary comment on the MR with issue counts and findings. In MR pipelines, `--changed-since` is auto-detected from `$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`, so only issues from changed files are reported. `FALLOW_SUMMARY_SCOPE: "diff"` also hides project-level dependency/catalog/override findings whose anchor line is outside the diff. Requires `GITLAB_TOKEN` CI/CD variable (project access token with `api` scope); `CI_JOB_TOKEN` is read-only for MR notes in the official GitLab API.
 
 ### GitLab CI: With Inline Code Review Comments
 
@@ -240,9 +243,10 @@ fallow:
   extends: .fallow
   variables:
     FALLOW_REVIEW: "true"
+    FALLOW_REVIEW_GUIDANCE: "true"
 ```
 
-Posts inline review comments directly on the MR diff lines where issues were found. This gives developers precise feedback without leaving the code review flow. Can be combined with `FALLOW_COMMENT: "true"` for both a summary and inline comments. Requires `GITLAB_TOKEN`.
+Posts inline review comments directly on the MR diff lines where issues were found. `FALLOW_REVIEW_GUIDANCE: "true"` adds collapsed "What to do" guidance blocks to each inline finding. This gives developers precise feedback without leaving the code review flow. Can be combined with `FALLOW_COMMENT: "true"` for both a summary and inline comments. Requires `GITLAB_TOKEN`.
 
 ### GitLab CI: Combined MR Comments + Review
 
@@ -254,11 +258,13 @@ fallow:
   extends: .fallow
   variables:
     FALLOW_COMMENT: "true"
+    FALLOW_SUMMARY_SCOPE: "diff"
     FALLOW_REVIEW: "true"
+    FALLOW_REVIEW_GUIDANCE: "true"
     FALLOW_FAIL_ON_ISSUES: "true"
 ```
 
-Posts both a summary comment and inline review comments on the MR. The template auto-detects the package manager (npm/pnpm/yarn) from lockfiles, so review comments show the correct commands for the project (e.g., `pnpm remove` instead of `npm uninstall`).
+Posts both a summary comment and inline review comments on the MR. `FALLOW_SUMMARY_SCOPE: "diff"` only affects the sticky summary; inline review comments remain anchored to diff lines. The template auto-detects the package manager (npm/pnpm/yarn) from lockfiles, so review comments show the correct commands for the project (e.g., `pnpm remove` instead of `npm uninstall`).
 
 ### GitLab CI: With Health Score and Trend
 
@@ -621,7 +627,7 @@ Focus on findings that are BOTH dead code and duplicated:
 
 ## Custom Plugin Setup
 
-For frameworks not covered by the 95 built-in plugins.
+For frameworks not covered by the 114 built-in plugins.
 
 ### Option 1: Inline framework config
 

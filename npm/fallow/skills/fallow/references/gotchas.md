@@ -23,7 +23,7 @@ Always preview with `--dry-run` before applying. This is a destructive operation
 
 ## Don't Create Config Unless Needed
 
-Fallow works with zero configuration for most projects thanks to 94 auto-detecting framework plugins. Creating an unnecessary config file can mask issues or override detection behavior.
+Fallow works with zero configuration for most projects thanks to 114 auto-detecting framework plugins. Creating an unnecessary config file can mask issues or override detection behavior.
 
 ```bash
 # WRONG: creating config for a standard Next.js project
