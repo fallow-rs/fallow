@@ -684,3 +684,87 @@ fn shallow_nested_package_scripts_become_entry_points_without_workspace_config()
         "orphan.mjs should remain unused: {unused_file_names:?}"
     );
 }
+
+// ── Workspace package with tsconfig path-alias to unbuilt dist (issue #757) ──
+
+/// A monorepo analyzed pre-build, where a workspace package's tsconfig `paths`
+/// map a sibling-package specifier to `../*/dist/index.d.ts` (unbuilt output).
+/// The TypeScript plugin registers `@fix757/` as a path alias, so the consumer's
+/// `@fix757/utils` import matches `matches_plugin_alias`; before the fix, the
+/// alias fallback failed (the dist target does not exist) and the import was
+/// reported as `unresolved-import` plus `unused-dependency` for `@fix757/utils`.
+/// The workspace package fallback must still resolve it against the package's
+/// source tree. See issue #757.
+#[test]
+fn workspace_tsconfig_path_alias_to_unbuilt_dist_resolves_to_source() {
+    let root = fixture_path("issue-757-workspace-dist-path-alias");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|i| i.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved.contains(&"@fix757/utils"),
+        "`@fix757/utils` should resolve to the workspace source despite the tsconfig \
+         path alias pointing at unbuilt dist, unresolved: {unresolved:?}"
+    );
+    assert!(
+        !unresolved.contains(&"@fix757/utils/string"),
+        "`@fix757/utils/string` subpath should resolve to the workspace source, \
+         unresolved: {unresolved:?}"
+    );
+
+    let mut unused_deps: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    unused_deps.extend(
+        results
+            .unused_dev_dependencies
+            .iter()
+            .map(|d| d.dep.package_name.as_str()),
+    );
+    assert!(
+        !unused_deps.contains(&"@fix757/utils"),
+        "`@fix757/utils` should be credited as used (its import now resolves), \
+         unused deps: {unused_deps:?}"
+    );
+
+    let unlisted: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unlisted.contains(&"@fix757/utils"),
+        "`@fix757/utils` should not surface as an unlisted dependency, unlisted: {unlisted:?}"
+    );
+
+    // The aliased source files themselves must be reachable, not reported as unused.
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| {
+            f.file
+                .path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect();
+    assert!(
+        !unused_files.contains(&"index.ts".to_string()),
+        "utils/src/index.ts should be reachable via the import, unused: {unused_files:?}"
+    );
+    assert!(
+        !unused_files.contains(&"string.ts".to_string()),
+        "utils/src/string.ts should be reachable via the subpath import, unused: {unused_files:?}"
+    );
+}

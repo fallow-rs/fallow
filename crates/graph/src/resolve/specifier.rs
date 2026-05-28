@@ -1356,10 +1356,27 @@ pub(super) fn resolve_specifier(
                 // This covers both built-in alias shapes (`~/`, `@/`, `#foo`) and
                 // custom prefixes discovered from framework config files such as
                 // `@shared/*` or `$utils/*`.
+                if let Some(result) = try_path_alias_fallback(ctx, specifier) {
+                    return result;
+                }
+                // A plugin-alias prefix can collide with a workspace package name when
+                // a tsconfig `paths` entry maps a sibling-package specifier at unbuilt
+                // output, e.g. `"@scope/*": ["../*/dist/index.d.ts"]`. The TypeScript
+                // plugin registers `@scope/` as a path alias, so `@scope/pkg` matches
+                // `matches_plugin_alias`, but the alias target (`dist/...`) does not
+                // exist pre-build and `try_path_alias_fallback` returns `None`. Before
+                // giving up, resolve it as a workspace package against the package's
+                // source tree, matching the non-alias bare-specifier path below.
+                // See issue #757.
+                if is_bare
+                    && is_valid_package_name(specifier)
+                    && let Some(result) = try_workspace_package_fallback(ctx, specifier)
+                {
+                    return result;
+                }
                 // Path aliases that fail resolution are unresolvable, not npm packages.
                 // Classifying them as NpmPackage would cause false "unlisted dependency" reports.
-                try_path_alias_fallback(ctx, specifier)
-                    .unwrap_or_else(|| ResolveResult::Unresolvable(specifier.to_string()))
+                ResolveResult::Unresolvable(specifier.to_string())
             } else if let Some(result) =
                 try_css_relative_subpath_fallback(ctx, from_file, specifier, from_style)
             {

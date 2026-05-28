@@ -1,0 +1,18 @@
+{
+  "name": "@fix757/utils",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+      "require": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+      "default": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+    },
+    "./string": {
+      "import": { "types": "./dist/string.d.ts", "default": "./dist/string.js" },
+      "default": { "types": "./dist/string.d.ts", "default": "./dist/string.js" }
+    },
+    "./package.json": "./package.json"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "module": "node16",
+    "moduleResolution": "node16",
+    "target": "esnext",
+    "composite": true,
+    "declaration": true,
+    "strict": true
+  }
+}

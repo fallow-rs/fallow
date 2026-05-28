@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "paths": { "@fix757/*": ["../*/dist/index.d.ts"] }
+  },
+  "references": [{ "path": "../utils" }]
+}
