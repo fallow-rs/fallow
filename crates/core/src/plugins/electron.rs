@@ -75,6 +75,17 @@ define_plugin! {
             }
         }
 
+        // Credit babel-plugin-react-compiler when React Compiler is wired through
+        // @vitejs/plugin-react / @rolldown/plugin-babel in a per-section
+        // `<section>.plugins` array (e.g. `renderer.plugins`). The Vite plugin
+        // never sees electron.vite.config.*, so the shared detector runs here.
+        // See crate::plugins::react_compiler (#751).
+        result.referenced_dependencies.extend(super::react_compiler::extract_dependencies(
+            source,
+            config_path,
+            &[&["main", "plugins"], &["preload", "plugins"], &["renderer", "plugins"]],
+        ));
+
         result
     },
 }
@@ -203,6 +214,58 @@ mod tests {
                 .resolve_config(&config_path(), source, Path::new("/project"))
                 .entry_patterns
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn resolve_config_credits_react_compiler_preset_in_renderer_plugins() {
+        // OpenWaggle shape (#751): the React Compiler preset is wired through
+        // @rolldown/plugin-babel inside `renderer.plugins`. `defineConfig` comes
+        // from electron-vite; the shared config-object finder must still resolve
+        // the object so the preset call is reached.
+        let source = r"
+            import { defineConfig } from 'electron-vite'
+            import react, { reactCompilerPreset } from '@vitejs/plugin-react'
+            import babel from '@rolldown/plugin-babel'
+
+            export default defineConfig({
+                main: { build: { rollupOptions: { input: 'src/main/index.ts' } } },
+                renderer: {
+                    plugins: [react(), babel({ presets: [reactCompilerPreset()] })],
+                },
+            })
+        ";
+        let result = ElectronPlugin.resolve_config(&config_path(), source, Path::new("/project"));
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"babel-plugin-react-compiler".to_string()),
+            "react compiler preset in renderer.plugins should be credited: {:?}",
+            result.referenced_dependencies
+        );
+    }
+
+    #[test]
+    fn resolve_config_local_react_compiler_preset_in_renderer_does_not_credit() {
+        // Provenance guard: a local reactCompilerPreset (not imported from
+        // @vitejs/plugin-react) must not credit the dependency.
+        let source = r"
+            import { defineConfig } from 'electron-vite'
+            import babel from '@rolldown/plugin-babel'
+
+            function reactCompilerPreset() {
+                return {};
+            }
+
+            export default defineConfig({
+                renderer: { plugins: [babel({ presets: [reactCompilerPreset()] })] },
+            })
+        ";
+        let result = ElectronPlugin.resolve_config(&config_path(), source, Path::new("/project"));
+        assert!(
+            !result
+                .referenced_dependencies
+                .contains(&"babel-plugin-react-compiler".to_string())
         );
     }
 }

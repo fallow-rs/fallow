@@ -400,6 +400,54 @@ fn issue_623_vite_no_react_compiler_config_dependency_is_flagged_unused() {
 }
 
 #[test]
+fn issue_751_vite_react_compiler_preset_dependency_is_not_flagged_unused() {
+    // The canonical @vitejs/plugin-react 6.x shape: babel({ presets:
+    // [reactCompilerPreset()] }) via @rolldown/plugin-babel in top-level plugins.
+    let root = fixture_path("issue-751-vite-react-compiler-preset");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_dep_names.contains(&"babel-plugin-react-compiler"),
+        "React Compiler dependency should be credited via reactCompilerPreset(): {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"left-pad"),
+        "left-pad should remain unused as a control dependency: {unused_dep_names:?}"
+    );
+}
+
+#[test]
+fn issue_751_electron_react_compiler_preset_dependency_is_not_flagged_unused() {
+    // OpenWaggle shape: the preset is wired through renderer.plugins of an
+    // electron.vite.config.ts, which the Vite plugin never sees.
+    let root = fixture_path("issue-751-electron-react-compiler-preset");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_dep_names.contains(&"babel-plugin-react-compiler"),
+        "React Compiler dependency should be credited via renderer.plugins reactCompilerPreset(): {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"left-pad"),
+        "left-pad should remain unused as a control dependency: {unused_dep_names:?}"
+    );
+}
+
+#[test]
 fn turborepo_generator_config_is_used_without_globbing_generator_directory() {
     let tmp = tempfile::tempdir().expect("failed to create temp dir");
     let root = tmp.path().to_path_buf();
