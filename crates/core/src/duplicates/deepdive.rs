@@ -149,6 +149,13 @@ fn is_generic_identifier(word: &str) -> bool {
             | "default" | "async" | "await" | "yield" | "type" | "interface" | "enum"
             | "as" | "is" | "keyof" | "readonly" | "public" | "private" | "protected"
             | "static" | "get" | "delete" | "throw" | "try" | "catch" | "finally"
+            // TS primitive / utility type keywords (dominate type-heavy code like
+            // schema libraries, where they would otherwise win the frequency count)
+            | "string" | "number" | "boolean" | "any" | "unknown" | "never" | "bigint"
+            | "symbol"
+            // common JS globals that are never a useful extracted-function name
+            | "Math" | "JSON" | "Object" | "Array" | "Promise" | "BigInt" | "Number"
+            | "String" | "Boolean" | "Symbol" | "RegExp" | "Date"
     )
 }
 
@@ -228,6 +235,22 @@ mod tests {
     fn dominant_identifier_none_on_generic() {
         let g = group(&["const data = result.map((item) => item.value);"], 3);
         assert_eq!(dominant_identifier(&g), None);
+    }
+
+    #[test]
+    fn dominant_identifier_skips_ts_primitive_keywords_and_globals() {
+        // Type-heavy code (schema libraries) repeats `string`/`number`/`any`;
+        // they must never become the proposed name. The real domain identifier
+        // wins instead.
+        let g = group(
+            &["const parseUser = z.string(); parseUser(z.number()); parseUser.or(z.string());"],
+            4,
+        );
+        assert_eq!(dominant_identifier(&g).as_deref(), Some("parseUser"));
+        let only_keywords = group(&["const x: string = y as string; return x as any;"], 3);
+        assert_eq!(dominant_identifier(&only_keywords), None);
+        let g_global = group(&["Math.max(Math.floor(Math.abs(v)), 0)"], 3);
+        assert_eq!(dominant_identifier(&g_global), None);
     }
 
     #[test]
