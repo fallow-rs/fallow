@@ -192,3 +192,5 @@ mod issue_620_error_subclass_name;
 mod issue_704_auto_import_components;
 #[path = "integration_test/issue_744_tsdown_config.rs"]
 mod issue_744_tsdown_config;
+#[path = "integration_test/pkg_utils_plugin.rs"]
+mod pkg_utils_plugin;

@@ -1,0 +1,8 @@
+{
+  "name": "pkg-utils-no-dep",
+  "version": "1.0.0",
+  "main": "./src/index.ts",
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

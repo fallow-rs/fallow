@@ -1,0 +1,11 @@
+{
+  "name": "pkg-utils-build-config",
+  "version": "1.0.0",
+  "main": "./src/index.ts",
+  "scripts": {
+    "build": "pkg-utils build --strict"
+  },
+  "devDependencies": {
+    "@sanity/pkg-utils": "^7.0.0"
+  }
+}
