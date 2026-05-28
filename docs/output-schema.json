@@ -1064,6 +1064,17 @@
           ],
           "description": "Runtime coverage findings from the paid sidecar (only populated with\n`--runtime-coverage`)."
         },
+        "coverage_intelligence": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CoverageIntelligenceReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Combined coverage, runtime, complexity, and change-scope verdicts."
+        },
         "large_functions": {
           "type": "array",
           "items": {
@@ -1974,6 +1985,17 @@
             }
           ],
           "description": "Runtime coverage findings from the paid sidecar (only populated with\n`--runtime-coverage`)."
+        },
+        "coverage_intelligence": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CoverageIntelligenceReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Combined coverage, runtime, complexity, and change-scope verdicts."
         },
         "large_functions": {
           "type": "array",
@@ -9454,6 +9476,278 @@
         }
       ],
       "description": "Machine-readable ownership state for a hotspot."
+    },
+    "CoverageIntelligenceReport": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "$ref": "#/definitions/CoverageIntelligenceSchemaVersion"
+        },
+        "verdict": {
+          "$ref": "#/definitions/CoverageIntelligenceVerdict"
+        },
+        "summary": {
+          "$ref": "#/definitions/CoverageIntelligenceSummary"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CoverageIntelligenceFinding"
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "verdict",
+        "summary",
+        "findings"
+      ],
+      "description": "Combined coverage, runtime, complexity, and change-scope verdicts."
+    },
+    "CoverageIntelligenceSchemaVersion": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "1",
+          "description": "First release of the coverage-intelligence block contract."
+        }
+      ],
+      "description": "Coverage-intelligence JSON contract version. Scoped to the\n`coverage_intelligence` block and independent of the top-level fallow\nJSON `schema_version`."
+    },
+    "CoverageIntelligenceVerdict": {
+      "type": "string",
+      "enum": [
+        "risky-change-detected",
+        "high-confidence-delete",
+        "review-required",
+        "refactor-carefully",
+        "clean",
+        "unknown"
+      ],
+      "description": "Headline verdict for the combined coverage-intelligence report."
+    },
+    "CoverageIntelligenceSummary": {
+      "type": "object",
+      "properties": {
+        "findings": {
+          "type": "integer"
+        },
+        "risky_changes": {
+          "type": "integer"
+        },
+        "high_confidence_deletes": {
+          "type": "integer"
+        },
+        "review_required": {
+          "type": "integer"
+        },
+        "refactor_carefully": {
+          "type": "integer"
+        },
+        "skipped_ambiguous_matches": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "findings",
+        "risky_changes",
+        "high_confidence_deletes",
+        "review_required",
+        "refactor_carefully",
+        "skipped_ambiguous_matches"
+      ],
+      "description": "Aggregate metadata for coverage-intelligence output."
+    },
+    "CoverageIntelligenceFinding": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable finding ID of the form `fallow:coverage-intel:<hash>`."
+        },
+        "path": {
+          "type": "string",
+          "description": "File path relative to the project root."
+        },
+        "identity": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Function or export identity when known."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-indexed source line."
+        },
+        "verdict": {
+          "$ref": "#/definitions/CoverageIntelligenceVerdict"
+        },
+        "signals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CoverageIntelligenceSignal"
+          }
+        },
+        "recommendation": {
+          "$ref": "#/definitions/CoverageIntelligenceRecommendation"
+        },
+        "confidence": {
+          "$ref": "#/definitions/CoverageIntelligenceConfidence"
+        },
+        "related_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence": {
+          "$ref": "#/definitions/CoverageIntelligenceEvidence"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CoverageIntelligenceAction"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "line",
+        "verdict",
+        "signals",
+        "recommendation",
+        "confidence",
+        "evidence",
+        "actions"
+      ],
+      "description": "One combined coverage-intelligence finding."
+    },
+    "CoverageIntelligenceSignal": {
+      "type": "string",
+      "enum": [
+        "changed",
+        "hot_path",
+        "low_test_coverage",
+        "high_crap",
+        "static_unused",
+        "runtime_cold",
+        "no_test_path",
+        "runtime_reachable",
+        "ownership_drift",
+        "test_covered"
+      ],
+      "description": "Ordered evidence signals behind a coverage-intelligence finding."
+    },
+    "CoverageIntelligenceRecommendation": {
+      "type": "string",
+      "enum": [
+        "add-test-or-split-before-merge",
+        "delete-after-confirming-owner",
+        "review-before-changing",
+        "refactor-carefully-keep-behavior"
+      ],
+      "description": "Recommended action family for a combined finding."
+    },
+    "CoverageIntelligenceConfidence": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "description": "Confidence in the joined evidence and resulting recommendation."
+    },
+    "CoverageIntelligenceEvidence": {
+      "type": "object",
+      "properties": {
+        "coverage_pct": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "crap": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "runtime_verdict": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "invocations": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "static_status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "test_coverage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "changed": {
+          "type": "boolean"
+        },
+        "ownership_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "match_confidence": {
+          "$ref": "#/definitions/CoverageIntelligenceMatchConfidence"
+        }
+      },
+      "required": [
+        "match_confidence"
+      ],
+      "description": "Compact evidence values that led to a recommendation."
+    },
+    "CoverageIntelligenceMatchConfidence": {
+      "type": "string",
+      "enum": [
+        "stable-id",
+        "source-hash",
+        "path-function-line",
+        "path-line",
+        "direct"
+      ],
+      "description": "Confidence tier for the cross-surface evidence match."
+    },
+    "CoverageIntelligenceAction": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Action identifier, normalized to `type` in JSON output."
+        },
+        "description": {
+          "type": "string"
+        },
+        "auto_fixable": {
+          "type": "boolean",
+          "description": "Whether fallow can apply this action automatically."
+        }
+      },
+      "required": [
+        "type",
+        "description",
+        "auto_fixable"
+      ],
+      "description": "Machine-actionable next step for a coverage-intelligence finding."
     }
   }
 }

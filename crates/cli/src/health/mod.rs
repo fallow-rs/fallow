@@ -1,4 +1,5 @@
 pub mod coverage;
+mod coverage_intelligence;
 mod grouping;
 mod hotspots;
 pub mod ownership;
@@ -1751,7 +1752,7 @@ fn assemble_health_report(
         Some(ist_total)
     };
 
-    HealthReport {
+    let mut report = HealthReport {
         summary: HealthSummary {
             files_analyzed,
             functions_analyzed: total_functions,
@@ -1798,6 +1799,7 @@ fn assemble_health_report(
             report_hotspot_summary
         },
         runtime_coverage,
+        coverage_intelligence: None,
         large_functions: if opts.score_only_output {
             Vec::new()
         } else {
@@ -1830,7 +1832,19 @@ fn assemble_health_report(
         } else {
             None
         },
+    };
+    if !opts.score_only_output {
+        report.coverage_intelligence = coverage_intelligence::build_coverage_intelligence(
+            &report,
+            opts.root,
+            coverage_intelligence::CoverageIntelligenceContext {
+                has_change_scope: opts.changed_since.is_some()
+                    || opts.diff_index.is_some()
+                    || opts.use_shared_diff_index,
+            },
+        );
     }
+    report
 }
 
 /// Collect functions exceeding 60 LOC when the unit size risk profile warrants it.

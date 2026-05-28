@@ -33,6 +33,7 @@ pub(in crate::report) fn print_health_human(
         && report.hotspots.is_empty()
         && report.targets.is_empty()
         && report.runtime_coverage.is_none()
+        && report.coverage_intelligence.is_none()
         && !has_score
     {
         if !quiet {
@@ -141,6 +142,7 @@ fn build_health_human_lines_with_explain(
         render_health_trend(&mut lines, report);
     }
     render_runtime_coverage(&mut lines, report, root);
+    render_coverage_intelligence(&mut lines, report, root);
     render_vital_signs(&mut lines, report);
     render_risk_profiles(&mut lines, report);
     render_large_functions(&mut lines, report, root);
@@ -153,6 +155,53 @@ fn build_health_human_lines_with_explain(
         inject_explain_blocks(lines)
     } else {
         lines
+    }
+}
+
+fn render_coverage_intelligence(
+    lines: &mut Vec<String>,
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+) {
+    let Some(ref intelligence) = report.coverage_intelligence else {
+        return;
+    };
+    if intelligence.findings.is_empty() {
+        return;
+    }
+
+    lines.push(String::new());
+    lines.push("Coverage intelligence".bold().to_string());
+    lines.push(
+        format!("  Verdict: {}", intelligence.verdict)
+            .bold()
+            .to_string(),
+    );
+    for finding in intelligence.findings.iter().take(MAX_FLAT_ITEMS) {
+        let relative = relative_path(&finding.path, root);
+        let identity = finding
+            .identity
+            .as_deref()
+            .map_or(String::new(), |name| format!(" {name}"));
+        let signals = finding
+            .signals
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let action = finding
+            .actions
+            .first()
+            .map_or("Review this finding", |action| action.description.as_str());
+        lines.push(format!(
+            "  {}:{}{} {} [{}]",
+            format_path(&relative.display().to_string()),
+            finding.line,
+            identity,
+            finding.verdict,
+            signals,
+        ));
+        lines.push(format!("    {action}"));
     }
 }
 

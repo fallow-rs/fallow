@@ -5,6 +5,7 @@
 //! reference these types without pulling in binary-only dependencies.
 
 mod coverage;
+mod coverage_intelligence;
 mod finding;
 mod grouped;
 mod runtime_coverage;
@@ -14,6 +15,7 @@ mod trends;
 mod vital_signs;
 
 pub use coverage::*;
+pub use coverage_intelligence::*;
 pub use finding::*;
 pub use grouped::*;
 pub use runtime_coverage::*;
@@ -120,6 +122,9 @@ pub struct HealthReport {
     /// `--runtime-coverage`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_coverage: Option<RuntimeCoverageReport>,
+    /// Combined coverage, runtime, complexity, and change-scope verdicts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage_intelligence: Option<CoverageIntelligenceReport>,
     /// Functions exceeding 60 LOC (very high risk). Only present when unit size
     /// very-high-risk bin >= 3%. Sorted by line count descending.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -163,6 +168,7 @@ impl Default for HealthReport {
             hotspots: vec![],
             hotspot_summary: None,
             runtime_coverage: None,
+            coverage_intelligence: None,
             large_functions: vec![],
             targets: vec![],
             target_thresholds: None,
@@ -185,6 +191,7 @@ mod tests {
         assert!(!json.contains("hotspots"));
         assert!(!json.contains("hotspot_summary"));
         assert!(!json.contains("runtime_coverage"));
+        assert!(!json.contains("coverage_intelligence"));
         assert!(!json.contains("large_functions"));
         assert!(!json.contains("targets"));
         assert!(!json.contains("vital_signs"));

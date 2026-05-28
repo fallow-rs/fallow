@@ -660,6 +660,7 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
         && report.hotspots.is_empty()
         && report.targets.is_empty()
         && report.runtime_coverage.is_none()
+        && report.coverage_intelligence.is_none()
     {
         if report.vital_signs.is_none() {
             let _ = write!(
@@ -677,6 +678,7 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
 
     write_findings_section(&mut out, report, root);
     write_runtime_coverage_section(&mut out, report, root);
+    write_coverage_intelligence_section(&mut out, report, root);
     write_coverage_gaps_section(&mut out, report, root);
     write_file_scores_section(&mut out, report, root);
     write_hotspots_section(&mut out, report, root);
@@ -684,6 +686,59 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
     write_metric_legend(&mut out, report);
 
     out
+}
+
+fn write_coverage_intelligence_section(
+    out: &mut String,
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+) {
+    let Some(ref intelligence) = report.coverage_intelligence else {
+        return;
+    };
+    if intelligence.findings.is_empty() {
+        return;
+    }
+    if !out.is_empty() && !out.ends_with("\n\n") {
+        out.push('\n');
+    }
+    let _ = writeln!(
+        out,
+        "## Coverage Intelligence\n\n- Verdict: {}\n- Findings: {}\n- Ambiguous matches skipped: {}\n",
+        intelligence.verdict,
+        intelligence.summary.findings,
+        intelligence.summary.skipped_ambiguous_matches,
+    );
+    out.push_str("| ID | Path | Identity | Verdict | Recommendation | Confidence | Signals |\n");
+    out.push_str("|:---|:-----|:---------|:--------|:---------------|:-----------|:--------|\n");
+    for finding in &intelligence.findings {
+        let path = escape_backticks(&normalize_uri(
+            &relative_path(&finding.path, root).display().to_string(),
+        ));
+        let identity = finding
+            .identity
+            .as_deref()
+            .map_or_else(|| "-".to_owned(), escape_backticks);
+        let signals = finding
+            .signals
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(
+            out,
+            "| `{}` | `{}`:{} | `{}` | {} | {} | {} | {} |",
+            escape_backticks(&finding.id),
+            path,
+            finding.line,
+            identity,
+            finding.verdict,
+            finding.recommendation,
+            finding.confidence,
+            signals,
+        );
+    }
+    out.push('\n');
 }
 
 fn write_runtime_coverage_section(

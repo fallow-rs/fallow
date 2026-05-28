@@ -330,6 +330,39 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
             println!("{line}");
         }
     }
+    if let Some(ref intelligence) = report.coverage_intelligence {
+        println!(
+            "coverage-intelligence-summary:verdict={},findings={},risky_changes={},high_confidence_deletes={},review_required={},refactor_carefully={},skipped_ambiguous_matches={}",
+            intelligence.verdict,
+            intelligence.summary.findings,
+            intelligence.summary.risky_changes,
+            intelligence.summary.high_confidence_deletes,
+            intelligence.summary.review_required,
+            intelligence.summary.refactor_carefully,
+            intelligence.summary.skipped_ambiguous_matches,
+        );
+        for finding in &intelligence.findings {
+            let relative = normalize_uri(&relative_path(&finding.path, root).display().to_string());
+            let identity = finding.identity.as_deref().unwrap_or("-");
+            let signals = finding
+                .signals
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("+");
+            println!(
+                "coverage-intelligence:{}:{}:{}:id={},verdict={},recommendation={},confidence={},signals={}",
+                relative,
+                finding.line,
+                identity,
+                finding.id,
+                finding.verdict,
+                finding.recommendation,
+                finding.confidence,
+                signals,
+            );
+        }
+    }
     for entry in &report.hotspots {
         let relative = normalize_uri(&relative_path(&entry.path, root).display().to_string());
         let ownership_suffix = entry

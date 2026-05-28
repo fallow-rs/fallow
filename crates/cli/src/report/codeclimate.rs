@@ -63,6 +63,25 @@ fn cc_issue(
     }
 }
 
+fn coverage_intelligence_check_name(
+    recommendation: crate::health_types::CoverageIntelligenceRecommendation,
+) -> &'static str {
+    match recommendation {
+        crate::health_types::CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge => {
+            "fallow/coverage-intelligence-risky-change"
+        }
+        crate::health_types::CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner => {
+            "fallow/coverage-intelligence-delete"
+        }
+        crate::health_types::CoverageIntelligenceRecommendation::ReviewBeforeChanging => {
+            "fallow/coverage-intelligence-review"
+        }
+        crate::health_types::CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior => {
+            "fallow/coverage-intelligence-refactor"
+        }
+    }
+}
+
 /// Push CodeClimate issues for unused dependencies with a shared structure.
 fn push_dep_cc_issues<'a, I>(
     issues: &mut Vec<CodeClimateIssue>,
@@ -1132,6 +1151,48 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
                 // | Performance | Security | Style. Production-coverage
                 // findings are a dead-code signal, so use "Bug Risk" — same
                 // category used by static dead-code issues elsewhere.
+                "Bug Risk",
+                &path,
+                Some(finding.line),
+                &fp,
+            ));
+        }
+    }
+
+    if let Some(ref intelligence) = report.coverage_intelligence {
+        for finding in &intelligence.findings {
+            let path = cc_path(&finding.path, root);
+            let check_name = coverage_intelligence_check_name(finding.recommendation);
+            let identity = finding.identity.as_deref().unwrap_or("code");
+            let description = format!(
+                "'{}' coverage intelligence verdict: {} ({})",
+                identity, finding.verdict, finding.recommendation,
+            );
+            let severity = match finding.verdict {
+                crate::health_types::CoverageIntelligenceVerdict::RiskyChangeDetected
+                | crate::health_types::CoverageIntelligenceVerdict::HighConfidenceDelete => {
+                    CodeClimateSeverity::Major
+                }
+                crate::health_types::CoverageIntelligenceVerdict::ReviewRequired
+                | crate::health_types::CoverageIntelligenceVerdict::RefactorCarefully => {
+                    CodeClimateSeverity::Minor
+                }
+                crate::health_types::CoverageIntelligenceVerdict::Clean
+                | crate::health_types::CoverageIntelligenceVerdict::Unknown => {
+                    continue;
+                }
+            };
+            let fp = fingerprint_hash(&[
+                check_name,
+                &path,
+                &finding.line.to_string(),
+                identity,
+                &finding.id,
+            ]);
+            issues.push(cc_issue(
+                check_name,
+                &description,
+                severity,
                 "Bug Risk",
                 &path,
                 Some(finding.line),

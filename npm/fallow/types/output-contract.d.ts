@@ -490,6 +490,32 @@ export type RuntimeCoverageRiskBand = ("low" | "medium" | "high")
  */
 export type RuntimeCoverageWatermark = ("trial-expired" | "license-expired-grace" | "unknown")
 /**
+ * Coverage-intelligence JSON contract version. Scoped to the
+ * `coverage_intelligence` block and independent of the top-level fallow
+ * JSON `schema_version`.
+ */
+export type CoverageIntelligenceSchemaVersion = "1"
+/**
+ * Headline verdict for the combined coverage-intelligence report.
+ */
+export type CoverageIntelligenceVerdict = ("risky-change-detected" | "high-confidence-delete" | "review-required" | "refactor-carefully" | "clean" | "unknown")
+/**
+ * Ordered evidence signals behind a coverage-intelligence finding.
+ */
+export type CoverageIntelligenceSignal = ("changed" | "hot_path" | "low_test_coverage" | "high_crap" | "static_unused" | "runtime_cold" | "no_test_path" | "runtime_reachable" | "ownership_drift" | "test_covered")
+/**
+ * Recommended action family for a combined finding.
+ */
+export type CoverageIntelligenceRecommendation = ("add-test-or-split-before-merge" | "delete-after-confirming-owner" | "review-before-changing" | "refactor-carefully-keep-behavior")
+/**
+ * Confidence in the joined evidence and resulting recommendation.
+ */
+export type CoverageIntelligenceConfidence = ("high" | "medium" | "low")
+/**
+ * Confidence tier for the cross-surface evidence match.
+ */
+export type CoverageIntelligenceMatchConfidence = ("stable-id" | "source-hash" | "path-function-line" | "path-line" | "direct")
+/**
  * Category of refactoring recommendation.
  */
 export type RecommendationCategory = ("urgent_churn_complexity" | "break_circular_dependency" | "split_high_impact" | "remove_dead_code" | "extract_complex_functions" | "extract_dependencies" | "add_test_coverage")
@@ -2568,6 +2594,10 @@ hotspot_summary?: (HotspotSummary | null)
  */
 runtime_coverage?: (RuntimeCoverageReport | null)
 /**
+ * Combined coverage, runtime, complexity, and change-scope verdicts.
+ */
+coverage_intelligence?: (CoverageIntelligenceReport | null)
+/**
  * Functions exceeding 60 LOC (very high risk). Only present when unit size
  * very-high-risk bin >= 3%. Sorted by line count descending.
  */
@@ -3987,6 +4017,82 @@ code: string
 message: string
 }
 /**
+ * Combined coverage, runtime, complexity, and change-scope verdicts.
+ */
+export interface CoverageIntelligenceReport {
+schema_version: CoverageIntelligenceSchemaVersion
+verdict: CoverageIntelligenceVerdict
+summary: CoverageIntelligenceSummary
+findings: CoverageIntelligenceFinding[]
+}
+/**
+ * Aggregate metadata for coverage-intelligence output.
+ */
+export interface CoverageIntelligenceSummary {
+findings: number
+risky_changes: number
+high_confidence_deletes: number
+review_required: number
+refactor_carefully: number
+skipped_ambiguous_matches: number
+}
+/**
+ * One combined coverage-intelligence finding.
+ */
+export interface CoverageIntelligenceFinding {
+/**
+ * Stable finding ID of the form `fallow:coverage-intel:<hash>`.
+ */
+id: string
+/**
+ * File path relative to the project root.
+ */
+path: string
+/**
+ * Function or export identity when known.
+ */
+identity?: (string | null)
+/**
+ * 1-indexed source line.
+ */
+line: number
+verdict: CoverageIntelligenceVerdict
+signals: CoverageIntelligenceSignal[]
+recommendation: CoverageIntelligenceRecommendation
+confidence: CoverageIntelligenceConfidence
+related_ids?: string[]
+evidence: CoverageIntelligenceEvidence
+actions: CoverageIntelligenceAction[]
+}
+/**
+ * Compact evidence values that led to a recommendation.
+ */
+export interface CoverageIntelligenceEvidence {
+coverage_pct?: (number | null)
+crap?: (number | null)
+runtime_verdict?: (string | null)
+invocations?: (number | null)
+static_status?: (string | null)
+test_coverage?: (string | null)
+changed?: boolean
+ownership_state?: (string | null)
+match_confidence: CoverageIntelligenceMatchConfidence
+}
+/**
+ * Machine-actionable next step for a coverage-intelligence finding.
+ */
+export interface CoverageIntelligenceAction {
+/**
+ * Action identifier, normalized to `type` in JSON output.
+ */
+type: string
+description: string
+/**
+ * Whether fallow can apply this action automatically.
+ */
+auto_fixable: boolean
+}
+/**
  * A function exceeding the very-high-risk size threshold (>60 LOC).
  */
 export interface LargeFunctionEntry {
@@ -5014,6 +5120,10 @@ hotspot_summary?: (HotspotSummary | null)
  * `--runtime-coverage`).
  */
 runtime_coverage?: (RuntimeCoverageReport | null)
+/**
+ * Combined coverage, runtime, complexity, and change-scope verdicts.
+ */
+coverage_intelligence?: (CoverageIntelligenceReport | null)
 /**
  * Functions exceeding 60 LOC (very high risk). Only present when unit size
  * very-high-risk bin >= 3%. Sorted by line count descending.

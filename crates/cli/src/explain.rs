@@ -680,6 +680,38 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         full: "Generic runtime-coverage finding for verdicts not covered by a more specific rule. Covers the forward-compat `unknown` sentinel; the CLI filters `active` entries out of `runtime_coverage.findings` so the surfaced list stays actionable.",
         docs_path: "explanations/health#runtime-coverage",
     },
+    RuleDef {
+        id: "fallow/coverage-intelligence-risky-change",
+        category: "Health",
+        name: "Coverage Intelligence Risky Change",
+        short: "Changed hot path combines high CRAP and low test coverage",
+        full: "Coverage intelligence combined change scope, runtime hot-path evidence, low test coverage, and high CRAP into a risky-change finding. Add focused tests or split the change before merging.",
+        docs_path: "explanations/health#coverage-intelligence",
+    },
+    RuleDef {
+        id: "fallow/coverage-intelligence-delete",
+        category: "Health",
+        name: "Coverage Intelligence Delete",
+        short: "Static and runtime evidence indicate code can be deleted",
+        full: "Coverage intelligence combined static unused status, runtime cold evidence, and lack of test reachability into a high-confidence delete recommendation.",
+        docs_path: "explanations/health#coverage-intelligence",
+    },
+    RuleDef {
+        id: "fallow/coverage-intelligence-review",
+        category: "Health",
+        name: "Coverage Intelligence Review",
+        short: "Cold reachable uncovered code needs owner review",
+        full: "Coverage intelligence found code that is statically reachable but cold in runtime evidence, uncovered by tests, and ownership-risky. Route it to an owner before changing or deleting it.",
+        docs_path: "explanations/health#coverage-intelligence",
+    },
+    RuleDef {
+        id: "fallow/coverage-intelligence-refactor",
+        category: "Health",
+        name: "Coverage Intelligence Refactor",
+        short: "Hot covered code has high CRAP and should be refactored carefully",
+        full: "Coverage intelligence found hot production code that is covered by tests but still has high CRAP. Refactor carefully while preserving behavior.",
+        docs_path: "explanations/health#coverage-intelligence",
+    },
 ];
 
 pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
@@ -1605,7 +1637,7 @@ mod tests {
 
     #[test]
     fn health_rules_count() {
-        assert_eq!(HEALTH_RULES.len(), 12);
+        assert_eq!(HEALTH_RULES.len(), 16);
     }
 
     #[test]

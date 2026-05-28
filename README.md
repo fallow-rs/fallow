@@ -352,6 +352,8 @@ Static `coverage_gaps` and runtime `runtime_coverage` are separate layers in the
 | Exact CRAP scoring | `--coverage` | Istanbul JSON file or `coverage-final.json` directory | how covered each function is for CRAP computation | no |
 | Runtime runtime coverage | `--runtime-coverage` | V8 directory, V8 JSON file, or Istanbul JSON file | which functions actually executed, which stayed cold, which are hot | yes |
 
+When enough evidence overlaps, `health` also emits `coverage_intelligence`: a combined verdict layer for humans and agents. It turns compound signals into stable findings, for example changed hot paths with high CRAP and low tests, static unused code that was also cold at runtime, cold reachable code with ownership risk, or hot covered code that needs careful refactoring. The block is additive and appears inside `audit` through the nested health result without changing audit's default verdict.
+
 Setup details:
 
 - `fallow license activate --trial --email ...` starts a trial and stores the signed license locally
