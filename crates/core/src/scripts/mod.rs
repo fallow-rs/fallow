@@ -1306,6 +1306,43 @@ mod tests {
         assert_eq!(cmds[0].binary, "vitest");
     }
 
+    #[test]
+    fn bun_runtime_flag_extracts_binary() {
+        // `bun --bun prek install` runs the `prek` binary with the bun runtime.
+        let cmds = parse_script("bun --bun prek install");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0].binary, "prek");
+    }
+
+    #[test]
+    fn bun_multiple_runtime_flags_extract_binary() {
+        let cmds = parse_script("bun --bun --watch prek");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0].binary, "prek");
+    }
+
+    #[test]
+    fn bun_runtime_flag_before_run_is_script() {
+        // `bun --watch run dev` delegates to the "dev" script, not a binary.
+        let cmds = parse_script("bun --watch run dev");
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn bun_unknown_flag_credits_nothing() {
+        // `--filter` takes a value; conservatively treated as a script
+        // delegation so neither the flag value nor `run` is credited.
+        let cmds = parse_script("bun --filter foo run build");
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn bun_x_extracts_binary() {
+        let cmds = parse_script("bun x cowsay hello");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0].binary, "cowsay");
+    }
+
     // --- script multiplexers ---
 
     #[test]

@@ -2,6 +2,16 @@
 
 use super::ENV_WRAPPERS;
 
+/// Bun runtime boolean flags that may precede an executed file/binary
+/// (`bun --bun <bin>`, `bun --watch <file>`, `bun --hot run dev`). Bun documents
+/// these as flags that go immediately after `bun`, before the `run`/file/binary
+/// target. None consume a value, so they can be skipped to reach the target.
+/// Value-taking flags (`--filter <glob>`) are deliberately absent: an unrecognized
+/// leading flag makes the parser treat the command as a script delegation rather
+/// than guess where the binary starts. Source: Bun runtime docs (oven-sh/bun
+/// docs/runtime/index.mdx, watch-mode.mdx).
+const BUN_RUNTIME_FLAGS: &[&str] = &["--bun", "--watch", "--hot", "--smol", "--no-clear-screen"];
+
 /// Split a script string on shell operators (`&&`, `||`, `;`, `|`, `&`).
 /// Respects single and double quotes.
 pub fn split_shell_operators(script: &str) -> Vec<&str> {
@@ -126,7 +136,35 @@ pub fn advance_past_package_manager(tokens: &[&str], mut idx: usize) -> Option<u
                 idx += 1;
             }
         }
-    } else if matches!(token, "yarn" | "pnpm" | "npm" | "bun") {
+    } else if token == "bun" {
+        // `bun` is both a script runner and a direct executor:
+        //   bun <script> / bun run <script>   -> named script (skip)
+        //   bun exec <bin> / bun x <pkg>      -> executes a binary
+        //   bun --bun <bin> ...               -> runtime flags, then a binary to run
+        // Skip known boolean runtime flags, then classify the target. An unknown
+        // leading flag is treated as a script delegation (skip) rather than guessed
+        // at, since we cannot tell whether it consumes the following token as a value.
+        idx += 1;
+        let mut saw_runtime_flag = false;
+        while idx < tokens.len() && BUN_RUNTIME_FLAGS.contains(&tokens[idx]) {
+            idx += 1;
+            saw_runtime_flag = true;
+        }
+        if idx >= tokens.len() {
+            return None;
+        }
+        let subcmd = tokens[idx];
+        if subcmd == "exec" || subcmd == "x" {
+            idx += 1;
+        } else if matches!(subcmd, "run" | "run-script") {
+            // Delegates to a named script, not a binary invocation
+            return None;
+        } else if !saw_runtime_flag {
+            // Bare `bun <name>` (or `bun --unknown-flag ...`) runs a script; skip.
+            return None;
+        }
+        // else: `bun --bun <bin>`, the post-flag target is a binary invocation.
+    } else if matches!(token, "yarn" | "pnpm" | "npm") {
         if idx + 1 < tokens.len() {
             let subcmd = tokens[idx + 1];
             if subcmd == "exec" || subcmd == "dlx" {
@@ -414,6 +452,57 @@ mod tests {
     #[test]
     fn advance_bun_run_returns_none() {
         let tokens = vec!["bun", "run", "dev"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), None);
+    }
+
+    #[test]
+    fn advance_bun_runtime_flag_then_binary() {
+        // `bun --bun prek install`: --bun forces the bun runtime for the
+        // executed binary; `prek` is the binary, not a script.
+        let tokens = vec!["bun", "--bun", "prek", "install"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), Some(2));
+    }
+
+    #[test]
+    fn advance_bun_multiple_runtime_flags_then_binary() {
+        let tokens = vec!["bun", "--bun", "--watch", "prek"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), Some(3));
+    }
+
+    #[test]
+    fn advance_bun_runtime_flag_then_run_is_script() {
+        // Bun documents `bun --watch run dev` (flag before `run`); the target
+        // is still a named script, so nothing is credited.
+        let tokens = vec!["bun", "--watch", "run", "dev"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), None);
+    }
+
+    #[test]
+    fn advance_bun_x_executes_binary() {
+        // `bun x <pkg>` is the bun-native alias of `bunx <pkg>`.
+        let tokens = vec!["bun", "x", "cowsay"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), Some(2));
+    }
+
+    #[test]
+    fn advance_bun_unknown_leading_flag_returns_none() {
+        // `--filter` consumes a value; an unrecognized leading flag is treated
+        // as a script delegation rather than guessed at (conservative: avoid
+        // crediting the flag value as a package).
+        let tokens = vec!["bun", "--filter", "foo", "run", "build"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), None);
+    }
+
+    #[test]
+    fn advance_bun_bare_name_returns_none() {
+        // Bare `bun <name>` runs a script, like `yarn <name>`.
+        let tokens = vec!["bun", "scripts/build.ts"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), None);
+    }
+
+    #[test]
+    fn advance_bun_runtime_flag_only_returns_none() {
+        let tokens = vec!["bun", "--watch"];
         assert_eq!(advance_past_package_manager(&tokens, 0), None);
     }
 }
