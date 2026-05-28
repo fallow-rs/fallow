@@ -134,6 +134,22 @@ pub(crate) struct ModuleInfoExtractor {
     /// Used so `x.method()` or `this.service.method()` can be mapped back to the
     /// imported/exported class or interface that owns the member.
     binding_target_names: FxHashMap<String, String>,
+    /// Module-scope interface / object-type-alias property types keyed by the
+    /// declared type name: `Props -> { resultState -> ResultState }`. Populated
+    /// while walking `interface`/`type` declarations so a destructured binding
+    /// typed by a named reference (`let { resultState }: Props = $props()`) can
+    /// resolve its members regardless of source order (interfaces hoist). Only
+    /// bare `TSTypeReference`-to-single-name property types are recorded; union /
+    /// array / generic-wrapped types are skipped (matches
+    /// `extract_type_annotation_name`). See issue #752.
+    interface_property_types: FxHashMap<String, FxHashMap<String, String>>,
+    /// Destructured bindings whose declared type is a named reference, captured
+    /// during the walk and resolved at finalize against `interface_property_types`.
+    /// Each entry is `(local_name, property_key, type_ref_name)`; the finalize
+    /// step inserts `local_name -> class` into `binding_target_names`. Inline
+    /// type-literal destructures (`let { x }: { x: Foo } = ...`) resolve in-place
+    /// during the walk and never reach this list. See issue #752.
+    pending_typed_destructures: Vec<(String, String, String)>,
     /// Iterable receivers whose element type is known (Angular plural queries:
     /// `viewChildren<T>()` / `contentChildren<T>()` initializers and
     /// `@ViewChildren`/`@ContentChildren` decorated `QueryList<T>` properties).
@@ -660,6 +676,37 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Resolve destructured bindings typed by a named reference into
+    /// `binding_target_names`.
+    ///
+    /// `let { resultState }: Props = $props()` (or a destructured formal
+    /// parameter `function f({ resultState }: Props)`) records a pending
+    /// `(local, property_key, "Props")` during the walk. Here we look up the
+    /// interface / object-type-alias `Props`'s property type for that key and
+    /// bind `local -> <class>`, so a later `resultState.pin(...)` access (in a
+    /// `.ts` body or a Svelte / Vue template) resolves the member onto the
+    /// class. Runs after the full walk so the interface may be declared after
+    /// the binding. Idempotent: drains the pending list and uses
+    /// `entry().or_insert`, so an existing `new`-based binding wins and a
+    /// second call is a no-op. See issue #752.
+    pub(crate) fn resolve_typed_destructure_bindings(&mut self) {
+        let pending = std::mem::take(&mut self.pending_typed_destructures);
+        if pending.is_empty() {
+            return;
+        }
+        for (local, property_key, type_name) in pending {
+            let Some(properties) = self.interface_property_types.get(&type_name) else {
+                continue;
+            };
+            let Some(class_name) = properties.get(&property_key) else {
+                continue;
+            };
+            self.binding_target_names
+                .entry(local)
+                .or_insert_with(|| class_name.clone());
+        }
+    }
+
     fn resolve_bound_object_name(&self, object: &str) -> Option<String> {
         if let Some(target_name) = self.binding_target_names.get(object) {
             return Some(target_name.clone());
@@ -796,6 +843,7 @@ impl ModuleInfoExtractor {
             suppressions,
             unknown_kinds,
         } = parsed;
+        self.resolve_typed_destructure_bindings();
         self.resolve_pending_local_export_specifiers();
         self.enrich_local_class_exports();
         self.record_exported_instance_bindings();
@@ -856,6 +904,7 @@ impl ModuleInfoExtractor {
              Angular content here, plumb inline_template_findings into the \
              merge step before relying on this assertion"
         );
+        self.resolve_typed_destructure_bindings();
         self.resolve_pending_local_export_specifiers();
         self.enrich_local_class_exports();
         self.record_exported_instance_bindings();

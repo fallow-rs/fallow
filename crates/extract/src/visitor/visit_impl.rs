@@ -312,6 +312,34 @@ fn extract_binding_local_name<'a>(pattern: &'a BindingPattern<'a>) -> Option<&'a
     }
 }
 
+/// Collect `{ property -> simple class type name }` from an object-type member
+/// list (an `interface` body or a `type X = { ... }` literal).
+///
+/// Only bare `TSTypeReference`-to-single-name property types are recorded (via
+/// `extract_type_annotation_name`); union / array / generic-wrapped property
+/// types are skipped because they do not name a single resolvable class. Used
+/// so a destructured binding typed by such an interface
+/// (`let { resultState }: Props = $props()`) can resolve its members onto the
+/// referenced class. See issue #752.
+fn collect_object_type_property_types(members: &[TSSignature<'_>]) -> FxHashMap<String, String> {
+    let mut properties = FxHashMap::default();
+    for member in members {
+        let TSSignature::TSPropertySignature(prop) = member else {
+            continue;
+        };
+        let Some(property_name) = prop.key.static_name() else {
+            continue;
+        };
+        let Some(type_annotation) = prop.type_annotation.as_deref() else {
+            continue;
+        };
+        if let Some(type_name) = extract_type_annotation_name(type_annotation) {
+            properties.insert(property_name.to_string(), type_name);
+        }
+    }
+    properties
+}
+
 fn extract_object_pattern_bindings(pattern: &ObjectPattern<'_>) -> FxHashMap<String, String> {
     let mut bindings = FxHashMap::default();
     collect_object_pattern_bindings(pattern, "", &mut bindings);
@@ -842,6 +870,46 @@ impl ModuleInfoExtractor {
             };
             self.binding_target_names
                 .insert(format!("{binding_name}.{property_path}"), resolved);
+        }
+    }
+
+    /// Record `binding_target_names` entries for a destructured binding that
+    /// carries a type annotation, e.g. `let { resultState }: Props = $props()`
+    /// or `function f({ resultState }: Props)`.
+    ///
+    /// An inline type literal (`{ resultState: ResultState }`) resolves in place
+    /// against its own members. A named reference (`Props`) is deferred to
+    /// `resolve_typed_destructure_bindings` because the interface may be
+    /// declared after the binding (interfaces hoist). Rename forms
+    /// (`{ resultState: rs }`) bind the local (`rs`) to the property key's type.
+    /// See issue #752.
+    fn record_typed_destructure_binding(
+        &mut self,
+        pattern: &ObjectPattern<'_>,
+        type_annotation: &TSTypeAnnotation<'_>,
+    ) {
+        // `extract_object_pattern_bindings` maps `local -> property_key` (the
+        // key path). Top-level destructures yield single-segment keys; nested
+        // destructures yield dotted keys that match no top-level property and
+        // simply do not resolve (conservative).
+        let bindings = extract_object_pattern_bindings(pattern);
+        if bindings.is_empty() {
+            return;
+        }
+        if let TSType::TSTypeLiteral(type_lit) = &type_annotation.type_annotation {
+            let properties = collect_object_type_property_types(&type_lit.members);
+            for (local, key) in bindings {
+                if let Some(class_name) = properties.get(&key) {
+                    self.binding_target_names
+                        .entry(local)
+                        .or_insert_with(|| class_name.clone());
+                }
+            }
+        } else if let Some(type_name) = extract_type_annotation_name(type_annotation) {
+            for (local, key) in bindings {
+                self.pending_typed_destructures
+                    .push((local, key, type_name.clone()));
+            }
         }
     }
 
@@ -1475,6 +1543,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             }
         }
 
+        // `function f({ resultState }: Props)`: typed destructured parameter.
+        if let BindingPattern::ObjectPattern(obj_pat) = &param.pattern
+            && let Some(type_annotation) = param.type_annotation.as_deref()
+        {
+            self.record_typed_destructure_binding(obj_pat, type_annotation);
+        }
+
         walk::walk_formal_parameter(self, param);
     }
 
@@ -1593,12 +1668,28 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     self.record_playwright_fixture_type_alias(alias);
                     let refs = Self::collect_type_alias_signature_refs(alias);
                     self.record_local_signature_refs(&alias.id.name, refs);
+                    // `type Props = { resultState: ResultState }`: record the
+                    // property types so a destructured binding typed by `Props`
+                    // resolves its members onto the class. See issue #752.
+                    if let TSType::TSTypeLiteral(type_lit) = &alias.type_annotation {
+                        let properties = collect_object_type_property_types(&type_lit.members);
+                        if !properties.is_empty() {
+                            self.interface_property_types
+                                .insert(alias.id.name.to_string(), properties);
+                        }
+                    }
                 }
                 Declaration::TSInterfaceDeclaration(iface) => {
                     self.record_local_declaration_name(&iface.id.name);
                     self.record_local_type_declaration(&iface.id.name, iface.id.span);
                     let refs = Self::collect_interface_signature_refs(iface);
                     self.record_local_signature_refs(&iface.id.name, refs);
+                    // `interface Props { resultState: ResultState }`: see #752.
+                    let properties = collect_object_type_property_types(&iface.body.body);
+                    if !properties.is_empty() {
+                        self.interface_property_types
+                            .insert(iface.id.name.to_string(), properties);
+                    }
                 }
                 Declaration::TSEnumDeclaration(enumd) => {
                     self.record_local_declaration_name(&enumd.id.name);
@@ -1993,6 +2084,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 && let Some(type_annotation) = declarator.type_annotation.as_deref()
             {
                 self.record_typed_binding(id.name.as_str(), type_annotation);
+            }
+
+            // `let { resultState }: Props = $props()`: typed destructured binding.
+            if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id
+                && let Some(type_annotation) = declarator.type_annotation.as_deref()
+            {
+                self.record_typed_destructure_binding(obj_pat, type_annotation);
             }
 
             let Some(init) = &declarator.init else {

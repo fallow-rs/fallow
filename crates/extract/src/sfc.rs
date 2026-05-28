@@ -320,6 +320,12 @@ fn merge_script_into_module(
         Parser::new(&allocator, &script.body, source_type_for_script(script)).parse();
     let mut extractor = ModuleInfoExtractor::new();
     extractor.visit_program(&parser_return.program);
+    // Resolve typed destructure bindings (`let { resultState }: Props = $props()`)
+    // into `binding_target_names` BEFORE the template-visible read below, so the
+    // template scanner credits `resultState.pin(...)` member access in markup.
+    // `merge_into` calls this again, but the pending list is drained here so the
+    // second call is a no-op. See issue #752.
+    extractor.resolve_typed_destructure_bindings();
 
     // The script-tag `generic="..."` (Vue) / `generics="..."` (Svelte)
     // constraint lives on the tag, not in the script body. Imports referenced

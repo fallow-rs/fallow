@@ -453,6 +453,142 @@ fn assigned_nested_object_member_access_mapped_to_class() {
     );
 }
 
+// ── Typed destructure binding member access (issue #752) ─────
+
+#[test]
+fn destructure_binding_typed_by_interface_mapped_to_class() {
+    let info = parse(
+        r"
+            import type { ResultState } from './state';
+            interface Props { resultState: ResultState }
+            const { resultState }: Props = getProps();
+            resultState.pin();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "ResultState" && a.member == "pin"),
+        "resultState.pin() through an interface-typed destructure should map to ResultState.pin, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn destructure_binding_typed_by_interface_declared_after_use() {
+    // Interfaces hoist: the destructure precedes the interface declaration.
+    let info = parse(
+        r"
+            import type { ResultState } from './state';
+            const { resultState }: Props = getProps();
+            resultState.pin();
+            interface Props { resultState: ResultState }
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "ResultState" && a.member == "pin"),
+        "source-order-independent interface resolution should map resultState.pin() to ResultState.pin, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn destructure_binding_typed_by_inline_type_literal_mapped_to_class() {
+    let info = parse(
+        r"
+            import type { ResultState } from './state';
+            const { resultState }: { resultState: ResultState } = getProps();
+            resultState.pin();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "ResultState" && a.member == "pin"),
+        "inline type-literal destructure should map resultState.pin() to ResultState.pin, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn destructure_binding_typed_by_type_alias_mapped_to_class() {
+    let info = parse(
+        r"
+            import type { ResultState } from './state';
+            type Props = { resultState: ResultState };
+            const { resultState }: Props = getProps();
+            resultState.pin();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "ResultState" && a.member == "pin"),
+        "object type-alias destructure should map resultState.pin() to ResultState.pin, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn renamed_destructure_binding_typed_by_interface_mapped_to_class() {
+    let info = parse(
+        r"
+            import type { ResultState } from './state';
+            interface Props { resultState: ResultState }
+            const { resultState: rs }: Props = getProps();
+            rs.pin();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "ResultState" && a.member == "pin"),
+        "renamed destructure `{{ resultState: rs }}` should map rs.pin() to ResultState.pin, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn destructured_formal_parameter_typed_by_interface_mapped_to_class() {
+    let info = parse(
+        r"
+            import type { ResultState } from './state';
+            interface Props { resultState: ResultState }
+            function render({ resultState }: Props) {
+                resultState.pin();
+            }
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "ResultState" && a.member == "pin"),
+        "destructured formal parameter typed by an interface should map resultState.pin() to ResultState.pin, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn untyped_destructure_binding_does_not_map_to_class() {
+    // No type annotation: nothing should be re-emitted against a class name.
+    let info = parse(
+        r"
+            const { resultState } = getProps();
+            resultState.pin();
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "ResultState"),
+        "an untyped destructure must not credit any class member, found: {:?}",
+        info.member_accesses
+    );
+}
+
 #[test]
 fn instance_whole_object_use_mapped_to_class() {
     let info = parse(

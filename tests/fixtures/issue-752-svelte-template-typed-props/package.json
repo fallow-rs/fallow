@@ -1,0 +1,7 @@
+{
+  "name": "issue-752-svelte-template-typed-props",
+  "version": "1.0.0",
+  "dependencies": {
+    "svelte": "^5.0.0"
+  }
+}

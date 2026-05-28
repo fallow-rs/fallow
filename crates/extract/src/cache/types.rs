@@ -85,7 +85,12 @@ use crate::MemberKind;
 /// `Option<String> source_hash` (content digest of the function's full-span
 /// source slice) so runtime-coverage baselines survive line moves. Pre-fix
 /// cache entries lack the field, so the hash is absent until re-extraction.
-pub(super) const CACHE_VERSION: u32 = 102;
+///
+/// Bumped to 103 for issue #752: typed destructure bindings
+/// (`let { resultState }: Props = $props()`, `function f({ x }: Props)`) now
+/// populate `binding_target_names`, which changes the `member_accesses` emitted
+/// for those files. Pre-fix cache entries lack the additional member accesses.
+pub(super) const CACHE_VERSION: u32 = 103;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
