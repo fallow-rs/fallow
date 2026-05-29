@@ -166,6 +166,15 @@ fn extract_eslint_config(
                     .push(crate::resolve::extract_package_name(nested_imp));
             }
         }
+
+        // Meta-presets such as @antfu/eslint-config call a factory (antfu({...}))
+        // and load their plugins dynamically or via peerDependencies, so neither the
+        // flat-config plugins object-key credit nor the one-level entry-import scan
+        // above sees them. Read the preset's own package.json and credit the
+        // eslint-ecosystem dependencies it declares. See issue #754.
+        if is_eslint_preset(&pkg_name) {
+            credit_preset_plugin_dependencies(root, &pkg_name, result);
+        }
     }
 
     // Legacy .eslintrc: extract plugins by short name
@@ -376,6 +385,64 @@ fn read_package_entry_for_specifier(
     let entry_path = pkg_dir.join(entry_rel);
     let source = std::fs::read_to_string(&entry_path).ok()?;
     Some((source, entry_path))
+}
+
+/// True when `name` is an ESLint *preset*: an aggregator config package that
+/// pulls in a fan of plugins, as opposed to a single plugin or parser.
+///
+/// - `eslint-config-airbnb`, `eslint-config-standard` -> true
+/// - `@antfu/eslint-config`, `@vue/eslint-config-typescript`, `@sveltejs/eslint-config` -> true
+/// - `eslint-plugin-react`, `@typescript-eslint/parser` -> false
+fn is_eslint_preset(name: &str) -> bool {
+    name.starts_with("eslint-config-") || name.contains("/eslint-config")
+}
+
+/// True when `name` is an ESLint-ecosystem package (plugin, shareable config,
+/// parser, or import resolver) that a preset legitimately pulls in transitively.
+///
+/// Filters a preset's declared dependencies so only its eslint plugins / configs /
+/// parsers are credited, never general-purpose runtime deps like `globals` or
+/// `ansis` (crediting those could mask a genuinely-unused dep the user declared
+/// for their own reasons).
+fn is_eslint_ecosystem_dependency(name: &str) -> bool {
+    name.starts_with("eslint-plugin-")
+        || name.starts_with("eslint-config-")
+        || name.starts_with("eslint-import-resolver-")
+        || name.contains("/eslint-plugin")
+        || name.contains("/eslint-config")
+        || name.ends_with("-eslint-parser")
+        || name.ends_with("/parser")
+}
+
+/// Read and parse a package's `package.json` from node_modules, walking up the
+/// directory tree to find it (handles hoisted deps in monorepos).
+fn read_package_json(workspace_dir: &Path, pkg_name: &str) -> Option<serde_json::Value> {
+    let pkg_dir = find_package_dir(workspace_dir, pkg_name)?;
+    let pkg_json_str = std::fs::read_to_string(pkg_dir.join("package.json")).ok()?;
+    serde_json::from_str(&pkg_json_str).ok()
+}
+
+/// Credit the ESLint plugins / configs / parsers a meta-preset pulls in.
+///
+/// Reads the preset's own `package.json` and credits every eslint-ecosystem entry
+/// in its `dependencies` / `peerDependencies` / `optionalDependencies`. Presets
+/// declare their framework plugins (react, vue, svelte, ...) as (optional) peer
+/// dependencies the host project installs, which is exactly the transitively-pulled
+/// set that would otherwise surface as `unused-(dev-)dependency`. See issue #754.
+fn credit_preset_plugin_dependencies(root: &Path, pkg_name: &str, result: &mut PluginResult) {
+    let Some(pkg_json) = read_package_json(root, pkg_name) else {
+        return;
+    };
+    for field in ["dependencies", "peerDependencies", "optionalDependencies"] {
+        let Some(map) = pkg_json.get(field).and_then(|v| v.as_object()) else {
+            continue;
+        };
+        for dep_name in map.keys() {
+            if is_eslint_ecosystem_dependency(dep_name) {
+                result.referenced_dependencies.push(dep_name.clone());
+            }
+        }
+    }
 }
 
 /// Resolve a package entry path from its `package.json` for the given subpath key.
@@ -726,6 +793,139 @@ mod tests {
             deps.contains(&"eslint-plugin-svelte".to_string()),
             "should find eslint-plugin-svelte from shared config"
         );
+    }
+
+    #[test]
+    fn is_eslint_preset_recognizes_aggregator_configs() {
+        // Preset shapes: bare eslint-config-*, scoped @x/eslint-config[-*].
+        assert!(super::is_eslint_preset("eslint-config-airbnb"));
+        assert!(super::is_eslint_preset("eslint-config-standard"));
+        assert!(super::is_eslint_preset("@antfu/eslint-config"));
+        assert!(super::is_eslint_preset("@vue/eslint-config-typescript"));
+        assert!(super::is_eslint_preset("@sveltejs/eslint-config"));
+        // Plain plugins / parsers are NOT presets (must not trigger dep-following).
+        assert!(!super::is_eslint_preset("eslint-plugin-react"));
+        assert!(!super::is_eslint_preset("@typescript-eslint/parser"));
+        assert!(!super::is_eslint_preset("@typescript-eslint/eslint-plugin"));
+        assert!(!super::is_eslint_preset("eslint"));
+    }
+
+    #[test]
+    fn is_eslint_ecosystem_dependency_filters_to_eslint_packages() {
+        // Plugins, configs, parsers, resolvers are eslint-ecosystem.
+        assert!(super::is_eslint_ecosystem_dependency(
+            "eslint-plugin-format"
+        ));
+        assert!(super::is_eslint_ecosystem_dependency(
+            "@eslint-react/eslint-plugin"
+        ));
+        assert!(super::is_eslint_ecosystem_dependency(
+            "@stylistic/eslint-plugin"
+        ));
+        assert!(super::is_eslint_ecosystem_dependency(
+            "eslint-config-flat-gitignore"
+        ));
+        assert!(super::is_eslint_ecosystem_dependency(
+            "@typescript-eslint/parser"
+        ));
+        assert!(super::is_eslint_ecosystem_dependency("vue-eslint-parser"));
+        assert!(super::is_eslint_ecosystem_dependency(
+            "eslint-import-resolver-typescript"
+        ));
+        // General-purpose runtime deps a preset also declares are NOT credited.
+        assert!(!super::is_eslint_ecosystem_dependency("globals"));
+        assert!(!super::is_eslint_ecosystem_dependency("ansis"));
+        assert!(!super::is_eslint_ecosystem_dependency("cac"));
+        assert!(!super::is_eslint_ecosystem_dependency("eslint"));
+    }
+
+    #[test]
+    fn meta_preset_credits_declared_eslint_plugins() {
+        // A flat config that calls a preset factory (antfu({...})) names no
+        // individual plugins, so they must be recovered from the preset's own
+        // package.json peer/deps. See issue #754.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let pkg_dir = root.join("node_modules/@antfu/eslint-config");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        std::fs::write(
+            pkg_dir.join("package.json"),
+            r#"{
+                "name": "@antfu/eslint-config",
+                "main": "index.js",
+                "dependencies": {
+                    "@typescript-eslint/parser": "*",
+                    "eslint-plugin-unicorn": "*",
+                    "ansis": "*"
+                },
+                "peerDependencies": {
+                    "eslint": "*",
+                    "@eslint-react/eslint-plugin": "*",
+                    "eslint-plugin-format": "*",
+                    "eslint-plugin-react-refresh": "*"
+                }
+            }"#,
+        )
+        .unwrap();
+        // Entry point with no static plugin imports (mirrors antfu's dynamic loading).
+        std::fs::write(
+            pkg_dir.join("index.js"),
+            "export default function antfu() {}",
+        )
+        .unwrap();
+
+        let source = r"
+            import antfu from '@antfu/eslint-config';
+            export default antfu({ formatters: true }).append({ rules: {} });
+        ";
+        let plugin = EslintPlugin;
+        let result = plugin.resolve_config(std::path::Path::new("eslint.config.js"), source, root);
+        let deps = &result.referenced_dependencies;
+
+        // Framework plugins declared as (optional) peers are credited.
+        assert!(deps.contains(&"@eslint-react/eslint-plugin".to_string()));
+        assert!(deps.contains(&"eslint-plugin-format".to_string()));
+        assert!(deps.contains(&"eslint-plugin-react-refresh".to_string()));
+        // Bundled eslint deps are credited too.
+        assert!(deps.contains(&"@typescript-eslint/parser".to_string()));
+        assert!(deps.contains(&"eslint-plugin-unicorn".to_string()));
+        // The preset's general-purpose runtime dep is NOT credited (would mask a
+        // genuinely-unused dep the user might declare independently).
+        assert!(!deps.contains(&"ansis".to_string()));
+    }
+
+    #[test]
+    fn plain_plugin_import_does_not_follow_preset_deps() {
+        // Importing a single plugin (not a preset) must not pull in that plugin's
+        // own dependency fan; only aggregator presets do.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let pkg_dir = root.join("node_modules/eslint-plugin-import");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        std::fs::write(
+            pkg_dir.join("package.json"),
+            r#"{
+                "name": "eslint-plugin-import",
+                "main": "index.js",
+                "dependencies": { "eslint-plugin-unrelated": "*" }
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(pkg_dir.join("index.js"), "export default {};").unwrap();
+
+        let source = r"
+            import importPlugin from 'eslint-plugin-import';
+            export default [{ plugins: { import: importPlugin } }];
+        ";
+        let plugin = EslintPlugin;
+        let result = plugin.resolve_config(std::path::Path::new("eslint.config.js"), source, root);
+        let deps = &result.referenced_dependencies;
+
+        assert!(deps.contains(&"eslint-plugin-import".to_string()));
+        // eslint-plugin-import is not a preset, so its transitive dep is not credited.
+        assert!(!deps.contains(&"eslint-plugin-unrelated".to_string()));
     }
 
     #[test]

@@ -1,0 +1,14 @@
+{
+  "name": "issue-754-eslint-meta-preset",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "@scope/eslint-config": "^1.0.0",
+    "eslint-plugin-alpha": "^1.0.0",
+    "@scope2/eslint-plugin": "^1.0.0",
+    "eslint-plugin-orphan": "^1.0.0",
+    "picocolors": "^1.0.0"
+  }
+}

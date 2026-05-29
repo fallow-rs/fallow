@@ -8,6 +8,7 @@ node_modules/
 !tests/fixtures/bin-script-deps/node_modules/
 !tests/fixtures/css-package-subpath-import/node_modules/
 !tests/fixtures/scss-node-modules-resolution/node_modules/
+!tests/fixtures/issue-754-eslint-meta-preset/node_modules/
 .DS_Store
 # macOS Spotlight index control markers (written into build output dirs)
 .metadata_never_index
