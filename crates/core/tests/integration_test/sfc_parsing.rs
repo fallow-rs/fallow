@@ -508,6 +508,26 @@ fn sveltekit_param_matchers_keep_match_export_alive() {
     );
 }
 
+#[test]
+fn sveltekit_layout_reset_routes_are_entry_points() {
+    let root = fixture_path("sveltekit-project");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused = unused_file_names(&results);
+
+    // `+page@.svelte` / `+layout@named.svelte` break out of the parent layout chain
+    // but are still route entry points; they must not be reported as unused (issue #791).
+    assert!(
+        !unused.contains(&"+page@.svelte".to_string()),
+        "layout-reset page (`+page@.svelte`) should be an entry point: {unused:?}"
+    );
+    assert!(
+        !unused.contains(&"+layout@named.svelte".to_string()),
+        "layout-reset layout (`+layout@named.svelte`) should be an entry point: {unused:?}"
+    );
+}
+
 fn unused_file_names(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
     results
         .unused_files
