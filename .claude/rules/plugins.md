@@ -6,9 +6,9 @@ paths:
 
 # Plugin system
 
-110 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
+115 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
 
-## Rich config parsing (25 plugins)
+## Rich config parsing (26 plugins)
 
 - **ESLint**: Legacy plugin/extends/parser short-name resolution (top-level AND inside `overrides[*]`), flat config plugin keys, JSON config, shared config following (reads imported config packages' entry points one level deep to discover peer deps), relative-path `extends` chain following (`./config/base.js`, `../shared/eslintrc.json`) with cycle protection and depth cap, settings["import/resolver"] (string/array/object formats)
 - **Vite**: rollupOptions.input, lib.entry (string/array/object literals AND path-helper calls: `resolve(__dirname, ...)`, `path.resolve(...)`, `join(...)`, `import.meta.dirname` equivalents, evaluated by the shared `expression_to_string_or_array`), optimizeDeps include/exclude, ssr.external/noExternal, resolve.alias (path-alias-only); embedded Vitest `test.alias` + `test.projects[*]` test.alias/resolve.alias (vite.config.* commonly hosts the Vitest config)
@@ -35,6 +35,7 @@ paths:
 - **Oxlint**: parses `.oxlintrc.json`, `oxlint.json`, and `oxlint.config.ts`; `jsPlugins` string entries, tuple first-elements, and alias-object specifier values are credited as npm dependencies; relative/absolute plugin paths are recorded as support setup files; built-in Oxlint plugin names are ignored for dependency credit.
 - **Wuchale**: keeps documented `wuchale.config.js` files alive at the root or inside workspaces; credits package imports/requires from those config files; treats `wuchale` and `@wuchale/vite-plugin` as tooling dependencies; and follows static `configFile` values passed to `@wuchale/vite-plugin` in `vite.config.*` only when they point at JavaScript config modules. Dynamic values and unsupported `wuchale.config.ts` files remain reportable.
 - **tsdown**: keeps `tsdown.config.{ts,mts,cts,js,cjs,mjs}` files alive, credits packages imported from those config files, and extracts literal `entry` arrays as source entry points so library entry files remain reachable. See issue #744 for the `.mts` / `.cts` config extension coverage.
+- **Velite**: activates on the `velite` dependency or a root/workspace `velite.config.{ts,mts,cts,js,mjs,cjs}` file. Keeps the config and generated `.velite/**` output always-used, traverses the hidden `.velite` directory when active, credits packages imported by the config and `velite` as a tooling dependency, and parses `defineConfig` / `defineCollection` to join each collection `pattern` (string or array, negations skipped) to the top-level `root` (default `content`) as support entry points; no recoverable pattern falls back to `<root>/**/*.{md,mdx,yml,yaml,json}`. A non-default `output.data` directory is credited config-relative. Patterns are scoped to the config file's package. See issue #609.
 ## Plugin trait extensions
 - `auto_imports()` for framework convention auto-imports (Nuxt `<Card001 />` components). Returns `AutoImportRule { name, source, kind }` built from a filesystem scan; the resolver matches a file's captured `auto_import_candidates` against the table and synthesizes a graph edge at graph-build time (never cached). See `detection.md` and issue #704.
 - `path_aliases()` for framework-specific alias resolution (Nuxt `~/`, Next.js `@/`)
