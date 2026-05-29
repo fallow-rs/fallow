@@ -595,7 +595,11 @@ pub fn build_snapshot(
 }
 
 /// ISO 8601 UTC timestamp without external chrono dependency.
-fn chrono_timestamp() -> String {
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "module is private; pub(crate) documents the cross-module (impact, audit) reuse intent"
+)]
+pub(crate) fn chrono_timestamp() -> String {
     use std::time::SystemTime;
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)

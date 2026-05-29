@@ -26,6 +26,7 @@ mod fix;
 mod flags;
 mod health;
 mod health_types;
+mod impact;
 mod init;
 mod license;
 mod list;
@@ -907,6 +908,25 @@ enum Command {
         /// when `--runtime-coverage` is set.
         #[arg(long, default_value_t = 100)]
         min_invocations_hot: u64,
+
+        /// Internal marker identifying a gate run (e.g. `pre-commit`), set by
+        /// the generated git hook so Fallow Impact can record a containment
+        /// event when the gate blocks then clears. Hidden; never changes the
+        /// verdict, exit code, or output.
+        #[arg(long, value_name = "MARKER", hide = true)]
+        gate_marker: Option<String>,
+    },
+
+    /// Show what fallow has done for you: how many issues it is surfacing, the
+    /// trend since the last recorded run, and how many commits it contained at
+    /// the pre-commit gate.
+    ///
+    /// Local-only and opt-in: enable with `fallow impact enable`, then let your
+    /// `fallow audit` / pre-commit gate runs build history. Impact never uploads
+    /// anything and never affects exit codes.
+    Impact {
+        #[command(subcommand)]
+        subcommand: Option<ImpactCli>,
     },
 
     /// Dump the CLI interface as machine-readable JSON for agent introspection
@@ -1144,6 +1164,16 @@ enum TelemetryCli {
         #[arg(long)]
         example: bool,
     },
+}
+
+#[derive(Clone, Copy, clap::Subcommand)]
+enum ImpactCli {
+    /// Enable local Impact tracking for this project.
+    Enable,
+    /// Disable Impact tracking (existing history is retained).
+    Disable,
+    /// Show whether Impact tracking is enabled and how much history exists.
+    Status,
 }
 
 #[derive(clap::Subcommand)]
@@ -2613,6 +2643,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             gate,
             runtime_coverage,
             min_invocations_hot,
+            gate_marker,
         } => {
             if cli.baseline.is_some() || cli.save_baseline.is_some() {
                 return emit_error(
@@ -2661,36 +2692,85 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             );
             let coverage =
                 coverage.or_else(|| std::env::var("FALLOW_COVERAGE").ok().map(PathBuf::from));
-            audit::run_audit(&audit::AuditOptions {
-                root,
-                config_path: &cli.config,
-                output,
-                no_cache: cli.no_cache,
-                threads,
-                quiet,
-                changed_since: cli.changed_since.as_deref(),
-                production: cli.production,
-                production_dead_code: Some(production.dead_code),
-                production_health: Some(production.health),
-                production_dupes: Some(production.dupes),
-                workspace: cli.workspace.as_deref(),
-                changed_workspaces: cli.changed_workspaces.as_deref(),
-                explain: cli.explain,
-                explain_skipped: cli.explain_skipped,
-                performance: cli.performance,
-                group_by: cli.group_by,
-                dead_code_baseline: resolved_dead_code_baseline.as_deref(),
-                health_baseline: resolved_health_baseline.as_deref(),
-                dupes_baseline: resolved_dupes_baseline.as_deref(),
-                max_crap,
-                coverage: coverage.as_deref(),
-                coverage_root: coverage_root.as_deref(),
-                gate: gate.map_or(audit_cfg.gate, Into::into),
-                include_entry_exports: cli.include_entry_exports,
-                runtime_coverage: runtime_coverage.as_deref(),
-                min_invocations_hot,
-            })
+            audit::run_audit(
+                &audit::AuditOptions {
+                    root,
+                    config_path: &cli.config,
+                    output,
+                    no_cache: cli.no_cache,
+                    threads,
+                    quiet,
+                    changed_since: cli.changed_since.as_deref(),
+                    production: cli.production,
+                    production_dead_code: Some(production.dead_code),
+                    production_health: Some(production.health),
+                    production_dupes: Some(production.dupes),
+                    workspace: cli.workspace.as_deref(),
+                    changed_workspaces: cli.changed_workspaces.as_deref(),
+                    explain: cli.explain,
+                    explain_skipped: cli.explain_skipped,
+                    performance: cli.performance,
+                    group_by: cli.group_by,
+                    dead_code_baseline: resolved_dead_code_baseline.as_deref(),
+                    health_baseline: resolved_health_baseline.as_deref(),
+                    dupes_baseline: resolved_dupes_baseline.as_deref(),
+                    max_crap,
+                    coverage: coverage.as_deref(),
+                    coverage_root: coverage_root.as_deref(),
+                    gate: gate.map_or(audit_cfg.gate, Into::into),
+                    include_entry_exports: cli.include_entry_exports,
+                    runtime_coverage: runtime_coverage.as_deref(),
+                    min_invocations_hot,
+                },
+                gate_marker.as_deref(),
+            )
         }
+        Command::Impact { subcommand } => match subcommand {
+            Some(ImpactCli::Enable) => {
+                let newly = impact::enable(root);
+                if !quiet {
+                    if newly {
+                        println!(
+                            "Fallow Impact enabled. Each `fallow audit` / pre-commit gate run is \
+                             recorded locally in .fallow/impact.json (gitignored, never uploaded)."
+                        );
+                        println!(
+                            "Tip: run `fallow init --hooks` (or add `--gate-marker pre-commit` to \
+                             your existing hook's `fallow audit` line) so blocked-then-fixed \
+                             commits are recorded as contained."
+                        );
+                    } else {
+                        println!("Fallow Impact is already enabled.");
+                    }
+                }
+                ExitCode::SUCCESS
+            }
+            Some(ImpactCli::Disable) => {
+                let was_enabled = impact::disable(root);
+                if !quiet {
+                    println!(
+                        "{}",
+                        if was_enabled {
+                            "Fallow Impact disabled. Existing history is retained."
+                        } else {
+                            "Fallow Impact was already disabled."
+                        }
+                    );
+                }
+                ExitCode::SUCCESS
+            }
+            Some(ImpactCli::Status) | None => {
+                let store = impact::load(root);
+                let report = impact::build_report(&store);
+                let rendered = match output {
+                    fallow_config::OutputFormat::Json => impact::render_json(&report),
+                    fallow_config::OutputFormat::Markdown => impact::render_markdown(&report),
+                    _ => impact::render_human(&report),
+                };
+                println!("{rendered}");
+                ExitCode::SUCCESS
+            }
+        },
         Command::Schema => unreachable!("handled above"),
         Command::Migrate {
             toml,
@@ -2764,7 +2844,8 @@ fn telemetry_workflow_for_command(
             | Command::Migrate { .. }
             | Command::License { .. }
             | Command::Telemetry { .. }
-            | Command::SetupHooks { .. },
+            | Command::SetupHooks { .. }
+            | Command::Impact { .. },
         ) => telemetry::Workflow::Unknown,
     }
 }

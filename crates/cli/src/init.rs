@@ -480,7 +480,7 @@ fn existing_hook_hint(hook_path: &str, fallback_base_ref: &str) -> String {
   else
     BASE="{fallback_base_ref}"
   fi
-  fallow audit --base "$BASE" --quiet"#
+  fallow audit --base "$BASE" --quiet --gate-marker pre-commit"#
     )
 }
 
@@ -501,7 +501,7 @@ fn lefthook_hint(fallback_base_ref: &str) -> String {
           else
             BASE="{fallback_base_ref}"
           fi
-          fallow audit --base "$BASE" --quiet"#
+          fallow audit --base "$BASE" --quiet --gate-marker pre-commit"#
     )
 }
 
@@ -570,7 +570,7 @@ if [ -n "$UPSTREAM" ]; then
 else
   BASE="{fallback_base_ref}"
 fi
-fallow audit --base "$BASE" --quiet
+fallow audit --base "$BASE" --quiet --gate-marker pre-commit
 "#
     );
 

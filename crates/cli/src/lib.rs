@@ -118,6 +118,12 @@ pub mod report;
     unused_imports,
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
+pub mod impact;
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse"
+)]
 mod runtime_support;
 #[allow(
     dead_code,
@@ -125,11 +131,6 @@ mod runtime_support;
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
 mod validate;
-#[allow(
-    dead_code,
-    unused_imports,
-    reason = "shared CLI library compiles bin-oriented support modules for reuse"
-)]
 mod vital_signs;
 
 pub use runtime_support::{AnalysisKind, GroupBy};

@@ -3510,7 +3510,11 @@ fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
 // ── Entry point ──────────────────────────────────────────────────
 
 /// Run the full audit command: execute analyses, print results, return exit code.
-pub fn run_audit(opts: &AuditOptions<'_>) -> ExitCode {
+/// Run audit, optionally tagged with a gate marker (e.g. `"pre-commit"`) so
+/// Fallow Impact can record a containment event when the gate blocks then
+/// clears. The marker only affects the local Impact store; it never changes
+/// the verdict, exit code, or output.
+pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode {
     if let Err(e) = crate::health::scoring::validate_coverage_root_absolute(opts.coverage_root) {
         return emit_error(&e, 2, opts.output);
     }
@@ -3540,7 +3544,20 @@ pub fn run_audit(opts: &AuditOptions<'_>) -> ExitCode {
         ..*opts
     };
     match execute_audit(&resolved_opts) {
-        Ok(result) => print_audit_result(&result, opts.quiet, opts.explain),
+        Ok(result) => {
+            // Best-effort: record this run into the local Impact store. No-op
+            // when Impact tracking is disabled; never affects exit/output.
+            crate::impact::record_audit_run(
+                opts.root,
+                &result.summary,
+                result.verdict,
+                gate_marker.is_some(),
+                result.head_sha.as_deref(),
+                env!("CARGO_PKG_VERSION"),
+                &crate::vital_signs::chrono_timestamp(),
+            );
+            print_audit_result(&result, opts.quiet, opts.explain)
+        }
         Err(code) => code,
     }
 }
