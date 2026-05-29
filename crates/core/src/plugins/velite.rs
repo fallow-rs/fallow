@@ -90,31 +90,37 @@ impl Plugin for VelitePlugin {
             .or_else(|| config_parser::normalize_config_path(DEFAULT_ROOT, config_path, root));
 
         if let Some(root_dir) = root_dir {
-            if collected.patterns.is_empty() {
+            // Keep only positive globs. Fast-glob negations (`!posts/private/**`)
+            // exclude files; they are not content entry roots.
+            let positive: Vec<&str> = collected
+                .patterns
+                .iter()
+                .filter(|pattern| !pattern.starts_with('!'))
+                .map(|pattern| pattern.trim_start_matches("./"))
+                .filter(|pattern| !pattern.is_empty())
+                .collect();
+
+            // Fall back to the whole content root when no positive collection
+            // pattern survives (no `defineCollection`, or negation-only globs).
+            if positive.is_empty() {
                 result.push_entry_pattern(format!("{root_dir}/**/*.{CONTENT_EXTENSIONS}"));
             } else {
-                for pattern in &collected.patterns {
-                    // Skip fast-glob negations (e.g. `!posts/private/**`): they
-                    // exclude files, they are not content entry roots.
-                    if pattern.starts_with('!') {
-                        continue;
-                    }
-                    let pattern = pattern.trim_start_matches("./");
-                    if pattern.is_empty() {
-                        continue;
-                    }
+                for pattern in positive {
                     result.push_entry_pattern(format!("{root_dir}/{pattern}"));
                 }
             }
         }
 
-        // Generated output: `.velite/**` is covered by `always_used` statically.
-        // A custom `output.data` directory needs an explicit always-used entry.
+        // Generated output: the default `.velite` is covered by the static
+        // `always_used` glob (matched anywhere, including workspace packages).
+        // Only a non-default `output.data` needs an explicit, config-relative
+        // always-used entry. Compare the raw value so a monorepo config that
+        // spells out the default does not add a redundant entry.
         if let Some(output_dir) = collected
             .output_data
             .as_deref()
+            .filter(|raw| raw.trim_start_matches("./") != DEFAULT_OUTPUT_DATA)
             .and_then(|raw| config_parser::normalize_config_path(raw, config_path, root))
-            && output_dir != DEFAULT_OUTPUT_DATA
         {
             result.always_used_files.push(format!("{output_dir}/**"));
         }
@@ -363,6 +369,70 @@ mod tests {
             result
                 .always_used_files
                 .contains(&"generated/velite/**".to_string())
+        );
+    }
+
+    #[test]
+    fn negation_only_pattern_falls_back_to_root_glob() {
+        let plugin = VelitePlugin;
+        let root = Path::new("/repo");
+        let config_path = root.join("velite.config.ts");
+        let source = r"
+            import { defineConfig, defineCollection } from 'velite';
+            export default defineConfig({
+                collections: {
+                    docs: defineCollection({ pattern: ['!private/**'] }),
+                },
+            });
+        ";
+
+        let patterns = patterns_of(&plugin.resolve_config(&config_path, source, root));
+        assert!(patterns.contains(&format!("content/**/*.{CONTENT_EXTENSIONS}")));
+        assert!(!patterns.iter().any(|p| p.contains('!')));
+    }
+
+    #[test]
+    fn default_output_data_adds_no_redundant_always_used_entry() {
+        let plugin = VelitePlugin;
+        let root = Path::new("/repo");
+        let config_path = root.join("apps/web/velite.config.ts");
+        // Explicitly spells out the default; static `.velite/**` already covers it.
+        let source = r"
+            import { defineConfig, defineCollection } from 'velite';
+            export default defineConfig({
+                output: { data: '.velite' },
+                collections: { docs: defineCollection({ pattern: 'docs/**/*.md' }) },
+            });
+        ";
+
+        let result = plugin.resolve_config(&config_path, source, root);
+        assert!(
+            result.always_used_files.is_empty(),
+            "default output.data must not add a redundant entry: {:?}",
+            result.always_used_files
+        );
+    }
+
+    #[test]
+    fn custom_output_data_in_workspace_is_scoped_to_package() {
+        let plugin = VelitePlugin;
+        let root = Path::new("/repo");
+        let config_path = root.join("apps/web/velite.config.ts");
+        let source = r"
+            import { defineConfig, defineCollection } from 'velite';
+            export default defineConfig({
+                output: { data: 'generated/velite' },
+                collections: { docs: defineCollection({ pattern: 'docs/**/*.md' }) },
+            });
+        ";
+
+        let result = plugin.resolve_config(&config_path, source, root);
+        assert!(
+            result
+                .always_used_files
+                .contains(&"apps/web/generated/velite/**".to_string()),
+            "custom output.data must be credited config-relative: {:?}",
+            result.always_used_files
         );
     }
 
