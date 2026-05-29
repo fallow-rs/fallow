@@ -3,6 +3,18 @@ disallowed-types = [
     { path = "std::collections::HashSet", reason = "Use rustc_hash::FxHashSet for better performance" },
 ]
 
+# Process spawning is banned by default (level set to allow in the workspace
+# Cargo.toml, then re-denied per-crate). fallow's analysis crates (fallow-core,
+# fallow-extract, fallow-graph) re-enable this deny at their crate root so the
+# "static analysis never executes the analyzed project's code, only `git`"
+# invariant is machine-checkable: every git spawn there routes through
+# `fallow_core::spawn::git`, the one allowed call site. The CLI / MCP crates
+# legitimately spawn git worktrees, the coverage sidecar, and subprocesses, and
+# are off the analysis path, so they keep the workspace-level allow.
+disallowed-methods = [
+    { path = "std::process::Command::new", reason = "On the analysis path, route process spawning through fallow_core::spawn (only `git` is permitted); the deny is scoped to fallow-core/extract/graph via crate-root attributes" },
+]
+
 # Maximum nesting depth before clippy::excessive_nesting fires.
 # Catches deeply nested control flow that should be refactored.
 excessive-nesting-threshold = 7

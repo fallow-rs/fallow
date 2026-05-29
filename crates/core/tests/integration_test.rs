@@ -66,6 +66,8 @@ mod nx_project_json;
 mod redwoodsdk;
 #[path = "integration_test/rules_config.rs"]
 mod rules_config;
+#[path = "integration_test/safe_analysis.rs"]
+mod safe_analysis;
 #[path = "integration_test/sfc_parsing.rs"]
 mod sfc_parsing;
 #[path = "integration_test/unreachable_exports.rs"]

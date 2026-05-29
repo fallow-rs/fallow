@@ -10,6 +10,13 @@
 //! patch releases; a subsequent minor will flip `publish = false` so the crate
 //! is no longer fetchable from crates.io.
 
+// fallow's analysis never executes the analyzed project's code. The only
+// external program it spawns is `git`, routed through `crate::spawn`. This deny
+// (paired with the `.clippy.toml` ban on `std::process::Command::new`) makes any
+// new process spawn on the analysis path a build failure. Test helpers that
+// shell out to `git` to build fixtures are exempt via `not(test)`.
+#![cfg_attr(not(test), deny(clippy::disallowed_methods))]
+
 pub mod analyze;
 pub mod cache;
 pub mod changed_files;
@@ -26,6 +33,7 @@ pub mod plugins;
 pub(crate) mod progress;
 pub mod results;
 pub(crate) mod scripts;
+pub(crate) mod spawn;
 pub mod suppress;
 pub mod trace;
 

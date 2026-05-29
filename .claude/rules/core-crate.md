@@ -18,3 +18,4 @@ Key modules:
 - `cross_reference.rs` — Cross-references duplication with dead code analysis
 - `plugins/` - Plugin system: `Plugin` trait, registry (110 built-in, ~42 with AST-based config parsing), `config_parser.rs` (Oxc-based helpers), `tooling.rs` (general tooling dep detection)
 - `trace.rs` — Debug/trace tooling and `PipelineTimings` for `--performance`
+- `spawn.rs`: Canonical process-spawn boundary. `spawn::git()` is the ONLY sanctioned `std::process::Command::new` in fallow-core/extract/graph; those crates pin `#![cfg_attr(not(test), deny(clippy::disallowed_methods))]` (banning `Command::new` via `.clippy.toml`, set to `allow` workspace-wide for cli/mcp). Analysis must never execute the analyzed project's code; route any new git invocation through `spawn::git()`. Adding a raw `Command::new` to these crates is a build failure by design. See `SECURITY.md` and the `safe_analysis` integration test.
