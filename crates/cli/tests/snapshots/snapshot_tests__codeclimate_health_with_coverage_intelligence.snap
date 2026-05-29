@@ -1,0 +1,86 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: json_str
+---
+[
+  {
+    "type": "issue",
+    "check_name": "fallow/high-complexity",
+    "description": "'processData' has cyclomatic complexity 25 (threshold: 20) and cognitive complexity 30 (threshold: 15)",
+    "categories": [
+      "Complexity"
+    ],
+    "severity": "major",
+    "fingerprint": "d4ee093a5fdb5d49",
+    "location": {
+      "path": "src/complex.ts",
+      "lines": {
+        "begin": 42
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/runtime-review-required",
+    "description": "'coldPath' runtime coverage verdict: review required (0 invocations)",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "major",
+    "fingerprint": "8ad72b7a0b4f6fb2",
+    "location": {
+      "path": "src/cold.ts",
+      "lines": {
+        "begin": 14
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/runtime-coverage-unavailable",
+    "description": "'lateBound' runtime coverage verdict: coverage unavailable (untracked)",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "minor",
+    "fingerprint": "a4bc61bb1ba59529",
+    "location": {
+      "path": "src/unknown.ts",
+      "lines": {
+        "begin": 8
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/coverage-intelligence-risky-change",
+    "description": "'handler' coverage intelligence verdict: risky-change-detected (add-test-or-split-before-merge)",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "major",
+    "fingerprint": "a60e4e21a3776e01",
+    "location": {
+      "path": "src/hot.ts",
+      "lines": {
+        "begin": 10
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/coverage-intelligence-delete",
+    "description": "'deadPath' coverage intelligence verdict: high-confidence-delete (delete-after-confirming-owner)",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "major",
+    "fingerprint": "d597d8564a9ed362",
+    "location": {
+      "path": "src/dead.ts",
+      "lines": {
+        "begin": 4
+      }
+    }
+  }
+]

@@ -2462,6 +2462,138 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
     report
 }
 
+/// Health report carrying a populated `coverage_intelligence` block alongside
+/// runtime coverage, so the public format renderers exercise the live combined
+/// surface (not just the per-format helper unit tests). Mirrors the shape the
+/// `build_coverage_intelligence` builder emits for a risky changed hot path plus
+/// a high-confidence delete candidate, with one ambiguous match skipped.
+fn health_report_with_coverage_intelligence(root: &Path) -> HealthReport {
+    let mut report = health_report_with_runtime_coverage(root);
+    report.coverage_intelligence = Some(CoverageIntelligenceReport {
+        schema_version: CoverageIntelligenceSchemaVersion::default(),
+        verdict: CoverageIntelligenceVerdict::RiskyChangeDetected,
+        summary: CoverageIntelligenceSummary {
+            findings: 2,
+            risky_changes: 1,
+            high_confidence_deletes: 1,
+            review_required: 0,
+            refactor_carefully: 0,
+            skipped_ambiguous_matches: 1,
+        },
+        findings: vec![
+            CoverageIntelligenceFinding {
+                id: "fallow:coverage-intel:0badc0de".to_string(),
+                path: root.join("src/hot.ts"),
+                identity: Some("handler".to_string()),
+                line: 10,
+                verdict: CoverageIntelligenceVerdict::RiskyChangeDetected,
+                signals: vec![
+                    CoverageIntelligenceSignal::Changed,
+                    CoverageIntelligenceSignal::HotPath,
+                    CoverageIntelligenceSignal::LowTestCoverage,
+                    CoverageIntelligenceSignal::HighCrap,
+                ],
+                recommendation: CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge,
+                confidence: CoverageIntelligenceConfidence::High,
+                related_ids: vec!["fallow:hot:cafebabe".to_string()],
+                evidence: CoverageIntelligenceEvidence {
+                    coverage_pct: Some(20.0),
+                    crap: Some(45.0),
+                    runtime_verdict: Some("hot_path_touched".to_string()),
+                    invocations: Some(250),
+                    static_status: Some("used".to_string()),
+                    test_coverage: Some("partially_covered".to_string()),
+                    changed: true,
+                    ownership_state: None,
+                    match_confidence: CoverageIntelligenceMatchConfidence::PathFunctionLine,
+                },
+                actions: vec![CoverageIntelligenceAction {
+                    kind: "add-tests".to_string(),
+                    description:
+                        "Add tests or split before merge: this changed hot path is undertested."
+                            .to_string(),
+                    auto_fixable: false,
+                }],
+            },
+            CoverageIntelligenceFinding {
+                id: "fallow:coverage-intel:1deadfa1".to_string(),
+                path: root.join("src/dead.ts"),
+                identity: Some("deadPath".to_string()),
+                line: 4,
+                verdict: CoverageIntelligenceVerdict::HighConfidenceDelete,
+                signals: vec![
+                    CoverageIntelligenceSignal::StaticUnused,
+                    CoverageIntelligenceSignal::RuntimeCold,
+                    CoverageIntelligenceSignal::NoTestPath,
+                ],
+                recommendation: CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner,
+                confidence: CoverageIntelligenceConfidence::High,
+                related_ids: vec!["fallow:prod:deadbeef".to_string()],
+                evidence: CoverageIntelligenceEvidence {
+                    coverage_pct: Some(0.0),
+                    crap: None,
+                    runtime_verdict: Some("safe_to_delete".to_string()),
+                    invocations: Some(0),
+                    static_status: Some("unused".to_string()),
+                    test_coverage: Some("not_covered".to_string()),
+                    changed: false,
+                    ownership_state: None,
+                    match_confidence: CoverageIntelligenceMatchConfidence::PathLine,
+                },
+                actions: vec![CoverageIntelligenceAction {
+                    kind: "delete-after-confirm".to_string(),
+                    description:
+                        "Delete after confirming with the owner: unused, cold, and untested."
+                            .to_string(),
+                    auto_fixable: false,
+                }],
+            },
+        ],
+    });
+    report
+}
+
+#[test]
+fn json_health_with_coverage_intelligence_snapshot() {
+    let root = PathBuf::from("/project");
+    let report = health_report_with_coverage_intelligence(&root);
+    let value = build_health_json(&report, &root, Duration::ZERO, false)
+        .expect("health JSON build should succeed");
+    let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
+    insta::assert_snapshot!(
+        "json_health_with_coverage_intelligence",
+        redact_version(&json_str)
+    );
+}
+
+#[test]
+fn markdown_health_with_coverage_intelligence_snapshot() {
+    let root = PathBuf::from("/project");
+    let report = health_report_with_coverage_intelligence(&root);
+    let output = build_health_markdown(&report, &root);
+    insta::assert_snapshot!("markdown_health_with_coverage_intelligence", output);
+}
+
+#[test]
+fn sarif_health_with_coverage_intelligence_snapshot() {
+    let root = PathBuf::from("/project");
+    let report = health_report_with_coverage_intelligence(&root);
+    let json_str = serde_json::to_string_pretty(&build_health_sarif(&report, &root)).unwrap();
+    insta::assert_snapshot!(
+        "sarif_health_with_coverage_intelligence",
+        redact_sarif_version(&json_str)
+    );
+}
+
+#[test]
+fn codeclimate_health_with_coverage_intelligence_snapshot() {
+    let root = PathBuf::from("/project");
+    let report = health_report_with_coverage_intelligence(&root);
+    let cc = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_health_with_coverage_intelligence", json_str);
+}
+
 /// Build an empty health report (no findings).
 const fn empty_health_report() -> HealthReport {
     HealthReport {

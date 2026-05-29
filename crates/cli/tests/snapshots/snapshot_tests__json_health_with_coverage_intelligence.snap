@@ -1,0 +1,216 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: redact_version(&json_str)
+---
+{
+  "schema_version": 6,
+  "version": "[VERSION]",
+  "elapsed_ms": 0,
+  "findings": [
+    {
+      "path": "src/complex.ts",
+      "name": "processData",
+      "line": 42,
+      "col": 0,
+      "cyclomatic": 25,
+      "cognitive": 30,
+      "line_count": 120,
+      "param_count": 0,
+      "exceeded": "both",
+      "severity": "high",
+      "actions": [
+        {
+          "type": "refactor-function",
+          "auto_fixable": false,
+          "description": "Refactor `processData` to reduce complexity (extract helper functions, simplify branching)",
+          "note": "Consider splitting into smaller functions with single responsibilities"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the function declaration",
+          "comment": "// fallow-ignore-next-line complexity",
+          "placement": "above-function-declaration"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "files_analyzed": 50,
+    "functions_analyzed": 200,
+    "functions_above_threshold": 1,
+    "max_cyclomatic_threshold": 20,
+    "max_cognitive_threshold": 15,
+    "max_crap_threshold": 30.0,
+    "severity_critical_count": 0,
+    "severity_high_count": 1,
+    "severity_moderate_count": 0
+  },
+  "runtime_coverage": {
+    "schema_version": "1",
+    "verdict": "cold-code-detected",
+    "summary": {
+      "data_source": "local",
+      "last_received_at": null,
+      "functions_tracked": 6,
+      "functions_hit": 3,
+      "functions_unhit": 2,
+      "functions_untracked": 1,
+      "coverage_percent": 50.0,
+      "trace_count": 2847291,
+      "period_days": 30,
+      "deployments_seen": 14
+    },
+    "findings": [
+      {
+        "id": "fallow:prod:deadbeef",
+        "stable_id": "fallow:fn:00000001",
+        "path": "src/cold.ts",
+        "function": "coldPath",
+        "line": 14,
+        "verdict": "review_required",
+        "invocations": 0,
+        "confidence": "medium",
+        "evidence": {
+          "static_status": "used",
+          "test_coverage": "not_covered",
+          "v8_tracking": "tracked",
+          "observation_days": 30,
+          "deployments_observed": 14
+        },
+        "actions": [
+          {
+            "type": "review-deletion",
+            "description": "Tracked in runtime coverage with zero invocations.",
+            "auto_fixable": false
+          }
+        ]
+      },
+      {
+        "id": "fallow:prod:feedface",
+        "path": "src/unknown.ts",
+        "function": "lateBound",
+        "line": 8,
+        "verdict": "coverage_unavailable",
+        "confidence": "none",
+        "evidence": {
+          "static_status": "used",
+          "test_coverage": "not_covered",
+          "v8_tracking": "untracked",
+          "untracked_reason": "lazy_parsed",
+          "observation_days": 30,
+          "deployments_observed": 14
+        },
+        "actions": [
+          {
+            "type": "collect-runtime-coverage",
+            "description": "Collect a broader production dump.",
+            "auto_fixable": false
+          }
+        ]
+      }
+    ],
+    "hot_paths": [
+      {
+        "id": "fallow:hot:cafebabe",
+        "stable_id": "fallow:fn:00000002",
+        "path": "src/hot.ts",
+        "function": "hotPath",
+        "line": 3,
+        "end_line": 9,
+        "invocations": 250,
+        "percentile": 99
+      }
+    ],
+    "blast_radius": [],
+    "importance": [],
+    "watermark": "license-expired-grace",
+    "warnings": [
+      {
+        "code": "partial-input",
+        "message": "One dump was incomplete."
+      }
+    ]
+  },
+  "coverage_intelligence": {
+    "schema_version": "1",
+    "verdict": "risky-change-detected",
+    "summary": {
+      "findings": 2,
+      "risky_changes": 1,
+      "high_confidence_deletes": 1,
+      "review_required": 0,
+      "refactor_carefully": 0,
+      "skipped_ambiguous_matches": 1
+    },
+    "findings": [
+      {
+        "id": "fallow:coverage-intel:0badc0de",
+        "path": "src/hot.ts",
+        "identity": "handler",
+        "line": 10,
+        "verdict": "risky-change-detected",
+        "signals": [
+          "changed",
+          "hot_path",
+          "low_test_coverage",
+          "high_crap"
+        ],
+        "recommendation": "add-test-or-split-before-merge",
+        "confidence": "high",
+        "related_ids": [
+          "fallow:hot:cafebabe"
+        ],
+        "evidence": {
+          "coverage_pct": 20.0,
+          "crap": 45.0,
+          "runtime_verdict": "hot_path_touched",
+          "invocations": 250,
+          "static_status": "used",
+          "test_coverage": "partially_covered",
+          "changed": true,
+          "match_confidence": "path-function-line"
+        },
+        "actions": [
+          {
+            "type": "add-tests",
+            "description": "Add tests or split before merge: this changed hot path is undertested.",
+            "auto_fixable": false
+          }
+        ]
+      },
+      {
+        "id": "fallow:coverage-intel:1deadfa1",
+        "path": "src/dead.ts",
+        "identity": "deadPath",
+        "line": 4,
+        "verdict": "high-confidence-delete",
+        "signals": [
+          "static_unused",
+          "runtime_cold",
+          "no_test_path"
+        ],
+        "recommendation": "delete-after-confirming-owner",
+        "confidence": "high",
+        "related_ids": [
+          "fallow:prod:deadbeef"
+        ],
+        "evidence": {
+          "coverage_pct": 0.0,
+          "runtime_verdict": "safe_to_delete",
+          "invocations": 0,
+          "static_status": "unused",
+          "test_coverage": "not_covered",
+          "match_confidence": "path-line"
+        },
+        "actions": [
+          {
+            "type": "delete-after-confirm",
+            "description": "Delete after confirming with the owner: unused, cold, and untested.",
+            "auto_fixable": false
+          }
+        ]
+      }
+    ]
+  }
+}
