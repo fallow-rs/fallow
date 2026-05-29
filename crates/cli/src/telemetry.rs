@@ -960,4 +960,134 @@ mod tests {
         assert!(loaded.prompt_shown);
         assert_eq!(loaded.schema_version, CONFIG_SCHEMA_VERSION);
     }
+
+    // --- Documentation drift guards ---------------------------------------
+    // These pin the in-repo canonical contract doc (docs/telemetry.md) to the
+    // code that is the real source of truth, so a new agent source or event
+    // field cannot ship without the doc being updated in the same change. The
+    // hosted fallow-docs pages and the fallow-skills copy are refreshed from
+    // this canonical doc; the fallow-cloud server keeps its own agreement test
+    // against the same enums. Run in the normal `cargo test` job (no new CI).
+
+    fn read_telemetry_doc() -> Option<String> {
+        // From crates/cli to the workspace root. Absent in a packaged /
+        // out-of-tree context, in which case the guard is skipped.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/telemetry.md");
+        std::fs::read_to_string(path).ok()
+    }
+
+    fn first_fenced_block(haystack: &str, fence: &str) -> Option<String> {
+        let start = haystack.find(fence)? + fence.len();
+        let rest = &haystack[start..];
+        let end = rest.find("```")?;
+        Some(rest[..end].to_owned())
+    }
+
+    #[test]
+    fn docs_agent_source_allowlist_matches_code() {
+        use std::collections::BTreeSet;
+
+        let all: &[AgentSource] = &[
+            AgentSource::None,
+            AgentSource::Codex,
+            AgentSource::ClaudeCode,
+            AgentSource::Cursor,
+            AgentSource::Copilot,
+            AgentSource::Opencode,
+            AgentSource::Aider,
+            AgentSource::Roo,
+            AgentSource::Windsurf,
+            AgentSource::Gemini,
+            AgentSource::Cline,
+            AgentSource::Continue,
+            AgentSource::Zed,
+            AgentSource::Goose,
+            AgentSource::OtherKnown,
+            AgentSource::Unknown,
+        ];
+        // Exhaustiveness guard: adding a new `AgentSource` variant makes this
+        // match non-exhaustive (compile error), forcing whoever adds it to
+        // extend the `all` list above and, via the assertion below, the docs.
+        for &source in all {
+            match source {
+                AgentSource::None
+                | AgentSource::Codex
+                | AgentSource::ClaudeCode
+                | AgentSource::Cursor
+                | AgentSource::Copilot
+                | AgentSource::Opencode
+                | AgentSource::Aider
+                | AgentSource::Roo
+                | AgentSource::Windsurf
+                | AgentSource::Gemini
+                | AgentSource::Cline
+                | AgentSource::Continue
+                | AgentSource::Zed
+                | AgentSource::Goose
+                | AgentSource::OtherKnown
+                | AgentSource::Unknown => {}
+            }
+        }
+        // Wire names come from serde, so they cannot drift from the actual
+        // serialization even if the match arms were mislabeled.
+        let canonical: BTreeSet<String> = all
+            .iter()
+            .map(|source| {
+                serde_json::to_value(source)
+                    .expect("AgentSource serializes")
+                    .as_str()
+                    .expect("AgentSource serializes to a string")
+                    .to_owned()
+            })
+            .collect();
+
+        let Some(doc) = read_telemetry_doc() else {
+            return;
+        };
+        let section = doc
+            .split("## Agent Source")
+            .nth(1)
+            .expect("docs/telemetry.md has an `## Agent Source` section");
+        let block = first_fenced_block(section, "```text")
+            .expect("`## Agent Source` has a ```text allowlist block");
+        let documented: BTreeSet<String> = block.split_whitespace().map(str::to_owned).collect();
+
+        assert_eq!(
+            documented, canonical,
+            "docs/telemetry.md `## Agent Source` allowlist is out of sync with the AgentSource enum"
+        );
+    }
+
+    #[test]
+    fn docs_example_payload_fields_match_emitted_event() {
+        use std::collections::BTreeSet;
+
+        let Some(doc) = read_telemetry_doc() else {
+            return;
+        };
+        let json_block =
+            first_fenced_block(&doc, "```json").expect("docs/telemetry.md has a ```json example");
+        let doc_value: serde_json::Value =
+            serde_json::from_str(&json_block).expect("doc example is valid JSON");
+        let real_value = serde_json::to_value(example_event()).expect("example event serializes");
+
+        let doc_keys: BTreeSet<&str> = doc_value
+            .as_object()
+            .expect("doc example is an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let real_keys: BTreeSet<&str> = real_value
+            .as_object()
+            .expect("event is an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+
+        assert_eq!(
+            doc_keys, real_keys,
+            "docs/telemetry.md example payload fields are out of sync with the emitted \
+             TelemetryEvent (compare against `fallow telemetry inspect --example`)"
+        );
+    }
 }
