@@ -1,16 +1,36 @@
-//! V8 `ScriptCoverage` JSON parser and Istanbul-compatible normalizer.
+//! V8 `ScriptCoverage` JSON parser and UTF-16 source-offset mapper.
 //!
-//! This is the open-source layer of fallow's runtime-coverage pipeline.
-//! It performs the mechanical conversion from V8's byte-offset-based coverage
-//! format (as emitted by `node --experimental-test-coverage`, `c8`, the
-//! Inspector protocol, or any V8 isolate) into the line/column-based
-//! [`IstanbulFileCoverage`] shape that fallow's CRAP scoring already
-//! consumes.
+//! This is the open-source layer of fallow's runtime-coverage pipeline. It
+//! provides the two things the `fallow` CLI consumes:
 //!
-//! The closed-source three-state cross-reference, combined scoring, hot-path
-//! heuristics and verdict generation live in `fallow-cov` (private) and
-//! consume this crate's normalized output via the `fallow-cov-protocol`
-//! envelope.
+//! 1. Serde input types for the V8 coverage dump format emitted by
+//!    `node --experimental-test-coverage`, `c8`, the Inspector protocol, or
+//!    any V8 isolate ([`V8CoverageDump`] and friends).
+//! 2. [`LineOffsetTable`], which converts V8 source offsets into 1-indexed
+//!    line / 0-indexed column [`IstanbulPosition`]s.
+//!
+//! ## Offset semantics (load-bearing)
+//!
+//! V8 reports coverage offsets in **UTF-16 code units**, not UTF-8 bytes (V8
+//! strings are UTF-16). Verified against real Node: a function preceded by a
+//! `😀` (2 UTF-16 units / 4 UTF-8 bytes) on the same line is reported at the
+//! UTF-16 offset, not the byte offset. [`LineOffsetTable`] therefore stores
+//! line starts in UTF-16 units. This is the invariant the `line_table_*` tests
+//! pin, and the one a byte-offset implementation gets wrong.
+//!
+//! ## Relationship to `oxc_coverage_v8`
+//!
+//! `oxc_coverage_v8` (in `oxc-coverage-instrument`) solves the inverse problem:
+//! it takes an AST-built Istanbul `FileCoverage` and fills its statement /
+//! function / branch counts by converting Istanbul positions into **byte**
+//! offsets. The two crates are intentionally not consolidated: opposite
+//! directions, opposite unit spaces, and different producers (real Node V8
+//! dumps here vs. an instrumenter-controlled pipeline there). See
+//! `decisions/010-v8-coverage-vs-oxc-coverage-boundary.md`.
+//!
+//! The closed-source cross-reference, combined scoring, hot-path heuristics and
+//! verdict generation live in `fallow-cov` (private) and consume the CLI's
+//! remapped function output via the `fallow-cov-protocol` envelope.
 
 #![forbid(unsafe_code)]
 
@@ -52,7 +72,8 @@ pub struct FunctionCoverage {
     /// and anonymous functions.
     #[serde(rename = "functionName")]
     pub function_name: String,
-    /// Coverage ranges, byte-offsets relative to the script's source text.
+    /// Coverage ranges, UTF-16 code-unit offsets relative to the script's
+    /// source text (see the crate-level "Offset semantics" note).
     pub ranges: Vec<CoverageRange>,
     /// True when V8 emitted block-level data for this function (instrumented
     /// coverage). False when only the outer function range is reliable
@@ -61,56 +82,20 @@ pub struct FunctionCoverage {
     pub is_block_coverage: bool,
 }
 
-/// A single coverage range. `count == 0` means the byte range was never hit.
+/// A single coverage range. `count == 0` means the range was never hit.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoverageRange {
-    /// Inclusive byte offset into the script's source.
+    /// Inclusive UTF-16 code-unit offset into the script's source.
     #[serde(rename = "startOffset")]
     pub start_offset: u32,
-    /// Exclusive byte offset into the script's source.
+    /// Exclusive UTF-16 code-unit offset into the script's source.
     #[serde(rename = "endOffset")]
     pub end_offset: u32,
     /// Number of times the range was executed.
     pub count: u64,
 }
 
-// -- Istanbul output types --------------------------------------------------
-
-/// Subset of the Istanbul `FileCoverage` shape that fallow needs for CRAP
-/// scoring. We do not emit statement / branch maps because fallow only needs
-/// per-function call counts.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IstanbulFileCoverage {
-    /// Absolute path of the source file.
-    pub path: String,
-    /// Per-function records keyed by stable index (`f0`, `f1`, …).
-    #[serde(rename = "fnMap")]
-    pub fn_map: std::collections::BTreeMap<String, IstanbulFunction>,
-    /// Per-function hit counts, keyed identically to `fn_map`.
-    pub f: std::collections::BTreeMap<String, u64>,
-}
-
-/// Istanbul function descriptor.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IstanbulFunction {
-    /// Source-as-written function name (matches V8's `functionName`).
-    pub name: String,
-    /// Declaration position. Matches Istanbul's `decl`.
-    pub decl: IstanbulRange,
-    /// Full body position. Matches Istanbul's `loc`.
-    pub loc: IstanbulRange,
-    /// 1-indexed line of the function declaration's start.
-    pub line: u32,
-}
-
-/// 1-indexed line/column range matching Istanbul's `Range`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IstanbulRange {
-    /// Inclusive start position.
-    pub start: IstanbulPosition,
-    /// Exclusive end position.
-    pub end: IstanbulPosition,
-}
+// -- Istanbul position type -------------------------------------------------
 
 /// 1-indexed line + 0-indexed column.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -223,68 +208,9 @@ impl LineOffsetTable {
     }
 }
 
-// -- Normalizer -------------------------------------------------------------
-
-/// Input bundle to [`normalize_script`].
-pub struct ScriptInput<'a> {
-    /// Absolute path to the source file (already resolved from V8's `url`).
-    pub path: &'a str,
-    /// Full source text used to convert byte offsets.
-    pub source: &'a str,
-    /// V8 coverage entry for this script.
-    pub script: &'a ScriptCoverage,
-}
-
-/// Convert one V8 [`ScriptCoverage`] entry into an [`IstanbulFileCoverage`].
-///
-/// Each V8 [`FunctionCoverage`] contributes one Istanbul function entry whose
-/// hit count is taken from the function's first range (the outermost
-/// `[startOffset, endOffset)`). Block-level sub-ranges are deliberately not
-/// flattened into separate functions — that's the closed-source three-state
-/// tracker's job.
-#[must_use]
-pub fn normalize_script(input: &ScriptInput<'_>) -> IstanbulFileCoverage {
-    let table = LineOffsetTable::from_source(input.source);
-    let mut fn_map = std::collections::BTreeMap::new();
-    let mut hits = std::collections::BTreeMap::new();
-    for (idx, function) in input.script.functions.iter().enumerate() {
-        let key = format!("f{idx}");
-        let outer = function.ranges.first().copied().unwrap_or(CoverageRange {
-            start_offset: 0,
-            end_offset: 0,
-            count: 0,
-        });
-        let start_pos = table.position(outer.start_offset);
-        let end_pos = table.position(outer.end_offset);
-        fn_map.insert(
-            key.clone(),
-            IstanbulFunction {
-                name: if function.function_name.is_empty() {
-                    "(anonymous)".to_owned()
-                } else {
-                    function.function_name.clone()
-                },
-                decl: IstanbulRange {
-                    start: start_pos,
-                    end: start_pos,
-                },
-                loc: IstanbulRange {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                line: start_pos.line,
-            },
-        );
-        hits.insert(key, outer.count);
-    }
-    IstanbulFileCoverage {
-        path: input.path.to_owned(),
-        fn_map,
-        f: hits,
-    }
-}
-
-// Manual Copy for IstanbulPosition + CoverageRange to keep normalize_script cheap.
+// Manual Copy impls: the CLI consumer `.copied()`s `CoverageRange` out of a
+// function's `ranges`, and `IstanbulPosition` is a small value type returned by
+// `LineOffsetTable::position`.
 impl Copy for CoverageRange {}
 impl Copy for IstanbulPosition {}
 
@@ -334,6 +260,44 @@ mod tests {
         assert_eq!(pos.column, 0);
     }
 
+    /// The discriminating case: a multibyte character and the offset live on the
+    /// SAME line, so the UTF-16-vs-byte distinction shows up as the *column*,
+    /// not just line counting. A byte-offset implementation would report a
+    /// strictly larger column here. `😀` is 2 UTF-16 units / 4 UTF-8 bytes, so
+    /// two of them put the byte offset 4 ahead of the V8 (UTF-16) offset. This
+    /// mirrors what real Node emits (`Profiler.takePreciseCoverage` reports the
+    /// UTF-16 offset, e.g. 18 rather than the byte offset 22 for this shape).
+    #[test]
+    fn line_table_maps_columns_in_utf16_units_within_a_line() {
+        let source = "const e = \"😀😀\"; function f(){}\n";
+        let function_byte_offset = source
+            .find("function")
+            .expect("test source should contain function")
+            as u32;
+        let function_v8_offset = source[..function_byte_offset as usize]
+            .encode_utf16()
+            .count() as u32;
+
+        // The fixture must actually exercise the multibyte gap, else a byte
+        // implementation would pass this test by accident.
+        assert!(
+            function_v8_offset < function_byte_offset,
+            "fixture must place a multibyte char before the function",
+        );
+
+        let table = LineOffsetTable::from_source(source);
+        let pos = table.position(function_v8_offset);
+
+        // Line 1 starts at offset 0, so the column equals the V8 (UTF-16)
+        // offset. A byte model would report `function_byte_offset` instead.
+        assert_eq!(pos.line, 1);
+        assert_eq!(pos.column, function_v8_offset);
+        assert!(
+            pos.column < function_byte_offset,
+            "column must be measured in UTF-16 units, not bytes",
+        );
+    }
+
     #[test]
     fn line_table_builds_from_v8_line_lengths() {
         let table = LineOffsetTable::from_v8_line_lengths(&[20, 12])
@@ -354,68 +318,6 @@ mod tests {
     }
 
     #[test]
-    fn normalize_round_trips_function_hits() {
-        let source = "function alpha() {}\nfunction beta() {}\n";
-        let script = ScriptCoverage {
-            script_id: "1".into(),
-            url: "file:///t/foo.js".into(),
-            functions: vec![
-                FunctionCoverage {
-                    function_name: "alpha".into(),
-                    ranges: vec![CoverageRange {
-                        start_offset: 0,
-                        end_offset: 19,
-                        count: 7,
-                    }],
-                    is_block_coverage: false,
-                },
-                FunctionCoverage {
-                    function_name: "beta".into(),
-                    ranges: vec![CoverageRange {
-                        start_offset: 20,
-                        end_offset: 39,
-                        count: 0,
-                    }],
-                    is_block_coverage: false,
-                },
-            ],
-        };
-        let normalized = normalize_script(&ScriptInput {
-            path: "/t/foo.js",
-            source,
-            script: &script,
-        });
-        assert_eq!(normalized.f["f0"], 7);
-        assert_eq!(normalized.f["f1"], 0);
-        assert_eq!(normalized.fn_map["f0"].name, "alpha");
-        assert_eq!(normalized.fn_map["f1"].line, 2);
-    }
-
-    #[test]
-    fn anonymous_function_renamed() {
-        let source = "() => {}";
-        let script = ScriptCoverage {
-            script_id: "1".into(),
-            url: "file:///t/anon.js".into(),
-            functions: vec![FunctionCoverage {
-                function_name: String::new(),
-                ranges: vec![CoverageRange {
-                    start_offset: 0,
-                    end_offset: 8,
-                    count: 1,
-                }],
-                is_block_coverage: false,
-            }],
-        };
-        let normalized = normalize_script(&ScriptInput {
-            path: "/t/anon.js",
-            source,
-            script: &script,
-        });
-        assert_eq!(normalized.fn_map["f0"].name, "(anonymous)");
-    }
-
-    #[test]
     fn parse_node_v8_coverage_dump() {
         let raw = serde_json::json!({
             "result": [{
@@ -433,38 +335,24 @@ mod tests {
         assert_eq!(dump.result[0].functions[0].function_name, "a");
     }
 
+    /// Some real Istanbul producers (e.g. Vitest under certain transforms) emit
+    /// `null` for end columns. [`IstanbulPosition`] tolerates that via
+    /// `deserialize_nullable_u32`, normalizing `null` to `0` so a downstream
+    /// consumer deserializing positions does not choke. Pinned directly on the
+    /// position type since that is where the custom deserializer lives.
     #[test]
-    fn parse_istanbul_coverage_with_null_columns() {
-        let raw = serde_json::json!({
-            "/t/linkUtils.ts": {
-                "path": "/t/linkUtils.ts",
-                "fnMap": {
-                    "0": {
-                        "name": "normalizeInternalLink",
-                        "decl": {
-                            "start": { "line": 66, "column": 0 },
-                            "end": { "line": 66, "column": null }
-                        },
-                        "loc": {
-                            "start": { "line": 66, "column": 0 },
-                            "end": { "line": 76, "column": null }
-                        },
-                        "line": 66
-                    }
-                },
-                "f": { "0": 9 }
-            }
-        });
+    fn istanbul_position_normalizes_null_column_to_zero() {
+        let with_null: IstanbulPosition =
+            serde_json::from_value(serde_json::json!({ "line": 76, "column": null })).unwrap();
+        assert_eq!(with_null.line, 76);
+        assert_eq!(with_null.column, 0);
 
-        let dump: std::collections::BTreeMap<String, IstanbulFileCoverage> =
-            serde_json::from_value(raw).unwrap();
-        let file = &dump["/t/linkUtils.ts"];
-        assert_eq!(file.fn_map["0"].decl.end.column, 0);
-        assert_eq!(file.fn_map["0"].loc.end.column, 0);
-        assert_eq!(file.f["0"], 9);
+        let with_value: IstanbulPosition =
+            serde_json::from_value(serde_json::json!({ "line": 66, "column": 4 })).unwrap();
+        assert_eq!(with_value.column, 4);
     }
 
-    /// Property tests for the byte-offset-to-line/column mapper.
+    /// Property tests for the UTF-16-offset-to-line/column mapper.
     ///
     /// The `position` mapper backs every Istanbul range fallow emits for runtime
     /// coverage, so its invariants are encoded as properties rather than relying

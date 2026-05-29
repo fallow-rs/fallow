@@ -8,7 +8,7 @@ homepage.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "V8 ScriptCoverage JSON parser and Istanbul-compatible normalizer for the fallow CLI"
+description = "V8 ScriptCoverage JSON parser and UTF-16 source-offset mapper for the fallow CLI"
 readme = "../../README.md"
 
 [lib]

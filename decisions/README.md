@@ -18,6 +18,8 @@ Each ADR follows a consistent structure: status, context explaining the problem,
 | 006 | [Hidden directory allowlist](006-hidden-directory-allowlist.md) | Accepted |
 | 007 | [Boundary zone subtree-relative root](007-boundary-zone-root.md) | Accepted |
 | 008 | [fallow-core is internal; embedders use fallow-cli::programmatic](008-fallow-core-internal-policy.md) | Accepted |
+| 009 | [Cache config-hash ingredients](009-cache-config-hash-ingredients.md) | Accepted |
+| 010 | [fallow-v8-coverage and oxc_coverage_v8 stay separate](010-v8-coverage-vs-oxc-coverage-boundary.md) | Accepted |
 
 ## Creating a new ADR
 
