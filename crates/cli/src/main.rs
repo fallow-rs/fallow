@@ -3081,8 +3081,8 @@ fn map_coverage_subcommand(sub: &CoverageCli, explain: bool) -> coverage::Covera
             allow_dirty,
             dry_run,
             ignore_upload_errors,
-        } => coverage::CoverageSubcommand::UploadStaticFindings(
-            coverage::UploadStaticFindingsArgs {
+        } => {
+            coverage::CoverageSubcommand::UploadStaticFindings(coverage::UploadStaticFindingsArgs {
                 api_key: api_key.clone(),
                 api_endpoint: api_endpoint.clone(),
                 project_id: project_id.clone(),
@@ -3090,8 +3090,8 @@ fn map_coverage_subcommand(sub: &CoverageCli, explain: bool) -> coverage::Covera
                 allow_dirty: *allow_dirty,
                 dry_run: *dry_run,
                 ignore_upload_errors: *ignore_upload_errors,
-            },
-        ),
+            })
+        }
     }
 }
 

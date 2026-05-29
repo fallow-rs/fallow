@@ -201,12 +201,22 @@ fn run_inner(args: &UploadStaticFindingsArgs, root: &Path) -> Result<(), UploadE
     };
 
     if args.dry_run {
-        print_dry_run_summary(&project_id, &git_sha, &findings, args.api_endpoint.as_deref());
+        print_dry_run_summary(
+            &project_id,
+            &git_sha,
+            &findings,
+            args.api_endpoint.as_deref(),
+        );
         return Ok(());
     }
 
     let api_key = resolve_api_key(args)?;
-    upload(&project_id, args.api_endpoint.as_deref(), &api_key, &payload)
+    upload(
+        &project_id,
+        args.api_endpoint.as_deref(),
+        &api_key,
+        &payload,
+    )
 }
 
 // ── Project ID resolution ────────────────────────────────────────────
@@ -638,10 +648,7 @@ fn print_dry_run_summary(
     endpoint_override: Option<&str>,
 ) {
     let decoded_url = display_endpoint_url(endpoint_override, project_id);
-    let dead_files = findings
-        .iter()
-        .filter(|f| f.kind == KIND_DEAD_FILE)
-        .count();
+    let dead_files = findings.iter().filter(|f| f.kind == KIND_DEAD_FILE).count();
     let unused_exports = findings
         .iter()
         .filter(|f| f.kind == KIND_UNUSED_EXPORT)
@@ -860,7 +867,11 @@ mod tests {
         let config = stub_config(&root);
         let results = StubResults {
             files: vec![root.join("src/legacy/old.ts")],
-            exports: vec![(root.join("src/utils/format.ts"), "formatBytes".to_owned(), 42)],
+            exports: vec![(
+                root.join("src/utils/format.ts"),
+                "formatBytes".to_owned(),
+                42,
+            )],
         };
         let findings = collect_findings(&config, &results);
         assert_eq!(findings.len(), 2);
@@ -900,8 +911,14 @@ mod tests {
         };
         let json = serde_json::to_string(&dead).expect("serialize dead file");
         assert!(json.contains(r#""filePath":"src/dead.ts""#));
-        assert!(!json.contains("exportName"), "null exportName must be omitted: {json}");
-        assert!(!json.contains("lineNumber"), "null lineNumber must be omitted: {json}");
+        assert!(
+            !json.contains("exportName"),
+            "null exportName must be omitted: {json}"
+        );
+        assert!(
+            !json.contains("lineNumber"),
+            "null lineNumber must be omitted: {json}"
+        );
 
         let export = StaticFinding {
             kind: KIND_UNUSED_EXPORT,
@@ -989,8 +1006,7 @@ mod tests {
     #[test]
     fn format_upload_error_message_uses_hint_for_known_code() {
         let envelope = parse_error_envelope(r#"{"code":"payload_too_large"}"#);
-        let message =
-            format_upload_error_message(413, "{}", Some("payload_too_large"), &envelope);
+        let message = format_upload_error_message(413, "{}", Some("payload_too_large"), &envelope);
         assert!(message.contains("200,000"), "got: {message}");
         assert!(message.contains("HTTP 413"));
         assert!(message.contains("code payload_too_large"));
