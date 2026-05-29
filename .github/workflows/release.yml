@@ -219,7 +219,7 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
 
       - name: Install NAPI package dependencies
-        run: cd crates/napi && npm ci --omit=optional
+        run: cd crates/napi && npm ci --omit=optional --ignore-scripts
 
       - name: Build NAPI addon
         run: cd crates/napi && npx napi build --platform --release --target ${{ matrix.target }}
@@ -454,7 +454,7 @@ jobs:
           cache-dependency-path: editors/vscode/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: cd editors/vscode && pnpm install --frozen-lockfile
+        run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Verify generated TypeScript matches docs/output-schema.json
         run: cd editors/vscode && pnpm run check:codegen
@@ -580,10 +580,12 @@ jobs:
           done
 
       - name: Install NAPI package dependencies
-        # Only safe here because this job has no publish tokens. The dev
-        # dependency tree of @napi-rs/cli runs install scripts; keeping that
-        # off the npm-publish job is the whole point of the split.
-        run: cd crates/napi && npm ci --omit=optional
+        # --ignore-scripts blocks dependency-tree install scripts here too, on
+        # top of the prep/publish split. The split (keeping dependency installs
+        # off the token-holding npm-publish job) is the primary guard; this is
+        # belt-and-suspenders. napi build does not need install scripts to
+        # produce the native addon, so disabling them is safe.
+        run: cd crates/napi && npm ci --omit=optional --ignore-scripts
 
       - name: Update NAPI package version
         env:
@@ -875,7 +877,7 @@ jobs:
           cache-dependency-path: editors/vscode/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: cd editors/vscode && pnpm install --frozen-lockfile
+        run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Update extension version
         env:
