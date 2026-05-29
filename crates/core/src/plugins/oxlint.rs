@@ -13,7 +13,13 @@ const CONFIG_PATTERNS: &[&str] = &[".oxlintrc.json", "oxlint.json", "oxlint.conf
 
 const ALWAYS_USED: &[&str] = CONFIG_PATTERNS;
 
-const TOOLING_DEPENDENCIES: &[&str] = &["oxlint"];
+// `oxlint` is the linter binary; `oxlint-tsgolint` is the type-aware companion
+// package the oxlint binary auto-loads at runtime (type-aware linting). Neither is
+// imported in source nor listed in an `.oxlintrc.json` `jsPlugins` array, so they
+// must be credited as tooling so a project that declares them (in either prod or
+// dev dependencies) does not report them as unused. New oxlint CLI tooling package
+// names are added here by exact name. See issue #753.
+const TOOLING_DEPENDENCIES: &[&str] = &["oxlint", "oxlint-tsgolint"];
 
 define_plugin! {
     struct OxlintPlugin => "oxlint",
@@ -244,6 +250,17 @@ mod tests {
             plugin.resolve_config(Path::new(".oxlintrc.json"), source, Path::new("/project"));
 
         assert!(result.referenced_dependencies.is_empty());
+    }
+
+    #[test]
+    fn tooling_dependencies_include_cli_tooling_packages() {
+        let plugin = OxlintPlugin;
+        let tooling = plugin.tooling_dependencies();
+        // The linter binary itself.
+        assert!(tooling.contains(&"oxlint"));
+        // The type-aware companion the oxlint binary loads at runtime: never imported,
+        // never in `jsPlugins`, so it needs an explicit tooling credit. See issue #753.
+        assert!(tooling.contains(&"oxlint-tsgolint"));
     }
 
     #[test]

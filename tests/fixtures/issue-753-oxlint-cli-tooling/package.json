@@ -1,0 +1,15 @@
+{
+  "name": "issue-753-oxlint-cli-tooling",
+  "private": true,
+  "scripts": {
+    "lint": "oxlint -c .oxlintrc.json ."
+  },
+  "dependencies": {
+    "oxlint-tsgolint": "0.2.0",
+    "oxlint-other": "1.0.0",
+    "unused-control-dep": "1.0.0"
+  },
+  "devDependencies": {
+    "oxlint": "1.0.0"
+  }
+}

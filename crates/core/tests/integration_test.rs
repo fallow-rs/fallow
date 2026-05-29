@@ -120,6 +120,8 @@ mod issue_616_browser_extension_manifest;
 mod issue_617_obsidian_plugin;
 #[path = "integration_test/issue_752_svelte_typed_props.rs"]
 mod issue_752_svelte_typed_props;
+#[path = "integration_test/issue_753_oxlint_cli_tooling.rs"]
+mod issue_753_oxlint_cli_tooling;
 #[path = "integration_test/issue_758_danger_no_dep.rs"]
 mod issue_758_danger_no_dep;
 #[path = "integration_test/issue_772_workspace_plugin_merge.rs"]
