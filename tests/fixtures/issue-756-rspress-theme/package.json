@@ -1,0 +1,6 @@
+{
+  "name": "issue-756-rspress-theme",
+  "dependencies": {
+    "@rspress/core": "^2.0.10"
+  }
+}

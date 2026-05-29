@@ -739,6 +739,27 @@ fn docusaurus_contributes_virtual_module_prefixes() {
 }
 
 #[test]
+fn rspress_contributes_theme_virtual_module_prefixes() {
+    let registry = PluginRegistry::default();
+    let pkg = make_pkg(&["@rspress/core"]);
+    let result = registry.run(&pkg, Path::new("/project"), &[]);
+    assert!(
+        result
+            .virtual_module_prefixes
+            .iter()
+            .any(|p| p == "@theme/"),
+        "rspress should contribute @theme/ virtual module prefix"
+    );
+    assert!(
+        result
+            .virtual_module_prefixes
+            .iter()
+            .any(|p| p == "@theme-original/"),
+        "rspress should contribute @theme-original/ virtual module prefix"
+    );
+}
+
+#[test]
 fn tanstack_router_contributes_start_virtual_module_prefixes() {
     let registry = PluginRegistry::default();
     let pkg = make_pkg(&["@tanstack/react-start"]);

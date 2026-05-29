@@ -1200,6 +1200,7 @@ mod rolldown;
 mod rollup;
 mod rsbuild;
 mod rspack;
+mod rspress;
 mod sanity;
 mod semantic_release;
 mod sentry;

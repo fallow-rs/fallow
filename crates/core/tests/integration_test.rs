@@ -64,6 +64,8 @@ mod member_detection;
 mod nx_project_json;
 #[path = "integration_test/redwoodsdk.rs"]
 mod redwoodsdk;
+#[path = "integration_test/rspress_theme.rs"]
+mod rspress_theme;
 #[path = "integration_test/rules_config.rs"]
 mod rules_config;
 #[path = "integration_test/safe_analysis.rs"]

@@ -6,7 +6,7 @@ paths:
 
 # Plugin system
 
-115 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
+116 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
 
 ## Rich config parsing (26 plugins)
 
@@ -39,7 +39,7 @@ paths:
 ## Plugin trait extensions
 - `auto_imports()` for framework convention auto-imports (Nuxt `<Card001 />` components). Returns `AutoImportRule { name, source, kind }` built from a filesystem scan; the resolver matches a file's captured `auto_import_candidates` against the table and synthesizes a graph edge at graph-build time (never cached). See `detection.md` and issue #704.
 - `path_aliases()` for framework-specific alias resolution (Nuxt `~/`, Next.js `@/`)
-- `virtual_module_prefixes()` for framework virtual modules (Docusaurus `@theme/`, `@docusaurus/`, TanStack Start `tanstack-start-manifest:`)
+- `virtual_module_prefixes()` for framework virtual modules (Docusaurus `@theme/`, `@docusaurus/`, rspress `@theme/` / `@theme-original/`, TanStack Start `tanstack-start-manifest:`)
 - `virtual_package_suffixes()` for framework virtual package conventions (Vitest `/__mocks__`). Matches as `ends_with` on the extracted package name, suppressing `unlisted-dependency` reports for non-npm specifiers like `@aws-sdk/__mocks__`.
 
 ## External plugins
