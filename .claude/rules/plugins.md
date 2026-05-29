@@ -21,7 +21,7 @@ paths:
 - **Rollup**: input entries, external deps
 - **Electron**: electron-vite `main` / `preload` / `renderer` `build.rollupOptions.input` (string/array/object forms, path-helper calls resolved) seeded as entry points relative to `electron.vite.config.*`, so multi-window renderer HTML entries keep their `<script src>` trees reachable; static main/preload globs cover `{ts,tsx,js,jsx,mts,mjs}`
 - **PostCSS**: plugins (object keys, require() calls, string arrays)
-- **Prettier**: plugins array (JSON/.prettierrc and JS configs)
+- **Prettier**: plugins array (JSON/.prettierrc, JS/TS configs, `.prettierrc.{yml,yaml,toml}` data-format configs, and the `package.json#prettier` key). Plugin packages are credited only when listed in the config (issue #462: `prettier-plugin-*` is no longer an exact tooling-catalogue match, so a declared-but-unlisted prettier plugin surfaces as unused)
 - **Nuxt**: modules, css, plugins, extends, postcss plugins; path aliases (`~`, `~~`, `#shared`); when `@nuxt/content` is registered in `modules:`, the adjacent `content.config.{ts,js,mts,mjs,cts,cjs}` is credited as a default-export entry (config-dir-relative; first-party only, per #138)
 - **Drizzle**: schema field (string/array/glob/directory → entry points), out directory
 - **Angular**: angular.json projects.*.architect.build.options → entry points; peer dep awareness; ng-packagr `ng-package.json` / `ng-package.prod.json` `lib.entryFile` (default `src/public_api.ts`, resolved relative to the config dir) → library public API entry point; nested secondary-entry-point configs in the package subtree scanned too; activates on `@angular/core` or `ng-packagr`
