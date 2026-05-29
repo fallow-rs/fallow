@@ -87,6 +87,7 @@ const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
     "storybook",
     "stryker",
     "typeorm",
+    "velite",
 ];
 
 /// Result of resolving a plugin's config file.
@@ -1225,6 +1226,7 @@ mod typeorm;
 mod typescript;
 mod unocss;
 mod varlock;
+mod velite;
 mod vite;
 mod vitepress;
 mod vitest;
