@@ -1391,6 +1391,64 @@ enum CoverageCli {
         #[arg(long)]
         fail_fast: bool,
     },
+    /// Upload static dead-code findings to fallow cloud for the source-evidence viewer.
+    ///
+    /// Runs fallow's static analysis and uploads the `unused_export` and
+    /// `dead_file` verdicts under the selected repo + git SHA. The cloud
+    /// overlays them on the source view alongside the runtime coverage overlay.
+    /// Findings are replace-by-SHA: each run sends the complete set for the SHA.
+    UploadStaticFindings {
+        /// Fallow cloud API key (bearer token).
+        ///
+        /// Precedence: this flag > $FALLOW_API_KEY. Generate at
+        /// <https://fallow.cloud/settings#api-keys>. This must be a live API
+        /// key, not a publishable ingest key.
+        ///
+        /// Security: prefer $FALLOW_API_KEY on shared CI runners. Passing a
+        /// secret on the command line may be visible to other processes via
+        /// `ps` and can leak into shell history or process audit logs.
+        #[arg(long, value_name = "KEY")]
+        api_key: Option<String>,
+
+        /// Override the fallow cloud base URL.
+        ///
+        /// Useful for staging and on-premise deployments. Also respects
+        /// $FALLOW_API_URL when this flag is not set.
+        #[arg(long, value_name = "URL")]
+        api_endpoint: Option<String>,
+
+        /// Project identifier, for example `fallow-cloud-api` or `owner/repo`.
+        ///
+        /// Defaults to $GITHUB_REPOSITORY, then $CI_PROJECT_PATH, then the
+        /// parsed origin URL from `git remote get-url origin`.
+        #[arg(long, value_name = "PROJECT_ID")]
+        project_id: Option<String>,
+
+        /// Explicit git SHA for these findings.
+        ///
+        /// Default: `git rev-parse HEAD`. Findings are keyed on this value and
+        /// fully replace any prior set uploaded for the same SHA.
+        #[arg(long, value_name = "SHA")]
+        git_sha: Option<String>,
+
+        /// Proceed even when the working tree has uncommitted changes.
+        ///
+        /// Warning: findings are generated from the working copy, so they may
+        /// not match the uploaded git SHA. Commit or stash first if you want a
+        /// SHA-exact upload.
+        #[arg(long)]
+        allow_dirty: bool,
+
+        /// Print what would be uploaded and exit. No network call.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Treat transient upload failures as warnings instead of errors
+        /// (exit 0). Validation and auth errors still fail hard; this only
+        /// downgrades transport and server errors.
+        #[arg(long)]
+        ignore_upload_errors: bool,
+    },
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -3015,6 +3073,25 @@ fn map_coverage_subcommand(sub: &CoverageCli, explain: bool) -> coverage::Covera
             concurrency: *concurrency,
             fail_fast: *fail_fast,
         }),
+        CoverageCli::UploadStaticFindings {
+            api_key,
+            api_endpoint,
+            project_id,
+            git_sha,
+            allow_dirty,
+            dry_run,
+            ignore_upload_errors,
+        } => coverage::CoverageSubcommand::UploadStaticFindings(
+            coverage::UploadStaticFindingsArgs {
+                api_key: api_key.clone(),
+                api_endpoint: api_endpoint.clone(),
+                project_id: project_id.clone(),
+                git_sha: git_sha.clone(),
+                allow_dirty: *allow_dirty,
+                dry_run: *dry_run,
+                ignore_upload_errors: *ignore_upload_errors,
+            },
+        ),
     }
 }
 

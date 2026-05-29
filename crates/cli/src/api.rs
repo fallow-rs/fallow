@@ -298,6 +298,15 @@ pub fn actionable_error_hint(operation: &str, code: &str) -> Option<&'static str
         ("upload-inventory", "payload_too_large") => Some(
             "inventory exceeds the 200,000-function server limit. Scope the walk with --exclude-paths, or open an issue if this is a legitimately large repo.",
         ),
+        // upload-static-findings uses the same live API key class as
+        // upload-inventory. A publishable ingest key (`fallow_pub_k1_*`) is
+        // rejected here with a scope error, so point users at a live key.
+        ("upload-static-findings", "unauthorized") => Some(
+            "authentication failed. Generate a live API key at https://fallow.cloud/settings#api-keys and set FALLOW_API_KEY on the runner. Note: a publishable ingest key (fallow_pub_k1_) is not accepted here, and `fallow license activate --trial` will not fix this error.",
+        ),
+        ("upload-static-findings", "payload_too_large") => Some(
+            "static findings exceed the 200,000-finding server limit. Scope the analysis with your fallow ignore rules, or open an issue if this is a legitimately large repo.",
+        ),
         _ => None,
     }
 }

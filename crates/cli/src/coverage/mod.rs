@@ -32,11 +32,13 @@ use crate::license;
 pub use analyze::AnalyzeArgs;
 pub use upload_inventory::UploadInventoryArgs;
 pub use upload_source_maps::UploadSourceMapsArgs;
+pub use upload_static_findings::UploadStaticFindingsArgs;
 
 mod analyze;
 mod cloud_client;
 mod upload_inventory;
 mod upload_source_maps;
+mod upload_static_findings;
 
 const COVERAGE_DOCS_URL: &str = "https://docs.fallow.tools/analysis/runtime-coverage";
 const SETUP_STATE_SCHEMA_VERSION: u8 = 1;
@@ -52,6 +54,8 @@ pub enum CoverageSubcommand {
     UploadInventory(UploadInventoryArgs),
     /// Upload JavaScript source maps to fallow cloud.
     UploadSourceMaps(UploadSourceMapsArgs),
+    /// Upload static dead-code findings to fallow cloud.
+    UploadStaticFindings(UploadStaticFindingsArgs),
 }
 
 /// Context shared by `fallow coverage` subcommands.
@@ -331,6 +335,9 @@ pub fn run(subcommand: CoverageSubcommand, ctx: &RunContext<'_>) -> ExitCode {
         CoverageSubcommand::Analyze(args) => analyze::run(&args, ctx),
         CoverageSubcommand::UploadInventory(args) => upload_inventory::run(&args, ctx.root),
         CoverageSubcommand::UploadSourceMaps(args) => upload_source_maps::run(&args, ctx.root),
+        CoverageSubcommand::UploadStaticFindings(args) => {
+            upload_static_findings::run(&args, ctx.root)
+        }
     }
 }
 
