@@ -1,5 +1,13 @@
 [advisories]
+# Build scripts (build.rs) and proc-macros execute arbitrary code at BUILD time,
+# on CI and on the release runner that signs fallow's binaries. `npm
+# --ignore-scripts` does nothing for this Cargo-side vector, so cargo-deny is the
+# gate: RUSTSEC advisories deny by default in cargo-deny v2, and a yanked crate
+# (often the first signal of a compromised or withdrawn release) is treated the
+# same way. Every entry added to `ignore` must carry a one-line justification so
+# the suppression is auditable, not a silent hole.
 ignore = []
+yanked = "deny"
 
 [licenses]
 allow = [
