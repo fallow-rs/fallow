@@ -186,6 +186,10 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: crate-ci/typos@aca895bf05aec0cb7dffa6f94495e923224d9f17 # v1
+      - name: Hidden unicode
+        run: python3 scripts/scan-hidden-unicode.py --mode committed
+      - name: Hidden-unicode scanner self-test
+        run: bash scripts/test-scan-hidden-unicode.sh
 
   js-lint:
     name: JS Lint and Format

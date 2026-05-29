@@ -102,3 +102,12 @@ Do NOT set this flag in regular CI configurations or on machines that are expect
 ### Reporting binary tampering
 
 If `npm install fallow` or the `fallow-rs/fallow` action ever aborts with `binary verification failed` on a fresh, unmodified install, do not ignore it. Report it via the [private vulnerability reporting link](https://github.com/fallow-rs/fallow/security/advisories/new) above and include the full error message and the platform package version. False positives on this path are rare; a sustained failure on a clean install is treated as a P0 supply-chain incident.
+
+## Agent-instruction surface
+
+AI coding agents read instruction files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.claude/**`, `.codex/**`, MCP config) as trusted context. A dependency install hook, or a pasted "fix", can plant hidden instructions in one of these files for the next agent session to execute. `scripts/scan-hidden-unicode.py` guards two surfaces against this:
+
+- **Committed surface (blocking):** the pre-commit hook and a CI step scan tracked text files for zero-width and bidirectional-override code points (emoji ZWJ sequences are allowlisted). These have no legitimate place in source, so a hit fails the commit / CI.
+- **Local agent surface (advisory):** a Claude Code `SessionStart` hook scans the agent-instruction allowlist, including untracked and gitignored files that never reach a pull request. Hidden code points are reported; on the un-reviewed (untracked) files only, shell-exec injection shapes (`curl | sh`, `base64 -d | sh`, `eval`, `node -e`) are flagged as advisory warnings; and a `scripts/agent-files.sha256` baseline warns when a tracked agent file changed since it was last blessed (re-bless with `python3 scripts/scan-hidden-unicode.py --update-manifest`).
+
+This is defense-in-depth, not a trust boundary: it raises the cost of agent-context poisoning and surfaces the most common shapes, but a determined attacker who can write these files can also edit the hook. Agent-instruction files are untrusted by default; never run a pasted remediation without reading the patch, the URLs, and the package names first.
