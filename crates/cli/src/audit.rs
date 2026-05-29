@@ -68,6 +68,10 @@ pub struct AuditResult {
     base_snapshot: Option<AuditKeySnapshot>,
     pub base_snapshot_skipped: bool,
     pub changed_files_count: usize,
+    /// Absolute paths of the files this run re-analyzed. Threaded into the
+    /// Fallow Impact per-finding attribution so the frontier diff knows which
+    /// files were authoritative this run.
+    pub changed_files: Vec<PathBuf>,
     pub base_ref: String,
     pub head_sha: Option<String>,
     pub output: OutputFormat,
@@ -2744,6 +2748,7 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
         base_snapshot,
         base_snapshot_skipped,
         changed_files_count,
+        changed_files: changed_files.into_iter().collect(),
         base_ref,
         head_sha: get_head_sha(opts.root),
         output: opts.output,
@@ -2796,6 +2801,7 @@ fn empty_audit_result(base_ref: String, opts: &AuditOptions<'_>, elapsed: Durati
         base_snapshot: None,
         base_snapshot_skipped: false,
         changed_files_count: 0,
+        changed_files: Vec::new(),
         base_ref,
         head_sha: get_head_sha(opts.root),
         output: opts.output,
@@ -3548,6 +3554,34 @@ pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode
         Ok(result) => {
             // Best-effort: record this run into the local Impact store. No-op
             // when Impact tracking is disabled; never affects exit/output.
+            // Build the per-finding attribution input from the typed results so
+            // impact can credit genuinely-resolved findings. `check.results`
+            // also carries the present-suppression snapshot used to tell a fix
+            // from a `fallow-ignore`.
+            let mut findings = result
+                .check
+                .as_ref()
+                .map(|c| crate::impact::collect_dead_code_findings(&c.results))
+                .unwrap_or_default();
+            if let Some(health) = result.health.as_ref() {
+                findings.extend(crate::impact::collect_complexity_findings(&health.report));
+            }
+            let clones = result
+                .dupes
+                .as_ref()
+                .map(|d| crate::impact::collect_clone_findings(&d.report))
+                .unwrap_or_default();
+            let empty_supps: Vec<fallow_core::results::ActiveSuppression> = Vec::new();
+            let suppressions = result.check.as_ref().map_or(empty_supps.as_slice(), |c| {
+                c.results.active_suppressions.as_slice()
+            });
+            let attribution = crate::impact::AttributionInput {
+                root: opts.root,
+                changed_files: &result.changed_files,
+                findings,
+                clones,
+                suppressions,
+            };
             crate::impact::record_audit_run(
                 opts.root,
                 &result.summary,
@@ -3556,6 +3590,7 @@ pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode
                 result.head_sha.as_deref(),
                 env!("CARGO_PKG_VERSION"),
                 &crate::vital_signs::chrono_timestamp(),
+                Some(&attribution),
             );
             print_audit_result(&result, opts.quiet, opts.explain)
         }

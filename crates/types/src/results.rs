@@ -175,6 +175,14 @@ pub struct AnalysisResults {
     /// machine output to avoid changing the public JSON issue contract.
     #[serde(skip)]
     pub suppression_count: usize,
+    /// Suppression comments present in analyzed files this run (every present
+    /// marker, all kinds, not only consumed ones). Internal: read in-process by
+    /// `fallow impact` to distinguish a genuinely resolved finding from one
+    /// silenced by a `fallow-ignore`. Skipped during serialization, like
+    /// [`Self::suppression_count`], so the public JSON output contract is
+    /// unchanged.
+    #[serde(skip)]
+    pub active_suppressions: Vec<ActiveSuppression>,
     /// Detected feature flag patterns. Advisory output, not included in issue counts.
     /// Skipped during default serialization: injected separately in JSON output when enabled.
     #[serde(skip)]
@@ -293,6 +301,7 @@ impl AnalysisResults {
             unused_dependency_overrides,
             misconfigured_dependency_overrides,
             suppression_count,
+            active_suppressions,
             feature_flags,
             export_usages,
             entry_point_summary,
@@ -327,6 +336,7 @@ impl AnalysisResults {
             .extend(misconfigured_dependency_overrides);
         self.feature_flags.extend(feature_flags);
         self.export_usages.extend(export_usages);
+        self.active_suppressions.extend(active_suppressions);
         self.suppression_count += suppression_count;
         if self.entry_point_summary.is_none() {
             self.entry_point_summary = entry_point_summary;
@@ -1262,6 +1272,31 @@ impl StaleSuppression {
             }
         }
     }
+}
+
+/// A suppression comment present in an analyzed file this run.
+///
+/// This is the "active-suppression state" the Fallow Impact value report needs
+/// to tell a genuinely resolved finding (the code was fixed) from one merely
+/// silenced by a newly-added `fallow-ignore`. It captures every PRESENT marker,
+/// not only the ones a detector consumed: complexity and code-duplication
+/// suppressions are consumed in the CLI layer rather than the core suppression
+/// context, so presence is the single uniform signal that covers all impact
+/// categories. A present-but-stale marker is harmless because impact keys on a
+/// suppression that newly appeared between two recorded runs. It is internal:
+/// never serialized into the public JSON output schema (the field on
+/// [`AnalysisResults`] is `#[serde(skip)]`), only read in-process by
+/// `fallow impact`.
+#[derive(Debug, Clone)]
+pub struct ActiveSuppression {
+    /// Absolute path to the file carrying the suppression comment.
+    pub path: PathBuf,
+    /// The suppressed issue kind in kebab-case (e.g. `"unused-export"`), or
+    /// `None` for a blanket marker that suppresses every kind on its target.
+    pub kind: Option<String>,
+    /// Whether this is a `fallow-ignore-file` (file-level) marker rather than a
+    /// `fallow-ignore-next-line` marker.
+    pub is_file_level: bool,
 }
 
 /// The detection method used to identify a feature flag.

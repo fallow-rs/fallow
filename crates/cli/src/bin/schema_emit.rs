@@ -44,7 +44,7 @@ use fallow_cli::health_types::{
 };
 use fallow_cli::impact::{
     ContainmentEvent, ImpactCounts, ImpactReport, ImpactReportSchemaVersion, ImpactTrendDirection,
-    TrendSummary,
+    ResolutionEvent, TrendSummary,
 };
 use fallow_cli::output_dupes::{
     AttributedCloneGroupFinding, CloneFamilyAction, CloneFamilyActionType, CloneFamilyFinding,
@@ -391,6 +391,7 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "ImpactReport",
         "ImpactReportSchemaVersion",
         "ImpactTrendDirection",
+        "ResolutionEvent",
         "TrendSummary",
     ]
 }
@@ -634,6 +635,7 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<ImpactCounts>();
     let _ = generator.subschema_for::<ImpactReportSchemaVersion>();
     let _ = generator.subschema_for::<ImpactTrendDirection>();
+    let _ = generator.subschema_for::<ResolutionEvent>();
     let _ = generator.subschema_for::<TrendSummary>();
     let _ = generator.subschema_for::<ContainmentEvent>();
     let _ = generator.subschema_for::<ImpactReport>();

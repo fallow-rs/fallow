@@ -849,6 +849,11 @@ pub fn find_dead_code_full(
             .extend(suppressions.find_stale(graph, config));
     }
     results.suppression_count = suppressions.used_count();
+    // Capture every present suppression (all kinds) so the Fallow Impact value
+    // report can tell a genuinely resolved finding from one silenced by a
+    // newly-added `fallow-ignore`. Internal: `#[serde(skip)]`, read in-process
+    // by `fallow impact`, never in the public JSON output.
+    results.active_suppressions = suppressions.all_suppressions(graph);
 
     // Detect pnpm catalog issues (purely off package.json + pnpm-workspace.yaml).
     // Catalog detectors share the YAML parse and consumer walk; gather state

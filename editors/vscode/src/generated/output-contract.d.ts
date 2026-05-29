@@ -634,11 +634,11 @@ export type LogicalGroupStatus = ("ok" | "empty" | "invalid_path")
 export type GroupByMode = ("owner" | "directory" | "package" | "section")
 /**
  * Wire-version discriminator for [`ImpactReport`]. Independent from the global
- * [`crate::output_envelope::SchemaVersion`] (the impact report versions on its
- * own cadence) and from the on-disk [`STORE_SCHEMA_VERSION`] (the persisted
- * store shape versions separately). Serializes as a string `const` so JSON
- * consumers can switch on it, matching the other independently-versioned
- * envelopes (e.g. `CoverageAnalyzeSchemaVersion`).
+ * `SchemaVersion` (the impact report versions on its own cadence) and from the
+ * on-disk `STORE_SCHEMA_VERSION` (the persisted store shape versions
+ * separately). Serializes as a string `const` so JSON consumers can switch on
+ * it, matching the other independently-versioned envelopes (e.g.
+ * `CoverageAnalyzeSchemaVersion`).
  */
 export type ImpactReportSchemaVersion = "1"
 /**
@@ -5691,6 +5691,26 @@ containment_count: number
  * Most recent containment events (newest last), capped for display.
  */
 recent_containment: ContainmentEvent[]
+/**
+ * Lifetime count of findings fallow credits as genuinely resolved (code
+ * removed or refactored, never a `fallow-ignore`). v1.5.
+ */
+resolved_total: number
+/**
+ * Lifetime count of findings silenced by a newly-added `fallow-ignore`.
+ * Reported as honest context, never as a win. v1.5.
+ */
+suppressed_total: number
+/**
+ * Most recent resolution events (newest last), capped for display. v1.5.
+ */
+recent_resolved: ResolutionEvent[]
+/**
+ * Whether per-finding attribution has a baseline yet. False on a freshly
+ * upgraded v1 store (no frontier captured), which the renderer uses to show
+ * "resolution tracking starts from your next run" instead of a bare zero.
+ */
+attribution_active: boolean
 }
 /**
  * Per-category issue counts captured at a recorded run.
@@ -5721,6 +5741,32 @@ blocked_at: string
 cleared_at: string
 git_sha?: (string | null)
 blocked_counts: ImpactCounts
+}
+/**
+ * A genuinely-resolved finding, recorded for the recent-resolutions display.
+ */
+export interface ResolutionEvent {
+/**
+ * The resolved finding's kind, kebab-case (e.g. `"unused-export"`).
+ */
+kind: string
+/**
+ * Workspace-relative, forward-slash path of the file the finding was in.
+ */
+path: string
+/**
+ * The finding's symbol (export / member / dependency name), when it has
+ * one. `None` for file-level and content-hash-keyed findings (duplication).
+ */
+symbol?: (string | null)
+/**
+ * Short git SHA of the run that recorded the resolution, when in a git repo.
+ */
+git_sha?: (string | null)
+/**
+ * ISO-8601 timestamp of the recording run.
+ */
+timestamp: string
 }
 /**
  * Envelope emitted by bare `fallow --format json` (the combined

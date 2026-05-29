@@ -9,7 +9,7 @@ pub use fallow_types::output_dead_code::{
     UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 pub use fallow_types::results::{
-    AnalysisResults, BoundaryViolation, CircularDependency, DependencyLocation,
+    ActiveSuppression, AnalysisResults, BoundaryViolation, CircularDependency, DependencyLocation,
     DependencyOverrideMisconfigReason, DependencyOverrideSource, DuplicateExport,
     DuplicateLocation, EmptyCatalogGroup, EntryPointSummary, ExportUsage, FeatureFlag,
     FlagConfidence, FlagKind, ImportSite, MisconfiguredDependencyOverride, PrivateTypeLeak,

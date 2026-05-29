@@ -12,7 +12,43 @@ pub use fallow_extract::suppress::parse_suppressions_from_source;
 use crate::discover::FileId;
 use crate::extract::ModuleInfo;
 use crate::graph::ModuleGraph;
-use crate::results::{StaleSuppression, SuppressionOrigin};
+use crate::results::{ActiveSuppression, StaleSuppression, SuppressionOrigin};
+
+/// Convert an [`IssueKind`] to its canonical kebab-case wire string.
+///
+/// Single source of truth for the kind-to-string mapping, shared by stale
+/// detection and active-suppression capture so the two never drift.
+#[must_use]
+pub fn kind_to_kebab(kind: IssueKind) -> &'static str {
+    match kind {
+        IssueKind::UnusedFile => "unused-file",
+        IssueKind::UnusedExport => "unused-export",
+        IssueKind::UnusedType => "unused-type",
+        IssueKind::PrivateTypeLeak => "private-type-leak",
+        IssueKind::UnusedDependency => "unused-dependency",
+        IssueKind::UnusedDevDependency => "unused-dev-dependency",
+        IssueKind::UnusedEnumMember => "unused-enum-member",
+        IssueKind::UnusedClassMember => "unused-class-member",
+        IssueKind::UnresolvedImport => "unresolved-import",
+        IssueKind::UnlistedDependency => "unlisted-dependency",
+        IssueKind::DuplicateExport => "duplicate-export",
+        IssueKind::CodeDuplication => "code-duplication",
+        IssueKind::CircularDependency => "circular-dependency",
+        IssueKind::ReExportCycle => "re-export-cycle",
+        IssueKind::TypeOnlyDependency => "type-only-dependency",
+        IssueKind::TestOnlyDependency => "test-only-dependency",
+        IssueKind::BoundaryViolation => "boundary-violation",
+        IssueKind::CoverageGaps => "coverage-gaps",
+        IssueKind::FeatureFlag => "feature-flag",
+        IssueKind::Complexity => "complexity",
+        IssueKind::StaleSuppression => "stale-suppression",
+        IssueKind::PnpmCatalogEntry => "unused-catalog-entry",
+        IssueKind::EmptyCatalogGroup => "empty-catalog-group",
+        IssueKind::UnresolvedCatalogReference => "unresolved-catalog-reference",
+        IssueKind::UnusedDependencyOverride => "unused-dependency-override",
+        IssueKind::MisconfiguredDependencyOverride => "misconfigured-dependency-override",
+    }
+}
 
 /// Map an `IssueKind` to its corresponding severity in `RulesConfig`.
 ///
@@ -271,40 +307,7 @@ impl<'a> SuppressionContext<'a> {
                 }
 
                 let is_file_level = s.line == 0;
-                let issue_kind_str = s.kind.map(|k| {
-                    // Convert back to the kebab-case string for output
-                    match k {
-                        IssueKind::UnusedFile => "unused-file",
-                        IssueKind::UnusedExport => "unused-export",
-                        IssueKind::UnusedType => "unused-type",
-                        IssueKind::PrivateTypeLeak => "private-type-leak",
-                        IssueKind::UnusedDependency => "unused-dependency",
-                        IssueKind::UnusedDevDependency => "unused-dev-dependency",
-                        IssueKind::UnusedEnumMember => "unused-enum-member",
-                        IssueKind::UnusedClassMember => "unused-class-member",
-                        IssueKind::UnresolvedImport => "unresolved-import",
-                        IssueKind::UnlistedDependency => "unlisted-dependency",
-                        IssueKind::DuplicateExport => "duplicate-export",
-                        IssueKind::CodeDuplication => "code-duplication",
-                        IssueKind::CircularDependency => "circular-dependency",
-                        IssueKind::ReExportCycle => "re-export-cycle",
-                        IssueKind::TypeOnlyDependency => "type-only-dependency",
-                        IssueKind::TestOnlyDependency => "test-only-dependency",
-                        IssueKind::BoundaryViolation => "boundary-violation",
-                        IssueKind::CoverageGaps => "coverage-gaps",
-                        IssueKind::FeatureFlag => "feature-flag",
-                        IssueKind::Complexity => "complexity",
-                        IssueKind::StaleSuppression => "stale-suppression",
-                        IssueKind::PnpmCatalogEntry => "unused-catalog-entry",
-                        IssueKind::EmptyCatalogGroup => "empty-catalog-group",
-                        IssueKind::UnresolvedCatalogReference => "unresolved-catalog-reference",
-                        IssueKind::UnusedDependencyOverride => "unused-dependency-override",
-                        IssueKind::MisconfiguredDependencyOverride => {
-                            "misconfigured-dependency-override"
-                        }
-                    }
-                    .to_string()
-                });
+                let issue_kind_str = s.kind.map(|k| kind_to_kebab(k).to_string());
 
                 stale.push(StaleSuppression {
                     path: path.clone(),
@@ -340,6 +343,41 @@ impl<'a> SuppressionContext<'a> {
         }
 
         stale
+    }
+
+    /// Collect every suppression comment present in the analyzed files this run,
+    /// keyed by file path and kind.
+    ///
+    /// This is the "active-suppression state" the Fallow Impact value report
+    /// needs (issue: v1.5 attribution): to tell a genuinely resolved finding
+    /// (code removed) from one merely silenced by a newly-added `fallow-ignore`,
+    /// impact records which suppressions are in play each run and looks for ones
+    /// that newly appeared covering a disappeared finding's kind.
+    ///
+    /// Unlike [`Self::find_stale`], this returns ALL present suppressions
+    /// regardless of whether a core detector consumed them, and across every
+    /// kind (dead-code, complexity, code-duplication, ...). Impact only needs to
+    /// know a suppression for `(file, kind)` exists; a present-but-stale entry is
+    /// harmless because impact's discriminator keys on a suppression that newly
+    /// appeared between two recorded runs, and a finding silenced by a present
+    /// suppression was never reported (so it never enters the resolved tally).
+    /// Complexity and code-duplication suppressions are consumed in the CLI
+    /// layer rather than through this context, so capturing presence here is the
+    /// single uniform mechanism that covers all three impact categories.
+    #[must_use]
+    pub fn all_suppressions(&self, graph: &ModuleGraph) -> Vec<ActiveSuppression> {
+        let mut active = Vec::new();
+        for (&file_id, supps) in &self.by_file {
+            let path = &graph.modules[file_id.0 as usize].path;
+            for s in *supps {
+                active.push(ActiveSuppression {
+                    path: path.clone(),
+                    kind: s.kind.map(|k| kind_to_kebab(k).to_string()),
+                    is_file_level: s.line == 0,
+                });
+            }
+        }
+        active
     }
 }
 

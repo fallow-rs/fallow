@@ -2095,6 +2095,7 @@ mod tests {
                 ),
             ],
             suppression_count: 1,
+            active_suppressions: Vec::new(),
             feature_flags: vec![fallow_core::results::FeatureFlag {
                 path: "/f.ts".into(),
                 flag_name: "ENABLE_X".to_string(),

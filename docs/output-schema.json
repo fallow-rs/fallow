@@ -9858,6 +9858,25 @@
             "$ref": "#/definitions/ContainmentEvent"
           },
           "description": "Most recent containment events (newest last), capped for display."
+        },
+        "resolved_total": {
+          "type": "integer",
+          "description": "Lifetime count of findings fallow credits as genuinely resolved (code\nremoved or refactored, never a `fallow-ignore`). v1.5."
+        },
+        "suppressed_total": {
+          "type": "integer",
+          "description": "Lifetime count of findings silenced by a newly-added `fallow-ignore`.\nReported as honest context, never as a win. v1.5."
+        },
+        "recent_resolved": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ResolutionEvent"
+          },
+          "description": "Most recent resolution events (newest last), capped for display. v1.5."
+        },
+        "attribution_active": {
+          "type": "boolean",
+          "description": "Whether per-finding attribution has a baseline yet. False on a freshly\nupgraded v1 store (no frontier captured), which the renderer uses to show\n\"resolution tracking starts from your next run\" instead of a bare zero."
         }
       },
       "required": [
@@ -9865,7 +9884,11 @@
         "enabled",
         "record_count",
         "containment_count",
-        "recent_containment"
+        "recent_containment",
+        "resolved_total",
+        "suppressed_total",
+        "recent_resolved",
+        "attribution_active"
       ],
       "title": "fallow impact --format json",
       "description": "The rendered impact report, derived purely from the store (no analysis run)."
@@ -9923,7 +9946,44 @@
           "description": "First release of the `fallow impact --format json` shape."
         }
       ],
-      "description": "Wire-version discriminator for [`ImpactReport`]. Independent from the global\n[`crate::output_envelope::SchemaVersion`] (the impact report versions on its\nown cadence) and from the on-disk [`STORE_SCHEMA_VERSION`] (the persisted\nstore shape versions separately). Serializes as a string `const` so JSON\nconsumers can switch on it, matching the other independently-versioned\nenvelopes (e.g. `CoverageAnalyzeSchemaVersion`)."
+      "description": "Wire-version discriminator for [`ImpactReport`]. Independent from the global\n`SchemaVersion` (the impact report versions on its own cadence) and from the\non-disk `STORE_SCHEMA_VERSION` (the persisted store shape versions\nseparately). Serializes as a string `const` so JSON consumers can switch on\nit, matching the other independently-versioned envelopes (e.g.\n`CoverageAnalyzeSchemaVersion`)."
+    },
+    "ResolutionEvent": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "The resolved finding's kind, kebab-case (e.g. `\"unused-export\"`)."
+        },
+        "path": {
+          "type": "string",
+          "description": "Workspace-relative, forward-slash path of the file the finding was in."
+        },
+        "symbol": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The finding's symbol (export / member / dependency name), when it has\none. `None` for file-level and content-hash-keyed findings (duplication)."
+        },
+        "git_sha": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Short git SHA of the run that recorded the resolution, when in a git repo."
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "ISO-8601 timestamp of the recording run."
+        }
+      },
+      "required": [
+        "kind",
+        "path",
+        "timestamp"
+      ],
+      "description": "A genuinely-resolved finding, recorded for the recent-resolutions display."
     }
   }
 }
