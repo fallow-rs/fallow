@@ -1,0 +1,380 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: redact_sarif_version(&json_str)
+---
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "fallow",
+          "version": "[VERSION]",
+          "informationUri": "https://github.com/fallow-rs/fallow",
+          "rules": [
+            {
+              "id": "fallow/high-cyclomatic-complexity",
+              "shortDescription": {
+                "text": "Function has high cyclomatic complexity"
+              },
+              "fullDescription": {
+                "text": "McCabe cyclomatic complexity exceeds the configured threshold. Cyclomatic complexity counts the number of independent paths through a function (1 + decision points: if/else, switch cases, loops, ternary, logical operators). High values indicate functions that are hard to test exhaustively. fallow also emits this rule on synthetic `<template>` findings (Angular .html templates and inline `@Component({ template: ... })` literals), counting template control-flow blocks (`@if`, `@else if`, `@for`, `@case`, `@defer (when ...)`, legacy `*ngIf`/`*ngFor`) plus ternary and logical operators inside bound attributes and `{{ }}` interpolations; and on synthetic `<component>` rollup findings whose `cyclomatic` is the worst class method's score plus the template's. Ranking and `--targets` use the rollup total; JSON exposes the per-half breakdown under `component_rollup`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#cyclomatic-complexity",
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "fallow/high-cognitive-complexity",
+              "shortDescription": {
+                "text": "Function has high cognitive complexity"
+              },
+              "fullDescription": {
+                "text": "SonarSource cognitive complexity exceeds the configured threshold. Unlike cyclomatic complexity, cognitive complexity penalizes nesting depth and non-linear control flow (breaks, continues, early returns). It measures how hard a function is to understand when reading sequentially. fallow also emits this rule on synthetic `<template>` findings (Angular .html templates and inline `@Component({ template: ... })` literals), where nesting penalties accumulate on stacked `@if`/`@for`/`@switch` blocks; and on synthetic `<component>` rollup findings whose `cognitive` is the worst class method's score plus the template's. Ranking and `--targets` use the rollup total; JSON exposes the per-half breakdown under `component_rollup`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#cognitive-complexity",
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "fallow/high-complexity",
+              "shortDescription": {
+                "text": "Function exceeds both complexity thresholds"
+              },
+              "fullDescription": {
+                "text": "Function exceeds both cyclomatic and cognitive complexity thresholds. This is the strongest signal that a function needs refactoring, it has many paths AND is hard to understand. The same rule fires on synthetic `<template>` findings (Angular .html templates and inline `@Component({ template: ... })` literals) when both metrics exceed their thresholds, and on synthetic `<component>` rollup findings whose totals are the worst class method's score plus the template's. Ranking and `--targets` use the rollup totals; JSON exposes the per-half breakdown under `component_rollup`."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#complexity-metrics",
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "fallow/high-crap-score",
+              "shortDescription": {
+                "text": "Function has a high CRAP score (complexity combined with low coverage)"
+              },
+              "fullDescription": {
+                "text": "The function's CRAP (Change Risk Anti-Patterns) score meets or exceeds the configured threshold. CRAP combines cyclomatic complexity with test coverage using the Savoia and Evans (2007) formula: `CC^2 * (1 - coverage/100)^3 + CC`. High CRAP indicates changes to this function carry high risk because it is complex AND poorly tested. Pair with `--coverage` for accurate per-function scoring; without it fallow estimates coverage from the module graph."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#crap-score",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/refactoring-target",
+              "shortDescription": {
+                "text": "File identified as a high-priority refactoring candidate"
+              },
+              "fullDescription": {
+                "text": "File identified as a refactoring candidate based on a weighted combination of complexity density, churn velocity, dead code ratio, fan-in (blast radius), and fan-out (coupling). Categories: urgent churn+complexity, break circular dependency, split high-impact file, remove dead code, extract complex functions, reduce coupling."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#refactoring-targets",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/untested-file",
+              "shortDescription": {
+                "text": "Runtime-reachable file has no test dependency path"
+              },
+              "fullDescription": {
+                "text": "A file is reachable from runtime entry points but not from any discovered test entry point. This indicates production code that no test imports, directly or transitively, according to the static module graph."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#coverage-gaps",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/untested-export",
+              "shortDescription": {
+                "text": "Runtime-reachable export has no test dependency path"
+              },
+              "fullDescription": {
+                "text": "A value export is reachable from runtime entry points but no test-reachable module references it. This is a static test dependency gap rather than line coverage, and highlights exports exercised only through production entry paths."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#coverage-gaps",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/runtime-safe-to-delete",
+              "shortDescription": {
+                "text": "Statically unused AND never invoked in production with V8 tracking"
+              },
+              "fullDescription": {
+                "text": "The function is both statically unreachable in the module graph and was never invoked during the observed runtime coverage window. This is the highest-confidence delete signal fallow emits."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#runtime-coverage",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/runtime-review-required",
+              "shortDescription": {
+                "text": "Statically used but never invoked in production"
+              },
+              "fullDescription": {
+                "text": "The function is reachable in the module graph (or exercised by tests / untracked call sites) but was not invoked during the observed runtime coverage window. Needs a human look: may be seasonal, error-path only, or legitimately unused."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#runtime-coverage",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/runtime-low-traffic",
+              "shortDescription": {
+                "text": "Function was invoked below the low-traffic threshold"
+              },
+              "fullDescription": {
+                "text": "The function was invoked in production but below the configured `--low-traffic-threshold` fraction of total trace count (spec default 0.1%). Effectively dead for the current period."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#runtime-coverage",
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "fallow/runtime-coverage-unavailable",
+              "shortDescription": {
+                "text": "Runtime coverage could not be resolved for this function"
+              },
+              "fullDescription": {
+                "text": "The function could not be matched to a V8-tracked coverage entry. Common causes: the function lives in a worker thread (separate V8 isolate), it is lazy-parsed and never reached the JIT tier, or its source map did not resolve to the expected source path. This is advisory, not a dead-code signal."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#runtime-coverage",
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "fallow/runtime-coverage",
+              "shortDescription": {
+                "text": "Runtime coverage finding"
+              },
+              "fullDescription": {
+                "text": "Generic runtime-coverage finding for verdicts not covered by a more specific rule. Covers the forward-compat `unknown` sentinel; the CLI filters `active` entries out of `runtime_coverage.findings` so the surfaced list stays actionable."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#runtime-coverage",
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "fallow/coverage-intelligence-risky-change",
+              "shortDescription": {
+                "text": "Changed hot path combines high CRAP and low test coverage"
+              },
+              "fullDescription": {
+                "text": "Coverage intelligence combined change scope, runtime hot-path evidence, low test coverage, and high CRAP into a risky-change finding. Add focused tests or split the change before merging."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#coverage-intelligence",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/coverage-intelligence-delete",
+              "shortDescription": {
+                "text": "Static and runtime evidence indicate code can be deleted"
+              },
+              "fullDescription": {
+                "text": "Coverage intelligence combined static unused status, runtime cold evidence, and lack of test reachability into a high-confidence delete recommendation."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#coverage-intelligence",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/coverage-intelligence-review",
+              "shortDescription": {
+                "text": "Cold reachable uncovered code needs owner review"
+              },
+              "fullDescription": {
+                "text": "Coverage intelligence found code that is statically reachable but cold in runtime evidence, uncovered by tests, and ownership-risky. Route it to an owner before changing or deleting it."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#coverage-intelligence",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/coverage-intelligence-refactor",
+              "shortDescription": {
+                "text": "Hot covered code has high CRAP and should be refactored carefully"
+              },
+              "fullDescription": {
+                "text": "Coverage intelligence found hot production code that is covered by tests but still has high CRAP. Refactor carefully while preserving behavior."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#coverage-intelligence",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "fallow/high-complexity",
+          "level": "warning",
+          "message": {
+            "text": "'processData' has cyclomatic complexity 25 (threshold: 20) and cognitive complexity 30 (threshold: 15)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/complex.ts"
+                },
+                "region": {
+                  "startLine": 42,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "c3976b43718b2197",
+            "primaryLocationLineHash/v1": "c3976b43718b2197"
+          }
+        },
+        {
+          "ruleId": "fallow/runtime-review-required",
+          "level": "warning",
+          "message": {
+            "text": "'coldPath' runtime coverage verdict: review required (0 invocations)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/cold.ts"
+                },
+                "region": {
+                  "startLine": 14,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "50be8b87d2e2ba94",
+            "primaryLocationLineHash/v1": "50be8b87d2e2ba94"
+          }
+        },
+        {
+          "ruleId": "fallow/runtime-coverage-unavailable",
+          "level": "note",
+          "message": {
+            "text": "'lateBound' runtime coverage verdict: coverage unavailable (untracked)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/unknown.ts"
+                },
+                "region": {
+                  "startLine": 8,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "2d109423d5abfa94",
+            "primaryLocationLineHash/v1": "2d109423d5abfa94"
+          }
+        },
+        {
+          "ruleId": "fallow/coverage-intelligence-risky-change",
+          "level": "warning",
+          "message": {
+            "text": "'handler' coverage intelligence verdict: risky-change-detected (add-test-or-split-before-merge, signals: changed, hot_path, low_test_coverage, high_crap)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/hot.ts"
+                },
+                "region": {
+                  "startLine": 10,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "51d70fbdfc758d28",
+            "primaryLocationLineHash/v1": "51d70fbdfc758d28"
+          },
+          "properties": {
+            "coverage_intelligence_id": "fallow:coverage-intel:0badc0de",
+            "verdict": "risky-change-detected",
+            "recommendation": "add-test-or-split-before-merge",
+            "confidence": "high",
+            "signals": [
+              "changed",
+              "hot_path",
+              "low_test_coverage",
+              "high_crap"
+            ],
+            "related_ids": [
+              "fallow:hot:cafebabe"
+            ]
+          }
+        },
+        {
+          "ruleId": "fallow/coverage-intelligence-delete",
+          "level": "warning",
+          "message": {
+            "text": "'deadPath' coverage intelligence verdict: high-confidence-delete (delete-after-confirming-owner, signals: static_unused, runtime_cold, no_test_path)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/dead.ts"
+                },
+                "region": {
+                  "startLine": 4,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "3a98b15b50d82422",
+            "primaryLocationLineHash/v1": "3a98b15b50d82422"
+          },
+          "properties": {
+            "coverage_intelligence_id": "fallow:coverage-intel:1deadfa1",
+            "verdict": "high-confidence-delete",
+            "recommendation": "delete-after-confirming-owner",
+            "confidence": "high",
+            "signals": [
+              "static_unused",
+              "runtime_cold",
+              "no_test_path"
+            ],
+            "related_ids": [
+              "fallow:prod:deadbeef"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
