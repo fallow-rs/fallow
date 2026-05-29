@@ -40,6 +40,7 @@ mod runtime_support;
 mod schema;
 mod setup_hooks;
 mod signal;
+mod telemetry;
 mod validate;
 mod vital_signs;
 mod watch;
@@ -90,6 +91,7 @@ Automation and CI:
 Runtime coverage:
   coverage       Set up or analyze runtime coverage data
   license        Manage the paid-feature license
+  telemetry      Manage opt-in product telemetry
 
 Reference:
   schema         Dump the CLI interface as machine-readable JSON
@@ -179,6 +181,14 @@ struct Cli {
     /// Compare against a previously saved baseline file
     #[arg(long, global = true)]
     baseline: Option<PathBuf>,
+
+    /// Correlate this run with a previous telemetry analysis run.
+    ///
+    /// Used only for opt-in telemetry follow-up measurement. The value is not
+    /// interpreted as a path, repository, package, or user identifier. Hidden
+    /// from `--help` until the correlation producer (`analysis_run_id`) ships.
+    #[arg(long, global = true, value_name = "RUN_ID", hide = true)]
+    parent_run: Option<String>,
 
     /// Save the current results as a baseline file
     #[arg(long, global = true)]
@@ -941,6 +951,18 @@ enum Command {
         subcommand: LicenseCli,
     },
 
+    /// Manage opt-in product telemetry.
+    ///
+    /// Telemetry is off by default. It never collects repository names, paths,
+    /// package names, source code, config values, raw errors, or raw agent
+    /// detection evidence. Use `fallow telemetry inspect --example` to see the
+    /// documented payload shape, or prefix a real command with
+    /// `FALLOW_TELEMETRY=inspect` to print the exact payload without sending.
+    Telemetry {
+        #[command(subcommand)]
+        subcommand: TelemetryCli,
+    },
+
     /// Runtime coverage workflow.
     ///
     /// `setup` is the resumable single-entry-point first-run flow: license
@@ -1098,6 +1120,22 @@ enum LicenseCli {
     Refresh,
     /// Remove the local license file.
     Deactivate,
+}
+
+#[derive(Clone, Copy, clap::Subcommand)]
+enum TelemetryCli {
+    /// Show effective telemetry state, precedence, and controls.
+    Status,
+    /// Enable opt-in telemetry in the user-level fallow config.
+    Enable,
+    /// Disable telemetry in the user-level fallow config.
+    Disable,
+    /// Explain inspect mode or print example payloads.
+    Inspect {
+        /// Print documented example payloads and field purposes.
+        #[arg(long)]
+        example: bool,
+    },
 }
 
 #[derive(clap::Subcommand)]
@@ -2032,6 +2070,9 @@ fn main() -> ExitCode {
     }
 
     let fmt = resolve_format(&cli);
+    if let Some(code) = run_telemetry_command_if_requested(&mut cli, fmt.output) {
+        return code;
+    }
     setup_tracing();
 
     let (root, threads) = match validate_inputs(&cli, fmt.output) {
@@ -2153,6 +2194,8 @@ fn main() -> ExitCode {
     let save_to_config = cli.save_regression_baseline.is_some() && save_regression_file.is_none();
 
     let command = cli.command.take();
+    let telemetry_workflow = telemetry_workflow_for_command(command.as_ref(), output);
+    let telemetry_start = std::time::Instant::now();
     let dispatch = DispatchContext {
         cli: &cli,
         root: &root,
@@ -2164,10 +2207,34 @@ fn main() -> ExitCode {
         save_regression_file: save_regression_file.as_ref(),
         save_to_config,
     };
-    match command {
+    let exit_code = match command {
         None => dispatch_bare_command(&dispatch),
         Some(cmd) => dispatch_subcommand(cmd, &dispatch),
+    };
+    telemetry::record_workflow(&telemetry::WorkflowRecord {
+        workflow: telemetry_workflow,
+        output,
+        quiet,
+        elapsed: telemetry_start.elapsed(),
+        exit_code,
+        parent_run: cli.parent_run.as_deref(),
+    });
+    if exit_code == ExitCode::SUCCESS {
+        telemetry::maybe_print_opt_in_note(output, quiet);
     }
+    exit_code
+}
+
+fn run_telemetry_command_if_requested(
+    cli: &mut Cli,
+    output: fallow_config::OutputFormat,
+) -> Option<ExitCode> {
+    if matches!(cli.command, Some(Command::Telemetry { .. }))
+        && let Some(Command::Telemetry { subcommand }) = cli.command.take()
+    {
+        return Some(telemetry::run(map_telemetry_subcommand(subcommand), output));
+    }
+    None
 }
 
 fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
@@ -2624,6 +2691,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             from,
         } => migrate::run_migrate(root, toml, jsonc, dry_run, from.as_deref()),
         Command::License { subcommand } => license::run(&map_license_subcommand(subcommand)),
+        Command::Telemetry { .. } => unreachable!("handled before root validation"),
         Command::Coverage { subcommand } => coverage::run(
             map_coverage_subcommand(&subcommand, cli.explain),
             &coverage::RunContext {
@@ -2652,6 +2720,44 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             gitignore_claude,
             uninstall,
         }),
+    }
+}
+
+fn telemetry_workflow_for_command(
+    command: Option<&Command>,
+    output: fallow_config::OutputFormat,
+) -> telemetry::Workflow {
+    match command {
+        None | Some(Command::Flags { .. }) => telemetry::Workflow::CodeQualityReview,
+        Some(Command::Check { .. }) => telemetry::Workflow::DeadCode,
+        Some(Command::Dupes { .. }) => telemetry::Workflow::Dupes,
+        Some(Command::Health { .. }) => telemetry::Workflow::Health,
+        Some(Command::Audit { .. }) => telemetry::Workflow::Audit,
+        Some(Command::Ci { .. }) => match output {
+            fallow_config::OutputFormat::ReviewGitlab
+            | fallow_config::OutputFormat::PrCommentGitlab
+            | fallow_config::OutputFormat::CodeClimate => telemetry::Workflow::GitlabCi,
+            _ => telemetry::Workflow::GithubAction,
+        },
+        Some(Command::Coverage { .. }) => telemetry::Workflow::RuntimeCoverageSetup,
+        Some(
+            Command::List { .. }
+            | Command::Workspaces
+            | Command::Fix { .. }
+            | Command::Watch { .. }
+            | Command::Init { .. }
+            | Command::Hooks { .. }
+            | Command::ConfigSchema
+            | Command::PluginSchema
+            | Command::Config { .. }
+            | Command::Explain { .. }
+            | Command::Schema
+            | Command::CiTemplate { .. }
+            | Command::Migrate { .. }
+            | Command::License { .. }
+            | Command::Telemetry { .. }
+            | Command::SetupHooks { .. },
+        ) => telemetry::Workflow::Unknown,
     }
 }
 
@@ -2772,6 +2878,15 @@ fn map_license_subcommand(sub: LicenseCli) -> license::LicenseSubcommand {
         LicenseCli::Status => license::LicenseSubcommand::Status,
         LicenseCli::Refresh => license::LicenseSubcommand::Refresh,
         LicenseCli::Deactivate => license::LicenseSubcommand::Deactivate,
+    }
+}
+
+fn map_telemetry_subcommand(sub: TelemetryCli) -> telemetry::TelemetryCommand {
+    match sub {
+        TelemetryCli::Status => telemetry::TelemetryCommand::Status,
+        TelemetryCli::Enable => telemetry::TelemetryCommand::Enable,
+        TelemetryCli::Disable => telemetry::TelemetryCommand::Disable,
+        TelemetryCli::Inspect { example } => telemetry::TelemetryCommand::Inspect { example },
     }
 }
 
