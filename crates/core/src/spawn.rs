@@ -24,7 +24,7 @@ use std::process::Command;
 ///
 /// This is the canonical, and only permitted, `Command::new` on fallow's
 /// analysis path. Callers add `.args(...)`, `.current_dir(...)`, and so on.
-#[allow(
+#[expect(
     clippy::disallowed_methods,
     reason = "canonical git spawn wrapper: the sole Command::new permitted on the analysis path"
 )]
