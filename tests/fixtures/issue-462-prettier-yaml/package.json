@@ -1,0 +1,11 @@
+{
+  "name": "issue-462-prettier-yaml",
+  "version": "1.0.0",
+  "type": "module",
+  "devDependencies": {
+    "prettier": "latest",
+    "prettier-plugin-tailwindcss": "latest",
+    "prettier-plugin-organize-imports": "latest",
+    "unused-control": "latest"
+  }
+}

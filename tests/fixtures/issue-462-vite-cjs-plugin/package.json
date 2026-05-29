@@ -1,0 +1,12 @@
+{
+  "name": "issue-462-vite-cjs-plugin",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "latest",
+    "vite-plugin-svgr": "latest",
+    "vite-plugin-eslint": "latest"
+  }
+}

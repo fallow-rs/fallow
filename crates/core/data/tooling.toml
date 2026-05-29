@@ -1,0 +1,397 @@
+# Community-maintainable catalogue of known dev tooling packages.
+#
+# Packages listed here are never reported as unused devDependencies, because
+# they are used via the CLI or config files rather than imported in application
+# source. This complements the per-plugin `tooling_dependencies()` lists with
+# tooling that is not tied to any single framework plugin.
+#
+# This file is the single source of truth: it is embedded into the binary via
+# `include_str!` and parsed once at startup (see `crates/core/src/plugins/tooling.rs`).
+# There is NO regeneration step. To add a tool, add one entry below and open a PR.
+#
+# How to choose:
+#   - [[prefix]]: a scope or family where EVERY package is tooling
+#     (e.g. `@types/`, `@vitest/`). Matched with `name.starts_with(pattern)`.
+#   - [[exact]]: a single package name. Matched exactly.
+#
+# Do NOT add framework-plugin packages here (anything matching
+# `vite-plugin-*`, `prettier-plugin-*`, `eslint-plugin-*`, `@rollup/plugin-*`).
+# Those must be credited by the relevant plugin's config parser when they
+# actually appear in the config file, otherwise a declared-but-unused plugin is
+# silently treated as used (a false negative). The catalogue parse test rejects
+# such entries.
+#
+# `notes` (on prefix) and `ecosystem` (on exact) are optional, for human
+# context and grouping in the diff. They do not affect matching.
+
+# ── Prefixes: package families where every member is tooling ──────────────
+
+[[prefix]]
+pattern = "@types/"
+notes = "TypeScript type definitions"
+
+[[prefix]]
+pattern = "husky"
+
+[[prefix]]
+pattern = "lint-staged"
+
+[[prefix]]
+pattern = "commitlint"
+
+[[prefix]]
+pattern = "@commitlint"
+
+[[prefix]]
+pattern = "stylelint"
+
+[[prefix]]
+pattern = "@vitest/"
+notes = "Vitest companion packages (coverage, ui)"
+
+[[prefix]]
+pattern = "@jest/"
+
+[[prefix]]
+pattern = "@tapjs/"
+
+[[prefix]]
+pattern = "@testing-library/"
+
+[[prefix]]
+pattern = "@playwright/"
+
+[[prefix]]
+pattern = "@react-native-community/cli"
+
+[[prefix]]
+pattern = "@react-native/"
+
+[[prefix]]
+pattern = "secretlint"
+
+[[prefix]]
+pattern = "@secretlint/"
+
+[[prefix]]
+pattern = "oxlint"
+
+[[prefix]]
+pattern = "@semantic-release/"
+
+[[prefix]]
+pattern = "semantic-release"
+
+[[prefix]]
+pattern = "@release-it/"
+
+[[prefix]]
+pattern = "@lerna-lite/"
+
+[[prefix]]
+pattern = "@changesets/"
+
+[[prefix]]
+pattern = "@graphql-codegen/"
+
+[[prefix]]
+pattern = "@biomejs/"
+
+[[prefix]]
+pattern = "@electron-forge/"
+
+[[prefix]]
+pattern = "@electron/"
+
+[[prefix]]
+pattern = "@formatjs/"
+
+# ── Exact package names ───────────────────────────────────────────────────
+
+[[exact]]
+name = "typescript"
+ecosystem = "core"
+
+[[exact]]
+name = "prettier"
+ecosystem = "formatting"
+
+[[exact]]
+name = "turbo"
+ecosystem = "monorepo"
+
+[[exact]]
+name = "concurrently"
+ecosystem = "scripts"
+
+[[exact]]
+name = "cross-env"
+ecosystem = "scripts"
+
+[[exact]]
+name = "rimraf"
+ecosystem = "scripts"
+
+[[exact]]
+name = "npm-run-all"
+ecosystem = "scripts"
+
+[[exact]]
+name = "npm-run-all2"
+ecosystem = "scripts"
+
+[[exact]]
+name = "nodemon"
+ecosystem = "scripts"
+
+[[exact]]
+name = "ts-node"
+ecosystem = "runtime"
+
+[[exact]]
+name = "tsx"
+ecosystem = "runtime"
+
+[[exact]]
+name = "knip"
+ecosystem = "analysis"
+
+[[exact]]
+name = "fallow"
+ecosystem = "analysis"
+
+[[exact]]
+name = "jest"
+ecosystem = "testing"
+
+[[exact]]
+name = "vitest"
+ecosystem = "testing"
+
+[[exact]]
+name = "tap"
+ecosystem = "testing"
+
+[[exact]]
+name = "happy-dom"
+ecosystem = "testing"
+
+[[exact]]
+name = "jsdom"
+ecosystem = "testing"
+
+[[exact]]
+name = "vite"
+ecosystem = "bundler"
+
+[[exact]]
+name = "sass"
+ecosystem = "styling"
+
+[[exact]]
+name = "sass-embedded"
+ecosystem = "styling"
+
+[[exact]]
+name = "webpack"
+ecosystem = "bundler"
+
+[[exact]]
+name = "webpack-cli"
+ecosystem = "bundler"
+
+[[exact]]
+name = "webpack-dev-server"
+ecosystem = "bundler"
+
+[[exact]]
+name = "esbuild"
+ecosystem = "bundler"
+
+[[exact]]
+name = "rollup"
+ecosystem = "bundler"
+
+[[exact]]
+name = "swc"
+ecosystem = "transpiler"
+
+[[exact]]
+name = "@swc/core"
+ecosystem = "transpiler"
+
+[[exact]]
+name = "@swc/jest"
+ecosystem = "testing"
+
+[[exact]]
+name = "terser"
+ecosystem = "bundler"
+
+[[exact]]
+name = "cssnano"
+ecosystem = "styling"
+
+[[exact]]
+name = "sharp"
+ecosystem = "build"
+
+[[exact]]
+name = "release-it"
+ecosystem = "release"
+
+[[exact]]
+name = "lerna"
+ecosystem = "monorepo"
+
+[[exact]]
+name = "dotenv-cli"
+ecosystem = "scripts"
+
+[[exact]]
+name = "dotenv-flow"
+ecosystem = "scripts"
+
+[[exact]]
+name = "oxfmt"
+ecosystem = "formatting"
+
+[[exact]]
+name = "jscpd"
+ecosystem = "analysis"
+
+[[exact]]
+name = "npm-check-updates"
+ecosystem = "deps"
+
+[[exact]]
+name = "markdownlint-cli"
+ecosystem = "linting"
+
+[[exact]]
+name = "npm-package-json-lint"
+ecosystem = "linting"
+
+[[exact]]
+name = "synp"
+ecosystem = "deps"
+
+[[exact]]
+name = "flow-bin"
+ecosystem = "types"
+
+[[exact]]
+name = "i18next-parser"
+ecosystem = "i18n"
+
+[[exact]]
+name = "i18next-conv"
+ecosystem = "i18n"
+
+[[exact]]
+name = "webpack-bundle-analyzer"
+ecosystem = "bundler"
+
+[[exact]]
+name = "@vitejs/plugin-vue"
+ecosystem = "bundler"
+
+[[exact]]
+name = "@vitejs/plugin-react"
+ecosystem = "bundler"
+
+[[exact]]
+name = "next-sitemap"
+ecosystem = "build"
+
+[[exact]]
+name = "tsup"
+ecosystem = "bundler"
+
+[[exact]]
+name = "unbuild"
+ecosystem = "bundler"
+
+[[exact]]
+name = "typedoc"
+ecosystem = "docs"
+
+[[exact]]
+name = "nx"
+ecosystem = "monorepo"
+
+[[exact]]
+name = "@manypkg/cli"
+ecosystem = "monorepo"
+
+[[exact]]
+name = "vue-tsc"
+ecosystem = "types"
+
+[[exact]]
+name = "@vue/tsconfig"
+ecosystem = "config"
+
+[[exact]]
+name = "@tsconfig/node20"
+ecosystem = "config"
+
+[[exact]]
+name = "@tsconfig/react-native"
+ecosystem = "config"
+
+[[exact]]
+name = "@typescript/native-preview"
+ecosystem = "core"
+
+[[exact]]
+name = "tw-animate-css"
+ecosystem = "styling"
+
+[[exact]]
+name = "@vitejs/plugin-react-swc"
+ecosystem = "bundler"
+
+[[exact]]
+name = "@vitejs/plugin-legacy"
+ecosystem = "bundler"
+
+[[exact]]
+name = "rolldown"
+ecosystem = "bundler"
+
+[[exact]]
+name = "rolldown-vite"
+ecosystem = "bundler"
+
+[[exact]]
+name = "oxc-transform"
+ecosystem = "transpiler"
+
+[[exact]]
+name = "playwright"
+ecosystem = "testing"
+
+[[exact]]
+name = "puppeteer"
+ecosystem = "testing"
+
+[[exact]]
+name = "madge"
+ecosystem = "analysis"
+
+[[exact]]
+name = "patch-package"
+ecosystem = "deps"
+
+[[exact]]
+name = "electron"
+ecosystem = "build"
+
+[[exact]]
+name = "electron-builder"
+ecosystem = "build"
+
+[[exact]]
+name = "electron-vite"
+ecosystem = "build"

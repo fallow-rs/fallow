@@ -1,0 +1,15 @@
+{
+  "name": "issue-462-vite-unused-plugin",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "latest",
+    "vite-plugin-inspect": "latest",
+    "vite-plugin-svgr": "latest",
+    "vite-plugin-eslint": "latest",
+    "unused-control": "latest"
+  }
+}

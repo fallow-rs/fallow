@@ -3,123 +3,97 @@
 //! Known dev dependencies that are tooling (used by CLI/config, not imported in
 //! application code). These complement the per-plugin `tooling_dependencies()`
 //! lists with dependencies that aren't tied to any single plugin.
+//!
+//! The catalogue is community-maintainable: the prefix and exact lists live in
+//! `crates/core/data/tooling.toml`, embedded via `include_str!` and parsed once
+//! at startup. There is no regeneration step. To add a tool, edit one entry in
+//! the TOML and open a PR. See `CONTRIBUTING.md`.
 
-/// Prefixes of package names that are always dev tooling.
-const GENERAL_TOOLING_PREFIXES: &[&str] = &[
-    "@types/",
-    "husky",
-    "lint-staged",
-    "commitlint",
-    "@commitlint",
-    "stylelint",
-    "@vitest/",
-    "@jest/",
-    "@tapjs/",
-    "@testing-library/",
-    "@playwright/",
-    "@react-native-community/cli",
-    "@react-native/",
-    "secretlint",
-    "@secretlint/",
-    "oxlint",
-    "@semantic-release/",
-    "semantic-release",
-    "@release-it/",
-    "@lerna-lite/",
-    "@changesets/",
-    "@graphql-codegen/",
-    "@biomejs/",
-    "@electron-forge/",
-    "@electron/",
-    "@formatjs/",
+use rustc_hash::FxHashSet;
+
+/// Embedded catalogue source. Because it is `include_str!`-embedded at compile
+/// time, a green `catalogue_parses` test guarantees the released binary parses.
+const CATALOGUE_TOML: &str = include_str!("../../data/tooling.toml");
+
+/// Framework-plugin name markers. A package whose bare name OR whose
+/// `@scope/`-stripped tail starts with one of these is a framework plugin and
+/// must NOT be listed in the catalogue (its config-parsing plugin credits it
+/// only when it actually appears in the config, avoiding a false negative). The
+/// tail check catches scoped community forms like
+/// `@ianvs/prettier-plugin-sort-imports`. Enforced by
+/// `catalogue_rejects_framework_plugin_exact_entries`.
+#[cfg(test)]
+const FRAMEWORK_PLUGIN_FAMILY_PREFIXES: &[&str] = &[
+    "vite-plugin-",
+    "prettier-plugin-",
+    "eslint-plugin-",
+    "rollup-plugin-",
 ];
 
-/// Exact package names that are always dev tooling.
-const GENERAL_TOOLING_EXACT: &[&str] = &[
-    "typescript",
-    "prettier",
-    "turbo",
-    "concurrently",
-    "cross-env",
-    "rimraf",
-    "npm-run-all",
-    "npm-run-all2",
-    "nodemon",
-    "ts-node",
-    "tsx",
-    "knip",
-    "fallow",
-    "jest",
-    "vitest",
-    "tap",
-    "happy-dom",
-    "jsdom",
-    "vite",
-    "sass",
-    "sass-embedded",
-    "webpack",
-    "webpack-cli",
-    "webpack-dev-server",
-    "esbuild",
-    "rollup",
-    "swc",
-    "@swc/core",
-    "@swc/jest",
-    "terser",
-    "cssnano",
-    "sharp",
-    "release-it",
-    "lerna",
-    "dotenv-cli",
-    "dotenv-flow",
-    "oxfmt",
-    "jscpd",
-    "npm-check-updates",
-    "markdownlint-cli",
-    "npm-package-json-lint",
-    "synp",
-    "flow-bin",
-    "i18next-parser",
-    "i18next-conv",
-    "webpack-bundle-analyzer",
-    "vite-plugin-svgr",
-    "vite-plugin-eslint",
-    "@vitejs/plugin-vue",
-    "@vitejs/plugin-react",
-    "next-sitemap",
-    "tsup",
-    "unbuild",
-    "typedoc",
-    "nx",
-    "@manypkg/cli",
-    "vue-tsc",
-    "@vue/tsconfig",
-    "@tsconfig/node20",
-    "@tsconfig/react-native",
-    "@typescript/native-preview",
-    "tw-animate-css",
-    "@ianvs/prettier-plugin-sort-imports",
-    "prettier-plugin-tailwindcss",
-    "prettier-plugin-organize-imports",
-    "@vitejs/plugin-react-swc",
-    "@vitejs/plugin-legacy",
-    "rolldown",
-    "rolldown-vite",
-    "oxc-transform",
-    "playwright",
-    "puppeteer",
-    "madge",
-    "patch-package",
-    "electron",
-    "electron-builder",
-    "electron-vite",
-];
+/// Official scoped framework-plugin namespaces, checked against the FULL name.
+/// `@rollup/plugin-*` is Rollup's official plugin scope. This is deliberately
+/// NOT generalized to `@scope/plugin-*`, because `@vitejs/plugin-react` and
+/// peers are legitimately-kept tooling exacts.
+#[cfg(test)]
+const FRAMEWORK_PLUGIN_SCOPED_PREFIXES: &[&str] = &["@rollup/plugin-"];
 
-/// Lazily-built set for O(1) exact-match lookups.
-fn tooling_exact_set() -> &'static rustc_hash::FxHashSet<&'static str> {
-    static SET: std::sync::OnceLock<rustc_hash::FxHashSet<&'static str>> =
-        std::sync::OnceLock::new();
-    SET.get_or_init(|| GENERAL_TOOLING_EXACT.iter().copied().collect())
+#[derive(serde::Deserialize)]
+struct ToolingCatalogue {
+    #[serde(default)]
+    prefix: Vec<PrefixEntry>,
+    #[serde(default)]
+    exact: Vec<ExactEntry>,
+}
+
+#[derive(serde::Deserialize)]
+struct PrefixEntry {
+    /// Match when `name.starts_with(pattern)`. Required and must be non-empty
+    /// (an empty pattern would match every package, disabling unused-dep
+    /// detection entirely).
+    pattern: String,
+    /// Optional human context; does not affect matching.
+    #[expect(
+        dead_code,
+        reason = "documentation field, surfaced via the catalogue source"
+    )]
+    #[serde(default)]
+    notes: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ExactEntry {
+    /// Exact package name to credit as tooling.
+    name: String,
+    /// Optional grouping label; does not affect matching.
+    #[expect(
+        dead_code,
+        reason = "documentation field, surfaced via the catalogue source"
+    )]
+    #[serde(default)]
+    ecosystem: Option<String>,
+}
+
+/// Parsed catalogue: ordered prefix patterns + an exact-match set.
+struct Catalogue {
+    prefixes: Vec<String>,
+    exact: FxHashSet<String>,
+}
+
+/// Parse and cache the embedded catalogue once. Panics with a clear message if
+/// the embedded TOML is malformed; this is unreachable in a released binary
+/// because the bytes are compile-time-embedded and gated by `catalogue_parses`.
+fn catalogue() -> &'static Catalogue {
+    static CATALOGUE: std::sync::OnceLock<Catalogue> = std::sync::OnceLock::new();
+    CATALOGUE.get_or_init(|| {
+        let parsed: ToolingCatalogue = toml::from_str(CATALOGUE_TOML).expect(
+            "embedded crates/core/data/tooling.toml must parse; run \
+             `cargo test -p fallow-core catalogue_parses` to see the error",
+        );
+        Catalogue {
+            prefixes: parsed.prefix.into_iter().map(|p| p.pattern).collect(),
+            exact: parsed.exact.into_iter().map(|e| e.name).collect(),
+        }
+    })
 }
 
 /// Check whether a package is a known tooling/dev dependency by name.
@@ -129,8 +103,12 @@ fn tooling_exact_set() -> &'static rustc_hash::FxHashSet<&'static str> {
 /// and aggregated separately in `AggregatedPluginResult`.
 #[must_use]
 pub fn is_known_tooling_dependency(name: &str) -> bool {
-    GENERAL_TOOLING_PREFIXES.iter().any(|p| name.starts_with(p))
-        || tooling_exact_set().contains(name)
+    let catalogue = catalogue();
+    catalogue
+        .prefixes
+        .iter()
+        .any(|p| name.starts_with(p.as_str()))
+        || catalogue.exact.contains(name)
 }
 
 #[cfg(test)]
@@ -262,9 +240,8 @@ mod tests {
         assert!(!is_known_tooling_dependency("type-fest"));
         assert!(!is_known_tooling_dependency("typestyle"));
         assert!(!is_known_tooling_dependency("prettier-bytes")); // not the exact "prettier"
-        // Note: "prettier-bytes" starts with "prettier" but only prefix matches
-        // check the prefixes list — "prettier" is NOT in GENERAL_TOOLING_PREFIXES,
-        // it's in GENERAL_TOOLING_EXACT. So "prettier-bytes" should not match.
+        // "prettier" is an [[exact]] entry in tooling.toml, not a [[prefix]],
+        // so "prettier-bytes" does not match.
     }
 
     #[test]
@@ -274,11 +251,21 @@ mod tests {
     }
 
     #[test]
-    fn prettier_plugins_are_tooling() {
-        assert!(is_known_tooling_dependency(
+    fn framework_plugin_packages_no_longer_exact_matched() {
+        // Issue #462: these 5 framework-plugin packages were removed from the
+        // catalogue. They are credited only when they actually appear in the
+        // parsed Vite / Prettier config (via the plugins' config parsers), so a
+        // declared-but-unused plugin now correctly surfaces as unused instead of
+        // being silently treated as used by an exact-name shadow match.
+        assert!(!is_known_tooling_dependency("vite-plugin-svgr"));
+        assert!(!is_known_tooling_dependency("vite-plugin-eslint"));
+        assert!(!is_known_tooling_dependency("prettier-plugin-tailwindcss"));
+        assert!(!is_known_tooling_dependency(
+            "prettier-plugin-organize-imports"
+        ));
+        assert!(!is_known_tooling_dependency(
             "@ianvs/prettier-plugin-sort-imports"
         ));
-        assert!(is_known_tooling_dependency("prettier-plugin-tailwindcss"));
     }
 
     // ── Additional prefix matching ────────────────────────────────
@@ -505,11 +492,99 @@ mod tests {
     }
 
     #[test]
-    fn tooling_exact_set_is_deterministic() {
-        // Calling the lazy set multiple times returns the same result
-        let set1 = tooling_exact_set();
-        let set2 = tooling_exact_set();
-        assert_eq!(set1.len(), set2.len());
-        assert!(set1.contains("typescript"));
+    fn catalogue_is_deterministic() {
+        // The OnceLock-cached catalogue returns identical results across calls.
+        assert_eq!(
+            is_known_tooling_dependency("typescript"),
+            is_known_tooling_dependency("typescript")
+        );
+        assert!(is_known_tooling_dependency("typescript"));
+    }
+
+    // ── Catalogue parse + schema guards (issue #462) ──────────────
+
+    #[test]
+    fn catalogue_parses() {
+        // The embedded TOML must parse and carry the canonical entries. Because
+        // the bytes are include_str!-embedded at compile time, this CI test
+        // passing == the released binary parses (no startup panic reachable).
+        let cat = catalogue();
+        assert!(!cat.prefixes.is_empty(), "catalogue must have prefixes");
+        assert!(!cat.exact.is_empty(), "catalogue must have exact entries");
+        assert!(cat.exact.contains("typescript"));
+        assert!(cat.prefixes.iter().any(|p| p == "@types/"));
+    }
+
+    #[test]
+    fn catalogue_has_no_empty_or_whitespace_prefixes() {
+        // An empty / whitespace prefix would make `name.starts_with(p)` match
+        // EVERY package, silently disabling unused-dependency detection.
+        for prefix in &catalogue().prefixes {
+            assert!(
+                !prefix.trim().is_empty(),
+                "catalogue prefix must be non-empty / non-whitespace; got {prefix:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn catalogue_has_no_duplicate_entries() {
+        // Re-parse from source so we can detect duplicates the FxHashSet would
+        // otherwise silently collapse.
+        let parsed: ToolingCatalogue = toml::from_str(CATALOGUE_TOML).unwrap();
+
+        let mut seen_exact = FxHashSet::default();
+        for entry in &parsed.exact {
+            assert!(
+                seen_exact.insert(entry.name.as_str()),
+                "duplicate exact catalogue entry: {:?}",
+                entry.name
+            );
+        }
+
+        let mut seen_prefix = FxHashSet::default();
+        for entry in &parsed.prefix {
+            assert!(
+                seen_prefix.insert(entry.pattern.as_str()),
+                "duplicate prefix catalogue entry: {:?}",
+                entry.pattern
+            );
+        }
+    }
+
+    #[test]
+    fn catalogue_rejects_framework_plugin_exact_entries() {
+        // Framework-plugin packages (vite-plugin-*, prettier-plugin-*,
+        // eslint-plugin-*, @rollup/plugin-*) must NOT be exact catalogue
+        // entries: their config-parsing plugin credits them only when present
+        // in the config, so listing them here re-introduces the false negative
+        // issue #462 removed. Keep them out (use the plugin's config parser).
+        let parsed: ToolingCatalogue = toml::from_str(CATALOGUE_TOML).unwrap();
+        for entry in &parsed.exact {
+            // Bare name, plus the segment after a leading `@scope/`, so a scoped
+            // community plugin like `@ianvs/prettier-plugin-sort-imports` is
+            // caught by its `prettier-plugin-` tail.
+            let tail = entry
+                .name
+                .strip_prefix('@')
+                .and_then(|rest| rest.split_once('/'))
+                .map(|(_scope, tail)| tail);
+            for bad in FRAMEWORK_PLUGIN_FAMILY_PREFIXES {
+                assert!(
+                    !entry.name.starts_with(bad) && !tail.is_some_and(|t| t.starts_with(bad)),
+                    "exact catalogue entry {:?} is a framework plugin ({bad}); \
+                     credit it in the relevant plugin's config parser instead of the catalogue",
+                    entry.name,
+                );
+            }
+            for bad in FRAMEWORK_PLUGIN_SCOPED_PREFIXES {
+                assert!(
+                    !entry.name.starts_with(bad),
+                    "exact catalogue entry {:?} is a framework plugin ({bad}); \
+                     credit it in the relevant plugin's config parser instead of the catalogue",
+                    entry.name,
+                );
+            }
+        }
     }
 }

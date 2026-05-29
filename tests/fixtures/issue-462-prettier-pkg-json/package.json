@@ -1,0 +1,14 @@
+{
+  "name": "issue-462-prettier-pkg-json",
+  "version": "1.0.0",
+  "type": "module",
+  "prettier": {
+    "semi": false,
+    "plugins": ["prettier-plugin-svelte"]
+  },
+  "devDependencies": {
+    "prettier": "latest",
+    "prettier-plugin-svelte": "latest",
+    "unused-control": "latest"
+  }
+}
