@@ -162,6 +162,12 @@ fn save(store: &ImpactStore, root: &Path) {
 }
 
 /// Enable Impact tracking. Returns whether it was newly enabled (false if already on).
+///
+/// Also ensures `.fallow/` is gitignored so the store is not accidentally
+/// committed: the store is the feature's local-only promise, and `enable` is the
+/// moment it is first created, so it is the right place to make
+/// "gitignored, never uploaded" true even when the user never ran `fallow init`.
+/// Best-effort: a gitignore write failure must never fail enabling.
 pub fn enable(root: &Path) -> bool {
     let mut store = load(root);
     let was_enabled = store.enabled;
@@ -170,7 +176,31 @@ pub fn enable(root: &Path) -> bool {
         store.schema_version = IMPACT_SCHEMA_VERSION;
     }
     save(&store, root);
+    ensure_fallow_gitignored(root);
     !was_enabled
+}
+
+/// Best-effort: append `.fallow/` to the project's `.gitignore` if no line
+/// already ignores it. Idempotent, and a no-op when `fallow init` (which writes
+/// the same entry) already added it. Any IO error is swallowed: enabling Impact
+/// must never fail on a gitignore write. `impact` lives in the library crate
+/// while `setup_hooks::ensure_gitignore_entry` is binary-only, so this small
+/// helper is intentionally self-contained rather than shared.
+fn ensure_fallow_gitignored(root: &Path) {
+    let path = root.join(".gitignore");
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let already = existing
+        .lines()
+        .any(|line| matches!(line.trim(), ".fallow" | ".fallow/"));
+    if already {
+        return;
+    }
+    let mut contents = existing;
+    if !contents.is_empty() && !contents.ends_with('\n') {
+        contents.push('\n');
+    }
+    contents.push_str(".fallow/\n");
+    let _ = std::fs::write(&path, contents);
 }
 
 /// Disable Impact tracking. Retains existing history. Returns whether it was
@@ -571,6 +601,27 @@ mod tests {
         assert_eq!(
             store.first_recorded.as_deref(),
             Some("2026-05-29T10:00:00Z")
+        );
+    }
+
+    #[test]
+    fn enable_gitignores_the_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        enable(root);
+        let gitignore = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert!(
+            gitignore.lines().any(|l| l.trim() == ".fallow/"),
+            "enable must gitignore .fallow/, got: {gitignore:?}"
+        );
+        // Idempotent: a second enable does not duplicate the entry, and an
+        // existing entry (e.g. from `fallow init`) is left alone.
+        enable(root);
+        let gitignore = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert_eq!(
+            gitignore.lines().filter(|l| l.trim() == ".fallow/").count(),
+            1,
+            "re-enabling must not duplicate the .fallow/ entry"
         );
     }
 

@@ -2781,7 +2781,21 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 let rendered = match output {
                     fallow_config::OutputFormat::Json => impact::render_json(&report),
                     fallow_config::OutputFormat::Markdown => impact::render_markdown(&report),
-                    _ => impact::render_human(&report),
+                    fallow_config::OutputFormat::Human => impact::render_human(&report),
+                    fallow_config::OutputFormat::Sarif
+                    | fallow_config::OutputFormat::Compact
+                    | fallow_config::OutputFormat::CodeClimate
+                    | fallow_config::OutputFormat::PrCommentGithub
+                    | fallow_config::OutputFormat::PrCommentGitlab
+                    | fallow_config::OutputFormat::ReviewGithub
+                    | fallow_config::OutputFormat::ReviewGitlab
+                    | fallow_config::OutputFormat::Badge => {
+                        return crate::error::emit_error(
+                            "impact supports human, json, and markdown output",
+                            2,
+                            output,
+                        );
+                    }
                 };
                 println!("{rendered}");
                 ExitCode::SUCCESS
