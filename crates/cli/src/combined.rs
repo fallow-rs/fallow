@@ -407,6 +407,7 @@ fn print_human_sections(
             opts.explain,
             None,
             None,
+            false,
             opts.summary,
             !show_headers,
             false,
@@ -900,6 +901,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         coverage_root: None,
         performance: opts.performance,
         min_severity: None,
+        report_only: false,
         runtime_coverage: None,
     }
 }

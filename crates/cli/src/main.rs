@@ -720,15 +720,28 @@ enum Command {
         #[arg(long)]
         score: bool,
 
-        /// Fail if the health score is below this threshold (0–100).
-        /// Implies --score. Useful as a CI quality gate.
+        /// Fail if the health score is below this threshold (0-100).
+        /// Implies --score. The authoritative CI quality gate: when set,
+        /// complexity findings become informational and the exit code is
+        /// driven solely by the score (so --min-score 0 always exits 0).
+        /// Composes with --min-severity (fails if either gate trips). Plain
+        /// `fallow health` (no gate flag) stays advisory and exits 1 on any
+        /// finding; for a gate on newly-introduced complexity use
+        /// `fallow audit --gate new-only`.
         #[arg(long, value_name = "N")]
         min_score: Option<f64>,
 
         /// Only exit with error for findings at or above this severity.
         /// Use --min-severity critical to ignore moderate/high findings in CI.
+        /// Composes with --min-score (the run fails if either gate trips).
         #[arg(long, value_name = "LEVEL", value_enum)]
         min_severity: Option<crate::health_types::FindingSeverity>,
+
+        /// Print the score and findings but never fail CI (always exit 0).
+        /// Advisory mode for surfacing health in logs without blocking.
+        /// Mutually exclusive with --min-score and --min-severity.
+        #[arg(long)]
+        report_only: bool,
 
         /// Git history window for hotspot analysis (default: 6m).
         /// Accepts durations (6m, 90d, 1y, 2w) or ISO dates (2025-06-01).
@@ -2529,6 +2542,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             score,
             min_score,
             min_severity,
+            report_only,
             since,
             min_commits,
             save_snapshot,
@@ -2565,6 +2579,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     score,
                     min_score,
                     min_severity,
+                    report_only,
                     since: since.as_deref(),
                     min_commits,
                     save_snapshot: save_snapshot.as_ref(),
@@ -3143,6 +3158,7 @@ struct HealthDispatchArgs<'a> {
     score: bool,
     min_score: Option<f64>,
     min_severity: Option<health_types::FindingSeverity>,
+    report_only: bool,
     since: Option<&'a str>,
     min_commits: Option<u32>,
     save_snapshot: Option<&'a Option<String>>,
@@ -3177,6 +3193,7 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         score,
         min_score,
         min_severity,
+        report_only,
         since,
         min_commits,
         save_snapshot,
@@ -3188,6 +3205,18 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         min_observation_volume,
         low_traffic_threshold,
     } = args;
+    // --report-only never fails CI, so combining it with the gate flags is a
+    // contradiction. Reject early with a targeted message rather than silently
+    // letting one win.
+    if report_only && (min_score.is_some() || min_severity.is_some()) {
+        return emit_error(
+            "--report-only cannot be combined with --min-score or --min-severity. \
+             --report-only always exits 0; drop it to gate on score/severity, or \
+             drop the gate flags to stay advisory.",
+            2,
+            output,
+        );
+    }
     // --effort implies --targets
     let targets = targets || effort.is_some();
     // --min-score, --save-snapshot, --trend, and --format badge imply --score
@@ -3264,6 +3293,7 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         score: eff_score,
         min_score,
         min_severity,
+        report_only,
         since,
         min_commits,
         explain: cli.explain,

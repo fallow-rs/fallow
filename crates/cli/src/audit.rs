@@ -3008,6 +3008,7 @@ fn run_audit_health<'a>(
         coverage_root: opts.coverage_root,
         performance: opts.performance,
         min_severity: None,
+        report_only: false,
         runtime_coverage,
     };
     let health_run = if let Some(shared) = shared_parse {
@@ -3154,7 +3155,7 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
             // (no orientation header), so let the standalone health renderer
             // emit it inline like `fallow health`.
             crate::health::print_health_result(
-                health, quiet, explain, None, None, false, true, false, false,
+                health, quiet, explain, None, None, false, false, true, false, false,
             );
         }
     }

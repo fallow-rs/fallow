@@ -130,6 +130,10 @@ pub struct HealthOptions<'a> {
     pub performance: bool,
     /// Only exit with error for findings at or above this severity level.
     pub min_severity: Option<FindingSeverity>,
+    /// Render the score and findings but never fail CI on any quality gate.
+    /// Mutually exclusive with `min_score` / `min_severity` (validated at the
+    /// CLI dispatch layer).
+    pub report_only: bool,
     /// Paid runtime coverage sidecar input.
     pub runtime_coverage: Option<RuntimeCoverageOptions>,
     // CLI calls source the parsed diff from the process-wide startup cache.
@@ -2486,6 +2490,7 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
         opts.explain,
         opts.min_score,
         opts.min_severity,
+        opts.report_only,
         opts.summary,
         true,
         true,
@@ -2524,6 +2529,19 @@ pub struct HealthResult {
 /// `skip_score_and_trend` MUST be `true`: the orientation header already
 /// renders both blocks and rendering them a second time here would duplicate
 /// the lines. Standalone `fallow health` invocations pass `false`.
+///
+/// Exit-code gating (when `report_only` is `false`): the score gate
+/// (`--min-score`), the findings gate (`--min-severity`, or any finding when
+/// no gate flag is set), the runtime-coverage gate, and the coverage-gap gate
+/// are OR-combined. `report_only` short-circuits all of them to
+/// `ExitCode::SUCCESS` after rendering. Combined and audit callers pass
+/// `report_only: false` (they own their own gate semantics).
+///
+/// Callers that pass `min_score: Some(_)` must ensure
+/// `result.report.health_score` is `Some` (the CLI guarantees this because
+/// `--min-score` implies `--score`). If the score is missing the score gate
+/// cannot evaluate, so a direct API caller that requests a score gate without
+/// computing the score would get a permissive `ExitCode::SUCCESS`.
 #[expect(
     clippy::too_many_arguments,
     reason = "thin formatting dispatcher that mirrors HealthOptions presentation knobs; bundling would be churn"
@@ -2534,6 +2552,7 @@ pub fn print_health_result(
     explain: bool,
     min_score: Option<f64>,
     min_severity: Option<FindingSeverity>,
+    report_only: bool,
     summary: bool,
     summary_heading: bool,
     show_explain_tip: bool,
@@ -2565,25 +2584,46 @@ pub fn print_health_result(
         return report_code;
     }
 
-    // Check --min-score threshold
+    // `--report-only` renders the score and findings for visibility but never
+    // fails CI on any quality gate. Genuine rendering / format errors are still
+    // surfaced via the `report_code` early return above. The flag is mutually
+    // exclusive with `--min-score` / `--min-severity` (validated in
+    // `dispatch_health`), so there is no gate flag to reconcile here.
+    if report_only {
+        return ExitCode::SUCCESS;
+    }
+
+    // Score gate: fail when the score is below the explicit `--min-score`
+    // threshold. When `--min-score` is set it is authoritative for the
+    // complexity-findings gate (findings below are demoted to informational),
+    // which is what fixes the surprising `--min-score 0` -> exit 1.
+    let mut score_gate_failed = false;
     if let Some(threshold) = min_score
         && let Some(ref hs) = result.report.health_score
         && hs.score < threshold
     {
+        score_gate_failed = true;
         if !quiet {
             eprintln!(
                 "Health score {:.1} ({}) is below minimum threshold {:.0}",
                 hs.score, hs.grade, threshold
             );
         }
-        return ExitCode::from(1);
     }
 
-    // Check findings against --min-severity filter
-    let has_failing_findings = if let Some(min_sev) = min_severity {
+    // Findings gate:
+    //  * `--min-severity` set: fail on findings at or above that severity
+    //    (composes with `--min-score`; both gates are OR-combined).
+    //  * neither gate flag set: any finding fails (back-compat default for
+    //    plain `fallow health`).
+    //  * `--min-score` set without `--min-severity`: findings are informational
+    //    and the score gate is authoritative.
+    let findings_gate_failed = if let Some(min_sev) = min_severity {
         result.report.findings.iter().any(|f| f.severity >= min_sev)
-    } else {
+    } else if min_score.is_none() {
         !result.report.findings.is_empty()
+    } else {
+        false
     };
     let has_failing_runtime_coverage =
         result
@@ -2600,12 +2640,30 @@ pub fn print_health_result(
                     )
                 })
             });
-    if has_failing_findings || has_failing_runtime_coverage {
+    if score_gate_failed || findings_gate_failed || has_failing_runtime_coverage {
         return ExitCode::from(1);
     }
 
     if result.should_fail_on_coverage_gaps && result.coverage_gaps_has_findings {
         return ExitCode::from(1);
+    }
+
+    // When `--min-score` demoted complexity findings to informational but the
+    // run still printed them, the visually-dominant findings list gives no
+    // signal that they did not fail the build. Emit one dimmed stderr line so
+    // a reader is not surprised by the exit 0. Human output only, never under
+    // `--quiet`, and only on the authoritative-score path.
+    if min_score.is_some()
+        && min_severity.is_none()
+        && !quiet
+        && !result.report.findings.is_empty()
+        && matches!(result.config.output, OutputFormat::Human)
+    {
+        eprintln!(
+            "{}",
+            "Findings above are informational: --min-score gates on the score, not on findings."
+                .dimmed()
+        );
     }
 
     ExitCode::SUCCESS
@@ -4151,9 +4209,8 @@ mod tests {
         assert_eq!(report.hot_paths.len(), 1);
     }
 
-    #[test]
-    fn print_health_result_fails_on_low_traffic_runtime_coverage() {
-        let result = HealthResult {
+    fn fx_low_traffic_runtime_result() -> HealthResult {
+        HealthResult {
             report: crate::health_types::HealthReport {
                 runtime_coverage: Some(crate::health_types::RuntimeCoverageReport {
                     schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
@@ -4188,12 +4245,213 @@ mod tests {
             timings: None,
             coverage_gaps_has_findings: false,
             should_fail_on_coverage_gaps: false,
-        };
+        }
+    }
+
+    #[test]
+    fn print_health_result_fails_on_low_traffic_runtime_coverage() {
+        let result = fx_low_traffic_runtime_result();
 
         assert_eq!(
-            print_health_result(&result, true, false, None, None, false, true, true, false),
+            print_health_result(
+                &result, true, false, None, None, false, false, true, true, false
+            ),
             ExitCode::from(1),
         );
+    }
+
+    // ── exit-code gating (issue #786) ───────────────────────────
+
+    fn fx_health_score(score: f64, grade: &'static str) -> crate::health_types::HealthScore {
+        crate::health_types::HealthScore {
+            formula_version: 2,
+            score,
+            grade,
+            penalties: crate::health_types::HealthScorePenalties {
+                dead_files: None,
+                dead_exports: None,
+                complexity: 0.0,
+                p90_complexity: 0.0,
+                maintainability: None,
+                hotspots: None,
+                unused_deps: None,
+                circular_deps: None,
+                unit_size: None,
+                coupling: None,
+                duplication: None,
+            },
+        }
+    }
+
+    fn fx_gate_result(
+        findings: Vec<crate::health_types::HealthFinding>,
+        score: Option<crate::health_types::HealthScore>,
+    ) -> HealthResult {
+        HealthResult {
+            report: crate::health_types::HealthReport {
+                findings,
+                health_score: score,
+                ..crate::health_types::HealthReport::default()
+            },
+            grouping: None,
+            group_resolver: None,
+            config: test_resolved_config(),
+            elapsed: Duration::default(),
+            timings: None,
+            coverage_gaps_has_findings: false,
+            should_fail_on_coverage_gaps: false,
+        }
+    }
+
+    fn moderate_finding() -> crate::health_types::HealthFinding {
+        make_finding("moderate", ExceededThreshold::Cyclomatic).into()
+    }
+
+    fn critical_finding() -> crate::health_types::HealthFinding {
+        let mut v = make_finding("critical", ExceededThreshold::All);
+        v.severity = FindingSeverity::Critical;
+        v.into()
+    }
+
+    /// Helper: run the gate with the given flags, quiet, no report-only.
+    fn gate_exit(
+        result: &HealthResult,
+        min_score: Option<f64>,
+        min_severity: Option<FindingSeverity>,
+        report_only: bool,
+    ) -> ExitCode {
+        print_health_result(
+            result,
+            true,
+            false,
+            min_score,
+            min_severity,
+            report_only,
+            false,
+            true,
+            true,
+            false,
+        )
+    }
+
+    #[test]
+    fn plain_health_with_findings_fails() {
+        // Criterion 1: back-compat. No gate flag -> any finding is fatal.
+        let result = fx_gate_result(vec![moderate_finding()], Some(fx_health_score(87.5, "A")));
+        assert_eq!(gate_exit(&result, None, None, false), ExitCode::from(1));
+    }
+
+    #[test]
+    fn plain_health_with_no_findings_succeeds() {
+        let result = fx_gate_result(vec![], Some(fx_health_score(100.0, "A")));
+        assert_eq!(gate_exit(&result, None, None, false), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn min_score_zero_never_fails_even_with_findings() {
+        // Criterion 2: the headline bug. --min-score 0 must exit 0.
+        let result = fx_gate_result(vec![moderate_finding()], Some(fx_health_score(50.0, "D")));
+        assert_eq!(
+            gate_exit(&result, Some(0.0), None, false),
+            ExitCode::SUCCESS
+        );
+    }
+
+    #[test]
+    fn min_score_passing_demotes_findings_to_informational() {
+        // Criterion 3: score >= threshold with non-empty findings -> exit 0.
+        let result = fx_gate_result(vec![moderate_finding()], Some(fx_health_score(87.5, "A")));
+        assert_eq!(
+            gate_exit(&result, Some(80.0), None, false),
+            ExitCode::SUCCESS
+        );
+    }
+
+    #[test]
+    fn min_score_below_threshold_fails() {
+        // Criterion 4.
+        let result = fx_gate_result(vec![moderate_finding()], Some(fx_health_score(50.0, "D")));
+        assert_eq!(
+            gate_exit(&result, Some(80.0), None, false),
+            ExitCode::from(1)
+        );
+    }
+
+    #[test]
+    fn min_severity_gates_on_severity_independent_of_min_score() {
+        // Criterion 5: --min-severity critical ignores moderate findings,
+        // fails on critical ones, with no --min-score present.
+        let only_moderate =
+            fx_gate_result(vec![moderate_finding()], Some(fx_health_score(87.5, "A")));
+        assert_eq!(
+            gate_exit(&only_moderate, None, Some(FindingSeverity::Critical), false),
+            ExitCode::SUCCESS,
+        );
+        let with_critical = fx_gate_result(
+            vec![moderate_finding(), critical_finding()],
+            Some(fx_health_score(87.5, "A")),
+        );
+        assert_eq!(
+            gate_exit(&with_critical, None, Some(FindingSeverity::Critical), false),
+            ExitCode::from(1),
+        );
+    }
+
+    #[test]
+    fn min_score_and_min_severity_compose_as_or() {
+        // Criterion 6: both gates active, OR-combined.
+        // score ok + only moderate -> pass
+        let pass = fx_gate_result(vec![moderate_finding()], Some(fx_health_score(87.5, "A")));
+        assert_eq!(
+            gate_exit(&pass, Some(80.0), Some(FindingSeverity::Critical), false),
+            ExitCode::SUCCESS,
+        );
+        // score below threshold (severity ok) -> fail via score gate
+        let low_score = fx_gate_result(vec![moderate_finding()], Some(fx_health_score(50.0, "D")));
+        assert_eq!(
+            gate_exit(
+                &low_score,
+                Some(80.0),
+                Some(FindingSeverity::Critical),
+                false
+            ),
+            ExitCode::from(1),
+        );
+        // score ok but a critical finding -> fail via severity gate
+        let critical = fx_gate_result(vec![critical_finding()], Some(fx_health_score(87.5, "A")));
+        assert_eq!(
+            gate_exit(
+                &critical,
+                Some(80.0),
+                Some(FindingSeverity::Critical),
+                false
+            ),
+            ExitCode::from(1),
+        );
+    }
+
+    #[test]
+    fn report_only_never_fails_on_findings_or_low_score() {
+        // Criterion: --report-only always exits 0.
+        let result = fx_gate_result(
+            vec![moderate_finding(), critical_finding()],
+            Some(fx_health_score(10.0, "F")),
+        );
+        assert_eq!(gate_exit(&result, None, None, true), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn runtime_coverage_gate_independent_of_min_score() {
+        // Criterion 7: --min-score demotes complexity findings but NOT the
+        // explicitly-opted-in runtime-coverage gate, so a failing runtime
+        // finding still exits 1 even under --min-score 0.
+        let result = fx_low_traffic_runtime_result();
+        assert_eq!(
+            gate_exit(&result, Some(0.0), None, false),
+            ExitCode::from(1)
+        );
+        // --report-only does suppress every gate, including runtime coverage.
+        assert_eq!(gate_exit(&result, None, None, true), ExitCode::SUCCESS);
     }
 
     // The suppress-line gating tests previously lived here exercising

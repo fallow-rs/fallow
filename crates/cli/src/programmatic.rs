@@ -827,6 +827,7 @@ fn build_complexity_options<'a>(
         coverage_root: options.coverage_root.as_deref(),
         performance: false,
         min_severity: None,
+        report_only: false,
         runtime_coverage: None,
     }
 }

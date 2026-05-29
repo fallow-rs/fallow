@@ -63,6 +63,107 @@ fn health_json_output_is_valid() {
     assert!(json.is_object(), "health JSON output should be an object");
 }
 
+// ---------------------------------------------------------------------------
+// CI-gate exit semantics (issue #786)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn health_min_score_zero_exits_zero_with_findings() {
+    // The headline bug: complexity-project has above-threshold functions, so
+    // plain `fallow health` exits 1. With --min-score 0 the score gate is
+    // authoritative and can never fail, so the run must exit 0 even though
+    // findings are present and printed.
+    let plain = run_fallow("health", "complexity-project", &["--quiet"]);
+    assert_eq!(plain.code, 1, "plain health should still fail on findings");
+
+    let gated = run_fallow(
+        "health",
+        "complexity-project",
+        &["--min-score", "0", "--quiet"],
+    );
+    assert_eq!(
+        gated.code, 0,
+        "--min-score 0 must exit 0. stderr: {}",
+        gated.stderr
+    );
+}
+
+#[test]
+fn health_min_score_below_threshold_fails() {
+    // An unreachably high threshold forces the score gate to fire.
+    let output = run_fallow(
+        "health",
+        "complexity-project",
+        &["--min-score", "100", "--quiet"],
+    );
+    assert_eq!(
+        output.code, 1,
+        "--min-score 100 should fail the score gate. stderr: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn health_min_score_demotes_rendered_findings_with_informational_note() {
+    // When --min-score passes but the findings list is rendered (--complexity),
+    // a dimmed stderr note clarifies the findings did not fail the build.
+    let output = run_fallow(
+        "health",
+        "complexity-project",
+        &["--complexity", "--min-score", "0"],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(
+        output
+            .stderr
+            .contains("Findings above are informational: --min-score gates on the score"),
+        "expected informational note in stderr, got: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn health_report_only_never_fails() {
+    let output = run_fallow(
+        "health",
+        "complexity-project",
+        &["--report-only", "--quiet"],
+    );
+    assert_eq!(
+        output.code, 0,
+        "--report-only must exit 0 even with findings. stderr: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn health_report_only_rejects_gate_flags() {
+    let output = run_fallow(
+        "health",
+        "complexity-project",
+        &[
+            "--report-only",
+            "--min-score",
+            "80",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(
+        output.code, 2,
+        "--report-only with --min-score should be rejected. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["error"], serde_json::json!(true));
+    let message = json["message"].as_str().expect("message should be present");
+    assert!(
+        message.contains("--report-only cannot be combined with"),
+        "unexpected error message: {message}"
+    );
+}
+
 #[test]
 fn health_rejects_relative_coverage_root() {
     let output = run_fallow(
