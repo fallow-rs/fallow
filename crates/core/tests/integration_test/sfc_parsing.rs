@@ -526,6 +526,13 @@ fn sveltekit_layout_reset_routes_are_entry_points() {
         !unused.contains(&"+layout@named.svelte".to_string()),
         "layout-reset layout (`+layout@named.svelte`) should be an entry point: {unused:?}"
     );
+    // The group form `+page@(group).svelte` targets a named group layout. It proves
+    // the `*` glob matches the literal parens (not glob metacharacters in globset),
+    // which is the riskiest assumption in the `+page@*.svelte` entry pattern.
+    assert!(
+        !unused.contains(&"+page@(checkout).svelte".to_string()),
+        "group-form layout-reset page (`+page@(checkout).svelte`) should be an entry point: {unused:?}"
+    );
 }
 
 fn unused_file_names(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
