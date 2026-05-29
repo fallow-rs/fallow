@@ -7,6 +7,10 @@
 //!
 //! Also detects Nuxt **module** authoring projects (using `@nuxt/kit`) and marks
 //! `src/runtime/` components, composables, plugins, and utils as entry points.
+//!
+//! When `@nuxt/content` is registered in the nuxt.config `modules:` array, the
+//! adjacent `content.config.{ts,js,mts,mjs,cts,cjs}` (which `@nuxt/content` reads
+//! at build time and nothing imports) is credited as a default-export entry.
 
 use std::path::{Path, PathBuf};
 
@@ -34,6 +38,10 @@ const COMPONENT_NAME_SUFFIXES: &[&str] = &["client", "server", "global"];
 /// Secondary enabler for Nuxt module authoring projects.
 /// `@nuxt/kit` is the standard API for building Nuxt modules.
 const MODULE_AUTHORING_ENABLER: &str = "@nuxt/kit";
+
+/// First-party module whose root `content.config.*` file is read at build time.
+/// When registered in `modules:`, its config file is credited as an entry point.
+const CONTENT_MODULE: &str = "@nuxt/content";
 
 const ENTRY_PATTERNS: &[&str] = &[
     // Standard Nuxt directories
@@ -313,9 +321,26 @@ impl Plugin for NuxtPlugin {
 
         // modules: [...] → referenced dependencies (Nuxt modules are npm packages)
         let modules = config_parser::extract_config_string_array(source, config_path, &["modules"]);
+        let mut content_module_registered = false;
         for module in &modules {
             let dep = crate::resolve::extract_package_name(module);
+            if dep == CONTENT_MODULE {
+                content_module_registered = true;
+            }
             result.referenced_dependencies.push(dep);
+        }
+
+        // @nuxt/content reads a root `content.config.*` at build time; nothing in
+        // app source imports it. Credit it as a default-export entry, but only when
+        // the module is registered (an installed-but-unregistered @nuxt/content
+        // leaves a genuinely-orphan content.config correctly flagged). The pattern
+        // is resolved relative to the config dir so nested/monorepo nuxt.config
+        // files credit the sibling content.config, not a root one.
+        if content_module_registered
+            && let Some(pattern) = content_config_entry_pattern(config_path, root)
+        {
+            add_default_used_export(&mut result, &pattern);
+            result.push_entry_pattern(pattern);
         }
 
         // css: [...] → always-used files or referenced dependencies
@@ -555,6 +580,15 @@ fn extend_prefixed_patterns(target: &mut Vec<String>, prefix: &str, patterns: &[
 
 fn component_dir_pattern(dir: &str) -> String {
     format!("{dir}/**/*.{{{COMPONENT_ENTRY_GLOB}}}")
+}
+
+/// Build the `content.config.{ts,js,mts,cts,mjs,cjs}` entry pattern for the
+/// directory holding the nuxt.config (`config_path`'s parent), workspace-root
+/// relative. Returns `None` when the path falls outside `root` (e.g. a relative
+/// `config_path` in a unit test); production passes an absolute config path.
+fn content_config_entry_pattern(config_path: &Path, root: &Path) -> Option<String> {
+    let base = config_parser::normalize_config_path("content.config", config_path, root)?;
+    Some(format!("{base}.{{{SCRIPT_ENTRY_GLOB}}}"))
 }
 
 fn script_entry_pattern(path: &str) -> String {
@@ -1006,6 +1040,81 @@ mod tests {
             result
                 .referenced_dependencies
                 .contains(&"@pinia/nuxt".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_credits_content_config_when_module_registered() {
+        let source = r#"
+            export default defineNuxtConfig({
+                modules: ["@nuxt/content"]
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/nuxt.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+
+        let pattern = "content.config.{ts,js,mts,cts,mjs,cjs}";
+        assert!(
+            has_entry_pattern(&result, pattern),
+            "@nuxt/content should credit content.config as an entry: {:?}",
+            result.entry_patterns
+        );
+        assert!(
+            has_used_export_rule(&result, pattern, &["default"]),
+            "content.config should keep its default export alive"
+        );
+    }
+
+    #[test]
+    fn resolve_config_no_content_config_credit_without_module() {
+        // @nuxt/content NOT in modules: content.config must not be credited.
+        let source = r#"
+            export default defineNuxtConfig({
+                modules: ["@nuxtjs/tailwindcss"]
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/nuxt.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+
+        assert!(
+            !has_entry_pattern(&result, "content.config.{ts,js,mts,cts,mjs,cjs}"),
+            "content.config must not be credited without @nuxt/content in modules: {:?}",
+            result.entry_patterns
+        );
+    }
+
+    #[test]
+    fn resolve_config_content_config_resolves_relative_to_nested_config_dir() {
+        // A nested nuxt.config credits the sibling content.config, not a root one.
+        let source = r#"
+            export default defineNuxtConfig({
+                modules: ["@nuxt/content"]
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/repo/docs/nuxt.config.ts"),
+            source,
+            Path::new("/repo"),
+        );
+
+        let pattern = "docs/content.config.{ts,js,mts,cts,mjs,cjs}";
+        assert!(
+            has_entry_pattern(&result, pattern),
+            "nested nuxt.config should credit docs/content.config: {:?}",
+            result.entry_patterns
+        );
+        assert!(
+            has_used_export_rule(&result, pattern, &["default"]),
+            "nested content.config should keep its default export alive"
         );
     }
 

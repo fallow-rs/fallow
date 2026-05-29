@@ -1206,6 +1206,50 @@ fn nuxt_default_scan_keeps_nested_plugin_index_but_not_nested_helpers() {
 }
 
 #[test]
+fn nuxt_content_config_is_credited_when_module_registered() {
+    let root = fixture_path("nuxt-content-config");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
+        .collect();
+
+    // content.config.ts is read by @nuxt/content at build time, not imported.
+    assert!(
+        !unused_file_names.contains(&"content.config.ts".to_string()),
+        "content.config.ts should be credited as an entry by @nuxt/content: {unused_file_names:?}"
+    );
+
+    // Its default export must not be reported as unused either.
+    let content_config_unused_export = results.unused_exports.iter().any(|e| {
+        e.export
+            .path
+            .file_name()
+            .is_some_and(|name| name == "content.config.ts")
+    });
+    assert!(
+        !content_config_unused_export,
+        "content.config.ts default export should stay alive"
+    );
+
+    // Crediting is scoped: a genuinely-orphan file still surfaces as unused.
+    assert!(
+        unused_file_names.contains(&"unused.ts".to_string()),
+        "an unrelated orphan file should still be reported unused: {unused_file_names:?}"
+    );
+}
+
+#[test]
 fn nuxt_runtime_conventions_report_dead_named_exports_without_unused_file_noise() {
     let root = fixture_path("nuxt-runtime-conventions");
     let config = create_config(root);
