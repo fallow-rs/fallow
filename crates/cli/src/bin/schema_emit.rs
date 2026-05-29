@@ -42,6 +42,9 @@ use fallow_cli::health_types::{
     TargetThresholds, TrendCount, UntestedExport, UntestedExportFinding, UntestedFile,
     UntestedFileFinding, VitalSigns, VitalSignsCounts,
 };
+use fallow_cli::impact::{
+    ContainmentEvent, ImpactCounts, ImpactReport, ImpactTrendDirection, TrendSummary,
+};
 use fallow_cli::output_dupes::{
     AttributedCloneGroupFinding, CloneFamilyAction, CloneFamilyActionType, CloneFamilyFinding,
     CloneGroupAction, CloneGroupActionType, CloneGroupFinding, DupesReportPayload,
@@ -379,6 +382,14 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         // joins `FallowOutput` as a sibling object variant.
         "CoverageAnalyzeOutput",
         "CoverageAnalyzeSchemaVersion",
+        // crates/cli/src/impact.rs - `fallow impact --format json` value
+        // report. Joins FallowOutput as an object variant; its nested counts,
+        // trend, and containment shapes are separate definitions.
+        "ContainmentEvent",
+        "ImpactCounts",
+        "ImpactReport",
+        "ImpactTrendDirection",
+        "TrendSummary",
     ]
 }
 
@@ -614,6 +625,15 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<MetaRule>();
 
     register_per_command_envelope_definitions(&mut generator);
+
+    // Fallow Impact value report (crates/cli/src/impact.rs). The
+    // `fallow impact --format json` shape; registered as definitions so the
+    // FallowOutput root references them rather than inlining.
+    let _ = generator.subschema_for::<ImpactCounts>();
+    let _ = generator.subschema_for::<ImpactTrendDirection>();
+    let _ = generator.subschema_for::<TrendSummary>();
+    let _ = generator.subschema_for::<ContainmentEvent>();
+    let _ = generator.subschema_for::<ImpactReport>();
 
     // Typed document root. Must be registered AFTER every variant struct so
     // schemars resolves each variant against the already-registered
@@ -1204,6 +1224,7 @@ mod drift_tests {
             ("Health", "HealthOutput"),
             ("Dupes", "DupesOutput"),
             ("CheckGrouped", "CheckGroupedOutput"),
+            ("Impact", "ImpactReport"),
             ("Check", "CheckOutput"),
             ("Combined", "CombinedOutput"),
         ];
@@ -1232,6 +1253,7 @@ mod drift_tests {
                 FallowOutput::Health(_) => "Health",
                 FallowOutput::Dupes(_) => "Dupes",
                 FallowOutput::CheckGrouped(_) => "CheckGrouped",
+                FallowOutput::Impact(_) => "Impact",
                 FallowOutput::Check(_) => "Check",
                 FallowOutput::Combined(_) => "Combined",
             }

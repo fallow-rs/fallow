@@ -202,6 +202,8 @@ For full adoption instead of one-off review, see the [Fallow compliance happy pa
 
 See [Agent integration](https://docs.fallow.tools/integrations/mcp) for MCP setup and the full list of structured tools.
 
+Run `fallow impact` to see what fallow has done for you: how many issues it is surfacing, the trend since your last recorded run, and how many commits its pre-commit gate caught before they shipped. It is opt-in (`fallow impact enable`) and entirely local: history lives in a gitignored `.fallow/impact.json` and is never uploaded.
+
 Product telemetry for improving agent, CI, MCP, and editor workflows is off by default. Run `fallow telemetry inspect --example` to see the payload, or `FALLOW_TELEMETRY=inspect fallow audit --format json --quiet` to inspect a real run without sending it. Run `fallow telemetry enable` only when you want to help improve these integrations. See [Telemetry](docs/telemetry.md).
 
 ## Why teams using AI need Fallow

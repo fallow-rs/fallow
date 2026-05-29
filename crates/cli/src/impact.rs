@@ -41,6 +41,7 @@ const STORE_FILE: &str = "impact.json";
 
 /// Per-category issue counts captured at a recorded run.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ImpactCounts {
     pub total_issues: usize,
     pub dead_code: usize,
@@ -87,6 +88,7 @@ pub struct PendingContainment {
 
 /// A blocked-then-cleared containment: fallow stopped a commit until it was fixed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ContainmentEvent {
     pub blocked_at: String,
     pub cleared_at: String,
@@ -260,8 +262,9 @@ const fn verdict_label(verdict: AuditVerdict) -> &'static str {
 
 /// Direction of a count trend between two recorded runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
-pub enum TrendDirection {
+pub enum ImpactTrendDirection {
     /// Issue count went down (good).
     Improving,
     /// Issue count went up.
@@ -272,36 +275,39 @@ pub enum TrendDirection {
 
 /// A computed trend between the two most recent records.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TrendSummary {
-    pub direction: TrendDirection,
+    pub direction: ImpactTrendDirection,
     /// Signed delta in total issues (current minus previous).
     pub total_delta: i64,
     pub previous_total: usize,
     pub current_total: usize,
 }
 
-fn direction_for(delta: i64) -> TrendDirection {
+fn direction_for(delta: i64) -> ImpactTrendDirection {
     if delta < -TREND_TOLERANCE {
-        TrendDirection::Improving
+        ImpactTrendDirection::Improving
     } else if delta > TREND_TOLERANCE {
-        TrendDirection::Declining
+        ImpactTrendDirection::Declining
     } else {
-        TrendDirection::Stable
+        ImpactTrendDirection::Stable
     }
 }
 
 /// The rendered impact report, derived purely from the store (no analysis run).
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(title = "fallow impact --format json"))]
 pub struct ImpactReport {
     pub enabled: bool,
     pub record_count: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_recorded: Option<String>,
     /// Current surfaced counts (the most recent recorded run).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surfacing: Option<ImpactCounts>,
     /// Trend between the two most recent records. None until two records exist.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trend: Option<TrendSummary>,
     pub containment_count: usize,
     /// Most recent containment events (newest last), capped for display.
@@ -353,7 +359,7 @@ pub fn build_report(store: &ImpactStore) -> ImpactReport {
 }
 
 /// Render the report as human-readable text.
-#[allow(
+#[expect(
     clippy::format_push_string,
     reason = "small report renderer; readability over avoiding the extra allocation"
 )]
@@ -391,9 +397,9 @@ pub fn render_human(report: &ImpactReport) -> String {
 
     if let Some(t) = &report.trend {
         let arrow = match t.direction {
-            TrendDirection::Improving => "down",
-            TrendDirection::Declining => "up",
-            TrendDirection::Stable => "flat",
+            ImpactTrendDirection::Improving => "down",
+            ImpactTrendDirection::Declining => "up",
+            ImpactTrendDirection::Stable => "flat",
         };
         out.push_str(&format!(
             "  TREND (since the previous recorded run)\n    issues {} -> {} ({})\n\n",
@@ -424,7 +430,7 @@ pub fn render_json(report: &ImpactReport) -> String {
 }
 
 /// Render the report as Markdown (paste-ready for a PR description or standup).
-#[allow(
+#[expect(
     clippy::format_push_string,
     reason = "small report renderer; readability over avoiding the extra allocation"
 )]
@@ -453,9 +459,9 @@ pub fn render_markdown(report: &ImpactReport) -> String {
     }
     if let Some(t) = &report.trend {
         let word = match t.direction {
-            TrendDirection::Improving => "improving",
-            TrendDirection::Declining => "rising",
-            TrendDirection::Stable => "stable",
+            ImpactTrendDirection::Improving => "improving",
+            ImpactTrendDirection::Declining => "rising",
+            ImpactTrendDirection::Stable => "stable",
         };
         out.push_str(&format!(
             "- **Trend:** {} -> {} ({})\n",
@@ -609,7 +615,7 @@ mod tests {
         }
         let report = build_report(&store);
         let trend = report.trend.unwrap();
-        assert_eq!(trend.direction, TrendDirection::Improving);
+        assert_eq!(trend.direction, ImpactTrendDirection::Improving);
         assert_eq!(trend.total_delta, -5);
     }
 

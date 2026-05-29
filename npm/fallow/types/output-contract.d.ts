@@ -65,7 +65,7 @@ export type FallowJsonOutput = (FallowOutput | CodeClimateOutput)
  * consumers, paired with a one-cycle `--legacy-envelope` opt-out flag.
  * Tracked under issue #384.
  */
-export type FallowOutput = (AuditOutput | ExplainOutput | ReviewEnvelopeOutput | ReviewReconcileOutput | CoverageSetupOutput | CoverageAnalyzeOutput | ListBoundariesOutput | HealthOutput | DupesOutput | CheckGroupedOutput | CheckOutput | CombinedOutput)
+export type FallowOutput = (AuditOutput | ExplainOutput | ReviewEnvelopeOutput | ReviewReconcileOutput | CoverageSetupOutput | CoverageAnalyzeOutput | ListBoundariesOutput | HealthOutput | DupesOutput | CheckGroupedOutput | ImpactReport | CheckOutput | CombinedOutput)
 /**
  * Schema version for this output format (independent of tool version). Bump
  * policy: ADDITIVE changes (new optional top-level fields, new optional struct
@@ -632,6 +632,10 @@ export type LogicalGroupStatus = ("ok" | "empty" | "invalid_path")
  * groups by GitLab CODEOWNERS `[Section]` header name.
  */
 export type GroupByMode = ("owner" | "directory" | "package" | "section")
+/**
+ * Direction of a count trend between two recorded runs.
+ */
+export type ImpactTrendDirection = ("improving" | "declining" | "stable")
 /**
  * Discriminator value for [`CodeClimateIssue::kind`].
  */
@@ -5644,6 +5648,57 @@ unused_dependency_overrides?: UnusedDependencyOverrideFinding[]
  * error. Wrapped in [`MisconfiguredDependencyOverrideFinding`].
  */
 misconfigured_dependency_overrides?: MisconfiguredDependencyOverrideFinding[]
+}
+/**
+ * The rendered impact report, derived purely from the store (no analysis run).
+ */
+export interface ImpactReport {
+enabled: boolean
+record_count: number
+first_recorded?: (string | null)
+/**
+ * Current surfaced counts (the most recent recorded run).
+ */
+surfacing?: (ImpactCounts | null)
+/**
+ * Trend between the two most recent records. None until two records exist.
+ */
+trend?: (TrendSummary | null)
+containment_count: number
+/**
+ * Most recent containment events (newest last), capped for display.
+ */
+recent_containment: ContainmentEvent[]
+}
+/**
+ * Per-category issue counts captured at a recorded run.
+ */
+export interface ImpactCounts {
+total_issues: number
+dead_code: number
+complexity: number
+duplication: number
+}
+/**
+ * A computed trend between the two most recent records.
+ */
+export interface TrendSummary {
+direction: ImpactTrendDirection
+/**
+ * Signed delta in total issues (current minus previous).
+ */
+total_delta: number
+previous_total: number
+current_total: number
+}
+/**
+ * A blocked-then-cleared containment: fallow stopped a commit until it was fixed.
+ */
+export interface ContainmentEvent {
+blocked_at: string
+cleared_at: string
+git_sha?: (string | null)
+blocked_counts: ImpactCounts
 }
 /**
  * Envelope emitted by bare `fallow --format json` (the combined

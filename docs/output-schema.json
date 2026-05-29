@@ -7458,6 +7458,10 @@
           "$ref": "#/definitions/CheckGroupedOutput"
         },
         {
+          "description": "`fallow impact --format json`. Required `enabled`, `record_count`,\n`containment_count`, `recent_containment`; no `schema_version`,\n`command`, `total_issues`, or `report`. Ordered before the broader\nvariants because its `record_count` + `containment_count` discriminator\npair is uniquely present here.",
+          "$ref": "#/definitions/ImpactReport"
+        },
+        {
           "description": "`fallow check --format json` / `fallow dead-code --format json`.\nRequired `total_issues` plus `summary: CheckSummary`.",
           "$ref": "#/definitions/CheckOutput"
         },
@@ -9746,6 +9750,158 @@
         "auto_fixable"
       ],
       "description": "Machine-actionable next step for a coverage-intelligence finding."
+    },
+    "ContainmentEvent": {
+      "type": "object",
+      "properties": {
+        "blocked_at": {
+          "type": "string"
+        },
+        "cleared_at": {
+          "type": "string"
+        },
+        "git_sha": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "blocked_counts": {
+          "$ref": "#/definitions/ImpactCounts"
+        }
+      },
+      "required": [
+        "blocked_at",
+        "cleared_at",
+        "blocked_counts"
+      ],
+      "description": "A blocked-then-cleared containment: fallow stopped a commit until it was fixed."
+    },
+    "ImpactCounts": {
+      "type": "object",
+      "properties": {
+        "total_issues": {
+          "type": "integer"
+        },
+        "dead_code": {
+          "type": "integer"
+        },
+        "complexity": {
+          "type": "integer"
+        },
+        "duplication": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total_issues",
+        "dead_code",
+        "complexity",
+        "duplication"
+      ],
+      "description": "Per-category issue counts captured at a recorded run."
+    },
+    "ImpactReport": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "record_count": {
+          "type": "integer"
+        },
+        "first_recorded": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "surfacing": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ImpactCounts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Current surfaced counts (the most recent recorded run)."
+        },
+        "trend": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TrendSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Trend between the two most recent records. None until two records exist."
+        },
+        "containment_count": {
+          "type": "integer"
+        },
+        "recent_containment": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ContainmentEvent"
+          },
+          "description": "Most recent containment events (newest last), capped for display."
+        }
+      },
+      "required": [
+        "enabled",
+        "record_count",
+        "containment_count",
+        "recent_containment"
+      ],
+      "title": "fallow impact --format json",
+      "description": "The rendered impact report, derived purely from the store (no analysis run)."
+    },
+    "ImpactTrendDirection": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "improving",
+          "description": "Issue count went down (good)."
+        },
+        {
+          "type": "string",
+          "const": "declining",
+          "description": "Issue count went up."
+        },
+        {
+          "type": "string",
+          "const": "stable",
+          "description": "Within tolerance."
+        }
+      ],
+      "description": "Direction of a count trend between two recorded runs."
+    },
+    "TrendSummary": {
+      "type": "object",
+      "properties": {
+        "direction": {
+          "$ref": "#/definitions/ImpactTrendDirection"
+        },
+        "total_delta": {
+          "type": "integer",
+          "description": "Signed delta in total issues (current minus previous)."
+        },
+        "previous_total": {
+          "type": "integer"
+        },
+        "current_total": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "direction",
+        "total_delta",
+        "previous_total",
+        "current_total"
+      ],
+      "description": "A computed trend between the two most recent records."
     }
   }
 }

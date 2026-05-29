@@ -75,6 +75,7 @@ Project inspection:
   list           List discovered files, entry points, plugins, boundaries, and workspaces
   workspaces     Show monorepo workspace discovery diagnostics
   explain        Explain one issue type without running analysis
+  impact         Show what fallow has done for you (opt-in, local-only)
 
 Setup and configuration:
   init           Create a fallow config, optionally with a Git hook
@@ -3413,6 +3414,7 @@ mod tests {
             "  list",
             "  workspaces",
             "  explain",
+            "  impact",
             "Setup and configuration:",
             "  init",
             "  migrate",

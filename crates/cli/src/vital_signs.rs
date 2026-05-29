@@ -595,7 +595,7 @@ pub fn build_snapshot(
 }
 
 /// ISO 8601 UTC timestamp without external chrono dependency.
-#[allow(
+#[expect(
     clippy::redundant_pub_crate,
     reason = "module is private; pub(crate) documents the cross-module (impact, audit) reuse intent"
 )]

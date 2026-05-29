@@ -1425,6 +1425,12 @@ pub enum FallowOutput {
     /// plus a `groups` array; ordered before [`Self::Check`] because the
     /// `grouped_by` discriminator field is uniquely present here.
     CheckGrouped(CheckGroupedOutput),
+    /// `fallow impact --format json`. Required `enabled`, `record_count`,
+    /// `containment_count`, `recent_containment`; no `schema_version`,
+    /// `command`, `total_issues`, or `report`. Ordered before the broader
+    /// variants because its `record_count` + `containment_count` discriminator
+    /// pair is uniquely present here.
+    Impact(crate::impact::ImpactReport),
     /// `fallow check --format json` / `fallow dead-code --format json`.
     /// Required `total_issues` plus `summary: CheckSummary`.
     Check(CheckOutput),
