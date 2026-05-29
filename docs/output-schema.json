@@ -9804,6 +9804,10 @@
     "ImpactReport": {
       "type": "object",
       "properties": {
+        "schema_version": {
+          "description": "Output-shape version for this report, so JSON consumers have a\nforward-compat signal independent of the on-disk store version. Always\npresent; bumped only on a breaking change to this report's wire shape.",
+          "$ref": "#/definitions/ImpactReportSchemaVersion"
+        },
         "enabled": {
           "type": "boolean"
         },
@@ -9821,7 +9825,7 @@
             "string",
             "null"
           ],
-          "description": "Git SHA of the most recent recorded run, so a consumer can tell which\ncommit the `surfacing` counts belong to. None when the latest run had no\nSHA (not a git repo) or there are no records yet."
+          "description": "Git SHA of the most recent recorded run, so a consumer can tell which\ncommit the `surfacing` counts belong to. This is an ABBREVIATED SHA\n(`git rev-parse --short`), so it is for display/correlation only and will\nnot match a full 40-character SHA from `$GITHUB_SHA` or the git API\nwithout expansion. None when the latest run had no SHA (not a git repo)\nor there are no records yet."
         },
         "surfacing": {
           "anyOf": [
@@ -9857,6 +9861,7 @@
         }
       },
       "required": [
+        "schema_version",
         "enabled",
         "record_count",
         "containment_count",
@@ -9909,6 +9914,16 @@
         "current_total"
       ],
       "description": "A computed trend between the two most recent records."
+    },
+    "ImpactReportSchemaVersion": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "1",
+          "description": "First release of the `fallow impact --format json` shape."
+        }
+      ],
+      "description": "Wire-version discriminator for [`ImpactReport`]. Independent from the global\n[`crate::output_envelope::SchemaVersion`] (the impact report versions on its\nown cadence) and from the on-disk [`STORE_SCHEMA_VERSION`] (the persisted\nstore shape versions separately). Serializes as a string `const` so JSON\nconsumers can switch on it, matching the other independently-versioned\nenvelopes (e.g. `CoverageAnalyzeSchemaVersion`)."
     }
   }
 }

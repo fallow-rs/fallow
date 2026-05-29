@@ -43,7 +43,8 @@ use fallow_cli::health_types::{
     UntestedFileFinding, VitalSigns, VitalSignsCounts,
 };
 use fallow_cli::impact::{
-    ContainmentEvent, ImpactCounts, ImpactReport, ImpactTrendDirection, TrendSummary,
+    ContainmentEvent, ImpactCounts, ImpactReport, ImpactReportSchemaVersion, ImpactTrendDirection,
+    TrendSummary,
 };
 use fallow_cli::output_dupes::{
     AttributedCloneGroupFinding, CloneFamilyAction, CloneFamilyActionType, CloneFamilyFinding,
@@ -388,6 +389,7 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "ContainmentEvent",
         "ImpactCounts",
         "ImpactReport",
+        "ImpactReportSchemaVersion",
         "ImpactTrendDirection",
         "TrendSummary",
     ]
@@ -630,6 +632,7 @@ fn derived_definitions() -> Map<String, Value> {
     // `fallow impact --format json` shape; registered as definitions so the
     // FallowOutput root references them rather than inlining.
     let _ = generator.subschema_for::<ImpactCounts>();
+    let _ = generator.subschema_for::<ImpactReportSchemaVersion>();
     let _ = generator.subschema_for::<ImpactTrendDirection>();
     let _ = generator.subschema_for::<TrendSummary>();
     let _ = generator.subschema_for::<ContainmentEvent>();

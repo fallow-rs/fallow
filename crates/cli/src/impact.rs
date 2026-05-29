@@ -22,8 +22,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::audit::{AuditSummary, AuditVerdict};
 
-/// Schema version for the rolling impact store.
-const IMPACT_SCHEMA_VERSION: u32 = 1;
+/// On-disk schema version for the rolling impact store. Distinct from the JSON
+/// report's wire version ([`ImpactReportSchemaVersion`]): the store's persisted
+/// shape and the `--format json` report's shape evolve independently.
+const STORE_SCHEMA_VERSION: u32 = 1;
 
 /// Upper bound on retained per-run records. The store is a single compacted file,
 /// so this only bounds memory/disk, not file count. Oldest records are dropped first.
@@ -32,8 +34,9 @@ const MAX_RECORDS: usize = 200;
 /// Upper bound on retained containment events (oldest dropped first).
 const MAX_CONTAINMENT: usize = 200;
 
-/// Tolerance (in absolute issue count) below which a trend is "stable" rather
-/// than improving/declining. A delta of a single finding is noise.
+/// Tolerance (in absolute issue count) at or below which a trend is "stable"
+/// rather than improving/declining. Zero means any nonzero delta (even a single
+/// finding) registers as a direction; raise it to suppress single-finding noise.
 const TREND_TOLERANCE: i64 = 0;
 
 /// File name of the rolling impact store inside `.fallow/`.
@@ -131,8 +134,18 @@ pub fn load(root: &Path) -> ImpactStore {
     let Ok(content) = std::fs::read_to_string(&path) else {
         return ImpactStore::default();
     };
-    match serde_json::from_str(&content) {
-        Ok(store) => store,
+    match serde_json::from_str::<ImpactStore>(&content) {
+        Ok(store) => {
+            if store.schema_version > STORE_SCHEMA_VERSION {
+                tracing::warn!(
+                    "fallow impact: store at {} has schema_version {} but this build understands up to {}; reading it as best-effort, fields this build does not know are dropped on the next write. Upgrade fallow to read it fully.",
+                    path.display(),
+                    store.schema_version,
+                    STORE_SCHEMA_VERSION,
+                );
+            }
+            store
+        }
         Err(err) => {
             tracing::warn!(
                 "fallow impact: ignoring unreadable store at {} ({err}); run `fallow impact enable` to reset it",
@@ -173,7 +186,7 @@ pub fn enable(root: &Path) -> bool {
     let was_enabled = store.enabled;
     store.enabled = true;
     if store.schema_version == 0 {
-        store.schema_version = IMPACT_SCHEMA_VERSION;
+        store.schema_version = STORE_SCHEMA_VERSION;
     }
     save(&store, root);
     ensure_fallow_gitignored(root);
@@ -200,7 +213,9 @@ fn ensure_fallow_gitignored(root: &Path) {
         contents.push('\n');
     }
     contents.push_str(".fallow/\n");
-    let _ = std::fs::write(&path, contents);
+    // atomic_write (tempfile + rename) so a crash mid-write cannot truncate the
+    // project's .gitignore, matching save()'s store-write durability.
+    let _ = fallow_config::atomic_write(&path, contents.as_bytes());
 }
 
 /// Disable Impact tracking. Retains existing history. Returns whether it was
@@ -341,18 +356,39 @@ fn direction_for(delta: i64) -> ImpactTrendDirection {
     }
 }
 
+/// Wire-version discriminator for [`ImpactReport`]. Independent from the global
+/// [`crate::output_envelope::SchemaVersion`] (the impact report versions on its
+/// own cadence) and from the on-disk [`STORE_SCHEMA_VERSION`] (the persisted
+/// store shape versions separately). Serializes as a string `const` so JSON
+/// consumers can switch on it, matching the other independently-versioned
+/// envelopes (e.g. `CoverageAnalyzeSchemaVersion`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum ImpactReportSchemaVersion {
+    /// First release of the `fallow impact --format json` shape.
+    #[serde(rename = "1")]
+    V1,
+}
+
 /// The rendered impact report, derived purely from the store (no analysis run).
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(title = "fallow impact --format json"))]
 pub struct ImpactReport {
+    /// Output-shape version for this report, so JSON consumers have a
+    /// forward-compat signal independent of the on-disk store version. Always
+    /// present; bumped only on a breaking change to this report's wire shape.
+    pub schema_version: ImpactReportSchemaVersion,
     pub enabled: bool,
     pub record_count: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_recorded: Option<String>,
     /// Git SHA of the most recent recorded run, so a consumer can tell which
-    /// commit the `surfacing` counts belong to. None when the latest run had no
-    /// SHA (not a git repo) or there are no records yet.
+    /// commit the `surfacing` counts belong to. This is an ABBREVIATED SHA
+    /// (`git rev-parse --short`), so it is for display/correlation only and will
+    /// not match a full 40-character SHA from `$GITHUB_SHA` or the git API
+    /// without expansion. None when the latest run had no SHA (not a git repo)
+    /// or there are no records yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_git_sha: Option<String>,
     /// Counts from the most recent recorded run. These are CHANGED-FILE scoped
@@ -405,6 +441,7 @@ pub fn build_report(store: &ImpactStore) -> ImpactReport {
     let latest_git_sha = store.records.last().and_then(|r| r.git_sha.clone());
 
     ImpactReport {
+        schema_version: ImpactReportSchemaVersion::V1,
         enabled: store.enabled,
         record_count: store.records.len(),
         first_recorded: store.first_recorded.clone(),
@@ -472,7 +509,10 @@ pub fn render_human(report: &ImpactReport) -> String {
         "Based on {} recorded run{} since {}. Local-only; never uploaded.\n",
         report.record_count,
         plural(report.record_count),
-        report.first_recorded.as_deref().unwrap_or("the first run"),
+        report
+            .first_recorded
+            .as_deref()
+            .map_or("the first run", date_only),
     ));
     out
 }
@@ -525,15 +565,28 @@ pub fn render_markdown(report: &ImpactReport) -> String {
         plural(report.containment_count),
     ));
     out.push_str(&format!(
-        "\n_Based on {} recorded run{}. Local-only._\n",
+        "\n_Based on {} recorded run{} since {}. Local-only._\n",
         report.record_count,
         plural(report.record_count),
+        report
+            .first_recorded
+            .as_deref()
+            .map_or("the first run", date_only),
     ));
     out
 }
 
 const fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
+}
+
+/// Trim a stored ISO-8601 timestamp (`2026-05-29T18:15:23Z`) to its date part
+/// (`2026-05-29`) for human/markdown footers. The wall-clock time and `Z` add
+/// noise without meaning when a reader just wants "tracking since when". JSON
+/// keeps the full `first_recorded` timestamp. Returns the input unchanged if it
+/// has no `T` separator.
+fn date_only(ts: &str) -> &str {
+    ts.split_once('T').map_or(ts, |(date, _)| date)
 }
 
 /// Single human-facing trend vocabulary, shared by the text and markdown
@@ -800,5 +853,91 @@ mod tests {
         assert_eq!(store.records.len(), MAX_RECORDS);
         // Oldest dropped: the surviving first record is t50.
         assert_eq!(store.records[0].timestamp, "t50");
+    }
+
+    #[test]
+    fn report_always_carries_schema_version() {
+        // Disabled / empty store still emits the schema version so a machine
+        // consumer has a forward-compat signal regardless of state.
+        let empty = build_report(&ImpactStore::default());
+        assert_eq!(empty.schema_version, ImpactReportSchemaVersion::V1);
+        let json = render_json(&empty);
+        assert!(
+            json.contains("\"schema_version\": \"1\""),
+            "schema_version must be present (as the \"1\" const) even when disabled: {json}"
+        );
+
+        let mut store = ImpactStore {
+            enabled: true,
+            ..Default::default()
+        };
+        store.records.push(ImpactRecord {
+            timestamp: "2026-05-29T10:00:00Z".into(),
+            version: "2.0.0".into(),
+            git_sha: None,
+            verdict: "pass".into(),
+            gate: false,
+            counts: ImpactCounts::default(),
+        });
+        assert_eq!(
+            build_report(&store).schema_version,
+            ImpactReportSchemaVersion::V1
+        );
+    }
+
+    #[test]
+    fn date_only_trims_iso_timestamp() {
+        assert_eq!(date_only("2026-05-29T18:15:23Z"), "2026-05-29");
+        // No `T` separator: returned unchanged.
+        assert_eq!(date_only("2026-05-29"), "2026-05-29");
+        assert_eq!(date_only("the first run"), "the first run");
+    }
+
+    #[test]
+    fn human_footer_shows_date_only() {
+        let mut store = ImpactStore {
+            enabled: true,
+            ..Default::default()
+        };
+        store.first_recorded = Some("2026-05-29T18:15:23Z".into());
+        store.records.push(ImpactRecord {
+            timestamp: "2026-05-29T18:15:23Z".into(),
+            version: "2.0.0".into(),
+            git_sha: None,
+            verdict: "pass".into(),
+            gate: false,
+            counts: ImpactCounts::default(),
+        });
+        let report = build_report(&store);
+        let human = render_human(&report);
+        assert!(
+            human.contains("since 2026-05-29.") && !human.contains("18:15:23"),
+            "human footer must show date-only: {human}"
+        );
+        let md = render_markdown(&report);
+        assert!(
+            md.contains("since 2026-05-29.") && !md.contains("18:15:23"),
+            "markdown footer must show date-only: {md}"
+        );
+    }
+
+    #[test]
+    fn future_schema_version_store_loads_without_panic_or_loss() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".fallow")).unwrap();
+        // A store written by a hypothetical future fallow (schema_version 2)
+        // must still load (best-effort) rather than be discarded as corrupt.
+        let future = format!(
+            "{{\"schema_version\":{},\"enabled\":true,\"records\":[],\"containment\":[]}}",
+            STORE_SCHEMA_VERSION + 1
+        );
+        std::fs::write(store_path(root), future).unwrap();
+        let store = load(root);
+        assert_eq!(store.schema_version, STORE_SCHEMA_VERSION + 1);
+        assert!(
+            store.enabled,
+            "future-version store must not degrade to default"
+        );
     }
 }

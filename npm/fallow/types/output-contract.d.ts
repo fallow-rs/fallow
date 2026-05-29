@@ -633,6 +633,15 @@ export type LogicalGroupStatus = ("ok" | "empty" | "invalid_path")
  */
 export type GroupByMode = ("owner" | "directory" | "package" | "section")
 /**
+ * Wire-version discriminator for [`ImpactReport`]. Independent from the global
+ * [`crate::output_envelope::SchemaVersion`] (the impact report versions on its
+ * own cadence) and from the on-disk [`STORE_SCHEMA_VERSION`] (the persisted
+ * store shape versions separately). Serializes as a string `const` so JSON
+ * consumers can switch on it, matching the other independently-versioned
+ * envelopes (e.g. `CoverageAnalyzeSchemaVersion`).
+ */
+export type ImpactReportSchemaVersion = "1"
+/**
  * Direction of a count trend between two recorded runs.
  */
 export type ImpactTrendDirection = ("improving" | "declining" | "stable")
@@ -5653,13 +5662,17 @@ misconfigured_dependency_overrides?: MisconfiguredDependencyOverrideFinding[]
  * The rendered impact report, derived purely from the store (no analysis run).
  */
 export interface ImpactReport {
+schema_version: ImpactReportSchemaVersion
 enabled: boolean
 record_count: number
 first_recorded?: (string | null)
 /**
  * Git SHA of the most recent recorded run, so a consumer can tell which
- * commit the `surfacing` counts belong to. None when the latest run had no
- * SHA (not a git repo) or there are no records yet.
+ * commit the `surfacing` counts belong to. This is an ABBREVIATED SHA
+ * (`git rev-parse --short`), so it is for display/correlation only and will
+ * not match a full 40-character SHA from `$GITHUB_SHA` or the git API
+ * without expansion. None when the latest run had no SHA (not a git repo)
+ * or there are no records yet.
  */
 latest_git_sha?: (string | null)
 /**
