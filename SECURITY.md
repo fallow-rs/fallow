@@ -103,6 +103,30 @@ Do NOT set this flag in regular CI configurations or on machines that are expect
 
 If `npm install fallow` or the `fallow-rs/fallow` action ever aborts with `binary verification failed` on a fresh, unmodified install, do not ignore it. Report it via the [private vulnerability reporting link](https://github.com/fallow-rs/fallow/security/advisories/new) above and include the full error message and the platform package version. False positives on this path are rare; a sustained failure on a clean install is treated as a P0 supply-chain incident.
 
+### Signing-key rotation and compromise response
+
+The binary-signing keypair is asymmetric and split across two surfaces:
+
+- **Private key:** the `ED25519_BINARY_SIGNING_PRIVATE_KEY` repository secret. Only the `build` job in `.github/workflows/release.yml` reads it, to sign each platform binary at release time.
+- **Public key:** the raw 32 bytes are hardcoded into every consumer that verifies a binary, `editors/vscode/src/download.ts` and `npm/fallow/scripts/verify-binary.js`, and the hex fingerprint is documented in the "Build-time trust boundary" section above. There is no CI job that asserts the two consumer copies agree, so they must be kept in sync by hand; treat both files plus this document's fingerprint as one unit on any key change.
+
+**Why rotation is a clean per-version cutover (no grace window needed).** Each released consumer pins exactly one public key (the one it was built with) and only ever fetches the binary for its own version (the npm wrapper resolves the matching `@fallow-cli/*` platform package; the VS Code extension and the Action download the binary for the version they ship). So version N's consumer verifies version N's binary against version N's key, and an already-installed version N-1 keeps verifying its own N-1 binary against the old key. A key rotation therefore takes effect on upgrade, with nothing to dual-sign and no mixed-key window to manage.
+
+**Scheduled / maintainer-change rotation.** Do it as one ordinary release:
+
+1. Generate a new Ed25519 keypair offline.
+2. Replace the `ED25519_BINARY_SIGNING_PRIVATE_KEY` repo secret (read from stdin, never `--body -`; see the release-workflow rules).
+3. Update the hardcoded raw public key in BOTH `editors/vscode/src/download.ts` and `npm/fallow/scripts/verify-binary.js`, and update the hex fingerprint block in this file, in the same commit.
+4. Ship a normal release through `/fallow-release`. The new release's binaries are signed with the new key and its consumers verify against it.
+5. Confirm a fresh `npm install fallow@<new>` and a clean VS Code extension download both verify without error.
+
+**Compromise response (private key suspected leaked).** The danger is that whoever holds the leaked key can sign a malicious binary that any consumer still pinned to the matching public key would accept. Move fast:
+
+1. Rotate immediately via a patch release using the steps above. This is the load-bearing action: once the new release ships, upgrading consumers no longer trust the compromised key.
+2. File a GitHub Security Advisory ([new advisory](https://github.com/fallow-rs/fallow/security/advisories/new)) describing the exposure window and the fixed version.
+3. Consider deprecating (`npm deprecate`) the versions published during the exposure window so installs steer to the rotated release. Do NOT force-rewrite their git tags (tag tombstones are permanent); the rotation is forward-only.
+4. Rotate any other secret that shared the exposure path (a leaked Actions secret rarely leaks alone): `NPM_TOKEN`, `CARGO_REGISTRY_TOKEN`, `VSCE_PAT`, `OVSX_PAT`.
+
 ## Agent-instruction surface
 
 AI coding agents read instruction files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.claude/**`, `.codex/**`, MCP config) as trusted context. A dependency install hook, or a pasted "fix", can plant hidden instructions in one of these files for the next agent session to execute. `scripts/scan-hidden-unicode.py` guards two surfaces against this:
