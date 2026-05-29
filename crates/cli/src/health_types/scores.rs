@@ -430,16 +430,7 @@ impl ExceededThreshold {
     }
 
     /// True when the CRAP threshold contributed to the finding.
-    ///
-    /// Exercised by the `exceeded_threshold_includes_helpers` unit test below;
-    /// the binary target has no direct caller today, so the lint is allowed
-    /// rather than expected (`#[expect]` would be unfulfilled on the lib side
-    /// which does reach the tests).
     #[must_use]
-    #[allow(
-        dead_code,
-        reason = "symmetry with includes_cyclomatic/cognitive; consumed by tests and intended for report format extensions"
-    )]
     pub const fn includes_crap(self) -> bool {
         matches!(
             self,
