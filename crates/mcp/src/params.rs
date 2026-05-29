@@ -820,6 +820,18 @@ pub struct ListBoundariesParams {
     pub threads: Option<usize>,
 }
 
+/// Parameters for the `impact` value-report tool.
+//
+// Intentionally `root`-only: `fallow impact` runs no analysis and reads only
+// `.fallow/impact.json` under `root`, so the config / no_cache / threads knobs
+// the analysis tools expose would be inert here and only confuse an agent.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct ImpactParams {
+    /// Project root directory whose local `.fallow/impact.json` value report to
+    /// read. Defaults to the current working directory.
+    pub root: Option<String>,
+}
+
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct FeatureFlagsParams {
     /// Root directory of the project to analyze. Defaults to current working directory.

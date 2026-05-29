@@ -710,6 +710,29 @@ fn list_boundaries_params_full() {
     assert_eq!(params.threads, Some(4));
 }
 
+// ── ImpactParams ────────────────────────────────────────────────
+
+#[test]
+fn impact_params_minimal() {
+    let params: ImpactParams = serde_json::from_str("{}").unwrap();
+    assert!(params.root.is_none());
+}
+
+#[test]
+fn impact_params_with_root() {
+    let params: ImpactParams = serde_json::from_str(r#"{"root": "/project"}"#).unwrap();
+    assert_eq!(params.root.as_deref(), Some("/project"));
+}
+
+#[test]
+fn impact_params_ignores_unknown_fields() {
+    // No config / no_cache / threads on this tool; an agent sending them (or
+    // any other stray field) must not fail deserialization.
+    let json = r#"{"root": "/app", "config": ".fallowrc.json", "no_cache": true}"#;
+    let params: ImpactParams = serde_json::from_str(json).unwrap();
+    assert_eq!(params.root.as_deref(), Some("/app"));
+}
+
 // ── FindDupesParams: changed_since deserialization ───────────────
 
 #[test]

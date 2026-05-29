@@ -41,7 +41,8 @@ fn all_tools_registered() {
     assert!(names.contains(&"get_blast_radius".to_string()));
     assert!(names.contains(&"get_importance".to_string()));
     assert!(names.contains(&"get_cleanup_candidates".to_string()));
-    assert_eq!(tools.len(), 20);
+    assert!(names.contains(&"impact".to_string()));
+    assert_eq!(tools.len(), 21);
 }
 
 #[test]
@@ -68,6 +69,7 @@ fn read_only_tools_have_annotations() {
         "get_blast_radius",
         "get_importance",
         "get_cleanup_candidates",
+        "impact",
     ];
     for tool in &tools {
         let name = tool.name.to_string();
@@ -146,6 +148,20 @@ fn open_world_hint_on_analysis_tools() {
             );
         }
     }
+}
+
+#[test]
+fn impact_is_read_only_closed_world() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let impact = tools.iter().find(|t| t.name == "impact").unwrap();
+    let ann = impact.annotations.as_ref().unwrap();
+    assert_eq!(ann.read_only_hint, Some(true));
+    // impact reads exactly one local file (.fallow/impact.json), a closed
+    // world, so it is open_world_hint=false like fallow_explain, NOT true like
+    // the project-crawling analysis tools.
+    assert_eq!(ann.open_world_hint, Some(false));
+    assert_eq!(ann.idempotent_hint, Some(true));
 }
 
 #[test]
@@ -617,6 +633,27 @@ fn audit_schema_contains_expected_properties() {
         assert!(
             schema.contains(prop),
             "audit schema should contain property '{prop}'"
+        );
+    }
+}
+
+#[test]
+fn impact_schema_contains_root_and_omits_inert_flags() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "impact").unwrap();
+    let schema = serde_json::to_value(&tool.input_schema).unwrap();
+    let props = schema
+        .get("properties")
+        .and_then(|p| p.as_object())
+        .expect("impact schema has a properties object");
+    assert!(props.contains_key("root"), "impact exposes 'root'");
+    // impact runs no analysis, so the analysis-tool knobs must NOT be exposed
+    // as properties (the doc text may still mention them by name).
+    for inert in ["config", "no_cache", "threads"] {
+        assert!(
+            !props.contains_key(inert),
+            "impact must NOT expose inert property '{inert}'"
         );
     }
 }

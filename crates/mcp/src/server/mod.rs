@@ -5,15 +5,16 @@ use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
 
 use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, ExplainParams,
-    FeatureFlagsParams, FindDupesParams, FixParams, HealthParams, ListBoundariesParams,
-    ProjectInfoParams, TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams,
+    FeatureFlagsParams, FindDupesParams, FixParams, HealthParams, ImpactParams,
+    ListBoundariesParams, ProjectInfoParams, TraceCloneParams, TraceDependencyParams,
+    TraceExportParams, TraceFileParams,
 };
 use crate::tools::{
     build_analyze_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
     build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
-    build_get_importance_args, build_health_args, build_list_boundaries_args,
+    build_get_importance_args, build_health_args, build_impact_args, build_list_boundaries_args,
     build_project_info_args, build_trace_clone_args, build_trace_dependency_args,
     build_trace_export_args, build_trace_file_args, run_fallow, run_fallow_with_top_level_warnings,
 };
@@ -255,6 +256,15 @@ impl FallowMcp {
     }
 
     #[tool(
+        description = "Read fallow's local value-tracking report. Runs NO analysis: it reads a local history file (.fallow/impact.json), answering \"what has fallow done for me over time\" rather than \"what is wrong now\" (for live findings use analyze / audit / check_health). LOCAL-DEV ONLY: history accrues only where .fallow/impact.json persists across runs (local dev, or a persistent pre-commit gate), so in CI / ephemeral runners this returns an empty report (enabled:false) and must NOT be used as a CI metric. Always returns a populated JSON object (never {}): branch on `enabled` (false = tracking was never set up; recommend the user run `fallow impact enable`, do not run it yourself) and `record_count` (0 with enabled:true = set up but awaiting gate runs). When enabled with history it returns `surfacing` (issue counts from the most recent recorded run), `trend` (count delta vs the previous run; improving/declining/stable on the wire), `containment_count` + `recent_containment` (pre-commit gate runs that blocked a commit then later cleared), and a short-SHA `latest_git_sha` for correlation. On fallow with impact v1.5+ the report also carries `resolved_total` / `suppressed_total` / `recent_resolved` / `attribution_active`, crediting findings fallow saw genuinely fixed (code removed or refactored) and never counting a fallow-ignore suppression as a win; older fallow binaries omit these fields. Read-only; the mutating `fallow impact enable` / `disable` lifecycle is intentionally not exposed over MCP.",
+        annotations(read_only_hint = true, idempotent_hint = true, open_world_hint = false)
+    )]
+    async fn impact(&self, params: Parameters<ImpactParams>) -> Result<CallToolResult, McpError> {
+        let args = build_impact_args(&params.0);
+        run_fallow(&self.binary, &args).await
+    }
+
+    #[tool(
         description = "Merge runtime-coverage data into the health report. Focused entry point for the runtime-coverage pipeline: pass a V8 coverage directory (`NODE_V8_COVERAGE=<dir>`), a single V8 coverage JSON file, or an Istanbul `coverage-final.json` via the required `coverage` field. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring (multiple JSON files in a V8 directory) requires an active license JWT (start a 30-day trial with `fallow license activate --trial --email <addr>`; check state with `fallow license status`). Returns structured JSON with a `runtime_coverage` block containing surfaced `findings` verdicts (`safe_to_delete` / `review_required` / `low_traffic` / `coverage_unavailable`), stable content-hash IDs (`fallow:prod:<hash>`), evidence, percentile-ranked hot paths (each with `start_line` and `end_line` so consumers can match against a PR diff), and on protocol-0.3+ sidecars a `summary.capture_quality` block that flags short-window captures. The sidecar may still classify other functions as `active`, but the CLI omits those from `runtime_coverage.findings` to keep the surfaced list actionable. Tunable via `min_invocations_hot` (hot-path threshold, default 100), `min_observation_volume` (high-confidence verdict floor, default 5000), and `low_traffic_threshold` (active/low_traffic split, default 0.001). `group_by` partitions results by CODEOWNERS / directory / package / section. PR-context behavior: when `FALLOW_DIFF_FILE` (path to a unified diff) is set in the agent's process environment, the top-level `runtime_coverage.verdict` promotes `hot-path-touched` over `cold-code-detected` so reviewers see the diff-tied signal first, AND every hot path is narrowed to functions whose `[start_line, end_line]` overlaps an added hunk. `FALLOW_CHANGED_SINCE` (git ref) also scopes (file-level). Without a change scope the verdict stays cold-code-primary and all hot paths are returned. The full unprioritized list is always in `runtime_coverage.signals[]` (kebab-case strings, severity-descending). Runtime coverage can exceed the default 120s MCP subprocess timeout on multi-megabyte dumps; raise `FALLOW_TIMEOUT_SECS` accordingly. For general complexity / hotspot / CRAP analysis without a production dump, use `check_health` instead.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
@@ -337,7 +347,8 @@ impl ServerHandler for FallowMcp {
                  audit (combined dead-code + complexity + duplication for changed files, returns verdict), \
                  fallow_explain (rule rationale and fix guidance without running analysis), \
                  list_boundaries (architecture boundary zones and access rules), \
-                 feature_flags (detect feature flag patterns). \
+                 feature_flags (detect feature flag patterns), \
+                 impact (read the local, opt-in value report: surfacing / trend / gate containment / resolved attribution; local-dev only, runs no analysis). \
                  Picking check_health vs check_runtime_coverage: use check_runtime_coverage when you have a V8 or Istanbul coverage dump and want surfaced dead-in-production verdicts; use check_health for general complexity / hotspot / CRAP analysis without a coverage dump.",
             )
     }

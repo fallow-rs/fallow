@@ -7,6 +7,7 @@ mod explain;
 mod fix;
 mod flags;
 mod health;
+mod impact;
 mod list_boundaries;
 mod project_info;
 mod trace;
@@ -23,6 +24,7 @@ pub use explain::build_explain_args;
 pub use fix::{build_fix_apply_args, build_fix_preview_args};
 pub use flags::build_feature_flags_args;
 pub use health::build_health_args;
+pub use impact::build_impact_args;
 pub use list_boundaries::build_list_boundaries_args;
 pub use project_info::build_project_info_args;
 pub use trace::{

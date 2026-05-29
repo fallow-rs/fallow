@@ -4,7 +4,7 @@ use crate::tools::{
     build_check_changed_args, build_check_runtime_coverage_args, build_explain_args,
     build_feature_flags_args, build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
-    build_get_importance_args, build_health_args, build_list_boundaries_args,
+    build_get_importance_args, build_health_args, build_impact_args, build_list_boundaries_args,
     build_project_info_args, build_trace_clone_args, build_trace_dependency_args,
     build_trace_export_args, build_trace_file_args,
 };
@@ -1294,6 +1294,42 @@ fn health_args_max_crap_integer_value() {
     );
 }
 
+// ── Argument building: impact ─────────────────────────────────────
+
+#[test]
+fn impact_args_minimal() {
+    let args = build_impact_args(&ImpactParams::default());
+    assert_eq!(args, ["impact", "--format", "json", "--quiet"]);
+}
+
+#[test]
+fn impact_args_with_root() {
+    let args = build_impact_args(&ImpactParams {
+        root: Some("/some/project".to_string()),
+    });
+    assert_eq!(
+        args,
+        [
+            "impact",
+            "--format",
+            "json",
+            "--quiet",
+            "--root",
+            "/some/project"
+        ]
+    );
+}
+
+#[test]
+fn impact_args_empty_root_dropped() {
+    // MCP clients sometimes send "" for an unset path; it must not become
+    // `--root ""` (which clap rejects / treats as cwd).
+    let args = build_impact_args(&ImpactParams {
+        root: Some(String::new()),
+    });
+    assert_eq!(args, ["impact", "--format", "json", "--quiet"]);
+}
+
 // ── All tools produce --format json --quiet ───────────────────────
 
 #[test]
@@ -1360,6 +1396,7 @@ fn all_arg_builders_include_format_json_and_quiet() {
     let feature_flags = build_feature_flags_args(&FeatureFlagsParams::default());
     let check_runtime_coverage =
         build_check_runtime_coverage_args(&check_runtime_coverage("./coverage"));
+    let impact = build_impact_args(&ImpactParams::default());
 
     for (name, args) in [
         ("analyze", &analyze),
@@ -1377,6 +1414,7 @@ fn all_arg_builders_include_format_json_and_quiet() {
         ("list_boundaries", &list_boundaries),
         ("feature_flags", &feature_flags),
         ("check_runtime_coverage", &check_runtime_coverage),
+        ("impact", &impact),
     ] {
         assert!(
             args.contains(&"--format".to_string()),
@@ -1410,6 +1448,7 @@ fn each_tool_uses_correct_subcommand() {
         "list"
     );
     assert_eq!(build_health_args(&HealthParams::default())[0], "health");
+    assert_eq!(build_impact_args(&ImpactParams::default())[0], "impact");
     assert_eq!(
         build_list_boundaries_args(&ListBoundariesParams::default())[0],
         "list"
