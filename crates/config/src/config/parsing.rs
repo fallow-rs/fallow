@@ -777,6 +777,116 @@ fn warn_on_unknown_rule_keys(config_path: &Path, merged: &serde_json::Value) {
     }
 }
 
+/// Return the lower-precedence config names from [`CONFIG_NAMES`] that ALSO
+/// exist in `dir`, given that `chosen_index` is the index of the first-match
+/// (winning) name.
+///
+/// Only indices after `chosen_index` are scanned: a higher-precedence name
+/// cannot coexist undetected, because it would have been the first match.
+fn shadowed_config_names(dir: &Path, chosen_index: usize) -> Vec<&'static str> {
+    CONFIG_NAMES
+        .iter()
+        .skip(chosen_index + 1)
+        .filter(|name| dir.join(name).exists())
+        .copied()
+        .collect()
+}
+
+/// A captured coexistence warning: `(chosen file name, shadowed file names)`.
+/// Test-only; populated by `warn_on_coexisting_configs` under capture.
+#[cfg(test)]
+type CoexistWarning = (String, Vec<String>);
+
+thread_local! {
+    /// Per-thread capture of coexisting-config warnings, for the wiring
+    /// regression test in this module. Mirrors [`UNKNOWN_RULE_CAPTURE`]: each
+    /// test installs a fresh capture via
+    /// [`capture_coexisting_config_warnings`], runs `find_and_load`, and reads
+    /// back the `(chosen, shadowed)` pairs. Thread-local so parallel test
+    /// execution does not race; bypassed entirely in production code.
+    #[cfg(test)]
+    static COEXIST_CAPTURE: std::cell::RefCell<Option<Vec<CoexistWarning>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Install a thread-local capture buffer and run `body`. Returns every
+/// `(chosen, shadowed)` pair emitted by `warn_on_coexisting_configs` within
+/// `body`'s call tree on the current thread, in order. Test-only.
+#[cfg(test)]
+pub(super) fn capture_coexisting_config_warnings<F: FnOnce() -> R, R>(
+    body: F,
+) -> (R, Vec<CoexistWarning>) {
+    COEXIST_CAPTURE.with(|cell| {
+        *cell.borrow_mut() = Some(Vec::new());
+    });
+    let result = body();
+    let findings = COEXIST_CAPTURE.with(|cell| cell.borrow_mut().take().unwrap_or_default());
+    (result, findings)
+}
+
+/// Emit a `tracing::warn!` when `find_and_load` picked `chosen_path` while one
+/// or more lower-precedence config files (`shadowed`) coexist in the same
+/// directory. Silent precedence is the worst class of config bug: the user
+/// sees correct-looking output produced from the wrong source (#458).
+///
+/// `chosen_path` is the absolute candidate path of the winning config;
+/// `shadowed` are the bare names of the lower-precedence files that also exist.
+///
+/// Deduplicates within the process keyed on the canonical directory, because
+/// `find_and_load` runs multiple times per analysis (combined mode loads config
+/// for check + dupes + health); without the dedupe the same directory would
+/// warn 3+ times per run. Two different directories with coexisting configs
+/// warn independently.
+fn warn_on_coexisting_configs(chosen_path: &Path, shadowed: &[&str]) {
+    use std::sync::{Mutex, OnceLock};
+
+    if shadowed.is_empty() {
+        return;
+    }
+
+    let chosen_name = chosen_path.file_name().map_or_else(
+        || chosen_path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let dir = chosen_path.parent().unwrap_or(chosen_path);
+
+    // Capture BEFORE the dedupe gate so the wiring test observes every emission
+    // even if the canonical directory was already warned about earlier.
+    #[cfg(test)]
+    COEXIST_CAPTURE.with(|cell| {
+        if let Some(buf) = cell.borrow_mut().as_mut() {
+            buf.push((
+                chosen_name.clone(),
+                shadowed.iter().map(|s| (*s).to_owned()).collect(),
+            ));
+        }
+    });
+
+    static WARNED: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
+    let warned = WARNED.get_or_init(|| Mutex::new(FxHashSet::default()));
+    let dedupe_key = std::fs::canonicalize(dir)
+        .unwrap_or_else(|_| dir.to_path_buf())
+        .display()
+        .to_string();
+    // On a poisoned mutex, fall through and warn anyway: over-warning beats
+    // silently swallowing the coexistence.
+    if let Ok(mut set) = warned.lock()
+        && !set.insert(dedupe_key)
+    {
+        return;
+    }
+
+    tracing::warn!(
+        "multiple fallow config files in {dir}: loaded '{chosen}', ignoring '{shadowed}'. \
+         fallow uses the first match in precedence order \
+         (.fallowrc.json > .fallowrc.jsonc > fallow.toml > .fallow.toml); \
+         remove the unused file(s) to silence this warning.",
+        dir = dir.display(),
+        chosen = chosen_name,
+        shadowed = shadowed.join(", "),
+    );
+}
+
 impl FallowConfig {
     /// Load config from a fallow config file (TOML or JSON/JSONC).
     ///
@@ -958,9 +1068,10 @@ impl FallowConfig {
     pub fn find_and_load(start: &Path) -> Result<Option<(Self, PathBuf)>, String> {
         let mut dir = start;
         loop {
-            for name in CONFIG_NAMES {
+            for (idx, name) in CONFIG_NAMES.iter().enumerate() {
                 let candidate = dir.join(name);
                 if candidate.exists() {
+                    warn_on_coexisting_configs(&candidate, &shadowed_config_names(dir, idx));
                     match Self::load(&candidate) {
                         Ok(config) => return Ok(Some((config, candidate))),
                         Err(e) => {
@@ -2499,6 +2610,153 @@ unknown_field = true
         let (config, path) = FallowConfig::find_and_load(dir.path()).unwrap().unwrap();
         assert_eq!(config.entry, vec!["from-json.ts"]);
         assert!(path.ends_with(".fallowrc.json"));
+    }
+
+    // ── coexisting-config detection (#458) ──────────────────────────
+
+    #[test]
+    fn shadowed_config_names_empty_when_single_config() {
+        let dir = test_dir("shadow-single");
+        std::fs::write(dir.path().join(".fallowrc.json"), "").unwrap();
+        // Winner is .fallowrc.json (index 0); nothing lower-precedence exists.
+        assert!(shadowed_config_names(dir.path(), 0).is_empty());
+    }
+
+    #[test]
+    fn shadowed_config_names_reports_lower_precedence_toml() {
+        let dir = test_dir("shadow-json-toml");
+        std::fs::write(dir.path().join(".fallowrc.json"), "").unwrap();
+        std::fs::write(dir.path().join("fallow.toml"), "").unwrap();
+        assert_eq!(shadowed_config_names(dir.path(), 0), vec!["fallow.toml"]);
+    }
+
+    #[test]
+    fn shadowed_config_names_reports_jsonc_sibling() {
+        let dir = test_dir("shadow-json-jsonc");
+        std::fs::write(dir.path().join(".fallowrc.json"), "").unwrap();
+        std::fs::write(dir.path().join(".fallowrc.jsonc"), "").unwrap();
+        assert_eq!(
+            shadowed_config_names(dir.path(), 0),
+            vec![".fallowrc.jsonc"]
+        );
+    }
+
+    #[test]
+    fn shadowed_config_names_reports_all_lower_when_four_coexist() {
+        let dir = test_dir("shadow-all-four");
+        for name in CONFIG_NAMES {
+            std::fs::write(dir.path().join(name), "").unwrap();
+        }
+        // Winner is .fallowrc.json (index 0); the other three are shadowed in
+        // precedence order.
+        assert_eq!(
+            shadowed_config_names(dir.path(), 0),
+            vec![".fallowrc.jsonc", "fallow.toml", ".fallow.toml"],
+        );
+    }
+
+    #[test]
+    fn shadowed_config_names_scoped_to_indices_after_winner() {
+        // When fallow.toml (index 2) is the winner, only .fallow.toml (index 3)
+        // can be shadowed; higher-precedence json names are absent here.
+        let dir = test_dir("shadow-toml-dottoml");
+        std::fs::write(dir.path().join("fallow.toml"), "").unwrap();
+        std::fs::write(dir.path().join(".fallow.toml"), "").unwrap();
+        assert_eq!(shadowed_config_names(dir.path(), 2), vec![".fallow.toml"]);
+    }
+
+    #[test]
+    fn find_and_load_warns_when_configs_coexist() {
+        let dir = test_dir("coexist-warn");
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"entry": ["from-json.ts"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("fallow.toml"),
+            "entry = [\"from-toml.ts\"]\n",
+        )
+        .unwrap();
+
+        let (result, captured) =
+            capture_coexisting_config_warnings(|| FallowConfig::find_and_load(dir.path()));
+
+        // The first-match winner still loads.
+        let (config, path) = result.unwrap().unwrap();
+        assert_eq!(config.entry, vec!["from-json.ts"]);
+        assert!(path.ends_with(".fallowrc.json"));
+
+        // Exactly one warning, naming the winner and the shadowed file.
+        assert_eq!(captured.len(), 1);
+        let (chosen, shadowed) = &captured[0];
+        assert_eq!(chosen, ".fallowrc.json");
+        assert_eq!(shadowed, &vec!["fallow.toml".to_owned()]);
+    }
+
+    #[test]
+    fn find_and_load_does_not_warn_for_single_config() {
+        let dir = test_dir("coexist-none");
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"entry": ["only.ts"]}"#,
+        )
+        .unwrap();
+
+        let (result, captured) =
+            capture_coexisting_config_warnings(|| FallowConfig::find_and_load(dir.path()));
+        assert!(result.unwrap().is_some());
+        assert!(captured.is_empty());
+    }
+
+    #[test]
+    fn find_and_load_warns_per_directory_independently() {
+        // Two distinct directories, each with coexisting configs, both reach the
+        // warn emitter in a single process run; the second is not skipped.
+        // Capture records BEFORE the process-wide dedupe gate, so this verifies
+        // per-directory DETECTION independence (the dedupe key itself is keyed
+        // on the canonical directory, so the tracing layer also warns once per
+        // directory rather than once globally).
+        let make = |name: &str| {
+            let dir = test_dir(name);
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            std::fs::write(dir.path().join(".fallowrc.json"), r#"{"entry": ["a.ts"]}"#).unwrap();
+            std::fs::write(dir.path().join("fallow.toml"), "entry = [\"a.ts\"]\n").unwrap();
+            dir
+        };
+        let first = make("coexist-dir-a");
+        let second = make("coexist-dir-b");
+
+        let ((), captured) = capture_coexisting_config_warnings(|| {
+            FallowConfig::find_and_load(first.path()).unwrap();
+            FallowConfig::find_and_load(second.path()).unwrap();
+        });
+
+        assert_eq!(captured.len(), 2);
+        assert!(captured.iter().all(|(chosen, shadowed)| {
+            chosen == ".fallowrc.json" && shadowed == &vec!["fallow.toml".to_owned()]
+        }));
+    }
+
+    #[test]
+    fn explicit_load_does_not_warn_about_coexisting_configs() {
+        // `--config <path>` routes through `FallowConfig::load`, which performs
+        // no discovery and must not emit the coexistence warning even when
+        // sibling configs exist in the same directory (#458).
+        let dir = test_dir("coexist-explicit");
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"entry": ["chosen.ts"]}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("fallow.toml"), "entry = [\"other.ts\"]\n").unwrap();
+
+        let chosen = dir.path().join("fallow.toml");
+        let (result, captured) = capture_coexisting_config_warnings(|| FallowConfig::load(&chosen));
+        assert!(result.is_ok());
+        assert!(captured.is_empty());
     }
 
     #[test]

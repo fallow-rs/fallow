@@ -545,6 +545,14 @@ enum Command {
     /// the final config as JSON. Use `--path` to print only the config
     /// file path (useful in shell scripts). Exit code 0 if a config was
     /// found, 3 if only defaults are in effect.
+    ///
+    /// Precedence is first-match-wins per directory, in the order
+    /// `.fallowrc.json` > `.fallowrc.jsonc` > `fallow.toml` > `.fallow.toml`,
+    /// walking up to the workspace root. `.fallowrc.json` accepts JSONC
+    /// (comments and trailing commas); `.fallowrc.jsonc` is identical in
+    /// behavior, the extension only signals to editors that comments are
+    /// expected. If two config files coexist in one directory, fallow loads the
+    /// higher-precedence one and warns on stderr naming the file it ignored.
     Config {
         /// Print only the config file path (one line, no JSON)
         #[arg(long)]

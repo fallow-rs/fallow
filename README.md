@@ -684,6 +684,18 @@ Works out of the box. When you need to customize, create `.fallowrc.json` or run
 }
 ```
 
+Fallow recognizes four config file names. Precedence is first-match-wins per
+directory, walking up to the workspace root:
+
+`.fallowrc.json` > `.fallowrc.jsonc` > `fallow.toml` > `.fallow.toml`
+
+`.fallowrc.json` accepts JSONC: comments and trailing commas are allowed.
+`.fallowrc.jsonc` is identical in behavior; the `.jsonc` extension exists only
+as a hint to editors that comments are expected. Pick whichever your tooling
+prefers. If more than one of these files coexists in the same directory, fallow
+loads the higher-precedence one and prints a warning on stderr naming the file
+it ignored, so a stale config left over from a migration cannot silently win.
+
 `fix.catalog.deletePrecedingComments` controls how `fallow fix` handles YAML
 comment blocks immediately above removed pnpm catalog entries: `"auto"` deletes
 blocks that clearly belong to the entry, `"always"` deletes every contiguous
