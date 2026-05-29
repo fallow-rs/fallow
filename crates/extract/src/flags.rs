@@ -100,6 +100,36 @@ const BUILTIN_ENV_PREFIXES: &[&str] = &[
     "TOGGLE_",
 ];
 
+/// Distinct built-in SDK provider labels, in declaration order.
+///
+/// Used by `fallow flags` to tell the user which SDKs the default detectors
+/// cover when no flags are found. Derived from `BUILTIN_SDK_PATTERNS` (empty
+/// provider labels skipped) with the import-based Vercel Flags provider appended,
+/// so the surfaced list stays in sync with what is actually detected.
+#[must_use]
+pub fn builtin_sdk_providers() -> Vec<&'static str> {
+    let mut providers: Vec<&'static str> = Vec::new();
+    for &(_, _, provider) in BUILTIN_SDK_PATTERNS {
+        if !provider.is_empty() && !providers.contains(&provider) {
+            providers.push(provider);
+        }
+    }
+    // Vercel Flags is detected via import resolution, not BUILTIN_SDK_PATTERNS.
+    if !providers.contains(&VERCEL_FLAGS_PROVIDER) {
+        providers.push(VERCEL_FLAGS_PROVIDER);
+    }
+    providers
+}
+
+/// Built-in environment variable prefixes treated as feature flags.
+///
+/// Used by `fallow flags` to surface the default env-prefix detectors in the
+/// empty-result hint. Returns the source-of-truth `BUILTIN_ENV_PREFIXES`.
+#[must_use]
+pub fn builtin_env_prefixes() -> &'static [&'static str] {
+    BUILTIN_ENV_PREFIXES
+}
+
 /// Config object names that heuristically indicate feature flag namespaces.
 const CONFIG_OBJECT_KEYWORDS: &[&str] = &[
     "feature",
@@ -882,5 +912,39 @@ mod tests {
         );
         assert_eq!(flags.len(), 1);
         assert_eq!(flags[0].flag_name, "MYAPP_ENABLE_V2");
+    }
+
+    // ── Built-in detector accessors (surfaced in the empty-result hint) ──
+
+    #[test]
+    fn builtin_sdk_providers_are_distinct_and_ordered() {
+        let providers = builtin_sdk_providers();
+        assert!(!providers.is_empty());
+        // Distinct: no duplicate labels.
+        let mut sorted = providers.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            providers.len(),
+            "providers must be distinct: {providers:?}"
+        );
+        // Empty provider labels (generic patterns like `getValue`) are skipped.
+        assert!(
+            !providers.contains(&""),
+            "empty provider labels must not leak into the surfaced list"
+        );
+        // Declaration order: LaunchDarkly first (first entry in BUILTIN_SDK_PATTERNS).
+        assert_eq!(providers.first(), Some(&"LaunchDarkly"));
+        // Vercel Flags is detected separately and appended last.
+        assert_eq!(providers.last(), Some(&VERCEL_FLAGS_PROVIDER));
+    }
+
+    #[test]
+    fn builtin_env_prefixes_match_source_constant() {
+        let prefixes = builtin_env_prefixes();
+        assert_eq!(prefixes, BUILTIN_ENV_PREFIXES);
+        assert!(prefixes.contains(&"FEATURE_"));
+        assert!(prefixes.contains(&"TOGGLE_"));
     }
 }

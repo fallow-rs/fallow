@@ -242,8 +242,11 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         );
     }
 
-    // Render output
-    print_flags_result(&flags, &config, opts, elapsed);
+    // Render output. `files.len()` is the discovered source-file count, which
+    // matches the "Scanned N files" wording better than the parsed-module count
+    // (the latter undercounts when a file fails to read).
+    let files_scanned = files.len();
+    print_flags_result(&flags, &config, opts, elapsed, files_scanned);
 
     ExitCode::SUCCESS
 }
@@ -254,9 +257,10 @@ fn print_flags_result(
     config: &ResolvedConfig,
     opts: &FlagsOptions<'_>,
     elapsed: std::time::Duration,
+    files_scanned: usize,
 ) {
     match opts.output {
-        OutputFormat::Human => print_flags_human(flags, config, elapsed, opts.quiet),
+        OutputFormat::Human => print_flags_human(flags, config, elapsed, opts.quiet, files_scanned),
         OutputFormat::Json => print_flags_json(flags, config, elapsed, opts.explain),
         OutputFormat::Compact => print_flags_compact(flags, config),
         OutputFormat::Sarif => print_flags_sarif(flags, config),
@@ -309,12 +313,90 @@ fn print_file_path(display: &str) {
     }
 }
 
+/// When `fallow flags` finds nothing, surface the configuration surface so the
+/// user can distinguish a true negative from "fallow does not recognize my SDK
+/// yet". On full defaults the hint enumerates the built-in detectors (sourced
+/// from `fallow_core::extract::flags`, never hardcoded) and points at the config
+/// knobs. When custom `flags.*` config is present, it collapses to a single
+/// terse acknowledgement so users who already found the surface are not nagged.
+/// All lines go to stderr, mirroring the empty-result line they follow.
+fn print_empty_flags_hint(config: &ResolvedConfig, files_scanned: usize) {
+    use colored::Colorize;
+
+    let custom_sdk = config.flags.sdk_patterns.len();
+    let custom_env = config.flags.env_prefixes.len();
+    let heuristics = config.flags.config_object_heuristics;
+    let has_custom = custom_sdk > 0 || custom_env > 0 || heuristics;
+
+    let files_label = if files_scanned == 1 { "file" } else { "files" };
+
+    if has_custom {
+        let mut parts: Vec<String> = Vec::new();
+        if custom_sdk > 0 {
+            parts.push(format!(
+                "{custom_sdk} custom SDK pattern{}",
+                if custom_sdk == 1 { "" } else { "s" }
+            ));
+        }
+        if custom_env > 0 {
+            parts.push(format!(
+                "{custom_env} custom env prefix{}",
+                if custom_env == 1 { "" } else { "es" }
+            ));
+        }
+        if heuristics {
+            parts.push("config-object heuristics enabled".to_string());
+        }
+        eprintln!(
+            "  {}",
+            format!(
+                "Scanned {files_scanned} {files_label} with your custom flag config: {}.",
+                parts.join(", ")
+            )
+            .dimmed()
+        );
+        return;
+    }
+
+    let env_prefixes = fallow_core::extract::flags::builtin_env_prefixes()
+        .iter()
+        .map(|p| format!("{p}*"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let providers = fallow_core::extract::flags::builtin_sdk_providers().join(", ");
+
+    eprintln!(
+        "  {}",
+        format!("Scanned {files_scanned} {files_label} for:").dimmed()
+    );
+    eprintln!(
+        "    {} Env prefixes: {}",
+        "\u{00b7}".dimmed(),
+        env_prefixes.dimmed()
+    );
+    eprintln!("    {} SDKs: {}", "\u{00b7}".dimmed(), providers.dimmed());
+    eprintln!(
+        "  {}",
+        "Using a different SDK (in-house, or one not listed)? Add it via `flags.sdkPatterns` in your config.".dimmed()
+    );
+    eprintln!(
+        "  {}",
+        "For property-access patterns (config.featureX), enable `flags.configObjectHeuristics`."
+            .dimmed()
+    );
+    eprintln!(
+        "  {}",
+        "Docs: https://docs.fallow.tools/cli/flags#configuration".dimmed()
+    );
+}
+
 /// Human-readable output for `fallow flags`.
 fn print_flags_human(
     flags: &[FeatureFlag],
     config: &ResolvedConfig,
     elapsed: std::time::Duration,
     quiet: bool,
+    files_scanned: usize,
 ) {
     use colored::Colorize;
 
@@ -325,6 +407,7 @@ fn print_flags_human(
                 "\u{2713}".green().bold(),
                 elapsed.as_secs_f64()
             );
+            print_empty_flags_hint(config, files_scanned);
         }
         return;
     }

@@ -1,0 +1,9 @@
+{
+  "flags": {
+    "sdkPatterns": [
+      { "function": "useMyFlag", "nameArg": 0, "provider": "InHouse" },
+      { "function": "checkToggle", "nameArg": 0 }
+    ],
+    "envPrefixes": ["MYAPP_FEATURE_"]
+  }
+}
