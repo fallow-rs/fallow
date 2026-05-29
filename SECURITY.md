@@ -12,7 +12,7 @@ You should receive a response within 48 hours. Please include:
 
 ## Scope
 
-fallow is a static analysis tool that reads source files and `package.json`. It does not execute user code, make network requests, or modify files (except `fallow fix`, which only edits files in the analyzed project).
+fallow is a static analysis tool that reads source files and `package.json`. It does not execute user code, make network requests, or modify files (except `fallow fix`, which only edits files in the analyzed project). The "does not execute user code" property is enforced, not just documented: the analysis crates (`fallow-core`, `fallow-extract`, `fallow-graph`) pin `#![cfg_attr(not(test), deny(clippy::disallowed_methods))]` against `std::process::Command::new`, so the only external program the analysis path can spawn is `git` (for `--changed-since`, churn history, and repository-state queries), routed through the single `fallow_core::spawn::git` wrapper. A `package.json` lifecycle script is read as data and never run; a regression test (`safe_analysis`) asserts a `postinstall` sentinel never fires during analysis.
 
 ## Threat model
 
@@ -22,7 +22,17 @@ Config-sourced glob patterns (`entry`, `ignorePatterns`, `dynamicallyLoaded`, `d
 
 On `fallow-rs/fallow`'s own GitHub Actions setup, the `approval_policy: first_time_contributors` setting requires maintainer approval before a first-time contributor's PR runs CI, which further narrows the realistic attack window. Self-hosted forks should configure a similar approval policy when running `fallow` on untrusted PR content.
 
-## Binary distribution and verification
+## Build-time trust boundary
+
+The threat model above covers fallow at runtime (analyzing a project). A separate boundary applies when *building* fallow itself. Cargo build scripts (`build.rs`) and procedural macros execute arbitrary code at build time, on CI and on the release runner that holds the binary-signing key. This is a distinct, higher-stakes surface from the runtime one, and `npm --ignore-scripts` (which guards the npm-wrapper install) does nothing for it.
+
+The Cargo dependency graph is gated by `cargo-deny` (`deny.toml`, run in CI):
+
+- RUSTSEC advisories deny by default (cargo-deny v2), and `yanked = "deny"` rejects yanked crates, an early signal of a withdrawn or compromised release.
+- `[bans] wildcards = "deny"` forbids `*` version requirements; `[sources]` denies unknown registries and git sources, so a dependency cannot be pulled from an unexpected origin.
+- Every `advisories.ignore` entry must carry a written justification, so suppressions are auditable rather than silent.
+
+Dependency updates flow through Dependabot with a 7-day cooldown and non-major-only auto-merge, so a freshly-published (possibly compromised) version is not pulled into a build the day it lands.
 
 Every fallow release publishes per-platform CLI, LSP, and MCP binaries via three channels (the GitHub Release, the `@fallow-cli/*` npm platform packages, and the bundled `fallow-rs/fallow@v2` GitHub Action). At release time the `build` job in `.github/workflows/release.yml` signs each binary with the workflow's Ed25519 private key (`ED25519_BINARY_SIGNING_PRIVATE_KEY` repo secret), uploads the resulting `.sig` files alongside the binaries, and publishes npm tarballs with `npm publish --provenance --ignore-scripts`. The same workflow computes a SHA-256 digest of every platform binary and writes it into the platform package's `package.json` under a `fallowDigests` field, so verification on every consumer runs locally without a network round-trip.
 

@@ -5,6 +5,11 @@
 //! HTML asset reference extraction, and incremental caching of parse results.
 
 #![warn(missing_docs)]
+// fallow's analysis never executes the analyzed project's code, and this crate
+// spawns no external process at all. The deny (paired with the `.clippy.toml`
+// ban on `std::process::Command::new`) keeps it that way: any future process
+// spawn here fails the build. Test helpers are exempt via `not(test)`.
+#![cfg_attr(not(test), deny(clippy::disallowed_methods))]
 
 mod asset_url;
 pub mod astro;
