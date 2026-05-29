@@ -120,18 +120,35 @@ fn store_path(root: &Path) -> PathBuf {
     root.join(".fallow").join(STORE_FILE)
 }
 
-/// Load the store. Returns a default (disabled) store on any error, so callers
-/// never have to handle the file-missing or corrupt cases specially.
+/// Load the store. A missing file is the normal "not enabled yet" case and
+/// returns a default silently. A present-but-unparsable file is surfaced with
+/// a one-line warning (rather than silently disabling tracking) and then
+/// degrades to a default; the corrupt file is left on disk untouched, and
+/// because [`record_audit_run`] no-ops on a disabled store it is never
+/// overwritten, so re-running `fallow impact enable` is a deliberate reset.
 pub fn load(root: &Path) -> ImpactStore {
     let path = store_path(root);
     let Ok(content) = std::fs::read_to_string(&path) else {
         return ImpactStore::default();
     };
-    serde_json::from_str(&content).unwrap_or_default()
+    match serde_json::from_str(&content) {
+        Ok(store) => store,
+        Err(err) => {
+            tracing::warn!(
+                "fallow impact: ignoring unreadable store at {} ({err}); run `fallow impact enable` to reset it",
+                path.display()
+            );
+            ImpactStore::default()
+        }
+    }
 }
 
-/// Persist the store, best-effort. Errors are swallowed: Impact must never
-/// affect the exit code or output of the command that triggered the write.
+/// Persist the store, best-effort. Uses `atomic_write` (tempfile + rename) so a
+/// crash or a concurrent writer can never leave a torn, half-written file that
+/// the next `load` would treat as corrupt and silently disable. Errors are
+/// swallowed: Impact must never affect the exit code or output of the command
+/// that triggered the write. Concurrent writers still race (last-write-wins can
+/// drop a record), but each write lands as whole, valid JSON.
 fn save(store: &ImpactStore, root: &Path) {
     let path = store_path(root);
     if let Some(parent) = path.parent()
@@ -140,7 +157,7 @@ fn save(store: &ImpactStore, root: &Path) {
         return;
     }
     if let Ok(json) = serde_json::to_string_pretty(store) {
-        let _ = std::fs::write(&path, json);
+        let _ = fallow_config::atomic_write(&path, json.as_bytes());
     }
 }
 
@@ -303,7 +320,15 @@ pub struct ImpactReport {
     pub record_count: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_recorded: Option<String>,
-    /// Current surfaced counts (the most recent recorded run).
+    /// Git SHA of the most recent recorded run, so a consumer can tell which
+    /// commit the `surfacing` counts belong to. None when the latest run had no
+    /// SHA (not a git repo) or there are no records yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_git_sha: Option<String>,
+    /// Counts from the most recent recorded run. These are CHANGED-FILE scoped
+    /// (each record comes from a `fallow audit` run, whose default `new-only`
+    /// gate counts only findings in the changed files of that run), NOT a
+    /// whole-project total.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surfacing: Option<ImpactCounts>,
     /// Trend between the two most recent records. None until two records exist.
@@ -347,10 +372,13 @@ pub fn build_report(store: &ImpactStore) -> ImpactReport {
         .cloned()
         .collect();
 
+    let latest_git_sha = store.records.last().and_then(|r| r.git_sha.clone());
+
     ImpactReport {
         enabled: store.enabled,
         record_count: store.records.len(),
         first_recorded: store.first_recorded.clone(),
+        latest_git_sha,
         surfacing,
         trend,
         containment_count: store.containment.len(),
@@ -385,7 +413,7 @@ pub fn render_human(report: &ImpactReport) -> String {
 
     if let Some(s) = &report.surfacing {
         out.push_str(&format!(
-            "  SURFACING\n    fallow is surfacing {} issue{} you can act on\n",
+            "  LATEST RUN (changed files)\n    {} issue{} flagged in your last `fallow audit` run\n",
             s.total_issues,
             plural(s.total_issues),
         ));
@@ -396,13 +424,9 @@ pub fn render_human(report: &ImpactReport) -> String {
     }
 
     if let Some(t) = &report.trend {
-        let arrow = match t.direction {
-            ImpactTrendDirection::Improving => "down",
-            ImpactTrendDirection::Declining => "up",
-            ImpactTrendDirection::Stable => "flat",
-        };
+        let arrow = trend_arrow(t.direction);
         out.push_str(&format!(
-            "  TREND (since the previous recorded run)\n    issues {} -> {} ({})\n\n",
+            "  TREND\n    {} -> {} issues ({}) across your last two recorded runs\n      each run is changed-file scope, so consecutive runs may cover different changes\n\n",
             t.previous_total, t.current_total, arrow,
         ));
     }
@@ -449,7 +473,7 @@ pub fn render_markdown(report: &ImpactReport) -> String {
 
     if let Some(s) = &report.surfacing {
         out.push_str(&format!(
-            "- **Surfacing:** {} issue{} (dead code {}, complexity {}, duplication {})\n",
+            "- **Latest run (changed files):** {} issue{} (dead code {}, complexity {}, duplication {})\n",
             s.total_issues,
             plural(s.total_issues),
             s.dead_code,
@@ -458,14 +482,11 @@ pub fn render_markdown(report: &ImpactReport) -> String {
         ));
     }
     if let Some(t) = &report.trend {
-        let word = match t.direction {
-            ImpactTrendDirection::Improving => "improving",
-            ImpactTrendDirection::Declining => "rising",
-            ImpactTrendDirection::Stable => "stable",
-        };
         out.push_str(&format!(
-            "- **Trend:** {} -> {} ({})\n",
-            t.previous_total, t.current_total, word,
+            "- **Trend (changed-file scope, last two runs):** {} -> {} ({})\n",
+            t.previous_total,
+            t.current_total,
+            trend_arrow(t.direction),
         ));
     }
     out.push_str(&format!(
@@ -483,6 +504,17 @@ pub fn render_markdown(report: &ImpactReport) -> String {
 
 const fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
+}
+
+/// Single human-facing trend vocabulary, shared by the text and markdown
+/// renderers so the same concept does not read three different ways. The JSON
+/// wire keeps the `improving`/`declining`/`stable` enum form for machines.
+const fn trend_arrow(direction: ImpactTrendDirection) -> &'static str {
+    match direction {
+        ImpactTrendDirection::Improving => "down",
+        ImpactTrendDirection::Declining => "up",
+        ImpactTrendDirection::Stable => "flat",
+    }
 }
 
 #[cfg(test)]

@@ -5657,7 +5657,16 @@ enabled: boolean
 record_count: number
 first_recorded?: (string | null)
 /**
- * Current surfaced counts (the most recent recorded run).
+ * Git SHA of the most recent recorded run, so a consumer can tell which
+ * commit the `surfacing` counts belong to. None when the latest run had no
+ * SHA (not a git repo) or there are no records yet.
+ */
+latest_git_sha?: (string | null)
+/**
+ * Counts from the most recent recorded run. These are CHANGED-FILE scoped
+ * (each record comes from a `fallow audit` run, whose default `new-only`
+ * gate counts only findings in the changed files of that run), NOT a
+ * whole-project total.
  */
 surfacing?: (ImpactCounts | null)
 /**

@@ -9816,6 +9816,13 @@
             "null"
           ]
         },
+        "latest_git_sha": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Git SHA of the most recent recorded run, so a consumer can tell which\ncommit the `surfacing` counts belong to. None when the latest run had no\nSHA (not a git repo) or there are no records yet."
+        },
         "surfacing": {
           "anyOf": [
             {
@@ -9825,7 +9832,7 @@
               "type": "null"
             }
           ],
-          "description": "Current surfaced counts (the most recent recorded run)."
+          "description": "Counts from the most recent recorded run. These are CHANGED-FILE scoped\n(each record comes from a `fallow audit` run, whose default `new-only`\ngate counts only findings in the changed files of that run), NOT a\nwhole-project total."
         },
         "trend": {
           "anyOf": [
