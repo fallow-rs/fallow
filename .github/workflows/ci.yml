@@ -405,6 +405,36 @@ jobs:
           npm ci --omit=optional --ignore-scripts
           npx napi build --platform --release --target aarch64-pc-windows-msvc
 
+  windows-audit-smoke:
+    name: Windows Audit Lifecycle Smoke
+    needs: changes
+    # The `check` matrix only runs the full test suite on windows-latest for
+    # push/merge_group, so PRs never execute these audit lifecycle paths on
+    # Windows. PR #489 replaced the `process_is_alive` stub (which made the
+    # orphan sweep a no-op on Windows) with a real Win32 OpenProcess /
+    # WaitForSingleObject implementation, and `ReusableWorktreeLock` uses
+    # NTFS LockFileEx whose semantics differ from POSIX flock. This job runs
+    # the three lifecycle tests on every Rust-touching PR so those Windows-only
+    # paths are validated before a release tag is cut. Narrower than the full
+    # Windows matrix (#447). Refs #489, #472.
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: windows-audit-smoke
+      - name: Run audit orphan-sweep + lock lifecycle tests
+        run: >
+          cargo test -p fallow-cli --lib --
+          --exact
+          audit::tests::audit_orphan_sweep_removes_dead_pid_worktree
+          audit::tests::audit_orphan_sweep_keeps_live_pid_worktree
+          audit::tests::reusable_worktree_lock_excludes_concurrent_acquires
+
   test-gitlab-ci:
     name: Test GitLab CI scripts
     needs: changes
@@ -533,7 +563,7 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [check, doc, typos, js-lint, npm-package, fallow-self-analyze, vscode, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri]
+    needs: [check, doc, typos, js-lint, npm-package, fallow-self-analyze, vscode, test-gitlab-ci, windows-audit-smoke, audit, deny, shear, zizmor, msrv, miri]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
