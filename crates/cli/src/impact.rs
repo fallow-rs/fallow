@@ -357,11 +357,11 @@ fn direction_for(delta: i64) -> ImpactTrendDirection {
 }
 
 /// Wire-version discriminator for [`ImpactReport`]. Independent from the global
-/// [`crate::output_envelope::SchemaVersion`] (the impact report versions on its
-/// own cadence) and from the on-disk [`STORE_SCHEMA_VERSION`] (the persisted
-/// store shape versions separately). Serializes as a string `const` so JSON
-/// consumers can switch on it, matching the other independently-versioned
-/// envelopes (e.g. `CoverageAnalyzeSchemaVersion`).
+/// `SchemaVersion` (the impact report versions on its own cadence) and from the
+/// on-disk `STORE_SCHEMA_VERSION` (the persisted store shape versions
+/// separately). Serializes as a string `const` so JSON consumers can switch on
+/// it, matching the other independently-versioned envelopes (e.g.
+/// `CoverageAnalyzeSchemaVersion`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum ImpactReportSchemaVersion {
