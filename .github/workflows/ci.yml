@@ -189,6 +189,8 @@ jobs:
       - uses: crate-ci/typos@aca895bf05aec0cb7dffa6f94495e923224d9f17 # v1
       - name: Hidden unicode
         run: python3 scripts/scan-hidden-unicode.py --mode committed
+      - name: Agent-file baseline drift
+        run: python3 scripts/scan-hidden-unicode.py --mode check-manifest
       - name: Hidden-unicode scanner self-test
         run: bash scripts/test-scan-hidden-unicode.sh
 

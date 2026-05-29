@@ -74,5 +74,23 @@ out=$(python3 scripts/scan-hidden-unicode.py --mode agent 2>&1); rc=$?
 check "agent drift warns not blocks" 0 $rc
 echo "$out" | grep -q "drift" && pass=$((pass + 1)) || { fail=$((fail + 1)); echo "FAIL: drift warning text missing"; }
 
+# 8. check-manifest gate: same drifted state as case 7 -> BLOCKS, exit 1
+out=$(python3 scripts/scan-hidden-unicode.py --mode check-manifest 2>&1); rc=$?
+check "check-manifest drift blocks" 1 $rc
+echo "$out" | grep -q "stale" && pass=$((pass + 1)) || { fail=$((fail + 1)); echo "FAIL: check-manifest stale text missing"; }
+
+# 9. check-manifest gate: re-bless -> clean, exit 0
+git add -A && git commit -qm "mutate rule"
+python3 scripts/scan-hidden-unicode.py --update-manifest >/dev/null 2>&1
+python3 scripts/scan-hidden-unicode.py --mode check-manifest >/dev/null 2>&1
+check "check-manifest clean after bless" 0 $?
+
+# 10. check-manifest gate: a tracked agent file with no blessed entry -> BLOCKS, exit 1
+printf 'new rule\n' > .claude/rules/unblessed.md
+git add -A && git commit -qm "add unblessed rule"
+out=$(python3 scripts/scan-hidden-unicode.py --mode check-manifest 2>&1); rc=$?
+check "check-manifest unblessed file blocks" 1 $rc
+echo "$out" | grep -q "unblessed" && pass=$((pass + 1)) || { fail=$((fail + 1)); echo "FAIL: check-manifest unblessed text missing"; }
+
 echo "scan-hidden-unicode self-test: $pass passed, $fail failed"
 [ "$fail" = 0 ]

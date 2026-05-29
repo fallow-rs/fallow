@@ -20,13 +20,23 @@ surface"):
                      drift check WARNS when a tracked agent file changed since it was
                      last blessed.
 
-  --update-manifest  Regenerate scripts/agent-files.sha256 (the blessed baseline for
-                     the agent-mode drift check). Run after a legitimate edit to a
-                     tracked agent file, then commit the manifest.
+  --mode check-manifest
+                     The CI drift gate. BLOCKS (exit 1) when any tracked agent file
+                     differs from its blessed sha256 in scripts/agent-files.sha256,
+                     or a blessed file is missing. This is the enforcing counterpart
+                     to agent mode's warn-only drift check: it makes a PR that edits a
+                     tracked agent file re-bless the manifest in the same change,
+                     rather than leaving stale drift that warns on every later session.
+                     No codepoint or keyword scan here. Wired into ci.yml.
 
-Exit code is nonzero ONLY on a codepoint hit. Keyword-soup and manifest drift are
-warn-only (exit 0) so a session is never hard-blocked by a heuristic or an
-in-progress edit. Stdlib only.
+  --update-manifest  Regenerate scripts/agent-files.sha256 (the blessed baseline for
+                     the drift checks). Run after a legitimate edit to a tracked agent
+                     file, then commit the manifest.
+
+Exit code is nonzero on a codepoint hit (committed / agent modes) or on manifest
+drift (check-manifest mode). In agent mode the manifest-drift and keyword-soup
+findings stay warn-only (exit 0) so a session is never hard-blocked by a heuristic
+or an in-progress edit. Stdlib only.
 """
 
 from __future__ import annotations
@@ -220,6 +230,39 @@ def manifest_drift_warnings() -> list[str]:
     return warnings
 
 
+def check_manifest() -> int:
+    """CI gate: nonzero when the blessed baseline is stale or incomplete.
+
+    Drift here means a tracked agent file was edited (or removed) without
+    re-blessing scripts/agent-files.sha256, so the agent-mode guard would warn
+    on every later session. Also fail when a tracked manifest file has no blessed
+    entry at all, so a newly added rule doc cannot silently escape the baseline.
+    """
+    if not MANIFEST_PATH.exists():
+        print("error: scripts/agent-files.sha256 is missing; run --update-manifest", file=sys.stderr)
+        return 1
+
+    drift = manifest_drift_warnings()
+    blessed = {line.partition("  ")[2] for line in MANIFEST_PATH.read_text(encoding="utf-8").splitlines() if line.strip()}
+    unblessed = [rel(p) for p in manifest_paths() if rel(p) not in blessed]
+
+    if not drift and not unblessed:
+        return 0
+
+    print("error: agent-file baseline is stale (scripts/agent-files.sha256).", file=sys.stderr)
+    for w in drift:
+        print(f"  drift: {w}", file=sys.stderr)
+    for u in unblessed:
+        print(f"  unblessed: {u}: tracked agent file has no entry in the manifest", file=sys.stderr)
+    print(
+        "  A PR that edits a tracked agent file (.claude/rules/**, .claude/agents/**,\n"
+        "  CLAUDE.md, .claude/settings.json) must re-bless the baseline in the same change.\n"
+        "  Fix: python3 scripts/scan-hidden-unicode.py --update-manifest, then commit the manifest.",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def scan_committed(staged_only: bool) -> int:
     errors = 0
     for path in committed_surface(staged_only):
@@ -292,6 +335,8 @@ def main(argv: list[str]) -> int:
             mode = "committed"
         elif arg == "--mode=agent" or arg == "agent":
             mode = "agent"
+        elif arg == "--mode=check-manifest" or arg == "check-manifest":
+            mode = "check-manifest"
         elif arg == "--mode" :
             continue
         elif arg == "--staged":
@@ -300,7 +345,9 @@ def main(argv: list[str]) -> int:
         return scan_committed(staged_only)
     if mode == "agent":
         return scan_agent()
-    print("usage: scan-hidden-unicode.py --mode {committed,agent} [--staged] | --update-manifest", file=sys.stderr)
+    if mode == "check-manifest":
+        return check_manifest()
+    print("usage: scan-hidden-unicode.py --mode {committed,agent,check-manifest} [--staged] | --update-manifest", file=sys.stderr)
     return 2
 
 
