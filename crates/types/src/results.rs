@@ -255,6 +255,84 @@ impl AnalysisResults {
         self.total_issues() > 0
     }
 
+    /// Merge `other` into `self`, taking the union of every field.
+    ///
+    /// This is the single canonical way to combine two [`AnalysisResults`]
+    /// (the LSP merges per-project-root results through it). The method
+    /// exhaustively destructures `Self`, so adding a field to the struct
+    /// becomes a compile error here instead of a silently-dropped field. See
+    /// issue #444.
+    ///
+    /// Every `Vec` field is appended (callers dedup downstream where needed,
+    /// e.g. the LSP's identity-keyed `dedup_results`). `suppression_count`
+    /// sums; `entry_point_summary` keeps `self`'s value when present and
+    /// otherwise adopts `other`'s.
+    pub fn merge_into(&mut self, other: Self) {
+        let Self {
+            unused_files,
+            unused_exports,
+            unused_types,
+            private_type_leaks,
+            unused_dependencies,
+            unused_dev_dependencies,
+            unused_optional_dependencies,
+            unused_enum_members,
+            unused_class_members,
+            unresolved_imports,
+            unlisted_dependencies,
+            duplicate_exports,
+            type_only_dependencies,
+            test_only_dependencies,
+            circular_dependencies,
+            re_export_cycles,
+            boundary_violations,
+            stale_suppressions,
+            unused_catalog_entries,
+            empty_catalog_groups,
+            unresolved_catalog_references,
+            unused_dependency_overrides,
+            misconfigured_dependency_overrides,
+            suppression_count,
+            feature_flags,
+            export_usages,
+            entry_point_summary,
+        } = other;
+
+        self.unused_files.extend(unused_files);
+        self.unused_exports.extend(unused_exports);
+        self.unused_types.extend(unused_types);
+        self.private_type_leaks.extend(private_type_leaks);
+        self.unused_dependencies.extend(unused_dependencies);
+        self.unused_dev_dependencies.extend(unused_dev_dependencies);
+        self.unused_optional_dependencies
+            .extend(unused_optional_dependencies);
+        self.unused_enum_members.extend(unused_enum_members);
+        self.unused_class_members.extend(unused_class_members);
+        self.unresolved_imports.extend(unresolved_imports);
+        self.unlisted_dependencies.extend(unlisted_dependencies);
+        self.duplicate_exports.extend(duplicate_exports);
+        self.type_only_dependencies.extend(type_only_dependencies);
+        self.test_only_dependencies.extend(test_only_dependencies);
+        self.circular_dependencies.extend(circular_dependencies);
+        self.re_export_cycles.extend(re_export_cycles);
+        self.boundary_violations.extend(boundary_violations);
+        self.stale_suppressions.extend(stale_suppressions);
+        self.unused_catalog_entries.extend(unused_catalog_entries);
+        self.empty_catalog_groups.extend(empty_catalog_groups);
+        self.unresolved_catalog_references
+            .extend(unresolved_catalog_references);
+        self.unused_dependency_overrides
+            .extend(unused_dependency_overrides);
+        self.misconfigured_dependency_overrides
+            .extend(misconfigured_dependency_overrides);
+        self.feature_flags.extend(feature_flags);
+        self.export_usages.extend(export_usages);
+        self.suppression_count += suppression_count;
+        if self.entry_point_summary.is_none() {
+            self.entry_point_summary = entry_point_summary;
+        }
+    }
+
     /// Sort all result arrays for deterministic output ordering.
     ///
     /// Parallel collection (rayon, `FxHashMap` iteration) does not guarantee

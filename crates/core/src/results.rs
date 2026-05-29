@@ -11,11 +11,12 @@ pub use fallow_types::output_dead_code::{
 pub use fallow_types::results::{
     AnalysisResults, BoundaryViolation, CircularDependency, DependencyLocation,
     DependencyOverrideMisconfigReason, DependencyOverrideSource, DuplicateExport,
-    DuplicateLocation, EmptyCatalogGroup, EntryPointSummary, ExportUsage, ImportSite,
-    MisconfiguredDependencyOverride, PrivateTypeLeak, ReExportCycle, ReExportCycleKind,
-    ReferenceLocation, StaleSuppression, SuppressionOrigin, TestOnlyDependency, TypeOnlyDependency,
-    UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
-    UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
+    DuplicateLocation, EmptyCatalogGroup, EntryPointSummary, ExportUsage, FeatureFlag,
+    FlagConfidence, FlagKind, ImportSite, MisconfiguredDependencyOverride, PrivateTypeLeak,
+    ReExportCycle, ReExportCycleKind, ReferenceLocation, StaleSuppression, SuppressionOrigin,
+    TestOnlyDependency, TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference,
+    UnresolvedImport, UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport,
+    UnusedFile, UnusedMember,
 };
 
 #[cfg(test)]

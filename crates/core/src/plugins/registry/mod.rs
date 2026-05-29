@@ -98,6 +98,141 @@ pub struct AggregatedPluginResult {
     pub provided_dependencies: Vec<ProvidedDependencyRule>,
 }
 
+/// Append `incoming` string items to `target`, skipping values already present
+/// in `target` or earlier in `incoming`. Matches the deduplication the
+/// workspace merge applied via per-field `seen` sets before #444 centralized
+/// it on [`AggregatedPluginResult::merge_into`].
+fn extend_unique(target: &mut Vec<String>, incoming: Vec<String>) {
+    let mut seen: FxHashSet<String> = target.iter().cloned().collect();
+    for item in incoming {
+        if seen.insert(item.clone()) {
+            target.push(item);
+        }
+    }
+}
+
+/// Prefix a workspace-relative pattern so it matches from the monorepo root,
+/// unless it is already workspace-prefixed or project-root-relative (leading
+/// `/`, e.g. an angular.json path). Mirrors the pre-#444 inline closure.
+fn prefix_if_needed(pat: &str, ws_prefix: &str) -> String {
+    if pat.starts_with(ws_prefix) || pat.starts_with('/') {
+        pat.to_string()
+    } else {
+        format!("{ws_prefix}/{pat}")
+    }
+}
+
+impl AggregatedPluginResult {
+    /// Apply a workspace prefix to every path-bearing field in place.
+    ///
+    /// Workspace-package results are collected with patterns relative to the
+    /// package root; to be matchable from the monorepo root they need the
+    /// package's prefix applied. This transform is call-site-specific (it
+    /// depends on `ws_prefix`), so it stays separate from [`Self::merge_into`],
+    /// which is a prefix-agnostic union. The root project's own result is
+    /// never prefixed.
+    ///
+    /// Fields that carry package names, absolute paths, or import-specifier
+    /// boundaries (referenced/tooling deps, setup files, static dir mappings,
+    /// auto-imports, virtual prefixes/suffixes, generated patterns) are left
+    /// untouched, matching the pre-#444 merge loop.
+    pub fn apply_workspace_prefix(&mut self, ws_prefix: &str) {
+        for (rule, _) in &mut self.entry_patterns {
+            *rule = rule.prefixed(ws_prefix);
+        }
+        for (pat, _) in &mut self.always_used {
+            *pat = prefix_if_needed(pat, ws_prefix);
+        }
+        for (pat, _) in &mut self.discovered_always_used {
+            *pat = prefix_if_needed(pat, ws_prefix);
+        }
+        for (pat, _) in &mut self.fixture_patterns {
+            *pat = prefix_if_needed(pat, ws_prefix);
+        }
+        for rule in &mut self.used_exports {
+            *rule = rule.prefixed(ws_prefix);
+        }
+        for rule in &mut self.provided_dependencies {
+            *rule = rule.prefixed(ws_prefix);
+        }
+        // Path aliases: the alias key (prefix) is unchanged, but the
+        // replacement directory is prefixed so it resolves from the root.
+        for (_, replacement) in &mut self.path_aliases {
+            *replacement = format!("{ws_prefix}/{replacement}");
+        }
+    }
+
+    /// Merge `other` into `self`, taking the union of every field.
+    ///
+    /// Exhaustively destructures `Self` so adding a field to
+    /// `AggregatedPluginResult` becomes a `missing field in pattern` compile
+    /// error here instead of a silently-dropped field. See issue #444.
+    ///
+    /// Callers that need the workspace prefix applied must call
+    /// [`Self::apply_workspace_prefix`] on `other` first; this method does not
+    /// transform any path. Dedup-bearing fields (`active_plugins`, the virtual
+    /// prefix/suffix and generated-pattern lists) deduplicate the incoming
+    /// values against the contents already in `self`, matching the pre-#444
+    /// `seen`-set behavior. `entry_point_roles` is first-writer-wins.
+    pub fn merge_into(&mut self, other: Self) {
+        let Self {
+            entry_patterns,
+            entry_point_roles,
+            config_patterns,
+            always_used,
+            used_exports,
+            used_class_members,
+            referenced_dependencies,
+            discovered_always_used,
+            setup_files,
+            tooling_dependencies,
+            script_used_packages,
+            virtual_module_prefixes,
+            virtual_package_suffixes,
+            generated_import_patterns,
+            generated_type_import_prefixes,
+            path_aliases,
+            auto_imports,
+            active_plugins,
+            fixture_patterns,
+            scss_include_paths,
+            static_dir_mappings,
+            provided_dependencies,
+        } = other;
+
+        self.entry_patterns.extend(entry_patterns);
+        for (plugin_name, role) in entry_point_roles {
+            self.entry_point_roles.entry(plugin_name).or_insert(role);
+        }
+        self.config_patterns.extend(config_patterns);
+        self.always_used.extend(always_used);
+        self.used_exports.extend(used_exports);
+        self.used_class_members.extend(used_class_members);
+        self.referenced_dependencies.extend(referenced_dependencies);
+        self.discovered_always_used.extend(discovered_always_used);
+        self.setup_files.extend(setup_files);
+        self.tooling_dependencies.extend(tooling_dependencies);
+        self.script_used_packages.extend(script_used_packages);
+        extend_unique(&mut self.virtual_module_prefixes, virtual_module_prefixes);
+        extend_unique(&mut self.virtual_package_suffixes, virtual_package_suffixes);
+        extend_unique(
+            &mut self.generated_import_patterns,
+            generated_import_patterns,
+        );
+        extend_unique(
+            &mut self.generated_type_import_prefixes,
+            generated_type_import_prefixes,
+        );
+        self.path_aliases.extend(path_aliases);
+        self.auto_imports.extend(auto_imports);
+        extend_unique(&mut self.active_plugins, active_plugins);
+        self.fixture_patterns.extend(fixture_patterns);
+        self.scss_include_paths.extend(scss_include_paths);
+        self.static_dir_mappings.extend(static_dir_mappings);
+        self.provided_dependencies.extend(provided_dependencies);
+    }
+}
+
 impl PluginRegistry {
     /// Create a registry with all built-in plugins and optional external plugins.
     #[must_use]

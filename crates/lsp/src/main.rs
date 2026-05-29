@@ -1472,61 +1472,13 @@ fn dedup_results(target: &mut AnalysisResults) {
 }
 
 /// Merge analysis results from a sub-project into the accumulated results.
+///
+/// Thin wrapper over [`AnalysisResults::merge_into`], the single
+/// field-exhaustive union (issue #444). Cross-root duplicates this
+/// `.extend()`-based union accumulates are collapsed afterwards by
+/// [`dedup_results`].
 fn merge_results(target: &mut AnalysisResults, source: AnalysisResults) {
-    target.unused_files.extend(source.unused_files);
-    target.unused_exports.extend(source.unused_exports);
-    target.unused_types.extend(source.unused_types);
-    target.private_type_leaks.extend(source.private_type_leaks);
-    target
-        .unused_dependencies
-        .extend(source.unused_dependencies);
-    target
-        .unused_dev_dependencies
-        .extend(source.unused_dev_dependencies);
-    target
-        .unused_optional_dependencies
-        .extend(source.unused_optional_dependencies);
-    target
-        .unused_enum_members
-        .extend(source.unused_enum_members);
-    target
-        .unused_class_members
-        .extend(source.unused_class_members);
-    target.unresolved_imports.extend(source.unresolved_imports);
-    target
-        .unlisted_dependencies
-        .extend(source.unlisted_dependencies);
-    target.duplicate_exports.extend(source.duplicate_exports);
-    target
-        .type_only_dependencies
-        .extend(source.type_only_dependencies);
-    target
-        .circular_dependencies
-        .extend(source.circular_dependencies);
-    target.re_export_cycles.extend(source.re_export_cycles);
-    target
-        .test_only_dependencies
-        .extend(source.test_only_dependencies);
-    target
-        .boundary_violations
-        .extend(source.boundary_violations);
-    target.export_usages.extend(source.export_usages);
-    target.stale_suppressions.extend(source.stale_suppressions);
-    target
-        .unused_catalog_entries
-        .extend(source.unused_catalog_entries);
-    target
-        .empty_catalog_groups
-        .extend(source.empty_catalog_groups);
-    target
-        .unresolved_catalog_references
-        .extend(source.unresolved_catalog_references);
-    target
-        .unused_dependency_overrides
-        .extend(source.unused_dependency_overrides);
-    target
-        .misconfigured_dependency_overrides
-        .extend(source.misconfigured_dependency_overrides);
+    target.merge_into(source);
 }
 
 /// Merge duplication reports from a sub-project into the accumulated report.
@@ -1944,6 +1896,10 @@ mod tests {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "intentionally names every AnalysisResults field (no ..Default::default()) so a new field is a compile error here; see #444"
+    )]
     fn merge_test_source_with_all_fields() -> AnalysisResults {
         AnalysisResults {
             unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
@@ -2048,7 +2004,115 @@ mod tests {
                 reference_count: 3,
                 reference_locations: vec![],
             }],
-            ..Default::default()
+            // Every remaining field is named explicitly (no `..Default::default()`)
+            // so adding a field to `AnalysisResults` is a compile error here, not a
+            // silently-unmerged field. This is the test-side half of the #444
+            // compile-time coverage; `AnalysisResults::merge_into`'s exhaustive
+            // destructure is the production-side half.
+            private_type_leaks: vec![fallow_core::results::PrivateTypeLeakFinding::with_actions(
+                fallow_core::results::PrivateTypeLeak {
+                    path: "/f.ts".into(),
+                    export_name: "pub_fn".to_string(),
+                    type_name: "Secret".to_string(),
+                    line: 14,
+                    col: 0,
+                    span_start: 0,
+                },
+            )],
+            re_export_cycles: vec![fallow_core::results::ReExportCycleFinding::with_actions(
+                fallow_core::results::ReExportCycle {
+                    files: vec!["/barrel.ts".into()],
+                    kind: fallow_core::results::ReExportCycleKind::SelfLoop,
+                },
+            )],
+            stale_suppressions: vec![fallow_core::results::StaleSuppression {
+                path: "/f.ts".into(),
+                line: 15,
+                col: 0,
+                origin: fallow_core::results::SuppressionOrigin::Comment {
+                    issue_kind: None,
+                    is_file_level: false,
+                    kind_known: true,
+                },
+            }],
+            unused_catalog_entries: vec![
+                fallow_core::results::UnusedCatalogEntryFinding::with_actions(
+                    fallow_core::results::UnusedCatalogEntry {
+                        entry_name: "react".to_string(),
+                        catalog_name: "default".to_string(),
+                        path: "/pnpm-workspace.yaml".into(),
+                        line: 16,
+                        hardcoded_consumers: vec![],
+                    },
+                ),
+            ],
+            empty_catalog_groups: vec![
+                fallow_core::results::EmptyCatalogGroupFinding::with_actions(
+                    fallow_core::results::EmptyCatalogGroup {
+                        catalog_name: "ui".to_string(),
+                        path: "/pnpm-workspace.yaml".into(),
+                        line: 17,
+                    },
+                ),
+            ],
+            unresolved_catalog_references: vec![
+                fallow_core::results::UnresolvedCatalogReferenceFinding::with_actions(
+                    fallow_core::results::UnresolvedCatalogReference {
+                        entry_name: "vue".to_string(),
+                        catalog_name: "default".to_string(),
+                        path: "/pkg.json".into(),
+                        line: 18,
+                        available_in_catalogs: vec![],
+                    },
+                ),
+            ],
+            unused_dependency_overrides: vec![
+                fallow_core::results::UnusedDependencyOverrideFinding::with_actions(
+                    fallow_core::results::UnusedDependencyOverride {
+                        raw_key: "react".to_string(),
+                        target_package: "react".to_string(),
+                        parent_package: None,
+                        version_constraint: None,
+                        version_range: "18".to_string(),
+                        source: fallow_core::results::DependencyOverrideSource::PnpmWorkspaceYaml,
+                        path: "/pnpm-workspace.yaml".into(),
+                        line: 19,
+                        hint: None,
+                    },
+                ),
+            ],
+            misconfigured_dependency_overrides: vec![
+                fallow_core::results::MisconfiguredDependencyOverrideFinding::with_actions(
+                    fallow_core::results::MisconfiguredDependencyOverride {
+                        raw_key: "bad>".to_string(),
+                        target_package: None,
+                        raw_value: String::new(),
+                        reason: fallow_core::results::DependencyOverrideMisconfigReason::EmptyValue,
+                        source: fallow_core::results::DependencyOverrideSource::PnpmPackageJson,
+                        path: "/pkg.json".into(),
+                        line: 20,
+                    },
+                ),
+            ],
+            suppression_count: 1,
+            feature_flags: vec![fallow_core::results::FeatureFlag {
+                path: "/f.ts".into(),
+                flag_name: "ENABLE_X".to_string(),
+                kind: fallow_core::results::FlagKind::EnvironmentVariable,
+                confidence: fallow_core::results::FlagConfidence::High,
+                line: 21,
+                col: 0,
+                guard_span_start: None,
+                guard_span_end: None,
+                sdk_name: None,
+                guard_line_start: None,
+                guard_line_end: None,
+                guarded_dead_exports: vec![],
+            }],
+            entry_point_summary: Some(fallow_core::results::EntryPointSummary {
+                total: 0,
+                by_source: vec![],
+            }),
         }
     }
 
@@ -2059,9 +2123,15 @@ mod tests {
 
         merge_results(&mut target, source);
 
+        // Every field the exhaustive fixture seeds with one element must
+        // survive the merge into an empty target (#444). If a new field is
+        // added to `AnalysisResults`, the fixture stops compiling (no
+        // `..Default::default()`) and `merge_into` flags the unmerged field;
+        // adding the assertion here keeps the union covered end to end.
         assert_eq!(target.unused_files.len(), 1);
         assert_eq!(target.unused_exports.len(), 1);
         assert_eq!(target.unused_types.len(), 1);
+        assert_eq!(target.private_type_leaks.len(), 1);
         assert_eq!(target.unused_dependencies.len(), 1);
         assert_eq!(target.unused_dev_dependencies.len(), 1);
         assert_eq!(target.unused_optional_dependencies.len(), 1);
@@ -2071,10 +2141,20 @@ mod tests {
         assert_eq!(target.unlisted_dependencies.len(), 1);
         assert_eq!(target.duplicate_exports.len(), 1);
         assert_eq!(target.type_only_dependencies.len(), 1);
-        assert_eq!(target.circular_dependencies.len(), 1);
         assert_eq!(target.test_only_dependencies.len(), 1);
+        assert_eq!(target.circular_dependencies.len(), 1);
+        assert_eq!(target.re_export_cycles.len(), 1);
         assert_eq!(target.boundary_violations.len(), 1);
+        assert_eq!(target.stale_suppressions.len(), 1);
+        assert_eq!(target.unused_catalog_entries.len(), 1);
+        assert_eq!(target.empty_catalog_groups.len(), 1);
+        assert_eq!(target.unresolved_catalog_references.len(), 1);
+        assert_eq!(target.unused_dependency_overrides.len(), 1);
+        assert_eq!(target.misconfigured_dependency_overrides.len(), 1);
         assert_eq!(target.export_usages.len(), 1);
+        assert_eq!(target.feature_flags.len(), 1);
+        assert_eq!(target.suppression_count, 1);
+        assert!(target.entry_point_summary.is_some());
     }
 
     #[test]

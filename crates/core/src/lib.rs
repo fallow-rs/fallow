@@ -1196,10 +1196,6 @@ fn append_workspace_package_file_asset_patterns(
 }
 
 /// Run plugins for root project and all workspace packages.
-#[expect(
-    clippy::too_many_lines,
-    reason = "plugin orchestration keeps root and workspace merging in one flow"
-)]
 fn run_plugins(
     config: &ResolvedConfig,
     files: &[discover::DiscoveredFile],
@@ -1272,129 +1268,31 @@ fn run_plugins(
         })
         .collect();
 
-    // Merge workspace results sequentially (deterministic order via par_iter index stability)
-    // Track seen names for O(1) dedup instead of O(n) Vec::contains
-    let mut seen_plugins: rustc_hash::FxHashSet<String> =
-        result.active_plugins.iter().cloned().collect();
-    let mut seen_prefixes: rustc_hash::FxHashSet<String> =
-        result.virtual_module_prefixes.iter().cloned().collect();
-    let mut seen_generated: rustc_hash::FxHashSet<String> =
-        result.generated_import_patterns.iter().cloned().collect();
-    let mut seen_generated_type_prefixes: rustc_hash::FxHashSet<String> = result
-        .generated_type_import_prefixes
-        .iter()
-        .cloned()
-        .collect();
-    let mut seen_suffixes: rustc_hash::FxHashSet<String> =
-        result.virtual_package_suffixes.iter().cloned().collect();
-
-    fn extend_unique(
-        target: &mut Vec<String>,
-        seen: &mut rustc_hash::FxHashSet<String>,
-        items: Vec<String>,
-    ) {
-        for item in items {
-            if seen.insert(item.clone()) {
-                target.push(item);
-            }
-        }
-    }
-    for (ws_result, ws_prefix) in ws_results {
-        // Prefix helper: workspace-relative patterns need the workspace prefix
-        // to be matchable from the monorepo root. But patterns that are already
-        // project-root-relative (e.g., from angular.json which uses absolute paths
-        // like "apps/client/src/styles.css") should not be double-prefixed.
-        let prefix_if_needed = |pat: &str| -> String {
-            if pat.starts_with(ws_prefix.as_str()) || pat.starts_with('/') {
-                pat.to_string()
-            } else {
-                format!("{ws_prefix}/{pat}")
-            }
-        };
-
-        for (rule, pname) in &ws_result.entry_patterns {
-            result
-                .entry_patterns
-                .push((rule.prefixed(&ws_prefix), pname.clone()));
-        }
-        for (plugin_name, role) in ws_result.entry_point_roles {
-            result.entry_point_roles.entry(plugin_name).or_insert(role);
-        }
-        for (pat, pname) in &ws_result.always_used {
-            result
-                .always_used
-                .push((prefix_if_needed(pat), pname.clone()));
-        }
-        for (pat, pname) in &ws_result.discovered_always_used {
-            result
-                .discovered_always_used
-                .push((prefix_if_needed(pat), pname.clone()));
-        }
-        for (pat, pname) in &ws_result.fixture_patterns {
-            result
-                .fixture_patterns
-                .push((prefix_if_needed(pat), pname.clone()));
-        }
-        for rule in &ws_result.used_exports {
-            result.used_exports.push(rule.prefixed(&ws_prefix));
-        }
-        for rule in &ws_result.provided_dependencies {
-            result.provided_dependencies.push(rule.prefixed(&ws_prefix));
-        }
-        // Merge active plugin names (deduplicated via HashSet)
-        for plugin_name in ws_result.active_plugins {
-            if !seen_plugins.contains(&plugin_name) {
-                seen_plugins.insert(plugin_name.clone());
-                result.active_plugins.push(plugin_name);
-            }
-        }
-        // These don't need prefixing (absolute paths / package names)
-        result
-            .referenced_dependencies
-            .extend(ws_result.referenced_dependencies);
-        result.setup_files.extend(ws_result.setup_files);
-        result
-            .tooling_dependencies
-            .extend(ws_result.tooling_dependencies);
-        result
-            .static_dir_mappings
-            .extend(ws_result.static_dir_mappings);
-        // Virtual import boundaries — prefixes (e.g., Docusaurus `@theme/`),
-        // generated import patterns (e.g., SvelteKit `/$types`), generated type
-        // prefixes (e.g., React Router `./+types/`), and package-name suffixes
-        // (e.g., Vitest `/__mocks__`) — match against import specifiers or
-        // package names, never file paths, so no workspace prefix is applied.
-        extend_unique(
-            &mut result.virtual_module_prefixes,
-            &mut seen_prefixes,
-            ws_result.virtual_module_prefixes,
-        );
-        extend_unique(
-            &mut result.generated_import_patterns,
-            &mut seen_generated,
-            ws_result.generated_import_patterns,
-        );
-        extend_unique(
-            &mut result.generated_type_import_prefixes,
-            &mut seen_generated_type_prefixes,
-            ws_result.generated_type_import_prefixes,
-        );
-        extend_unique(
-            &mut result.virtual_package_suffixes,
-            &mut seen_suffixes,
-            ws_result.virtual_package_suffixes,
-        );
-        // Path aliases from workspace plugins (e.g., SvelteKit $lib/ → src/lib).
-        // Prefix the replacement directory so it resolves from the monorepo root.
-        for (prefix, replacement) in ws_result.path_aliases {
-            result
-                .path_aliases
-                .push((prefix, format!("{ws_prefix}/{replacement}")));
-        }
-        // Auto-import rules carry absolute `source` paths (built from the
-        // workspace package root), so they are already correct per-package and
-        // need no prefixing, just merging. See issue #704.
-        result.auto_imports.extend(ws_result.auto_imports);
+    // Merge workspace results sequentially (deterministic order via par_iter
+    // index stability). Each result is prefix-transformed for its workspace,
+    // then folded into the accumulator via the single field-exhaustive
+    // `merge_into` (issue #444): adding a field to `AggregatedPluginResult`
+    // becomes a compile error in `merge_into` rather than a silently-dropped
+    // field that would diverge the CLI from the LSP.
+    for (mut ws_result, ws_prefix) in ws_results {
+        ws_result.apply_workspace_prefix(&ws_prefix);
+        // Preserve pre-#444 behavior: the old workspace merge loop never
+        // folded these fields into the root aggregate. Clearing them on the
+        // incoming result keeps the merge byte-identical while `merge_into`
+        // stays a prefix-agnostic full union.
+        //   - `config_patterns`, `used_class_members`, `scss_include_paths`
+        //     ARE populated by `run_workspace_fast` and were dropped; whether
+        //     that drop is a latent bug is tracked in issue #772.
+        //   - `script_used_packages` is never populated by `run_workspace_fast`
+        //     (the root's script-used set is computed separately after this
+        //     function returns), so clearing it is a no-op today; it is cleared
+        //     anyway so a future change that starts populating it cannot
+        //     silently alter root script-credit behavior.
+        ws_result.config_patterns.clear();
+        ws_result.used_class_members.clear();
+        ws_result.scss_include_paths.clear();
+        ws_result.script_used_packages.clear();
+        result.merge_into(ws_result);
     }
 
     gate_auto_import_entry_patterns(&mut result, config, workspaces);
