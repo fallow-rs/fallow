@@ -120,6 +120,31 @@ const title = "Hello";
 }
 
 #[test]
+fn astro_template_script_src_has_source_span() {
+    let source = r#"---
+---
+<html>
+  <script src="../scripts/foo.ts"></script>
+</html>
+"#;
+    let info = parse_source_to_module(FileId(0), Path::new("Page.astro"), source, 0, false);
+    let import = info
+        .imports
+        .iter()
+        .find(|i| i.source == "../scripts/foo.ts")
+        .expect("script src import extracted");
+    let (line, _col) = fallow_types::extract::byte_offset_to_line_col(
+        &info.line_offsets,
+        import.source_span.start,
+    );
+    assert_eq!(line, 4);
+    assert_eq!(
+        &source[import.source_span.start as usize..import.source_span.end as usize],
+        "../scripts/foo.ts"
+    );
+}
+
+#[test]
 fn astro_template_inline_script_imports_followed() {
     // Issue #295: ESM imports inside inline <script> blocks should be
     // followed so their targets stay reachable.
@@ -143,6 +168,33 @@ fn astro_template_inline_script_imports_followed() {
     assert!(
         sources.contains(&"../scripts/bar"),
         "expected ../scripts/bar in {sources:?}"
+    );
+}
+
+#[test]
+fn astro_inline_script_import_spans_are_original_source_offsets() {
+    let source = r"---
+---
+<html>
+  <body>
+    <script>
+      import '../scripts/bar';
+    </script>
+  </body>
+</html>
+";
+    let info = parse_source_to_module(FileId(0), Path::new("Page.astro"), source, 0, false);
+    let import = info
+        .imports
+        .iter()
+        .find(|i| i.source == "../scripts/bar")
+        .expect("inline script import extracted");
+    let (line, _col) =
+        fallow_types::extract::byte_offset_to_line_col(&info.line_offsets, import.span.start);
+    assert_eq!(line, 6);
+    assert_eq!(
+        &source[import.source_span.start as usize..import.source_span.end as usize],
+        "'../scripts/bar'"
     );
 }
 

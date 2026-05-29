@@ -21,6 +21,7 @@ pub mod mdx;
 mod parse;
 pub mod sfc;
 mod sfc_template;
+mod source_map;
 pub mod suppress;
 pub(crate) mod template_complexity;
 mod template_usage;

@@ -32,6 +32,22 @@ fn extracts_css_import_quoted() {
 }
 
 #[test]
+fn css_import_spans_point_at_source_specifier() {
+    let source = "\n\n@import \"./reset.css\";\n";
+    let info = parse_css(source, "styles.css");
+    let import = &info.imports[0];
+    let (line, _col) = fallow_types::extract::byte_offset_to_line_col(
+        &info.line_offsets,
+        import.source_span.start,
+    );
+    assert_eq!(line, 3);
+    assert_eq!(
+        &source[import.source_span.start as usize..import.source_span.end as usize],
+        "./reset.css"
+    );
+}
+
+#[test]
 fn extracts_css_import_single_quoted() {
     let info = parse_css("@import './variables.css';", "styles.css");
     assert_eq!(info.imports.len(), 1);
