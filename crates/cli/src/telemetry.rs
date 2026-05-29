@@ -622,11 +622,8 @@ fn classify_invocation_context() -> InvocationContext {
 }
 
 fn classify_agent_source() -> AgentSource {
-    if let Some(source) = std::env::var(AGENT_SOURCE_ENV)
-        .ok()
-        .and_then(|value| parse_agent_source_value(&value))
-    {
-        return source;
+    if let Ok(value) = std::env::var(AGENT_SOURCE_ENV) {
+        return parse_agent_source_value(&value).unwrap_or(AgentSource::None);
     }
     classify_agent_source_from_env(std::env::vars_os().map(|(key, _)| key))
 }

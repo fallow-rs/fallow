@@ -2069,8 +2069,8 @@ fn main() -> ExitCode {
     }
 
     let fmt = resolve_format(&cli);
-    if let Some(Command::Telemetry { subcommand }) = cli.command.take() {
-        return telemetry::run(map_telemetry_subcommand(subcommand), fmt.output);
+    if let Some(code) = run_telemetry_command_if_requested(&mut cli, fmt.output) {
+        return code;
     }
     setup_tracing();
 
@@ -2222,6 +2222,18 @@ fn main() -> ExitCode {
         telemetry::maybe_print_opt_in_note(output, quiet);
     }
     exit_code
+}
+
+fn run_telemetry_command_if_requested(
+    cli: &mut Cli,
+    output: fallow_config::OutputFormat,
+) -> Option<ExitCode> {
+    if matches!(cli.command, Some(Command::Telemetry { .. }))
+        && let Some(Command::Telemetry { subcommand }) = cli.command.take()
+    {
+        return Some(telemetry::run(map_telemetry_subcommand(subcommand), output));
+    }
+    None
 }
 
 fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
