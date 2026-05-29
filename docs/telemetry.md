@@ -1,8 +1,10 @@
 # Telemetry
 
-Fallow telemetry is opt-in product telemetry for improving agent, CI, JSON, MCP, and editor workflows.
+Fallow's product telemetry is opt-in and off by default. It exists to improve agent, CI, JSON, MCP, and editor workflows.
 
-Telemetry is off by default. Fallow does not collect repository names, file paths, package names, dependency names, workspace names, source code, config values, environment variables, raw command lines, raw errors, or stack traces.
+Fallow does not collect repository names, file paths, package names, dependency names, workspace names, source code, config values, environment variable names or values, raw command lines, raw errors, or stack traces.
+
+To keep telemetry off everywhere, set `FALLOW_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`.
 
 ## Commands
 
@@ -26,8 +28,10 @@ FALLOW_TELEMETRY=inspect fallow audit --format json --quiet
 Precedence:
 
 ```text
-DO_NOT_TRACK / FALLOW_TELEMETRY_DISABLED
-> FALLOW_TELEMETRY
+DO_NOT_TRACK / FALLOW_TELEMETRY_DISABLED   (admin/fleet kill switch)
+> FALLOW_TELEMETRY_DEBUG                     (forces inspect mode)
+> FALLOW_TELEMETRY                           (per-shell override)
+> CI: off unless FALLOW_TELEMETRY is set
 > user telemetry config
 > default: off
 ```
@@ -121,9 +125,9 @@ other_known
 unknown
 ```
 
-`none` is an internal classifier state, not a wire value: `agent_source` is only emitted when a run is classified as agent-driven, which by definition is not `none`. Agents not on the list (for example enterprise IDE assistants) are grouped under `other_known`.
+`none` appears in the list because it is the internal default before a run is classified, but it is never sent: `agent_source` is only emitted for runs Fallow identifies as agent-driven, and those are never `none`. Agents not on the list (for example enterprise IDE assistants) are grouped under `other_known`.
 
-Fallow does not upload raw MCP `clientInfo`, process names, parent process paths, editor identifiers, extension names, environment variable names, model names, account IDs, organization IDs, prompts, versions, or free-form vendor strings. Agent wrappers should use `FALLOW_AGENT_SOURCE=<allowlisted-value>` when the user has enabled telemetry. Ambiguous sources emit `unknown`. Low-volume public aggregates are grouped under `other_known`.
+Fallow does not upload raw MCP client info, process names, parent process paths, editor identifiers, extension names, environment variable names, model names, account IDs, organization IDs, prompts, versions, or free-form vendor strings. Agent wrappers should use `FALLOW_AGENT_SOURCE=<allowlisted-value>` when the user has enabled telemetry; ambiguous sources emit `unknown`. **Setting `FALLOW_AGENT_SOURCE` never enables telemetry by itself and uploads no codebase content.**
 
 When several agent environments coexist (for example one agent running inside another), heuristic `agent_source` attribution is best-effort and depends on environment iteration order. Set `FALLOW_AGENT_SOURCE` explicitly for deterministic attribution.
 
@@ -150,12 +154,13 @@ Agents must not enable telemetry automatically. `fallow telemetry enable` requir
 
 ## Transport And Server Privacy
 
-When upload support is enabled:
+When telemetry is enabled and sending events:
 
-- requests are HTTPS POST JSON
+- requests are HTTPS POST JSON to `https://api.fallow.cloud/v1/telemetry/events` (override the host with `FALLOW_API_URL`)
 - no cookies are used
 - telemetry requests do not carry an authentication token
-- the upload runs on a detached thread and never blocks command exit for meaningful time; delivery is best-effort and lossy by design. Because the process does not wait for the upload, the fastest commands and runs on slow networks disproportionately fail to deliver, so event counts are a biased sample, not a usage census
+- the upload runs on a background thread, so it does not slow down your command
+- Fallow does not wait for the upload, so the fastest runs and runs on slow networks often drop their event; counts are a rough, biased sample, not an exact usage count
 - network errors are ignored and never affect command output or exit code
 - telemetry is never written to stdout
 - server-side handling must not enrich telemetry with customer, repository, organization, git, package-registry, or license data

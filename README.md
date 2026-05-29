@@ -202,7 +202,7 @@ For full adoption instead of one-off review, see the [Fallow compliance happy pa
 
 See [Agent integration](https://docs.fallow.tools/integrations/mcp) for MCP setup and the full list of structured tools.
 
-Opt-in product telemetry for improving agent and CI workflows is off by default. Use `fallow telemetry inspect --example` to see the payload, `FALLOW_TELEMETRY=inspect fallow audit --format json --quiet` to inspect a real run without sending it, and `fallow telemetry enable` only when you explicitly want to help improve these integrations. See [Telemetry](docs/telemetry.md).
+Product telemetry for improving agent, CI, MCP, and editor workflows is off by default. Run `fallow telemetry inspect --example` to see the payload, or `FALLOW_TELEMETRY=inspect fallow audit --format json --quiet` to inspect a real run without sending it. Run `fallow telemetry enable` only when you want to help improve these integrations. See [Telemetry](docs/telemetry.md).
 
 ## Why teams using AI need Fallow
 
@@ -760,7 +760,7 @@ Fallow is not an AI assistant. It is the deterministic codebase intelligence lay
 - **Agent Skill + MCP server** -- version-matched AI agent guidance ships in the npm package, with MCP integration for Claude Code, Codex, Cursor, Windsurf, and other agents ([fallow-skills](https://github.com/fallow-rs/fallow-skills))
 - **JSON `actions` array** -- every issue in `--format json` output includes fix suggestions with `auto_fixable` flag, so agents can self-correct
 - **Typed output contract** -- `import type { CheckOutput } from "fallow/types"` version-pinned to your installed CLI
-- **Opt-in telemetry controls** -- `fallow telemetry status|inspect|enable|disable`, with normalized agent source support through `FALLOW_AGENT_SOURCE`
+- **Opt-in telemetry controls** -- `fallow telemetry status|inspect|enable|disable`, with agent-source attribution through `FALLOW_AGENT_SOURCE`
 
 ## Performance
 
