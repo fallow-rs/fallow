@@ -21,7 +21,7 @@ Inspect the exact payload for a real command without sending it:
 FALLOW_TELEMETRY=inspect fallow audit --format json --quiet
 ```
 
-`FALLOW_TELEMETRY_DEBUG=1` is an alias for inspect mode.
+`FALLOW_TELEMETRY_DEBUG=1` forces inspect mode and outranks `FALLOW_TELEMETRY`.
 
 ## Environment Controls
 
@@ -85,9 +85,12 @@ V1 events are workflow-level and coarse:
   "arch": "x86_64",
   "duration_bucket_ms": "500-2000",
   "outcome": "issues_found",
-  "exit_code_bucket": "1"
+  "exit_code_bucket": "1",
+  "parent_run": "tmp_8x7p4k"
 }
 ```
+
+`agent_source` and `parent_run` are optional: `agent_source` appears only on agent-driven runs, and `parent_run` only when a run is explicitly correlated to a previous one. Both are omitted otherwise.
 
 Field purposes:
 
@@ -148,7 +151,7 @@ Hashing these values is not used as a workaround.
 
 ## Agent Follow-up
 
-Future agent-correlation work may include a short-lived `_meta.telemetry.analysis_run_id` in inspect/enabled/explicit-agent contexts. Agents may pass that value back with `--parent-run` so Fallow can measure whether a follow-up run improved aggregate findings. `--parent-run` accepts only short ASCII tokens with letters, numbers, `_`, and `-`; paths and free-form values are dropped before upload.
+The `--parent-run` flag and the `parent_run` field ship today (the flag is hidden from `--help` until the rest of this mechanism lands). `--parent-run` accepts only short ASCII tokens with letters, numbers, `_`, and `-`; paths and free-form values are dropped before upload. The piece that is still future is the server-issued `_meta.telemetry.analysis_run_id` that an agent would pass back via `--parent-run` so Fallow can measure whether a follow-up run improved aggregate findings.
 
 Agents must not enable telemetry automatically. `fallow telemetry enable` requires explicit user action in a human-controlled shell or explicit CI environment configuration.
 
