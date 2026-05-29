@@ -24,6 +24,7 @@ fn analysis_never_runs_package_json_lifecycle_scripts() {
         r#"{
   "name": "sentinel-fixture",
   "version": "1.0.0",
+  "main": "index.ts",
   "dependencies": { "left-pad": "^1.0.0" },
   "scripts": {
     "preinstall": "node -e \"require('fs').writeFileSync('LIFECYCLE_SCRIPT_RAN','')\"",
@@ -34,7 +35,8 @@ fn analysis_never_runs_package_json_lifecycle_scripts() {
     )
     .expect("write package.json");
 
-    // index.ts (default entry) reaches used.ts; orphan.ts is unreferenced.
+    // index.ts is the package `main` (an entry point), so it reaches used.ts;
+    // orphan.ts is reachable from no entry point.
     fs::write(
         root.join("index.ts"),
         "import { used } from './used';\nconsole.log(used);\n",
@@ -55,7 +57,10 @@ fn analysis_never_runs_package_json_lifecycle_scripts() {
 
     // Non-vacuity: prove the full pipeline (discovery, parse, graph, reachability)
     // actually ran over this project, so the negative assertion above is meaningful.
-    // orphan.ts is reachable from no entry point and must surface as an unused file.
+    // With index.ts as the entry point, used.ts is reachable (NOT unused) and
+    // orphan.ts is not (unused). The used.ts assertion specifically requires the
+    // import graph to have been traversed: if BFS were skipped, used.ts would also
+    // appear unused and the assertion would fail.
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
@@ -70,6 +75,11 @@ fn analysis_never_runs_package_json_lifecycle_scripts() {
         .collect();
     assert!(
         unused_files.iter().any(|name| name == "orphan.ts"),
-        "expected analysis to flag orphan.ts as unused (proving the pipeline ran), found: {unused_files:?}",
+        "expected analysis to flag orphan.ts as unused, found: {unused_files:?}",
+    );
+    assert!(
+        !unused_files.iter().any(|name| name == "used.ts"),
+        "expected used.ts to be reachable from the index.ts entry point (proving the \
+         import graph was traversed), but it was flagged unused: {unused_files:?}",
     );
 }
