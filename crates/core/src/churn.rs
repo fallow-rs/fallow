@@ -10,8 +10,6 @@ use std::sync::OnceLock;
 
 use serde::Serialize;
 
-use crate::git_env::clear_ambient_git_env;
-
 /// Function pointer signature used by `set_spawn_hook` to intercept the
 /// `git log --numstat` subprocess. Lets the CLI route long-running git
 /// log calls through its `ScopedChild` registry so SIGINT / SIGTERM
@@ -200,11 +198,10 @@ pub fn analyze_churn(root: &Path, since: &SinceDuration) -> Option<ChurnResult> 
 /// Check if the repository is a shallow clone.
 #[must_use]
 pub fn is_shallow_clone(root: &Path) -> bool {
-    let mut command = Command::new("git");
+    let mut command = crate::spawn::git();
     command
         .args(["rev-parse", "--is-shallow-repository"])
         .current_dir(root);
-    clear_ambient_git_env(&mut command);
     command.output().is_ok_and(|o| {
         String::from_utf8_lossy(&o.stdout)
             .trim()
@@ -215,13 +212,12 @@ pub fn is_shallow_clone(root: &Path) -> bool {
 /// Check if the directory is inside a git repository.
 #[must_use]
 pub fn is_git_repo(root: &Path) -> bool {
-    let mut command = Command::new("git");
+    let mut command = crate::spawn::git();
     command
         .args(["rev-parse", "--git-dir"])
         .current_dir(root)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
-    clear_ambient_git_env(&mut command);
     command.status().is_ok_and(|s| s.success())
 }
 
@@ -279,9 +275,8 @@ struct ChurnEventState {
 
 /// Get the full HEAD SHA for cache keying.
 fn get_head_sha(root: &Path) -> Option<String> {
-    let mut command = Command::new("git");
+    let mut command = crate::spawn::git();
     command.args(["rev-parse", "HEAD"]).current_dir(root);
-    clear_ambient_git_env(&mut command);
     command
         .output()
         .ok()
@@ -291,11 +286,10 @@ fn get_head_sha(root: &Path) -> Option<String> {
 
 /// Check whether `ancestor` is still reachable from `descendant`.
 fn is_ancestor(root: &Path, ancestor: &str, descendant: &str) -> bool {
-    let mut command = Command::new("git");
+    let mut command = crate::spawn::git();
     command
         .args(["merge-base", "--is-ancestor", ancestor, descendant])
         .current_dir(root);
-    clear_ambient_git_env(&mut command);
     command.status().is_ok_and(|s| s.success())
 }
 
@@ -432,7 +426,7 @@ fn analyze_churn_events(
     since: &SinceDuration,
     revision_range: Option<&str>,
 ) -> Option<ChurnEventState> {
-    let mut command = Command::new("git");
+    let mut command = crate::spawn::git();
     command.arg("log");
     if let Some(range) = revision_range {
         command.arg(range);
@@ -447,7 +441,6 @@ fn analyze_churn_events(
             &format!("--after={}", since.git_after),
         ])
         .current_dir(root);
-    clear_ambient_git_env(&mut command);
 
     let output = match spawn_output(&mut command) {
         Ok(o) => o,

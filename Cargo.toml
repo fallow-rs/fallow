@@ -134,6 +134,13 @@ non_zero_suggestions = "warn"            # Suggest NonZero types for naturally n
 precedence_bits = "warn"                 # Catch bitwise operator precedence mistakes
 map_with_unused_argument_over_ranges = "warn" # Use `repeat`/`repeat_with` instead
 
+# Process-spawn ban (method list lives in .clippy.toml). Allowed workspace-wide
+# so the CLI / MCP crates can spawn git worktrees, the coverage sidecar, and
+# subprocesses off the analysis path; fallow-core/extract/graph re-deny it at
+# their crate root to enforce that the analysis path spawns only `git` via
+# fallow_core::spawn.
+disallowed_methods = "allow"
+
 # Allow common pedantic false positives
 module_name_repetitions = "allow"
 must_use_candidate = "allow"

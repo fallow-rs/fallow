@@ -225,9 +225,8 @@ fn collect_git_paths(
 }
 
 fn git_command(cwd: &Path, args: &[&str]) -> std::process::Command {
-    let mut command = std::process::Command::new("git");
+    let mut command = crate::spawn::git();
     command.args(args).current_dir(cwd);
-    crate::git_env::clear_ambient_git_env(&mut command);
     command
 }
 
