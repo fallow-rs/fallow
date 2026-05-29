@@ -125,6 +125,8 @@ unknown
 
 Fallow does not upload raw MCP `clientInfo`, process names, parent process paths, editor identifiers, extension names, environment variable names, model names, account IDs, organization IDs, prompts, versions, or free-form vendor strings. Agent wrappers should use `FALLOW_AGENT_SOURCE=<allowlisted-value>` when the user has enabled telemetry. Ambiguous sources emit `unknown`. Low-volume public aggregates are grouped under `other_known`.
 
+When several agent environments coexist (for example one agent running inside another), heuristic `agent_source` attribution is best-effort and depends on environment iteration order. Set `FALLOW_AGENT_SOURCE` explicitly for deterministic attribution.
+
 ## What Is Never Collected
 
 Fallow telemetry must not include:
@@ -153,7 +155,7 @@ When upload support is enabled:
 - requests are HTTPS POST JSON
 - no cookies are used
 - telemetry requests do not carry an authentication token
-- the upload runs on a detached thread and never blocks command exit for meaningful time; delivery is best-effort and lossy by design
+- the upload runs on a detached thread and never blocks command exit for meaningful time; delivery is best-effort and lossy by design. Because the process does not wait for the upload, the fastest commands and runs on slow networks disproportionately fail to deliver, so event counts are a biased sample, not a usage census
 - network errors are ignored and never affect command output or exit code
 - telemetry is never written to stdout
 - server-side handling must not enrich telemetry with customer, repository, organization, git, package-registry, or license data
