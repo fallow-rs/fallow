@@ -748,7 +748,20 @@ fn render_vital_signs(lines: &mut Vec<String>, report: &crate::health_types::Hea
         parts.push(format!("maintainability {mi:.1} ({label})"));
     }
     if let Some(hc) = vs.hotspot_count {
-        parts.push(format!("{hc} churn hotspot{}", plural(hc as usize)));
+        // Carry the analysis window with the count so the orientation line is
+        // self-explanatory even when the Hotspots section is suppressed (zero
+        // hotspots). Falls back to no suffix when `hotspot_summary` is absent
+        // (hotspot pipeline did not run, or churn analysis failed at runtime:
+        // non-git repo, shallow clone, etc.).
+        let since_suffix = report
+            .hotspot_summary
+            .as_ref()
+            .map(|s| format!(" (since {})", s.since))
+            .unwrap_or_default();
+        parts.push(format!(
+            "{hc} churn hotspot{}{since_suffix}",
+            plural(hc as usize)
+        ));
     }
     if let Some(cd) = vs.circular_dep_count
         && cd > 0
@@ -2919,6 +2932,13 @@ mod tests {
             total_loc: 42_381,
             ..Default::default()
         });
+        report.hotspot_summary = Some(crate::health_types::HotspotSummary {
+            since: "6 months".to_string(),
+            min_commits: 3,
+            files_analyzed: 50,
+            files_excluded: 20,
+            shallow_clone: false,
+        });
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
         assert!(text.contains("42,381 LOC"));
@@ -2927,9 +2947,57 @@ mod tests {
         assert!(text.contains("avg cyclomatic 4.7"));
         assert!(text.contains("p90 cyclomatic 12"));
         assert!(text.contains("maintainability 72.4"));
-        assert!(text.contains("2 churn hotspots"));
+        // The analysis window travels with the count in the orientation line.
+        assert!(text.contains("2 churn hotspots (since 6 months)"));
         assert!(text.contains("3 unused deps"));
         assert!(text.contains("1 circular dep"));
+    }
+
+    #[test]
+    fn vital_signs_zero_hotspots_still_show_window() {
+        // The Hotspots section is suppressed at zero hotspots, so the
+        // orientation line must carry the window or it is invisible. (Issue #552)
+        let root = PathBuf::from("/project");
+        let mut report = empty_report();
+        report.vital_signs = Some(crate::health_types::VitalSigns {
+            avg_cyclomatic: 2.0,
+            p90_cyclomatic: 5,
+            hotspot_count: Some(0),
+            total_loc: 1_000,
+            ..Default::default()
+        });
+        report.hotspot_summary = Some(crate::health_types::HotspotSummary {
+            since: "90 days".to_string(),
+            min_commits: 3,
+            files_analyzed: 10,
+            files_excluded: 0,
+            shallow_clone: false,
+        });
+        let lines = build_health_human_lines(&report, &root);
+        let text = plain(&lines);
+        assert!(text.contains("0 churn hotspots (since 90 days)"));
+        // Section itself stays suppressed with no hotspots.
+        assert!(!text.contains("Hotspots ("));
+    }
+
+    #[test]
+    fn vital_signs_hotspot_count_without_summary_omits_window() {
+        // When the hotspot pipeline did not run, `hotspot_summary` is None and
+        // the count renders without a misleading `(since ...)` suffix.
+        let root = PathBuf::from("/project");
+        let mut report = empty_report();
+        report.vital_signs = Some(crate::health_types::VitalSigns {
+            avg_cyclomatic: 2.0,
+            p90_cyclomatic: 5,
+            hotspot_count: Some(1),
+            total_loc: 1_000,
+            ..Default::default()
+        });
+        report.hotspot_summary = None;
+        let lines = build_health_human_lines(&report, &root);
+        let text = plain(&lines);
+        assert!(text.contains("1 churn hotspot"));
+        assert!(!text.contains("(since"));
     }
 
     #[test]

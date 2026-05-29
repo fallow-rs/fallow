@@ -936,7 +936,15 @@ fn write_vital_signs_section(out: &mut String, report: &crate::health_types::Hea
         let _ = writeln!(out, "| Maintainability (avg) | {v:.1} |");
     }
     if let Some(v) = vs.hotspot_count {
-        let _ = writeln!(out, "| Hotspots | {v} |");
+        // Carry the analysis window in the metric label so the count stays
+        // meaningful at zero hotspots, where the Hotspots section is omitted.
+        // No suffix when the churn pipeline did not run (`hotspot_summary` is
+        // absent). Mirrors the human `■ Metrics:` line (issue #552).
+        let label = report.hotspot_summary.as_ref().map_or_else(
+            || "Hotspots".to_string(),
+            |summary| format!("Hotspots (since {})", summary.since),
+        );
+        let _ = writeln!(out, "| {label} | {v} |");
     }
     if let Some(v) = vs.circular_dep_count {
         let _ = writeln!(out, "| Circular Deps | {v} |");
@@ -2179,6 +2187,13 @@ mod tests {
                 total_loc: 15_200,
                 ..Default::default()
             }),
+            hotspot_summary: Some(crate::health_types::HotspotSummary {
+                since: "6 months".to_string(),
+                min_commits: 3,
+                files_analyzed: 50,
+                files_excluded: 0,
+                shallow_clone: false,
+            }),
             ..Default::default()
         };
         let md = build_health_markdown(&report, &root);
@@ -2190,9 +2205,30 @@ mod tests {
         assert!(md.contains("| Dead Files | 5.0% |"));
         assert!(md.contains("| Dead Exports | 10.2% |"));
         assert!(md.contains("| Maintainability (avg) | 72.3 |"));
-        assert!(md.contains("| Hotspots | 3 |"));
+        // The analysis window travels in the metric label (issue #552).
+        assert!(md.contains("| Hotspots (since 6 months) | 3 |"));
         assert!(md.contains("| Circular Deps | 1 |"));
         assert!(md.contains("| Unused Deps | 2 |"));
+    }
+
+    #[test]
+    fn health_markdown_hotspots_without_summary_omits_window() {
+        // No churn pipeline (`hotspot_summary` absent): the label stays bare.
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            vital_signs: Some(crate::health_types::VitalSigns {
+                avg_cyclomatic: 2.0,
+                p90_cyclomatic: 5,
+                hotspot_count: Some(0),
+                total_loc: 1_000,
+                ..Default::default()
+            }),
+            hotspot_summary: None,
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("| Hotspots | 0 |"));
+        assert!(!md.contains("Hotspots (since"));
     }
 
     // ── Health markdown file scores ──
