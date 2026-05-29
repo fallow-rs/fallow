@@ -185,8 +185,9 @@ struct Cli {
     /// Correlate this run with a previous telemetry analysis run.
     ///
     /// Used only for opt-in telemetry follow-up measurement. The value is not
-    /// interpreted as a path, repository, package, or user identifier.
-    #[arg(long, global = true, value_name = "RUN_ID")]
+    /// interpreted as a path, repository, package, or user identifier. Hidden
+    /// from `--help` until the correlation producer (`analysis_run_id`) ships.
+    #[arg(long, global = true, value_name = "RUN_ID", hide = true)]
     parent_run: Option<String>,
 
     /// Save the current results as a baseline file

@@ -58,7 +58,7 @@ Agents and wrappers can identify their integration with one normalized allowlist
 export FALLOW_AGENT_SOURCE=codex
 ```
 
-Accepted values are `codex`, `claude_code`, `cursor`, `copilot`, `opencode`, `aider`, `roo`, `other_known`, `unknown`, and `none`. Hyphen aliases such as `claude-code` are normalized. Unrecognized values are ignored rather than uploaded.
+Accepted values are `codex`, `claude_code`, `cursor`, `copilot`, `opencode`, `aider`, `roo`, `windsurf`, `gemini`, `cline`, `continue`, `zed`, `goose`, `other_known`, `unknown`, and `none`. Hyphen aliases such as `claude-code` and CLI aliases such as `gemini_cli` / `antigravity` (both map to `gemini`) are normalized. Unrecognized values are ignored rather than uploaded.
 
 ## What Is Collected
 
@@ -78,7 +78,7 @@ V1 events are workflow-level and coarse:
   "ci": false,
   "tty": false,
   "os": "linux",
-  "arch": "x64",
+  "arch": "x86_64",
   "duration_bucket_ms": "500-2000",
   "outcome": "issues_found",
   "exit_code_bucket": "1"
@@ -111,9 +111,17 @@ copilot
 opencode
 aider
 roo
+windsurf
+gemini
+cline
+continue
+zed
+goose
 other_known
 unknown
 ```
+
+`none` is an internal classifier state, not a wire value: `agent_source` is only emitted when a run is classified as agent-driven, which by definition is not `none`. Agents not on the list (for example enterprise IDE assistants) are grouped under `other_known`.
 
 Fallow does not upload raw MCP `clientInfo`, process names, parent process paths, editor identifiers, extension names, environment variable names, model names, account IDs, organization IDs, prompts, versions, or free-form vendor strings. Agent wrappers should use `FALLOW_AGENT_SOURCE=<allowlisted-value>` when the user has enabled telemetry. Ambiguous sources emit `unknown`. Low-volume public aggregates are grouped under `other_known`.
 
@@ -145,6 +153,7 @@ When upload support is enabled:
 - requests are HTTPS POST JSON
 - no cookies are used
 - telemetry requests do not carry an authentication token
+- the upload runs on a detached thread and never blocks command exit for meaningful time; delivery is best-effort and lossy by design
 - network errors are ignored and never affect command output or exit code
 - telemetry is never written to stdout
 - server-side handling must not enrich telemetry with customer, repository, organization, git, package-registry, or license data

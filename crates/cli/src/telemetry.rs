@@ -19,6 +19,11 @@ const CONFIG_SCHEMA_VERSION: u8 = 1;
 const TELEMETRY_SCHEMA_VERSION: u8 = 1;
 const CONNECT_TIMEOUT_SECS: u64 = 1;
 const TOTAL_TIMEOUT_SECS: u64 = 1;
+/// Maximum time the main thread waits for a telemetry upload to finish before
+/// continuing. The upload runs on a detached thread; if it has not completed
+/// within this grace window the process continues and the thread is abandoned
+/// at exit. Telemetry must never add meaningful latency to a sub-second run.
+const UPLOAD_GRACE_MS: u64 = 200;
 const TELEMETRY_PATH: &str = "/v1/telemetry/events";
 
 const DO_NOT_TRACK: &str = "DO_NOT_TRACK";
@@ -35,7 +40,7 @@ pub enum TelemetryCommand {
     Inspect { example: bool },
 }
 
-#[allow(
+#[expect(
     dead_code,
     reason = "telemetry schema reserves v1 values for LSP/editor/programmatic surfaces before every surface is wired"
 )]
@@ -56,7 +61,7 @@ pub enum Workflow {
     Unknown,
 }
 
-#[allow(
+#[expect(
     dead_code,
     reason = "telemetry schema reserves v1 values for LSP/editor/programmatic surfaces before every surface is wired"
 )]
@@ -85,10 +90,6 @@ pub enum InvocationContext {
     Unknown,
 }
 
-#[allow(
-    dead_code,
-    reason = "telemetry schema reserves the unknown source for ambiguous future classifiers"
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentSource {
@@ -100,6 +101,12 @@ pub enum AgentSource {
     Opencode,
     Aider,
     Roo,
+    Windsurf,
+    Gemini,
+    Cline,
+    Continue,
+    Zed,
+    Goose,
     OtherKnown,
     Unknown,
 }
@@ -186,14 +193,13 @@ pub fn run(command: TelemetryCommand, output: OutputFormat) -> ExitCode {
 }
 
 pub fn record_workflow(record: &WorkflowRecord<'_>) {
-    let effective = effective_config();
-    let event = build_workflow_event(record);
-    match effective.mode {
+    match effective_config().mode {
+        // Off is the default. Build no event and run no classification so the
+        // agent-detection env scan never runs speculatively while telemetry is
+        // disabled.
         EffectiveMode::Off | EffectiveMode::DisabledByAdmin => {}
-        EffectiveMode::Inspect => print_event_to_stderr(&event),
-        EffectiveMode::On => {
-            let _ = upload_event(&event);
-        }
+        EffectiveMode::Inspect => print_event_to_stderr(&build_workflow_event(record)),
+        EffectiveMode::On => upload_event_best_effort(build_workflow_event(record)),
     }
 }
 
@@ -215,10 +221,12 @@ pub fn maybe_print_opt_in_note(output: OutputFormat, quiet: bool) {
     config.prompt_shown = true;
     let _ = write_config_to(&path, &config);
     eprintln!(
-        "Help improve Fallow's agent and CI workflows with anonymous opt-in telemetry.\n\
+        "Help improve Fallow's agent and CI workflows with minimal, allowlisted opt-in telemetry.\n\
          No repository names, paths, package names, source code, config values, or raw errors are collected.\n\
          Inspect the exact payload: FALLOW_TELEMETRY=inspect fallow audit --format json --quiet\n\
-         Enable it: fallow telemetry enable"
+         Enable it: fallow telemetry enable\n\
+         This notice is shown once; your preference (still off) is stored at {}",
+        path.display()
     );
 }
 
@@ -287,9 +295,7 @@ fn set_enabled(enabled: bool, output: OutputFormat) -> ExitCode {
     if enabled {
         match effective_config().mode {
             EffectiveMode::Inspect => print_event_to_stderr(&event),
-            EffectiveMode::On => {
-                let _ = upload_event(&event);
-            }
+            EffectiveMode::On => upload_event_best_effort(event),
             EffectiveMode::Off | EffectiveMode::DisabledByAdmin => {}
         }
     }
@@ -581,6 +587,21 @@ fn write_config_to(path: &std::path::Path, config: &TelemetryConfig) -> Result<(
     std::fs::write(path, raw).map_err(|err| err.to_string())
 }
 
+/// Send a telemetry event without blocking the caller for meaningful time.
+///
+/// The bounded HTTP POST runs on a detached thread. The main thread waits only
+/// up to [`UPLOAD_GRACE_MS`] for it to finish on a healthy network; if the grace
+/// window elapses, the caller returns and the thread is abandoned (terminated at
+/// process exit). Delivery is best-effort and lossy by design: errors are
+/// already discarded, so blocking process exit on the upload would buy nothing.
+fn upload_event_best_effort(event: TelemetryEvent) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(upload_event(&event));
+    });
+    let _ = rx.recv_timeout(Duration::from_millis(UPLOAD_GRACE_MS));
+}
+
 fn upload_event(event: &TelemetryEvent) -> Result<(), String> {
     let agent = try_api_agent_with_timeout(CONNECT_TIMEOUT_SECS, TOTAL_TIMEOUT_SECS)
         .map_err(|err| err.to_string())?;
@@ -638,6 +659,12 @@ fn parse_agent_source_value(value: &str) -> Option<AgentSource> {
         "opencode" | "open_code" => Some(AgentSource::Opencode),
         "aider" => Some(AgentSource::Aider),
         "roo" | "roo_code" => Some(AgentSource::Roo),
+        "windsurf" => Some(AgentSource::Windsurf),
+        "gemini" | "gemini_cli" | "antigravity" => Some(AgentSource::Gemini),
+        "cline" => Some(AgentSource::Cline),
+        "continue" | "continue_dev" => Some(AgentSource::Continue),
+        "zed" => Some(AgentSource::Zed),
+        "goose" => Some(AgentSource::Goose),
         "other" | "other_known" => Some(AgentSource::OtherKnown),
         "unknown" => Some(AgentSource::Unknown),
         _ => None,
@@ -648,31 +675,34 @@ fn classify_agent_source_from_env<I>(keys: I) -> AgentSource
 where
     I: IntoIterator<Item = OsString>,
 {
+    // Tokens are matched at a leading word boundary (start of the key, or
+    // immediately after `_`) so short, generic tokens like `ROO` / `ZED` do not
+    // false-match unrelated variables such as `CHROOT` or `AUTHORIZED`.
+    const VENDORS: &[(&str, AgentSource)] = &[
+        ("CODEX", AgentSource::Codex),
+        ("CLAUDE", AgentSource::ClaudeCode),
+        ("CURSOR", AgentSource::Cursor),
+        ("COPILOT", AgentSource::Copilot),
+        ("OPENCODE", AgentSource::Opencode),
+        ("AIDER", AgentSource::Aider),
+        ("ROO", AgentSource::Roo),
+        ("WINDSURF", AgentSource::Windsurf),
+        ("GEMINI", AgentSource::Gemini),
+        ("ANTIGRAVITY", AgentSource::Gemini),
+        ("CLINE", AgentSource::Cline),
+        ("CONTINUE", AgentSource::Continue),
+        ("ZED", AgentSource::Zed),
+        ("GOOSE", AgentSource::Goose),
+    ];
     let mut saw_agent = false;
     for key in keys {
         let key = key.to_string_lossy().to_ascii_uppercase();
-        if key.contains("CODEX") {
-            return AgentSource::Codex;
+        for (token, source) in VENDORS {
+            if key_has_token(&key, token) {
+                return *source;
+            }
         }
-        if key.contains("CLAUDE") {
-            return AgentSource::ClaudeCode;
-        }
-        if key.contains("CURSOR") {
-            return AgentSource::Cursor;
-        }
-        if key.contains("COPILOT") {
-            return AgentSource::Copilot;
-        }
-        if key.contains("OPENCODE") {
-            return AgentSource::Opencode;
-        }
-        if key.contains("AIDER") {
-            return AgentSource::Aider;
-        }
-        if key.contains("ROO") {
-            return AgentSource::Roo;
-        }
-        if key.contains("AGENT") {
+        if key_has_token(&key, "AGENT") {
             saw_agent = true;
         }
     }
@@ -681,6 +711,14 @@ where
     } else {
         AgentSource::None
     }
+}
+
+/// True when `token` appears in `key` at a leading word boundary: either at the
+/// start of the key or immediately after an underscore. Avoids matching a token
+/// embedded mid-word (`CHROOT` must not classify as `ROO`).
+fn key_has_token(key: &str, token: &str) -> bool {
+    key.match_indices(token)
+        .any(|(idx, _)| idx == 0 || key.as_bytes()[idx - 1] == b'_')
 }
 
 fn is_ci() -> bool {
@@ -828,6 +866,54 @@ mod tests {
             Some(AgentSource::ClaudeCode)
         );
         assert_eq!(parse_agent_source_value("private-agent-x"), None);
+    }
+
+    #[test]
+    fn explicit_agent_source_accepts_new_vendors() {
+        assert_eq!(
+            parse_agent_source_value("windsurf"),
+            Some(AgentSource::Windsurf)
+        );
+        assert_eq!(
+            parse_agent_source_value("gemini_cli"),
+            Some(AgentSource::Gemini)
+        );
+        assert_eq!(
+            parse_agent_source_value("antigravity"),
+            Some(AgentSource::Gemini)
+        );
+        assert_eq!(parse_agent_source_value("cline"), Some(AgentSource::Cline));
+        assert_eq!(
+            parse_agent_source_value("continue"),
+            Some(AgentSource::Continue)
+        );
+        assert_eq!(parse_agent_source_value("zed"), Some(AgentSource::Zed));
+        assert_eq!(parse_agent_source_value("goose"), Some(AgentSource::Goose));
+    }
+
+    #[test]
+    fn heuristic_detects_new_vendors_at_word_boundary() {
+        assert_eq!(
+            classify_agent_source_from_env([OsString::from("WINDSURF_SESSION")]),
+            AgentSource::Windsurf
+        );
+        assert_eq!(
+            classify_agent_source_from_env([OsString::from("MY_GEMINI_KEY")]),
+            AgentSource::Gemini
+        );
+    }
+
+    #[test]
+    fn heuristic_does_not_match_token_mid_word() {
+        // `CHROOT` contains `ROO` but not at a leading word boundary, so it must
+        // not classify as Roo; `AUTHORIZED` likewise must not classify as Zed.
+        assert_eq!(
+            classify_agent_source_from_env([
+                OsString::from("CHROOT"),
+                OsString::from("AUTHORIZED_KEYS"),
+            ]),
+            AgentSource::None
+        );
     }
 
     #[test]
