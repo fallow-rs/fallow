@@ -1,0 +1,9 @@
+{
+  "name": "@fixture/ng-styles",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/main.ts",
+  "dependencies": {
+    "@angular/core": "^20.0.0"
+  }
+}

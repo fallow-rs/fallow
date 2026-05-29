@@ -1,0 +1,8 @@
+{
+  "name": "issue-772-workspace-plugin-merge",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ]
+}

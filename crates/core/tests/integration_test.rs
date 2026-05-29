@@ -120,6 +120,8 @@ mod issue_617_obsidian_plugin;
 mod issue_752_svelte_typed_props;
 #[path = "integration_test/issue_758_danger_no_dep.rs"]
 mod issue_758_danger_no_dep;
+#[path = "integration_test/issue_772_workspace_plugin_merge.rs"]
+mod issue_772_workspace_plugin_merge;
 #[path = "integration_test/lit_custom_element.rs"]
 mod lit_custom_element;
 #[path = "integration_test/scoped_used_class_members.rs"]

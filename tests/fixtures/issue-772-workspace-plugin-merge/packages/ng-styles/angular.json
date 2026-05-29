@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "projects": {
+    "ng-styles": {
+      "projectType": "application",
+      "sourceRoot": "src",
+      "architect": {
+        "build": {
+          "builder": "@angular-devkit/build-angular:application",
+          "options": {
+            "browser": "src/main.ts",
+            "tsConfig": "tsconfig.json",
+            "inlineStyleLanguage": "scss",
+            "styles": ["src/styles.scss"],
+            "stylePreprocessorOptions": {
+              "includePaths": ["src/styles"]
+            }
+          }
+        }
+      }
+    }
+  }
+}

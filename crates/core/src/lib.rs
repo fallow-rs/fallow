@@ -1276,21 +1276,27 @@ fn run_plugins(
     // field that would diverge the CLI from the LSP.
     for (mut ws_result, ws_prefix) in ws_results {
         ws_result.apply_workspace_prefix(&ws_prefix);
-        // Preserve pre-#444 behavior: the old workspace merge loop never
-        // folded these fields into the root aggregate. Clearing them on the
-        // incoming result keeps the merge byte-identical while `merge_into`
-        // stays a prefix-agnostic full union.
-        //   - `config_patterns`, `used_class_members`, `scss_include_paths`
-        //     ARE populated by `run_workspace_fast` and were dropped; whether
-        //     that drop is a latent bug is tracked in issue #772.
+        // `used_class_members` and `scss_include_paths` flow through the merge
+        // (issue #772): a workspace package that activates a framework
+        // contributing a heritage-scoped class-member allowlist (Lit, Lexical,
+        // Ember, ...) or SCSS `includePaths` (Angular/Nx) needs those folded
+        // into the root aggregate, otherwise the package's members surface as
+        // false `unused-class-member` findings and its SCSS `@use`/`@import`
+        // surface as `unresolved-import`. Both are prefix-agnostic (member
+        // names and absolute directories), so `apply_workspace_prefix` leaves
+        // them untouched and `merge_into` unions them as-is.
+        //
+        // Two fields stay cleared to keep behavior unchanged:
+        //   - `config_patterns` IS populated by `run_workspace_fast` but no
+        //     consumer reads the merged aggregate's `config_patterns` after
+        //     `run_plugins`, so folding it in is inert; it is cleared to keep
+        //     the merge byte-identical for that field.
         //   - `script_used_packages` is never populated by `run_workspace_fast`
         //     (the root's script-used set is computed separately after this
         //     function returns), so clearing it is a no-op today; it is cleared
         //     anyway so a future change that starts populating it cannot
         //     silently alter root script-credit behavior.
         ws_result.config_patterns.clear();
-        ws_result.used_class_members.clear();
-        ws_result.scss_include_paths.clear();
         ws_result.script_used_packages.clear();
         result.merge_into(ws_result);
     }

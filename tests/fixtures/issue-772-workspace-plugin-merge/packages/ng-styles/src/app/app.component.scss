@@ -1,0 +1,10 @@
+// `variables` only resolves via the workspace package's
+// stylePreprocessorOptions.includePaths: ["src/styles"]. Those include paths
+// must survive the workspace-result merge (issue #772), otherwise this
+// @import surfaces as an unresolved-import.
+@import 'variables';
+@use 'mixins';
+
+.app {
+  color: $primary-color;
+}
