@@ -12,6 +12,14 @@ if command -v typos &> /dev/null; then
   typos
 fi
 
+# Block hidden / bidi unicode from entering the committed surface. Scans staged
+# text files only (codepoint check; emoji ZWJ sequences are allowlisted). See
+# scripts/scan-hidden-unicode.py and SECURITY.md.
+if command -v python3 &> /dev/null; then
+  echo "Running hidden-unicode check..."
+  python3 scripts/scan-hidden-unicode.py --mode committed --staged
+fi
+
 # Run oxlint + oxfmt --check only when this commit touches a JS/TS file
 # inside one of the lintable scopes. Keeps pure-Rust commits fast.
 #

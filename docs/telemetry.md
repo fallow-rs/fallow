@@ -168,6 +168,6 @@ When telemetry is enabled and sending events:
 - telemetry is never written to stdout
 - server-side handling must not enrich telemetry with customer, repository, organization, git, package-registry, or license data
 - IP addresses are dropped or truncated as early as practical
-- raw events are retained only for a short documented window, then aggregated and deleted
+- raw events are retained only for a short documented window, then deleted
 
 Public reporting uses only coarse aggregate trends after privacy review.

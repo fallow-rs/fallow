@@ -11,6 +11,17 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 scripts/scan-hidden-unicode.py --mode agent 2>&1 || true",
+            "statusMessage": "Scanning agent-instruction files for hidden unicode..."
+          }
+        ]
+      }
     ]
   }
 }
