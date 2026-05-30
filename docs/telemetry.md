@@ -72,7 +72,7 @@ V1 events are workflow-level and coarse:
 {
   "schema_version": 1,
   "event": "workflow_completed",
-  "fallow_version": "2.84.0",
+  "fallow_version": "2.85.0",
   "workflow": "audit",
   "integration_surface": "cli_json",
   "invocation_context": "agent",
