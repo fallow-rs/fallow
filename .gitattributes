@@ -1,0 +1,6 @@
+# Test fixtures must have deterministic bytes across platforms so snapshot
+# tests produce identical output on Windows (CRLF) and Unix (LF) checkouts.
+# Without this, a Windows checkout with core.autocrlf converts fixture line
+# endings to CRLF, which shifts content-derived hashes (e.g. clone fingerprints)
+# and breaks byte-exact snapshot assertions.
+tests/fixtures/** text eol=lf

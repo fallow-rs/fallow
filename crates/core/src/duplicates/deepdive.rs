@@ -79,7 +79,7 @@ impl CloneFingerprintSet {
             .iter()
             .map(|group| {
                 let key = CloneFingerprintKey::from_group(group);
-                let hash = xxh3_64(key.representative_fragment().as_bytes());
+                let hash = hash_fragment(key.representative_fragment());
                 (key, hash)
             })
             .collect();
@@ -211,10 +211,26 @@ pub fn clone_fingerprint(instances: &[CloneInstance]) -> String {
 /// fingerprint matches the top-level `clone_groups[].fingerprint` for the clone.
 #[must_use]
 pub fn fingerprint_for_fragment(fragment: &str) -> String {
-    let hash = xxh3_64(fragment.as_bytes());
+    let hash = hash_fragment(fragment);
     // Low 32 bits give an 8-hex handle: ~4e9 space, ample for a single report's
     // clone-group count while staying short enough to type after `--trace`.
     format!("{FINGERPRINT_PREFIX}{:08x}", hash as u32)
+}
+
+/// Hash a representative fragment, normalizing CRLF to LF first.
+///
+/// A clone group must get the same `dup:` fingerprint whether its source was
+/// checked out with Windows (`\r\n`) or Unix (`\n`) line endings; otherwise the
+/// same code yields different handles on a Windows dev machine versus a Linux CI
+/// runner, breaking `dupes --trace dup:<id>` and any fingerprint-keyed baseline
+/// across platforms. Stripping `\r` is a no-op on Unix-checkout fragments, so
+/// existing fingerprints are unchanged.
+fn hash_fragment(fragment: &str) -> u64 {
+    if fragment.as_bytes().contains(&b'\r') {
+        xxh3_64(fragment.replace('\r', "").as_bytes())
+    } else {
+        xxh3_64(fragment.as_bytes())
+    }
 }
 
 /// Build a per-group `ExtractFunction` refactoring suggestion.
