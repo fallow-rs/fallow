@@ -3577,7 +3577,7 @@ pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode
             });
             let attribution = crate::impact::AttributionInput {
                 root: opts.root,
-                changed_files: &result.changed_files,
+                scope: crate::impact::Scope::ChangedFiles(&result.changed_files),
                 findings,
                 clones,
                 suppressions,

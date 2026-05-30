@@ -5686,6 +5686,19 @@ surfacing?: (ImpactCounts | null)
  * Trend between the two most recent records. None until two records exist.
  */
 trend?: (TrendSummary | null)
+/**
+ * Counts from the most recent whole-project `fallow` run. WHOLE-PROJECT
+ * scope (not changed-file), so this is the current issue total across the
+ * whole repo, context next to the actionable changed-file `surfacing`
+ * count. None until a full `fallow` run has been recorded. v1.6.
+ */
+project_surfacing?: (ImpactCounts | null)
+/**
+ * Trend between the two most recent whole-project records. Comparable over
+ * time (same whole-project denominator every run), unlike the changed-file
+ * `trend`. None until two full `fallow` runs exist. v1.6.
+ */
+project_trend?: (TrendSummary | null)
 containment_count: number
 /**
  * Most recent containment events (newest last), capped for display.

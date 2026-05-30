@@ -9849,6 +9849,28 @@
           ],
           "description": "Trend between the two most recent records. None until two records exist."
         },
+        "project_surfacing": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ImpactCounts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Counts from the most recent whole-project `fallow` run. WHOLE-PROJECT\nscope (not changed-file), so this is the current issue total across the\nwhole repo, context next to the actionable changed-file `surfacing`\ncount. None until a full `fallow` run has been recorded. v1.6."
+        },
+        "project_trend": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TrendSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Trend between the two most recent whole-project records. Comparable over\ntime (same whole-project denominator every run), unlike the changed-file\n`trend`. None until two full `fallow` runs exist. v1.6."
+        },
         "containment_count": {
           "type": "integer"
         },

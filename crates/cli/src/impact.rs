@@ -98,6 +98,18 @@ impl ImpactCounts {
             duplication: summary.duplication_clone_groups,
         }
     }
+
+    /// Build counts from a whole-project combined run's per-analysis totals.
+    /// Unlike [`from_summary`](Self::from_summary) (changed-file scope), these
+    /// are whole-project totals.
+    pub(crate) fn from_combined(dead_code: usize, complexity: usize, duplication: usize) -> Self {
+        Self {
+            total_issues: dead_code + complexity + duplication,
+            dead_code,
+            complexity,
+            duplication,
+        }
+    }
 }
 
 /// One recorded audit run.
@@ -207,6 +219,12 @@ pub struct ImpactStore {
     pub first_recorded: Option<String>,
     #[serde(default)]
     pub records: Vec<ImpactRecord>,
+    /// Whole-project records appended by a true full `fallow` run (dead code,
+    /// duplication, and complexity together, with no scope narrowing). Kept
+    /// separate from `records` so the changed-file (audit) trend and the
+    /// whole-project trend never share a series. v1.6.
+    #[serde(default)]
+    pub project_records: Vec<ImpactRecord>,
     #[serde(default)]
     pub containment: Vec<ContainmentEvent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -401,6 +419,58 @@ pub fn record_audit_run(
     save(&store, root);
 }
 
+/// Record a whole-project combined run into the project track. No-op when
+/// tracking is disabled or the store cannot be read. Best-effort throughout;
+/// never returns an error and never affects the command's exit code or output.
+///
+/// Unlike [`record_audit_run`] this appends to `project_records` (not `records`)
+/// and derives no containment (the pre-commit gate is audit-only). `attribution`
+/// drives v1.5 resolved/suppressed credit with [`Scope::WholeProject`], so a
+/// duplication or whole-repo cleanup verified outside a changed-file audit is
+/// credited on the next full `fallow` run.
+pub fn record_combined_run(
+    root: &Path,
+    counts: ImpactCounts,
+    git_sha: Option<&str>,
+    version: &str,
+    timestamp: &str,
+    attribution: Option<&AttributionInput<'_>>,
+) {
+    let mut store = load(root);
+    if !store.enabled {
+        return;
+    }
+    store.schema_version = STORE_SCHEMA_VERSION;
+
+    if store.first_recorded.is_none() {
+        store.first_recorded = Some(timestamp.to_owned());
+    }
+
+    let verdict_str = if counts.total_issues == 0 {
+        "pass"
+    } else {
+        "warn"
+    };
+    store.project_records.push(ImpactRecord {
+        timestamp: timestamp.to_owned(),
+        version: version.to_owned(),
+        git_sha: git_sha.map(ToOwned::to_owned),
+        verdict: verdict_str.to_owned(),
+        gate: false,
+        counts,
+    });
+    if store.project_records.len() > MAX_RECORDS {
+        let overflow = store.project_records.len() - MAX_RECORDS;
+        store.project_records.drain(0..overflow);
+    }
+
+    if let Some(attribution) = attribution {
+        apply_attribution(&mut store, attribution, git_sha, timestamp);
+    }
+
+    save(&store, root);
+}
+
 /// Update pending/contained state from a gate run's verdict.
 fn apply_containment(
     store: &mut ImpactStore,
@@ -469,9 +539,21 @@ pub struct CloneInput {
 /// holds dead-code and complexity findings; `clones` holds duplication groups;
 /// `suppressions` is the present-suppression snapshot from
 /// [`AnalysisResults::active_suppressions`].
+/// The set of files an attribution pass may reason about when diffing a
+/// disappearance against the stored frontier. Audit passes its git-diff changed
+/// set; a whole-project `fallow` run passes [`Scope::WholeProject`], which
+/// scopes off the frontier keys themselves (every file fallow previously
+/// reported a finding for was, by definition, just re-analyzed on a full run).
+pub enum Scope<'a> {
+    /// Only the listed files were re-analyzed (audit's git-diff changed set).
+    ChangedFiles(&'a [PathBuf]),
+    /// The whole project was re-analyzed (a full `fallow` run).
+    WholeProject,
+}
+
 pub struct AttributionInput<'a> {
     pub root: &'a Path,
-    pub changed_files: &'a [PathBuf],
+    pub scope: Scope<'a>,
     pub findings: Vec<FindingInput>,
     pub clones: Vec<CloneInput>,
     pub suppressions: &'a [ActiveSuppression],
@@ -499,11 +581,10 @@ fn apply_attribution(
     timestamp: &str,
 ) {
     let root = input.root;
-    let changed: FxHashSet<String> = input
-        .changed_files
-        .iter()
-        .map(|p| format_display_path(p, root))
-        .collect();
+    let changed: FxHashSet<String> = match input.scope {
+        Scope::ChangedFiles(files) => files.iter().map(|p| format_display_path(p, root)).collect(),
+        Scope::WholeProject => whole_project_scope(store, input, root),
+    };
 
     // Current findings and suppressions for the changed (re-analyzed) files only.
     let mut current_findings: FxHashMap<String, Vec<FrontierFinding>> = FxHashMap::default();
@@ -575,6 +656,35 @@ fn apply_attribution(
     classify_clone_disappearances(store, input, &changed, git_sha, timestamp);
     prune_frontier(store, root);
     bound_recent_resolved(store);
+}
+
+/// Build the in-scope file set for a whole-project run: every file the frontier
+/// or clone-frontier already tracks (all re-analyzed by definition on a full
+/// run) plus every file carrying a finding or clone instance this run. This lets
+/// a resolution anywhere in the repo be credited without a git-diff changed set,
+/// while staying safe against double-credit: a finding leaves the frontier
+/// exactly once (whichever run first re-analyzes its file and sees it gone), and
+/// once gone a wider scope cannot re-find it.
+fn whole_project_scope(
+    store: &ImpactStore,
+    input: &AttributionInput<'_>,
+    root: &Path,
+) -> FxHashSet<String> {
+    let mut set: FxHashSet<String> = store.frontier.keys().cloned().collect();
+    for paths in store.clone_frontier.values() {
+        for p in paths {
+            set.insert(p.clone());
+        }
+    }
+    for f in &input.findings {
+        set.insert(format_display_path(&f.path, root));
+    }
+    for c in &input.clones {
+        for p in &c.instance_paths {
+            set.insert(format_display_path(p, root));
+        }
+    }
+    set
 }
 
 /// Classify each finding that left a changed file's frontier since the last run.
@@ -708,6 +818,15 @@ fn classify_clone_disappearances(
         })
     };
 
+    // Files still participating in SOME current clone group this run. A
+    // disappeared fingerprint whose instance files are still duplicated (under a
+    // different, reshaped fingerprint) is NOT a full resolution: removing one of
+    // three identical instances changes the content fingerprint but leaves the
+    // remaining files duplicated. Crediting that as resolved would over-count, so
+    // a reshape is silently re-tracked under the new fingerprint, never credited.
+    // Conservative direction, matching v1.5 (never over-credit a win).
+    let still_duplicated: FxHashSet<&String> = current.values().flatten().collect();
+
     // Disappeared clones: in the stored frontier, intersecting a changed file,
     // not present in the current run.
     let disappeared: Vec<(String, Vec<String>)> = store
@@ -721,6 +840,12 @@ fn classify_clone_disappearances(
 
     for (fp, paths) in disappeared {
         store.clone_frontier.remove(&fp);
+        if paths.iter().any(|p| still_duplicated.contains(p)) {
+            // Reshape, not a resolution: duplication persists at these files
+            // under a new fingerprint (re-tracked below). Neither resolved nor
+            // suppressed.
+            continue;
+        }
         if dup_suppressed(&paths) {
             store.suppressed_total += 1;
         } else {
@@ -1070,6 +1195,17 @@ pub struct ImpactReport {
     /// Trend between the two most recent records. None until two records exist.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trend: Option<TrendSummary>,
+    /// Counts from the most recent whole-project `fallow` run. WHOLE-PROJECT
+    /// scope (not changed-file), so this is the current issue total across the
+    /// whole repo, context next to the actionable changed-file `surfacing`
+    /// count. None until a full `fallow` run has been recorded. v1.6.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_surfacing: Option<ImpactCounts>,
+    /// Trend between the two most recent whole-project records. Comparable over
+    /// time (same whole-project denominator every run), unlike the changed-file
+    /// `trend`. None until two full `fallow` runs exist. v1.6.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_trend: Option<TrendSummary>,
     pub containment_count: usize,
     /// Most recent containment events (newest last), capped for display.
     pub recent_containment: Vec<ContainmentEvent>,
@@ -1090,26 +1226,30 @@ pub struct ImpactReport {
 /// Build a report from the store. Defensive: a single record (or none) yields
 /// no trend rather than a spurious spike, and an empty store yields an empty
 /// report flagged so the renderer can show the first-run message.
+/// Trend between the two most recent records in a series. None until two records
+/// exist; a missing prior record is "unknown" (no trend), never a spike.
+fn trend_for(records: &[ImpactRecord]) -> Option<TrendSummary> {
+    if records.len() < 2 {
+        return None;
+    }
+    let current = &records[records.len() - 1];
+    let previous = &records[records.len() - 2];
+    let current_total = current.counts.total_issues;
+    let previous_total = previous.counts.total_issues;
+    let total_delta = current_total as i64 - previous_total as i64;
+    Some(TrendSummary {
+        direction: direction_for(total_delta),
+        total_delta,
+        previous_total,
+        current_total,
+    })
+}
+
 pub fn build_report(store: &ImpactStore) -> ImpactReport {
     let surfacing = store.records.last().map(|r| r.counts.clone());
-
-    // Trend only when we have at least two records to compare. Treat a missing
-    // prior record as "unknown" (no trend), never as a spike.
-    let trend = if store.records.len() >= 2 {
-        let current = &store.records[store.records.len() - 1];
-        let previous = &store.records[store.records.len() - 2];
-        let current_total = current.counts.total_issues;
-        let previous_total = previous.counts.total_issues;
-        let total_delta = current_total as i64 - previous_total as i64;
-        Some(TrendSummary {
-            direction: direction_for(total_delta),
-            total_delta,
-            previous_total,
-            current_total,
-        })
-    } else {
-        None
-    };
+    let trend = trend_for(&store.records);
+    let project_surfacing = store.project_records.last().map(|r| r.counts.clone());
+    let project_trend = trend_for(&store.project_records);
 
     let recent_containment = store
         .containment
@@ -1145,6 +1285,8 @@ pub fn build_report(store: &ImpactStore) -> ImpactReport {
         latest_git_sha,
         surfacing,
         trend,
+        project_surfacing,
+        project_trend,
         containment_count: store.containment.len(),
         recent_containment,
         resolved_total: store.resolved_total,
@@ -1152,6 +1294,36 @@ pub fn build_report(store: &ImpactStore) -> ImpactReport {
         recent_resolved,
         attribution_active,
     }
+}
+
+/// Render the whole-project view for the human report. Deliberately understated
+/// (one count line, one trend line, one caveat) rather than a co-equal header:
+/// the project track advances only on local full `fallow` runs, not CI, so it is
+/// context for the changed-file story above, not the headline. Renders nothing
+/// when no full `fallow` run has been recorded yet.
+#[expect(
+    clippy::format_push_string,
+    reason = "small report renderer; readability over avoiding the extra allocation"
+)]
+fn render_project_section(out: &mut String, report: &ImpactReport) {
+    let Some(s) = &report.project_surfacing else {
+        return;
+    };
+    out.push_str(&format!(
+        "  WHOLE PROJECT (whole-repo context, not a to-do)\n    {} issue{} across the whole project at your last full `fallow` run\n",
+        s.total_issues,
+        plural(s.total_issues),
+    ));
+    if let Some(t) = &report.project_trend {
+        let arrow = trend_arrow(t.direction);
+        out.push_str(&format!(
+            "    {} -> {} ({}) across your last two full runs (comparable over time)\n",
+            t.previous_total, t.current_total, arrow,
+        ));
+    } else {
+        out.push_str("    project trend starts after your next full `fallow` run\n");
+    }
+    out.push_str("      advances only on your local full `fallow` runs, not CI\n\n");
 }
 
 /// Render the report as human-readable text.
@@ -1171,17 +1343,18 @@ pub fn render_human(report: &ImpactReport) -> String {
         return out;
     }
 
-    if report.record_count == 0 {
+    if report.record_count == 0 && report.project_surfacing.is_none() {
         out.push_str(
             "Tracking enabled. No history yet: check back after your next few\n\
-             commits (Impact records each `fallow audit` / pre-commit gate run).\n",
+             commits (Impact records each `fallow audit` / pre-commit gate run,\n\
+             and each full `fallow` run for the whole-project view).\n",
         );
         return out;
     }
 
     if let Some(s) = &report.surfacing {
         out.push_str(&format!(
-            "  LATEST RUN (changed files)\n    {} issue{} flagged in your last `fallow audit` run\n",
+            "  LATEST RUN (changed files, act on these now)\n    {} issue{} flagged in your last `fallow audit` run\n",
             s.total_issues,
             plural(s.total_issues),
         ));
@@ -1198,6 +1371,8 @@ pub fn render_human(report: &ImpactReport) -> String {
             t.previous_total, t.current_total, arrow,
         ));
     }
+
+    render_project_section(&mut out, report);
 
     out.push_str(&format!(
         "  CONTAINED AT COMMIT\n    {} time{} fallow blocked a commit until it was fixed\n",
@@ -1223,7 +1398,7 @@ pub fn render_human(report: &ImpactReport) -> String {
         }
     } else if report.attribution_active {
         out.push_str(
-            "\n  RESOLVED\n    none yet; a finding is credited when fallow re-analyzes the\n      changed file it left (a fix that reverts a file to its base state\n      may not be individually credited)\n",
+            "\n  RESOLVED\n    none yet; a finding is credited when fallow re-analyzes the\n      file it left (a fix that reverts a file to its base state\n      may not be individually credited)\n",
         );
     } else {
         out.push_str("\n  RESOLVED\n    resolution tracking starts from your next gate run\n");
@@ -1239,18 +1414,27 @@ pub fn render_human(report: &ImpactReport) -> String {
     }
 
     out.push('\n');
-    out.push_str(&format!(
-        "Based on {} recorded run{} since {}. Local-only; never uploaded.\n\
-         Changed-file scope: each run only sees files differing from your audit base.\n\
-         Resolution tracking is a local-developer signal: it accrues where\n\
+    let since = report
+        .first_recorded
+        .as_deref()
+        .map_or("the first run", date_only);
+    if report.record_count > 0 {
+        out.push_str(&format!(
+            "Based on {} recorded audit run{} since {}. Local-only; never uploaded.\n\
+             Changed-file scope: each audit run only sees files differing from your base.\n",
+            report.record_count,
+            plural(report.record_count),
+            since,
+        ));
+    } else {
+        out.push_str(&format!(
+            "Tracking since {since}. Local-only; never uploaded.\n",
+        ));
+    }
+    out.push_str(
+        "Resolution tracking is a local-developer signal: it accrues where\n\
          .fallow/impact.json persists across runs, not in ephemeral CI runners.\n",
-        report.record_count,
-        plural(report.record_count),
-        report
-            .first_recorded
-            .as_deref()
-            .map_or("the first run", date_only),
-    ));
+    );
     out
 }
 
@@ -1258,6 +1442,34 @@ pub fn render_human(report: &ImpactReport) -> String {
 pub fn render_json(report: &ImpactReport) -> String {
     serde_json::to_string_pretty(report)
         .unwrap_or_else(|_| "{\"error\":\"failed to serialize impact report\"}".to_owned())
+}
+
+/// Render the whole-project view for the markdown report. One understated line
+/// plus a trend line when available, matching the human renderer's framing.
+/// Renders nothing when no full `fallow` run has been recorded yet.
+#[expect(
+    clippy::format_push_string,
+    reason = "small report renderer; readability over avoiding the extra allocation"
+)]
+fn render_project_markdown(out: &mut String, report: &ImpactReport) {
+    let Some(s) = &report.project_surfacing else {
+        return;
+    };
+    out.push_str(&format!(
+        "- **Whole project (whole-repo context, last full `fallow` run):** {} issue{} (dead code {}, complexity {}, duplication {})\n",
+        s.total_issues,
+        plural(s.total_issues),
+        s.dead_code,
+        s.complexity,
+        s.duplication,
+    ));
+    if let Some(t) = &report.project_trend {
+        let arrow = trend_arrow(t.direction);
+        out.push_str(&format!(
+            "- **Project trend (whole project, last two full runs):** {} -> {} ({})\n",
+            t.previous_total, t.current_total, arrow,
+        ));
+    }
 }
 
 /// Render the report as Markdown (paste-ready for a PR description or standup).
@@ -1273,7 +1485,7 @@ pub fn render_markdown(report: &ImpactReport) -> String {
         out.push_str("Impact tracking is off. Run `fallow impact enable` to start.\n");
         return out;
     }
-    if report.record_count == 0 {
+    if report.record_count == 0 && report.project_surfacing.is_none() {
         out.push_str("Tracking enabled. No history yet; check back after a few commits.\n");
         return out;
     }
@@ -1296,6 +1508,7 @@ pub fn render_markdown(report: &ImpactReport) -> String {
             trend_arrow(t.direction),
         ));
     }
+    render_project_markdown(&mut out, report);
     out.push_str(&format!(
         "- **Contained at commit:** {} time{}\n",
         report.containment_count,
@@ -1321,15 +1534,22 @@ pub fn render_markdown(report: &ImpactReport) -> String {
             plural(report.suppressed_total),
         ));
     }
-    out.push_str(&format!(
-        "\n_Based on {} recorded run{} since {}. Local-only; resolution is a local-developer signal._\n",
-        report.record_count,
-        plural(report.record_count),
-        report
-            .first_recorded
-            .as_deref()
-            .map_or("the first run", date_only),
-    ));
+    let since = report
+        .first_recorded
+        .as_deref()
+        .map_or("the first run", date_only);
+    if report.record_count > 0 {
+        out.push_str(&format!(
+            "\n_Based on {} recorded audit run{} since {}. Local-only; resolution is a local-developer signal._\n",
+            report.record_count,
+            plural(report.record_count),
+            since,
+        ));
+    } else {
+        out.push_str(&format!(
+            "\n_Tracking since {since}. Local-only; resolution is a local-developer signal._\n",
+        ));
+    }
     out
 }
 
@@ -1427,7 +1647,7 @@ mod tests {
         let changed_files: Vec<PathBuf> = changed.iter().map(|p| p.to_path_buf()).collect();
         let input = AttributionInput {
             root,
-            changed_files: &changed_files,
+            scope: Scope::ChangedFiles(&changed_files),
             findings,
             clones,
             suppressions: supps,
@@ -2131,6 +2351,8 @@ mod tests {
             latest_git_sha: None,
             surfacing: Some(ImpactCounts::default()),
             trend: None,
+            project_surfacing: None,
+            project_trend: None,
             containment_count: 0,
             recent_containment: vec![],
             resolved_total: 0,
@@ -2155,5 +2377,299 @@ mod tests {
             "markdown always has a Resolved bullet"
         );
         assert!(md.contains("- **Marked intentional:** 2 finding"));
+    }
+
+    /// Build a `CloneInput` over real absolute paths (built from `root`).
+    fn clone_at(fingerprint: &str, paths: &[&Path]) -> CloneInput {
+        CloneInput {
+            fingerprint: fingerprint.to_owned(),
+            instance_paths: paths.iter().map(|p| p.to_path_buf()).collect(),
+        }
+    }
+
+    /// Record a WHOLE-PROJECT run via the real combined-track recorder
+    /// (`record_combined_run` with `Scope::WholeProject`), exercising the same
+    /// path `combined.rs` uses on a full `fallow` run.
+    fn run_wp(
+        root: &Path,
+        findings: Vec<FindingInput>,
+        clones: Vec<CloneInput>,
+        supps: &[ActiveSuppression],
+        ts: &str,
+    ) {
+        let input = AttributionInput {
+            root,
+            scope: Scope::WholeProject,
+            findings,
+            clones,
+            suppressions: supps,
+        };
+        record_combined_run(
+            root,
+            ImpactCounts::default(),
+            Some("sha"),
+            "2.0.0",
+            ts,
+            Some(&input),
+        );
+    }
+
+    // FIX-FIRST safety test 1: a clone credited resolved by an audit run is NOT
+    // re-credited by a later whole-project run. The frontier is shared across
+    // both tracks, and a disappearance leaves the frontier exactly once, so a
+    // wider scope cannot re-find it. Uses real temp files because
+    // `prune_frontier` drops entries whose files are gone from disk.
+    #[test]
+    fn whole_project_run_does_not_double_credit_after_audit() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        enable(root);
+        let a = touch(root, "src/a.ts");
+        let b = touch(root, "src/b.ts");
+        // Audit run 1: clone present, enters the clone frontier.
+        run(
+            root,
+            &[&a, &b],
+            vec![],
+            vec![clone_at("dup:abc", &[&a, &b])],
+            &[],
+            "t1",
+        );
+        assert_eq!(load(root).clone_frontier.len(), 1);
+
+        // Audit run 2: clone gone, credited resolved once and removed.
+        run(root, &[&a, &b], vec![], vec![], &[], "t2");
+        assert_eq!(load(root).resolved_total, 1);
+        assert!(load(root).clone_frontier.is_empty());
+
+        // Whole-project run: clone still gone. Must NOT re-credit.
+        run_wp(root, vec![], vec![], &[], "t3");
+        assert_eq!(
+            load(root).resolved_total,
+            1,
+            "whole-project run re-credited a resolution"
+        );
+    }
+
+    // FIX-FIRST safety test 2: on a whole-project run, a finding gone from an
+    // UNCHANGED file because a fresh fallow-ignore now covers it is credited
+    // suppressed, never resolved (the v1.5 false-win guard through the wider
+    // WholeProject scope rather than a git changed set).
+    #[test]
+    fn whole_project_run_credits_suppressed_not_resolved() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        enable(root);
+        let util = touch(root, "src/util.ts");
+        // Audit run records the finding into the frontier.
+        run(
+            root,
+            &[&util],
+            vec![fi(&util, "unused-export", "dead")],
+            vec![],
+            &[],
+            "t1",
+        );
+        assert_eq!(load(root).frontier.len(), 1);
+
+        // Whole-project run: finding gone, a fresh fallow-ignore covers it. The
+        // file is in scope because it is a frontier key (no git changed set).
+        run_wp(root, vec![], vec![], &[supp(&util, "unused-export")], "t2");
+        let store = load(root);
+        assert_eq!(
+            store.suppressed_total, 1,
+            "suppressed finding not counted suppressed"
+        );
+        assert_eq!(
+            store.resolved_total, 0,
+            "suppressed finding wrongly counted resolved"
+        );
+    }
+
+    // FIX-FIRST safety test 3: a clone reshaped from three instances to two
+    // (still duplicated, new content fingerprint) is NOT credited as fully
+    // resolved. Duplication persists at the surviving files, so the disappeared
+    // fingerprint is re-tracked under the new one, never counted as a win.
+    #[test]
+    fn clone_reshape_three_to_two_not_credited_as_resolved() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        enable(root);
+        let a = touch(root, "src/a.ts");
+        let b = touch(root, "src/b.ts");
+        let c = touch(root, "src/c.ts");
+        // Run 1: a 3-instance clone.
+        run(
+            root,
+            &[&a, &b, &c],
+            vec![],
+            vec![clone_at("dup:aaa", &[&a, &b, &c])],
+            &[],
+            "t1",
+        );
+        assert_eq!(load(root).clone_frontier.len(), 1);
+
+        // Run 2 (whole project): one instance removed, the remaining two still
+        // duplicate under a new fingerprint. The old fingerprint disappears but
+        // its files are still duplicated, so it is a reshape, not a resolution.
+        run_wp(
+            root,
+            vec![],
+            vec![clone_at("dup:bbb", &[&a, &b])],
+            &[],
+            "t2",
+        );
+        let store = load(root);
+        assert_eq!(
+            store.resolved_total, 0,
+            "clone reshape miscredited as resolved"
+        );
+        assert!(store.clone_frontier.contains_key("dup:bbb"));
+        assert!(!store.clone_frontier.contains_key("dup:aaa"));
+    }
+
+    // ---- v1.6 whole-project render-state tests ----
+    // Lock the exact human/markdown strings for the project-only and both-tracks
+    // states. Every other render test sets `project_surfacing: None`, so without
+    // these, a regression (section dropped, empty-state guard misfiring, or an
+    // unlabeled count) would pass CI unnoticed.
+
+    fn rcounts(total: usize, dead: usize, complexity: usize, dup: usize) -> ImpactCounts {
+        ImpactCounts {
+            total_issues: total,
+            dead_code: dead,
+            complexity,
+            duplication: dup,
+        }
+    }
+
+    fn rtrend(prev: usize, cur: usize) -> TrendSummary {
+        TrendSummary {
+            direction: direction_for(cur as i64 - prev as i64),
+            total_delta: cur as i64 - prev as i64,
+            previous_total: prev,
+            current_total: cur,
+        }
+    }
+
+    /// Build a report literal for render-state tests.
+    fn rreport(
+        record_count: usize,
+        first_recorded: Option<&str>,
+        surfacing: Option<ImpactCounts>,
+        trend: Option<TrendSummary>,
+        project_surfacing: Option<ImpactCounts>,
+        project_trend: Option<TrendSummary>,
+        attribution_active: bool,
+    ) -> ImpactReport {
+        ImpactReport {
+            schema_version: ImpactReportSchemaVersion::V1,
+            enabled: true,
+            record_count,
+            first_recorded: first_recorded.map(ToOwned::to_owned),
+            latest_git_sha: None,
+            surfacing,
+            trend,
+            project_surfacing,
+            project_trend,
+            containment_count: 0,
+            recent_containment: vec![],
+            resolved_total: 0,
+            suppressed_total: 0,
+            recent_resolved: vec![],
+            attribution_active,
+        }
+    }
+
+    // A project-only store (full `fallow` runs, never `audit`): record_count 0
+    // but project_surfacing present. Must render the WHOLE PROJECT section and a
+    // "Tracking since" footer, NOT "No history yet" / a changed-file caveat.
+    #[test]
+    fn render_human_project_only_store_shows_whole_project_not_empty_state() {
+        let r = rreport(
+            0,
+            Some("2026-05-30T10:00:00Z"),
+            None,
+            None,
+            Some(rcounts(1, 1, 0, 0)),
+            None,
+            true,
+        );
+        let human = render_human(&r);
+        assert!(
+            human.contains("WHOLE PROJECT (whole-repo context, not a to-do)"),
+            "project-only must render the labeled section"
+        );
+        assert!(human.contains("1 issue across the whole project"));
+        assert!(
+            human.contains("project trend starts after your next full `fallow` run"),
+            "single project record => no trend line, shows the next-run hint"
+        );
+        assert!(human.contains("Tracking since 2026-05-30"));
+        assert!(
+            !human.contains("No history yet"),
+            "must not show the empty-state copy"
+        );
+        assert!(
+            !human.contains("LATEST RUN"),
+            "no changed-file track recorded"
+        );
+        assert!(
+            !human.contains("recorded audit run"),
+            "no audit runs => no changed-file footer"
+        );
+    }
+
+    // Both tracks present: the two counts must be labeled so a human knows which
+    // is actionable, and LATEST RUN must render before WHOLE PROJECT.
+    #[test]
+    fn render_human_both_tracks_label_actionable_vs_context() {
+        let r = rreport(
+            3,
+            Some("2026-05-29T10:00:00Z"),
+            Some(rcounts(4, 4, 0, 0)),
+            Some(rtrend(6, 4)),
+            Some(rcounts(40, 30, 5, 5)),
+            Some(rtrend(45, 40)),
+            true,
+        );
+        let human = render_human(&r);
+        let latest = human
+            .find("LATEST RUN (changed files, act on these now)")
+            .expect("LATEST RUN labeled actionable");
+        let whole = human
+            .find("WHOLE PROJECT (whole-repo context, not a to-do)")
+            .expect("WHOLE PROJECT labeled context");
+        assert!(
+            latest < whole,
+            "changed-file section renders before whole-project"
+        );
+        assert!(human.contains("45 -> 40 (down) across your last two full runs"));
+        assert!(human.contains("advances only on your local full `fallow` runs, not CI"));
+    }
+
+    #[test]
+    fn render_markdown_project_only_store_shows_whole_project_not_empty_state() {
+        let r = rreport(
+            0,
+            Some("2026-05-30T10:00:00Z"),
+            None,
+            None,
+            Some(rcounts(1, 1, 0, 0)),
+            None,
+            true,
+        );
+        let md = render_markdown(&r);
+        assert!(
+            md.contains(
+                "- **Whole project (whole-repo context, last full `fallow` run):** 1 issue"
+            ),
+            "project-only md must render the labeled whole-project line"
+        );
+        assert!(
+            !md.contains("No history yet"),
+            "project-only md must not show empty state"
+        );
+        assert!(md.contains("Tracking since 2026-05-30"));
     }
 }
