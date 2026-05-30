@@ -184,7 +184,7 @@ A parallel git worktree of fallow main. The bare-config'd `~/Sites/fallow/` is t
 The bare-config'd `~/Sites/fallow/` checkout where commits originate. Worktrees and parallel sessions must not push from their own working dirs without an ephemeral worktree (see `CLAUDE.md` worktree rules).
 
 **ADR**
-Architecture Decision Record. Lives in `decisions/<NNN>-<slug>.md`. Documents load-bearing structural choices. ADRs are forward-only; superseded ADRs link to their replacement.
+Architecture Decision Record. Kept in a private repo (symlinked locally at `decisions/<NNN>-<slug>.md`). Documents load-bearing structural choices. ADRs are forward-only; superseded ADRs link to their replacement.
 
 **.plans/**
 Gitignored directory for in-flight feature plans. `/fallow-implement` writes its Phase 1 plan to `.plans/<feature-slug>.md`; downstream skills (`/panel-review`, the implementation phase, `/fallow-review`) re-read the file rather than relying on context overflow. Plans are transient; promoted concepts go to ADRs.

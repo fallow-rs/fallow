@@ -41,7 +41,7 @@ ci/           -- GitLab CI template and supporting scripts
   tests/      -- Unit tests for jq scripts (92 tests, run: bash ci/tests/run.sh)
 tests/
   fixtures/ -- Integration test fixtures
-decisions/ -- Architecture Decision Records (ADRs)
+decisions/ -- Architecture Decision Records (ADRs; private, symlinked locally)
 ```
 
 ## Architecture
@@ -73,14 +73,14 @@ cargo run --bin fallow -- fix --dry-run      # Auto-fix preview
 
 ## Key design decisions
 
-Documented as Architecture Decision Records in [`decisions/`](decisions/). Key decisions:
+Documented as Architecture Decision Records in `decisions/` (kept in a private repo, symlinked locally). Key decisions:
 
-- **No TypeScript compiler** ([ADR-001](decisions/001-no-typescript-compiler.md)): Syntactic analysis via Oxc parser + `oxc_semantic`. No type resolution, no tsc.
-- **Flat edge storage** ([ADR-002](decisions/002-flat-edge-storage.md)): Contiguous `Vec<Edge>` with range indices for cache-friendly traversal.
-- **FxHashMap/FxHashSet required** ([ADR-003](decisions/003-fxhashmap-over-std.md)): Standard `HashMap`/`HashSet` disallowed (enforced via `.clippy.toml`).
-- **Path-sorted FileIds** ([ADR-004](decisions/004-path-sorted-file-ids.md)): Stable cross-run identity, not insertion order.
-- **Re-export chain resolution** ([ADR-005](decisions/005-re-export-chain-resolution.md)): Iterative propagation through barrel files with cycle detection.
-- **Hidden directory allowlist** ([ADR-006](decisions/006-hidden-directory-allowlist.md)): `.storybook`, `.vitepress`, `.well-known`, `.changeset`, `.github` traversed; other dotdirs skipped.
+- **No TypeScript compiler** (ADR-001): Syntactic analysis via Oxc parser + `oxc_semantic`. No type resolution, no tsc.
+- **Flat edge storage** (ADR-002): Contiguous `Vec<Edge>` with range indices for cache-friendly traversal.
+- **FxHashMap/FxHashSet required** (ADR-003): Standard `HashMap`/`HashSet` disallowed (enforced via `.clippy.toml`).
+- **Path-sorted FileIds** (ADR-004): Stable cross-run identity, not insertion order.
+- **Re-export chain resolution** (ADR-005): Iterative propagation through barrel files with cycle detection.
+- **Hidden directory allowlist** (ADR-006): `.storybook`, `.vitepress`, `.well-known`, `.changeset`, `.github` traversed; other dotdirs skipped.
 
 ## Git conventions
 

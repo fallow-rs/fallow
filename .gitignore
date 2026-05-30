@@ -91,3 +91,6 @@ AGENTS.md
 
 # Crash-handover markers from sdk-cli automation
 /HANDOVER-CRASH-*.md
+
+decisions
+decisions/
