@@ -5,8 +5,7 @@ use colored::Colorize;
 use fallow_core::duplicates::{CloneFingerprintSet, DuplicationReport};
 
 use super::{
-    MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, relative_path,
-    split_dir_filename, thousands,
+    MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, split_dir_filename, thousands,
 };
 use crate::report::dupes_grouping::DuplicationGrouping;
 
@@ -154,8 +153,7 @@ fn build_duplication_human_lines_with_explain(
         ));
 
         for instance in &group.instances {
-            let relative = relative_path(&instance.file, root);
-            let path_str = relative.display().to_string();
+            let path_str = crate::report::format_display_path(&instance.file, root);
             let (dir, filename) = split_dir_filename(&path_str);
             lines.push(format!(
                 "    {}{}:{}-{}",
@@ -339,8 +337,8 @@ pub(super) fn detect_mirrored_families<'a>(
         if family.files.len() != 2 {
             continue;
         }
-        let path_a = relative_path(&family.files[0], root).display().to_string();
-        let path_b = relative_path(&family.files[1], root).display().to_string();
+        let path_a = crate::report::format_display_path(&family.files[0], root);
+        let path_b = crate::report::format_display_path(&family.files[1], root);
 
         let (dir_a, file_a) = split_dir_filename(&path_a);
         let (dir_b, file_b) = split_dir_filename(&path_b);
@@ -530,8 +528,7 @@ pub(in crate::report) fn print_grouped_duplication_human(
                 plural(cg.instances.len()),
             );
             for inst in &cg.instances {
-                let relative = relative_path(&inst.instance.file, root);
-                let path_str = relative.display().to_string();
+                let path_str = crate::report::format_display_path(&inst.instance.file, root);
                 let (dir, filename) = split_dir_filename(&path_str);
                 let owner_tag = if inst.owner == bucket.key {
                     String::new()
