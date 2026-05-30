@@ -90,7 +90,7 @@ fn run_inner(args: &UploadSourceMapsArgs, root: &Path) -> Result<(), UploadSourc
     let exclude = compile_glob_set(&args.exclude, "--exclude")?;
     let repo = resolve_repo_name(args.repo.as_deref(), root)?;
     let git_sha = resolve_git_sha(args.git_sha.as_deref(), root)?;
-    let maps = collect_source_maps(&build_dir, &include, &exclude, args.strip_path)?;
+    let maps = collect_source_maps(root, &build_dir, &include, &exclude, args.strip_path)?;
 
     if maps.is_empty() {
         return Err(UploadSourceMapsError::Validation(format!(
@@ -276,22 +276,33 @@ struct SourceMapCandidate {
     path: PathBuf,
     rel_path: PathBuf,
     file_name: String,
+    /// The map's path relative to the REPO ROOT (e.g.
+    /// `dashboard/dist/assets/app.js.map`), posix-separated. `None` when the map
+    /// is not under the repo root (an absolute `--dir` outside it) or the path
+    /// fails the same safety checks as `file_name`. The cloud resolves each
+    /// `sources[]` entry against this path's directory so a monorepo
+    /// sub-package map's `../../src/x` resolves to `dashboard/src/x` instead of
+    /// collapsing to `src/x` and losing the package prefix (issue #260). It is
+    /// distinct from `file_name`, which keys the upload's storage + identity.
+    map_path: Option<String>,
     bytes: u64,
 }
 
 fn collect_source_maps(
+    repo_root: &Path,
     dir: &Path,
     include: &GlobSet,
     exclude: &GlobSet,
     strip_path: bool,
 ) -> Result<Vec<SourceMapCandidate>, UploadSourceMapsError> {
     let mut maps = Vec::new();
-    collect_source_maps_inner(dir, dir, include, exclude, strip_path, &mut maps)?;
+    collect_source_maps_inner(repo_root, dir, dir, include, exclude, strip_path, &mut maps)?;
     maps.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
     Ok(maps)
 }
 
 fn collect_source_maps_inner(
+    repo_root: &Path,
     root: &Path,
     dir: &Path,
     include: &GlobSet,
@@ -315,7 +326,7 @@ fn collect_source_maps_inner(
             continue;
         }
         if file_type.is_dir() {
-            collect_source_maps_inner(root, &path, include, exclude, strip_path, maps)?;
+            collect_source_maps_inner(repo_root, root, &path, include, exclude, strip_path, maps)?;
             continue;
         }
         if !include.is_match(&rel_path) || !path.is_file() {
@@ -323,14 +334,26 @@ fn collect_source_maps_inner(
         }
         let bytes = entry.metadata().map_or(0, |metadata| metadata.len());
         let file_name = map_file_name(&rel_path, strip_path)?;
+        let map_path = repo_relative_map_path(repo_root, &path);
         maps.push(SourceMapCandidate {
             path,
             rel_path,
             file_name,
+            map_path,
             bytes,
         });
     }
     Ok(())
+}
+
+/// The map file's path relative to `repo_root`, posix-separated, or `None` when
+/// the map is not under the repo root or the result is not a safe relative path
+/// (issue #260). Only `Some` paths are sent as `mapPath`; the cloud falls back
+/// to root-anchored normalization when absent, so dropping it is always safe.
+fn repo_relative_map_path(repo_root: &Path, path: &Path) -> Option<String> {
+    let rel = path.strip_prefix(repo_root).ok()?;
+    let value = to_posix_string(rel);
+    validate_file_name(&value).ok().map(|()| value)
 }
 
 fn map_file_name(rel_path: &Path, strip_path: bool) -> Result<String, UploadSourceMapsError> {
@@ -584,6 +607,11 @@ struct SourceMapRequest<'a> {
     git_sha: &'a str,
     #[serde(rename = "fileName")]
     file_name: &'a str,
+    /// The map's repo-relative path, omitted when not resolvable (#260). The
+    /// cloud resolves `sources[]` against its directory for monorepo
+    /// sub-packages; an older cloud ignores the field.
+    #[serde(rename = "mapPath", skip_serializing_if = "Option::is_none")]
+    map_path: Option<&'a str>,
     #[serde(rename = "sourceMap")]
     source_map: &'a serde_json::Value,
 }
@@ -620,6 +648,7 @@ fn send_source_map(
     let payload = SourceMapRequest {
         git_sha,
         file_name: &map.candidate.file_name,
+        map_path: map.candidate.map_path.as_deref(),
         source_map: &map.source_map,
     };
     let mut response = agent
@@ -806,11 +835,13 @@ fn print_dry_run(
         display_endpoint_url(endpoint_override, repo)
     );
     for map in maps.iter().take(20) {
+        let map_path = map.map_path.as_deref().unwrap_or("-");
         println!(
-            "  - {} ({}) -> fileName={}",
+            "  - {} ({}) -> fileName={} mapPath={}",
             map.rel_path.display(),
             format_bytes(map.bytes),
-            map.file_name
+            map.file_name,
+            map_path
         );
     }
     if maps.len() > 20 {
@@ -907,10 +938,66 @@ mod tests {
 
         let include = compile_glob_set(&["**/*.map".to_owned()], "--include").unwrap();
         let exclude = compile_glob_set(&["**/node_modules/**".to_owned()], "--exclude").unwrap();
-        let maps = collect_source_maps(dir.path(), &include, &exclude, false).unwrap();
+        let maps = collect_source_maps(dir.path(), dir.path(), &include, &exclude, false).unwrap();
 
         let file_names: Vec<&str> = maps.iter().map(|map| map.file_name.as_str()).collect();
         assert_eq!(file_names, vec!["assets/app.js.map", "root.js.map"]);
+    }
+
+    #[test]
+    fn map_path_is_repo_root_relative_when_build_dir_is_a_subdirectory() {
+        // CI runs `upload-source-maps --dir dashboard/dist` from the repo root,
+        // so the repo root is the parent of `dashboard/dist`. mapPath must carry
+        // the full `dashboard/dist/...` prefix even though fileName is stripped.
+        let repo_root = tempdir().expect("tempdir");
+        let build_dir = repo_root.path().join("dashboard/dist");
+        std::fs::create_dir_all(build_dir.join("assets")).expect("assets dir");
+        std::fs::write(build_dir.join("assets/app-a1b2.js.map"), "{}").expect("map");
+
+        let include = compile_glob_set(&["**/*.map".to_owned()], "--include").unwrap();
+        let exclude = compile_glob_set(&["**/node_modules/**".to_owned()], "--exclude").unwrap();
+        let maps =
+            collect_source_maps(repo_root.path(), &build_dir, &include, &exclude, true).unwrap();
+
+        assert_eq!(maps.len(), 1);
+        // fileName is the stripped basename (storage identity), unchanged.
+        assert_eq!(maps[0].file_name, "app-a1b2.js.map");
+        // mapPath carries the repo-relative path so the cloud can resolve the
+        // map's `sources[]` against `dashboard/dist/assets`.
+        assert_eq!(
+            maps[0].map_path.as_deref(),
+            Some("dashboard/dist/assets/app-a1b2.js.map")
+        );
+    }
+
+    #[test]
+    fn repo_relative_map_path_is_none_for_a_map_outside_the_repo_root() {
+        let repo_root = tempdir().expect("repo root");
+        let elsewhere = tempdir().expect("elsewhere");
+        let outside = elsewhere.path().join("app.js.map");
+        assert_eq!(repo_relative_map_path(repo_root.path(), &outside), None);
+    }
+
+    #[test]
+    fn request_serializes_map_path_and_omits_it_when_absent() {
+        let source_map = serde_json::json!({ "version": 3, "sources": [], "mappings": "" });
+        let with_path = SourceMapRequest {
+            git_sha: "abcdef1",
+            file_name: "app.js.map",
+            map_path: Some("dashboard/dist/assets/app.js.map"),
+            source_map: &source_map,
+        };
+        let json = serde_json::to_string(&with_path).unwrap();
+        assert!(json.contains(r#""mapPath":"dashboard/dist/assets/app.js.map""#));
+
+        let without_path = SourceMapRequest {
+            git_sha: "abcdef1",
+            file_name: "app.js.map",
+            map_path: None,
+            source_map: &source_map,
+        };
+        let json = serde_json::to_string(&without_path).unwrap();
+        assert!(!json.contains("mapPath"));
     }
 
     #[test]
@@ -947,6 +1034,7 @@ mod tests {
             path: PathBuf::from("dist/app.js.map"),
             rel_path: PathBuf::from("dist/app.js.map"),
             file_name: "dist/app.js.map".to_owned(),
+            map_path: Some("dist/app.js.map".to_owned()),
             bytes: 10,
         };
         let outcomes = [MapOutcome::failed(

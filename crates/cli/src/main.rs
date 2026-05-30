@@ -1384,6 +1384,12 @@ enum CoverageCli {
     /// the selected repo + git SHA. The production beacon reports bundled
     /// paths; the cloud resolver uses these maps to remap runtime coverage back
     /// to original source files.
+    ///
+    /// Each upload also carries the map's path relative to the repo root, so the
+    /// source-evidence viewer can resolve a monorepo sub-package map's relative
+    /// `sources[]` (e.g. `../../src/X`) to the package-prefixed source path
+    /// (e.g. `dashboard/src/X`). Run from the repo root so this prefix is
+    /// correct.
     UploadSourceMaps {
         /// Directory to scan recursively for source maps.
         #[arg(long, value_name = "PATH", default_value = "dist")]
