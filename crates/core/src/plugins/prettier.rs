@@ -102,11 +102,21 @@ define_plugin! {
             }
         }
 
-        // Handle JSON configs (.prettierrc, .prettierrc.json)
+        // Handle JSON configs (.prettierrc, .prettierrc.json). Prettier also
+        // accepts a package name string in package.json: { "prettier": "pkg" }.
         let is_json = config_path.extension().is_some_and(|ext| ext == "json")
             || config_path
                 .file_name()
                 .is_some_and(|name| name == ".prettierrc");
+        if is_json
+            && let Ok(serde_json::Value::String(config_package)) =
+                serde_json::from_str::<serde_json::Value>(source)
+        {
+            result
+                .referenced_dependencies
+                .push(crate::resolve::extract_package_name(&config_package));
+            return result;
+        }
         let (parse_source, parse_path_buf) = if is_json {
             (format!("({source})"), config_path.with_extension("js"))
         } else {
@@ -179,6 +189,22 @@ mod tests {
         let result = plugin.resolve_config(Path::new(".prettierrc"), source, Path::new("/project"));
 
         assert!(result.referenced_dependencies.is_empty());
+    }
+
+    #[test]
+    fn resolve_package_json_string_config() {
+        let source = r#""@scope/prettier-config""#;
+        let plugin = PrettierPlugin;
+        let result = plugin.resolve_config(
+            Path::new("prettier.config.json"),
+            source,
+            Path::new("/project"),
+        );
+
+        assert_eq!(
+            result.referenced_dependencies,
+            vec!["@scope/prettier-config".to_string()]
+        );
     }
 
     #[test]

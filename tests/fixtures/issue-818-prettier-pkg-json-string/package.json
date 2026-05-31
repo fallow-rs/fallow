@@ -1,0 +1,11 @@
+{
+  "name": "issue-818-prettier-pkg-json-string",
+  "version": "1.0.0",
+  "type": "module",
+  "prettier": "@scope/prettier-config",
+  "devDependencies": {
+    "@scope/prettier-config": "latest",
+    "prettier": "latest",
+    "unused-control": "latest"
+  }
+}
