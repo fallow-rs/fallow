@@ -1,0 +1,19 @@
+{
+  "name": "app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "registry-pkg": "catalog:",
+    "jsr-pkg": "catalog:",
+    "workspace-pkg": "catalog:",
+    "local-dir-pkg": "catalog:",
+    "local-tarball-pkg": "catalog:",
+    "remote-tarball-pkg": "catalog:",
+    "git-url-pkg": "catalog:",
+    "git-shorthand-pkg": "catalog:",
+    "npm-alias-pkg": "catalog:",
+    "unused-control": "catalog:"
+  }
+}

@@ -1332,6 +1332,121 @@ fn specifier_bare_npm_scheme_returns_external_file() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
+fn pnpm_package_source_alias_preserves_declared_import_name() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    let source_pkg = root
+        .join("node_modules/.pnpm/unstorage-nightly@2.0.0-alpha.5/node_modules/unstorage-nightly");
+    std::fs::create_dir_all(&source_pkg).unwrap();
+    std::fs::write(
+        source_pkg.join("index.js"),
+        "export const createStorage = () => ({});",
+    )
+    .unwrap();
+    std::fs::write(
+        source_pkg.join("package.json"),
+        r#"{"name":"unstorage-nightly","exports":"./index.js"}"#,
+    )
+    .unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&source_pkg, root.join("node_modules/unstorage")).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&source_pkg, root.join("node_modules/unstorage")).unwrap();
+
+    let resolver = specifier::create_resolver(&[], &[]);
+    let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let extensions = react_native::build_extensions(&[]);
+    let path_to_id = FxHashMap::default();
+    let raw_path_to_id = FxHashMap::default();
+    let workspace_roots = FxHashMap::default();
+    let package_manifests = Vec::new();
+    let condition_names = react_native::build_condition_names(&[], &[]);
+    let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+    let ctx = ResolveContext {
+        resolver: &resolver,
+        style_resolver: &style_resolver,
+        extensions: &extensions,
+        path_to_id: &path_to_id,
+        raw_path_to_id: &raw_path_to_id,
+        workspace_roots: &workspace_roots,
+        package_manifests: &package_manifests,
+        condition_names: &condition_names,
+        path_aliases: &[],
+        scss_include_paths: &[],
+        static_dir_mappings: &[],
+        root,
+        canonical_fallback: None,
+        tsconfig_warned: &tsconfig_warned,
+    };
+
+    let result = specifier::resolve_specifier(&ctx, &root.join("app.ts"), "unstorage", false);
+    assert!(
+        matches!(result, ResolveResult::NpmPackage(ref name) if name == "unstorage"),
+        "expected package usage to preserve declared import name, got {result:?}"
+    );
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn pnpm_jsr_package_source_alias_preserves_declared_import_name() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    let source_pkg = root.join("node_modules/.pnpm/@jsr+std__csv@1.0.6/node_modules/@jsr/std__csv");
+    std::fs::create_dir_all(&source_pkg).unwrap();
+    std::fs::write(
+        source_pkg.join("stringify.js"),
+        "export const stringify = () => '';",
+    )
+    .unwrap();
+    std::fs::write(
+        source_pkg.join("package.json"),
+        r#"{"name":"@jsr/std__csv","exports":{"./stringify":"./stringify.js"}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("node_modules/@std")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&source_pkg, root.join("node_modules/@std/csv")).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&source_pkg, root.join("node_modules/@std/csv")).unwrap();
+
+    let resolver = specifier::create_resolver(&[], &[]);
+    let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let extensions = react_native::build_extensions(&[]);
+    let path_to_id = FxHashMap::default();
+    let raw_path_to_id = FxHashMap::default();
+    let workspace_roots = FxHashMap::default();
+    let package_manifests = Vec::new();
+    let condition_names = react_native::build_condition_names(&[], &[]);
+    let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+    let ctx = ResolveContext {
+        resolver: &resolver,
+        style_resolver: &style_resolver,
+        extensions: &extensions,
+        path_to_id: &path_to_id,
+        raw_path_to_id: &raw_path_to_id,
+        workspace_roots: &workspace_roots,
+        package_manifests: &package_manifests,
+        condition_names: &condition_names,
+        path_aliases: &[],
+        scss_include_paths: &[],
+        static_dir_mappings: &[],
+        root,
+        canonical_fallback: None,
+        tsconfig_warned: &tsconfig_warned,
+    };
+
+    let result =
+        specifier::resolve_specifier(&ctx, &root.join("app.ts"), "@std/csv/stringify", false);
+    assert!(
+        matches!(result, ResolveResult::NpmPackage(ref name) if name == "@std/csv"),
+        "expected package usage to preserve declared import name, got {result:?}"
+    );
+}
+
+#[test]
 fn specifier_html_root_relative_unresolvable() {
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/public/index.html");

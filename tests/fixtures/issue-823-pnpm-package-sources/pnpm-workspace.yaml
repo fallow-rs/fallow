@@ -1,0 +1,15 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+catalog:
+  registry-pkg: ^1.0.0
+  jsr-pkg: jsr:@scope/jsr-pkg@1.0.0
+  workspace-pkg: workspace:*
+  local-dir-pkg: ./packages/local-dir-pkg
+  local-tarball-pkg: ./vendor/local-tarball-pkg-1.0.0.tgz
+  remote-tarball-pkg: https://example.com/remote-tarball-pkg-1.0.0.tgz
+  git-url-pkg: git+https://github.com/example/git-url-pkg.git#v1.0.0
+  git-shorthand-pkg: github:example/git-shorthand-pkg#v1.0.0
+  npm-alias-pkg: npm:actual-npm-package@1.0.0
+  unused-control: ^1.0.0

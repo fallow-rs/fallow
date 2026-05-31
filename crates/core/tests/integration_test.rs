@@ -197,6 +197,8 @@ mod issue_811_vite_alias_identifier_spread;
 mod issue_818_prettier_pkg_json_string;
 #[path = "integration_test/issue_820_vercel_ts_config.rs"]
 mod issue_820_vercel_ts_config;
+#[path = "integration_test/issue_823_pnpm_package_sources.rs"]
+mod issue_823_pnpm_package_sources;
 #[path = "integration_test/lexical_nodes.rs"]
 mod lexical_nodes;
 #[path = "integration_test/script_multiplexers.rs"]
