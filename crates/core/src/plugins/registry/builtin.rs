@@ -34,9 +34,10 @@ use super::super::{
     tailwind::TailwindPlugin, tanstack_router::TanstackRouterPlugin, tap::TapPlugin,
     tsd::TsdPlugin, tsdown::TsdownPlugin, tsup::TsupPlugin, turborepo::TurborepoPlugin,
     typedoc::TypedocPlugin, typeorm::TypeormPlugin, typescript::TypeScriptPlugin,
-    unocss::UnoCssPlugin, varlock::VarlockPlugin, velite::VelitePlugin, vite::VitePlugin,
-    vitepress::VitePressPlugin, vitest::VitestPlugin, webdriverio::WebdriverioPlugin,
-    webpack::WebpackPlugin, wrangler::WranglerPlugin, wuchale::WuchalePlugin, wxt::WxtPlugin,
+    unocss::UnoCssPlugin, varlock::VarlockPlugin, velite::VelitePlugin, vercel::VercelPlugin,
+    vite::VitePlugin, vitepress::VitePressPlugin, vitest::VitestPlugin,
+    webdriverio::WebdriverioPlugin, webpack::WebpackPlugin, wrangler::WranglerPlugin,
+    wuchale::WuchalePlugin, wxt::WxtPlugin,
 };
 
 /// Create all built-in plugin instances, categorized by domain.
@@ -145,6 +146,7 @@ pub fn create_builtin_plugins() -> Vec<Box<dyn Plugin>> {
         // Blockchain
         Box::new(HardhatPlugin),
         // Deployment
+        Box::new(VercelPlugin),
         Box::new(WranglerPlugin),
         Box::new(OpenNextCloudflarePlugin),
         Box::new(SentryPlugin),

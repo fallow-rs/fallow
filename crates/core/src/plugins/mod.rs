@@ -1228,6 +1228,7 @@ mod typescript;
 mod unocss;
 mod varlock;
 mod velite;
+mod vercel;
 mod vite;
 mod vitepress;
 mod vitest;

@@ -1,0 +1,10 @@
+{
+  "name": "issue-819-vercel-ts-config",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "@vercel/config": "latest",
+    "vercel": "latest"
+  }
+}
