@@ -983,12 +983,23 @@ fn try_style_condition_package_resolution(
         .or_else(|| Some(ResolveResult::ExternalFile(resolved_path.to_path_buf())))
 }
 
-fn package_usage_name_for_resolved_package(
+/// Package-usage key for an import that resolved into `node_modules`.
+///
+/// pnpm can install a package under a declared name (e.g. `unstorage`) symlinked
+/// to a `.pnpm` store whose inner package has a different "source" name (e.g.
+/// `unstorage-nightly`). For a plain bare specifier we credit the declared import
+/// name so `unused-dependency` / `unlisted-dependency` accounting matches what the
+/// user wrote in `package.json`, not the on-disk source package. Path aliases that
+/// happen to be bare (Node.js `#imports`, `~/`, `@/`, PascalCase scopes) are
+/// excluded: they can map to an external package whose real name is only recoverable
+/// from the resolved path, so they keep the resolved-package name. Returns `None`
+/// when the path is not inside a `node_modules` directory.
+pub(super) fn package_usage_name_for_resolved_package(
     specifier: &str,
     resolved_path: &Path,
 ) -> Option<String> {
     let resolved_package = extract_package_name_from_node_modules_path(resolved_path)?;
-    if is_bare_specifier(specifier) {
+    if is_bare_specifier(specifier) && !is_path_alias(specifier) {
         Some(extract_package_name(specifier))
     } else {
         Some(resolved_package)

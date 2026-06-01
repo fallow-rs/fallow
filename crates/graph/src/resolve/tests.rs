@@ -1447,6 +1447,48 @@ fn pnpm_jsr_package_source_alias_preserves_declared_import_name() {
 }
 
 #[test]
+fn package_usage_name_prefers_declared_name_for_bare_specifiers() {
+    // pnpm source alias: declared `unstorage` resolved into a `.pnpm` store dir
+    // whose inner package is `unstorage-nightly`. Credit the declared name.
+    let resolved =
+        Path::new("/p/node_modules/.pnpm/unstorage-nightly@2.0.0/node_modules/unstorage-nightly");
+    assert_eq!(
+        specifier::package_usage_name_for_resolved_package("unstorage", resolved),
+        Some("unstorage".to_string()),
+    );
+
+    // Scoped subpath bare specifier reduces to the package name.
+    let resolved_scoped =
+        Path::new("/p/node_modules/.pnpm/@jsr+std__csv@1.0.6/node_modules/@jsr/std__csv");
+    assert_eq!(
+        specifier::package_usage_name_for_resolved_package("@std/csv/stringify", resolved_scoped),
+        Some("@std/csv".to_string()),
+    );
+
+    // Common case (declared name == source name) is unchanged.
+    let resolved_plain = Path::new("/p/node_modules/lodash");
+    assert_eq!(
+        specifier::package_usage_name_for_resolved_package("lodash", resolved_plain),
+        Some("lodash".to_string()),
+    );
+
+    // Path aliases that are bare (Node.js `#imports`) must NOT be credited as the
+    // package name: they can map to an external package whose real name is only on
+    // the resolved path. Keep the resolved-package name instead.
+    let resolved_import_map = Path::new("/p/node_modules/polyfill-pkg/index.js");
+    assert_eq!(
+        specifier::package_usage_name_for_resolved_package("#polyfill", resolved_import_map),
+        Some("polyfill-pkg".to_string()),
+    );
+
+    // Not under node_modules: no package-usage credit.
+    assert_eq!(
+        specifier::package_usage_name_for_resolved_package("unstorage", Path::new("/p/src/x.ts")),
+        None,
+    );
+}
+
+#[test]
 fn specifier_html_root_relative_unresolvable() {
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/public/index.html");
