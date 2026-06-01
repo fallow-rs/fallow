@@ -1,7 +1,9 @@
 //! Vue/Svelte Single File Component (SFC) script and style extraction.
 //!
 //! Extracts `<script>` block content from `.vue` and `.svelte` files using regex,
-//! handling `lang`, `src`, and `generic` attributes, and filtering HTML comments.
+//! handling `lang`, `src` metadata, and `generic` attributes, and filtering
+//! HTML comments. Vue external script references are emitted as graph edges;
+//! Svelte markup-level script `src` references are treated as runtime HTML.
 //! Also extracts `<style>` block sources (`@import` / `@use` / `@forward` /
 //! `@plugin` and `<style src="...">`) so referenced CSS / SCSS files become
 //! reachable from the component, preventing false `unused-files` reports on
@@ -335,7 +337,9 @@ fn merge_script_into_module(
     template_visible_bound_targets: &mut FxHashMap<String, String>,
     need_complexity: bool,
 ) {
-    if let Some(src) = &script.src {
+    if kind == SfcKind::Vue
+        && let Some(src) = &script.src
+    {
         add_script_src_import(combined, src, script.src_span);
     }
 

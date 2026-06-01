@@ -428,6 +428,24 @@ fn sveltekit_generated_types_not_unresolved() {
 }
 
 #[test]
+fn sveltekit_head_script_src_not_unresolved() {
+    let root = fixture_path("issue-835-svelte-script-src");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specs: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+
+    assert!(
+        !unresolved_specs.contains(&"/some-lib.min.js"),
+        "SvelteKit markup script src should not be unresolved: {unresolved_specs:?}"
+    );
+}
+
+#[test]
 fn sveltekit_workspace_types_not_unresolved() {
     let root = fixture_path("workspace-sveltekit");
     let config = create_config(root);

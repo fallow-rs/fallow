@@ -1,0 +1,12 @@
+{
+  "name": "issue-835-svelte-script-src",
+  "private": true,
+  "dependencies": {
+    "svelte": "^5.0.0"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-auto": "^3.0.0",
+    "@sveltejs/kit": "^2.0.0",
+    "@sveltejs/vite-plugin-svelte": "^4.0.0"
+  }
+}

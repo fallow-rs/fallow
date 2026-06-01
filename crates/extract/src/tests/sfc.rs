@@ -809,13 +809,85 @@ fn vue_script_src_bare_filename_normalized() {
 }
 
 #[test]
-fn svelte_script_src_bare_filename_normalized() {
+fn svelte_script_src_bare_filename_creates_no_import() {
     let info = parse_sfc(
         r#"<script src="store.js"></script><div>hi</div>"#,
         "App.svelte",
     );
-    assert_eq!(info.imports.len(), 1);
-    assert_eq!(info.imports[0].source, "./store.js");
+    assert!(
+        info.imports.is_empty(),
+        "Svelte markup script src should not create imports: {:?}",
+        info.imports
+    );
+}
+
+#[test]
+fn svelte_script_src_root_relative_creates_no_import() {
+    let info = parse_sfc(
+        r#"<script src="/some-lib.min.js"></script><div>hi</div>"#,
+        "App.svelte",
+    );
+    assert!(
+        info.imports.is_empty(),
+        "Svelte root-relative script src should not create imports: {:?}",
+        info.imports
+    );
+}
+
+#[test]
+fn svelte_script_src_relative_creates_no_import() {
+    let info = parse_sfc(
+        r#"<script src="./store.js"></script><div>hi</div>"#,
+        "App.svelte",
+    );
+    assert!(
+        info.imports.is_empty(),
+        "Svelte relative script src should not create imports: {:?}",
+        info.imports
+    );
+}
+
+#[test]
+fn svelte_script_src_type_module_creates_no_import() {
+    let info = parse_sfc(
+        r#"<script type="module" src="./module.js"></script><div>hi</div>"#,
+        "App.svelte",
+    );
+    assert!(
+        info.imports.is_empty(),
+        "Svelte type=module script src should not create imports: {:?}",
+        info.imports
+    );
+}
+
+#[test]
+fn svelte_head_script_src_creates_no_import() {
+    let info = parse_sfc(
+        r#"<svelte:head><script src="/some-lib.min.js" async></script></svelte:head>"#,
+        "App.svelte",
+    );
+    assert!(
+        info.imports.is_empty(),
+        "Svelte head script src should not create imports: {:?}",
+        info.imports
+    );
+}
+
+#[test]
+fn svelte_script_src_cdn_urls_create_no_import() {
+    for src in [
+        "https://cdn.example.com/lib.js",
+        "http://cdn.example.com/lib.js",
+        "//cdn.example.com/lib.js",
+    ] {
+        let source = format!(r#"<script src="{src}"></script><div>hi</div>"#);
+        let info = parse_sfc(&source, "App.svelte");
+        assert!(
+            info.imports.is_empty(),
+            "Svelte CDN script src should not create imports for {src}: {:?}",
+            info.imports
+        );
+    }
 }
 
 #[test]

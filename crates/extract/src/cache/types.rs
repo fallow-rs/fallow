@@ -105,7 +105,12 @@ use crate::MemberKind;
 /// Bumped to 106 for `fallow security`: JS/TS extraction now stores file-level
 /// directives (`"use client"`, `"use server"`) in the parse cache so client
 /// boundary detection does not depend on stale cached module info.
-pub(super) const CACHE_VERSION: u32 = 106;
+///
+/// Bumped to 107 for issue #835: Svelte `<script src>` references no longer
+/// emit synthetic imports because they are runtime markup, not bundled SFC
+/// script modules. Pre-fix entries can carry stale root-relative imports that
+/// surface as false `unresolved-imports`.
+pub(super) const CACHE_VERSION: u32 = 107;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
