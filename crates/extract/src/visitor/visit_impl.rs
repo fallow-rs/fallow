@@ -2265,12 +2265,22 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_new_expression(&mut self, expr: &oxc_ast::ast::NewExpression<'a>) {
         if let Some(source) = new_url_import_source(expr) {
+            // A `new URL(specifier, import.meta.url)` whose specifier has no file
+            // extension may refer to a directory rather than a module (e.g.
+            // `new URL("./services", import.meta.url)` to obtain the directory URL
+            // via `fileURLToPath(...)`). Such a specifier cannot be resolved to a
+            // module, so marking it speculative causes the resolver to silently drop
+            // it when the target is unresolvable. Specifiers with an extension
+            // (e.g. `./worker.js`) keep `is_speculative = false` so genuinely
+            // missing files are still reported as `unresolved-import`.
+            // See issue #840.
+            let is_speculative = PathBuf::from(&source).extension().is_none();
             self.dynamic_imports.push(DynamicImportInfo {
                 source,
                 span: expr.span,
                 destructured_names: Vec::new(),
                 local_name: None,
-                is_speculative: false,
+                is_speculative,
             });
         }
 

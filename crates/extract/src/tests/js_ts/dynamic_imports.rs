@@ -870,3 +870,53 @@ fn node_module_register_template_literal_specifier_supported() {
             .any(|imp| imp.source == "tsx/esm")
     );
 }
+
+// Issue #840: new URL("./dir", import.meta.url) for a directory target must not
+// produce an unresolved-import finding. Directory-pointing specifiers (no file
+// extension) are marked speculative so the resolver drops them silently when no
+// module can be found. File-pointing specifiers (with an extension) keep
+// is_speculative = false so genuinely missing files are still reported.
+
+#[test]
+fn new_url_extensionless_specifier_is_speculative() {
+    let info = parse_source("const dir = new URL('./services', import.meta.url);");
+    let imp = info
+        .dynamic_imports
+        .iter()
+        .find(|i| i.source == "./services")
+        .expect("new URL('./services', ...) should emit a dynamic import");
+    assert!(
+        imp.is_speculative,
+        "extensionless new URL specifier must be marked speculative so a \
+         directory target is silently dropped rather than reported unresolved"
+    );
+}
+
+#[test]
+fn new_url_extensioned_specifier_is_not_speculative() {
+    let info = parse_source("const w = new URL('./worker.js', import.meta.url);");
+    let imp = info
+        .dynamic_imports
+        .iter()
+        .find(|i| i.source == "./worker.js")
+        .expect("new URL('./worker.js', ...) should emit a dynamic import");
+    assert!(
+        !imp.is_speculative,
+        "file-extension new URL specifier must NOT be marked speculative so \
+         a genuinely missing file is still reported as unresolved-import"
+    );
+}
+
+#[test]
+fn new_url_parent_relative_extensionless_specifier_is_speculative() {
+    let info = parse_source("const dir = new URL('../bin', import.meta.url);");
+    let imp = info
+        .dynamic_imports
+        .iter()
+        .find(|i| i.source == "../bin")
+        .expect("new URL('../bin', ...) should emit a dynamic import");
+    assert!(
+        imp.is_speculative,
+        "parent-relative extensionless new URL specifier must be marked speculative"
+    );
+}
