@@ -3577,4 +3577,264 @@ mod tests {
         let val = extract_config_string(source, &ts_path(), &["testDir"]);
         assert_eq!(val, Some("./tests".to_string()));
     }
+
+    // --- issue #811: resolve.alias as imported identifier / spread ---
+
+    fn aliases(source: &str) -> Vec<(String, String)> {
+        extract_config_aliases(source, &js_path(), &["resolve", "alias"])
+    }
+
+    #[test]
+    fn aliases_inline_object_still_extracted() {
+        // Regression: the resolver must not change inline-object behavior.
+        let source = r#"
+            export default defineConfig({
+                resolve: { alias: { "@": "./src", utils: "../../utils" } }
+            });
+        "#;
+        let mut got = aliases(source);
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("@".to_string(), "./src".to_string()),
+                ("utils".to_string(), "../../utils".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn aliases_inline_array_still_extracted() {
+        let source = r#"
+            export default defineConfig({
+                resolve: { alias: [{ find: "@", replacement: "./src" }] }
+            });
+        "#;
+        assert_eq!(
+            aliases(source),
+            vec![("@".to_string(), "./src".to_string())]
+        );
+    }
+
+    #[test]
+    fn aliases_local_const_array_identifier() {
+        let source = r#"
+            const sharedAliases = [{ find: "@", replacement: "./src" }];
+            export default defineConfig({ resolve: { alias: sharedAliases } });
+        "#;
+        assert_eq!(
+            aliases(source),
+            vec![("@".to_string(), "./src".to_string())]
+        );
+    }
+
+    #[test]
+    fn aliases_local_const_object_identifier() {
+        let source = r#"
+            const sharedAliases = { "@": "./src" };
+            export default defineConfig({ resolve: { alias: sharedAliases } });
+        "#;
+        assert_eq!(
+            aliases(source),
+            vec![("@".to_string(), "./src".to_string())]
+        );
+    }
+
+    #[test]
+    fn aliases_array_spread_of_identifiers_and_inline() {
+        let source = r##"
+            const a = [{ find: "@", replacement: "./src" }];
+            const b = [{ find: "~", replacement: "./lib" }];
+            export default defineConfig({
+                resolve: { alias: [...a, ...b, { find: "#", replacement: "./test" }] }
+            });
+        "##;
+        let mut got = aliases(source);
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("#".to_string(), "./test".to_string()),
+                ("@".to_string(), "./src".to_string()),
+                ("~".to_string(), "./lib".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn aliases_object_spread_of_identifier_and_inline() {
+        let source = r#"
+            const base = { "@": "./src" };
+            export default defineConfig({
+                resolve: { alias: { ...base, "~": "./lib" } }
+            });
+        "#;
+        let mut got = aliases(source);
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("@".to_string(), "./src".to_string()),
+                ("~".to_string(), "./lib".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn aliases_local_const_chained_identifier() {
+        // `const a = b` indirection resolves through the chain.
+        let source = r#"
+            const real = [{ find: "@", replacement: "./src" }];
+            const alias2 = real;
+            export default defineConfig({ resolve: { alias: alias2 } });
+        "#;
+        assert_eq!(
+            aliases(source),
+            vec![("@".to_string(), "./src".to_string())]
+        );
+    }
+
+    #[test]
+    fn aliases_imported_named_identifier_from_sibling() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("vite.shared.js"),
+            r#"export const sharedAliases = [
+                { find: "@", replacement: new URL("./src", import.meta.url).pathname },
+            ];"#,
+        )
+        .unwrap();
+        let config = dir.path().join("vite.config.js");
+        let source = r#"
+            import { defineConfig } from "vite";
+            import { sharedAliases } from "./vite.shared.js";
+            export default defineConfig({ resolve: { alias: sharedAliases } });
+        "#;
+        let got = extract_config_aliases(source, &config, &["resolve", "alias"]);
+        assert_eq!(got, vec![("@".to_string(), "./src".to_string())]);
+    }
+
+    #[test]
+    fn aliases_imported_extensionless_specifier_probed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("aliases.mjs"),
+            r#"export const sharedAliases = { "@": "./src" };"#,
+        )
+        .unwrap();
+        let config = dir.path().join("vite.config.ts");
+        let source = r#"
+            import { sharedAliases } from "./aliases";
+            export default defineConfig({ resolve: { alias: sharedAliases } });
+        "#;
+        let got = extract_config_aliases(source, &config, &["resolve", "alias"]);
+        assert_eq!(got, vec![("@".to_string(), "./src".to_string())]);
+    }
+
+    #[test]
+    fn aliases_imported_default_export_from_sibling() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("aliases.js"),
+            r#"export default [{ find: "@", replacement: "./src" }];"#,
+        )
+        .unwrap();
+        let config = dir.path().join("vite.config.js");
+        let source = r#"
+            import sharedAliases from "./aliases.js";
+            export default defineConfig({ resolve: { alias: sharedAliases } });
+        "#;
+        let got = extract_config_aliases(source, &config, &["resolve", "alias"]);
+        assert_eq!(got, vec![("@".to_string(), "./src".to_string())]);
+    }
+
+    #[test]
+    fn aliases_imported_spread_from_two_siblings() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("a.js"),
+            r#"export const a = [{ find: "@", replacement: "./src" }];"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("b.js"),
+            r#"export const b = [{ find: "~", replacement: "./lib" }];"#,
+        )
+        .unwrap();
+        let config = dir.path().join("vite.config.js");
+        let source = r#"
+            import { a } from "./a.js";
+            import { b } from "./b.js";
+            export default defineConfig({ resolve: { alias: [...a, ...b] } });
+        "#;
+        let mut got = extract_config_aliases(source, &config, &["resolve", "alias"]);
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("@".to_string(), "./src".to_string()),
+                ("~".to_string(), "./lib".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn aliases_import_cycle_terminates() {
+        // a.js imports from b.js and vice versa; resolution must not hang and
+        // should still recover the literal pairs present.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("a.js"),
+            r#"import { b } from "./b.js";
+               export const a = [{ find: "@", replacement: "./src" }, ...b];"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("b.js"),
+            r#"import { a } from "./a.js";
+               export const b = [...a];"#,
+        )
+        .unwrap();
+        let config = dir.path().join("vite.config.js");
+        let source = r#"
+            import { a } from "./a.js";
+            export default defineConfig({ resolve: { alias: a } });
+        "#;
+        let got = extract_config_aliases(source, &config, &["resolve", "alias"]);
+        assert_eq!(got, vec![("@".to_string(), "./src".to_string())]);
+    }
+
+    #[test]
+    fn aliases_non_relative_import_not_followed() {
+        // A bare-package import is intentionally out of scope: no node_modules
+        // read for an alias literal.
+        let source = r#"
+            import { sharedAliases } from "some-pkg";
+            export default defineConfig({ resolve: { alias: sharedAliases } });
+        "#;
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("vite.config.js");
+        assert!(extract_config_aliases(source, &config, &["resolve", "alias"]).is_empty());
+    }
+
+    #[test]
+    fn aliases_kinded_preserves_is_bare_through_resolution() {
+        // The bare-string vs path discriminator must survive identifier + spread
+        // resolution (the test.alias package-to-package gate depends on it).
+        let source = r#"
+            const a = [{ find: "lodash-es", replacement: "lodash" }];
+            export default defineConfig({
+                resolve: { alias: [...a, { find: "@", replacement: "./src" }] }
+            });
+        "#;
+        let mut got = extract_config_aliases_kinded(source, &js_path(), &["resolve", "alias"]);
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("@".to_string(), "./src".to_string(), false),
+                ("lodash-es".to_string(), "lodash".to_string(), true),
+            ]
+        );
+    }
 }

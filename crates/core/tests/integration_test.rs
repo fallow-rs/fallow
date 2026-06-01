@@ -191,6 +191,8 @@ mod issue_635_scaffold_template_assets;
 mod issue_638_node_script_entrypoints;
 #[path = "integration_test/issue_754_eslint_meta_preset.rs"]
 mod issue_754_eslint_meta_preset;
+#[path = "integration_test/issue_811_vite_alias_identifier_spread.rs"]
+mod issue_811_vite_alias_identifier_spread;
 #[path = "integration_test/issue_818_prettier_pkg_json_string.rs"]
 mod issue_818_prettier_pkg_json_string;
 #[path = "integration_test/issue_820_vercel_ts_config.rs"]
