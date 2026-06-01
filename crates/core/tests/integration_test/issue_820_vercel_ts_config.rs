@@ -1,4 +1,4 @@
-//! Issue #819: Vercel programmatic config files are convention entrypoints.
+//! Issue #820: Vercel programmatic config files are convention entrypoints.
 
 use super::common::{create_config, fixture_path};
 
@@ -23,7 +23,7 @@ fn unused_file_paths(
 
 #[test]
 fn vercel_ts_config_is_not_reported_as_unused() {
-    let root = fixture_path("issue-819-vercel-ts-config");
+    let root = fixture_path("issue-820-vercel-ts-config");
     let config = create_config(root.clone());
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 

@@ -191,8 +191,8 @@ mod issue_635_scaffold_template_assets;
 mod issue_638_node_script_entrypoints;
 #[path = "integration_test/issue_754_eslint_meta_preset.rs"]
 mod issue_754_eslint_meta_preset;
-#[path = "integration_test/issue_819_vercel_ts_config.rs"]
-mod issue_819_vercel_ts_config;
+#[path = "integration_test/issue_820_vercel_ts_config.rs"]
+mod issue_820_vercel_ts_config;
 #[path = "integration_test/lexical_nodes.rs"]
 mod lexical_nodes;
 #[path = "integration_test/script_multiplexers.rs"]

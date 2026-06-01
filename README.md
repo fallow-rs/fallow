@@ -84,7 +84,7 @@ For cleanup-specific findings:
 npx fallow dead-code
 ```
 
-116 framework plugins. No Node.js runtime required for static analysis. No config needed for the first run.
+117 framework plugins. No Node.js runtime required for static analysis. No config needed for the first run.
 
 ## What is Fallow?
 
@@ -749,7 +749,7 @@ See the [full configuration reference](https://docs.fallow.tools/configuration/o
 
 ## Framework plugins
 
-116 built-in plugins detect entry points, convention exports, config-defined aliases, and template-visible usage for your framework automatically.
+117 built-in plugins detect entry points, convention exports, config-defined aliases, and template-visible usage for your framework automatically.
 
 | Category | Plugins |
 |---|---|
@@ -757,6 +757,7 @@ See the [full configuration reference](https://docs.fallow.tools/configuration/o
 | **Bundlers** | Vite, Webpack, Rspack, Rsbuild, Rollup, Rolldown, Tsup, Tsdown, pkg-utils, Parcel |
 | **Testing** | Vitest, Jest, Playwright, Cypress, Storybook, Stryker, Mocha, Ava, tap, tsd |
 | **CI/CD & Release** | Danger, Commitlint, Commitizen, Semantic Release |
+| **Deployment** | Vercel, Wrangler, Sentry, OpenNext Cloudflare |
 | **CSS** | Tailwind, PostCSS, UnoCSS, PandaCSS |
 | **Databases & Backend** | Prisma, Drizzle, Knex, TypeORM, Kysely, Convex |
 | **Blockchain** | Hardhat |
