@@ -37,14 +37,19 @@ define_plugin! {
             "specifier",
         );
         for specifier in js_plugins {
-            push_js_plugin_reference(&mut result, config_path, root, &specifier);
+            credit_config_specifier(&mut result, config_path, root, &specifier);
+        }
+
+        let extends = config_parser::extract_config_shallow_strings(source, config_path, "extends");
+        for entry in extends {
+            credit_config_specifier(&mut result, config_path, root, &entry);
         }
 
         result
     }
 }
 
-fn push_js_plugin_reference(
+fn credit_config_specifier(
     result: &mut PluginResult,
     config_path: &Path,
     root: &Path,
@@ -265,5 +270,39 @@ mod tests {
             plugin.resolve_config(Path::new(".oxlintrc.json"), source, Path::new("/project"));
 
         assert!(result.referenced_dependencies.is_empty());
+    }
+
+    #[test]
+    fn resolve_config_extends_credits_package_and_records_local_path() {
+        let source = r#"
+            {
+                "extends": ["@nkzw/oxlint-config", "./local.json"]
+            }
+        "#;
+        let plugin = OxlintPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/.oxlintrc.json"),
+            source,
+            Path::new("/project"),
+        );
+
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"@nkzw/oxlint-config".to_string()),
+            "expected @nkzw/oxlint-config in referenced_dependencies"
+        );
+        assert!(
+            result
+                .setup_files
+                .contains(&PathBuf::from("/project/local.json")),
+            "expected /project/local.json in setup_files"
+        );
+        assert!(
+            !result
+                .referenced_dependencies
+                .contains(&"./local.json".to_string()),
+            "local path must not appear in referenced_dependencies"
+        );
     }
 }
