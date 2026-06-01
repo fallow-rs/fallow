@@ -631,6 +631,93 @@ fn collect_dynamic_reexport_sources(
     }
 }
 
+/// An export name occurrence in a single module, collected before deduplication.
+struct ExportEntry {
+    module_idx: usize,
+    path: std::path::PathBuf,
+    file_id: FileId,
+    span_start: u32,
+    is_type_only: bool,
+}
+
+/// Partition `entries` into connected components where two entries are connected
+/// when they share at least one common importer in `graph`, or one directly
+/// imports the other.
+///
+/// Returns index sets into `entries`; each inner vec is one component.
+/// Singleton components (no shared importer with any sibling) are included so
+/// the caller can drop them as unrelated leaf modules.
+fn partition_by_common_importer(entries: &[ExportEntry], graph: &ModuleGraph) -> Vec<Vec<usize>> {
+    let n = entries.len();
+
+    // Union-Find with path compression.
+    let mut parent: Vec<usize> = (0..n).collect();
+
+    fn find(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        x
+    }
+
+    fn union(parent: &mut [usize], a: usize, b: usize) {
+        let ra = find(parent, a);
+        let rb = find(parent, b);
+        if ra != rb {
+            parent[ra] = rb;
+        }
+    }
+
+    // Build importer -> [entry index] map so we can union all entries that share
+    // a common importer.
+    let mut importer_to_entries: FxHashMap<FileId, Vec<usize>> = FxHashMap::default();
+    for (i, entry) in entries.iter().enumerate() {
+        let idx = entry.file_id.0 as usize;
+        if idx >= graph.reverse_deps.len() {
+            continue;
+        }
+        for &importer in &graph.reverse_deps[idx] {
+            importer_to_entries.entry(importer).or_default().push(i);
+        }
+    }
+
+    // Union all entries that share a common importer.
+    for members in importer_to_entries.values() {
+        if let Some((&first, rest)) = members.split_first() {
+            for &other in rest {
+                union(&mut parent, first, other);
+            }
+        }
+    }
+
+    // Also union entries where one directly imports the other (i.e. the importer
+    // itself is a member of the duplicate set).
+    let entry_file_ids: FxHashSet<FileId> = entries.iter().map(|e| e.file_id).collect();
+    for (i, entry) in entries.iter().enumerate() {
+        let idx = entry.file_id.0 as usize;
+        if idx >= graph.reverse_deps.len() {
+            continue;
+        }
+        for &importer in &graph.reverse_deps[idx] {
+            if entry_file_ids.contains(&importer)
+                && let Some(j) = entries.iter().position(|e| e.file_id == importer)
+            {
+                union(&mut parent, i, j);
+            }
+        }
+    }
+
+    // Group entry indices by their union-find root.
+    let mut components: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
+    for i in 0..n {
+        let root = find(&mut parent, i);
+        components.entry(root).or_default().push(i);
+    }
+
+    components.into_values().collect()
+}
+
 /// Find exports that appear with the same name in multiple files (potential duplicates).
 ///
 /// Barrel re-exports (files that only re-export from other modules via `export { X } from './source'`)
@@ -668,14 +755,6 @@ pub fn find_duplicate_exports(
     }
 
     collect_dynamic_reexport_sources(resolved_modules, graph, &mut re_export_sources);
-
-    struct ExportEntry {
-        module_idx: usize,
-        path: std::path::PathBuf,
-        file_id: FileId,
-        span_start: u32,
-        is_type_only: bool,
-    }
 
     let mut export_locations: FxHashMap<String, Vec<ExportEntry>> = FxHashMap::default();
 
@@ -722,98 +801,86 @@ pub fn find_duplicate_exports(
                 return None;
             }
 
-            let has_value = locations.iter().any(|e| !e.is_type_only);
-            let has_type = locations.iter().any(|e| e.is_type_only);
-            if has_value && has_type {
-                let value_modules: FxHashSet<usize> = locations
-                    .iter()
-                    .filter(|e| !e.is_type_only)
-                    .map(|e| e.module_idx)
-                    .collect();
-                let type_modules: FxHashSet<usize> = locations
-                    .iter()
-                    .filter(|e| e.is_type_only)
-                    .map(|e| e.module_idx)
-                    .collect();
-                if value_modules.len() <= 1 && type_modules.len() <= 1 {
-                    return None;
-                }
-            }
-
+            // Strip re-export chain members: a module that re-exports from another
+            // group member is not an independent origin.
             let module_indices: FxHashSet<usize> = locations.iter().map(|e| e.module_idx).collect();
-            let (independent_file_ids, independent): (Vec<FileId>, Vec<DuplicateLocation>) =
-                locations
-                    .into_iter()
-                    .filter(|e| {
-                        let sources = re_export_sources.get(&e.module_idx);
-                        let has_source_in_set = sources
-                            .is_some_and(|s| s.iter().any(|src| module_indices.contains(src)));
-                        !has_source_in_set
-                    })
-                    .map(|e| {
-                        let (line, col) =
-                            byte_offset_to_line_col(line_offsets_by_file, e.file_id, e.span_start);
-                        (
-                            e.file_id,
-                            DuplicateLocation {
-                                path: e.path,
-                                line,
-                                col,
-                            },
-                        )
-                    })
-                    .unzip();
+            let independent_entries: Vec<ExportEntry> = locations
+                .into_iter()
+                .filter(|e| {
+                    let sources = re_export_sources.get(&e.module_idx);
+                    let has_source_in_set =
+                        sources.is_some_and(|s| s.iter().any(|src| module_indices.contains(src)));
+                    !has_source_in_set
+                })
+                .collect();
 
-            if independent.len() <= 1 {
+            if independent_entries.len() <= 1 {
                 return None;
             }
 
-            let has_shared_importer = has_common_importer(&independent_file_ids, graph);
-            if has_shared_importer {
-                Some(DuplicateExport {
-                    export_name: name,
-                    locations: independent,
-                })
-            } else {
-                None
+            // Partition independent entries into connected components where two
+            // entries are connected when they share a common importer. This prevents
+            // a cross-package member (e.g. a backend `class Label` that no frontend
+            // module imports) from inflating `value_modules` and defeating the
+            // value+type self-suppression check that should apply only to the
+            // frontend component.
+            let components = partition_by_common_importer(&independent_entries, graph);
+
+            // Collect locations from all components that represent a genuine duplicate.
+            let mut surviving_locations: Vec<DuplicateLocation> = Vec::new();
+            for component_indices in components {
+                if component_indices.len() <= 1 {
+                    // A singleton component shares no importer with any sibling;
+                    // it is an unrelated leaf and must be dropped.
+                    continue;
+                }
+
+                // Value+type self-suppression: a single value export paired with a
+                // single type export in the same importer-connected component is the
+                // TypeScript pattern of re-declaring a runtime value alongside its
+                // type alias, not a genuine duplicate.
+                let comp_has_value = component_indices
+                    .iter()
+                    .any(|&i| !independent_entries[i].is_type_only);
+                let comp_has_type = component_indices
+                    .iter()
+                    .any(|&i| independent_entries[i].is_type_only);
+                if comp_has_value && comp_has_type {
+                    let value_count = component_indices
+                        .iter()
+                        .filter(|&&i| !independent_entries[i].is_type_only)
+                        .count();
+                    let type_count = component_indices
+                        .iter()
+                        .filter(|&&i| independent_entries[i].is_type_only)
+                        .count();
+                    if value_count <= 1 && type_count <= 1 {
+                        continue;
+                    }
+                }
+
+                for i in component_indices {
+                    let e = &independent_entries[i];
+                    let (line, col) =
+                        byte_offset_to_line_col(line_offsets_by_file, e.file_id, e.span_start);
+                    surviving_locations.push(DuplicateLocation {
+                        path: e.path.clone(),
+                        line,
+                        col,
+                    });
+                }
             }
+
+            if surviving_locations.len() <= 1 {
+                return None;
+            }
+
+            Some(DuplicateExport {
+                export_name: name,
+                locations: surviving_locations,
+            })
         })
         .collect()
-}
-
-/// Check if any two files in the duplicate set share a common importer.
-///
-/// Two files "share a common importer" if there exists a third file that imports
-/// from both. This filters out false positives from unrelated leaf modules (e.g.,
-/// SvelteKit route files in different directories) that coincidentally export the
-/// same name but are never imported together.
-fn has_common_importer(file_ids: &[FileId], graph: &ModuleGraph) -> bool {
-    if file_ids.len() <= 1 {
-        return false;
-    }
-
-    let duplicate_files: FxHashSet<FileId> = file_ids.iter().copied().collect();
-    let mut importer_owner: FxHashMap<FileId, FileId> = FxHashMap::default();
-
-    for &file_id in file_ids {
-        let idx = file_id.0 as usize;
-        if idx >= graph.reverse_deps.len() {
-            continue;
-        }
-
-        for &importer in &graph.reverse_deps[idx] {
-            if duplicate_files.contains(&importer) {
-                return true;
-            }
-            if let Some(previous_file) = importer_owner.insert(importer, file_id)
-                && previous_file != file_id
-            {
-                return true;
-            }
-        }
-    }
-
-    false
 }
 
 /// Collect usage counts for all exports in the module graph.
@@ -1329,6 +1396,115 @@ mod tests {
             result.len(),
             1,
             "same-namespace duplicates should still be flagged"
+        );
+    }
+
+    /// Regression test for issue #848.
+    ///
+    /// Setup:
+    ///   module 1 (backend): `class Label` (value) -- no shared importer with frontend
+    ///   module 2 (frontend value): `function Label` (value)
+    ///   module 3 (frontend type): `export type Label` (type)
+    ///   module 4 (frontend consumer): imports from both module 2 and module 3
+    ///
+    /// Before the fix, `value_modules` contained both module 1 and module 2, so
+    /// `.len() > 1` defeated the self-suppression check and a false duplicate was
+    /// reported. After the fix the group is partitioned: module 1 is a singleton
+    /// (dropped), and the {module 2, module 3} pair self-suppresses via value+type.
+    #[test]
+    fn duplicate_exports_cross_package_backend_does_not_defeat_value_type_suppression() {
+        // Files: 0=backend-entry, 1=frontend-entry, 2=backend Label, 3=frontend Label value,
+        // 4=frontend Label type, 5=frontend consumer
+        let mut graph = build_graph(&[
+            ("/src/backend/entry.ts", true),
+            ("/src/frontend/entry.ts", true),
+            ("/src/backend/label.ts", false),
+            ("/src/frontend/label.ts", false),
+            ("/src/frontend/label.types.ts", false),
+            ("/src/frontend/consumer.ts", false),
+        ]);
+        // Reachable non-entry modules
+        graph.modules[2].set_reachable(true);
+        graph.modules[3].set_reachable(true);
+        graph.modules[4].set_reachable(true);
+        graph.modules[5].set_reachable(true);
+
+        // Backend: value export `Label`
+        graph.modules[2].exports = vec![make_export("Label", 10, 20)];
+        // Frontend value: `function Label`
+        graph.modules[3].exports = vec![make_export("Label", 10, 20)];
+        // Frontend type: `export type Label`
+        graph.modules[4].exports = vec![make_type_export("Label", 10, 20)];
+
+        // Backend label is imported only by the backend entry (FileId 0).
+        graph.reverse_deps[2] = vec![FileId(0)];
+        // Frontend consumer (FileId 5) imports from both the frontend value and type.
+        graph.reverse_deps[3] = vec![FileId(5)];
+        graph.reverse_deps[4] = vec![FileId(5)];
+        // Frontend consumer is imported by the frontend entry.
+        graph.reverse_deps[5] = vec![FileId(1)];
+
+        let suppressions = SuppressionContext::empty();
+        let config = test_config();
+        let result =
+            find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default(), &[]);
+        assert!(
+            result.is_empty(),
+            "backend `class Label` shares no importer with the frontend value+type pair; \
+            the frontend pair must self-suppress, so no duplicate should be reported, \
+            but got: {result:?}",
+        );
+    }
+
+    /// Companion to the regression test: two value modules that DO share a common
+    /// importer must still be reported as genuine duplicates even when an unrelated
+    /// third module with the same name (but no shared importer) exists.
+    #[test]
+    fn duplicate_exports_genuine_value_duplicate_still_flagged_despite_unrelated_backend() {
+        // Files: 0=entry, 1=backend Label (no shared importer), 2=frontend-a Label,
+        // 3=frontend-b Label, 4=shared consumer of frontend-a and frontend-b
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/backend/label.ts", false),
+            ("/src/frontend/a.ts", false),
+            ("/src/frontend/b.ts", false),
+            ("/src/frontend/consumer.ts", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[2].set_reachable(true);
+        graph.modules[3].set_reachable(true);
+        graph.modules[4].set_reachable(true);
+
+        // All three export a value `Label`.
+        graph.modules[1].exports = vec![make_export("Label", 10, 20)];
+        graph.modules[2].exports = vec![make_export("Label", 10, 20)];
+        graph.modules[3].exports = vec![make_export("Label", 10, 20)];
+
+        // Backend is only imported by the entry (no connection to frontend).
+        graph.reverse_deps[1] = vec![FileId(0)];
+        // Frontend consumer imports from both frontend-a and frontend-b.
+        graph.reverse_deps[2] = vec![FileId(4)];
+        graph.reverse_deps[3] = vec![FileId(4)];
+        // Frontend consumer is imported by entry.
+        graph.reverse_deps[4] = vec![FileId(0)];
+
+        let suppressions = SuppressionContext::empty();
+        let config = test_config();
+        let result =
+            find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default(), &[]);
+        assert_eq!(
+            result.len(),
+            1,
+            "frontend-a and frontend-b share a common importer and both export a value \
+            `Label`, so a genuine duplicate must be reported even though an unrelated \
+            backend module also exports `Label`"
+        );
+        assert_eq!(result[0].export_name, "Label");
+        // The finding must include only the two connected frontend locations, not backend.
+        assert_eq!(
+            result[0].locations.len(),
+            2,
+            "only the two connected frontend locations should be in the finding"
         );
     }
 
