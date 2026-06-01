@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The GitHub Action now uploads SARIF on public repositories.** Setting `sarif: true` on a public repo previously skipped the upload with a warning that Code Scanning (GitHub Advanced Security) was not enabled. That was a false negative: public repositories get GitHub Code Scanning for free without Advanced Security, and the first SARIF upload is what initializes it. The action's availability check probed the `code-scanning/alerts` endpoint, which returns 404 on a public repo that has never run Code Scanning, so it concluded the feature was unavailable and never attempted the upload that would have enabled it. The check now treats a public repository (`visibility == "public"`) as available and attempts the upload directly; private and internal repositories still fall back to the alerts probe, since Code Scanning there genuinely requires Advanced Security (internal enterprise repos report `private: false` but still need it, so the check keys on `visibility`, not `private`). One consequence to note: on a public repo the upload step now runs unconditionally, so a workflow that set `sarif: true` without granting `permissions: security-events: write` will see the `github/codeql-action/upload-sarif` step fail rather than skip silently. Add that permission alongside `sarif: true`. Thanks [@cloud-walker](https://github.com/cloud-walker) for the detailed report. (Closes [#817](https://github.com/fallow-rs/fallow/issues/817).)
+
 ## [2.85.0] - 2026-05-30
 
 ### Added

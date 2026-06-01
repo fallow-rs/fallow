@@ -1682,6 +1682,95 @@ assert_contains "$OUT" "::" "annotate.sh: custom artifacts path emits annotation
 
 rm -rf "$WORK_DIR"
 
+# --- Code Scanning availability gate (check-code-scanning.sh) ---
+
+echo ""
+echo "=== Code Scanning gate ==="
+
+CSCRIPT="$DIR/../scripts/check-code-scanning.sh"
+GATE_DIR=$(mktemp -d)
+GATE_BIN="$GATE_DIR/bin"
+mkdir -p "$GATE_BIN"
+
+# Parameterized gh mock. MOCK_VISIBILITY sets the repos/{repo} --jq .visibility
+# response; empty simulates a failed metadata read (gh exits non-zero).
+# MOCK_ALERTS_EXIT sets the code-scanning/alerts probe exit code (0 = available).
+cat > "$GATE_BIN/gh" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *"code-scanning/alerts"*)
+    exit "${MOCK_ALERTS_EXIT:-1}"
+    ;;
+  *"--jq"*".visibility"*)
+    if [ -n "${MOCK_VISIBILITY:-}" ]; then
+      printf '%s\n' "$MOCK_VISIBILITY"
+      exit 0
+    fi
+    exit 1
+    ;;
+esac
+exit 1
+SH
+chmod +x "$GATE_BIN/gh"
+
+GATE_OUT=""
+GATE_LOG=""
+run_gate() {
+  # $1 = visibility value (empty simulates read failure), $2 = alerts probe exit code
+  local out_file
+  out_file=$(mktemp)
+  GATE_LOG=$(PATH="$GATE_BIN:$PATH" GH_REPO="acme/web" GITHUB_OUTPUT="$out_file" \
+    MOCK_VISIBILITY="$1" MOCK_ALERTS_EXIT="$2" \
+    bash "$CSCRIPT" 2>&1)
+  GATE_OUT=$(cat "$out_file")
+  rm -f "$out_file"
+}
+
+# Case 1: public repo is available even when the alerts probe would fail
+# (the first upload initializes Code Scanning; this is the issue #817 fix).
+run_gate "public" 1
+assert_contains "$GATE_OUT" "available=true" "gate: public repo is available"
+assert_not_contains "$GATE_LOG" "::warning::" "gate: public repo emits no skip warning"
+
+# Case 2: private repo with GHAS (alerts probe succeeds) is available.
+run_gate "private" 0
+assert_contains "$GATE_OUT" "available=true" "gate: private repo with GHAS is available"
+assert_not_contains "$GATE_LOG" "::warning::" "gate: private repo with GHAS emits no warning"
+
+# Case 3: private repo without GHAS (alerts probe fails) skips with a warning.
+run_gate "private" 1
+assert_contains "$GATE_OUT" "available=false" "gate: private repo without GHAS is unavailable"
+assert_contains "$GATE_LOG" "::warning::" "gate: private repo without GHAS warns"
+assert_contains "$GATE_LOG" "private or internal repository" "gate: warning names private or internal repos"
+
+# Case 4: internal (enterprise) repo with GHAS is available via the probe.
+# This is the row the rejected `.private == false` approach would have broken.
+run_gate "internal" 0
+assert_contains "$GATE_OUT" "available=true" "gate: internal repo with GHAS is available"
+assert_not_contains "$GATE_LOG" "::warning::" "gate: internal repo with GHAS emits no warning"
+
+# Case 5: internal repo without GHAS skips with a warning; no fallback debug note
+# (visibility was read successfully, so this is the intended probe, not a fallback).
+run_gate "internal" 1
+assert_contains "$GATE_OUT" "available=false" "gate: internal repo without GHAS is unavailable"
+assert_contains "$GATE_LOG" "::warning::" "gate: internal repo without GHAS warns"
+assert_contains "$GATE_LOG" "private or internal repository" "gate: internal warning names private or internal repos"
+assert_not_contains "$GATE_LOG" "::debug::" "gate: internal repo emits no fallback debug note"
+
+# Case 6: visibility read fails (empty) but the probe succeeds -> available via fallback.
+run_gate "" 0
+assert_contains "$GATE_OUT" "available=true" "gate: unreadable visibility falls back to probe (available)"
+assert_contains "$GATE_LOG" "::debug::" "gate: unreadable visibility emits a fallback debug note"
+assert_not_contains "$GATE_LOG" "::warning::" "gate: unreadable visibility with probe success emits no warning"
+
+# Case 7: visibility read fails (empty) and the probe fails -> skip with warning + debug note.
+run_gate "" 1
+assert_contains "$GATE_OUT" "available=false" "gate: unreadable visibility with probe failure is unavailable"
+assert_contains "$GATE_LOG" "::warning::" "gate: unreadable visibility with probe failure warns"
+assert_contains "$GATE_LOG" "::debug::" "gate: unreadable visibility with probe failure emits a fallback debug note"
+
+rm -rf "$GATE_DIR"
+
 # --- Summary ---
 
 echo ""

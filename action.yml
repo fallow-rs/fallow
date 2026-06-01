@@ -23,7 +23,7 @@ inputs:
     required: false
     default: 'sarif'
   sarif:
-    description: 'Upload SARIF to GitHub Code Scanning. Requires Code Scanning availability (public repo or a plan with GitHub Advanced Security).'
+    description: 'Upload SARIF to GitHub Code Scanning. Available on public repos (free) and private or internal repos with GitHub Advanced Security. Requires permissions: security-events: write.'
     required: false
     default: 'false'
   production:
@@ -442,13 +442,7 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         GH_REPO: ${{ github.repository }}
-      run: |
-        if gh api "repos/${GH_REPO}/code-scanning/alerts?per_page=1" > /dev/null 2>&1; then
-          echo "available=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "available=false" >> "$GITHUB_OUTPUT"
-          echo "::warning::SARIF upload skipped. Code Scanning (GitHub Advanced Security) is not enabled on this repository. To enable: Settings > Code security > Code scanning. The job summary and JSON output are still available. To suppress this warning, use format: json instead of sarif."
-        fi
+      run: bash ${{ github.action_path }}/action/scripts/check-code-scanning.sh
 
     - name: Upload SARIF
       if: >-
