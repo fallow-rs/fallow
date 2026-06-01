@@ -1,0 +1,3 @@
+useTsOnly();
+
+export default {};

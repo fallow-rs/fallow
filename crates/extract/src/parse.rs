@@ -96,7 +96,7 @@ fn parse_source_to_module_inner(
     let mut template_used_imports =
         collect_glimmer_template_into_extractor(&mut extractor, path, source);
 
-    let mut import_binding_usage = compute_import_binding_usage(
+    let mut semantic_usage = compute_semantic_usage(
         &parser_return.program,
         &extractor.imports,
         &template_used_imports,
@@ -145,7 +145,7 @@ fn parse_source_to_module_inner(
         if retry_total > total_extracted {
             template_used_imports =
                 collect_glimmer_template_into_extractor(&mut retry_extractor, path, source);
-            import_binding_usage = compute_import_binding_usage(
+            semantic_usage = compute_semantic_usage(
                 &retry_return.program,
                 &retry_extractor.imports,
                 &template_used_imports,
@@ -195,9 +195,10 @@ fn parse_source_to_module_inner(
     }
 
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
-    info.unused_import_bindings = import_binding_usage.unused;
-    info.type_referenced_import_bindings = import_binding_usage.type_referenced;
-    info.value_referenced_import_bindings = import_binding_usage.value_referenced;
+    info.unused_import_bindings = semantic_usage.import_binding_usage.unused;
+    info.type_referenced_import_bindings = semantic_usage.import_binding_usage.type_referenced;
+    info.value_referenced_import_bindings = semantic_usage.import_binding_usage.value_referenced;
+    info.auto_import_candidates = semantic_usage.auto_import_candidates;
     info.line_offsets = line_offsets;
     info.complexity = complexity;
     info.flag_uses = flag_uses;
@@ -562,33 +563,19 @@ pub struct ImportBindingUsage {
     pub value_referenced: Vec<String>,
 }
 
-/// Use `oxc_semantic` to summarize how import bindings are referenced in the file.
-///
-/// An import like `import { foo } from './utils'` where `foo` is never used
-/// anywhere in the file should not count as a reference to the `foo` export.
-/// This improves unused-export detection precision.
-///
-/// `template_used` lets framework template scanners (Glimmer `<template>`
-/// blocks today; Vue/Svelte SFCs will follow) credit imports referenced only
-/// in markup that `oxc_semantic` cannot see. Names in the set are filtered
-/// out of the `unused` result before it is built. Pass `&FxHashSet::default()`
-/// when no template scan applies.
-///
-/// Note: `get_resolved_references` counts both value-context and type-context
-/// references. A value import used only as a type annotation (`const x: Foo`)
-/// will have a type-position reference and will NOT appear in the unused list.
-/// This is correct: `import { Foo }` (without `type`) may be needed at runtime.
-pub fn compute_import_binding_usage(
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct SemanticUsage {
+    pub import_binding_usage: ImportBindingUsage,
+    pub auto_import_candidates: Vec<String>,
+}
+
+pub fn compute_semantic_usage(
     program: &Program<'_>,
     imports: &[ImportInfo],
     template_used: &rustc_hash::FxHashSet<String>,
-) -> ImportBindingUsage {
+) -> SemanticUsage {
     use oxc_semantic::SemanticBuilder;
     use rustc_hash::FxHashSet;
-
-    if imports.is_empty() {
-        return ImportBindingUsage::default();
-    }
 
     let semantic_ret = SemanticBuilder::new().build(program);
     let semantic = semantic_ret.semantic;
@@ -639,19 +626,75 @@ pub fn compute_import_binding_usage(
         value_referenced_bindings.into_iter().collect();
     value_referenced_bindings.sort_unstable();
 
-    ImportBindingUsage {
-        unused,
-        type_referenced: type_referenced_bindings,
-        value_referenced: value_referenced_bindings,
+    SemanticUsage {
+        import_binding_usage: ImportBindingUsage {
+            unused,
+            type_referenced: type_referenced_bindings,
+            value_referenced: value_referenced_bindings,
+        },
+        auto_import_candidates: compute_auto_import_candidates_from_semantic(scoping),
     }
+}
+
+pub fn compute_auto_import_candidates(program: &Program<'_>) -> Vec<String> {
+    use oxc_semantic::SemanticBuilder;
+
+    let semantic_ret = SemanticBuilder::new().build(program);
+    let semantic = semantic_ret.semantic;
+    compute_auto_import_candidates_from_semantic(semantic.scoping())
+}
+
+fn compute_auto_import_candidates_from_semantic(scoping: &oxc_semantic::Scoping) -> Vec<String> {
+    use rustc_hash::FxHashSet;
+
+    let mut candidates: FxHashSet<String> = FxHashSet::default();
+    for (name, reference_ids) in scoping.root_unresolved_references() {
+        if reference_ids
+            .iter()
+            .any(|reference_id| scoping.get_reference(*reference_id).is_value())
+        {
+            candidates.insert(name.as_str().to_string());
+        }
+    }
+
+    let mut candidates: Vec<String> = candidates.into_iter().collect();
+    candidates.sort_unstable();
+    candidates
+}
+
+/// Use `oxc_semantic` to summarize how import bindings are referenced in the file.
+///
+/// An import like `import { foo } from './utils'` where `foo` is never used
+/// anywhere in the file should not count as a reference to the `foo` export.
+/// This improves unused-export detection precision.
+///
+/// `template_used` lets framework template scanners (Glimmer `<template>`
+/// blocks today; Vue/Svelte SFCs will follow) credit imports referenced only
+/// in markup that `oxc_semantic` cannot see. Names in the set are filtered
+/// out of the `unused` result before it is built. Pass `&FxHashSet::default()`
+/// when no template scan applies.
+///
+/// Note: `get_resolved_references` counts both value-context and type-context
+/// references. A value import used only as a type annotation (`const x: Foo`)
+/// will have a type-position reference and will NOT appear in the unused list.
+/// This is correct: `import { Foo }` (without `type`) may be needed at runtime.
+pub fn compute_import_binding_usage(
+    program: &Program<'_>,
+    imports: &[ImportInfo],
+    template_used: &rustc_hash::FxHashSet<String>,
+) -> ImportBindingUsage {
+    compute_semantic_usage(program, imports, template_used).import_binding_usage
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        has_alpha_tag, has_beta_tag, has_internal_tag, has_public_tag, scan_jsdoc_imports_in,
+        has_alpha_tag, has_beta_tag, has_internal_tag, has_public_tag, parse_source_to_module,
+        scan_jsdoc_imports_in,
     };
+    use fallow_types::discover::FileId;
     use fallow_types::extract::{ImportInfo, ImportedName};
+    use std::path::Path;
 
     #[test]
     fn has_public_tag_matches_bare_tag() {
@@ -745,6 +788,63 @@ mod tests {
         );
         assert!(imports[0].is_type_only);
         assert!(imports[0].local_name.is_empty());
+    }
+
+    #[test]
+    fn script_auto_import_candidates_capture_zero_import_value_refs() {
+        let info = parse_source_to_module(
+            FileId(0),
+            Path::new("pages/index.ts"),
+            r"
+                useCounter();
+                const price = formatPrice(10);
+                const localOnly = () => null;
+                localOnly();
+                type Local = UseTypeOnly;
+            ",
+            0,
+            false,
+        );
+
+        assert!(
+            info.auto_import_candidates
+                .contains(&"formatPrice".to_string())
+        );
+        assert!(
+            info.auto_import_candidates
+                .contains(&"useCounter".to_string())
+        );
+        assert!(
+            !info
+                .auto_import_candidates
+                .contains(&"UseTypeOnly".to_string())
+        );
+        assert!(
+            !info
+                .auto_import_candidates
+                .contains(&"localOnly".to_string())
+        );
+    }
+
+    #[test]
+    fn script_auto_import_candidates_skip_explicit_imports() {
+        let info = parse_source_to_module(
+            FileId(0),
+            Path::new("pages/index.ts"),
+            "import { useCounter } from '../composables/useCounter';\nuseCounter();\nuseOther();\n",
+            0,
+            false,
+        );
+
+        assert!(
+            !info
+                .auto_import_candidates
+                .contains(&"useCounter".to_string())
+        );
+        assert!(
+            info.auto_import_candidates
+                .contains(&"useOther".to_string())
+        );
     }
 
     #[test]

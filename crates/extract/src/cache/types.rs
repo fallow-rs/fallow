@@ -96,7 +96,12 @@ use crate::MemberKind;
 /// file byte offsets. Pre-fix entries can carry synthetic extracted-buffer
 /// positions, so diagnostics can point at line 1 or compacted MDX lines until
 /// the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 104;
+///
+/// Bumped to 105 for issue #739: JS/TS and Vue/Svelte SFC script extraction
+/// now populates `auto_import_candidates` from unresolved value references.
+/// Pre-fix entries omit these candidates, so convention script auto-imports
+/// are not edge-credited until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 105;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

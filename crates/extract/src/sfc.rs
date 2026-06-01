@@ -17,7 +17,9 @@ use oxc_span::SourceType;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::asset_url::normalize_asset_url;
-use crate::parse::compute_import_binding_usage;
+use crate::parse::{
+    compute_auto_import_candidates, compute_import_binding_usage, compute_semantic_usage,
+};
 use crate::sfc_template::{SfcKind, collect_template_usage_with_bound_targets};
 use crate::source_map::ExtractionResult;
 use crate::visitor::ModuleInfoExtractor;
@@ -277,6 +279,8 @@ pub(crate) fn parse_sfc_to_module(
     combined.type_referenced_import_bindings.dedup();
     combined.value_referenced_import_bindings.sort_unstable();
     combined.value_referenced_import_bindings.dedup();
+    combined.auto_import_candidates.sort_unstable();
+    combined.auto_import_candidates.dedup();
 
     combined
 }
@@ -345,19 +349,27 @@ fn merge_script_into_module(
 
     let augmented_body = build_generic_attr_probe_source(script);
     let empty_template_used = rustc_hash::FxHashSet::default();
-    let binding_usage = if let Some(augmented) = augmented_body.as_deref() {
+    let (binding_usage, auto_import_candidates) = if let Some(augmented) = augmented_body.as_deref()
+    {
         let augmented_return =
             Parser::new(&allocator, augmented, source_type_for_script(script)).parse();
-        compute_import_binding_usage(
-            &augmented_return.program,
-            &extractor.imports,
-            &empty_template_used,
+        (
+            compute_import_binding_usage(
+                &augmented_return.program,
+                &extractor.imports,
+                &empty_template_used,
+            ),
+            compute_auto_import_candidates(&parser_return.program),
         )
     } else {
-        compute_import_binding_usage(
+        let semantic_usage = compute_semantic_usage(
             &parser_return.program,
             &extractor.imports,
             &empty_template_used,
+        );
+        (
+            semantic_usage.import_binding_usage,
+            semantic_usage.auto_import_candidates,
         )
     };
     combined
@@ -369,6 +381,9 @@ fn merge_script_into_module(
     combined
         .value_referenced_import_bindings
         .extend(binding_usage.value_referenced.iter().cloned());
+    combined
+        .auto_import_candidates
+        .extend(auto_import_candidates);
     if need_complexity {
         combined.complexity.extend(translate_script_complexity(
             script,

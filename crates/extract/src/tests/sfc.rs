@@ -1319,3 +1319,40 @@ import Card001 from './Card001.vue';
     );
     assert!(!info.auto_import_candidates.contains(&"Card001".to_string()));
 }
+
+#[test]
+fn captures_script_setup_auto_import_candidates() {
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+useCounter();
+const label = formatPrice(10);
+const localOnly = () => label;
+localOnly();
+type Local = UseTypeOnly;
+</script>
+<template><Card001 /></template>
+"#,
+        "pages/index.vue",
+    );
+
+    assert!(
+        info.auto_import_candidates
+            .contains(&"useCounter".to_string())
+    );
+    assert!(
+        info.auto_import_candidates
+            .contains(&"formatPrice".to_string())
+    );
+    assert!(info.auto_import_candidates.contains(&"Card001".to_string()));
+    assert!(
+        !info
+            .auto_import_candidates
+            .contains(&"UseTypeOnly".to_string())
+    );
+    assert!(
+        !info
+            .auto_import_candidates
+            .contains(&"localOnly".to_string())
+    );
+}

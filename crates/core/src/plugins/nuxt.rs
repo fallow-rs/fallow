@@ -15,6 +15,8 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::{AutoImportKind, AutoImportRule};
+use fallow_types::discover::FileId;
+use fallow_types::extract::ExportName;
 
 use super::config_parser;
 use super::{Plugin, PluginResult};
@@ -26,6 +28,19 @@ const ENABLERS: &[&str] = &["nuxt"];
 /// scanned when present. Custom `components: [...]` dirs in `nuxt.config` are out
 /// of scope (the entry-pattern fallback keeps those files alive). See issue #704.
 const COMPONENT_DIRS: &[&str] = &["components", "app/components"];
+
+/// Directories Nuxt auto-imports composables and utilities from by default.
+///
+/// These are intentionally top-level scans. Nested entries stay protected by
+/// fallback entry patterns until custom `imports.dirs` modeling lands.
+const SCRIPT_AUTO_IMPORT_DIRS: &[&str] = &[
+    "composables",
+    "app/composables",
+    "utils",
+    "app/utils",
+    "shared/utils",
+    "shared/types",
+];
 
 /// File extensions Nuxt treats as components, matching the component entry glob.
 const COMPONENT_EXTS: &[&str] = &["vue", "ts", "tsx", "js", "jsx"];
@@ -99,6 +114,8 @@ const SRC_DIR_ALWAYS_USED: &[&str] = &["app.vue", "app.config.{ts,js}", "error.v
 const COMPONENT_ENTRY_GLOB: &str = "vue,ts,tsx,js,jsx";
 const SCRIPT_ENTRY_GLOB: &str = "ts,js,mts,cts,mjs,cjs";
 const SCRIPT_ENTRY_EXTENSIONS: &[&str] = &["ts", "js", "mts", "cts", "mjs", "cjs"];
+const AUTO_IMPORT_SCRIPT_EXTENSIONS: &[&str] =
+    &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"];
 
 /// Implicit dependencies that Nuxt provides — these should not be flagged as unlisted.
 const TOOLING_DEPENDENCIES: &[&str] = &[
@@ -236,6 +253,12 @@ impl Plugin for NuxtPlugin {
             let base = root.join(dir);
             if base.is_dir() {
                 collect_component_auto_imports(&base, &base, &mut rules);
+            }
+        }
+        for dir in SCRIPT_AUTO_IMPORT_DIRS {
+            let base = root.join(dir);
+            if base.is_dir() {
+                collect_script_auto_imports(&base, &mut rules);
             }
         }
         rules
@@ -667,11 +690,93 @@ fn push_component_rule(rules: &mut Vec<AutoImportRule>, name: String, source: Pa
     });
 }
 
+/// Scan one top-level Nuxt composable/util directory and emit rules for the
+/// exports Nuxt can inject into scripts.
+fn collect_script_auto_imports(dir: &Path, rules: &mut Vec<AutoImportRule>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() || !has_auto_import_script_extension(&path) {
+            continue;
+        }
+        let Ok(source) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let module = fallow_extract::parse_source_to_module(FileId(0), &path, &source, 0, false);
+        let default_name = derive_script_default_name(&path);
+        for export in module.exports {
+            match export.name {
+                ExportName::Named(name) if !export.is_type_only => {
+                    push_auto_import_rule(rules, name, path.clone(), AutoImportKind::Named);
+                }
+                ExportName::Default if !export.is_type_only => {
+                    if let Some(name) = &default_name {
+                        push_auto_import_rule(
+                            rules,
+                            name.clone(),
+                            path.clone(),
+                            AutoImportKind::Default,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn push_auto_import_rule(
+    rules: &mut Vec<AutoImportRule>,
+    name: String,
+    source: PathBuf,
+    kind: AutoImportKind,
+) {
+    if rules
+        .iter()
+        .any(|rule| rule.name == name && rule.source == source && rule.kind == kind)
+    {
+        return;
+    }
+    rules.push(AutoImportRule { name, source, kind });
+}
+
+fn derive_script_default_name(path: &Path) -> Option<String> {
+    let stem = path.file_stem()?.to_str()?;
+    let words = split_words(stem);
+    if words.is_empty() {
+        return None;
+    }
+    let mut name = words[0].clone();
+    for word in &words[1..] {
+        let mut chars = word.chars();
+        if let Some(first) = chars.next() {
+            name.extend(first.to_uppercase());
+            name.push_str(chars.as_str());
+        }
+    }
+    Some(name)
+}
+
 /// Whether the path has a component file extension (case-insensitive).
 fn has_component_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| COMPONENT_EXTS.iter().any(|c| ext.eq_ignore_ascii_case(c)))
+}
+
+fn has_auto_import_script_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            AUTO_IMPORT_SCRIPT_EXTENSIONS
+                .iter()
+                .any(|candidate| ext.eq_ignore_ascii_case(candidate))
+        })
 }
 
 /// Derive the Nuxt component name from a path relative to the components root.
@@ -808,6 +913,25 @@ pub fn is_component_entry_pattern(pattern: &str) -> bool {
     valid_prefix && !prefix.contains("runtime/")
 }
 
+/// Whether an aggregated entry-pattern glob is one of the Nuxt script
+/// convention directories that `auto_imports` now resolves.
+pub fn is_script_auto_import_entry_pattern(pattern: &str) -> bool {
+    const SUFFIXES: &[&str] = &[
+        "composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+        "utils/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+        "shared/utils/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+        "shared/types/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+        "app/composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+        "app/utils/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    ];
+    SUFFIXES.iter().any(|suffix| {
+        pattern.strip_suffix(suffix).is_some_and(|prefix| {
+            let valid_prefix = prefix.is_empty() || prefix.ends_with('/');
+            valid_prefix && !prefix.contains("runtime/")
+        })
+    })
+}
+
 /// Conservative guard for the `autoImports` flag: whether the root `nuxt.config`
 /// declares a `components:` key. When it does, custom `prefix` / `pathPrefix` /
 /// `dirs` settings (which `auto_imports` does not model) may be in play, so the
@@ -827,6 +951,22 @@ pub fn config_declares_components(root: &Path) -> bool {
     false
 }
 
+/// Conservative guard for script auto-import fallbacks: whether the root
+/// `nuxt.config` declares an `imports:` key. When it does, custom `dirs` or
+/// `scan` settings may be in play, so composable/util entry patterns are kept.
+pub fn config_declares_imports(root: &Path) -> bool {
+    for name in ["nuxt.config.ts", "nuxt.config.js"] {
+        let path = root.join(name);
+        let Ok(source) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if source_has_imports_key(&source) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Whether the source declares a `components` property key in any position.
 ///
 /// Tolerant on purpose: matches `components:`, `"components":`, `'components':`,
@@ -838,12 +978,24 @@ fn source_has_components_key(source: &str) -> bool {
     COMPONENTS_KEY_RE.is_match(source)
 }
 
+fn source_has_imports_key(source: &str) -> bool {
+    IMPORTS_KEY_RE.is_match(source)
+}
+
 #[expect(
     clippy::expect_used,
     reason = "static Nuxt regex pattern is hard-coded and covered by plugin tests"
 )]
 static COMPONENTS_KEY_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(r#"["']?\bcomponents\b["']?\s*:"#).expect("valid regex")
+});
+
+#[expect(
+    clippy::expect_used,
+    reason = "static Nuxt regex pattern is hard-coded and covered by plugin tests"
+)]
+static IMPORTS_KEY_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r#"["']?\bimports\b["']?\s*:"#).expect("valid regex")
 });
 
 #[cfg(test)]
@@ -1827,7 +1979,67 @@ mod tests {
     }
 
     #[test]
-    fn auto_imports_empty_without_component_dirs() {
+    fn auto_imports_emits_script_named_and_default_exports() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("composables")).unwrap();
+        std::fs::create_dir_all(root.join("utils")).unwrap();
+        std::fs::write(
+            root.join("composables/useCounter.ts"),
+            "export function useCounter() { return 1; }\nexport type CounterType = number;\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("utils/format-price.ts"),
+            "export default function format(value: number) { return String(value); }\n",
+        )
+        .unwrap();
+
+        let rules = NuxtPlugin.auto_imports(root);
+        let use_counter = rules
+            .iter()
+            .find(|rule| rule.name == "useCounter")
+            .expect("named export rule");
+        assert_eq!(use_counter.source, root.join("composables/useCounter.ts"));
+        assert!(matches!(use_counter.kind, AutoImportKind::Named));
+        assert!(
+            rules.iter().all(|rule| rule.name != "CounterType"),
+            "type-only exports are not value auto-import rules"
+        );
+        let format_price = rules
+            .iter()
+            .find(|rule| rule.name == "formatPrice")
+            .expect("default export rule");
+        assert_eq!(format_price.source, root.join("utils/format-price.ts"));
+        assert!(matches!(format_price.kind, AutoImportKind::Default));
+    }
+
+    #[test]
+    fn auto_imports_scans_shared_top_level_only() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("shared/utils/nested")).unwrap();
+        std::fs::write(
+            root.join("shared/utils/useShared.ts"),
+            "export const useShared = () => null;\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("shared/utils/nested/useDeep.ts"),
+            "export const useDeep = () => null;\n",
+        )
+        .unwrap();
+
+        let rules = NuxtPlugin.auto_imports(root);
+        assert!(rules.iter().any(|rule| rule.name == "useShared"));
+        assert!(
+            rules.iter().all(|rule| rule.name != "useDeep"),
+            "nested shared utils are not scanned by default"
+        );
+    }
+
+    #[test]
+    fn auto_imports_empty_without_convention_dirs() {
         let tmp = tempfile::tempdir().expect("tempdir");
         assert!(NuxtPlugin.auto_imports(tmp.path()).is_empty());
     }
@@ -1848,6 +2060,25 @@ mod tests {
         ));
         assert!(!is_component_entry_pattern(
             "pages/**/*.{vue,ts,tsx,js,jsx}"
+        ));
+    }
+
+    #[test]
+    fn script_auto_import_entry_pattern_matches_modeled_dirs_only() {
+        assert!(is_script_auto_import_entry_pattern(
+            "composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}"
+        ));
+        assert!(is_script_auto_import_entry_pattern(
+            "app/utils/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}"
+        ));
+        assert!(is_script_auto_import_entry_pattern(
+            "packages/web/shared/types/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}"
+        ));
+        assert!(!is_script_auto_import_entry_pattern(
+            "server/utils/**/*.{ts,js}"
+        ));
+        assert!(!is_script_auto_import_entry_pattern(
+            "src/runtime/utils/*.{ts,js,mts,cts,mjs,cjs}"
         ));
     }
 
@@ -1887,5 +2118,30 @@ mod tests {
         )
         .unwrap();
         assert!(!config_declares_components(root));
+    }
+
+    #[test]
+    fn config_declares_imports_detects_key() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::write(
+            root.join("nuxt.config.ts"),
+            "export default defineNuxtConfig({ imports: { dirs: ['custom'] } })\n",
+        )
+        .unwrap();
+        assert!(config_declares_imports(root));
+    }
+
+    #[test]
+    fn config_declares_imports_detects_inline_and_quoted_keys() {
+        assert!(source_has_imports_key(
+            "export default defineNuxtConfig({ imports: { dirs: ['custom'] } })"
+        ));
+        assert!(source_has_imports_key(
+            r#"export default { "imports": { scan: false } }"#
+        ));
+        assert!(!source_has_imports_key(
+            "export default defineNuxtConfig({ components: true })"
+        ));
     }
 }

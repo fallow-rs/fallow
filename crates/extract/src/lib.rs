@@ -125,7 +125,7 @@ pub const FLUENT_CHAIN_SENTINEL: &str = "__fallow_fluent_chain__:";
 /// the `static_member_object_name` `NewExpression` arm. See issue #605.
 pub const FLUENT_CHAIN_NEW_SENTINEL: &str = "__fallow_fluent_chain_new__:";
 
-use parse::parse_source_to_module;
+pub use parse::parse_source_to_module;
 
 /// Leading UTF-8 byte order mark codepoint.
 ///

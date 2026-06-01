@@ -221,6 +221,8 @@ mod issue_620_error_subclass_name;
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]
 mod issue_704_auto_import_components;
+#[path = "integration_test/issue_739_script_auto_imports.rs"]
+mod issue_739_script_auto_imports;
 #[path = "integration_test/issue_744_tsdown_config.rs"]
 mod issue_744_tsdown_config;
 #[path = "integration_test/pkg_utils_plugin.rs"]

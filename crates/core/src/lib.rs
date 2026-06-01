@@ -1218,14 +1218,11 @@ fn run_plugins(
     result
 }
 
-/// When `autoImports` is enabled, drop the Nuxt component entry patterns so
-/// genuinely-unreferenced components are reported as `unused-file` (their
-/// reachability now comes from synthesized auto-import edges instead). Guarded by
-/// `config_declares_components`: if the root OR any workspace package's
-/// `nuxt.config` declares a `components:` key, the patterns are kept, because
-/// custom `prefix` / `pathPrefix` / `dirs` are not yet modeled and dropping the
-/// protection would risk false positives. Auto-import edge synthesis itself is
-/// unconditional; only this entry-pattern removal is flag-gated. See issue #704.
+/// When `autoImports` is enabled, drop the modeled Nuxt convention entry
+/// patterns so genuinely-unreferenced convention files are reported as
+/// `unused-file`. Component and script fallbacks have separate conservative
+/// config guards because custom `components:` and `imports:` settings affect
+/// different convention surfaces.
 fn gate_auto_import_entry_patterns(
     result: &mut plugins::AggregatedPluginResult,
     config: &ResolvedConfig,
@@ -1237,15 +1234,25 @@ fn gate_auto_import_entry_patterns(
     if !result.active_plugins.iter().any(|name| name == "nuxt") {
         return;
     }
-    if plugins::nuxt::config_declares_components(&config.root)
+    let components_custom = plugins::nuxt::config_declares_components(&config.root)
         || workspaces
             .iter()
-            .any(|ws| plugins::nuxt::config_declares_components(&ws.root))
-    {
-        return;
-    }
+            .any(|ws| plugins::nuxt::config_declares_components(&ws.root));
+    let imports_custom = plugins::nuxt::config_declares_imports(&config.root)
+        || workspaces
+            .iter()
+            .any(|ws| plugins::nuxt::config_declares_imports(&ws.root));
     result.entry_patterns.retain(|(rule, plugin)| {
-        !(plugin == "nuxt" && plugins::nuxt::is_component_entry_pattern(&rule.pattern))
+        if plugin != "nuxt" {
+            return true;
+        }
+        if !components_custom && plugins::nuxt::is_component_entry_pattern(&rule.pattern) {
+            return false;
+        }
+        if !imports_custom && plugins::nuxt::is_script_auto_import_entry_pattern(&rule.pattern) {
+            return false;
+        }
+        true
     });
 }
 

@@ -1,0 +1,7 @@
+{
+  "name": "nuxt-script-auto-imports-custom-imports",
+  "private": true,
+  "dependencies": {
+    "nuxt": "^3.0.0"
+  }
+}
