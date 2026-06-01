@@ -5,6 +5,7 @@ expression: redacted
 ■ Metrics: 21 LOC · dead files 33.3% · dead exports 0.0% · avg cyclomatic 7.0 · p90 cyclomatic 13 · maintainability 85.8 (good)
 
 ● High complexity functions (1)
+  CRAP scores are estimated from export references; run `fallow health --coverage <coverage-final.json>` for exact scores.
   src/complex.ts
     :1 classify CRITICAL
           13 cyclomatic   13 cognitive   15 lines

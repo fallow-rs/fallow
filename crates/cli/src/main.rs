@@ -4,10 +4,11 @@
     reason = "CLI binary produces intentional terminal output"
 )]
 
+use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 mod api;
 mod audit;
@@ -2031,23 +2032,32 @@ fn signal_test_helper() -> ExitCode {
     ExitCode::from(2)
 }
 
-fn main() -> ExitCode {
+fn install_spawn_hooks() {
+    fallow_core::churn::set_spawn_hook(signal::scoped_child::output);
+    fallow_core::changed_files::set_spawn_hook(signal::scoped_child::output);
+}
+
+fn install_signal_handlers() {
     if let Err(err) = signal::install_handlers() {
         use std::io::Write as _;
         let stderr = std::io::stderr();
         let mut lock = stderr.lock();
         let _ = writeln!(lock, "fallow: failed to install signal handlers: {err}");
     }
+}
 
-    fallow_core::churn::set_spawn_hook(signal::scoped_child::output);
-
-    fallow_core::changed_files::set_spawn_hook(signal::scoped_child::output);
+fn main() -> ExitCode {
+    install_signal_handlers();
+    install_spawn_hooks();
 
     if std::env::var_os("FALLOW_TEST_SIGNAL_HELPER").is_some() {
         return signal_test_helper();
     }
 
-    let mut cli = Cli::parse();
+    let mut cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(err) => return handle_cli_parse_error(&err),
+    };
 
     if let Some(workspaces) = cli.workspace.as_ref()
         && !workspaces.is_empty()
@@ -2196,6 +2206,54 @@ fn main() -> ExitCode {
         telemetry::maybe_print_opt_in_note(output, quiet);
     }
     exit_code
+}
+
+fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {
+    if is_top_level_coverage_unknown_argument(err, std::env::args_os().skip(1)) {
+        eprintln!("{}", top_level_coverage_error_message());
+        return ExitCode::from(2);
+    }
+
+    let exit_code = err.exit_code();
+    let _ = err.print();
+    ExitCode::from(u8::try_from(exit_code).unwrap_or(2))
+}
+
+fn is_top_level_coverage_unknown_argument<I, S>(err: &clap::Error, args: I) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    err.kind() == clap::error::ErrorKind::UnknownArgument && args_have_top_level_coverage(args)
+}
+
+fn args_have_top_level_coverage<I, S>(args: I) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    for arg in args {
+        let arg = arg.as_ref();
+        let arg_str = arg.to_string_lossy();
+        if arg == "--coverage" || arg_str.starts_with("--coverage=") {
+            return true;
+        }
+        if is_top_level_command(&arg_str) {
+            return false;
+        }
+    }
+    false
+}
+
+fn is_top_level_command(arg: &str) -> bool {
+    Cli::command().get_subcommands().any(|command| {
+        command.get_name() == arg || command.get_all_aliases().any(|alias| alias == arg)
+    })
+}
+
+fn top_level_coverage_error_message() -> &'static str {
+    "error: --coverage is a flag on the `health` subcommand, not a top-level flag.\n\n\
+tip: run `fallow health --coverage <coverage-final.json>` for exact CRAP scores, or `fallow coverage setup` to configure runtime coverage."
 }
 
 fn run_telemetry_command_if_requested(
@@ -3501,6 +3559,36 @@ mod tests {
         let code = emit_error("test error", 2, fallow_config::OutputFormat::Human);
         assert_eq!(code, ExitCode::from(2));
     }
+
+    #[test]
+    fn top_level_coverage_flag_reports_health_hint() {
+        let Err(err) = Cli::try_parse_from(["fallow", "--coverage"]) else {
+            panic!("top-level --coverage should fail to parse");
+        };
+        assert!(is_top_level_coverage_unknown_argument(
+            &err,
+            [std::ffi::OsString::from("--coverage")]
+        ));
+        let message = top_level_coverage_error_message();
+        assert!(message.contains("`health` subcommand"));
+        assert!(message.contains("fallow health --coverage <coverage-final.json>"));
+        assert!(message.contains("fallow coverage setup"));
+    }
+
+    #[test]
+    fn subcommand_coverage_flag_keeps_regular_clap_error() {
+        let Err(err) = Cli::try_parse_from(["fallow", "dead-code", "--coverage"]) else {
+            panic!("dead-code --coverage should fail to parse");
+        };
+        assert!(!is_top_level_coverage_unknown_argument(
+            &err,
+            [
+                std::ffi::OsString::from("dead-code"),
+                std::ffi::OsString::from("--coverage"),
+            ]
+        ));
+    }
+
     #[test]
     fn format_parsing_covers_all_variants() {
         let parse = |s: &str| -> Option<Format> {
