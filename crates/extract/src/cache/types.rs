@@ -110,7 +110,13 @@ use crate::MemberKind;
 /// emit synthetic imports because they are runtime markup, not bundled SFC
 /// script modules. Pre-fix entries can carry stale root-relative imports that
 /// surface as false `unresolved-imports`.
-pub(super) const CACHE_VERSION: u32 = 107;
+///
+/// Bumped to 108 for issue #839: `declare` ambient class properties are no
+/// longer extracted as class members because they emit no JS and cannot be
+/// value-referenced. Pre-fix cache entries carry those phantom members, so they
+/// surface as false `unused-class-member` findings until the file is
+/// re-extracted.
+pub(super) const CACHE_VERSION: u32 = 108;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
