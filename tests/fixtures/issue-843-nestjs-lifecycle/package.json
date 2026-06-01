@@ -1,0 +1,9 @@
+{
+  "name": "issue-843-nestjs-lifecycle-fixture",
+  "main": "src/main.ts",
+  "dependencies": {
+    "@nestjs/core": "^10.0.0",
+    "@nestjs/common": "^10.0.0",
+    "reflect-metadata": "^0.2.0"
+  }
+}

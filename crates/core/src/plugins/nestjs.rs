@@ -252,8 +252,7 @@ mod tests {
             };
             assert!(
                 !s.matches_heritage(None, &no_implements),
-                "rule {:?} must not match a class with no heritage",
-                s
+                "rule {s:?} must not match a class with no heritage"
             );
         }
     }
