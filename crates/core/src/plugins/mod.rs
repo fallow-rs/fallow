@@ -1168,6 +1168,7 @@ mod opennext_cloudflare;
 mod oxlint;
 mod pandacss;
 mod parcel;
+mod pinia;
 mod pkg_utils;
 mod playwright;
 mod plop;

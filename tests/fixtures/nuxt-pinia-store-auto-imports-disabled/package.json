@@ -1,0 +1,9 @@
+{
+  "name": "nuxt-pinia-store-auto-imports-disabled",
+  "private": true,
+  "dependencies": {
+    "nuxt": "^4.0.0",
+    "pinia": "^3.0.0",
+    "vue": "^3.0.0"
+  }
+}

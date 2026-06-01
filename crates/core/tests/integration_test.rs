@@ -225,6 +225,8 @@ mod issue_609_velite;
 mod issue_704_auto_import_components;
 #[path = "integration_test/issue_739_script_auto_imports.rs"]
 mod issue_739_script_auto_imports;
+#[path = "integration_test/issue_740_pinia_store_auto_imports.rs"]
+mod issue_740_pinia_store_auto_imports;
 #[path = "integration_test/issue_744_tsdown_config.rs"]
 mod issue_744_tsdown_config;
 #[path = "integration_test/pkg_utils_plugin.rs"]
