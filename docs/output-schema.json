@@ -1109,6 +1109,17 @@
           "type": "integer",
           "description": "Number of findings in this group, mirroring the project-level\n`summary.functions_above_threshold` semantics post-baseline /\npost-`--top` truncation. When `--top` was supplied this reflects the\nrendered finding count, not the un-truncated total."
         },
+        "coverage_source_consistency": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CoverageSourceConsistency"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether CRAP findings in this group share a single coverage-source kind\n(`uniform`) or combine Istanbul / estimated / inherited sources\n(`mixed`). Absent when no grouped finding carries CRAP source data."
+        },
         "vital_signs": {
           "anyOf": [
             {
@@ -2160,6 +2171,16 @@
           "anyOf": [
             {
               "$ref": "#/definitions/CoverageModel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverage_source_consistency": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CoverageSourceConsistency"
             },
             {
               "type": "null"
@@ -3337,7 +3358,7 @@
       "type": "object",
       "properties": {
         "type": {
-          "description": "Action type identifier. A single finding's `actions` array can carry\nMULTIPLE entries of different types: e.g., a finding that exceeded\nboth cyclomatic and CRAP at `coverage_tier`: partial will get BOTH\n`increase-coverage` AND `refactor-function`, plus `suppress-line`.\nConsumers that select a single action should treat the FIRST\nnon-`suppress-{line,file}` action as primary. `add-tests` is emitted\nwhen CRAP triggered the finding, the function has no test coverage\n(`coverage_tier`: none), and full coverage can bring CRAP below\n`max_crap_threshold` (cyclomatic < threshold, since CRAP bottoms out\nat CC at 100% coverage). `increase-coverage` is emitted when CRAP\ntriggered the finding, some coverage exists (`coverage_tier`: partial\nor high), and full coverage can bring CRAP below `max_crap_threshold`;\nthe description steers toward targeted branch coverage rather than\nscaffolding new tests. `refactor-function` is emitted when\ncyclomatic/cognitive triggered the finding, when full coverage still\ncannot bring CRAP below `max_crap_threshold` (cyclomatic >=\nthreshold), or as a secondary action when cyclomatic is within 5 of\nthe cyclomatic threshold AND cognitive is at or above\n`max_cognitive_threshold / 2` (the cognitive floor suppresses false\npositives on flat type-tag dispatchers and JSX render maps where\nhigh cyclomatic comes from a single switch with near-zero cognitive\nload). `suppress-file` is emitted instead of `suppress-line` for\nsynthetic Angular `<template>` findings on `.html` files, because\nline-suppression comments cannot be expressed in HTML; the `comment`\nfield carries `<!-- fallow-ignore-file complexity -->` and\n`placement` is `top-of-template`.",
+          "description": "Action type identifier. A single finding's `actions` array can carry\nMULTIPLE entries of different types: e.g., a finding that exceeded\nboth cyclomatic and CRAP at `coverage_tier`: partial will get BOTH\n`increase-coverage` AND `refactor-function`, plus `suppress-line`.\nConsumers that select a single action should treat the FIRST\nnon-`suppress-{line,file}` action as primary. `add-tests` is emitted\nwhen CRAP triggered the finding, the function has no test coverage\n(`coverage_tier`: none), and full coverage can bring CRAP below\n`max_crap_threshold` (cyclomatic < threshold, since CRAP bottoms out\nat CC at 100% coverage). `increase-coverage` is emitted when CRAP\ntriggered the finding, some coverage exists (`coverage_tier`: partial\nor high), and full coverage can bring CRAP below `max_crap_threshold`;\nthe description steers toward targeted branch coverage rather than\nscaffolding new tests. `refactor-function` is emitted when\ncyclomatic/cognitive triggered the finding, when full coverage still\ncannot bring CRAP below `max_crap_threshold` (cyclomatic >=\nthreshold), or as a secondary action when cyclomatic is within the\nconfigured `health.crapRefactorBand` of the cyclomatic threshold AND\ncognitive is at or above `max_cognitive_threshold / 2` (the cognitive\nfloor suppresses false positives on flat type-tag dispatchers and JSX\nrender maps where high cyclomatic comes from a single switch with\nnear-zero cognitive load). `suppress-file` is emitted instead of\n`suppress-line` for\nsynthetic Angular `<template>` findings on `.html` files, because\nline-suppression comments cannot be expressed in HTML; the `comment`\nfield carries `<!-- fallow-ignore-file complexity -->` and\n`placement` is `top-of-template`.",
           "$ref": "#/definitions/HealthFindingActionType"
         },
         "auto_fixable": {
@@ -6594,7 +6615,7 @@
         {
           "type": "string",
           "const": "refactor-function",
-          "description": "Refactor the function to reduce complexity. Emitted when\ncyclomatic/cognitive triggered the finding, when full coverage\nstill cannot bring CRAP below `max_crap_threshold`, or as a\nsecondary action when cyclomatic is within 5 of the cyclomatic\nthreshold AND cognitive is at or above the cognitive floor."
+          "description": "Refactor the function to reduce complexity. Emitted when\ncyclomatic/cognitive triggered the finding, when full coverage\nstill cannot bring CRAP below `max_crap_threshold`, or as a\nsecondary action when cyclomatic is within the configured\n`health.crapRefactorBand` of the cyclomatic threshold AND cognitive\nis at or above the cognitive floor."
         },
         {
           "type": "string",
@@ -9515,6 +9536,14 @@
         "path",
         "timestamp"
       ]
+    },
+    "CoverageSourceConsistency": {
+      "type": "string",
+      "enum": [
+        "uniform",
+        "mixed"
+      ],
+      "description": "Whether CRAP findings in the report used one coverage-source kind or a mix."
     }
   }
 }

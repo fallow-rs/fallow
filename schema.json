@@ -124,6 +124,7 @@
         "maxCyclomatic": 20,
         "maxCognitive": 15,
         "maxCrap": 30.0,
+        "crapRefactorBand": 5,
         "ignore": [],
         "ownership": {
           "botPatterns": [
@@ -782,6 +783,14 @@
           "type": "number",
           "format": "double",
           "default": 30.0
+        },
+        "crapRefactorBand": {
+          "description": "Band below `maxCyclomatic` where CRAP-only findings also receive a\nsecondary `refactor-function` action (default: 5). Set to `0` to only\nsuggest refactoring when cyclomatic already meets the configured\nthreshold.",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535,
+          "default": 5
         },
         "ignore": {
           "description": "Glob patterns to exclude from complexity analysis.",

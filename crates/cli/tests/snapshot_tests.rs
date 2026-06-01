@@ -2265,6 +2265,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
         max_cyclomatic_threshold: 20,
         max_cognitive_threshold: 15,
         max_crap_threshold: 30.0,
+        crap_refactor_band: 5,
     };
     HealthReport {
         findings: vec![fallow_cli::health_types::HealthFinding::with_actions(
@@ -2298,6 +2299,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
             files_scored: None,
             average_maintainability: None,
             coverage_model: None,
+            coverage_source_consistency: None,
             istanbul_matched: None,
             istanbul_total: None,
             severity_critical_count: 0,
@@ -2557,6 +2559,7 @@ const fn empty_health_report() -> HealthReport {
             files_scored: None,
             average_maintainability: None,
             coverage_model: None,
+            coverage_source_consistency: None,
             istanbul_matched: None,
             istanbul_total: None,
             severity_critical_count: 0,

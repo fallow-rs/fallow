@@ -14,7 +14,7 @@ use super::scoring::FileScoreOutput;
 use super::{SubsetFilter, apply_duplication_metrics, compute_vital_signs_and_counts};
 use crate::health_types::{
     ComplexityViolation, FileHealthScore, HealthGroup, HealthGrouping, HotspotEntry,
-    LargeFunctionEntry, RefactoringTarget,
+    LargeFunctionEntry, RefactoringTarget, summarize_coverage_source_consistency,
 };
 use crate::report::OwnershipResolver;
 use crate::vital_signs;
@@ -200,6 +200,11 @@ fn build_group(
         score_requested.then(|| vital_signs::compute_health_score(&vital_signs, total_files));
 
     let functions_above_threshold = group_findings.len();
+    let coverage_source_consistency = summarize_coverage_source_consistency(
+        group_findings
+            .iter()
+            .filter_map(|finding| finding.coverage_source),
+    );
     let wrapped_findings: Vec<crate::health_types::HealthFinding> = group_findings
         .into_iter()
         .map(|v| crate::health_types::HealthFinding::with_actions(v, action_ctx))
@@ -220,6 +225,7 @@ fn build_group(
         owners,
         files_analyzed: total_files,
         functions_above_threshold,
+        coverage_source_consistency,
         vital_signs: show_vital_signs.then_some(vital_signs),
         health_score,
         findings: wrapped_findings,

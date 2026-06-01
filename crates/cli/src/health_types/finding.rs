@@ -15,10 +15,6 @@ use crate::health_types::scores::{
 };
 use crate::health_types::targets::{RecommendationCategory, RefactoringTarget};
 
-/// Band below `max_cyclomatic_threshold` where a CRAP-only finding also gets
-/// a secondary `refactor-function` action.
-const SECONDARY_REFACTOR_BAND: u16 = 5;
-
 /// Options controlling how the action builder populates `actions`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HealthActionOptions {
@@ -39,6 +35,9 @@ pub struct HealthActionContext {
     pub max_cognitive_threshold: u16,
     /// CRAP ceiling.
     pub max_crap_threshold: f64,
+    /// Band below `max_cyclomatic_threshold` where a CRAP-only finding also
+    /// gets a secondary `refactor-function` action.
+    pub crap_refactor_band: u16,
 }
 
 /// Wire envelope for a single complexity finding.
@@ -143,7 +142,7 @@ pub fn build_health_finding_actions(
         && cyclomatic
             >= ctx
                 .max_cyclomatic_threshold
-                .saturating_sub(SECONDARY_REFACTOR_BAND)
+                .saturating_sub(ctx.crap_refactor_band)
         && cognitive >= cognitive_floor;
     let is_template = name == "<template>";
     let is_component = name == "<component>";

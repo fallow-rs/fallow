@@ -2131,6 +2131,7 @@ mod tests {
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
                 coverage_model: Some(crate::health_types::CoverageModel::StaticEstimated),
+                coverage_source_consistency: None,
                 ..Default::default()
             },
             ..Default::default()
@@ -2170,6 +2171,7 @@ mod tests {
                 functions_analyzed: 2,
                 functions_above_threshold: 1,
                 coverage_model: Some(crate::health_types::CoverageModel::Istanbul),
+                coverage_source_consistency: None,
                 istanbul_matched: Some(1),
                 istanbul_total: Some(2),
                 ..Default::default()
@@ -2215,6 +2217,7 @@ mod tests {
                 functions_analyzed: 2,
                 functions_above_threshold: 1,
                 coverage_model: None,
+                coverage_source_consistency: None,
                 istanbul_matched: Some(1),
                 istanbul_total: Some(2),
                 ..Default::default()

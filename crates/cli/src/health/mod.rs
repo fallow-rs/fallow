@@ -696,6 +696,7 @@ fn execute_health_inner(
         max_cyclomatic_threshold: max_cyclomatic,
         max_cognitive_threshold: max_cognitive,
         max_crap_threshold: max_crap,
+        crap_refactor_band: config.health.crap_refactor_band,
     };
 
     let grouping = if let Some(ref resolver) = group_resolver {
@@ -1635,6 +1636,15 @@ fn assemble_health_report(
     } else {
         None
     };
+    let summary_coverage_source_consistency = if opts.score_only_output || !opts.complexity {
+        None
+    } else {
+        crate::health_types::summarize_coverage_source_consistency(
+            findings
+                .iter()
+                .filter_map(|finding| finding.coverage_source),
+        )
+    };
     let summary_istanbul_matched = if opts.score_only_output || !has_istanbul_coverage {
         None
     } else {
@@ -1657,6 +1667,7 @@ fn assemble_health_report(
             files_scored: summary_files_scored,
             average_maintainability: summary_average_maintainability,
             coverage_model: summary_coverage_model,
+            coverage_source_consistency: summary_coverage_source_consistency,
             istanbul_matched: summary_istanbul_matched,
             istanbul_total: summary_istanbul_total,
             severity_critical_count: sev_critical,

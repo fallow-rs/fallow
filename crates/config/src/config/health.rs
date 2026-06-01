@@ -16,6 +16,10 @@ const fn default_max_crap() -> f64 {
     30.0
 }
 
+const fn default_crap_refactor_band() -> u16 {
+    5
+}
+
 /// Default for `suggest_inline_suppression`: emit `suppress-line` actions
 /// alongside health findings unless a baseline is active or the team has
 /// opted out via config.
@@ -124,6 +128,13 @@ pub struct HealthConfig {
     #[serde(default = "default_max_crap")]
     pub max_crap: f64,
 
+    /// Band below `maxCyclomatic` where CRAP-only findings also receive a
+    /// secondary `refactor-function` action (default: 5). Set to `0` to only
+    /// suggest refactoring when cyclomatic already meets the configured
+    /// threshold.
+    #[serde(default = "default_crap_refactor_band")]
+    pub crap_refactor_band: u16,
+
     /// Glob patterns to exclude from complexity analysis.
     #[serde(default)]
     pub ignore: Vec<String>,
@@ -151,6 +162,7 @@ impl Default for HealthConfig {
             max_cyclomatic: default_max_cyclomatic(),
             max_cognitive: default_max_cognitive(),
             max_crap: default_max_crap(),
+            crap_refactor_band: default_crap_refactor_band(),
             ignore: vec![],
             ownership: OwnershipConfig::default(),
             suggest_inline_suppression: default_suggest_inline_suppression(),
@@ -168,6 +180,7 @@ mod tests {
         assert_eq!(config.max_cyclomatic, 20);
         assert_eq!(config.max_cognitive, 15);
         assert!((config.max_crap - 30.0).abs() < f64::EPSILON);
+        assert_eq!(config.crap_refactor_band, 5);
         assert!(config.ignore.is_empty());
     }
 
@@ -177,12 +190,14 @@ mod tests {
             "maxCyclomatic": 30,
             "maxCognitive": 25,
             "maxCrap": 50.0,
+            "crapRefactorBand": 3,
             "ignore": ["**/generated/**", "vendor/**"]
         }"#;
         let config: HealthConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.max_cyclomatic, 30);
         assert_eq!(config.max_cognitive, 25);
         assert!((config.max_crap - 50.0).abs() < f64::EPSILON);
+        assert_eq!(config.crap_refactor_band, 3);
         assert_eq!(config.ignore, vec!["**/generated/**", "vendor/**"]);
     }
 
@@ -193,6 +208,7 @@ mod tests {
         assert_eq!(config.max_cyclomatic, 10);
         assert_eq!(config.max_cognitive, 15); // default
         assert!((config.max_crap - 30.0).abs() < f64::EPSILON); // default
+        assert_eq!(config.crap_refactor_band, 5); // default
         assert!(config.ignore.is_empty()); // default
     }
 
@@ -203,6 +219,7 @@ mod tests {
         assert!((config.max_crap - 15.5).abs() < f64::EPSILON);
         assert_eq!(config.max_cyclomatic, 20); // default
         assert_eq!(config.max_cognitive, 15); // default
+        assert_eq!(config.crap_refactor_band, 5); // default
     }
 
     #[test]
@@ -210,6 +227,7 @@ mod tests {
         let config: HealthConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(config.max_cyclomatic, 20);
         assert_eq!(config.max_cognitive, 15);
+        assert_eq!(config.crap_refactor_band, 5);
         assert!(config.ignore.is_empty());
     }
 
@@ -249,6 +267,7 @@ ignore = ["generated/**", "vendor/**"]
             max_cyclomatic: 50,
             max_cognitive: 40,
             max_crap: 75.0,
+            crap_refactor_band: 4,
             ignore: vec!["test/**".to_string()],
             ownership: OwnershipConfig::default(),
             suggest_inline_suppression: false,
@@ -258,6 +277,7 @@ ignore = ["generated/**", "vendor/**"]
         assert_eq!(restored.max_cyclomatic, 50);
         assert_eq!(restored.max_cognitive, 40);
         assert!((restored.max_crap - 75.0).abs() < f64::EPSILON);
+        assert_eq!(restored.crap_refactor_band, 4);
         assert_eq!(restored.ignore, vec!["test/**"]);
         assert!(!restored.suggest_inline_suppression);
     }

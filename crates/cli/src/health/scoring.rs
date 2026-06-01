@@ -713,6 +713,37 @@ impl IstanbulCoverage {
     }
 }
 
+/// Precedence decision for per-function CRAP coverage inputs.
+///
+/// Template inheritance wins first so Angular `.html` template findings can
+/// use the owning `.component.ts` reachability context. Istanbul wins next,
+/// even when the current file is missing from the coverage map, because that
+/// path still records unmatched functions in the run-level match counters.
+/// Plain graph-estimated coverage is the final fallback.
+enum CrapCoverageResolution<'a> {
+    TemplateInherited(&'a TemplateInheritContext),
+    Istanbul {
+        file_coverage: Option<&'a IstanbulFileCoverage>,
+    },
+    StaticEstimated,
+}
+
+fn resolve_crap_coverage<'a>(
+    template_inherit: Option<&'a TemplateInheritContext>,
+    istanbul_coverage: Option<&'a IstanbulCoverage>,
+    canonical_path: &std::path::Path,
+) -> CrapCoverageResolution<'a> {
+    if let Some(inherit_ctx) = template_inherit {
+        CrapCoverageResolution::TemplateInherited(inherit_ctx)
+    } else if let Some(istanbul) = istanbul_coverage {
+        CrapCoverageResolution::Istanbul {
+            file_coverage: istanbul.get(canonical_path),
+        }
+    } else {
+        CrapCoverageResolution::StaticEstimated
+    }
+}
+
 /// Load Istanbul coverage data from a `coverage-final.json` file or directory.
 ///
 /// Auto-detect a `coverage-final.json` file in common locations relative to the project root.
@@ -1344,10 +1375,15 @@ pub(super) fn compute_file_scores(
             )
         });
         let is_test_reachable = node.is_test_reachable() || is_coverage_suppressed;
-        let (crap_max, crap_above_threshold, per_function) = if let Some(inherit_ctx) =
-            template_inherit.get(&node.file_id)
-        {
-            module.map_or((0.0, 0, Vec::new()), |m| {
+        let canonical = dunce::canonicalize(&path_owned).unwrap_or_else(|_| path_owned.clone());
+        let crap_resolution = resolve_crap_coverage(
+            template_inherit.get(&node.file_id),
+            istanbul_coverage,
+            &canonical,
+        );
+        let (crap_max, crap_above_threshold, per_function) = match (module, crap_resolution) {
+            (None, _) => (0.0, 0, Vec::new()),
+            (Some(m), CrapCoverageResolution::TemplateInherited(inherit_ctx)) => {
                 let result = compute_crap_scores_estimated(
                     &m.complexity,
                     &inherit_ctx.test_referenced_exports,
@@ -1355,30 +1391,15 @@ pub(super) fn compute_file_scores(
                     crate::health_types::CoverageSource::EstimatedComponentInherited,
                 );
                 (result.max_crap, result.above_threshold, result.per_function)
-            })
-        } else if let Some(istanbul) = istanbul_coverage {
-            let canonical = dunce::canonicalize(&path_owned).unwrap_or_else(|_| path_owned.clone());
-            let result = module.map_or(
-                IstanbulCrapResult {
-                    max_crap: 0.0,
-                    above_threshold: 0,
-                    matched: 0,
-                    total: 0,
-                    per_function: Vec::new(),
-                },
-                |m| {
-                    compute_crap_scores_istanbul(
-                        &m.complexity,
-                        istanbul.get(&canonical),
-                        is_test_reachable,
-                    )
-                },
-            );
-            istanbul_matched += result.matched;
-            istanbul_total += result.total;
-            (result.max_crap, result.above_threshold, result.per_function)
-        } else {
-            module.map_or((0.0, 0, Vec::new()), |m| {
+            }
+            (Some(m), CrapCoverageResolution::Istanbul { file_coverage }) => {
+                let result =
+                    compute_crap_scores_istanbul(&m.complexity, file_coverage, is_test_reachable);
+                istanbul_matched += result.matched;
+                istanbul_total += result.total;
+                (result.max_crap, result.above_threshold, result.per_function)
+            }
+            (Some(m), CrapCoverageResolution::StaticEstimated) => {
                 let test_refs = build_test_referenced_exports(&node.exports, &graph.modules);
                 let result = compute_crap_scores_estimated(
                     &m.complexity,
@@ -1387,7 +1408,7 @@ pub(super) fn compute_file_scores(
                     crate::health_types::CoverageSource::Estimated,
                 );
                 (result.max_crap, result.above_threshold, result.per_function)
-            })
+            }
         };
 
         if !per_function.is_empty() {
@@ -1513,6 +1534,49 @@ mod tests {
     #[test]
     fn maintainability_perfect_score() {
         assert!((compute_maintainability_index(0.0, 0.0, 0, 100) - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn crap_resolution_prefers_template_inheritance_over_istanbul() {
+        let inherit_ctx = TemplateInheritContext {
+            is_test_reachable: true,
+            test_referenced_exports: rustc_hash::FxHashSet::default(),
+            provenance_owner: std::path::PathBuf::from("/project/src/app.component.ts"),
+        };
+        let istanbul = IstanbulCoverage {
+            files: rustc_hash::FxHashMap::default(),
+        };
+
+        let resolution = resolve_crap_coverage(
+            Some(&inherit_ctx),
+            Some(&istanbul),
+            std::path::Path::new("/project/src/app.component.html"),
+        );
+
+        assert!(matches!(
+            resolution,
+            CrapCoverageResolution::TemplateInherited(_)
+        ));
+    }
+
+    #[test]
+    fn crap_resolution_keeps_istanbul_when_file_is_missing() {
+        let istanbul = IstanbulCoverage {
+            files: rustc_hash::FxHashMap::default(),
+        };
+
+        let resolution = resolve_crap_coverage(
+            None,
+            Some(&istanbul),
+            std::path::Path::new("/project/src/missing.ts"),
+        );
+
+        assert!(matches!(
+            resolution,
+            CrapCoverageResolution::Istanbul {
+                file_coverage: None
+            }
+        ));
     }
 
     #[test]

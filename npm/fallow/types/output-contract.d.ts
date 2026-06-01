@@ -357,6 +357,10 @@ export type HealthFindingActionType = ("refactor-function" | "add-tests" | "incr
  */
 export type CoverageModel = ("static_binary" | "static_estimated" | "istanbul")
 /**
+ * Whether CRAP findings in the report used one coverage-source kind or a mix.
+ */
+export type CoverageSourceConsistency = ("uniform" | "mixed")
+/**
  * Discriminant for [`UntestedFileAction::kind`]. Mirrors the action types
  * emitted by `build_untested_file_actions`.
  */
@@ -2600,6 +2604,7 @@ max_crap_threshold: number
 files_scored?: (number | null)
 average_maintainability?: (number | null)
 coverage_model?: (CoverageModel | null)
+coverage_source_consistency?: (CoverageSourceConsistency | null)
 istanbul_matched?: (number | null)
 istanbul_total?: (number | null)
 severity_critical_count: number
@@ -4185,6 +4190,12 @@ files_analyzed: number
  * rendered finding count, not the un-truncated total.
  */
 functions_above_threshold: number
+/**
+ * Whether CRAP findings in this group share a single coverage-source kind
+ * (`uniform`) or combine Istanbul / estimated / inherited sources
+ * (`mixed`). Absent when no grouped finding carries CRAP source data.
+ */
+coverage_source_consistency?: (CoverageSourceConsistency | null)
 /**
  * Per-group vital signs recomputed from the files in this group. Absent
  * when --score-only suppressed top-level vital signs.

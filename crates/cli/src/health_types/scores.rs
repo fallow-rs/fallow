@@ -110,6 +110,33 @@ pub enum CoverageSource {
     EstimatedComponentInherited,
 }
 
+/// Whether CRAP findings in the report used one coverage-source kind or a mix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum CoverageSourceConsistency {
+    Uniform,
+    Mixed,
+}
+
+/// Summarise the coverage-source provenance attached to CRAP findings.
+#[must_use]
+pub fn summarize_coverage_source_consistency(
+    sources: impl IntoIterator<Item = CoverageSource>,
+) -> Option<CoverageSourceConsistency> {
+    let mut first = None;
+    for source in sources {
+        match first {
+            None => first = Some(source),
+            Some(existing) if existing != source => {
+                return Some(CoverageSourceConsistency::Mixed);
+            }
+            Some(_) => {}
+        }
+    }
+    first.map(|_| CoverageSourceConsistency::Uniform)
+}
+
 /// Inner complexity-violation payload.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -322,6 +349,8 @@ pub struct HealthSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_model: Option<CoverageModel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage_source_consistency: Option<CoverageSourceConsistency>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub istanbul_matched: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub istanbul_total: Option<usize>,
@@ -343,6 +372,7 @@ impl Default for HealthSummary {
             files_scored: None,
             average_maintainability: None,
             coverage_model: None,
+            coverage_source_consistency: None,
             istanbul_matched: None,
             istanbul_total: None,
             severity_critical_count: 0,
@@ -701,5 +731,33 @@ mod tests {
         assert!(!ExceededThreshold::Both.includes_crap());
         assert!(!ExceededThreshold::Cyclomatic.includes_crap());
         assert!(!ExceededThreshold::Cognitive.includes_crap());
+    }
+
+    #[test]
+    fn coverage_source_consistency_omits_empty_sources() {
+        let sources = Vec::new();
+        assert_eq!(summarize_coverage_source_consistency(sources), None);
+    }
+
+    #[test]
+    fn coverage_source_consistency_reports_uniform_sources() {
+        assert_eq!(
+            summarize_coverage_source_consistency([
+                CoverageSource::Estimated,
+                CoverageSource::Estimated,
+            ]),
+            Some(CoverageSourceConsistency::Uniform)
+        );
+    }
+
+    #[test]
+    fn coverage_source_consistency_reports_mixed_sources() {
+        assert_eq!(
+            summarize_coverage_source_consistency([
+                CoverageSource::Istanbul,
+                CoverageSource::Estimated,
+            ]),
+            Some(CoverageSourceConsistency::Mixed)
+        );
     }
 }

@@ -10,8 +10,8 @@
 use serde::Serialize;
 
 use crate::health_types::{
-    FileHealthScore, HealthActionsMeta, HealthFinding, HealthScore, HotspotFinding,
-    LargeFunctionEntry, RefactoringTargetFinding, VitalSigns,
+    CoverageSourceConsistency, FileHealthScore, HealthActionsMeta, HealthFinding, HealthScore,
+    HotspotFinding, LargeFunctionEntry, RefactoringTargetFinding, VitalSigns,
 };
 
 /// A health report scoped to a single group.
@@ -46,6 +46,11 @@ pub struct HealthGroup {
     /// post-`--top` truncation. When `--top` was supplied this reflects the
     /// rendered finding count, not the un-truncated total.
     pub functions_above_threshold: usize,
+    /// Whether CRAP findings in this group share a single coverage-source kind
+    /// (`uniform`) or combine Istanbul / estimated / inherited sources
+    /// (`mixed`). Absent when no grouped finding carries CRAP source data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage_source_consistency: Option<CoverageSourceConsistency>,
     /// Per-group vital signs recomputed from the files in this group. Absent
     /// when --score-only suppressed top-level vital signs.
     #[serde(default, skip_serializing_if = "Option::is_none")]

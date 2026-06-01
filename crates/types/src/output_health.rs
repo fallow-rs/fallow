@@ -47,12 +47,13 @@ pub struct HealthFindingAction {
     /// scaffolding new tests. `refactor-function` is emitted when
     /// cyclomatic/cognitive triggered the finding, when full coverage still
     /// cannot bring CRAP below `max_crap_threshold` (cyclomatic >=
-    /// threshold), or as a secondary action when cyclomatic is within 5 of
-    /// the cyclomatic threshold AND cognitive is at or above
-    /// `max_cognitive_threshold / 2` (the cognitive floor suppresses false
-    /// positives on flat type-tag dispatchers and JSX render maps where
-    /// high cyclomatic comes from a single switch with near-zero cognitive
-    /// load). `suppress-file` is emitted instead of `suppress-line` for
+    /// threshold), or as a secondary action when cyclomatic is within the
+    /// configured `health.crapRefactorBand` of the cyclomatic threshold AND
+    /// cognitive is at or above `max_cognitive_threshold / 2` (the cognitive
+    /// floor suppresses false positives on flat type-tag dispatchers and JSX
+    /// render maps where high cyclomatic comes from a single switch with
+    /// near-zero cognitive load). `suppress-file` is emitted instead of
+    /// `suppress-line` for
     /// synthetic Angular `<template>` findings on `.html` files, because
     /// line-suppression comments cannot be expressed in HTML; the `comment`
     /// field carries `<!-- fallow-ignore-file complexity -->` and
@@ -108,8 +109,9 @@ pub enum HealthFindingActionType {
     /// Refactor the function to reduce complexity. Emitted when
     /// cyclomatic/cognitive triggered the finding, when full coverage
     /// still cannot bring CRAP below `max_crap_threshold`, or as a
-    /// secondary action when cyclomatic is within 5 of the cyclomatic
-    /// threshold AND cognitive is at or above the cognitive floor.
+    /// secondary action when cyclomatic is within the configured
+    /// `health.crapRefactorBand` of the cyclomatic threshold AND cognitive
+    /// is at or above the cognitive floor.
     RefactorFunction,
     /// Add tests for a CRAP-triggered finding whose coverage tier is
     /// `none` (no test path reaches the function).

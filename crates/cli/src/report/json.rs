@@ -2074,6 +2074,7 @@ mod tests {
             max_cyclomatic_threshold,
             max_cognitive_threshold,
             max_crap_threshold,
+            crap_refactor_band: 5,
         };
         let finding = crate::health_types::HealthFinding::with_actions(violation, &ctx);
         let serialized = serde_json::to_value(&finding).expect("serialize HealthFinding");
@@ -2389,6 +2390,7 @@ mod tests {
             max_cyclomatic_threshold,
             max_cognitive_threshold,
             max_crap_threshold,
+            crap_refactor_band: 5,
         };
         let finding = crate::health_types::HealthFinding::with_actions(violation, &ctx);
         let actions_meta = if action_opts.omit_suppress_line {
@@ -2529,6 +2531,62 @@ mod tests {
         assert!(
             actions.iter().any(|a| a["type"] == "refactor-function"),
             "near-threshold CC with cognitive above floor must emit secondary refactor (got {actions:?})"
+        );
+    }
+
+    #[test]
+    fn crap_only_secondary_refactor_respects_configured_band() {
+        let violation = crate::health_types::ComplexityViolation {
+            path: std::path::PathBuf::from("src/risk.ts"),
+            name: "computeScore".to_string(),
+            line: 12,
+            col: 0,
+            cyclomatic: 14,
+            cognitive: 10,
+            line_count: 40,
+            param_count: 0,
+            exceeded: crate::health_types::ExceededThreshold::Crap,
+            severity: crate::health_types::FindingSeverity::Moderate,
+            crap: Some(35.5),
+            coverage_pct: None,
+            coverage_tier: Some(crate::health_types::CoverageTier::None),
+            coverage_source: None,
+            inherited_from: None,
+            component_rollup: None,
+        };
+        let narrow_ctx = crate::health_types::HealthActionContext {
+            opts: crate::health_types::HealthActionOptions::default(),
+            max_cyclomatic_threshold: 20,
+            max_cognitive_threshold: 15,
+            max_crap_threshold: 30.0,
+            crap_refactor_band: 5,
+        };
+        let wide_ctx = crate::health_types::HealthActionContext {
+            crap_refactor_band: 6,
+            ..narrow_ctx
+        };
+
+        let narrow_actions =
+            crate::health_types::build_health_finding_actions(&violation, &narrow_ctx);
+        let wide_actions = crate::health_types::build_health_finding_actions(&violation, &wide_ctx);
+
+        assert!(
+            !narrow_actions.iter().any(|a| {
+                matches!(
+                    a.kind,
+                    fallow_types::output_health::HealthFindingActionType::RefactorFunction
+                )
+            }),
+            "default band should not refactor a CRAP-only finding 6 below max cyclomatic"
+        );
+        assert!(
+            wide_actions.iter().any(|a| {
+                matches!(
+                    a.kind,
+                    fallow_types::output_health::HealthFindingActionType::RefactorFunction
+                )
+            }),
+            "configured wider band should emit the secondary refactor action"
         );
     }
 
