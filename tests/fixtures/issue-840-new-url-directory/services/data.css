@@ -1,0 +1,10 @@
+/* Asset inside the services/ directory.
+
+   The directory is referenced as a directory URL via
+   `new URL('./services', import.meta.url)` in entry.js to obtain its
+   filesystem path. There is intentionally NO index module here, so the
+   `./services` specifier is genuinely unresolvable and exercises the
+   speculative-drop path. */
+.services-marker {
+    display: block;
+}

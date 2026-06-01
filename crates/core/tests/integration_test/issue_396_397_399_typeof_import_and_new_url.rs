@@ -9,9 +9,11 @@
 //! - #399 `new URL('./', import.meta.url)`: the canonical __dirname idiom must
 //!   not produce an `unresolved-imports` finding. The string is a directory URL
 //!   argument, not a module specifier.
-//! - #840 `new URL('./dir', import.meta.url)` without trailing slash: a directory
-//!   target without an extension must not produce an `unresolved-import` finding;
-//!   a file target with an extension and a genuinely missing file must still report.
+//! - #840 `new URL('./services', import.meta.url)` without trailing slash: an
+//!   extensionless specifier pointing at a directory with no index module is
+//!   speculative and must not produce an `unresolved-import` finding, while a
+//!   file target with an extension and a genuinely missing file (`./missing.js`)
+//!   must still report.
 //!
 //! These tests use the shared `create_config(root)` helper which builds a
 //! `FallowConfig` with `entry: vec![]` and DOES NOT read the fixture's
@@ -89,13 +91,26 @@ fn new_url_dot_slash_does_not_produce_unresolved_import() {
     );
 }
 
-/// Issue #840: `new URL("./sub", import.meta.url)` where `sub/` is an existing
-/// directory must not produce an `unresolved-import` finding. The specifier has
-/// no file extension, so it is treated as speculative and silently dropped when
-/// the resolver cannot find a module at that path.
+/// Issue #840: `new URL("./services", import.meta.url)` where `services/` is an
+/// existing directory with NO resolvable index module must not produce an
+/// `unresolved-import` finding. The specifier has no file extension, so it is
+/// marked speculative; the resolver cannot find a module at that path, so the
+/// finding is silently dropped.
 ///
-/// At the same time, `new URL("./worker.js", import.meta.url)` with `worker.js`
-/// present must still resolve (no unresolved-import for that specifier).
+/// This is a real resolve-layer regression: the `services/` fixture directory
+/// deliberately contains only a non-module asset (`data.css`), so `./services`
+/// resolves to `Unresolvable`. With the pre-#840 behavior (`is_speculative =
+/// false` for every `new URL` specifier) this would surface `./services` as an
+/// `unresolved-import`. The assertion below fails before the fix and passes
+/// after it.
+///
+/// The test also pins both halves of the selectivity guarantee:
+/// - `new URL("./worker.js", import.meta.url)` with `worker.js` present must
+///   resolve (no finding), and
+/// - `new URL("./missing.js", import.meta.url)` with an extension but no file
+///   keeps `is_speculative = false`, so a genuinely missing file is STILL
+///   reported. This proves the speculative gate is keyed on the extension, not
+///   a blanket suppression of all `new URL` specifiers.
 #[cfg_attr(miri, ignore)]
 #[test]
 fn new_url_directory_target_does_not_produce_unresolved_import() {
@@ -105,13 +120,21 @@ fn new_url_directory_target_does_not_produce_unresolved_import() {
 
     let specifiers = unresolved_specifiers(&results);
     assert!(
-        !specifiers.iter().any(|s| s == "./sub"),
-        "`new URL('./sub', import.meta.url)` pointing at a directory must not \
-         be flagged as unresolved-import. Got: {specifiers:?}"
+        !specifiers.iter().any(|s| s == "./services"),
+        "`new URL('./services', import.meta.url)` pointing at a directory with \
+         no index module must not be flagged as unresolved-import (speculative \
+         drop). Got: {specifiers:?}"
     );
     assert!(
         !specifiers.iter().any(|s| s == "./worker.js"),
         "`new URL('./worker.js', import.meta.url)` with a present file must \
          resolve without an unresolved-import finding. Got: {specifiers:?}"
+    );
+    assert!(
+        specifiers.iter().any(|s| s == "./missing.js"),
+        "`new URL('./missing.js', import.meta.url)` with a file extension but no \
+         file on disk must STILL be reported as unresolved-import; the \
+         speculative gate keys on the extension, not on the `new URL` form. \
+         Got: {specifiers:?}"
     );
 }

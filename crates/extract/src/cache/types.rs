@@ -110,7 +110,14 @@ use crate::MemberKind;
 /// emit synthetic imports because they are runtime markup, not bundled SFC
 /// script modules. Pre-fix entries can carry stale root-relative imports that
 /// surface as false `unresolved-imports`.
-pub(super) const CACHE_VERSION: u32 = 107;
+///
+/// Bumped to 108 for issue #840: extensionless `new URL(specifier,
+/// import.meta.url)` dynamic imports now persist `is_speculative = true` so a
+/// directory target (`new URL('./services', import.meta.url)`) is silently
+/// dropped when the resolver finds no module. Pre-fix entries carry
+/// `is_speculative = false` for those specifiers and surface them as false
+/// `unresolved-imports` until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 108;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
