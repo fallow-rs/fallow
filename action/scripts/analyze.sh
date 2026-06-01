@@ -535,7 +535,12 @@ if { [ "${INPUT_FORMAT:-}" = "sarif" ] || [ "${INPUT_SARIF:-}" = "true" ]; } && 
   build_common_args sarif
   build_command_args false  # omit --top for SARIF
 
-  if ! fallow "${ARGS[@]}" "${EXTRA_ARGS[@]}" > "$SARIF_FILE" 2>/dev/null; then
+  # Validate the produced file rather than gating on the exit code: fallow exits
+  # 1 when issues are found (e.g. health with complexity findings), which is not
+  # a generation failure. Only an empty or invalid SARIF file is a real failure,
+  # matching this block's entry condition and fallow's exit-code semantics (>=2).
+  fallow "${ARGS[@]}" "${EXTRA_ARGS[@]}" > "$SARIF_FILE" 2>/dev/null || true
+  if [ ! -s "$SARIF_FILE" ] || ! jq -e '.' "$SARIF_FILE" > /dev/null 2>&1; then
     echo "::warning::SARIF generation failed"
   fi
 fi

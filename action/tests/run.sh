@@ -599,6 +599,51 @@ else
 fi
 assert_contains "$OUT" "artifacts-dir must be a relative path inside the workspace" "analyze: artifacts-dir traversal error is clear"
 
+# Issue #813: the fallback SARIF block must validate the produced file, not gate
+# on the exit code. fallow exits 1 when issues are found (e.g. `health` with
+# complexity findings), which is not a generation failure. `health` never gets
+# --sarif-file support (HAS_SARIF_FILE stays false), so the fallback block always
+# runs for it. The mock writes valid SARIF and exits 1 to mimic findings-present.
+cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+fmt=""
+prev=""
+for arg in "$@"; do
+  [ "$prev" = "--format" ] && fmt="$arg"
+  prev="$arg"
+done
+if [ "$fmt" = "sarif" ]; then
+  if [ "${MOCK_SARIF_MODE:-valid}" = "valid" ]; then
+    printf '%s\n' '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"fallow"}},"results":[]}]}'
+  fi
+  # exit 1 = issues found (valid mode) OR genuine failure (empty mode writes nothing)
+  exit 1
+fi
+# Primary run is always --format json.
+printf '%s\n' '{"summary":{"functions_above_threshold":0}}'
+exit 1
+SH
+chmod +x "$ANALYZE_TMP/bin/fallow"
+
+SARIF_OK_WORK="$ANALYZE_TMP/sarif-exit1-valid"
+mkdir -p "$SARIF_OK_WORK"
+cd "$SARIF_OK_WORK" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="health" INPUT_FORMAT="sarif" MOCK_SARIF_MODE="valid" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+assert_not_contains "$OUT" "SARIF generation failed" "analyze: valid SARIF + exit 1 does not warn (issue #813)"
+[ -s "$SARIF_OK_WORK/fallow-results.sarif" ] && pass "analyze: valid SARIF + exit 1 still writes the file" || fail "analyze: valid SARIF + exit 1 still writes the file" "missing sarif file"
+
+SARIF_BAD_WORK="$ANALYZE_TMP/sarif-empty"
+mkdir -p "$SARIF_BAD_WORK"
+cd "$SARIF_BAD_WORK" && rm -f "$ANALYZE_TMP/output"
+OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+  INPUT_ROOT="." INPUT_COMMAND="health" INPUT_FORMAT="sarif" MOCK_SARIF_MODE="empty" \
+  bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+cd "$DIR"
+assert_contains "$OUT" "SARIF generation failed" "analyze: empty/invalid SARIF still warns (issue #813)"
+
 # --- Summary jq tests ---
 
 echo ""
