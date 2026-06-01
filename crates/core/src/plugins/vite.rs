@@ -112,7 +112,7 @@ define_plugin!(
         ));
 
         for (find, replacement) in
-            config_parser::extract_config_aliases(source, config_path, &["resolve", "alias"])
+            config_parser::extract_config_path_aliases(source, config_path, &["resolve", "alias"])
         {
             if let Some(normalized) =
                 config_parser::normalize_config_path(&replacement, config_path, root)

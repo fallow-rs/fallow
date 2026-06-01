@@ -70,18 +70,24 @@ fn extract_main_entries(config_path: &Path, source: &str, root: &Path) -> Vec<St
 }
 
 fn extract_js_main_entries(config_path: &Path, source: &str, root: &Path) -> Vec<String> {
-    let top_level = config_parser::extract_config_path_string(source, config_path, &["main"]);
+    let mut entries = Vec::new();
+    if let Some(raw) = config_parser::extract_config_path(source, config_path, &["main"])
+        && let Some(path) = config_parser::normalize_config_path(&raw, config_path, root)
+    {
+        entries.push(path);
+    }
     let env_entries = config_parser::extract_config_object_nested_strings(
         source,
         config_path,
         &["env"],
         &["main"],
     );
-    top_level
-        .into_iter()
-        .chain(env_entries)
-        .filter_map(|raw| config_parser::normalize_config_path(&raw, config_path, root))
-        .collect()
+    entries.extend(
+        env_entries
+            .into_iter()
+            .filter_map(|raw| config_parser::normalize_config_path(raw, config_path, root)),
+    );
+    entries
 }
 
 fn extract_toml_main_entries(config_path: &Path, source: &str, root: &Path) -> Vec<String> {

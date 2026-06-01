@@ -277,7 +277,7 @@ impl Plugin for NuxtPlugin {
             .unwrap_or_else(|| default_src_dir.clone());
 
         if let Some(configured_src_dir) = configured_src_dir.as_deref()
-            && configured_src_dir != default_src_dir.as_str()
+            && configured_src_dir != default_src_dir.as_path()
         {
             add_src_dir_support(&mut result, configured_src_dir);
         }
@@ -342,8 +342,9 @@ impl Plugin for NuxtPlugin {
         }
 
         for (find, replacement) in
-            config_parser::extract_config_aliases(source, config_path, &["alias"])
+            config_parser::extract_config_path_aliases(source, config_path, &["alias"])
         {
+            let replacement = config_parser::path_to_config_string(&replacement);
             if let Some(normalized) = normalize_nuxt_path(&replacement, config_path, root, &src_dir)
             {
                 result.path_aliases.push((find, normalized));
@@ -447,11 +448,11 @@ fn add_module_runtime_patterns(result: &mut PluginResult, root: &Path) {
     }
 }
 
-fn default_nuxt_src_dir(root: &Path) -> String {
+fn default_nuxt_src_dir(root: &Path) -> PathBuf {
     if root.join("app").is_dir() {
-        "app".to_string()
+        PathBuf::from("app")
     } else {
-        String::new()
+        PathBuf::new()
     }
 }
 
@@ -464,28 +465,32 @@ fn is_local_css_path(entry: &str) -> bool {
         || entry.starts_with('/')
 }
 
-fn extract_nuxt_src_dir(source: &str, config_path: &Path, root: &Path) -> Option<String> {
-    let raw = config_parser::extract_config_string(source, config_path, &["srcDir"])?;
+fn extract_nuxt_src_dir(source: &str, config_path: &Path, root: &Path) -> Option<PathBuf> {
+    let raw = config_parser::extract_config_path(source, config_path, &["srcDir"])?;
     normalize_nuxt_src_dir(&raw, config_path, root)
 }
 
-fn normalize_nuxt_src_dir(raw: &str, config_path: &Path, root: &Path) -> Option<String> {
-    let trimmed = raw.trim().trim_end_matches('/');
+fn normalize_nuxt_src_dir(raw: &Path, config_path: &Path, root: &Path) -> Option<PathBuf> {
+    let raw_string = config_parser::path_to_config_string(raw);
+    let trimmed = raw_string.trim().trim_end_matches('/');
     if trimmed.is_empty() || trimmed == "." {
-        return Some(String::new());
+        return Some(PathBuf::new());
     }
-    config_parser::normalize_config_path(trimmed, config_path, root)
+    config_parser::normalize_config_path_buf(
+        config_parser::path_from_config_string(trimmed),
+        config_path,
+        root,
+    )
 }
 
-fn add_src_dir_support(result: &mut PluginResult, src_dir: &str) {
+fn add_src_dir_support(result: &mut PluginResult, src_dir: &Path) {
+    let src_dir_string = config_parser::path_to_config_string(src_dir);
     result
         .path_aliases
-        .push(("~/".to_string(), src_dir.to_string()));
-    result
-        .path_aliases
-        .push(("@/".to_string(), src_dir.to_string()));
+        .push(("~/".to_string(), src_dir_string.clone()));
+    result.path_aliases.push(("@/".to_string(), src_dir_string));
 
-    if src_dir.is_empty() {
+    if src_dir.as_os_str().is_empty() {
         return;
     }
 
@@ -507,13 +512,13 @@ fn add_default_used_export(result: &mut PluginResult, pattern: impl Into<String>
     result.push_used_export_rule(pattern, ["default"]);
 }
 
-fn add_prefixed_default_used_exports(result: &mut PluginResult, prefix: &str, patterns: &[&str]) {
+fn add_prefixed_default_used_exports(result: &mut PluginResult, prefix: &Path, patterns: &[&str]) {
     for pattern in patterns {
         add_default_used_export(result, prefix_with_src_dir(prefix, pattern));
     }
 }
 
-fn extend_prefixed_patterns(target: &mut Vec<String>, prefix: &str, patterns: &[&str]) {
+fn extend_prefixed_patterns(target: &mut Vec<String>, prefix: &Path, patterns: &[&str]) {
     target.extend(
         patterns
             .iter()
@@ -553,14 +558,16 @@ fn normalize_nuxt_path(
     raw: &str,
     config_path: &Path,
     root: &Path,
-    src_dir: &str,
+    src_dir: &Path,
 ) -> Option<String> {
     if let Some(stripped) = raw.strip_prefix("~/").or_else(|| raw.strip_prefix("@/")) {
         return Some(prefix_with_src_dir(src_dir, stripped));
     }
 
     if let Some(stripped) = raw.strip_prefix("~~/").or_else(|| raw.strip_prefix("@@/")) {
-        return Some(stripped.to_string());
+        return Some(config_parser::path_to_config_string(
+            &config_parser::path_from_config_string(stripped),
+        ));
     }
 
     config_parser::normalize_config_path(raw, config_path, root)
@@ -570,7 +577,7 @@ fn normalize_imports_dir_pattern(
     raw: &str,
     config_path: &Path,
     root: &Path,
-    src_dir: &str,
+    src_dir: &Path,
 ) -> Option<String> {
     let normalized = normalize_nuxt_path(raw, config_path, root, src_dir)?;
     Some(imports_dir_pattern(&normalized))
@@ -604,11 +611,13 @@ fn path_looks_like_file_pattern(pattern: &str) -> bool {
         .is_some_and(|segment| segment.contains('.'))
 }
 
-fn prefix_with_src_dir(src_dir: &str, path: &str) -> String {
-    if src_dir.is_empty() {
-        path.to_string()
+fn prefix_with_src_dir(src_dir: &Path, path: &str) -> String {
+    let path = config_parser::path_from_config_string(path);
+    if src_dir.as_os_str().is_empty() {
+        config_parser::path_to_config_string(&path)
     } else {
-        format!("{src_dir}/{path}")
+        let normalized = config_parser::lexical_normalize(&src_dir.join(path));
+        config_parser::path_to_config_string(&normalized)
     }
 }
 
@@ -1484,6 +1493,79 @@ mod tests {
                 .always_used_files
                 .contains(&"src/error.vue".to_string()),
             "srcDir should add error.vue under the configured source root"
+        );
+    }
+
+    #[test]
+    fn resolve_config_src_dir_leading_slash_is_project_relative() {
+        let source = r#"
+            export default defineNuxtConfig({
+                srcDir: "/src",
+                imports: {
+                    dirs: ["~/custom/composables"]
+                }
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/nuxt.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+
+        assert!(
+            result
+                .path_aliases
+                .contains(&("~/".to_string(), "src".to_string())),
+            "leading-slash srcDir should remap ~/ under the project root"
+        );
+        assert!(has_entry_pattern(
+            &result,
+            "src/custom/composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}"
+        ));
+    }
+
+    #[test]
+    fn resolve_config_src_dir_normalizes_backslash_config_values() {
+        let source = r#"
+            export default defineNuxtConfig({
+                srcDir: path.resolve(__dirname, "src\\\\app/"),
+                imports: {
+                    dirs: ["~/custom\\\\composables"]
+                },
+                components: [
+                    { path: "@/feature\\\\components" }
+                ]
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/nuxt.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+
+        assert!(
+            result
+                .path_aliases
+                .contains(&("~/".to_string(), "src/app".to_string())),
+            "srcDir should be normalized in aliases"
+        );
+        assert!(has_entry_pattern(
+            &result,
+            "src/app/custom/composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}"
+        ));
+        assert!(has_entry_pattern(
+            &result,
+            "src/app/feature/components/**/*.{vue,ts,tsx,js,jsx}"
+        ));
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .all(|entry| !entry.contains('\\')),
+            "entry patterns should use forward slashes: {:?}",
+            result.entry_patterns
         );
     }
 

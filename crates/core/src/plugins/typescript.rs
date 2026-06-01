@@ -78,7 +78,7 @@ define_plugin!(
             result.referenced_dependencies.push(jsx_source);
         }
 
-        for (find, replacement) in config_parser::extract_config_aliases(
+        for (find, replacement) in config_parser::extract_config_path_aliases(
             &parse_source,
             parse_path,
             &["compilerOptions", "paths"],
@@ -103,7 +103,7 @@ define_plugin!(
 
 fn normalize_tsconfig_path_alias(
     find: &str,
-    replacement: &str,
+    replacement: &Path,
     config_path: &Path,
     root: &Path,
 ) -> Option<(String, String)> {
@@ -111,10 +111,11 @@ fn normalize_tsconfig_path_alias(
     if normalized_find.is_empty() {
         return None;
     }
+    let replacement = config_parser::path_to_config_string(replacement);
     let normalized_replacement = replacement
         .strip_suffix("/*")
         .or_else(|| replacement.strip_suffix('*'))
-        .unwrap_or(replacement);
+        .unwrap_or(&replacement);
     let normalized_replacement =
         config_parser::normalize_config_path(normalized_replacement, config_path, root)?;
 

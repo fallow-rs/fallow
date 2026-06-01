@@ -727,7 +727,11 @@ fn normalize_local_module_path(raw: &str, config_path: &Path, root: &Path) -> Op
         .flatten()
 }
 
-fn normalize_project_path(raw: &str, config_path: &Path, root: &Path) -> Option<String> {
+fn normalize_project_path(
+    raw: impl AsRef<Path>,
+    config_path: &Path,
+    root: &Path,
+) -> Option<String> {
     config_parser::normalize_config_path(raw, config_path, root)
 }
 
@@ -747,7 +751,7 @@ fn resolve_site_asset_paths(
             .filter_map(|directory| {
                 let candidate = join_project_relative_path(directory, site_relative);
                 let normalized = config_parser::normalize_config_path(
-                    &format!("/{candidate}"),
+                    format!("/{candidate}"),
                     config_path,
                     root,
                 )?;
@@ -789,11 +793,11 @@ fn property_project_path(
     root: &Path,
 ) -> Option<String> {
     config_parser::property_expr(obj, key)
-        .and_then(config_parser::expression_to_path_string)
-        .and_then(|raw| normalize_project_path(&raw, config_path, root))
+        .and_then(config_parser::expression_to_path)
+        .and_then(|raw| normalize_project_path(raw, config_path, root))
 }
 
-fn property_path_values(obj: &ObjectExpression<'_>, key: &str) -> Vec<String> {
+fn property_path_values(obj: &ObjectExpression<'_>, key: &str) -> Vec<PathBuf> {
     config_parser::property_expr(obj, key)
         .map(config_parser::expression_to_path_values)
         .unwrap_or_default()

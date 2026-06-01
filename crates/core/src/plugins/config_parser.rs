@@ -186,15 +186,31 @@ pub(crate) fn array_expression<'a>(expr: &'a Expression<'a>) -> Option<&'a Array
     }
 }
 
-/// Convert a path-like expression to zero or more statically recoverable path strings.
-pub(crate) fn expression_to_path_values(expr: &Expression<'_>) -> Vec<String> {
+/// Convert a config path string to a `PathBuf` with platform-independent
+/// separator handling.
+pub(crate) fn path_from_config_string(raw: &str) -> PathBuf {
+    PathBuf::from(raw.replace('\\', "/"))
+}
+
+/// Convert a config path to the forward-slash string form used in plugin output.
+pub(crate) fn path_to_config_string(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+/// Convert a path-like expression to a statically recoverable path.
+pub(crate) fn expression_to_path(expr: &Expression<'_>) -> Option<PathBuf> {
+    expression_to_path_string(expr).map(|path| path_from_config_string(&path))
+}
+
+/// Convert a path-like expression to zero or more statically recoverable paths.
+pub(crate) fn expression_to_path_values(expr: &Expression<'_>) -> Vec<PathBuf> {
     match expr {
         Expression::ArrayExpression(arr) => arr
             .elements
             .iter()
-            .filter_map(|element| element.as_expression().and_then(expression_to_path_string))
+            .filter_map(|element| element.as_expression().and_then(expression_to_path))
             .collect(),
-        _ => expression_to_path_string(expr).into_iter().collect(),
+        _ => expression_to_path(expr).into_iter().collect(),
     }
 }
 
@@ -251,13 +267,13 @@ pub fn extract_config_string_or_array(
     .unwrap_or_default()
 }
 
-/// Extract a statically recoverable path-like string from a property path.
+/// Extract a statically recoverable path-like value from a property path.
 #[must_use]
-pub fn extract_config_path_string(source: &str, path: &Path, prop_path: &[&str]) -> Option<String> {
+pub fn extract_config_path(source: &str, path: &Path, prop_path: &[&str]) -> Option<PathBuf> {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
         let expr = get_nested_expression(obj, prop_path)?;
-        expression_to_path_string(expr)
+        expression_to_path(expr)
     })
 }
 
@@ -370,6 +386,19 @@ pub fn extract_config_aliases(
     extract_config_aliases_kinded(source, path, prop_path)
         .into_iter()
         .map(|(find, replacement, _is_bare)| (find, replacement))
+        .collect()
+}
+
+/// Extract alias mappings where the replacement is a filesystem path value.
+#[must_use]
+pub fn extract_config_path_aliases(
+    source: &str,
+    path: &Path,
+    prop_path: &[&str],
+) -> Vec<(String, PathBuf)> {
+    extract_config_aliases_kinded(source, path, prop_path)
+        .into_iter()
+        .map(|(find, replacement, _is_bare)| (find, path_from_config_string(&replacement)))
         .collect()
 }
 
@@ -802,31 +831,44 @@ pub fn extract_vite_react_babel_dependencies(source: &str, path: &Path) -> Vec<S
     .unwrap_or_default()
 }
 
-/// Normalize a config-relative path string to a project-root-relative path.
+/// Normalize a config-relative path to a project-root-relative path.
 ///
 /// Handles values extracted from config files such as `"./src"`, `"src/lib"`,
 /// `"/src"`, or absolute filesystem paths under `root`.
 #[must_use]
-pub fn normalize_config_path(raw: &str, config_path: &Path, root: &Path) -> Option<String> {
-    if raw.is_empty() {
+pub fn normalize_config_path_buf(
+    raw: impl AsRef<Path>,
+    config_path: &Path,
+    root: &Path,
+) -> Option<PathBuf> {
+    let raw = raw.as_ref();
+    if raw.as_os_str().is_empty() {
         return None;
     }
 
-    let candidate = if let Some(stripped) = raw.strip_prefix('/') {
+    let raw_string = path_to_config_string(raw);
+    let raw_path = Path::new(&raw_string);
+    let candidate = if let Some(stripped) = raw_string.strip_prefix('/') {
         lexical_normalize(&root.join(stripped))
+    } else if raw_path.is_absolute() {
+        lexical_normalize(raw_path)
     } else {
-        let path = Path::new(raw);
-        if path.is_absolute() {
-            lexical_normalize(path)
-        } else {
-            let base = config_path.parent().unwrap_or(root);
-            lexical_normalize(&base.join(path))
-        }
+        let base = config_path.parent().unwrap_or(root);
+        lexical_normalize(&base.join(raw_path))
     };
 
     let relative = candidate.strip_prefix(root).ok()?;
-    let normalized = relative.to_string_lossy().replace('\\', "/");
-    (!normalized.is_empty()).then_some(normalized)
+    (!relative.as_os_str().is_empty()).then(|| relative.to_path_buf())
+}
+
+/// Normalize a config-relative path to a project-root-relative forward-slash string.
+#[must_use]
+pub fn normalize_config_path(
+    raw: impl AsRef<Path>,
+    config_path: &Path,
+    root: &Path,
+) -> Option<String> {
+    normalize_config_path_buf(raw, config_path, root).map(|path| path_to_config_string(&path))
 }
 
 /// Parse source and run an extraction function on the AST.
@@ -1329,7 +1371,10 @@ fn expression_to_alias_pairs(expr: &Expression) -> Vec<(String, String)> {
                     return None;
                 };
                 let find = property_key_to_string(&prop.key)?;
-                let replacement = expression_to_path_values(&prop.value).into_iter().next()?;
+                let replacement = expression_to_path_values(&prop.value)
+                    .into_iter()
+                    .next()
+                    .map(|path| path_to_config_string(&path))?;
                 Some((find, replacement))
             })
             .collect(),
@@ -1724,7 +1769,7 @@ fn array_from_expression<'a>(expr: &'a Expression<'a>) -> Option<&'a ArrayExpres
     }
 }
 
-fn lexical_normalize(path: &Path) -> PathBuf {
+pub(crate) fn lexical_normalize(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
 
     for component in path.components() {
@@ -2847,6 +2892,28 @@ mod tests {
     }
 
     #[test]
+    fn normalize_config_path_mixed_separators_and_parent_dirs() {
+        let config_path = PathBuf::from("/project/config/vite.config.ts");
+        let root = PathBuf::from("/project");
+
+        assert_eq!(
+            normalize_config_path(".\\src\\..\\app\\lib", &config_path, &root),
+            Some("config/app/lib".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_config_path_leading_slash_stays_project_relative() {
+        let config_path = PathBuf::from("/project/vite.config.ts");
+        let root = PathBuf::from("/project");
+
+        assert_eq!(
+            normalize_config_path("/src\\lib", &config_path, &root),
+            Some("src/lib".to_string())
+        );
+    }
+
+    #[test]
     fn json_wrapped_in_parens_string() {
         let source = r#"({"extends": "@tsconfig/node18/tsconfig.json"})"#;
         let val = extract_config_string(source, &js_path(), &["extends"]);
@@ -3675,6 +3742,32 @@ mod tests {
             });
         "#;
         let mut got = extract_config_aliases_kinded(source, &js_path(), &["resolve", "alias"]);
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("@".to_string(), "./src".to_string(), false),
+                ("lodash-es".to_string(), "lodash".to_string(), true),
+            ]
+        );
+    }
+
+    #[test]
+    fn aliases_kinded_preserves_is_bare_through_imported_spread() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("aliases.js"),
+            r#"export const packageAliases = [{ find: "lodash-es", replacement: "lodash" }];"#,
+        )
+        .unwrap();
+        let config = dir.path().join("vite.config.js");
+        let source = r#"
+            import { packageAliases } from "./aliases.js";
+            export default defineConfig({
+                resolve: { alias: [...packageAliases, { find: "@", replacement: "./src" }] }
+            });
+        "#;
+        let mut got = extract_config_aliases_kinded(source, &config, &["resolve", "alias"]);
         got.sort();
         assert_eq!(
             got,
