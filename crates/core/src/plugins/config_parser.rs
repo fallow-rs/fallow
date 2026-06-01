@@ -1511,6 +1511,14 @@ fn alias_replacement_kinded(expr: &Expression) -> Option<(String, bool)> {
                 !value.starts_with("./") && !value.starts_with("../") && !value.starts_with('/');
             Some((value, is_bare))
         }
+        // tsconfig `compilerOptions.paths` maps each key to an ARRAY of targets
+        // (`{ "@/*": ["./src/*"] }`); take the first entry, matching the prior
+        // non-kinded `expression_to_path_values().next()` behavior.
+        Expression::ArrayExpression(arr) => arr
+            .elements
+            .iter()
+            .find_map(ArrayExpressionElement::as_expression)
+            .and_then(alias_replacement_kinded),
         // Path-builder calls / `new URL(...)` / other expressions are filesystem
         // paths, never bare-package aliases.
         _ => expression_to_path_string(expr).map(|value| (value, false)),
@@ -3815,6 +3823,28 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config = dir.path().join("vite.config.js");
         assert!(extract_config_aliases(source, &config, &["resolve", "alias"]).is_empty());
+    }
+
+    #[test]
+    fn aliases_object_array_value_takes_first_entry() {
+        // tsconfig `compilerOptions.paths` maps each key to an ARRAY of targets;
+        // the resolver must take the first, matching the long-standing non-kinded
+        // behavior the TypeScript plugin depends on. Regression guard for the
+        // array-value case that the kinded unification briefly dropped.
+        let source = r#"
+            export default {
+                compilerOptions: { paths: { "@/*": ["./src/*"], "~/*": ["./lib/*", "./vendor/*"] } }
+            };
+        "#;
+        let mut got = extract_config_aliases(source, &js_path(), &["compilerOptions", "paths"]);
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("@/*".to_string(), "./src/*".to_string()),
+                ("~/*".to_string(), "./lib/*".to_string()),
+            ]
+        );
     }
 
     #[test]
