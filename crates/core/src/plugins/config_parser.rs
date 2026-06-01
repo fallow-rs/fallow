@@ -1535,8 +1535,10 @@ const MAX_ALIAS_RESOLVE_DEPTH: usize = 8;
 /// Sibling-file extensions probed when an alias identifier is imported from a
 /// relative specifier. Mirrors the JS/TS config extensions Vite/Vitest configs
 /// and their shared alias modules use. `.js` first matches the common
-/// JS-project case; the direct-as-written read happens before any probing.
-const ALIAS_SIBLING_EXTS: [&str; 7] = ["js", "mjs", "cjs", "ts", "mts", "cts", "json"];
+/// JS-project case; the direct-as-written read happens before any probing. JSON
+/// is intentionally excluded: it parses as a bare expression with no `export`,
+/// so `find_exported_init` could never recover an alias literal from it.
+const ALIAS_SIBLING_EXTS: [&str; 6] = ["js", "mjs", "cjs", "ts", "mts", "cts"];
 
 /// Resolve an alias expression into `(find, replacement, is_bare)` tuples,
 /// following identifiers and expanding spreads.
