@@ -332,6 +332,21 @@ fn is_storybook_preview_html(from_file: &Path) -> bool {
         == Some(".storybook")
 }
 
+/// Return `true` when `specifier` matches the plugin alias `prefix` at a
+/// path-segment boundary.
+///
+/// Mirrors `alias_match_remainder` in `fallbacks.rs`: a prefix that already
+/// ends with `/` matches any continuation. For bare prefixes (e.g. `@` or
+/// `~`) the match is only admitted when the specifier equals the prefix
+/// exactly or the remainder after stripping the prefix starts with `/`, so
+/// `prefix = "@"` does NOT match `@radix-ui/react-checkbox`.
+fn specifier_matches_alias_prefix(specifier: &str, prefix: &str) -> bool {
+    let Some(remainder) = specifier.strip_prefix(prefix) else {
+        return false;
+    };
+    remainder.is_empty() || prefix.ends_with('/') || remainder.starts_with('/')
+}
+
 fn strip_url_suffix(specifier: &str) -> &str {
     specifier
         .find(['?', '#'])
@@ -1113,7 +1128,7 @@ pub(super) fn resolve_specifier(
     let matches_plugin_alias = ctx
         .path_aliases
         .iter()
-        .any(|(prefix, _)| specifier.starts_with(prefix));
+        .any(|(prefix, _)| specifier_matches_alias_prefix(specifier, prefix));
 
     if let Some(result) =
         try_style_condition_package_resolution(ctx, from_file, specifier, from_style)

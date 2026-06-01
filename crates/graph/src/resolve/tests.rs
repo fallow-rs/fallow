@@ -1935,3 +1935,59 @@ fn resolve_honors_user_supplied_conditions_before_baseline() {
         resolved_path.display()
     );
 }
+
+/// Regression test for issue #838: a bare `"@"` plugin alias must not swallow
+/// `@scope/pkg` imports. Before the fix, `specifier.starts_with("@")` matched
+/// every scoped package and routed it into the alias branch, returning
+/// `Unresolvable` instead of `NpmPackage`.
+#[test]
+#[cfg_attr(miri, ignore)] // oxc_resolver uses statx syscall unsupported by Miri
+fn bare_at_alias_does_not_swallow_scoped_npm_packages() {
+    let resolver = specifier::create_resolver(&[], &[]);
+    let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let extensions = react_native::build_extensions(&[]);
+    let path_to_id = FxHashMap::default();
+    let raw_path_to_id = FxHashMap::default();
+    let workspace_roots = FxHashMap::default();
+    let package_manifests = Vec::new();
+    let condition_names = react_native::build_condition_names(&[], &[]);
+    let root = PathBuf::from("/project");
+    // Register a bare "@" alias pointing to "./src", the problematic case.
+    let aliases = vec![("@".to_string(), "src".to_string())];
+    let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+    let ctx = ResolveContext {
+        resolver: &resolver,
+        style_resolver: &style_resolver,
+        extensions: &extensions,
+        path_to_id: &path_to_id,
+        raw_path_to_id: &raw_path_to_id,
+        workspace_roots: &workspace_roots,
+        package_manifests: &package_manifests,
+        condition_names: &condition_names,
+        path_aliases: &aliases,
+        scss_include_paths: &[],
+        static_dir_mappings: &[],
+        root: &root,
+        canonical_fallback: None,
+        tsconfig_warned: &tsconfig_warned,
+    };
+
+    let file = Path::new("/project/src/app.ts");
+
+    // A scoped npm package must NOT enter the alias branch and must resolve as
+    // NpmPackage, not Unresolvable.
+    let result = specifier::resolve_specifier(&ctx, file, "@radix-ui/react-checkbox", false);
+    assert!(
+        matches!(result, ResolveResult::NpmPackage(ref pkg) if pkg == "@radix-ui/react-checkbox"),
+        "bare '@' alias must not capture @scope/pkg; got {result:?}"
+    );
+
+    // "@/foo" DOES start with "@" and ends with a "/" continuation so it
+    // should still enter the alias branch (and fail resolution since the file
+    // does not exist, returning Unresolvable, not NpmPackage).
+    let result_alias = specifier::resolve_specifier(&ctx, file, "@/foo", false);
+    assert!(
+        matches!(result_alias, ResolveResult::Unresolvable(_)),
+        "'@/foo' should enter the alias branch and return Unresolvable; got {result_alias:?}"
+    );
+}
