@@ -1286,3 +1286,30 @@ fn factory_call_candidate_with_unknown_object_is_dropped() {
         info.member_accesses
     );
 }
+
+/// Regression test for issue #839: `declare` ambient class properties must not
+/// be extracted as class members. They emit no JS and cannot be value-referenced,
+/// so including them causes false unused-class-member findings.
+#[test]
+fn declare_ambient_property_excluded_from_class_members() {
+    let info = parse_source(
+        r"export class MyComponent<I> {
+            declare readonly __input?: I;
+            processInput() { return this.__input; }
+        }",
+    );
+    assert_eq!(info.exports.len(), 1);
+    let names: Vec<&str> = info.exports[0]
+        .members
+        .iter()
+        .map(|m| m.name.as_str())
+        .collect();
+    assert!(
+        !names.contains(&"__input"),
+        "`declare` ambient property must not appear in extracted members; got {names:?}",
+    );
+    assert!(
+        names.contains(&"processInput"),
+        "normal method must still be extracted; got {names:?}",
+    );
+}

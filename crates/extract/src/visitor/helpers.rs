@@ -440,6 +440,7 @@ pub fn extract_class_members(class: &Class<'_>, is_angular_class: bool) -> Vec<M
             }
             ClassElement::PropertyDefinition(prop) => {
                 if let Some(name) = prop.key.static_name()
+                    && !prop.declare
                     && !matches!(
                         prop.accessibility,
                         Some(TSAccessibility::Private | oxc_ast::ast::TSAccessibility::Protected)
