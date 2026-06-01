@@ -1201,7 +1201,11 @@ pub fn render_human(report: &ImpactReport) -> String {
 
 /// Render the report as JSON.
 pub fn render_json(report: &ImpactReport) -> String {
-    serde_json::to_string_pretty(report)
+    let value = crate::output_envelope::serialize_root_output(
+        crate::output_envelope::FallowOutput::Impact(report.clone()),
+    )
+    .unwrap_or_else(|_| serde_json::json!({"error":"failed to serialize impact report"}));
+    serde_json::to_string_pretty(&value)
         .unwrap_or_else(|_| "{\"error\":\"failed to serialize impact report\"}".to_owned())
 }
 

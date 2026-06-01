@@ -1,10 +1,10 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 263
 expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"CARGO_PKG_VERSION\")),\n\"\\\"version\\\": \\\"[VERSION]\\\"\",)"
 ---
 {
-  "schema_version": 6,
+  "kind": "dead-code",
+  "schema_version": 7,
   "version": "[VERSION]",
   "elapsed_ms": 0,
   "total_issues": 0,

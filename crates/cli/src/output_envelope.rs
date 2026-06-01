@@ -3,6 +3,8 @@
 //! This module is the schema-side source of truth for fallow's top-level JSON
 //! envelopes.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use fallow_core::results::AnalysisResults;
 use fallow_types::envelope::{
     BaselineDeltas, BaselineMatch, CheckSummary, ElapsedMs, EntryPoints, Meta, RegressionResult,
@@ -14,6 +16,64 @@ use crate::audit::{AuditAttribution, AuditSummary, AuditVerdict};
 use crate::health_types::{HealthGroup, HealthReport, RuntimeCoverageReport};
 use crate::output_dupes::DupesReportPayload;
 use crate::report::dupes_grouping::DuplicationGroup;
+
+static LEGACY_ENVELOPE: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnvelopeMode {
+    Tagged,
+    Legacy,
+}
+
+impl EnvelopeMode {
+    #[must_use]
+    pub fn current() -> Self {
+        if LEGACY_ENVELOPE.load(Ordering::Relaxed) {
+            Self::Legacy
+        } else {
+            Self::Tagged
+        }
+    }
+}
+
+pub fn set_legacy_envelope(enabled: bool) {
+    LEGACY_ENVELOPE.store(enabled, Ordering::Relaxed);
+}
+
+pub fn serialize_root_output(output: FallowOutput) -> Result<serde_json::Value, serde_json::Error> {
+    serialize_root_output_with_mode(output, EnvelopeMode::current())
+}
+
+pub fn serialize_root_output_with_mode(
+    output: FallowOutput,
+    mode: EnvelopeMode,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut value = serde_json::to_value(output)?;
+    if mode == EnvelopeMode::Legacy {
+        remove_root_kind(&mut value);
+    }
+    Ok(value)
+}
+
+/// Remove only the document-root discriminator for the one-cycle
+/// compatibility mode. Nested objects may carry their own meaningful `kind`
+/// fields, so this intentionally does not recurse.
+pub fn remove_root_kind(value: &mut serde_json::Value) {
+    if let serde_json::Value::Object(map) = value {
+        map.remove("kind");
+    }
+}
+
+pub fn apply_root_kind(value: &mut serde_json::Value, kind: &'static str) {
+    if EnvelopeMode::current() == EnvelopeMode::Tagged
+        && let serde_json::Value::Object(map) = value
+    {
+        map.insert(
+            "kind".to_string(),
+            serde_json::Value::String(kind.to_string()),
+        );
+    }
+}
 
 /// `fallow coverage setup --json` envelope.
 #[derive(Debug, Clone, Serialize)]
@@ -811,29 +871,16 @@ pub struct BoundariesListLogicalGroup {
     pub child_source_indices: Vec<usize>,
 }
 
-/// Typed root of every fallow `--format json` envelope shape that
-/// serializes as a JSON object. The schema derived from this enum drives
-/// the document-root `oneOf` in `docs/output-schema.json`, replacing the
-/// previously hand-maintained block.
+/// Typed root of every fallow JSON envelope shape that serializes as a JSON
+/// object and participates in the documented `FallowOutput` contract. The
+/// schema derived from this enum drives the document-root `oneOf` in
+/// `docs/output-schema.json`.
 ///
-/// `#[serde(untagged)]` preserves wire compatibility: consumers see exactly
-/// the same top-level keys today (`schema_version`, `version`, plus the
-/// per-envelope shape). The schema's `oneOf` lets agents narrow by trying
-/// variants in order; field sets differ enough that the first matching
-/// variant is the correct one in practice. Note that [`HealthOutput`] and
-/// [`DupesOutput`] flatten their inner body (`HealthReport` /
-/// `DuplicationReport`) into top-level fields, so the actual
-/// discriminators are nested-body keys such as `health_score` (health) and
-/// `clone_groups` (dupes), NOT `report` or `groups`.
-///
-/// Variant order is **most-specific first**. Schemars 1 preserves
-/// declaration order in the emitted `oneOf`, and validators that enforce
-/// strict `oneOf` (and any future migration that adds `Deserialize`) will
-/// try branches top-to-bottom. The required-field sets shrink as we move
-/// down the list, with [`CombinedOutput`] last because its three required
-/// fields (`schema_version`, `version`, `elapsed_ms`) are a strict subset
-/// of every other variant's required set; placing it earlier would let a
-/// `CheckOutput` payload silently match `CombinedOutput` first.
+/// The default wire shape now carries a top-level `kind` discriminator so
+/// agents and schema-validating clients can select the variant in O(1) instead
+/// of probing for unique field presence. `--legacy-envelope` is a one-cycle
+/// compatibility flag that removes only this document-root `kind` field from
+/// CLI JSON output; nested report objects are not rewritten.
 ///
 /// One envelope is intentionally NOT in this enum:
 /// - `CodeClimateOutput` serializes as a bare JSON array
@@ -841,71 +888,124 @@ pub struct BoundariesListLogicalGroup {
 ///   spec; `#[serde(tag = ...)]` cannot internally tag a non-object
 ///   variant and wrapping the array would break the spec. The root schema
 ///   carries it as a sibling `oneOf` branch alongside `FallowOutput`.
-///
-/// A future major release plans to switch this to
-/// `#[serde(tag = "kind")]` for true O(1) discriminability on AI / agent
-/// consumers, paired with a one-cycle `--legacy-envelope` opt-out flag.
-/// Tracked under issue #384.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
     feature = "schema",
     schemars(title = "fallow --format json (typed root)")
 )]
-#[serde(untagged)]
+#[serde(tag = "kind")]
 #[allow(
     dead_code,
-    reason = "consumed at schema-emit time only; runtime code uses the per-variant envelope structs directly"
+    reason = "some variants are schema-emit only, but runtime roots serialize through this enum where practical"
 )]
 pub enum FallowOutput {
     /// `fallow audit --format json`. Required `command: "audit"` singleton
     /// plus `verdict` and `summary`.
+    #[serde(rename = "audit")]
     Audit(AuditOutput),
     /// `fallow explain <issue-type> --format json`. Required `id`, `name`,
     /// `rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.
+    #[serde(rename = "explain")]
     Explain(ExplainOutput),
     /// `fallow --format review-github` / `--format review-gitlab`. Required
     /// `body`, `comments`, `meta`; no `schema_version`.
+    #[serde(rename = "review-envelope")]
     ReviewEnvelope(ReviewEnvelopeOutput),
     /// `fallow ci reconcile-review --format json`. Required `schema`
     /// singleton plus `provider`, `comments`, and the various
     /// `*_fingerprints` arrays.
+    #[serde(rename = "review-reconcile")]
     ReviewReconcile(ReviewReconcileOutput),
     /// `fallow coverage setup --json`. Required `schema_version` singleton
     /// plus `framework_detected`, `members`, `commands`, `snippets`.
+    #[serde(rename = "coverage-setup")]
     CoverageSetup(CoverageSetupOutput),
     /// `fallow coverage analyze --format json`. Required
     /// `schema_version: "1"` singleton plus `version`, `elapsed_ms`,
-    /// `runtime_coverage`. The `runtime_coverage` discriminator field is
-    /// uniquely present here; ordered before broader variants so untagged
-    /// narrowing matches `CoverageAnalyzeOutput` first.
+    /// `runtime_coverage`.
+    #[serde(rename = "coverage-analyze")]
     CoverageAnalyze(CoverageAnalyzeOutput),
     /// `fallow list --boundaries --format json`. Required `boundaries`
     /// sub-object; no `schema_version`.
+    #[serde(rename = "list-boundaries")]
     ListBoundaries(ListBoundariesOutput),
     /// `fallow health --format json`. Required `report: HealthReport`.
+    #[serde(rename = "health")]
     Health(HealthOutput),
     /// `fallow dupes --format json`. Required `report: DupesReportPayload`
     /// (typed wrapper payload carrying `clone_groups[]: CloneGroupFinding`
     /// and `clone_families[]: CloneFamilyFinding`).
+    #[serde(rename = "dupes")]
     Dupes(DupesOutput),
-    /// `fallow check --format json --group-by <mode>`. Required `grouped_by`
-    /// plus a `groups` array; ordered before [`Self::Check`] because the
-    /// `grouped_by` discriminator field is uniquely present here.
+    /// `fallow dead-code --format json --group-by <mode>`. Required `grouped_by`
+    /// plus a `groups` array.
+    #[serde(rename = "dead-code-grouped")]
     CheckGrouped(CheckGroupedOutput),
     /// `fallow impact --format json`. Required `enabled`, `record_count`,
-    /// `containment_count`, `recent_containment`; no `schema_version`,
-    /// `command`, `total_issues`, or `report`. Ordered before the broader
-    /// variants because its `record_count` + `containment_count` discriminator
-    /// pair is uniquely present here.
+    /// `containment_count`, `recent_containment`; no global `schema_version`,
+    /// `command`, `total_issues`, or `report`.
+    #[serde(rename = "impact")]
     Impact(crate::impact::ImpactReport),
-    /// `fallow check --format json` / `fallow dead-code --format json`.
+    /// `fallow dead-code --format json`.
     /// Required `total_issues` plus `summary: CheckSummary`.
+    #[serde(rename = "dead-code")]
     Check(CheckOutput),
     /// Bare `fallow --format json` (combined dead-code + dupes + health).
-    /// LAST because its required-field set (`schema_version`, `version`,
-    /// `elapsed_ms`) is a strict subset of every other variant's required
-    /// set; placing it earlier would let untagged narrowing match a
-    /// `CheckOutput` payload against `CombinedOutput` first.
+    /// Required `schema_version`, `version`, and `elapsed_ms`, with optional
+    /// `check`, `dupes`, and `health` subreports.
+    #[serde(rename = "combined")]
     Combined(CombinedOutput),
+}
+
+#[cfg(test)]
+mod tests {
+    use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+
+    use super::*;
+
+    fn combined_output() -> CombinedOutput {
+        CombinedOutput {
+            schema_version: SchemaVersion(crate::report::SCHEMA_VERSION),
+            version: ToolVersion("test".to_string()),
+            elapsed_ms: ElapsedMs(0),
+            meta: None,
+            check: None,
+            dupes: None,
+            health: None,
+        }
+    }
+
+    #[test]
+    fn root_output_serializes_kind_by_default() {
+        let value = serialize_root_output_with_mode(
+            FallowOutput::Combined(combined_output()),
+            EnvelopeMode::Tagged,
+        )
+        .expect("combined root should serialize");
+
+        assert_eq!(value["kind"], serde_json::Value::String("combined".into()));
+        assert_eq!(value["schema_version"], crate::report::SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn legacy_mode_removes_only_root_kind() {
+        let value = serialize_root_output_with_mode(
+            FallowOutput::Combined(combined_output()),
+            EnvelopeMode::Legacy,
+        )
+        .expect("combined root should serialize");
+
+        assert!(value.get("kind").is_none());
+
+        let mut nested = serde_json::json!({
+            "kind": "root",
+            "action": {
+                "kind": "suppress"
+            }
+        });
+        remove_root_kind(&mut nested);
+        assert!(nested.get("kind").is_none());
+        assert_eq!(nested["action"]["kind"], "suppress");
+    }
 }

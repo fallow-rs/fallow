@@ -701,6 +701,7 @@ pub use compact::build_compact_lines;
 )]
 pub(crate) use json::SCHEMA_VERSION;
 pub use json::build_baseline_deltas_json;
+pub use json::build_check_json_payload_with_config_fixable;
 #[allow(
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"

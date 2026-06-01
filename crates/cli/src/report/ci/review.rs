@@ -152,8 +152,10 @@ pub fn print_review_envelope(command: &str, provider: Provider, codeclimate: &Va
         super::pr_comment::issues_from_codeclimate(codeclimate),
     );
     let envelope = render_review_envelope(command, provider, &issues);
-    let value =
-        serde_json::to_value(&envelope).expect("ReviewEnvelopeOutput serializes infallibly");
+    let value = crate::output_envelope::serialize_root_output(
+        crate::output_envelope::FallowOutput::ReviewEnvelope(envelope),
+    )
+    .expect("ReviewEnvelopeOutput serializes infallibly");
     emit_json(&value, "review envelope")
 }
 

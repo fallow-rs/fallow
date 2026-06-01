@@ -1,10 +1,10 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 2038
 expression: redact_version(&json_str)
 ---
 {
-  "schema_version": 6,
+  "kind": "dead-code",
+  "schema_version": 7,
   "version": "[VERSION]",
   "elapsed_ms": 42,
   "total_issues": 21,

@@ -230,6 +230,7 @@ fn print_list_json(
         result.insert("entry_points".to_string(), serde_json::json!(eps));
     }
 
+    let has_boundaries = boundary_data.is_some();
     if let Some(bd) = boundary_data {
         result.insert("boundaries".to_string(), boundary_data_to_json(bd));
     }
@@ -268,7 +269,12 @@ fn print_list_json(
         );
     }
 
-    match serde_json::to_string_pretty(&serde_json::Value::Object(result)) {
+    let mut output = serde_json::Value::Object(result);
+    if has_boundaries {
+        crate::output_envelope::apply_root_kind(&mut output, "list-boundaries");
+    }
+
+    match serde_json::to_string_pretty(&output) {
         Ok(json) => {
             println!("{json}");
             ExitCode::SUCCESS

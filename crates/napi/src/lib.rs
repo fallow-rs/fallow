@@ -25,6 +25,7 @@ pub struct DeadCodeOptions {
     pub workspace: Option<Vec<String>>,
     pub changed_workspaces: Option<String>,
     pub explain: Option<bool>,
+    pub legacy_envelope: Option<bool>,
     pub unused_files: Option<bool>,
     pub unused_exports: Option<bool>,
     pub unused_deps: Option<bool>,
@@ -61,6 +62,7 @@ pub struct DuplicationOptions {
     pub workspace: Option<Vec<String>>,
     pub changed_workspaces: Option<String>,
     pub explain: Option<bool>,
+    pub legacy_envelope: Option<bool>,
     pub mode: Option<String>,
     pub min_tokens: Option<u32>,
     pub min_lines: Option<u32>,
@@ -87,6 +89,7 @@ pub struct ComplexityOptions {
     pub workspace: Option<Vec<String>>,
     pub changed_workspaces: Option<String>,
     pub explain: Option<bool>,
+    pub legacy_envelope: Option<bool>,
     pub max_cyclomatic: Option<u32>,
     pub max_cognitive: Option<u32>,
     pub max_crap: Option<f64>,
@@ -122,6 +125,7 @@ fn map_common_options(
     workspace: Option<Vec<String>>,
     changed_workspaces: Option<String>,
     explain: Option<bool>,
+    legacy_envelope: Option<bool>,
 ) -> napi::Result<programmatic::AnalysisOptions> {
     let threads = threads.map(usize::try_from).transpose().map_err(|_| {
         napi::Error::new(
@@ -142,6 +146,7 @@ fn map_common_options(
         workspace,
         changed_workspaces,
         explain: explain.unwrap_or(false),
+        legacy_envelope: legacy_envelope.unwrap_or(false),
     })
 }
 
@@ -253,6 +258,7 @@ impl TryFrom<DeadCodeOptions> for programmatic::DeadCodeOptions {
                 value.workspace,
                 value.changed_workspaces,
                 value.explain,
+                value.legacy_envelope,
             )?,
             filters: programmatic::DeadCodeFilters {
                 unused_files: value.unused_files.unwrap_or(false),
@@ -305,6 +311,7 @@ impl TryFrom<DuplicationOptions> for programmatic::DuplicationOptions {
                 value.workspace,
                 value.changed_workspaces,
                 value.explain,
+                value.legacy_envelope,
             )?,
             mode: parse_duplication_mode(value.mode)?,
             min_tokens: value.min_tokens.map_or(defaults.min_tokens, |n| n as usize),
@@ -343,6 +350,7 @@ impl TryFrom<ComplexityOptions> for programmatic::ComplexityOptions {
                 value.workspace,
                 value.changed_workspaces,
                 value.explain,
+                value.legacy_envelope,
             )?,
             max_cyclomatic: value
                 .max_cyclomatic

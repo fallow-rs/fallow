@@ -9,6 +9,7 @@ export interface AnalysisOptions {
   workspace?: string[];
   changedWorkspaces?: string;
   explain?: boolean;
+  legacyEnvelope?: boolean;
 }
 
 export interface DeadCodeOptions extends AnalysisOptions {

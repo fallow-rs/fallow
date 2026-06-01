@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Fallow JSON Output Schemas",
-  "description": "Schemas for the JSON output of fallow commands. To identify which envelope you have, check for the unique top-level field: `summary.total_issues` (check), `health_score` (health), `clone_groups` (dupes), `runtime_coverage` (coverage analyze), `boundaries` (list --boundaries), `command: \"audit\"` (audit), `body` plus `comments` (review-github / review-gitlab), `schema: \"fallow-review-reconcile/v1\"` (ci reconcile-review), `framework_detected` plus `members` (coverage setup), `id` plus `how_to_fix` (explain), `check`+`dupes`+`health` keys together (bare combined invocation). `HealthOutput` and `DupesOutput` flatten their body (`HealthReport` / `DupesReportPayload`) into top-level fields, so the discriminator field is from the body shape itself, not a wrapper key. Every object-shaped envelope is a variant of `FallowOutput`; `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch.",
+  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator (for example `dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, `explain`, `impact`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of probing for unique field presence. `--legacy-envelope` removes only the document-root `kind` for one compatibility cycle. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.",
   "oneOf": [
     {
       "$ref": "#/definitions/FallowOutput"
@@ -7004,62 +7004,221 @@
       "description": "Discovery outcome for a [`LogicalGroup`]."
     },
     "FallowOutput": {
-      "anyOf": [
+      "oneOf": [
         {
           "description": "`fallow audit --format json`. Required `command: \"audit\"` singleton\nplus `verdict` and `summary`.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "audit"
+            }
+          },
+          "required": [
+            "kind"
+          ],
           "$ref": "#/definitions/AuditOutput"
         },
         {
-          "description": "`fallow explain <issue-type> --format json`. Required `id`, `name`,\n`rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.",
-          "$ref": "#/definitions/ExplainOutput"
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "rationale": {
+              "type": "string"
+            },
+            "example": {
+              "type": "string"
+            },
+            "how_to_fix": {
+              "type": "string"
+            },
+            "docs": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "explain"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "name",
+            "summary",
+            "rationale",
+            "example",
+            "how_to_fix",
+            "docs"
+          ],
+          "title": "fallow explain <issue-type> --format json",
+          "description": "`fallow explain <issue-type> --format json`. Required `id`, `name`,\n`rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`."
         },
         {
           "description": "`fallow --format review-github` / `--format review-gitlab`. Required\n`body`, `comments`, `meta`; no `schema_version`.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "review-envelope"
+            }
+          },
+          "required": [
+            "kind"
+          ],
           "$ref": "#/definitions/ReviewEnvelopeOutput"
         },
         {
           "description": "`fallow ci reconcile-review --format json`. Required `schema`\nsingleton plus `provider`, `comments`, and the various\n`*_fingerprints` arrays.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "review-reconcile"
+            }
+          },
+          "required": [
+            "kind"
+          ],
           "$ref": "#/definitions/ReviewReconcileOutput"
         },
         {
           "description": "`fallow coverage setup --json`. Required `schema_version` singleton\nplus `framework_detected`, `members`, `commands`, `snippets`.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "coverage-setup"
+            }
+          },
+          "required": [
+            "kind"
+          ],
           "$ref": "#/definitions/CoverageSetupOutput"
         },
         {
-          "description": "`fallow coverage analyze --format json`. Required\n`schema_version: \"1\"` singleton plus `version`, `elapsed_ms`,\n`runtime_coverage`. The `runtime_coverage` discriminator field is\nuniquely present here; ordered before broader variants so untagged\nnarrowing matches `CoverageAnalyzeOutput` first.",
+          "description": "`fallow coverage analyze --format json`. Required\n`schema_version: \"1\"` singleton plus `version`, `elapsed_ms`,\n`runtime_coverage`.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "coverage-analyze"
+            }
+          },
+          "required": [
+            "kind"
+          ],
           "$ref": "#/definitions/CoverageAnalyzeOutput"
         },
         {
           "description": "`fallow list --boundaries --format json`. Required `boundaries`\nsub-object; no `schema_version`.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "list-boundaries"
+            }
+          },
+          "required": [
+            "kind"
+          ],
           "$ref": "#/definitions/ListBoundariesOutput"
         },
         {
           "description": "`fallow health --format json`. Required `report: HealthReport`.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "health"
+            }
+          },
+          "required": [
+            "kind"
+          ],
           "$ref": "#/definitions/HealthOutput"
         },
         {
           "description": "`fallow dupes --format json`. Required `report: DupesReportPayload`\n(typed wrapper payload carrying `clone_groups[]: CloneGroupFinding`\nand `clone_families[]: CloneFamilyFinding`).",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "dupes"
+            }
+          },
+          "required": [
+            "kind"
+          ],
           "$ref": "#/definitions/DupesOutput"
         },
         {
-          "description": "`fallow check --format json --group-by <mode>`. Required `grouped_by`\nplus a `groups` array; ordered before [`Self::Check`] because the\n`grouped_by` discriminator field is uniquely present here.",
+          "description": "`fallow dead-code --format json --group-by <mode>`. Required `grouped_by`\nplus a `groups` array.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "dead-code-grouped"
+            }
+          },
+          "required": [
+            "kind"
+          ],
           "$ref": "#/definitions/CheckGroupedOutput"
         },
         {
-          "description": "`fallow impact --format json`. Required `enabled`, `record_count`,\n`containment_count`, `recent_containment`; no `schema_version`,\n`command`, `total_issues`, or `report`. Ordered before the broader\nvariants because its `record_count` + `containment_count` discriminator\npair is uniquely present here.",
+          "description": "`fallow impact --format json`. Required `enabled`, `record_count`,\n`containment_count`, `recent_containment`; no global `schema_version`,\n`command`, `total_issues`, or `report`.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "impact"
+            }
+          },
+          "required": [
+            "kind"
+          ],
           "$ref": "#/definitions/ImpactReport"
         },
         {
-          "description": "`fallow check --format json` / `fallow dead-code --format json`.\nRequired `total_issues` plus `summary: CheckSummary`.",
+          "description": "`fallow dead-code --format json`.\nRequired `total_issues` plus `summary: CheckSummary`.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "dead-code"
+            }
+          },
+          "required": [
+            "kind"
+          ],
           "$ref": "#/definitions/CheckOutput"
         },
         {
-          "description": "Bare `fallow --format json` (combined dead-code + dupes + health).\nLAST because its required-field set (`schema_version`, `version`,\n`elapsed_ms`) is a strict subset of every other variant's required\nset; placing it earlier would let untagged narrowing match a\n`CheckOutput` payload against `CombinedOutput` first.",
+          "description": "Bare `fallow --format json` (combined dead-code + dupes + health).\nRequired `schema_version`, `version`, and `elapsed_ms`, with optional\n`check`, `dupes`, and `health` subreports.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "combined"
+            }
+          },
+          "required": [
+            "kind"
+          ],
           "$ref": "#/definitions/CombinedOutput"
         }
       ],
       "title": "fallow --format json (typed root)",
-      "description": "Typed root of every fallow `--format json` envelope shape that\nserializes as a JSON object. The schema derived from this enum drives\nthe document-root `oneOf` in `docs/output-schema.json`, replacing the\npreviously hand-maintained block.\n\n`#[serde(untagged)]` preserves wire compatibility: consumers see exactly\nthe same top-level keys today (`schema_version`, `version`, plus the\nper-envelope shape). The schema's `oneOf` lets agents narrow by trying\nvariants in order; field sets differ enough that the first matching\nvariant is the correct one in practice. Note that [`HealthOutput`] and\n[`DupesOutput`] flatten their inner body (`HealthReport` /\n`DuplicationReport`) into top-level fields, so the actual\ndiscriminators are nested-body keys such as `health_score` (health) and\n`clone_groups` (dupes), NOT `report` or `groups`.\n\nVariant order is **most-specific first**. Schemars 1 preserves\ndeclaration order in the emitted `oneOf`, and validators that enforce\nstrict `oneOf` (and any future migration that adds `Deserialize`) will\ntry branches top-to-bottom. The required-field sets shrink as we move\ndown the list, with [`CombinedOutput`] last because its three required\nfields (`schema_version`, `version`, `elapsed_ms`) are a strict subset\nof every other variant's required set; placing it earlier would let a\n`CheckOutput` payload silently match `CombinedOutput` first.\n\nOne envelope is intentionally NOT in this enum:\n- `CodeClimateOutput` serializes as a bare JSON array\n  (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality\n  spec; `#[serde(tag = ...)]` cannot internally tag a non-object\n  variant and wrapping the array would break the spec. The root schema\n  carries it as a sibling `oneOf` branch alongside `FallowOutput`.\n\nA future major release plans to switch this to\n`#[serde(tag = \"kind\")]` for true O(1) discriminability on AI / agent\nconsumers, paired with a one-cycle `--legacy-envelope` opt-out flag.\nTracked under issue #384."
+      "description": "Typed root of every fallow JSON envelope shape that serializes as a JSON\nobject and participates in the documented `FallowOutput` contract. The\nschema derived from this enum drives the document-root `oneOf` in\n`docs/output-schema.json`.\n\nThe default wire shape now carries a top-level `kind` discriminator so\nagents and schema-validating clients can select the variant in O(1) instead\nof probing for unique field presence. `--legacy-envelope` is a one-cycle\ncompatibility flag that removes only this document-root `kind` field from\nCLI JSON output; nested report objects are not rewritten.\n\nOne envelope is intentionally NOT in this enum:\n- `CodeClimateOutput` serializes as a bare JSON array\n  (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality\n  spec; `#[serde(tag = ...)]` cannot internally tag a non-object\n  variant and wrapping the array would break the spec. The root schema\n  carries it as a sibling `oneOf` branch alongside `FallowOutput`."
     },
     "UntestedExportFinding": {
       "type": "object",

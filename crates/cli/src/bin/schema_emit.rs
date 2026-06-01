@@ -627,22 +627,17 @@ fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
     root.insert(
         "description".to_string(),
         Value::String(
-            "Schemas for the JSON output of fallow commands. To identify which \
-             envelope you have, check for the unique top-level field: \
-             `summary.total_issues` (check), `health_score` (health), \
-             `clone_groups` (dupes), `runtime_coverage` (coverage analyze), \
-             `boundaries` (list --boundaries), `command: \"audit\"` (audit), \
-             `body` plus `comments` (review-github / review-gitlab), \
-             `schema: \"fallow-review-reconcile/v1\"` (ci reconcile-review), \
-             `framework_detected` plus `members` (coverage setup), `id` plus \
-             `how_to_fix` (explain), `check`+`dupes`+`health` keys together \
-             (bare combined invocation). `HealthOutput` and `DupesOutput` \
-             flatten their body (`HealthReport` / `DupesReportPayload`) into \
-             top-level fields, so the discriminator field is from the body \
-             shape itself, not a wrapper key. Every object-shaped envelope \
-             is a variant of `FallowOutput`; `CodeClimateOutput` is a bare \
-             JSON array (per the Code Climate / GitLab Code Quality spec) \
-             and stays a sibling root branch."
+            "Schemas for the JSON output of fallow commands. Object-shaped \
+             envelopes covered by the `FallowOutput` contract carry a top-level \
+             `kind` discriminator (for example `dead-code`, `dead-code-grouped`, \
+             `health`, `dupes`, `combined`, `audit`, `explain`, `impact`, \
+             `coverage-setup`, `coverage-analyze`, `list-boundaries`, \
+             `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of \
+             probing for unique field presence. `--legacy-envelope` removes \
+             only the document-root `kind` for one compatibility cycle. \
+             `CodeClimateOutput` is a bare JSON array (per the Code Climate / \
+             GitLab Code Quality spec) and stays a sibling root branch \
+             discriminated by checking whether the document root is an array."
                 .to_string(),
         ),
     );

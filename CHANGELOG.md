@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **JSON envelope outputs now include a top-level `kind` discriminator.** Typed `FallowOutput` roots such as `dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, `explain`, `impact`, coverage setup/analyze, list boundaries, and CI review envelopes can now be identified by `kind` instead of field-presence heuristics. `schema_version` is bumped to 7, and `--legacy-envelope` keeps the previous root shape for one migration cycle. `CodeClimateOutput` remains a bare array to preserve the Code Climate / GitLab Code Quality contract. The CLI `check` subcommand remains a legacy alias for `dead-code`; new JSON discriminators use the canonical `dead-code` name. (Closes [#413](https://github.com/fallow-rs/fallow/issues/413).)
+
 ### Fixed
 
 - **`fallow health` now explains whether CRAP scores are estimated or sourced from Istanbul coverage in the high-complexity output.** Previously the main human section showed values like `650.0 CRAP` without saying whether they came from real coverage or the static export-reference estimate, and the file-score hint told users to pass a bare `--coverage` flag. The complexity section now includes a short coverage-source note, mixed Istanbul runs call out that unmatched functions fall back to estimates, and the hint spells out `fallow health --coverage <coverage-final.json>`. A top-level `fallow --coverage` typo now gets a targeted health-command hint instead of clap suggesting unrelated flags such as `--tolerance`. (Refs [#474](https://github.com/fallow-rs/fallow/issues/474).)

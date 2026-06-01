@@ -504,7 +504,9 @@ pub fn run_explain(issue_type: &str, output: OutputFormat) -> ExitCode {
                 how_to_fix: guide.how_to_fix.to_string(),
                 docs: rule_docs_url(rule),
             };
-            match serde_json::to_value(&envelope) {
+            match crate::output_envelope::serialize_root_output(
+                crate::output_envelope::FallowOutput::Explain(envelope),
+            ) {
                 Ok(value) => crate::report::emit_json(&value, "explain"),
                 Err(e) => {
                     crate::error::emit_error(&format!("JSON serialization error: {e}"), 2, output)

@@ -21,7 +21,7 @@ All functions are async and return the same JSON-shaped report contracts that th
 
 Enum-like option values use lowercase CLI-style strings such as `"mild"`, `"cyclomatic"`, `"handle"`, and `"low"`.
 
-Shared options mirror analysis-affecting CLI globals, including `root`, `configPath`, `noCache`, `threads`, `diffFile`, `production`, `changedSince`, `workspace`, `changedWorkspaces`, and `explain`. `diffFile` accepts a path to a unified diff file; stdin diff sources are CLI-only.
+Shared options mirror analysis-affecting CLI globals, including `root`, `configPath`, `noCache`, `threads`, `diffFile`, `production`, `changedSince`, `workspace`, `changedWorkspaces`, `explain`, and `legacyEnvelope`. `legacyEnvelope` mirrors CLI `--legacy-envelope` for consumers that need one migration cycle without the top-level JSON `kind` discriminator. `diffFile` accepts a path to a unified diff file; stdin diff sources are CLI-only.
 
 Rejected promises throw a `FallowNodeError` with:
 

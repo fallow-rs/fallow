@@ -589,7 +589,9 @@ fn print_combined_json(
         dupes: None,
         health: None,
     };
-    let mut combined = match serde_json::to_value(&envelope) {
+    let mut combined = match crate::output_envelope::serialize_root_output(
+        crate::output_envelope::FallowOutput::Combined(envelope),
+    ) {
         Ok(serde_json::Value::Object(map)) => map,
         Ok(_) => unreachable!("CombinedOutput serializes as a JSON object"),
         Err(e) => {
@@ -602,7 +604,7 @@ fn print_combined_json(
     };
 
     if let Some(result) = check {
-        match report::build_json_with_config_fixable(
+        match report::build_check_json_payload_with_config_fixable(
             &result.results,
             &result.config.root,
             result.elapsed,

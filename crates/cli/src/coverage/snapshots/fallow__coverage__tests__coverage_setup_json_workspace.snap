@@ -2,6 +2,7 @@
 source: crates/cli/src/coverage/mod.rs
 expression: payload
 ---
+kind: coverage-setup
 schema_version: "1"
 framework_detected: plain_node
 package_manager: pnpm

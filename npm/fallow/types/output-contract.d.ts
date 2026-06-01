@@ -25,33 +25,20 @@
 
 
 /**
- * Schemas for the JSON output of fallow commands. To identify which envelope you have, check for the unique top-level field: `summary.total_issues` (check), `health_score` (health), `clone_groups` (dupes), `runtime_coverage` (coverage analyze), `boundaries` (list --boundaries), `command: "audit"` (audit), `body` plus `comments` (review-github / review-gitlab), `schema: "fallow-review-reconcile/v1"` (ci reconcile-review), `framework_detected` plus `members` (coverage setup), `id` plus `how_to_fix` (explain), `check`+`dupes`+`health` keys together (bare combined invocation). `HealthOutput` and `DupesOutput` flatten their body (`HealthReport` / `DupesReportPayload`) into top-level fields, so the discriminator field is from the body shape itself, not a wrapper key. Every object-shaped envelope is a variant of `FallowOutput`; `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch.
+ * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator (for example `dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, `explain`, `impact`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of probing for unique field presence. `--legacy-envelope` removes only the document-root `kind` for one compatibility cycle. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.
  */
 export type FallowJsonOutput = (FallowOutput | CodeClimateOutput)
 /**
- * Typed root of every fallow `--format json` envelope shape that
- * serializes as a JSON object. The schema derived from this enum drives
- * the document-root `oneOf` in `docs/output-schema.json`, replacing the
- * previously hand-maintained block.
+ * Typed root of every fallow JSON envelope shape that serializes as a JSON
+ * object and participates in the documented `FallowOutput` contract. The
+ * schema derived from this enum drives the document-root `oneOf` in
+ * `docs/output-schema.json`.
  *
- * `#[serde(untagged)]` preserves wire compatibility: consumers see exactly
- * the same top-level keys today (`schema_version`, `version`, plus the
- * per-envelope shape). The schema's `oneOf` lets agents narrow by trying
- * variants in order; field sets differ enough that the first matching
- * variant is the correct one in practice. Note that [`HealthOutput`] and
- * [`DupesOutput`] flatten their inner body (`HealthReport` /
- * `DuplicationReport`) into top-level fields, so the actual
- * discriminators are nested-body keys such as `health_score` (health) and
- * `clone_groups` (dupes), NOT `report` or `groups`.
- *
- * Variant order is **most-specific first**. Schemars 1 preserves
- * declaration order in the emitted `oneOf`, and validators that enforce
- * strict `oneOf` (and any future migration that adds `Deserialize`) will
- * try branches top-to-bottom. The required-field sets shrink as we move
- * down the list, with [`CombinedOutput`] last because its three required
- * fields (`schema_version`, `version`, `elapsed_ms`) are a strict subset
- * of every other variant's required set; placing it earlier would let a
- * `CheckOutput` payload silently match `CombinedOutput` first.
+ * The default wire shape now carries a top-level `kind` discriminator so
+ * agents and schema-validating clients can select the variant in O(1) instead
+ * of probing for unique field presence. `--legacy-envelope` is a one-cycle
+ * compatibility flag that removes only this document-root `kind` field from
+ * CLI JSON output; nested report objects are not rewritten.
  *
  * One envelope is intentionally NOT in this enum:
  * - `CodeClimateOutput` serializes as a bare JSON array
@@ -59,13 +46,8 @@ export type FallowJsonOutput = (FallowOutput | CodeClimateOutput)
  *   spec; `#[serde(tag = ...)]` cannot internally tag a non-object
  *   variant and wrapping the array would break the spec. The root schema
  *   carries it as a sibling `oneOf` branch alongside `FallowOutput`.
- *
- * A future major release plans to switch this to
- * `#[serde(tag = "kind")]` for true O(1) discriminability on AI / agent
- * consumers, paired with a one-cycle `--legacy-envelope` opt-out flag.
- * Tracked under issue #384.
  */
-export type FallowOutput = (AuditOutput | ExplainOutput | ReviewEnvelopeOutput | ReviewReconcileOutput | CoverageSetupOutput | CoverageAnalyzeOutput | ListBoundariesOutput | HealthOutput | DupesOutput | CheckGroupedOutput | ImpactReport | CheckOutput | CombinedOutput)
+export type FallowOutput = (AuditOutput | FallowExplainIssueTypeFormatJson | ReviewEnvelopeOutput | ReviewReconcileOutput | CoverageSetupOutput | CoverageAnalyzeOutput | ListBoundariesOutput | HealthOutput | DupesOutput | CheckGroupedOutput | ImpactReport | CheckOutput | CombinedOutput)
 /**
  * Schema version for this output format (independent of tool version). Bump
  * policy: ADDITIVE changes (new optional top-level fields, new optional struct
@@ -87,7 +69,7 @@ export type FallowOutput = (AuditOutput | ExplainOutput | ReviewEnvelopeOutput |
  * additive examples: dupes --group-by adds optional grouped_by, total_issues,
  * groups fields without bumping.
  */
-export type SchemaVersion = 6
+export type SchemaVersion = 7
 /**
  * Fallow CLI version that produced this envelope. Renders to the JSON wire as
  * a bare string (e.g. `"2.74.0"`).
@@ -3825,14 +3807,10 @@ reason: string
 scope: string
 }
 /**
- * Envelope emitted by `fallow explain <issue-type> --format json`.
- *
- * Standalone rule explanation. This command does not run project analysis
- * and intentionally returns a compact object without `schema_version` /
- * `version` metadata; consumers that need those should call any other
- * fallow JSON-producing command.
+ * `fallow explain <issue-type> --format json`. Required `id`, `name`,
+ * `rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.
  */
-export interface ExplainOutput {
+export interface FallowExplainIssueTypeFormatJson {
 id: string
 name: string
 summary: string
@@ -3840,6 +3818,7 @@ rationale: string
 example: string
 how_to_fix: string
 docs: string
+kind: "explain"
 }
 /**
  * Envelope emitted by `fallow --format review-github` / `review-gitlab`.

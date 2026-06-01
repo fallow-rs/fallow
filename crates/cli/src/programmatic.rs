@@ -22,6 +22,7 @@ pub const COMMON_ANALYSIS_OPTION_FLAGS: &[&str] = &[
     "workspace",
     "changed-workspaces",
     "explain",
+    "legacy-envelope",
 ];
 
 /// Structured error surface for the programmatic API.
@@ -93,6 +94,8 @@ pub struct AnalysisOptions {
     pub workspace: Option<Vec<String>>,
     pub changed_workspaces: Option<String>,
     pub explain: bool,
+    /// Return the one-cycle legacy root envelope without top-level `kind`.
+    pub legacy_envelope: bool,
 }
 
 /// Issue-type filters for the dead-code analysis.
@@ -284,6 +287,7 @@ struct ResolvedAnalysisOptions {
     workspace: Option<Vec<String>>,
     changed_workspaces: Option<String>,
     explain: bool,
+    legacy_envelope: bool,
 }
 
 impl AnalysisOptions {
@@ -372,6 +376,7 @@ impl AnalysisOptions {
             workspace: self.workspace.clone(),
             changed_workspaces: self.changed_workspaces.clone(),
             explain: self.explain,
+            legacy_envelope: self.legacy_envelope,
         })
     }
 }
@@ -458,6 +463,15 @@ fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
     }
 }
 
+fn apply_programmatic_envelope_options(
+    output: &mut serde_json::Value,
+    resolved: &ResolvedAnalysisOptions,
+) {
+    if resolved.legacy_envelope {
+        crate::output_envelope::remove_root_kind(output);
+    }
+}
+
 fn build_dead_code_json(
     results: &AnalysisResults,
     root: &Path,
@@ -475,6 +489,8 @@ fn build_dead_code_json(
     if explain {
         insert_meta(&mut output, crate::explain::check_meta());
     }
+    // `build_dead_code_json` is only called after options have been resolved;
+    // callers apply the root-envelope compatibility setting at the boundary.
     Ok(output)
 }
 
@@ -618,13 +634,15 @@ pub fn detect_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<serde_j
         let check_options = build_check_options(&resolved, options, &filters, &trace_opts);
         let result = crate::check::execute_check(&check_options)
             .map_err(|_| generic_analysis_error("dead-code"))?;
-        build_dead_code_json(
+        let mut output = build_dead_code_json(
             &result.results,
             &result.config.root,
             result.elapsed,
             resolved.explain,
             result.config_fixable,
-        )
+        )?;
+        apply_programmatic_envelope_options(&mut output, &resolved);
+        Ok(output)
     })
 }
 
@@ -646,13 +664,15 @@ pub fn detect_circular_dependencies(
         let result = crate::check::execute_check(&check_options)
             .map_err(|_| generic_analysis_error("dead-code"))?;
         let filtered = filter_for_circular_dependencies(&result.results);
-        build_dead_code_json(
+        let mut output = build_dead_code_json(
             &filtered,
             &result.config.root,
             result.elapsed,
             resolved.explain,
             result.config_fixable,
-        )
+        )?;
+        apply_programmatic_envelope_options(&mut output, &resolved);
+        Ok(output)
     })
 }
 
@@ -674,13 +694,15 @@ pub fn detect_boundary_violations(
         let result = crate::check::execute_check(&check_options)
             .map_err(|_| generic_analysis_error("dead-code"))?;
         let filtered = filter_for_boundary_violations(&result.results);
-        build_dead_code_json(
+        let mut output = build_dead_code_json(
             &filtered,
             &result.config.root,
             result.elapsed,
             resolved.explain,
             result.config_fixable,
-        )
+        )?;
+        apply_programmatic_envelope_options(&mut output, &resolved);
+        Ok(output)
     })
 }
 
@@ -723,7 +745,7 @@ pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<se
         };
         let result = crate::dupes::execute_dupes(&dupes_options)
             .map_err(|_| generic_analysis_error("dupes"))?;
-        build_duplication_json(
+        let mut output = build_duplication_json(
             &result.report,
             &result.config.root,
             result.elapsed,
@@ -733,7 +755,9 @@ pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<se
             ProgrammaticError::new(format!("failed to serialize duplication report: {err}"), 2)
                 .with_code("FALLOW_SERIALIZE_DUPLICATION_REPORT")
                 .with_context("dupes")
-        })
+        })?;
+        apply_programmatic_envelope_options(&mut output, &resolved);
+        Ok(output)
     })
 }
 
@@ -852,7 +876,7 @@ pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<ser
         let health_options = build_complexity_options(&resolved, options);
         let result = crate::health::execute_health(&health_options)
             .map_err(|_| generic_analysis_error("health"))?;
-        build_health_json(
+        let mut output = build_health_json(
             &result.report,
             &result.config.root,
             result.elapsed,
@@ -862,7 +886,9 @@ pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<ser
             ProgrammaticError::new(format!("failed to serialize health report: {err}"), 2)
                 .with_code("FALLOW_SERIALIZE_HEALTH_REPORT")
                 .with_context("health")
-        })
+        })?;
+        apply_programmatic_envelope_options(&mut output, &resolved);
+        Ok(output)
     })
 }
 
@@ -889,6 +915,7 @@ mod tests {
         let json = build_dead_code_json(&filtered, &root, std::time::Duration::ZERO, false, false)
             .expect("should serialize");
 
+        assert_eq!(json["kind"], "dead-code");
         assert_eq!(json["circular_dependencies"].as_array().unwrap().len(), 1);
         assert_eq!(json["boundary_violations"].as_array().unwrap().len(), 0);
         assert_eq!(json["unused_files"].as_array().unwrap().len(), 0);
@@ -903,6 +930,7 @@ mod tests {
         let json = build_dead_code_json(&filtered, &root, std::time::Duration::ZERO, false, false)
             .expect("should serialize");
 
+        assert_eq!(json["kind"], "dead-code");
         assert_eq!(json["boundary_violations"].as_array().unwrap().len(), 1);
         assert_eq!(json["circular_dependencies"].as_array().unwrap().len(), 0);
         assert_eq!(json["unused_exports"].as_array().unwrap().len(), 0);
@@ -941,6 +969,32 @@ mod tests {
             !paths.iter().any(|path| path.ends_with("utils.test.ts")),
             "omitted production option should defer to production.deadCode=true config: {paths:?}"
         );
+    }
+
+    #[test]
+    fn dead_code_legacy_envelope_removes_root_kind() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"programmatic-legacy","main":"src/index.ts"}"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("src/index.ts"), "export const ok = 1;\n").unwrap();
+
+        let options = DeadCodeOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                legacy_envelope: true,
+                ..AnalysisOptions::default()
+            },
+            ..DeadCodeOptions::default()
+        };
+        let json = detect_dead_code(&options).expect("analysis should succeed");
+
+        assert!(json.get("kind").is_none());
+        assert_eq!(json["schema_version"], crate::report::SCHEMA_VERSION);
     }
 
     #[test]

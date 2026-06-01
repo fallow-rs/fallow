@@ -55,8 +55,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 The JSON contract is documented in `docs/output-schema.json`. Consumers that
-previously matched Rust structs should now narrow by the documented JSON keys
-and deserialize into their own local DTOs if they need typed access.
+previously matched Rust structs should now narrow typed envelopes by the
+top-level `kind` field and deserialize into their own local DTOs if they need
+typed access. Set `AnalysisOptions::legacy_envelope` only while migrating
+consumers that still expect the previous root shape without `kind`.
 
 ## Semantic differences vs. the typed Rust API
 

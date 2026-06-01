@@ -11,7 +11,8 @@ use super::{emit_json, normalize_uri};
 use crate::explain;
 use crate::output_dupes::DupesReportPayload;
 use crate::output_envelope::{
-    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, DupesOutput, GroupByMode, HealthOutput,
+    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, DupesOutput, FallowOutput, GroupByMode,
+    HealthOutput, serialize_root_output,
 };
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
 
@@ -97,7 +98,7 @@ pub(super) fn print_grouped_json(
         meta: None,
     };
 
-    let mut output = match serde_json::to_value(&envelope) {
+    let mut output = match serialize_root_output(FallowOutput::CheckGrouped(envelope)) {
         Ok(value) => value,
         Err(e) => {
             eprintln!("Error: failed to serialize grouped results: {e}");
@@ -124,7 +125,7 @@ pub(super) fn print_grouped_json(
     clippy::redundant_pub_crate,
     reason = "used through report module re-export by combined.rs, audit.rs, flags.rs"
 )]
-pub(crate) const SCHEMA_VERSION: u32 = 6;
+pub(crate) const SCHEMA_VERSION: u32 = 7;
 
 #[allow(
     dead_code,
@@ -149,9 +150,33 @@ pub fn build_json_with_config_fixable(
     elapsed: Duration,
     config_fixable: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
+    let envelope = build_check_output(results, root, elapsed, config_fixable);
+    let mut output = serialize_root_output(FallowOutput::Check(envelope))?;
+    postprocess_check_json(&mut output, root);
+    Ok(output)
+}
+
+pub fn build_check_json_payload_with_config_fixable(
+    results: &AnalysisResults,
+    root: &Path,
+    elapsed: Duration,
+    config_fixable: bool,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let envelope = build_check_output(results, root, elapsed, config_fixable);
+    let mut output = serde_json::to_value(&envelope)?;
+    postprocess_check_json(&mut output, root);
+    Ok(output)
+}
+
+fn build_check_output(
+    results: &AnalysisResults,
+    root: &Path,
+    elapsed: Duration,
+    config_fixable: bool,
+) -> CheckOutput {
     let mut owned_results = results.clone();
     apply_config_fixable_to_duplicate_exports(&mut owned_results, config_fixable);
-    let envelope = CheckOutput {
+    CheckOutput {
         schema_version: SchemaVersion(SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
@@ -174,13 +199,13 @@ pub fn build_json_with_config_fixable(
         regression: None,
         meta: None,
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
-    };
+    }
+}
 
-    let mut output = serde_json::to_value(&envelope)?;
+fn postprocess_check_json(output: &mut serde_json::Value, root: &Path) {
     let root_prefix = format!("{}/", root.display());
-    strip_root_prefix(&mut output, &root_prefix);
-    harmonize_multi_kind_suppress_line_actions(&mut output);
-    Ok(output)
+    strip_root_prefix(output, &root_prefix);
+    harmonize_multi_kind_suppress_line_actions(output);
 }
 
 /// Compute the per-category `CheckSummary` from analysis results.
@@ -432,7 +457,7 @@ pub fn build_health_json(
         meta: None,
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
     };
-    let mut output = serde_json::to_value(&envelope)?;
+    let mut output = serialize_root_output(FallowOutput::Health(envelope))?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
     if explain {
@@ -474,7 +499,7 @@ pub fn build_grouped_health_json(
         meta: None,
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
     };
-    let mut output = serde_json::to_value(&envelope)?;
+    let mut output = serialize_root_output(FallowOutput::Health(envelope))?;
     strip_root_prefix(&mut output, &root_prefix);
 
     let group_values: Vec<serde_json::Value> = grouping
@@ -531,7 +556,7 @@ pub fn build_duplication_json(
         meta: None,
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
     };
-    let mut output = serde_json::to_value(&envelope)?;
+    let mut output = serialize_root_output(FallowOutput::Dupes(envelope))?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
 
@@ -576,7 +601,7 @@ pub fn build_grouped_duplication_json(
         meta: None,
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
     };
-    let mut output = serde_json::to_value(&envelope)?;
+    let mut output = serialize_root_output(FallowOutput::Dupes(envelope))?;
     strip_root_prefix(&mut output, &root_prefix);
 
     let group_values: Vec<serde_json::Value> = grouping
@@ -662,7 +687,8 @@ mod tests {
         let elapsed = Duration::from_millis(123);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
-        assert_eq!(output["schema_version"], 6);
+        assert_eq!(output["kind"], "dead-code");
+        assert_eq!(output["schema_version"], 7);
         assert!(output["version"].is_string());
         assert_eq!(output["elapsed_ms"], 123);
         assert_eq!(output["total_issues"], 0);
@@ -823,10 +849,11 @@ mod tests {
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
         let keys: Vec<&String> = output.as_object().unwrap().keys().collect();
-        assert_eq!(keys[0], "schema_version");
-        assert_eq!(keys[1], "version");
-        assert_eq!(keys[2], "elapsed_ms");
-        assert_eq!(keys[3], "total_issues");
+        assert_eq!(keys[0], "kind");
+        assert_eq!(keys[1], "schema_version");
+        assert_eq!(keys[2], "version");
+        assert_eq!(keys[3], "elapsed_ms");
+        assert_eq!(keys[4], "total_issues");
     }
 
     #[test]
@@ -1482,7 +1509,7 @@ mod tests {
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["schema_version"], SCHEMA_VERSION);
-        assert_eq!(output["schema_version"], 6);
+        assert_eq!(output["schema_version"], 7);
     }
 
     #[test]
@@ -1668,7 +1695,8 @@ mod tests {
         let elapsed = Duration::from_millis(99);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
-        assert_eq!(output["schema_version"], 6);
+        assert_eq!(output["kind"], "dead-code");
+        assert_eq!(output["schema_version"], 7);
         assert_eq!(output["elapsed_ms"], 99);
     }
 

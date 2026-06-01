@@ -161,7 +161,9 @@ fn emit_reconcile_result(
         failed_fingerprints: applied.failed_fingerprints.iter().cloned().collect(),
         unapplied_fingerprints: applied.unapplied_fingerprints.iter().cloned().collect(),
     };
-    match serde_json::to_value(&envelope_struct) {
+    match crate::output_envelope::serialize_root_output(
+        crate::output_envelope::FallowOutput::ReviewReconcile(envelope_struct),
+    ) {
         Ok(value) => crate::report::emit_json(&value, "review reconcile"),
         Err(e) => emit_error(
             &format!("JSON serialization error: {e}"),

@@ -223,6 +223,10 @@ struct Cli {
     #[arg(long, global = true)]
     explain: bool,
 
+    /// Emit legacy JSON root envelopes without the top-level `kind` discriminator.
+    #[arg(long, global = true)]
+    legacy_envelope: bool,
+
     /// Show a per-pattern breakdown for default duplicate ignores.
     #[arg(long, global = true)]
     explain_skipped: bool,
@@ -2061,6 +2065,71 @@ fn install_signal_handlers() {
     }
 }
 
+fn args_use_legacy_check_alias<I>(args: I) -> bool
+where
+    I: IntoIterator<Item = String>,
+{
+    let value_options = [
+        "-r",
+        "--root",
+        "-c",
+        "--config",
+        "-f",
+        "--format",
+        "--output",
+        "--threads",
+        "--changed-since",
+        "--base",
+        "--diff-file",
+        "--baseline",
+        "--parent-run",
+        "--save-baseline",
+        "-w",
+        "--workspace",
+        "--changed-workspaces",
+        "--group-by",
+        "--file",
+        "--sarif-file",
+        "--only",
+        "--skip",
+        "--dupes-mode",
+        "--dupes-threshold",
+        "--save-snapshot",
+        "--regression-baseline",
+        "--tolerance",
+        "--save-regression-baseline",
+    ];
+    let mut skip_next = false;
+    for arg in args.into_iter().skip(1) {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if arg == "--" {
+            break;
+        }
+        if arg.starts_with('-') {
+            let option_name = arg.split_once('=').map_or(arg.as_str(), |(name, _)| name);
+            if !arg.contains('=') && value_options.contains(&option_name) {
+                skip_next = true;
+            }
+            continue;
+        }
+        return arg == "check";
+    }
+    false
+}
+
+fn raw_args_use_legacy_check_alias() -> bool {
+    args_use_legacy_check_alias(std::env::args())
+}
+
+fn warn_legacy_check_alias_if_needed(used_legacy_check_alias: bool, quiet: bool) {
+    if used_legacy_check_alias && !quiet {
+        eprintln!("fallow: `check` is deprecated; use `dead-code` instead.");
+    }
+}
+
 fn main() -> ExitCode {
     install_signal_handlers();
     install_spawn_hooks();
@@ -2069,10 +2138,13 @@ fn main() -> ExitCode {
         return signal_test_helper();
     }
 
+    let used_legacy_check_alias = raw_args_use_legacy_check_alias();
     let mut cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(err) => return handle_cli_parse_error(&err),
     };
+    warn_legacy_check_alias_if_needed(used_legacy_check_alias, cli.quiet);
+    output_envelope::set_legacy_envelope(cli.legacy_envelope);
 
     if let Some(workspaces) = cli.workspace.as_ref()
         && !workspaces.is_empty()
@@ -3501,6 +3573,7 @@ mod tests {
                         | "workspace"
                         | "changed-workspaces"
                         | "explain"
+                        | "legacy-envelope"
                 )
             })
             .collect();
@@ -3602,6 +3675,27 @@ mod tests {
                 std::ffi::OsString::from("--coverage"),
             ]
         ));
+    }
+
+    #[test]
+    fn legacy_check_alias_detection_ignores_option_values() {
+        assert!(args_use_legacy_check_alias(vec![
+            "fallow".to_string(),
+            "check".to_string(),
+            "--summary".to_string(),
+        ]));
+        assert!(!args_use_legacy_check_alias(vec![
+            "fallow".to_string(),
+            "--root".to_string(),
+            "check".to_string(),
+            "dead-code".to_string(),
+        ]));
+        assert!(!args_use_legacy_check_alias(vec![
+            "fallow".to_string(),
+            "dead-code".to_string(),
+            "--file".to_string(),
+            "check".to_string(),
+        ]));
     }
 
     #[test]

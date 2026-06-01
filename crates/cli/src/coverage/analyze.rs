@@ -1041,7 +1041,9 @@ fn print_runtime_json(
     elapsed: std::time::Duration,
     explain: bool,
 ) -> ExitCode {
-    use crate::output_envelope::{CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion};
+    use crate::output_envelope::{
+        CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, FallowOutput, serialize_root_output,
+    };
     use fallow_types::envelope::{ElapsedMs, ToolVersion};
 
     debug_assert_eq!(
@@ -1056,7 +1058,7 @@ fn print_runtime_json(
         runtime_coverage: report.clone(),
         meta: None,
     };
-    let mut output = match serde_json::to_value(&envelope) {
+    let mut output = match serialize_root_output(FallowOutput::CoverageAnalyze(envelope)) {
         Ok(value) => value,
         Err(err) => {
             eprintln!("Error: failed to serialize runtime coverage report: {err}");
