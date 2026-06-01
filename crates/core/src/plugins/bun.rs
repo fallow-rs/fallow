@@ -50,14 +50,14 @@ fn extract_preload_entries(config_path: &Path, source: &str, root: &Path) -> Vec
     }
 
     // `[test] preload = [...]`
-    if let Some(test) = value.get("test").and_then(toml::Value::as_table) {
-        if let Some(arr) = test.get("preload").and_then(toml::Value::as_array) {
-            for item in arr {
-                if let Some(raw) = item.as_str()
-                    && let Some(path) = config_parser::normalize_config_path(raw, config_path, root)
-                {
-                    entries.push(path);
-                }
+    if let Some(test) = value.get("test").and_then(toml::Value::as_table)
+        && let Some(arr) = test.get("preload").and_then(toml::Value::as_array)
+    {
+        for item in arr {
+            if let Some(raw) = item.as_str()
+                && let Some(path) = config_parser::normalize_config_path(raw, config_path, root)
+            {
+                entries.push(path);
             }
         }
     }
@@ -92,7 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn test_preload_entries_are_entry_patterns() {
+    fn test_section_preload_entries_are_entry_patterns() {
         let plugin = BunPlugin;
         let result = plugin.resolve_config(
             Path::new("/repo/bunfig.toml"),
@@ -147,10 +147,10 @@ preload = ["./src/setup.ts", "./src/polyfills.ts"]
         let plugin = BunPlugin;
         let result = plugin.resolve_config(
             Path::new("/repo/bunfig.toml"),
-            r#"
+            r"
 [install]
 exact = true
-"#,
+",
             Path::new("/repo"),
         );
 
