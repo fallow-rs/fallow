@@ -4,7 +4,10 @@ use fallow_config::{
     ExternalPluginDef, ExternalUsedExport, PluginDetection, ScopedUsedClassMemberRule,
     UsedClassMemberRule,
 };
-use helpers::{check_plugin_detection, discover_config_files, process_config_result};
+use helpers::{
+    check_plugin_detection, discover_config_files, invalid_excluded_segment_regex_warning,
+    process_config_result,
+};
 use rustc_hash::FxHashSet;
 
 fn make_external(name: &str, enablers: &[&str], config_patterns: &[&str]) -> ExternalPluginDef {
@@ -3189,6 +3192,64 @@ fn process_config_result_strips_invalid_regex_in_used_exports() {
             .is_empty(),
         "invalid regex on used_exports rule should be stripped"
     );
+}
+
+#[test]
+fn tanstack_route_file_ignore_pattern_warning_names_js_regex_compatibility() {
+    let pattern = ["^(", "?!layout\\.tsx$|__root\\.tsx$).+\\.tsx$"].concat();
+    let err = regex::Regex::new(&pattern).unwrap_err();
+    let warning = invalid_excluded_segment_regex_warning(
+        "tanstack-router",
+        Some(Path::new("/proj/vite.config.ts")),
+        &pattern,
+        "src/routes/**/*.{ts,tsx,js,jsx}",
+        &err,
+    );
+
+    assert!(warning.contains("plugin 'tanstack-router' in /proj/vite.config.ts"));
+    assert!(warning.contains("routeFileIgnorePattern"));
+    assert!(warning.contains("syntax unsupported by fallow's Rust regex engine"));
+    assert!(warning.contains("src/routes/**/*.{ts,tsx,js,jsx}"));
+    assert!(warning.contains(&pattern));
+    assert!(warning.contains(&err.to_string()));
+    assert!(
+        !warning.contains("future release"),
+        "TanStack JavaScript regex compatibility warnings should not threaten hard failure"
+    );
+}
+
+#[test]
+fn tanstack_route_file_ignore_pattern_unsupported_patterns_are_warn_and_drop() {
+    let unsupported_patterns = [
+        "^(?!layout\\.tsx$|__root\\.tsx$).+\\.tsx$",
+        "^_(?!_)",
+        "/*.{js,jsx}",
+    ];
+
+    for pattern in unsupported_patterns {
+        let mut aggregated = AggregatedPluginResult::default();
+        let rule = PathRule::new("src/routes/**/*.{ts,tsx,js,jsx}")
+            .with_excluded_segment_regexes(["valid_segment", pattern]);
+        let config_result = PluginResult {
+            entry_patterns: vec![rule],
+            ..Default::default()
+        };
+
+        process_config_result(
+            "tanstack-router",
+            config_result,
+            &mut aggregated,
+            Some(Path::new("/proj/vite.config.ts")),
+        );
+
+        assert_eq!(aggregated.entry_patterns.len(), 1);
+        let (kept, _name) = &aggregated.entry_patterns[0];
+        assert_eq!(
+            kept.exclude_segment_regexes,
+            vec!["valid_segment".to_string()],
+            "unsupported TanStack pattern should be stripped without failing: {pattern}"
+        );
+    }
 }
 
 #[test]

@@ -333,15 +333,15 @@ fn validate_path_rule_regexes(
         .retain(|pattern| match regex::Regex::new(pattern) {
             Ok(_) => true,
             Err(err) => {
-                let loc = config_path
-                    .map(|p| format!(" in {}", p.display()))
-                    .unwrap_or_default();
                 tracing::warn!(
-                    "plugin '{plugin_name}'{loc}: invalid excluded regex \
-                     '{pattern}' for entry pattern '{rule_pattern}': {err}; \
-                     the pattern will be ignored. A future release may reject \
-                     invalid regex patterns at config load.",
-                    rule_pattern = rule.pattern,
+                    "{}",
+                    invalid_excluded_regex_warning(
+                        plugin_name,
+                        config_path,
+                        pattern,
+                        &rule.pattern,
+                        &err,
+                    )
                 );
                 false
             }
@@ -350,19 +350,63 @@ fn validate_path_rule_regexes(
         .retain(|pattern| match regex::Regex::new(pattern) {
             Ok(_) => true,
             Err(err) => {
-                let loc = config_path
-                    .map(|p| format!(" in {}", p.display()))
-                    .unwrap_or_default();
                 tracing::warn!(
-                    "plugin '{plugin_name}'{loc}: invalid excluded segment \
-                     regex '{pattern}' for entry pattern '{rule_pattern}': \
-                     {err}; the pattern will be ignored. A future release \
-                     may reject invalid regex patterns at config load.",
-                    rule_pattern = rule.pattern,
+                    "{}",
+                    invalid_excluded_segment_regex_warning(
+                        plugin_name,
+                        config_path,
+                        pattern,
+                        &rule.pattern,
+                        &err,
+                    )
                 );
                 false
             }
         });
+}
+
+fn config_location(config_path: Option<&Path>) -> String {
+    config_path
+        .map(|p| format!(" in {}", p.display()))
+        .unwrap_or_default()
+}
+
+fn invalid_excluded_regex_warning(
+    plugin_name: &str,
+    config_path: Option<&Path>,
+    pattern: &str,
+    rule_pattern: &str,
+    err: &regex::Error,
+) -> String {
+    let loc = config_location(config_path);
+    format!(
+        "plugin '{plugin_name}'{loc}: invalid excluded regex '{pattern}' for entry pattern \
+         '{rule_pattern}': {err}; the pattern will be ignored. A future release may reject \
+         invalid regex patterns at config load."
+    )
+}
+
+pub(super) fn invalid_excluded_segment_regex_warning(
+    plugin_name: &str,
+    config_path: Option<&Path>,
+    pattern: &str,
+    rule_pattern: &str,
+    err: &regex::Error,
+) -> String {
+    let loc = config_location(config_path);
+    if plugin_name == "tanstack-router" {
+        return format!(
+            "plugin '{plugin_name}'{loc}: routeFileIgnorePattern '{pattern}' for entry pattern \
+             '{rule_pattern}' uses JavaScript regex syntax unsupported by fallow's Rust regex \
+             engine: {err}; fallow will ignore this routeFileIgnorePattern during analysis."
+        );
+    }
+
+    format!(
+        "plugin '{plugin_name}'{loc}: invalid excluded segment regex '{pattern}' for entry pattern \
+         '{rule_pattern}': {err}; the pattern will be ignored. A future release may reject \
+         invalid regex patterns at config load."
+    )
 }
 
 /// Merge a `PluginResult` from config parsing into the aggregated result.
