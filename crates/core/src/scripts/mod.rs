@@ -293,9 +293,27 @@ fn extract_args_for_binary(
     (file_args, config_args)
 }
 
+/// Strip a matching pair of surrounding single or double quotes from a token.
+///
+/// Only strips when the token both starts and ends with the same quote character.
+/// A token with a single internal quote (e.g. `can't`) is returned unchanged.
+fn strip_surrounding_quotes(token: &str) -> &str {
+    if token.len() >= 2 {
+        let first = token.as_bytes()[0];
+        let last = token.as_bytes()[token.len() - 1];
+        if (first == b'\'' || first == b'"') && first == last {
+            return &token[1..token.len() - 1];
+        }
+    }
+    token
+}
+
 /// Parse a single command segment (after splitting on shell operators).
 fn parse_command_segment(segment: &str) -> Option<ScriptCommand> {
-    let tokens: Vec<&str> = segment.split_whitespace().collect();
+    let tokens: Vec<&str> = segment
+        .split_whitespace()
+        .map(strip_surrounding_quotes)
+        .collect();
     if tokens.is_empty() {
         return None;
     }
@@ -1325,6 +1343,54 @@ mod tests {
         let result = analyze_scripts(&scripts, Path::new("/fake"), &FxHashMap::default());
         assert!(result.used_packages.contains("npm-run-all"));
         assert!(!result.used_packages.contains("server"));
+    }
+
+    #[test]
+    fn node_test_quoted_glob_strips_quotes() {
+        // Regression test for issue #841: quoted glob args kept their quotes,
+        // causing looks_like_file_path to reject them and the entry pattern to
+        // match zero files.
+        let cmds = parse_script("node --test --import tsx 'src/**/*.test.ts'");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0].binary, "node");
+        // The surrounding quotes must be stripped from the glob.
+        assert!(
+            cmds[0].file_args.contains(&"src/**/*.test.ts".to_string()),
+            "expected unquoted glob in file_args, got: {:?}",
+            cmds[0].file_args
+        );
+        assert!(
+            !cmds[0]
+                .file_args
+                .iter()
+                .any(|f| f.starts_with('\'') || f.ends_with('\'')),
+            "file_args must not contain surrounding single quotes"
+        );
+    }
+
+    #[test]
+    fn node_test_unquoted_glob_still_works() {
+        // Unquoted globs must continue to be extracted correctly.
+        let cmds = parse_script("node --test src/**/*.test.ts");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0].binary, "node");
+        assert!(cmds[0].file_args.contains(&"src/**/*.test.ts".to_string()));
+    }
+
+    #[test]
+    fn token_with_internal_single_quote_unchanged() {
+        // A token whose quote is internal (not surrounding) must not be mangled.
+        // Use a file arg that contains an internal apostrophe but is not shell-quoted.
+        // We exercise strip_surrounding_quotes directly via a known non-file-path
+        // context: confirm parse_script does not mangle such a token.
+        assert_eq!(super::strip_surrounding_quotes("can't"), "can't");
+        assert_eq!(super::strip_surrounding_quotes("'quoted'"), "quoted");
+        assert_eq!(super::strip_surrounding_quotes("\"quoted\""), "quoted");
+        assert_eq!(
+            super::strip_surrounding_quotes("'mismatched\""),
+            "'mismatched\""
+        );
+        assert_eq!(super::strip_surrounding_quotes(""), "");
     }
 
     mod proptests {
