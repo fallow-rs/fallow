@@ -110,7 +110,16 @@ use crate::MemberKind;
 /// emit synthetic imports because they are runtime markup, not bundled SFC
 /// script modules. Pre-fix entries can carry stale root-relative imports that
 /// surface as false `unresolved-imports`.
-pub(super) const CACHE_VERSION: u32 = 107;
+///
+/// Bumped to 108 for issue #845: `if (x instanceof ClassName)` guards now
+/// populate `binding_target_names`, so method calls on the narrowed local
+/// inside the body (`x.getMessage()`) are credited as uses of
+/// `ClassName.getMessage`. This changes the `member_accesses` emitted for any
+/// instanceof-bearing file (structurally identical to the #752 typed-destructure
+/// change above). Pre-fix cache entries lack the additional member accesses, so
+/// the narrowed class members surface as false `unused-class-member` until the
+/// file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 108;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

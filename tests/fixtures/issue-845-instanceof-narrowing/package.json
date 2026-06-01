@@ -1,0 +1,4 @@
+{
+  "name": "issue-845-instanceof-narrowing-fixture",
+  "main": "src/app.ts"
+}
