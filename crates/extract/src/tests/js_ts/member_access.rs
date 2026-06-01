@@ -140,3 +140,68 @@ fn non_namespace_destructuring_not_captured() {
         "Should not capture destructuring of non-namespace variables"
     );
 }
+
+/// Regression test for issue #845: a method call on a value narrowed by
+/// `if (x instanceof ClassName)` must be credited as a use of
+/// `ClassName.method`, preventing a false `unused-class-member` finding.
+#[test]
+fn instanceof_narrowed_method_call_is_credited_as_class_member_use() {
+    let info = parse_source(
+        r"
+import { BaseException } from './exceptions';
+function handle(e) {
+    if (e instanceof BaseException) {
+        e.getMessage();
+    }
+}
+",
+    );
+    let has_access = info
+        .member_accesses
+        .iter()
+        .any(|a| a.object == "BaseException" && a.member == "getMessage");
+    assert!(
+        has_access,
+        "e.getMessage() inside `if (e instanceof BaseException)` must be \
+         credited as BaseException.getMessage; got member_accesses = {:?}",
+        info.member_accesses,
+    );
+}
+
+/// Regression test for issue #845: `&&`-chained instanceof guards must all
+/// contribute narrowings so each narrowed local's method calls are credited.
+#[test]
+fn instanceof_narrowing_through_logical_and_chain() {
+    let info = parse_source(
+        r"
+import { FooError } from './foo';
+import { BarError } from './bar';
+function handle(a, b) {
+    if (a instanceof FooError && b instanceof BarError) {
+        a.getFooMessage();
+        b.getBarMessage();
+    }
+}
+",
+    );
+    let has_foo = info
+        .member_accesses
+        .iter()
+        .any(|a| a.object == "FooError" && a.member == "getFooMessage");
+    let has_bar = info
+        .member_accesses
+        .iter()
+        .any(|a| a.object == "BarError" && a.member == "getBarMessage");
+    assert!(
+        has_foo,
+        "a.getFooMessage() inside `if (a instanceof FooError && ...)` must be \
+         credited as FooError.getFooMessage; got member_accesses = {:?}",
+        info.member_accesses,
+    );
+    assert!(
+        has_bar,
+        "b.getBarMessage() inside `if (... && b instanceof BarError)` must be \
+         credited as BarError.getBarMessage; got member_accesses = {:?}",
+        info.member_accesses,
+    );
+}

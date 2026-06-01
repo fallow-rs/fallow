@@ -2474,6 +2474,22 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         walk::walk_for_in_statement(self, stmt);
     }
 
+    fn visit_if_statement(&mut self, stmt: &IfStatement<'a>) {
+        // Record `x instanceof ClassName` narrowings from the test condition so
+        // that method calls on `x` inside the body (e.g. `x.getMessage()`) are
+        // credited as uses of `ClassName.getMessage`, preventing false
+        // unused-class-member findings. The bindings are module-scoped (not
+        // strictly block-scoped), which is conservative: it may credit accesses
+        // outside the guard, but that produces at most false negatives, not false
+        // positives.
+        let mut narrowings = Vec::new();
+        collect_instanceof_narrowings(&stmt.test, &mut narrowings);
+        for (local, class_name) in narrowings {
+            self.binding_target_names.entry(local).or_insert(class_name);
+        }
+        walk::walk_if_statement(self, stmt);
+    }
+
     fn visit_spread_element(&mut self, elem: &SpreadElement<'a>) {
         if let Expression::Identifier(ident) = &elem.argument {
             self.whole_object_uses.push(ident.name.to_string());
@@ -2647,6 +2663,31 @@ fn static_member_object_name(expr: &Expression<'_>) -> Option<String> {
 /// Returns true when the tagged template's tag is the bare identifier `html`.
 fn is_html_tagged_template(tag: &Expression<'_>) -> bool {
     matches!(tag, Expression::Identifier(id) if id.name == "html")
+}
+
+/// Collect `(local_name, class_name)` pairs from an `instanceof` guard expression.
+///
+/// Recurses through `&&`-chained conditions so `a instanceof A && b instanceof B`
+/// yields both pairs. Only simple identifier left-hand sides (`x instanceof Cls`)
+/// are collected; complex left-hand expressions are skipped conservatively.
+fn collect_instanceof_narrowings<'a>(expr: &'a Expression<'a>, out: &mut Vec<(String, String)>) {
+    match expr {
+        Expression::BinaryExpression(bin) if bin.operator == BinaryOperator::Instanceof => {
+            if let Expression::Identifier(left) = &bin.left
+                && let Expression::Identifier(right) = &bin.right
+            {
+                out.push((left.name.to_string(), right.name.to_string()));
+            }
+        }
+        Expression::LogicalExpression(logical) if logical.operator == LogicalOperator::And => {
+            collect_instanceof_narrowings(&logical.left, out);
+            collect_instanceof_narrowings(&logical.right, out);
+        }
+        Expression::ParenthesizedExpression(paren) => {
+            collect_instanceof_narrowings(&paren.expression, out);
+        }
+        _ => {}
+    }
 }
 
 impl ModuleInfoExtractor {
