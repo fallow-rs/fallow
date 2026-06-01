@@ -524,6 +524,10 @@ fn kind_label(flag: &FeatureFlag) -> &'static str {
 }
 
 /// SARIF output for `fallow flags`.
+#[expect(
+    clippy::expect_used,
+    reason = "feature flag SARIF JSON is built from serializable literals"
+)]
 fn print_flags_sarif(flags: &[FeatureFlag], config: &ResolvedConfig) {
     let rules = vec![serde_json::json!({
         "id": "fallow/feature-flag",
@@ -635,6 +639,10 @@ fn print_flags_markdown(flags: &[FeatureFlag], config: &ResolvedConfig) {
 }
 
 /// CodeClimate output for `fallow flags` (GitLab Code Quality).
+#[expect(
+    clippy::expect_used,
+    reason = "feature flag CodeClimate JSON is built from serializable literals"
+)]
 fn print_flags_codeclimate(flags: &[FeatureFlag], config: &ResolvedConfig) {
     let issues: Vec<serde_json::Value> = flags
         .iter()
@@ -677,6 +685,10 @@ fn print_flags_codeclimate(flags: &[FeatureFlag], config: &ResolvedConfig) {
 }
 
 /// JSON output for `fallow flags`.
+#[expect(
+    clippy::expect_used,
+    reason = "feature flag JSON output is built from serializable literals"
+)]
 fn print_flags_json(
     flags: &[FeatureFlag],
     config: &ResolvedConfig,

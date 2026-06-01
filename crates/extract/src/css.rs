@@ -14,49 +14,48 @@ use fallow_types::discover::FileId;
 /// Regex to extract CSS @import sources.
 /// Matches: @import "path"; @import 'path'; @import url("path"); @import url('path'); @import url(path);
 static CSS_IMPORT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"@import\s+(?:url\(\s*(?:["']([^"']+)["']|([^)]+))\s*\)|["']([^"']+)["'])"#)
-        .expect("valid regex")
+    crate::static_regex(
+        r#"@import\s+(?:url\(\s*(?:["']([^"']+)["']|([^)]+))\s*\)|["']([^"']+)["'])"#,
+    )
 });
 
 /// Regex to extract SCSS @use and @forward sources.
 /// Matches: @use "path"; @use 'path'; @forward "path"; @forward 'path';
-static SCSS_USE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"@(?:use|forward)\s+["']([^"']+)["']"#).expect("valid regex")
-});
+static SCSS_USE_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"@(?:use|forward)\s+["']([^"']+)["']"#));
 
 /// Regex to extract Tailwind CSS @plugin sources.
 /// Matches: @plugin "package"; @plugin 'package'; @plugin "./local-plugin.js";
 static CSS_PLUGIN_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r#"@plugin\s+["']([^"']+)["']"#).expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r#"@plugin\s+["']([^"']+)["']"#));
 
 /// Regex to extract @apply class references.
 /// Matches: @apply class1 class2 class3;
 static CSS_APPLY_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"@apply\s+[^;}\n]+").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"@apply\s+[^;}\n]+"));
 
 /// Regex to extract @tailwind directives.
 /// Matches: @tailwind base; @tailwind components; @tailwind utilities;
 static CSS_TAILWIND_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"@tailwind\s+\w+").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"@tailwind\s+\w+"));
 
 /// Regex to match CSS block comments (`/* ... */`) for stripping before extraction.
 static CSS_COMMENT_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?s)/\*.*?\*/").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"(?s)/\*.*?\*/"));
 
 /// Regex to match SCSS single-line comments (`// ...`) for stripping before extraction.
 static SCSS_LINE_COMMENT_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"//[^\n]*").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"//[^\n]*"));
 
 /// Regex to extract CSS class names from selectors.
 /// Matches `.className` in selectors. Applied after stripping comments, strings, and URLs.
 static CSS_CLASS_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"\.([a-zA-Z_][a-zA-Z0-9_-]*)").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"\.([a-zA-Z_][a-zA-Z0-9_-]*)"));
 
 /// Regex to strip quoted strings and `url(...)` content from CSS before class extraction.
 /// Prevents false positives from `content: ".foo"` and `url(./path/file.ext)`.
-static CSS_NON_SELECTOR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?s)"[^"]*"|'[^']*'|url\([^)]*\)"#).expect("valid regex")
-});
+static CSS_NON_SELECTOR_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"(?s)"[^"]*"|'[^']*'|url\([^)]*\)"#));
 
 /// Regex to strip the prelude of `@layer` and `@import` at-rules before
 /// CSS-Modules class extraction. Matches the `@keyword` plus everything up to
@@ -70,7 +69,7 @@ static CSS_NON_SELECTOR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 /// because the prelude IS a selector list and `.foo` / `.bar` are real class
 /// references that the user may want to surface as exports.
 static CSS_AT_RULE_PRELUDE_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"@(?:layer|import)\b[^;{]*").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"@(?:layer|import)\b[^;{]*"));
 
 pub(crate) fn is_css_file(path: &Path) -> bool {
     path.extension()

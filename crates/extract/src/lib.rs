@@ -6,6 +6,14 @@
 
 #![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::disallowed_methods))]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        reason = "tests use unwrap and expect to keep fixture setup concise"
+    )
+)]
 
 mod asset_url;
 pub mod astro;
@@ -49,6 +57,14 @@ pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
 pub use mdx::extract_mdx_statements;
 pub use sfc::{extract_sfc_scripts, is_sfc_file};
 pub use sfc_template::angular::ANGULAR_TPL_SENTINEL;
+
+#[expect(
+    clippy::expect_used,
+    reason = "static regex patterns are hard-coded analyzer invariants covered by extraction tests"
+)]
+pub(crate) fn static_regex(pattern: &str) -> regex::Regex {
+    regex::Regex::new(pattern).expect("static regex pattern should compile")
+}
 
 /// Synthetic member-access object used to carry exported-instance bindings.
 ///

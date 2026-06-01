@@ -511,6 +511,10 @@ fn uninstall_claude_settings(path: &Path, dry_run: bool) -> Result<SettingsOutco
 /// Returns the merged value and the tuple `(added, removed, preserved)`
 /// where `preserved` counts handlers in the `Bash` matcher group that are
 /// NOT owned by fallow (the existing typecheck/lint / user's own handlers).
+#[expect(
+    clippy::expect_used,
+    reason = "rebuilt settings value is explicitly constructed as an object"
+)]
 fn merge_settings_value(
     current: &serde_json::Value,
     desired: &serde_json::Value,
@@ -828,6 +832,10 @@ fn set_executable_bit(_path: &Path) {}
 /// Development`, or `## Local development` heading (if present); failing
 /// that it is appended at the end with a horizontal-rule separator so the
 /// block reads as deliberate rather than orphaned prose.
+#[expect(
+    clippy::unwrap_used,
+    reason = "managed block bounds are checked before slicing replacement offsets"
+)]
 fn upsert_managed_block(path: &Path, dry_run: bool) -> std::io::Result<AgentsOutcome> {
     let existing = read_optional_text(path)?.unwrap_or_default();
     let new_block = format!("{AGENTS_BLOCK_START}\n{AGENTS_BLOCK_BODY}{AGENTS_BLOCK_END}\n");

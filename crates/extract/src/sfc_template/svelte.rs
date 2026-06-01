@@ -12,36 +12,30 @@ use super::shared::{
 };
 
 static STYLE_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?is)<style\b(?:[^>"']|"[^"]*"|'[^']*')*>(?P<body>[\s\S]*?)</style>"#)
-        .expect("valid regex")
+    crate::static_regex(r#"(?is)<style\b(?:[^>"']|"[^"]*"|'[^']*')*>(?P<body>[\s\S]*?)</style>"#)
 });
 
 static SCRIPT_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?is)<script\b(?:[^>"']|"[^"]*"|'[^']*')*>(?P<body>[\s\S]*?)</script>"#)
-        .expect("valid regex")
+    crate::static_regex(r#"(?is)<script\b(?:[^>"']|"[^"]*"|'[^']*')*>(?P<body>[\s\S]*?)</script>"#)
 });
 
 static SVELTE_EACH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
+    crate::static_regex(
         r"(?is)^#each\s+(?P<iterable>.+?)\s+as\s+(?P<bindings>.+?)(?:\s*\((?P<key>.+)\))?$",
     )
-    .expect("valid regex")
 });
 
 static SVELTE_AWAIT_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?is)^#await\s+(?P<expr>.+)$").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"(?is)^#await\s+(?P<expr>.+)$"));
 
-static SVELTE_THEN_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(?is)^:then(?:\s+(?P<binding>.+))?$").expect("valid regex")
-});
+static SVELTE_THEN_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"(?is)^:then(?:\s+(?P<binding>.+))?$"));
 
-static SVELTE_CATCH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(?is)^:catch(?:\s+(?P<binding>.+))?$").expect("valid regex")
-});
+static SVELTE_CATCH_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"(?is)^:catch(?:\s+(?P<binding>.+))?$"));
 
 static SVELTE_SNIPPET_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(?is)^#snippet\s+[A-Za-z_$][\w$]*\s*\((?P<params>.*)\)\s*$")
-        .expect("valid regex")
+    crate::static_regex(r"(?is)^#snippet\s+[A-Za-z_$][\w$]*\s*\((?P<params>.*)\)\s*$")
 });
 
 #[derive(Debug, Clone, PartialEq, Eq)]

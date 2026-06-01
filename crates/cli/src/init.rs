@@ -122,6 +122,10 @@ fn read_pnpm_workspace_patterns(root: &Path) -> Vec<String> {
 /// `fallow fix`'s missing-config fallback (so the seed file produced when
 /// auto-applying duplicate-export config rules matches what `fallow init`
 /// would have written, framework detection and all).
+#[expect(
+    clippy::expect_used,
+    reason = "init config is built from json literals and serializes infallibly"
+)]
 pub fn build_json_config(info: &ProjectInfo) -> String {
     let mut config = serde_json::json!({
         "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",

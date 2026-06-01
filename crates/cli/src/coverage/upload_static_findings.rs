@@ -508,6 +508,10 @@ fn endpoint_url(override_endpoint: Option<&str>, project_id: &str) -> String {
 /// (`acme/widgets`), but the server receives them as a single percent-encoded
 /// segment under `/v1/coverage/{repo}/static-findings`, so `/` must be encoded
 /// too.
+#[expect(
+    clippy::expect_used,
+    reason = "formatting percent-encoded bytes into String is infallible"
+)]
 fn url_encode_path_segment(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {

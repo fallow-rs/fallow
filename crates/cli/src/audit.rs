@@ -3299,6 +3299,10 @@ fn print_audit_codeclimate(result: &AuditResult) -> ExitCode {
     report::emit_json(&value, "CodeClimate audit")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "CodeClimate issue envelope contains only infallibly serializable fields"
+)]
 fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
     let mut all_issues: Vec<crate::output_envelope::CodeClimateIssue> = Vec::new();
 

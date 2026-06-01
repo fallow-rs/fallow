@@ -29,8 +29,7 @@ use regex::Regex;
 /// `fa6-solid`). The trailing `[a-z0-9]` guarantees a real `prefix:name`, not a
 /// bare `prefix:`.
 static ICON_PROP: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"[\s"'/](?:icon|name)\s*=\s*["']([a-z0-9]+(?:-[a-z0-9]+)*):[a-z0-9]"#)
-        .expect("valid icon-prop regex")
+    crate::static_regex(r#"[\s"'/](?:icon|name)\s*=\s*["']([a-z0-9]+(?:-[a-z0-9]+)*):[a-z0-9]"#)
 });
 
 /// Matches HTML markup comments so a commented-out icon usage does not credit
@@ -38,8 +37,7 @@ static ICON_PROP: LazyLock<Regex> = LazyLock::new(|| {
 /// `html.rs`. JS/JSX comment forms (`//`, `/* */`, `{/* */}`) are not stripped:
 /// icon props rarely appear inside them and stripping risks mangling real
 /// attribute lines (e.g. a `//` inside a URL).
-static HTML_COMMENT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)<!--.*?-->").expect("valid html-comment regex"));
+static HTML_COMMENT: LazyLock<Regex> = LazyLock::new(|| crate::static_regex(r"(?s)<!--.*?-->"));
 
 /// File extensions whose source is markup that can carry icon-component props.
 /// Plain `.js`/`.ts`/`.mjs`/`.cjs` are excluded: they have no template markup,

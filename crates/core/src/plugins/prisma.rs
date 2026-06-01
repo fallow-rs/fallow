@@ -117,9 +117,17 @@ fn collect_schema_folder_provider_dependencies(path: &Path, providers: &mut Vec<
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "static Prisma regex patterns are hard-coded and covered by plugin tests"
+)]
 static GENERATOR_BLOCK_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)\bgenerator\s+\w+\s*\{([^}]*)\}").expect("valid regex"));
 
+#[expect(
+    clippy::expect_used,
+    reason = "static Prisma regex patterns are hard-coded and covered by plugin tests"
+)]
 static PROVIDER_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?m)^\s*provider\s*=\s*"([^"]+)""#).expect("valid regex"));
 

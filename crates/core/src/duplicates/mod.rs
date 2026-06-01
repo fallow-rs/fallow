@@ -455,6 +455,10 @@ pub fn find_duplicates_in_project(root: &Path, config: &DuplicatesConfig) -> Dup
 }
 
 /// Build a merged ignore set from built-in and user-provided duplicates ignores.
+#[expect(
+    clippy::expect_used,
+    reason = "duplicate ignore globs are validated before clone detection"
+)]
 fn build_ignore_set(config: &DuplicatesConfig) -> Option<IgnoreSet> {
     if !config.ignore_defaults && config.ignore.is_empty() {
         return None;

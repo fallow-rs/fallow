@@ -29,57 +29,52 @@ use oxc_span::Span;
 /// Regex to extract `<script>` block content from Vue/Svelte SFCs.
 /// The attrs pattern handles `>` inside quoted attribute values (e.g., `generic="T extends Foo<Bar>"`).
 static SCRIPT_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
+    crate::static_regex(
         r#"(?is)<script\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>(?P<body>[\s\S]*?)</script>"#,
     )
-    .expect("valid regex")
 });
 
 /// Regex to extract the `lang` attribute value from a script tag.
 static LANG_ATTR_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r#"lang\s*=\s*["'](\w+)["']"#).expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r#"lang\s*=\s*["'](\w+)["']"#));
 
 /// Regex to extract the `src` attribute value from a script tag.
 /// Requires whitespace (or start of string) before `src` to avoid matching `data-src` etc.
-static SRC_ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?:^|\s)src\s*=\s*["']([^"']+)["']"#).expect("valid regex")
-});
+static SRC_ATTR_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"(?:^|\s)src\s*=\s*["']([^"']+)["']"#));
 
 /// Regex to detect Vue's bare `setup` attribute.
 static SETUP_ATTR_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?:^|\s)setup(?:\s|$)").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"(?:^|\s)setup(?:\s|$)"));
 
 /// Regex to detect Svelte's `context="module"` attribute.
 static CONTEXT_MODULE_ATTR_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r#"context\s*=\s*["']module["']"#).expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r#"context\s*=\s*["']module["']"#));
 
 /// Regex to extract Vue's `generic="..."` attribute value (script-setup
 /// generics). Matches the contents between the quotes and stops at the
 /// closing quote, mirroring `LANG_ATTR_RE`.
 static VUE_GENERIC_ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?:^|\s)generic\s*=\s*"([^"]*)"|(?:^|\s)generic\s*=\s*'([^']*)'"#)
-        .expect("valid regex")
+    crate::static_regex(r#"(?:^|\s)generic\s*=\s*"([^"]*)"|(?:^|\s)generic\s*=\s*'([^']*)'"#)
 });
 
 /// Regex to extract Svelte's `generics="..."` attribute value (Svelte 4
 /// generic script attribute, repurposed by some Svelte 5 code).
 static SVELTE_GENERICS_ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?:^|\s)generics\s*=\s*"([^"]*)"|(?:^|\s)generics\s*=\s*'([^']*)'"#)
-        .expect("valid regex")
+    crate::static_regex(r#"(?:^|\s)generics\s*=\s*"([^"]*)"|(?:^|\s)generics\s*=\s*'([^']*)'"#)
 });
 
 /// Regex to match HTML comments for filtering script blocks inside comments.
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"(?s)<!--.*?-->"));
 
 /// Regex to extract `<style>` block content from Vue/Svelte SFCs.
 /// Mirrors `SCRIPT_BLOCK_RE`: handles `>` inside quoted attribute values and
 /// captures the body so `@import` / `@use` / `@forward` directives can be parsed.
 static STYLE_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
+    crate::static_regex(
         r#"(?is)<style\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>(?P<body>[\s\S]*?)</style>"#,
     )
-    .expect("valid regex")
 });
 
 /// An extracted `<script>` block from a Vue or Svelte SFC.

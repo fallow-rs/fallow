@@ -32,6 +32,10 @@ impl ModuleGraph {
         clippy::cast_possible_truncation,
         reason = "file count is bounded by project size, well under u32::MAX"
     )]
+    #[expect(
+        clippy::expect_used,
+        reason = "Tarjan traversal only pops nodes that were pushed onto the SCC stack"
+    )]
     pub fn find_cycles(&self) -> Vec<Vec<FileId>> {
         let n = self.modules.len();
         if n == 0 {
@@ -275,7 +279,9 @@ fn dfs_find_cycles_from(
         if frame.succ_pos >= frame.succ_end {
             dfs.pop();
             if path.len() > 1 {
-                let removed = path.pop().unwrap();
+                let Some(removed) = path.pop() else {
+                    continue;
+                };
                 path_set.set(removed, false);
             }
             continue;

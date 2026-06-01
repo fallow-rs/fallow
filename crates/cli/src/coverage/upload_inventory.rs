@@ -657,6 +657,10 @@ fn endpoint_url(override_endpoint: Option<&str>, project_id: &str) -> String {
 /// Project IDs can be bare (`fallow-cloud-api`) or slash-scoped
 /// (`acme/widgets`), but the server receives them as a single percent-encoded
 /// segment under `/v1/coverage/{repo}/inventory`, so `/` must be encoded too.
+#[expect(
+    clippy::expect_used,
+    reason = "formatting percent-encoded bytes into String is infallible"
+)]
 fn url_encode_path_segment(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {

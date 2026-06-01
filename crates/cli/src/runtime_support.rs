@@ -105,7 +105,9 @@ fn log_config_loaded(path: &Path, output: OutputFormat, quiet: bool) {
 
 fn should_log_config_loaded(path: &Path) -> bool {
     let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    CONFIG_LOADED_LOGGED.lock().unwrap().insert(key)
+    CONFIG_LOADED_LOGGED
+        .lock()
+        .is_ok_and(|mut logged| logged.insert(key))
 }
 
 #[expect(clippy::ref_option, reason = "&Option matches clap's field type")]

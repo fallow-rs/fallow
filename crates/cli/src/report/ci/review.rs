@@ -143,6 +143,10 @@ pub fn render_review_envelope_with_diff(
 }
 
 #[must_use]
+#[expect(
+    clippy::expect_used,
+    reason = "review envelope contains only infallibly serializable fields"
+)]
 pub fn print_review_envelope(command: &str, provider: Provider, codeclimate: &Value) -> ExitCode {
     let issues = super::diff_filter::filter_issues_from_env(
         super::pr_comment::issues_from_codeclimate(codeclimate),
@@ -224,6 +228,7 @@ fn group_by_path_line(issues: &[CiIssue]) -> Vec<Vec<&CiIssue>> {
 /// fingerprints. The composite identity shifts whenever the set of
 /// constituents changes, so consumers' skip-if-fingerprint-exists logic
 /// correctly re-posts on content change.
+#[expect(clippy::expect_used, reason = "formatting into String is infallible")]
 fn render_merged_comment(
     provider: Provider,
     group: &[&CiIssue],

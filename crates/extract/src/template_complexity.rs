@@ -482,7 +482,10 @@ fn find_top_level_ternary(source: &str) -> Result<Option<(usize, usize)>, ScanEr
             }
             b':' if depth == 0 && question.is_some() => {
                 if nested_ternaries == 0 {
-                    return Ok(Some((question.expect("question exists"), offset)));
+                    if let Some(question) = question {
+                        return Ok(Some((question, offset)));
+                    }
+                    return Err(ScanError);
                 }
                 nested_ternaries -= 1;
                 offset += 1;

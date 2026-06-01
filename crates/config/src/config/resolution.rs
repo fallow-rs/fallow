@@ -211,6 +211,10 @@ fn compute_cache_config_hash(external_plugins: &[ExternalPluginDef]) -> u64 {
 
 impl FallowConfig {
     /// Resolve into a fully resolved config with compiled globs.
+    #[expect(
+        clippy::expect_used,
+        reason = "user glob patterns are validated before config resolution"
+    )]
     pub fn resolve(
         self,
         root: PathBuf,

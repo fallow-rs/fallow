@@ -1082,6 +1082,10 @@ pub(super) fn print_sarif(results: &AnalysisResults, root: &Path, rules: &RulesC
 /// Calls `build_sarif` to produce the standard SARIF JSON, then post-processes
 /// each result to add `"properties": { "owner": "@team" }` by resolving the
 /// artifact location URI through the `OwnershipResolver`.
+#[expect(
+    clippy::expect_used,
+    reason = "grouped SARIF entries are JSON objects created by build_sarif"
+)]
 pub(super) fn print_grouped_sarif(
     results: &AnalysisResults,
     root: &Path,
@@ -1178,6 +1182,10 @@ pub(super) fn print_duplication_sarif(report: &DuplicationReport, root: &Path) -
 #[expect(
     clippy::cast_possible_truncation,
     reason = "line/col numbers are bounded by source size"
+)]
+#[expect(
+    clippy::expect_used,
+    reason = "duplication SARIF entries are JSON objects created by sarif_result_with_snippet"
 )]
 pub(super) fn print_grouped_duplication_sarif(
     report: &DuplicationReport,
@@ -1624,6 +1632,10 @@ pub(super) fn print_health_sarif(
 /// SARIF pipeline. Each finding's URI is decoded (`%5B` -> `[`, `%5D` -> `]`)
 /// before resolution, matching the dead-code behaviour for paths containing
 /// brackets like Next.js dynamic routes.
+#[expect(
+    clippy::expect_used,
+    reason = "grouped health SARIF entries are JSON objects created by build_health_sarif"
+)]
 pub(super) fn print_grouped_health_sarif(
     report: &crate::health_types::HealthReport,
     root: &Path,

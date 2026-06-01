@@ -9,6 +9,10 @@ pub struct AnalysisProgress {
 
 impl AnalysisProgress {
     /// Create a new progress reporter.
+    #[expect(
+        clippy::expect_used,
+        reason = "progress template is hard-coded and covered by CLI smoke tests"
+    )]
     #[must_use]
     pub fn new(enabled: bool) -> Self {
         if !enabled {

@@ -163,8 +163,7 @@ pub fn has_error_severity_issues(
     let has_overrides = config.is_some_and(|c| !c.overrides.is_empty());
 
     let file_scoped_errors =
-        if has_overrides {
-            let config = config.unwrap();
+        if let Some(config) = config.filter(|c| !c.overrides.is_empty()) {
             results.unused_files.iter().any(|f| {
                 config.resolve_rules_for_path(&f.file.path).unused_files == Severity::Error
             }) || results.unused_exports.iter().any(|e| {

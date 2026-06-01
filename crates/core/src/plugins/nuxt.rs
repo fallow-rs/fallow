@@ -829,6 +829,10 @@ fn source_has_components_key(source: &str) -> bool {
     COMPONENTS_KEY_RE.is_match(source)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "static Nuxt regex pattern is hard-coded and covered by plugin tests"
+)]
 static COMPONENTS_KEY_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(r#"["']?\bcomponents\b["']?\s*:"#).expect("valid regex")
 });

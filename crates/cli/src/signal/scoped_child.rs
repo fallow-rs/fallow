@@ -83,6 +83,10 @@ impl ScopedChild {
     /// and stderr. The signal handler may have already killed the
     /// child via the PID side channel; in that case wait returns
     /// normally with a non-zero status.
+    #[expect(
+        clippy::expect_used,
+        reason = "ScopedChild owns inner until one terminal wait method consumes it"
+    )]
     pub fn wait_with_output(mut self) -> io::Result<Output> {
         let child = self.inner.take().expect("inner already taken");
         let id = self.id.take();
@@ -95,6 +99,10 @@ impl ScopedChild {
 
     /// Wait for the child to exit, returning the status. Same signal-
     /// kill-by-PID semantics as `wait_with_output`.
+    #[expect(
+        clippy::expect_used,
+        reason = "ScopedChild owns inner until one terminal wait method consumes it"
+    )]
     pub fn wait(mut self) -> io::Result<ExitStatus> {
         let mut child = self.inner.take().expect("inner already taken");
         let id = self.id.take();

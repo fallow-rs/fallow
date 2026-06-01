@@ -20,32 +20,29 @@ use fallow_types::discover::FileId;
 
 /// Regex to match HTML comments (`<!-- ... -->`) for stripping before extraction.
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"(?s)<!--.*?-->"));
 
 /// Regex to extract `src` attribute from `<script>` tags.
 /// Matches both `<script src="...">` and `<script type="module" src="...">`.
 /// Uses `(?s)` so `.` matches newlines (multi-line attributes).
 static SCRIPT_SRC_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?si)<script\b(?:[^>"']|"[^"]*"|'[^']*')*?\bsrc\s*=\s*["']([^"']+)["']"#)
-        .expect("valid regex")
+    crate::static_regex(r#"(?si)<script\b(?:[^>"']|"[^"]*"|'[^']*')*?\bsrc\s*=\s*["']([^"']+)["']"#)
 });
 
 /// Regex to extract `href` attribute from `<link>` tags with `rel="stylesheet"` or
 /// `rel="modulepreload"`.
 /// Handles attributes in any order (rel before or after href).
 static LINK_HREF_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
+    crate::static_regex(
         r#"(?si)<link\b(?:[^>"']|"[^"]*"|'[^']*')*?\brel\s*=\s*["'](stylesheet|modulepreload)["'](?:[^>"']|"[^"]*"|'[^']*')*?\bhref\s*=\s*["']([^"']+)["']"#,
     )
-    .expect("valid regex")
 });
 
 /// Regex for the reverse attribute order: href before rel.
 static LINK_HREF_REVERSE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
+    crate::static_regex(
         r#"(?si)<link\b(?:[^>"']|"[^"]*"|'[^']*')*?\bhref\s*=\s*["']([^"']+)["'](?:[^>"']|"[^"]*"|'[^']*')*?\brel\s*=\s*["'](stylesheet|modulepreload)["']"#,
     )
-    .expect("valid regex")
 });
 
 /// Check if a path is an HTML file.

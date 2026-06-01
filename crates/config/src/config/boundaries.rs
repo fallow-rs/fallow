@@ -698,6 +698,10 @@ impl BoundaryConfig {
     }
 
     /// Resolve into compiled form with pre-built glob matchers.
+    #[expect(
+        clippy::expect_used,
+        reason = "boundary glob patterns are validated before config resolution"
+    )]
     #[must_use]
     pub fn resolve(&self) -> ResolvedBoundaryConfig {
         let zones = self

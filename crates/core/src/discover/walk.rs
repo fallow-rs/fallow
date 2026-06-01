@@ -63,6 +63,10 @@ impl ignore::ParallelVisitor for FileVisitor<'_> {
 }
 
 impl Drop for FileVisitor<'_> {
+    #[expect(
+        clippy::expect_used,
+        reason = "poisoned walk collector lock means worker state is unrecoverable"
+    )]
     fn drop(&mut self) {
         if !self.local.is_empty() {
             self.shared
@@ -181,6 +185,10 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
 #[expect(
     clippy::cast_possible_truncation,
     reason = "file count is bounded by project size, well under u32::MAX"
+)]
+#[expect(
+    clippy::expect_used,
+    reason = "source file globs are hard-coded and the collector lock must remain usable"
 )]
 pub fn discover_files_with_additional_hidden_dirs(
     config: &ResolvedConfig,

@@ -23,34 +23,30 @@ use crate::{ImportInfo, ImportedName, ModuleInfo};
 use fallow_types::discover::FileId;
 
 /// Regex to extract Astro frontmatter (content between `---` delimiters at file start).
-static ASTRO_FRONTMATTER_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(?s)\A\s*---[ \t]*\r?\n(?P<body>.*?\r?\n)---").expect("valid regex")
-});
+static ASTRO_FRONTMATTER_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"(?s)\A\s*---[ \t]*\r?\n(?P<body>.*?\r?\n)---"));
 
 /// Regex matching `<script>` blocks in the Astro template body. Captures the
 /// attribute list and the body so callers can decide whether to follow `src=`
 /// or parse the inline body as TypeScript.
 static SCRIPT_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
+    crate::static_regex(
         r#"(?is)<script\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>(?P<body>[\s\S]*?)</script>"#,
     )
-    .expect("valid regex")
 });
 
 /// Regex matching opening `<script>` tags in the Astro template body.
 static SCRIPT_OPEN_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?is)<script\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>"#)
-        .expect("valid regex")
+    crate::static_regex(r#"(?is)<script\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>"#)
 });
 
 /// Regex detecting and capturing a `src` attribute on a script tag.
-static SRC_ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?i)(?:^|\s)src\s*=\s*["'](?P<src>[^"']+)["']"#).expect("valid regex")
-});
+static SRC_ATTR_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"(?i)(?:^|\s)src\s*=\s*["'](?P<src>[^"']+)["']"#));
 
 /// Regex matching HTML comments for stripping before template scanning.
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"(?s)<!--.*?-->"));
 
 /// Extract frontmatter from an Astro component.
 pub fn extract_astro_frontmatter(source: &str) -> Option<SfcScript> {
@@ -130,7 +126,9 @@ fn extend_imports_from_template(
         .collect();
 
     for cap in SCRIPT_OPEN_RE.captures_iter(template) {
-        let open = cap.get(0).expect("full match exists");
+        let Some(open) = cap.get(0) else {
+            continue;
+        };
         if comment_ranges
             .iter()
             .any(|&(start, end)| open.start() >= start && open.start() < end)
@@ -159,7 +157,9 @@ fn extend_imports_from_template(
     }
 
     for cap in SCRIPT_BLOCK_RE.captures_iter(template) {
-        let open = cap.get(0).expect("full match exists");
+        let Some(open) = cap.get(0) else {
+            continue;
+        };
         if comment_ranges
             .iter()
             .any(|&(start, end)| open.start() >= start && open.start() < end)

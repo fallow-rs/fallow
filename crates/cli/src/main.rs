@@ -3,6 +3,14 @@
     clippy::print_stderr,
     reason = "CLI binary produces intentional terminal output"
 )]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        reason = "tests use unwrap and expect to keep fixture setup concise"
+    )
+)]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -1772,10 +1780,17 @@ fn validate_inputs(
         ));
     }
 
-    let raw_root = cli
-        .root
-        .clone()
-        .unwrap_or_else(|| std::env::current_dir().expect("Failed to get current directory"));
+    let raw_root = if let Some(root) = cli.root.clone() {
+        root
+    } else {
+        std::env::current_dir().map_err(|err| {
+            emit_error(
+                &format!("Failed to get current directory: {err}"),
+                2,
+                output,
+            )
+        })?
+    };
     let root = match validate::validate_root(&raw_root) {
         Ok(r) => r,
         Err(e) => {

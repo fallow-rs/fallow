@@ -70,22 +70,21 @@ impl AngularTemplateRefs {
 
 /// Regex to strip HTML comments before scanning.
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"(?s)<!--.*?-->"));
 
 /// Regex to extract attribute name-value pairs from an HTML tag.
 /// Captures: group 1 = attribute name (including prefix like `[`, `(`, `*`),
 ///           group 2 = value (inside quotes).
-static ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?s)([\[()*#a-zA-Z][\w.\-\[\]()]*)\s*=\s*"([^"]*)""#).expect("valid regex")
-});
+static ATTR_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"(?s)([\[()*#a-zA-Z][\w.\-\[\]()]*)\s*=\s*"([^"]*)""#));
 
 /// Regex to parse `*ngFor` microsyntax: `let item of items`.
 static NG_FOR_OF_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?s)^\s*let\s+(\w+)\s+of\s+(.+)$").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"(?s)^\s*let\s+(\w+)\s+of\s+(.+)$"));
 
 /// Regex to match Angular 17+ `@for (item of expr; track expr)` control flow.
 static CONTROL_FOR_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?s)^\s*(\w+)\s+of\s+(.+)$").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"(?s)^\s*(\w+)\s+of\s+(.+)$"));
 
 /// Scan an Angular HTML template and collect all referenced identifiers and
 /// member-access chains.

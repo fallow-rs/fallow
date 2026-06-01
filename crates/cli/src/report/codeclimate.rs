@@ -790,6 +790,10 @@ fn push_misconfigured_dependency_override_issues(
 /// variants serialized as kebab-case strings; serde_json cannot fail on
 /// these shapes.
 #[must_use]
+#[expect(
+    clippy::expect_used,
+    reason = "CodeClimateIssue contains only infallibly serializable fields"
+)]
 pub fn issues_to_value(issues: &[CodeClimateIssue]) -> serde_json::Value {
     serde_json::to_value(issues).expect("CodeClimateIssue serializes infallibly")
 }
@@ -981,6 +985,10 @@ pub(super) fn print_codeclimate(
 /// Calls `build_codeclimate` to produce the standard CodeClimate JSON array,
 /// then post-processes each entry to add `"owner": "@team"` by resolving the
 /// issue's location path through the `OwnershipResolver`.
+#[expect(
+    clippy::expect_used,
+    reason = "grouped CodeClimate entries are JSON objects created by issues_to_value"
+)]
 pub(super) fn print_grouped_codeclimate(
     results: &AnalysisResults,
     root: &Path,
@@ -1242,6 +1250,10 @@ pub(super) fn print_health_codeclimate(report: &HealthReport, root: &Path) -> Ex
 /// `OwnershipResolver`. Lets GitLab Code Quality and other CodeClimate
 /// consumers partition findings per team / package without re-parsing the
 /// project structure.
+#[expect(
+    clippy::expect_used,
+    reason = "grouped health CodeClimate entries are JSON objects created by issues_to_value"
+)]
 pub(super) fn print_grouped_health_codeclimate(
     report: &HealthReport,
     root: &Path,
@@ -1334,6 +1346,10 @@ pub(super) fn print_duplication_codeclimate(report: &DuplicationReport, root: &P
 /// top-level `group` key. Lets GitLab Code Quality and other CodeClimate
 /// consumers partition findings per team / package / directory without
 /// re-parsing the project structure.
+#[expect(
+    clippy::expect_used,
+    reason = "grouped duplication CodeClimate entries are JSON objects created by issues_to_value"
+)]
 pub(super) fn print_grouped_duplication_codeclimate(
     report: &DuplicationReport,
     root: &Path,

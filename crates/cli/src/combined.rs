@@ -790,6 +790,10 @@ fn print_combined_codeclimate(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "CodeClimate issue envelope contains only infallibly serializable fields"
+)]
 fn build_combined_codeclimate(
     check: Option<&CheckResult>,
     dupes: Option<&DupesResult>,

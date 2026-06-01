@@ -3,6 +3,14 @@
     clippy::print_stderr,
     reason = "CLI binary produces intentional terminal output"
 )]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        reason = "tests use unwrap and expect to keep fixture setup concise"
+    )
+)]
 
 #[allow(
     dead_code,

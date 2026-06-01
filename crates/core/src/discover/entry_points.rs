@@ -446,6 +446,10 @@ fn apply_default_fallback(
 }
 
 /// Discover entry points from package.json, framework rules, and defaults.
+#[expect(
+    clippy::expect_used,
+    reason = "entry glob patterns are validated before entry point discovery"
+)]
 fn discover_entry_points_with_warnings_impl(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
@@ -925,6 +929,10 @@ fn resolve_plugin_setup_file(root: &Path, setup_file: &Path) -> PathBuf {
 ///
 /// Matches the configured glob patterns against the discovered file list and
 /// marks matching files as entry points so they are never flagged as unused.
+#[expect(
+    clippy::expect_used,
+    reason = "dynamicallyLoaded glob patterns are validated before entry point discovery"
+)]
 #[must_use]
 pub fn discover_dynamically_loaded_entry_points(
     config: &ResolvedConfig,

@@ -11,15 +11,13 @@ use super::shared::{
 };
 
 static TEMPLATE_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
+    crate::static_regex(
         r#"(?is)<template\b(?:[^>"']|"[^"]*"|'[^']*')*>(?P<body>[\s\S]*?)</template>"#,
     )
-    .expect("valid regex")
 });
 
-static VUE_FOR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(?is)^(?P<binding>.+?)\s+(?:in|of)\s+(?P<source>.+)$").expect("valid regex")
-});
+static VUE_FOR_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r"(?is)^(?P<binding>.+?)\s+(?:in|of)\s+(?P<source>.+)$"));
 
 #[cfg(test)]
 pub(super) fn collect_template_usage(

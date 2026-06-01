@@ -1,3 +1,8 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
 #![expect(
     deprecated,
     reason = "ADR-008: benchmark exercises the workspace path-dep fallow_core::analyze surface"

@@ -689,6 +689,10 @@ fn run_setup_json(root: &Path, explain: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "coverage setup envelope contains only infallibly serializable fields"
+)]
 fn build_setup_json(root: &Path, explain: bool) -> serde_json::Value {
     let envelope = build_setup_envelope(root, explain);
     serde_json::to_value(&envelope).expect("CoverageSetupOutput serializes infallibly")

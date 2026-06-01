@@ -129,6 +129,7 @@ fn issue_from_codeclimate(value: &Value) -> Option<CiIssue> {
 }
 
 #[must_use]
+#[expect(clippy::expect_used, reason = "formatting into String is infallible")]
 pub fn render_pr_comment(command: &str, provider: Provider, issues: &[CiIssue]) -> String {
     let marker_id = sticky_marker_id();
     let marker = format!("<!-- fallow-id: {marker_id} -->");
@@ -177,6 +178,7 @@ fn summary_label(category: &str, total: usize, max: usize) -> String {
     }
 }
 
+#[expect(clippy::expect_used, reason = "formatting into String is infallible")]
 fn render_findings_table(out: &mut String, issues: &[CiIssue], max: usize, summary: &str) {
     writeln!(out, "<details>\n<summary>{summary}</summary>\n").expect("write to string");
     out.push_str("| Severity | Rule | Location | Description |\n");

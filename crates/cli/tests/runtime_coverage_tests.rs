@@ -1,3 +1,9 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
 //! End-to-end integration tests for `fallow health --runtime-coverage`.
 //!
 //! Exercises the full CLI → sidecar pipeline with a signed stub sidecar:

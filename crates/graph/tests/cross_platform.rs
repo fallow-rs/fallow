@@ -1,3 +1,9 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
 //! Cross-platform path handling tests for the fallow-graph crate.
 //!
 //! Exercises path separator normalization, case sensitivity, unicode paths,

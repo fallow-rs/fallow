@@ -4,6 +4,14 @@
 //! (core, CLI, LSP). It has no analysis logic, only data structures.
 
 #![warn(missing_docs)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        reason = "tests use unwrap and expect to keep fixture setup concise"
+    )
+)]
 
 /// File discovery types: discovered files, file IDs, and entry points.
 pub mod discover;

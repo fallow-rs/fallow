@@ -718,6 +718,10 @@ fn display_endpoint_url(override_endpoint: Option<&str>, repo: &str) -> String {
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "formatting percent-encoded bytes into String is infallible"
+)]
 fn url_encode_path_segment(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {

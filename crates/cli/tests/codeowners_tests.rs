@@ -1,3 +1,9 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
 //! End-to-end tests for CODEOWNERS parsing that exercise the disk-read path.
 //!
 //! The unit tests in `crates/cli/src/codeowners.rs` cover the parser in

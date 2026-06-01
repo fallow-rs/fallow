@@ -249,6 +249,10 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     clippy::too_many_lines,
     reason = "health pipeline orchestration with many optional features"
 )]
+#[expect(
+    clippy::expect_used,
+    reason = "shared analysis output and churn thread joins are guarded by the selected health modes"
+)]
 fn execute_health_inner(
     opts: &HealthOptions<'_>,
     input: HealthPipelineInput,
@@ -1796,6 +1800,10 @@ fn collect_large_functions(
 ///
 /// User patterns were validated at config load time
 /// (see `FallowConfig::validate_user_globs`).
+#[expect(
+    clippy::expect_used,
+    reason = "health ignore globs are validated before health analysis"
+)]
 fn build_ignore_set(patterns: &[String]) -> globset::GlobSet {
     let mut builder = globset::GlobSetBuilder::new();
     for pattern in patterns {

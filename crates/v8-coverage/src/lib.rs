@@ -33,6 +33,14 @@
 //! remapped function output via the `fallow-cov-protocol` envelope.
 
 #![forbid(unsafe_code)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        reason = "tests use unwrap and expect to keep fixture setup concise"
+    )
+)]
 
 use serde::{Deserialize, Deserializer, Serialize};
 

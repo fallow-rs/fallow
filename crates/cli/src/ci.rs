@@ -1295,6 +1295,10 @@ fn resolved_body(fingerprint: &str, sha: Option<&str>) -> String {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "formatting percent-encoded bytes into String is infallible"
+)]
 fn url_encode_path_segment(value: &str) -> String {
     let mut out = String::new();
     for byte in value.bytes() {

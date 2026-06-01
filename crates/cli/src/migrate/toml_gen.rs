@@ -2,6 +2,10 @@ use std::fmt::Write as _;
 
 use super::{MigrationResult, source_head};
 
+#[expect(
+    clippy::expect_used,
+    reason = "migrated config is always stored as a JSON object"
+)]
 pub(super) fn generate_toml(result: &MigrationResult) -> String {
     let mut output = String::new();
     let source_comment = result

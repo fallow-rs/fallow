@@ -82,6 +82,10 @@ struct Catalogue {
 /// Parse and cache the embedded catalogue once. Panics with a clear message if
 /// the embedded TOML is malformed; this is unreachable in a released binary
 /// because the bytes are compile-time-embedded and gated by `catalogue_parses`.
+#[expect(
+    clippy::expect_used,
+    reason = "embedded tooling catalogue is compile-time data pinned by catalogue_parses"
+)]
 fn catalogue() -> &'static Catalogue {
     static CATALOGUE: std::sync::OnceLock<Catalogue> = std::sync::OnceLock::new();
     CATALOGUE.get_or_init(|| {

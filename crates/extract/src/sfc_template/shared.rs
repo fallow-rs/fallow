@@ -11,7 +11,7 @@ use super::scanners::scan_curly_section;
 
 /// Regex for stripping HTML comments (`<!-- ... -->`), shared by Vue and Svelte.
 pub(super) static HTML_COMMENT_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("valid regex"));
+    LazyLock::new(|| crate::static_regex(r"(?s)<!--.*?-->"));
 
 pub(super) fn merge_expression_usage(
     usage: &mut TemplateUsage,

@@ -686,6 +686,10 @@ impl LocalPackageManager {
     clippy::too_many_arguments,
     reason = "mirrors the protocol StaticFunction field set, which has no builder"
 )]
+#[expect(
+    clippy::expect_used,
+    reason = "static function test fixtures are constructed from JSON literals"
+)]
 fn static_function(
     relative_posix: &str,
     name: &str,
@@ -1157,6 +1161,10 @@ fn parse_source_map_cache(dump: &V8CoverageDump) -> Option<BTreeMap<String, Sour
     serde_json::from_value(raw).ok()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "temp dir option is initialized immediately before it is read"
+)]
 fn ensure_temp_dir(temp_dir: &mut Option<TempDir>) -> Result<&Path, String> {
     if temp_dir.is_none() {
         *temp_dir = Some(

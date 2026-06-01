@@ -11,9 +11,8 @@ use oxc_span::Span;
 use crate::{ImportInfo, ImportedName, ModuleInfo};
 use fallow_types::discover::FileId;
 
-static GRAPHQL_IMPORT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?m)^[ \t]*#\s*import\s+["']([^"'\r\n]+)["']"#).expect("valid regex")
-});
+static GRAPHQL_IMPORT_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"(?m)^[ \t]*#\s*import\s+["']([^"'\r\n]+)["']"#));
 
 pub(crate) fn is_graphql_file(path: &Path) -> bool {
     path.extension()

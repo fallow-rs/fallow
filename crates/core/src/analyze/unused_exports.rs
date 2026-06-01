@@ -481,6 +481,10 @@ const ROUTE_CONVENTION_PATTERNS: &[&str] = &[
     "**/app/**/+*.{ts,tsx,js,jsx}",
 ];
 
+#[expect(
+    clippy::expect_used,
+    reason = "route convention globs are hard-coded and covered by entry point tests"
+)]
 fn build_route_convention_globset() -> globset::GlobSet {
     let mut builder = globset::GlobSetBuilder::new();
     for pattern in ROUTE_CONVENTION_PATTERNS {

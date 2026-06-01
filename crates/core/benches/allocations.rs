@@ -1,3 +1,9 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
 //! Allocation tracking benchmark using dhat.
 //!
 //! This benchmark measures heap allocation statistics for the fallow analysis
