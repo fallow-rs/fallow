@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use super::PackageJson;
 use super::diagnostics::{
     WorkspaceDiagnostic, WorkspaceDiagnosticKind, is_ignored_workspace_dir, is_skip_listed_dir,
 };
@@ -264,7 +265,35 @@ pub(super) fn expand_workspace_glob_with_diagnostics(
                     }
                     continue;
                 }
-                maybe_emit_glob_no_pkg_diag(root, raw_pattern, &path, ignore_patterns, diagnostics);
+                // The glob matched a bare intermediate directory with no
+                // package.json (e.g. `packages/themes` for `packages/*`, where the
+                // real package lives at `packages/themes/<pkg>`). Descend one level
+                // and recover any child that is itself a named package, so a file
+                // under it is attributed to its own manifest instead of falling
+                // back to the project root. See issue #842.
+                let recovered = recover_nested_packages(&path, canonical_root, ignore_patterns);
+                if recovered.is_empty() {
+                    maybe_emit_glob_no_pkg_diag(
+                        root,
+                        raw_pattern,
+                        &path,
+                        ignore_patterns,
+                        diagnostics,
+                    );
+                } else {
+                    // The user's glob is one level too shallow: it named the bare
+                    // grouping directory, not the package below it. Recovery keeps
+                    // the deep package discovered, but nudge the user toward the
+                    // glob the package manager itself would need.
+                    tracing::debug!(
+                        "workspace glob '{raw_pattern}' matched '{}' which has no package.json; \
+                         recovered {} nested package(s) one level down. Consider '{raw_pattern}/*' \
+                         so npm/pnpm/yarn resolve them as workspace members too.",
+                        path.display(),
+                        recovered.len()
+                    );
+                    results.extend(recovered);
+                }
             }
             results
         }
@@ -273,6 +302,73 @@ pub(super) fn expand_workspace_glob_with_diagnostics(
             Vec::new()
         }
     }
+}
+
+/// Descend one level into a glob-matched directory that has no `package.json`
+/// of its own and recover any immediate child that is a real, named package.
+///
+/// This handles the common `packages/<group>/<pkg>` layout where the root
+/// declares a one-level glob like `packages/*`: the glob matches the bare
+/// grouping directory (`packages/themes`), which has no manifest, so the deeper
+/// real package (`packages/themes/my-theme`) is never discovered and every file
+/// beneath it is misattributed to the project root, producing false
+/// `unlisted-dependencies`. See issue #842.
+///
+/// Recovery is conservative to avoid sweeping in non-packages: children are
+/// skipped when their leaf name is in the conventional skip list (build output,
+/// caches, hidden dirs) or `node_modules`, when their project-root-relative path
+/// matches the user's `ignore_patterns` (so a path the user excluded via
+/// `ignorePatterns` is a reliable opt-out and is never recovered), and a child
+/// is only registered when its `package.json` loads AND declares a `name` (so
+/// fixtures, build artifacts, and `__mocks__` manifests without a name are not
+/// treated as workspaces). Descends exactly one level: deeper
+/// `packages/<group>/<sub>/<pkg>` layouts are intentionally out of scope and
+/// should use a recursive (`**`) glob. Returns `(path, canonical_path)` pairs in
+/// the same shape as the glob expander.
+fn recover_nested_packages(
+    path: &Path,
+    canonical_root: &Path,
+    ignore_patterns: &globset::GlobSet,
+) -> Vec<(PathBuf, PathBuf)> {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return Vec::new();
+    };
+    let mut recovered = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        let child = entry.path();
+        if !child.is_dir() {
+            continue;
+        }
+        let leaf = entry.file_name();
+        let leaf = leaf.to_string_lossy();
+        if leaf == "node_modules" || is_skip_listed_dir(&leaf) {
+            continue;
+        }
+        let Some(cp) = dunce::canonicalize(&child)
+            .ok()
+            .filter(|cp| cp.starts_with(canonical_root))
+        else {
+            continue;
+        };
+        // Honor the user's `ignorePatterns`: a recovered child the user already
+        // excluded must not be registered as a workspace (mirrors the
+        // suppression contract on the normal no-package-json glob path).
+        let relative = cp.strip_prefix(canonical_root).unwrap_or(cp.as_path());
+        if is_ignored_workspace_dir(relative, ignore_patterns) {
+            continue;
+        }
+        let pkg_path = child.join("package.json");
+        // Gate on a real, named package so fixtures / build output / mock
+        // manifests under the grouping directory are not registered.
+        let Ok(pkg) = PackageJson::load(&pkg_path) else {
+            continue;
+        };
+        if pkg.name.is_none() {
+            continue;
+        }
+        recovered.push((child, cp));
+    }
+    recovered
 }
 
 /// Emit a `glob-matched-no-package-json` diagnostic if the path is neither
@@ -1081,6 +1177,84 @@ mod tests {
                 .to_string_lossy()
                 .replace('\\', "/")
                 .ends_with("packages/with-pkg")
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn expand_workspace_glob_recovers_nested_package_under_bare_intermediate() {
+        // Reporter layout (issue #842): root glob `packages/*` matches the bare
+        // grouping dir `packages/themes` (no package.json); the real package is
+        // one level deeper at `packages/themes/my-theme`. A nameless manifest and
+        // a non-package dir under the same grouping dir must NOT be recovered.
+        let temp_dir = std::env::temp_dir().join("fallow-test-expand-nested-recover");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(temp_dir.join("packages/themes/my-theme")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("packages/themes/no-name")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("packages/themes/just-src")).unwrap();
+        std::fs::write(
+            temp_dir.join("packages/themes/my-theme/package.json"),
+            r#"{"name": "my-theme", "dependencies": {"react": "^18"}}"#,
+        )
+        .unwrap();
+        // Nameless manifest: must be rejected (fixtures / build output shape).
+        std::fs::write(
+            temp_dir.join("packages/themes/no-name/package.json"),
+            r#"{"private": true}"#,
+        )
+        .unwrap();
+        // `just-src` has no package.json at all: nothing to recover.
+
+        let canonical_root = dunce::canonicalize(&temp_dir).unwrap();
+        let results = expand_workspace_glob(&temp_dir, "packages/*", &canonical_root);
+
+        let names: Vec<String> = results
+            .iter()
+            .map(|(p, _)| p.to_string_lossy().replace('\\', "/"))
+            .collect();
+        assert_eq!(
+            results.len(),
+            1,
+            "only the named nested package should be recovered, got {names:?}"
+        );
+        assert!(
+            names[0].ends_with("packages/themes/my-theme"),
+            "recovered path should be the deep named package, got {names:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn expand_workspace_glob_recovery_honors_ignore_patterns() {
+        // A nested package the user excluded via `ignorePatterns` must NOT be
+        // recovered, so `ignorePatterns` stays a reliable opt-out. See issue #842.
+        let temp_dir = std::env::temp_dir().join("fallow-test-recover-ignore");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(temp_dir.join("packages/themes/my-theme")).unwrap();
+        std::fs::write(
+            temp_dir.join("packages/themes/my-theme/package.json"),
+            r#"{"name": "my-theme"}"#,
+        )
+        .unwrap();
+
+        let canonical_root = dunce::canonicalize(&temp_dir).unwrap();
+        let mut builder = globset::GlobSetBuilder::new();
+        builder.add(globset::Glob::new("packages/themes/my-theme").unwrap());
+        let ignore = builder.build().unwrap();
+        let mut diagnostics = Vec::new();
+        let results = expand_workspace_glob_with_diagnostics(
+            &temp_dir,
+            "packages/*",
+            "packages/*",
+            &canonical_root,
+            &ignore,
+            &mut diagnostics,
+        );
+        assert!(
+            results.is_empty(),
+            "an ignored nested package must not be recovered, got {results:?}"
         );
 
         let _ = std::fs::remove_dir_all(&temp_dir);

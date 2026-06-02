@@ -981,6 +981,41 @@ mod tests {
     }
 
     #[test]
+    fn discover_workspaces_recovers_package_under_bare_glob_intermediate() {
+        // Issue #842 (reporter metrists/metrists): root declares
+        // `["./packages/*", "./themes/*"]`, but the real package lives two levels
+        // deep at `packages/themes/metrists-theme-next` while `packages/themes`
+        // itself has no package.json. The single-level glob only matches the bare
+        // `packages/themes`; without recovery the deep package is never discovered,
+        // its files fall back to the root manifest, and its declared deps (react)
+        // are reported as unlisted. Discovery must recover the named deep package.
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let theme = dir
+            .path()
+            .join("packages")
+            .join("themes")
+            .join("metrists-theme-next");
+        std::fs::create_dir_all(&theme).unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"name": "metrists-monorepo", "workspaces": ["./packages/*", "./themes/*"]}"#,
+        )
+        .unwrap();
+        // packages/themes intentionally has NO package.json (bare grouping dir).
+        std::fs::write(
+            theme.join("package.json"),
+            r#"{"name": "metrists-theme-next", "dependencies": {"react": "^18"}}"#,
+        )
+        .unwrap();
+
+        let workspaces = discover_workspaces(dir.path());
+        assert!(
+            workspaces.iter().any(|ws| ws.name == "metrists-theme-next"),
+            "deep package under a bare glob-matched intermediate must be discovered: {workspaces:?}"
+        );
+    }
+
+    #[test]
     fn undeclared_workspace_detected() {
         let dir = tempfile::tempdir().expect("create temp dir");
         let pkg_a = dir.path().join("packages").join("a");
