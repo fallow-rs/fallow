@@ -1,5 +1,8 @@
 {
   "name": "security-path-traversal-fixture",
   "version": "0.0.0",
-  "private": true
+  "private": true,
+  "dependencies": {
+    "express": "0.0.0"
+  }
 }

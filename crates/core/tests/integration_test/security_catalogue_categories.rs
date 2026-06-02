@@ -203,6 +203,21 @@ fn ssrf_literal_does_not_fire() {
 }
 
 #[test]
+fn ssrf_literal_allowlist_guard_does_not_fire() {
+    let results = analyze_with_security_sink("security-ssrf");
+    assert!(
+        !anchored_on(&results, "src/allowlisted.ts"),
+        "a URL checked against a literal-backed fail-closed allowlist must not be flagged"
+    );
+}
+
+#[test]
+fn ssrf_helper_predicate_still_fires() {
+    let results = analyze_with_security_sink("security-ssrf");
+    assert_candidate(&results, "src/helper-predicate.ts", "ssrf", 918);
+}
+
+#[test]
 fn ssrf_default_off_emits_nothing() {
     assert!(no_tainted_sinks(&analyze_default_off("security-ssrf")));
 }
@@ -222,6 +237,33 @@ fn path_traversal_literal_does_not_fire() {
         !anchored_on(&results, "src/safe.ts"),
         "a fully-literal path.join must not be flagged"
     );
+}
+
+#[test]
+fn path_traversal_relative_containment_guard_does_not_fire() {
+    let results = analyze_with_security_sink("security-path-traversal");
+    assert!(
+        !anchored_on(&results, "src/contained.ts"),
+        "a path.relative containment guard must suppress the path candidate"
+    );
+}
+
+#[test]
+fn path_traversal_prefix_collision_check_still_fires() {
+    let results = analyze_with_security_sink("security-path-traversal");
+    assert_candidate(&results, "src/prefix-collision.ts", "path-traversal", 22);
+}
+
+#[test]
+fn path_traversal_post_guard_still_fires() {
+    let results = analyze_with_security_sink("security-path-traversal");
+    assert_candidate(&results, "src/post-guard.ts", "route-send-file", 22);
+}
+
+#[test]
+fn path_traversal_url_guard_still_fires() {
+    let results = analyze_with_security_sink("security-path-traversal");
+    assert_candidate(&results, "src/url-guard.ts", "path-traversal", 22);
 }
 
 #[test]
@@ -246,6 +288,27 @@ fn open_redirect_literal_does_not_fire() {
         !anchored_on(&results, "src/safe.ts"),
         "a literal redirect target must not be flagged"
     );
+}
+
+#[test]
+fn open_redirect_literal_allowlist_guard_does_not_fire() {
+    let results = analyze_with_security_sink("security-open-redirect");
+    assert!(
+        !anchored_on(&results, "src/allowlisted.ts"),
+        "a redirect checked against a literal-backed fail-closed allowlist must not be flagged"
+    );
+}
+
+#[test]
+fn open_redirect_mutable_allowlist_still_fires() {
+    let results = analyze_with_security_sink("security-open-redirect");
+    assert_candidate(&results, "src/mutable-allowlist.ts", "open-redirect", 601);
+}
+
+#[test]
+fn open_redirect_post_guard_still_fires() {
+    let results = analyze_with_security_sink("security-open-redirect");
+    assert_candidate(&results, "src/post-guard.ts", "open-redirect", 601);
 }
 
 #[test]

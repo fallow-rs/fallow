@@ -174,6 +174,24 @@ fn is_html_sanitizable_category(id: &str) -> bool {
     matches!(id, "dangerous-html" | "dom-document-write" | "jquery-html")
 }
 
+fn is_url_sanitizable_category(id: &str) -> bool {
+    matches!(id, "open-redirect" | "nextjs-open-redirect" | "ssrf")
+}
+
+fn is_path_sanitizable_category(id: &str) -> bool {
+    matches!(id, "path-traversal" | "route-send-file" | "zip-slip")
+}
+
+fn has_direct_sanitizer(sink: &SinkSite, args: &[SanitizedSinkArg], scope: SanitizerScope) -> bool {
+    args.iter().any(|arg| {
+        arg.span_start == sink.span_start && arg.arg_index == sink.arg_index && arg.scope == scope
+    })
+}
+
+fn sink_has_sanitizer(module: &ModuleInfo, sink: &SinkSite, scope: SanitizerScope) -> bool {
+    has_direct_sanitizer(sink, &module.sanitized_sink_args, scope)
+}
+
 fn has_direct_html_sanitizer(sink: &SinkSite, args: &[SanitizedSinkArg]) -> bool {
     args.iter().any(|arg| {
         arg.span_start == sink.span_start
@@ -276,6 +294,16 @@ pub fn find_tainted_sinks(
             };
 
             if is_html_sanitizable_category(&matcher.id) && sink_has_html_sanitizer(module, sink) {
+                continue;
+            }
+            if is_url_sanitizable_category(&matcher.id)
+                && sink_has_sanitizer(module, sink, SanitizerScope::Url)
+            {
+                continue;
+            }
+            if is_path_sanitizable_category(&matcher.id)
+                && sink_has_sanitizer(module, sink, SanitizerScope::Path)
+            {
                 continue;
             }
 

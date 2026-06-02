@@ -30,9 +30,9 @@ use super::helpers::{
     ts_import_type_qualifier_root,
 };
 use super::{
-    ModuleInfoExtractor, PendingLocalExportSpecifier, SideEffectRegistrationTarget,
-    try_extract_arrow_wrapped_import, try_extract_dynamic_import, try_extract_import_then_callback,
-    try_extract_property_callback_import, try_extract_require,
+    ModuleInfoExtractor, PendingLocalExportSpecifier, SecurityPathSinkBinding,
+    SideEffectRegistrationTarget, try_extract_arrow_wrapped_import, try_extract_dynamic_import,
+    try_extract_import_then_callback, try_extract_property_callback_import, try_extract_require,
 };
 
 #[derive(Default)]
@@ -579,6 +579,73 @@ impl ModuleInfoExtractor {
         }
     }
 
+    fn record_literal_allowlist_binding(&mut self, name: &str, trusted: bool) {
+        if self.is_module_scope() {
+            self.module_literal_allowlist_bindings
+                .insert(name.to_string(), trusted);
+            return;
+        }
+        if let Some(bindings) = self.literal_allowlist_binding_stack.last_mut() {
+            bindings.insert(name.to_string(), trusted);
+        }
+    }
+
+    fn literal_allowlist_binding(&self, name: &str) -> bool {
+        for bindings in self.literal_allowlist_binding_stack.iter().rev() {
+            if let Some(trusted) = bindings.get(name) {
+                return *trusted;
+            }
+        }
+        self.module_literal_allowlist_bindings
+            .get(name)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    fn record_path_sink_binding(&mut self, name: &str, binding: Option<SecurityPathSinkBinding>) {
+        if self.is_module_scope() {
+            self.module_path_sink_bindings
+                .insert(name.to_string(), binding);
+            return;
+        }
+        if let Some(bindings) = self.path_sink_binding_stack.last_mut() {
+            bindings.insert(name.to_string(), binding);
+        }
+    }
+
+    fn path_sink_binding(&self, name: &str) -> Option<SecurityPathSinkBinding> {
+        for bindings in self.path_sink_binding_stack.iter().rev() {
+            if let Some(binding) = bindings.get(name) {
+                return *binding;
+            }
+        }
+        self.module_path_sink_bindings
+            .get(name)
+            .and_then(|binding| *binding)
+    }
+
+    fn record_path_relative_binding(&mut self, name: &str, target: Option<String>) {
+        if self.is_module_scope() {
+            self.module_path_relative_bindings
+                .insert(name.to_string(), target);
+            return;
+        }
+        if let Some(bindings) = self.path_relative_binding_stack.last_mut() {
+            bindings.insert(name.to_string(), target);
+        }
+    }
+
+    fn path_relative_binding(&self, name: &str) -> Option<&str> {
+        for bindings in self.path_relative_binding_stack.iter().rev() {
+            if let Some(target) = bindings.get(name) {
+                return target.as_deref();
+            }
+        }
+        self.module_path_relative_bindings
+            .get(name)
+            .and_then(Option::as_deref)
+    }
+
     fn sanitizer_scope_for_identifier(&self, name: &str) -> Option<SanitizerScope> {
         for bindings in self.sanitizer_binding_stack.iter().rev() {
             if let Some(scope) = bindings.get(name) {
@@ -622,14 +689,32 @@ impl ModuleInfoExtractor {
             .iter()
             .map(|name| (name.clone(), None))
             .collect::<FxHashMap<_, _>>();
+        let allowlist_scope = scope
+            .iter()
+            .map(|name| (name.clone(), false))
+            .collect::<FxHashMap<_, _>>();
+        let path_sink_scope = scope
+            .iter()
+            .map(|name| (name.clone(), None))
+            .collect::<FxHashMap<_, _>>();
+        let path_relative_scope = scope
+            .iter()
+            .map(|name| (name.clone(), None))
+            .collect::<FxHashMap<_, _>>();
         self.nested_declaration_stack.push(scope);
         self.sanitizer_binding_stack.push(sanitizer_scope);
+        self.literal_allowlist_binding_stack.push(allowlist_scope);
+        self.path_sink_binding_stack.push(path_sink_scope);
+        self.path_relative_binding_stack.push(path_relative_scope);
     }
 
     fn pop_function_declaration_scope(&mut self) {
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.pop();
             self.sanitizer_binding_stack.pop();
+            self.literal_allowlist_binding_stack.pop();
+            self.path_sink_binding_stack.pop();
+            self.path_relative_binding_stack.pop();
         }
     }
 
@@ -1278,6 +1363,138 @@ impl ModuleInfoExtractor {
         });
     }
 
+    fn record_guarded_path_sink_arg(&mut self, local: &str) {
+        let Some(binding) = self.path_sink_binding(local) else {
+            return;
+        };
+        self.sanitized_sink_args.push(SanitizedSinkArg {
+            span_start: binding.span_start,
+            arg_index: binding.arg_index,
+            scope: SanitizerScope::Path,
+        });
+    }
+
+    fn record_fail_closed_guard_after_statement(&mut self, stmt: &Statement<'_>) {
+        let Statement::IfStatement(if_stmt) = stmt else {
+            return;
+        };
+        if if_stmt.alternate.is_some() || !statement_exits_current_flow(&if_stmt.consequent) {
+            return;
+        }
+        if let Some(target) = self.url_allowlist_guard_target(&if_stmt.test) {
+            self.record_sanitizer_binding(&target, Some(SanitizerScope::Url));
+        }
+        if let Some(target) = self.path_containment_guard_target(&if_stmt.test) {
+            self.record_sanitizer_binding(&target, Some(SanitizerScope::Path));
+            self.record_guarded_path_sink_arg(&target);
+        }
+    }
+
+    fn url_allowlist_guard_target(&self, expr: &Expression<'_>) -> Option<String> {
+        let Expression::UnaryExpression(unary) = unwrap_parens(expr) else {
+            return None;
+        };
+        if unary.operator != UnaryOperator::LogicalNot {
+            return None;
+        }
+        let Expression::CallExpression(call) = unwrap_parens(&unary.argument) else {
+            return None;
+        };
+        let Expression::StaticMemberExpression(member) = &call.callee else {
+            return None;
+        };
+        if !matches!(member.property.name.as_str(), "has" | "includes") {
+            return None;
+        }
+        let Expression::Identifier(allowlist) = &member.object else {
+            return None;
+        };
+        if !self.literal_allowlist_binding(&allowlist.name) {
+            return None;
+        }
+        let Some(Argument::Identifier(target)) = call.arguments.first() else {
+            return None;
+        };
+        Some(target.name.to_string())
+    }
+
+    fn path_containment_guard_target(&self, expr: &Expression<'_>) -> Option<String> {
+        let Expression::LogicalExpression(logical) = unwrap_parens(expr) else {
+            return None;
+        };
+        if logical.operator != LogicalOperator::Or {
+            return None;
+        }
+        let left = path_relative_starts_with_parent(&logical.left)
+            .or_else(|| self.path_is_absolute_relative_arg(&logical.left));
+        let right = path_relative_starts_with_parent(&logical.right)
+            .or_else(|| self.path_is_absolute_relative_arg(&logical.right));
+        let (Some(left), Some(right)) = (left, right) else {
+            return None;
+        };
+        if left != right {
+            return None;
+        }
+        self.path_relative_binding(left).map(str::to_string)
+    }
+
+    fn path_is_absolute_relative_arg<'b>(&self, expr: &'b Expression<'_>) -> Option<&'b str> {
+        let Expression::CallExpression(call) = unwrap_parens(expr) else {
+            return None;
+        };
+        if !self.is_node_path_method_call(call, "isAbsolute") {
+            return None;
+        }
+        let Some(Argument::Identifier(rel)) = call.arguments.first() else {
+            return None;
+        };
+        Some(rel.name.as_str())
+    }
+
+    fn is_node_path_method_call(&self, call: &CallExpression<'_>, method: &str) -> bool {
+        let Expression::StaticMemberExpression(member) = &call.callee else {
+            return false;
+        };
+        if member.property.name != method {
+            return false;
+        }
+        let Expression::Identifier(object) = &member.object else {
+            return false;
+        };
+        self.node_path_namespace_bindings
+            .contains(object.name.as_str())
+            && !self.nested_scope_shadows(object.name.as_str())
+    }
+
+    fn path_sink_binding_for_expr(&self, expr: &Expression<'_>) -> Option<SecurityPathSinkBinding> {
+        let Expression::CallExpression(call) = unwrap_parens(expr) else {
+            return None;
+        };
+        if !["join", "normalize", "resolve"]
+            .iter()
+            .any(|method| self.is_node_path_method_call(call, method))
+        {
+            return None;
+        }
+        Some(SecurityPathSinkBinding {
+            span_start: call.span.start,
+            arg_index: 0,
+        })
+    }
+
+    fn path_relative_target_for_expr(&self, expr: &Expression<'_>) -> Option<String> {
+        let Expression::CallExpression(call) = unwrap_parens(expr) else {
+            return None;
+        };
+        if !self.is_node_path_method_call(call, "relative") {
+            return None;
+        }
+        let Some(Argument::Identifier(target)) = call.arguments.get(1) else {
+            return None;
+        };
+        Some(target.name.to_string())
+    }
+
     /// Record tainted-source bindings for `const { a, b } = <object>.<prop>`,
     /// where the destructured initializer is a member-access chain (or bare
     /// identifier root). Each bound local maps to the FULL flattened init path:
@@ -1692,11 +1909,23 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.push(FxHashSet::default());
             self.sanitizer_binding_stack.push(FxHashMap::default());
+            self.literal_allowlist_binding_stack
+                .push(FxHashMap::default());
+            self.path_sink_binding_stack.push(FxHashMap::default());
+            self.path_relative_binding_stack.push(FxHashMap::default());
         }
-        walk::walk_block_statement(self, stmt);
+        for statement in &stmt.body {
+            self.visit_statement(statement);
+            if self.namespace_depth == 0 {
+                self.record_fail_closed_guard_after_statement(statement);
+            }
+        }
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.pop();
             self.sanitizer_binding_stack.pop();
+            self.literal_allowlist_binding_stack.pop();
+            self.path_sink_binding_stack.pop();
+            self.path_relative_binding_stack.pop();
         }
         self.block_depth -= 1;
     }
@@ -1715,6 +1944,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     if let Some(id) = class.id.as_ref() {
                         self.record_local_declaration_name(&id.name);
                         self.record_sanitizer_binding(id.name.as_str(), None);
+                        self.record_literal_allowlist_binding(id.name.as_str(), false);
+                        self.record_path_sink_binding(id.name.as_str(), None);
+                        self.record_path_relative_binding(id.name.as_str(), None);
                         self.record_local_type_declaration(&id.name, id.span);
                         let is_angular = has_angular_class_decorator(class);
                         let instance_bindings =
@@ -1734,6 +1966,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     if let Some(id) = function.id.as_ref() {
                         self.record_local_declaration_name(&id.name);
                         self.record_sanitizer_binding(id.name.as_str(), None);
+                        self.record_literal_allowlist_binding(id.name.as_str(), false);
+                        self.record_path_sink_binding(id.name.as_str(), None);
+                        self.record_path_relative_binding(id.name.as_str(), None);
                         let refs = Self::collect_function_signature_refs(function);
                         self.record_local_signature_refs(&id.name, refs);
 
@@ -1794,12 +2029,18 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     if let Some(id) = class.id.as_ref() {
                         self.record_nested_declaration_names(std::iter::once(id));
                         self.record_sanitizer_binding(id.name.as_str(), None);
+                        self.record_literal_allowlist_binding(id.name.as_str(), false);
+                        self.record_path_sink_binding(id.name.as_str(), None);
+                        self.record_path_relative_binding(id.name.as_str(), None);
                     }
                 }
                 Declaration::FunctionDeclaration(function) => {
                     if let Some(id) = function.id.as_ref() {
                         self.record_nested_declaration_names(std::iter::once(id));
                         self.record_sanitizer_binding(id.name.as_str(), None);
+                        self.record_literal_allowlist_binding(id.name.as_str(), false);
+                        self.record_path_sink_binding(id.name.as_str(), None);
+                        self.record_path_relative_binding(id.name.as_str(), None);
                     }
                 }
                 _ => {}
@@ -1823,6 +2064,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         walk::walk_arrow_function_expression(self, expr);
         self.function_depth -= 1;
         self.pop_function_declaration_scope();
+    }
+
+    fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
+        for statement in &body.statements {
+            self.visit_statement(statement);
+            if self.namespace_depth == 0 {
+                self.record_fail_closed_guard_after_statement(statement);
+            }
+        }
     }
 
     fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
@@ -2168,6 +2418,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             let Some(init) = &declarator.init else {
                 for id in declarator.id.get_binding_identifiers() {
                     self.record_sanitizer_binding(id.name.as_str(), None);
+                    self.record_literal_allowlist_binding(id.name.as_str(), false);
+                    self.record_path_sink_binding(id.name.as_str(), None);
+                    self.record_path_relative_binding(id.name.as_str(), None);
                 }
                 continue;
             };
@@ -2182,9 +2435,23 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 self.record_tainted_source_binding(id.name.as_str(), init);
                 let sanitizer_scope = self.sanitizer_scope_for_expr(init);
                 self.record_sanitizer_binding(id.name.as_str(), sanitizer_scope);
+                let allowlist = decl.kind == VariableDeclarationKind::Const
+                    && is_literal_string_allowlist_expr(init);
+                self.record_literal_allowlist_binding(id.name.as_str(), allowlist);
+                self.record_path_sink_binding(
+                    id.name.as_str(),
+                    self.path_sink_binding_for_expr(init),
+                );
+                self.record_path_relative_binding(
+                    id.name.as_str(),
+                    self.path_relative_target_for_expr(init),
+                );
             } else {
                 for id in declarator.id.get_binding_identifiers() {
                     self.record_sanitizer_binding(id.name.as_str(), None);
+                    self.record_literal_allowlist_binding(id.name.as_str(), false);
+                    self.record_path_sink_binding(id.name.as_str(), None);
+                    self.record_path_relative_binding(id.name.as_str(), None);
                 }
             }
 
@@ -2854,6 +3121,76 @@ fn static_argument_object_name(arg: &Argument<'_>) -> Option<String> {
             member.property.name
         )),
         _ => None,
+    }
+}
+
+fn statement_exits_current_flow(stmt: &Statement<'_>) -> bool {
+    match stmt {
+        Statement::ReturnStatement(_) | Statement::ThrowStatement(_) => true,
+        Statement::BlockStatement(block) => {
+            block.body.first().is_some_and(statement_exits_current_flow)
+        }
+        _ => false,
+    }
+}
+
+fn path_relative_starts_with_parent<'b>(expr: &'b Expression<'_>) -> Option<&'b str> {
+    let Expression::CallExpression(call) = unwrap_parens(expr) else {
+        return None;
+    };
+    let Expression::StaticMemberExpression(member) = &call.callee else {
+        return None;
+    };
+    if member.property.name != "startsWith" {
+        return None;
+    }
+    let Expression::Identifier(relative) = &member.object else {
+        return None;
+    };
+    let Some(Argument::StringLiteral(prefix)) = call.arguments.first() else {
+        return None;
+    };
+    if prefix.value.as_str() != ".." {
+        return None;
+    }
+    Some(relative.name.as_str())
+}
+
+fn is_literal_string_allowlist_expr(expr: &Expression<'_>) -> bool {
+    match unwrap_static_expr(expr) {
+        Expression::ArrayExpression(array) => is_string_literal_array(array),
+        Expression::NewExpression(new_expr) => {
+            let Expression::Identifier(callee) = &new_expr.callee else {
+                return false;
+            };
+            if callee.name != "Set" {
+                return false;
+            }
+            let Some(Argument::ArrayExpression(array)) = new_expr.arguments.first() else {
+                return false;
+            };
+            is_string_literal_array(array)
+        }
+        _ => false,
+    }
+}
+
+fn is_string_literal_array(array: &ArrayExpression<'_>) -> bool {
+    array
+        .elements
+        .iter()
+        .all(|element| matches!(element, ArrayExpressionElement::StringLiteral(_)))
+}
+
+fn unwrap_static_expr<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    loop {
+        match expr {
+            Expression::ParenthesizedExpression(paren) => expr = &paren.expression,
+            Expression::TSAsExpression(ts_as) => expr = &ts_as.expression,
+            Expression::TSSatisfiesExpression(ts_sat) => expr = &ts_sat.expression,
+            Expression::TSNonNullExpression(ts_non_null) => expr = &ts_non_null.expression,
+            _ => return expr,
+        }
     }
 }
 

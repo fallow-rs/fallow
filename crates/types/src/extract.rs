@@ -112,6 +112,10 @@ pub struct ModuleInfo {
 pub enum SanitizerScope {
     /// HTML markup sanitized by DOMPurify-compatible APIs.
     Html,
+    /// URL or redirect target checked against a literal-backed allowlist.
+    Url,
+    /// Path value checked against a high-confidence containment guard.
+    Path,
 }
 
 /// A captured sink argument that is itself a recognized sanitizer call.

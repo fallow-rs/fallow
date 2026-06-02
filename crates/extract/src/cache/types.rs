@@ -152,7 +152,11 @@ use crate::MemberKind;
 /// the security `tainted_sink` detector can suppress high-confidence
 /// DOMPurify-backed HTML sink candidates. Pre-112 entries lack sanitizer
 /// metadata until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 112;
+///
+/// Bumped to 113 for issue #863 follow-up: sanitizer metadata gained URL and
+/// path domains plus guarded path backpatching. Pre-113 entries may lack those
+/// sanitizer domains until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 113;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
