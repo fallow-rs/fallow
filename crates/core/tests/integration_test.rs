@@ -139,6 +139,9 @@ mod issue_758_danger_no_dep;
 mod issue_772_workspace_plugin_merge;
 #[path = "integration_test/issue_845_instanceof_narrowing.rs"]
 mod issue_845_instanceof_narrowing;
+
+#[path = "integration_test/issue_844_usememo_instance.rs"]
+mod issue_844_usememo_instance;
 #[path = "integration_test/lit_custom_element.rs"]
 mod lit_custom_element;
 #[path = "integration_test/scoped_used_class_members.rs"]

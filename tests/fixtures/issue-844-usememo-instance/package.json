@@ -1,0 +1,4 @@
+{
+  "name": "issue-844-usememo-instance-fixture",
+  "main": "src/app.ts"
+}

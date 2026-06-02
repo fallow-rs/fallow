@@ -135,6 +135,24 @@ fn vi_mock_has_factory(call: &CallExpression<'_>) -> bool {
     call.arguments.get(1).is_some_and(is_factory_arg)
 }
 
+/// Whether `callee` is a `useMemo` / `React.useMemo` reference.
+///
+/// `useMemo(factory)` returns the factory's product directly, so
+/// `const svc = useMemo(() => new Svc())` binds `svc` to a `Svc` instance.
+/// This is unlike `useState`, which returns a `[value, setter]` tuple (handled
+/// only through the array-destructure factory path), so an unqualified
+/// `const x = useState(() => new Foo())` must NOT bind. Scoped to `useMemo`
+/// because an arbitrary wrapper does not necessarily return the instance;
+/// binding generically would over-credit and hide genuinely-unused members.
+/// See issue #844.
+fn is_value_returning_memo_callee(callee: &Expression<'_>) -> bool {
+    match callee {
+        Expression::Identifier(id) => id.name == "useMemo",
+        Expression::StaticMemberExpression(member) => member.property.name == "useMemo",
+        _ => false,
+    }
+}
+
 /// Specifier source string from the first argument of `register(...)`.
 fn node_module_register_specifier(call: &CallExpression<'_>) -> Option<String> {
     match call.arguments.first()? {
@@ -2058,6 +2076,23 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             {
                 self.binding_target_names
                     .insert(id.name.to_string(), class_name);
+            }
+
+            // `const svc = useMemo(() => new Svc())`: useMemo returns the
+            // factory's product directly, so the non-destructured binding is a
+            // class instance. Scoped to useMemo (see `is_value_returning_memo_callee`)
+            // so arbitrary wrappers and tuple-returning hooks like useState are
+            // not over-credited. `or_insert` so a stronger pre-existing binding
+            // wins. See issue #844.
+            if let Expression::CallExpression(call) = init
+                && let BindingPattern::BindingIdentifier(id) = &declarator.id
+                && is_value_returning_memo_callee(&call.callee)
+                && let Some(class_name) =
+                    super::helpers::try_extract_factory_new_class(&call.arguments)
+            {
+                self.binding_target_names
+                    .entry(id.name.to_string())
+                    .or_insert(class_name);
             }
 
             if let Expression::CallExpression(call) = init

@@ -793,6 +793,65 @@ fn non_array_destructured_call_not_tracked() {
 }
 
 #[test]
+fn usememo_non_destructured_factory_tracked() {
+    // useMemo returns the factory's product directly, so `svc` is a Svc
+    // instance and `svc.fetch()` credits Svc.fetch. See issue #844.
+    let info = parse(
+        r"
+            import { Svc } from './svc';
+            const svc = useMemo(() => new Svc(token), [token]);
+            svc.fetch();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Svc" && a.member == "fetch"),
+        "useMemo factory binding should credit Svc.fetch, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn usememo_react_namespaced_factory_tracked() {
+    let info = parse(
+        r"
+            import { Svc } from './svc';
+            const svc = React.useMemo(() => new Svc(), []);
+            svc.fetch();
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Svc" && a.member == "fetch"),
+        "React.useMemo factory binding should credit Svc.fetch, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn usestate_non_destructured_factory_not_tracked() {
+    // useState returns a [value, setter] tuple, so a non-destructured binding is
+    // the tuple, not the instance. Only the array-destructured form is tracked.
+    let info = parse(
+        r"
+            import { Foo } from './foo';
+            const state = useState(() => new Foo());
+            state.bar();
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "Foo" && a.member == "bar"),
+        "non-destructured useState (tuple) should not bind the instance, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn array_destructured_no_factory_not_tracked() {
     let info = parse(
         r"

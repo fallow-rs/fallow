@@ -132,7 +132,13 @@ use crate::MemberKind;
 /// exclude safely-parameterized `` sql`${x}` `` templates and object-form
 /// `.execute({ sql, args })` arguments. Pre-109 entries lack the field, so their
 /// sink sites do not feed the catalogue until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 109;
+///
+/// Bumped to 110 for issue #844: `const svc = useMemo(() => new Svc())` now
+/// binds the non-destructured identifier to the constructed class, so method
+/// calls on it emit member accesses crediting the class. This changes the
+/// persisted `member_accesses` for files using the useMemo factory shape;
+/// pre-fix entries miss the credit and surface as false `unused-class-member`.
+pub(super) const CACHE_VERSION: u32 = 110;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
