@@ -2582,6 +2582,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_call_expression(&mut self, expr: &CallExpression<'a>) {
+        if let Expression::StaticMemberExpression(member) = &expr.callee
+            && let Expression::Identifier(object) = &member.object
+            && !matches!(member.property.name.as_str(), "has" | "includes")
+            && self.literal_allowlist_binding(&object.name)
+        {
+            self.record_literal_allowlist_binding(object.name.as_str(), false);
+        }
+
         if let Some(test_name) = playwright_test_callee_name(&expr.callee) {
             self.member_accesses
                 .extend(collect_playwright_fixture_member_uses(
@@ -2800,6 +2808,17 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         reason = "CJS export pattern matching requires deep nesting"
     )]
     fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
+        if let Some(name) = assignment_target_identifier_name(&expr.left) {
+            self.record_sanitizer_binding(name, None);
+            self.record_literal_allowlist_binding(name, false);
+            self.record_path_sink_binding(name, None);
+            self.record_path_relative_binding(name, None);
+        } else if let Some(name) = assignment_target_member_object_name(&expr.left)
+            && self.literal_allowlist_binding(name)
+        {
+            self.record_literal_allowlist_binding(name, false);
+        }
+
         if let AssignmentTarget::StaticMemberExpression(member) = &expr.left {
             if let Expression::Identifier(obj) = &member.object {
                 if obj.name == "module" && member.property.name == "exports" {
@@ -3120,6 +3139,53 @@ fn static_argument_object_name(arg: &Argument<'_>) -> Option<String> {
             static_member_object_name(&member.object)?,
             member.property.name
         )),
+        _ => None,
+    }
+}
+
+fn assignment_target_identifier_name<'b>(target: &'b AssignmentTarget<'_>) -> Option<&'b str> {
+    match target {
+        AssignmentTarget::AssignmentTargetIdentifier(ident) => Some(ident.name.as_str()),
+        AssignmentTarget::TSAsExpression(ts_as) => expression_identifier_name(&ts_as.expression),
+        AssignmentTarget::TSSatisfiesExpression(ts_sat) => {
+            expression_identifier_name(&ts_sat.expression)
+        }
+        AssignmentTarget::TSNonNullExpression(ts_non_null) => {
+            expression_identifier_name(&ts_non_null.expression)
+        }
+        AssignmentTarget::TSTypeAssertion(ts_assertion) => {
+            expression_identifier_name(&ts_assertion.expression)
+        }
+        _ => None,
+    }
+}
+
+fn expression_identifier_name<'b>(expr: &'b Expression<'_>) -> Option<&'b str> {
+    match expr {
+        Expression::Identifier(ident) => Some(ident.name.as_str()),
+        Expression::ParenthesizedExpression(paren) => expression_identifier_name(&paren.expression),
+        Expression::TSAsExpression(ts_as) => expression_identifier_name(&ts_as.expression),
+        Expression::TSSatisfiesExpression(ts_sat) => expression_identifier_name(&ts_sat.expression),
+        Expression::TSNonNullExpression(ts_non_null) => {
+            expression_identifier_name(&ts_non_null.expression)
+        }
+        Expression::TSTypeAssertion(ts_assertion) => {
+            expression_identifier_name(&ts_assertion.expression)
+        }
+        _ => None,
+    }
+}
+
+fn assignment_target_member_object_name<'b>(target: &'b AssignmentTarget<'_>) -> Option<&'b str> {
+    match target {
+        AssignmentTarget::StaticMemberExpression(member) => match &member.object {
+            Expression::Identifier(object) => Some(object.name.as_str()),
+            _ => None,
+        },
+        AssignmentTarget::ComputedMemberExpression(member) => match &member.object {
+            Expression::Identifier(object) => Some(object.name.as_str()),
+            _ => None,
+        },
         _ => None,
     }
 }

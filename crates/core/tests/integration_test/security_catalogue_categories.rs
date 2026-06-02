@@ -306,6 +306,23 @@ fn open_redirect_mutable_allowlist_still_fires() {
 }
 
 #[test]
+fn open_redirect_mutated_const_allowlist_still_fires() {
+    let results = analyze_with_security_sink("security-open-redirect");
+    assert_candidate(
+        &results,
+        "src/mutated-const-allowlist.ts",
+        "open-redirect",
+        601,
+    );
+}
+
+#[test]
+fn open_redirect_reassigned_guarded_target_still_fires() {
+    let results = analyze_with_security_sink("security-open-redirect");
+    assert_candidate(&results, "src/reassigned-target.ts", "open-redirect", 601);
+}
+
+#[test]
 fn open_redirect_post_guard_still_fires() {
     let results = analyze_with_security_sink("security-open-redirect");
     assert_candidate(&results, "src/post-guard.ts", "open-redirect", 601);
