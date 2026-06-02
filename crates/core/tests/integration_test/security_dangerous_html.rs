@@ -76,6 +76,48 @@ fn non_literal_dangerously_set_inner_html_fires() {
 }
 
 #[test]
+fn dompurify_sanitized_html_sinks_do_not_fire() {
+    let results = analyze_with_security_sink();
+    for suffix in [
+        "src/dompurify-default.ts",
+        "src/dompurify-namespace.ts",
+        "src/dompurify-require.ts",
+        "src/isomorphic-dompurify.ts",
+        "src/sanitized-component.tsx",
+    ] {
+        assert!(
+            !anchored_on(&results, suffix),
+            "{suffix} should be suppressed by DOMPurify provenance"
+        );
+    }
+}
+
+#[test]
+fn sanitizer_near_misses_still_fire() {
+    let results = analyze_with_security_sink();
+    assert!(
+        anchored_on(&results, "src/near-miss.ts"),
+        "local sanitize-like helpers must not suppress HTML sink candidates"
+    );
+}
+
+#[test]
+fn dompurify_does_not_suppress_non_html_sinks() {
+    let results = analyze_with_security_sink();
+    let finding = results
+        .security_findings
+        .iter()
+        .find(|f| {
+            f.path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with("src/code-sink.ts")
+        })
+        .expect("eval with DOMPurify output must remain a code-injection candidate");
+    assert_eq!(finding.category.as_deref(), Some("code-injection"));
+}
+
+#[test]
 fn sink_in_test_or_config_file_does_not_fire() {
     // Build-config and test files are excluded from security candidate
     // generation (production-mode parity): an unsafe innerHTML sink inside a

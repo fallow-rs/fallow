@@ -14,7 +14,9 @@ use std::sync::OnceLock;
 
 use rustc_hash::FxHashMap;
 
-use fallow_types::extract::{ModuleInfo, SinkSite, TaintedBinding};
+use fallow_types::extract::{
+    ModuleInfo, SanitizedBinding, SanitizedSinkArg, SanitizerScope, SinkSite, TaintedBinding,
+};
 use fallow_types::output::{IssueAction, SuppressFileAction, SuppressFileKind};
 use fallow_types::results::{SecurityFinding, SecurityFindingKind, TraceHop, TraceHopRole};
 use fallow_types::suppress::IssueKind;
@@ -168,6 +170,31 @@ fn source_tainted_locals(bindings: &[TaintedBinding]) -> FxHashMap<&str, &'stati
     out
 }
 
+fn is_html_sanitizable_category(id: &str) -> bool {
+    matches!(id, "dangerous-html" | "dom-document-write" | "jquery-html")
+}
+
+fn has_direct_html_sanitizer(sink: &SinkSite, args: &[SanitizedSinkArg]) -> bool {
+    args.iter().any(|arg| {
+        arg.span_start == sink.span_start
+            && arg.arg_index == sink.arg_index
+            && arg.scope == SanitizerScope::Html
+    })
+}
+
+fn has_sanitized_html_binding(sink: &SinkSite, bindings: &[SanitizedBinding]) -> bool {
+    sink.arg_idents.iter().any(|name| {
+        bindings
+            .iter()
+            .any(|binding| binding.local == name.as_str() && binding.scope == SanitizerScope::Html)
+    })
+}
+
+fn sink_has_html_sanitizer(module: &ModuleInfo, sink: &SinkSite) -> bool {
+    has_direct_html_sanitizer(sink, &module.sanitized_sink_args)
+        || has_sanitized_html_binding(sink, &module.sanitized_bindings)
+}
+
 /// The matched source title if any of a sink's captured argument identifiers
 /// trace to a source-tainted local binding, else `None`. The intra-module,
 /// name-based back-trace from issue #859.
@@ -256,6 +283,10 @@ pub fn find_tainted_sinks(
             }) else {
                 continue;
             };
+
+            if is_html_sanitizable_category(&matcher.id) && sink_has_html_sanitizer(module, sink) {
+                continue;
+            }
 
             let (line, col) =
                 byte_offset_to_line_col(line_offsets_by_file, file_id, sink.span_start);

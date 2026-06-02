@@ -198,6 +198,8 @@ pub(crate) fn parse_html_to_module_with_complexity(
         security_sinks: Vec::new(),
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
+        sanitized_bindings: Vec::new(),
+        sanitized_sink_args: Vec::new(),
     }
 }
 

@@ -1378,6 +1378,8 @@ mod tests {
                 security_sinks: Vec::new(),
                 security_sinks_skipped: 0,
                 tainted_bindings: Vec::new(),
+                sanitized_bindings: Vec::new(),
+                sanitized_sink_args: Vec::new(),
             }];
 
             let rules = RulesConfig {

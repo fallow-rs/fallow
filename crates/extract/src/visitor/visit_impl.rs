@@ -14,8 +14,8 @@ use crate::{
     MemberAccess, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
-    ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference, SinkArgKind, SinkShape,
-    SinkSite, TaintedBinding,
+    ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference, SanitizedBinding,
+    SanitizedSinkArg, SanitizerScope, SinkArgKind, SinkShape, SinkSite, TaintedBinding,
 };
 
 use crate::asset_url::normalize_asset_url;
@@ -112,6 +112,10 @@ fn vitest_auto_mock_source(source: &str) -> Option<String> {
     }
 
     Some(format!("{dir}/__mocks__/{file_name}"))
+}
+
+fn is_dompurify_source(source: &str) -> bool {
+    matches!(source, "dompurify" | "isomorphic-dompurify")
 }
 
 /// Detect whether `vi.mock(specifier, factory, ...)` passes a factory.
@@ -1173,6 +1177,88 @@ impl ModuleInfoExtractor {
         }
     }
 
+    fn record_sanitized_binding(&mut self, name: &str, expr: &Expression<'_>) {
+        let Some(scope) = self.sanitizer_scope_for_expr(expr) else {
+            return;
+        };
+        self.sanitized_bindings.push(SanitizedBinding {
+            local: name.to_string(),
+            scope,
+        });
+    }
+
+    fn record_dompurify_import_binding(&mut self, source: &str, local: &str, is_type_only: bool) {
+        if !is_type_only && self.is_module_scope() && is_dompurify_source(source) {
+            self.dompurify_bindings.insert(local.to_string());
+        }
+    }
+
+    fn record_dompurify_require_binding(
+        &mut self,
+        declarator: &VariableDeclarator<'_>,
+        source: &str,
+    ) {
+        if !self.is_module_scope() || !is_dompurify_source(source) {
+            return;
+        }
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id {
+            self.dompurify_bindings.insert(id.name.to_string());
+        }
+    }
+
+    fn sanitizer_scope_for_expr(&self, expr: &Expression<'_>) -> Option<SanitizerScope> {
+        match unwrap_parens(expr) {
+            Expression::AwaitExpression(await_expr) => {
+                self.sanitizer_scope_for_expr(&await_expr.argument)
+            }
+            Expression::CallExpression(call) if self.is_dompurify_sanitize_call(call) => {
+                Some(SanitizerScope::Html)
+            }
+            Expression::ObjectExpression(obj) => self.sanitizer_scope_for_object(obj),
+            _ => None,
+        }
+    }
+
+    fn sanitizer_scope_for_object(&self, obj: &ObjectExpression<'_>) -> Option<SanitizerScope> {
+        obj.properties.iter().find_map(|prop| {
+            let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+                return None;
+            };
+            if prop.key.static_name().is_none_or(|name| name != "__html") {
+                return None;
+            }
+            self.sanitizer_scope_for_expr(&prop.value)
+        })
+    }
+
+    fn is_dompurify_sanitize_call(&self, call: &CallExpression<'_>) -> bool {
+        let Some(callee_path) = flatten_callee_path(&call.callee) else {
+            return false;
+        };
+        let Some((object, method)) = callee_path.rsplit_once('.') else {
+            return false;
+        };
+        method == "sanitize"
+            && self.dompurify_bindings.contains(object)
+            && !self.nested_scope_shadows(object)
+    }
+
+    fn record_sanitized_sink_arg(
+        &mut self,
+        span_start: u32,
+        arg_index: u32,
+        expr: &Expression<'_>,
+    ) {
+        let Some(scope) = self.sanitizer_scope_for_expr(expr) else {
+            return;
+        };
+        self.sanitized_sink_args.push(SanitizedSinkArg {
+            span_start,
+            arg_index,
+            scope,
+        });
+    }
+
     /// Record tainted-source bindings for `const { a, b } = <object>.<prop>`,
     /// where the destructured initializer is a member-access chain (or bare
     /// identifier root). Each bound local maps to the FULL flattened init path:
@@ -1749,6 +1835,11 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         });
                     }
                     ImportDeclarationSpecifier::ImportDefaultSpecifier(s) => {
+                        self.record_dompurify_import_binding(
+                            &source,
+                            s.local.name.as_str(),
+                            is_type_only,
+                        );
                         if self.is_module_scope() && is_node_path_source(&source) {
                             self.node_path_namespace_bindings
                                 .insert(s.local.name.to_string());
@@ -1765,6 +1856,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     }
                     ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => {
                         let local = s.local.name.to_string();
+                        self.record_dompurify_import_binding(&source, &local, is_type_only);
                         if self.is_module_scope() && is_child_process_source(&source) {
                             self.child_process_namespace_bindings.insert(local.clone());
                         }
@@ -2060,6 +2152,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 self.record_current_module_file_path_binding(id.name.as_str(), init);
                 self.record_child_process_fork_target_binding(id.name.as_str(), init);
                 self.record_tainted_source_binding(id.name.as_str(), init);
+                self.record_sanitized_binding(id.name.as_str(), init);
             }
 
             if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id {
@@ -2093,6 +2186,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             }
 
             if let Some((call, source)) = try_extract_require(init) {
+                self.record_dompurify_require_binding(declarator, source);
                 self.record_child_process_require_binding(declarator, source);
                 self.handle_require_declaration(declarator, call, source);
                 continue;
@@ -2896,6 +2990,13 @@ fn collect_idents_into(expr: &Expression<'_>, out: &mut Vec<String>) {
                 }
             }
         }
+        Expression::ObjectExpression(obj) => {
+            for prop in &obj.properties {
+                if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+                    collect_idents_into(&prop.value, out);
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -2985,6 +3086,7 @@ impl ModuleInfoExtractor {
             let Ok(arg_index) = u32::try_from(index) else {
                 continue;
             };
+            self.record_sanitized_sink_arg(expr.span.start, arg_index, arg_expr);
             self.security_sinks.push(SinkSite {
                 sink_shape,
                 callee_path: callee_path.clone(),
@@ -3012,6 +3114,7 @@ impl ModuleInfoExtractor {
             self.security_sinks_skipped += 1;
             return;
         };
+        self.record_sanitized_sink_arg(expr.span.start, 0, &expr.right);
         self.security_sinks.push(SinkSite {
             sink_shape: SinkShape::MemberAssign,
             callee_path: format!("{}.{}", object_path, member.property.name),
@@ -3068,6 +3171,7 @@ impl ModuleInfoExtractor {
         if !is_non_literal_arg(value_expr) {
             return;
         }
+        self.record_sanitized_sink_arg(attr.span.start, 0, value_expr);
         self.security_sinks.push(SinkSite {
             sink_shape: SinkShape::JsxAttr,
             callee_path: name.name.to_string(),

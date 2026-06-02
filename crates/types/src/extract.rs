@@ -90,6 +90,52 @@ pub struct ModuleInfo {
     /// matching `local` names as source-tainted. Intra-module and name-based
     /// (no scope analysis); a conservative association, never a taint proof.
     pub tainted_bindings: Vec<TaintedBinding>,
+    /// Local bindings whose initializer is a recognized sanitizer call.
+    /// Consumed by the security `tainted_sink` detector to suppress high
+    /// confidence sanitizer-backed HTML sink candidates.
+    pub sanitized_bindings: Vec<SanitizedBinding>,
+    /// Sink arguments that were recognized as sanitizer calls at extraction
+    /// time. Used for direct sink calls such as
+    /// `el.innerHTML = DOMPurify.sanitize(input)`.
+    pub sanitized_sink_args: Vec<SanitizedSinkArg>,
+}
+
+/// Sanitizer output domain. Kept intentionally narrow so a sanitizer for one
+/// domain cannot suppress a different sink family.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub enum SanitizerScope {
+    /// HTML markup sanitized by DOMPurify-compatible APIs.
+    Html,
+}
+
+/// A local binding initialized from a recognized sanitizer call.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, bitcode::Encode, bitcode::Decode)]
+pub struct SanitizedBinding {
+    /// The local binding name introduced by the declarator.
+    pub local: String,
+    /// The sanitizer output domain for this binding.
+    pub scope: SanitizerScope,
+}
+
+/// A captured sink argument that is itself a recognized sanitizer call.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, bitcode::Encode, bitcode::Decode)]
+pub struct SanitizedSinkArg {
+    /// Byte offset of the owning sink span start.
+    pub span_start: u32,
+    /// The positional argument index on the owning sink.
+    pub arg_index: u32,
+    /// The sanitizer output domain for this argument.
+    pub scope: SanitizerScope,
 }
 
 /// A local binding tied to the flattened member-access path it was initialized
@@ -582,7 +628,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 64);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 624);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 672);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
