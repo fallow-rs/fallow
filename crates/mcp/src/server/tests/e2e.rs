@@ -9,8 +9,9 @@ use std::path::PathBuf;
 use rmcp::model::RawContent;
 
 use crate::tools::{
-    build_analyze_args, build_health_args, build_project_info_args, build_trace_clone_args,
-    build_trace_dependency_args, build_trace_export_args, build_trace_file_args, run_fallow,
+    build_analyze_args, build_health_args, build_project_info_args, build_security_candidates_args,
+    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
+    build_trace_file_args, run_fallow,
 };
 
 /// Resolve the fallow binary from `FALLOW_BIN`, or the workspace target dir.
@@ -125,6 +126,29 @@ async fn e2e_analyze_with_issue_type_filter() {
     assert!(
         exports.is_none() || exports.unwrap().is_empty(),
         "filtered output should not have unused_exports"
+    );
+}
+
+#[tokio::test]
+async fn e2e_security_candidates_returns_security_json() {
+    let bin = fallow_binary();
+    let root = fixture_path("security-client-server-leak");
+    let params = crate::params::SecurityCandidatesParams {
+        root: Some(root.to_string_lossy().to_string()),
+        ..Default::default()
+    };
+    let args = build_security_candidates_args(&params).unwrap();
+    let result = run_fallow(&bin, &args).await.unwrap();
+
+    assert_eq!(result.is_error, Some(false));
+
+    let text = extract_text(&result);
+    let json: serde_json::Value = serde_json::from_str(text)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}"));
+    assert_eq!(json["kind"].as_str(), Some("security"));
+    assert!(
+        json["security_findings"].is_array(),
+        "security output should include security_findings"
     );
 }
 

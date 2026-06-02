@@ -5,8 +5,8 @@ use crate::tools::{
     build_feature_flags_args, build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
     build_get_importance_args, build_health_args, build_impact_args, build_list_boundaries_args,
-    build_project_info_args, build_trace_clone_args, build_trace_dependency_args,
-    build_trace_export_args, build_trace_file_args,
+    build_project_info_args, build_security_candidates_args, build_trace_clone_args,
+    build_trace_dependency_args, build_trace_export_args, build_trace_file_args,
 };
 
 /// Parse a validation error body into its `message` field. Arg builders emit
@@ -332,6 +332,99 @@ fn check_changed_args_with_all_options() {
 fn check_changed_args_with_commit_sha() {
     let args = build_check_changed_args(check_changed("abc123def456"));
     assert!(args.contains(&"abc123def456".to_string()));
+}
+
+#[test]
+fn security_candidates_args_minimal() {
+    let args = build_security_candidates_args(&SecurityCandidatesParams::default()).unwrap();
+    assert_eq!(args, ["security", "--format", "json", "--quiet"]);
+}
+
+#[test]
+fn security_candidates_args_with_scope_and_performance_options() {
+    let params = SecurityCandidatesParams {
+        root: Some("/repo".to_string()),
+        config: Some("fallow.toml".to_string()),
+        workspace: Some("apps/web".to_string()),
+        changed_since: Some("origin/main".to_string()),
+        changed_workspaces: None,
+        no_cache: Some(true),
+        threads: Some(4),
+    };
+    let args = build_security_candidates_args(&params).unwrap();
+    assert_eq!(
+        args,
+        [
+            "security",
+            "--format",
+            "json",
+            "--quiet",
+            "--root",
+            "/repo",
+            "--config",
+            "fallow.toml",
+            "--no-cache",
+            "--threads",
+            "4",
+            "--workspace",
+            "apps/web",
+            "--changed-since",
+            "origin/main",
+        ]
+    );
+}
+
+#[test]
+fn security_candidates_args_support_changed_workspaces() {
+    let params = SecurityCandidatesParams {
+        changed_workspaces: Some("origin/main".to_string()),
+        ..Default::default()
+    };
+    let args = build_security_candidates_args(&params).unwrap();
+    assert!(
+        args.windows(2)
+            .any(|w| w == ["--changed-workspaces", "origin/main"])
+    );
+}
+
+#[test]
+fn security_candidates_args_reject_workspace_with_changed_workspaces() {
+    let params = SecurityCandidatesParams {
+        workspace: Some("apps/web".to_string()),
+        changed_workspaces: Some("origin/main".to_string()),
+        ..Default::default()
+    };
+    let err = build_security_candidates_args(&params).unwrap_err();
+    let msg = parse_validation_message(&err);
+    assert!(msg.contains("workspace and changed_workspaces are mutually exclusive"));
+}
+
+#[test]
+fn security_candidates_args_do_not_expose_ci_or_write_surfaces() {
+    let params = SecurityCandidatesParams {
+        root: Some("/repo".to_string()),
+        changed_since: Some("origin/main".to_string()),
+        ..Default::default()
+    };
+    let args = build_security_candidates_args(&params).unwrap();
+    for forbidden in [
+        "--ci",
+        "--fail-on-issues",
+        "--sarif-file",
+        "--summary",
+        "--baseline",
+        "--save-baseline",
+        "--fail-on-regression",
+        "--regression-baseline",
+        "--save-regression-baseline",
+        "--diff-file",
+        "--diff-stdin",
+    ] {
+        assert!(
+            !args.iter().any(|arg| arg == forbidden),
+            "security_candidates must not emit {forbidden}, got {args:?}"
+        );
+    }
 }
 
 #[test]

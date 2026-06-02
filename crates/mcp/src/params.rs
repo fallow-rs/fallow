@@ -95,6 +95,32 @@ pub struct CheckChangedParams {
     pub threads: Option<usize>,
 }
 
+/// Parameters for the `security_candidates` tool.
+///
+/// Security analysis can exceed the default MCP subprocess timeout on large
+/// repos. Raise `FALLOW_TIMEOUT_SECS` in the server environment when needed.
+#[derive(Default, Deserialize, JsonSchema)]
+pub struct SecurityCandidatesParams {
+    pub root: Option<String>,
+
+    pub config: Option<String>,
+
+    /// Scope candidates to selected workspace roots. Mutually exclusive with
+    /// `changed_workspaces`.
+    pub workspace: Option<String>,
+
+    /// Git ref to compare against when limiting candidates to changed files.
+    pub changed_since: Option<String>,
+
+    /// Scope candidates to workspaces touched since this git ref. Mutually
+    /// exclusive with `workspace`.
+    pub changed_workspaces: Option<String>,
+
+    pub no_cache: Option<bool>,
+
+    pub threads: Option<usize>,
+}
+
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct FindDupesParams {
     pub root: Option<String>,

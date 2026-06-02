@@ -23,6 +23,7 @@ fn all_tools_registered() {
     let names: Vec<String> = tools.iter().map(|t| t.name.to_string()).collect();
     assert!(names.contains(&"analyze".to_string()));
     assert!(names.contains(&"check_changed".to_string()));
+    assert!(names.contains(&"security_candidates".to_string()));
     assert!(names.contains(&"find_dupes".to_string()));
     assert!(names.contains(&"fix_preview".to_string()));
     assert!(names.contains(&"fix_apply".to_string()));
@@ -42,7 +43,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"get_importance".to_string()));
     assert!(names.contains(&"get_cleanup_candidates".to_string()));
     assert!(names.contains(&"impact".to_string()));
-    assert_eq!(tools.len(), 21);
+    assert_eq!(tools.len(), 22);
 }
 
 #[test]
@@ -52,6 +53,7 @@ fn read_only_tools_have_annotations() {
     let read_only = [
         "analyze",
         "check_changed",
+        "security_candidates",
         "find_dupes",
         "fix_preview",
         "project_info",
@@ -124,6 +126,7 @@ fn open_world_hint_on_analysis_tools() {
     let open_world = [
         "analyze",
         "check_changed",
+        "security_candidates",
         "find_dupes",
         "fix_preview",
         "project_info",
@@ -191,6 +194,7 @@ fn server_instructions_mention_all_tools() {
     let instructions = info.instructions.as_deref().unwrap();
     assert!(instructions.contains("analyze"));
     assert!(instructions.contains("check_changed"));
+    assert!(instructions.contains("security_candidates"));
     assert!(instructions.contains("find_dupes"));
     assert!(instructions.contains("fix_preview"));
     assert!(instructions.contains("fix_apply"));
@@ -288,6 +292,78 @@ fn check_changed_schema_requires_since() {
         assert!(
             required.iter().any(|v| v.as_str() == Some("since")),
             "check_changed schema should require 'since'"
+        );
+    }
+}
+
+#[test]
+fn security_candidates_schema_contains_expected_properties() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools
+        .iter()
+        .find(|t| t.name == "security_candidates")
+        .unwrap();
+    let schema = serde_json::to_string(&tool.input_schema).unwrap();
+    for prop in [
+        "root",
+        "config",
+        "workspace",
+        "changed_since",
+        "changed_workspaces",
+        "no_cache",
+        "threads",
+    ] {
+        assert!(
+            schema.contains(prop),
+            "security_candidates schema should contain property '{prop}'"
+        );
+    }
+    for inert in [
+        "ci",
+        "fail_on_issues",
+        "sarif_file",
+        "summary",
+        "baseline",
+        "save_baseline",
+    ] {
+        assert!(
+            !schema.contains(inert),
+            "security_candidates must not expose inert or mutating property '{inert}'"
+        );
+    }
+}
+
+#[test]
+fn security_candidates_description_frames_candidates_and_scope() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools
+        .iter()
+        .find(|t| t.name == "security_candidates")
+        .unwrap();
+    let desc = tool.description.as_deref().unwrap();
+    assert!(
+        desc.starts_with("Returns unverified security candidates, not confirmed vulnerabilities."),
+        "security_candidates description must lead with candidate framing, got {desc}"
+    );
+    for expected in [
+        "fallow security --format json",
+        "kind: \"security\"",
+        "security_findings",
+        "category",
+        "CWE",
+        "evidence",
+        "structural trace",
+        "Verify trace and evidence",
+        "changed_since",
+        "changed_workspaces",
+        "FALLOW_DIFF_FILE",
+        "FALLOW_TIMEOUT_SECS",
+    ] {
+        assert!(
+            desc.contains(expected),
+            "security_candidates description should mention {expected}"
         );
     }
 }

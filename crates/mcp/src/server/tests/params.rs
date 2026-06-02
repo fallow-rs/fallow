@@ -60,6 +60,39 @@ fn check_changed_params_require_since() {
 }
 
 #[test]
+fn security_candidates_params_minimal() {
+    let params: SecurityCandidatesParams = serde_json::from_str("{}").unwrap();
+    assert!(params.root.is_none());
+    assert!(params.config.is_none());
+    assert!(params.workspace.is_none());
+    assert!(params.changed_since.is_none());
+    assert!(params.changed_workspaces.is_none());
+    assert!(params.no_cache.is_none());
+    assert!(params.threads.is_none());
+}
+
+#[test]
+fn security_candidates_params_all_fields_deserialize() {
+    let json = r#"{
+        "root": "/project",
+        "config": "fallow.toml",
+        "workspace": "apps/web",
+        "changed_since": "HEAD~3",
+        "changed_workspaces": "origin/main",
+        "no_cache": true,
+        "threads": 4
+    }"#;
+    let params: SecurityCandidatesParams = serde_json::from_str(json).unwrap();
+    assert_eq!(params.root.as_deref(), Some("/project"));
+    assert_eq!(params.config.as_deref(), Some("fallow.toml"));
+    assert_eq!(params.workspace.as_deref(), Some("apps/web"));
+    assert_eq!(params.changed_since.as_deref(), Some("HEAD~3"));
+    assert_eq!(params.changed_workspaces.as_deref(), Some("origin/main"));
+    assert_eq!(params.no_cache, Some(true));
+    assert_eq!(params.threads, Some(4));
+}
+
+#[test]
 fn check_runtime_coverage_params_require_coverage() {
     let json = "{}";
     let result: Result<CheckRuntimeCoverageParams, _> = serde_json::from_str(json);

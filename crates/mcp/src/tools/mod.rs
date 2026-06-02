@@ -10,6 +10,7 @@ mod health;
 mod impact;
 mod list_boundaries;
 mod project_info;
+mod security;
 mod trace;
 
 pub use analyze::build_analyze_args;
@@ -27,6 +28,7 @@ pub use health::build_health_args;
 pub use impact::build_impact_args;
 pub use list_boundaries::build_list_boundaries_args;
 pub use project_info::build_project_info_args;
+pub use security::build_security_candidates_args;
 pub use trace::{
     build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
     build_trace_file_args,

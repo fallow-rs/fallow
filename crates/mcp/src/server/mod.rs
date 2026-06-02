@@ -6,8 +6,8 @@ use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
 use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, ExplainParams,
     FeatureFlagsParams, FindDupesParams, FixParams, HealthParams, ImpactParams,
-    ListBoundariesParams, ProjectInfoParams, TraceCloneParams, TraceDependencyParams,
-    TraceExportParams, TraceFileParams,
+    ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams, TraceCloneParams,
+    TraceDependencyParams, TraceExportParams, TraceFileParams,
 };
 use crate::tools::{
     build_analyze_args, build_audit_args, build_check_changed_args,
@@ -15,8 +15,9 @@ use crate::tools::{
     build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
     build_get_importance_args, build_health_args, build_impact_args, build_list_boundaries_args,
-    build_project_info_args, build_trace_clone_args, build_trace_dependency_args,
-    build_trace_export_args, build_trace_file_args, run_fallow, run_fallow_with_top_level_warnings,
+    build_project_info_args, build_security_candidates_args, build_trace_clone_args,
+    build_trace_dependency_args, build_trace_export_args, build_trace_file_args, run_fallow,
+    run_fallow_with_top_level_warnings,
 };
 
 #[cfg(test)]
@@ -88,6 +89,21 @@ impl FallowMcp {
     ) -> Result<CallToolResult, McpError> {
         let args = build_check_changed_args(params.0);
         run_fallow(&self.binary, &args).await
+    }
+
+    #[tool(
+        description = "Returns unverified security candidates, not confirmed vulnerabilities. Runs `fallow security --format json` and returns `kind: \"security\"`, `security_findings`, category, CWE, evidence, structural trace, and blind-spot counters for agent verification. Verify trace and evidence before editing code or presenting a finding as a vulnerability. Supports root, config, workspace, changed_since, changed_workspaces, no_cache, and threads. The CLI also honors `FALLOW_DIFF_FILE` from the MCP server environment for line-level diff scoping. Security analysis can exceed the default 120s subprocess timeout on large repos; raise `FALLOW_TIMEOUT_SECS` accordingly.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
+    async fn security_candidates(
+        &self,
+        params: Parameters<SecurityCandidatesParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = params.0;
+        match build_security_candidates_args(&params) {
+            Ok(args) => run_fallow(&self.binary, &args).await,
+            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
+        }
     }
 
     #[tool(
@@ -331,6 +347,7 @@ impl ServerHandler for FallowMcp {
             .with_instructions(
                 "Fallow MCP server, codebase analysis for TypeScript/JavaScript projects. \
                  Tools: analyze (full analysis), check_changed (incremental/PR analysis), \
+                 security_candidates (unverified local security candidates for agent verification), \
                  find_dupes (code duplication), fix_preview/fix_apply (auto-fix), \
                  project_info (plugins, files, entry points, boundary zones), \
                  trace_export / trace_file / trace_dependency / trace_clone (graph and clone evidence), \
