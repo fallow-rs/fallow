@@ -1140,6 +1140,7 @@ mod graphql_codegen;
 mod hardhat;
 mod husky;
 mod i18next;
+mod ionic;
 mod jest;
 mod k6;
 mod karma;
@@ -1533,6 +1534,7 @@ mod tests {
             (&nextjs::NextJsPlugin, &["next"]),
             (&nuxt::NuxtPlugin, &["nuxt"]),
             (&angular::AngularPlugin, &["@angular/core"]),
+            (&ionic::IonicPlugin, &["@ionic/angular"]),
             (&sveltekit::SvelteKitPlugin, &["@sveltejs/kit"]),
             (&gatsby::GatsbyPlugin, &["gatsby"]),
         ];

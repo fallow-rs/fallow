@@ -217,6 +217,8 @@ mod issue_818_prettier_pkg_json_string;
 mod issue_820_vercel_ts_config;
 #[path = "integration_test/issue_823_pnpm_package_sources.rs"]
 mod issue_823_pnpm_package_sources;
+#[path = "integration_test/issue_868_ionic_lifecycle.rs"]
+mod issue_868_ionic_lifecycle;
 #[path = "integration_test/lexical_nodes.rs"]
 mod lexical_nodes;
 #[path = "integration_test/script_multiplexers.rs"]

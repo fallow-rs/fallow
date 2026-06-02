@@ -1,0 +1,13 @@
+{
+  "name": "issue-868-ionic-lifecycle",
+  "private": true,
+  "dependencies": {
+    "@angular/core": "20.0.0",
+    "@ionic/angular": "8.5.0",
+    "ionicons": "7.4.0"
+  },
+  "devDependencies": {
+    "@ionic/angular-toolkit": "12.1.1",
+    "@ionic/cli": "7.2.0"
+  }
+}
