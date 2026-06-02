@@ -178,6 +178,47 @@ fn external_package_scss_subpaths_credit_nested_style_dependencies() {
 }
 
 #[test]
+fn angular_material_scss_package_entrypoint_resolves_external_relative_graph() {
+    let root = fixture_path("angular-material-scss-entrypoint");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specs: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specs.contains(&"@angular/material"),
+        "Angular Material Sass entrypoint should resolve: {unresolved_specs:?}"
+    );
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dep_names.contains(&"@angular/material"),
+        "Angular Material imported via SCSS must not be reported as unused: {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"unused-package"),
+        "real unused dependencies should still be reported: {unused_dep_names:?}"
+    );
+
+    let unlisted_dep_names: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unlisted_dep_names.contains(&"@angular/cdk"),
+        "external package internals should not create unlisted deps: {unlisted_dep_names:?}"
+    );
+}
+
+#[test]
 fn scss_bare_import_does_not_collide_with_sibling_tsx() {
     let root = fixture_path("scss-bare-import-tsx-collision");
     let config = create_config(root);

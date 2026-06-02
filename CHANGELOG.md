@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`fallow-mcp` now exposes `security_candidates` for agent-readable local security candidates.** The read-only tool wraps `fallow security --format json --quiet` and returns the existing security JSON envelope, including `kind: "security"`, `security_findings`, category, CWE, evidence, structural trace, and blind-spot counters. It deliberately frames results as unverified candidates, not confirmed vulnerabilities, and tells agents to verify trace and evidence before editing code. The MCP params expose only scope and performance knobs: `root`, `config`, `workspace`, `changed_since`, `changed_workspaces`, `no_cache`, and `threads`; SARIF, CI, baseline, summary, failure, and fix behavior stay on the CLI. Closes [#864](https://github.com/fallow-rs/fallow/issues/864).
 
+### Fixed
+
+- **Angular Material Sass entrypoints no longer report as unresolved or unused.** External Sass package entrypoints such as `@use "@angular/material" as mat;` can resolve through the package `sass` export and then follow package-local relative `@use` / `@forward` imports with Sass partial, extension, and index lookup. Thanks [@rbalet](https://github.com/rbalet) for the report. (Closes [#871](https://github.com/fallow-rs/fallow/issues/871).)
+
 ## [2.86.0] - 2026-06-02
 
 ### Added

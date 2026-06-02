@@ -1,0 +1,5 @@
+@use "sass:map";
+@use "@angular/material" as mat;
+
+$theme: mat.define-theme(());
+$token: map.get($theme, color);

@@ -1,0 +1,12 @@
+{
+  "name": "angular-material-scss-entrypoint",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@angular/material": "20.1.0",
+    "unused-package": "1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

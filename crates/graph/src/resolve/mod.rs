@@ -135,6 +135,7 @@ pub fn resolve_all_imports(
     let condition_names = build_condition_names(active_plugins, extra_conditions);
     let resolver = create_resolver(active_plugins, extra_conditions);
     let mut style_conditions = extra_conditions.to_vec();
+    style_conditions.push("sass".to_string());
     style_conditions.push("style".to_string());
     let style_resolver = create_resolver(active_plugins, &style_conditions);
 

@@ -892,6 +892,14 @@ fn is_bare_style_subpath(specifier: &str) -> bool {
             })
 }
 
+fn is_bare_style_package_reference(specifier: &str) -> bool {
+    if !is_bare_specifier(specifier) {
+        return false;
+    }
+
+    is_bare_style_subpath(specifier) || extract_package_name(specifier) == specifier
+}
+
 fn try_css_relative_subpath_fallback(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
@@ -920,6 +928,7 @@ fn should_preserve_node_modules_style_file(
     specifier: &str,
     from_file: &Path,
     resolved_path: &Path,
+    from_style: bool,
 ) -> bool {
     if !is_style_file(resolved_path) || !is_node_modules_path(resolved_path) {
         return false;
@@ -928,6 +937,10 @@ fn should_preserve_node_modules_style_file(
     let is_bare_subpath =
         is_bare_specifier(specifier) && extract_package_name(specifier).as_str() != specifier;
     if is_bare_subpath {
+        return true;
+    }
+
+    if is_bare_specifier(specifier) && (from_style || is_style_file(from_file)) {
         return true;
     }
 
@@ -940,7 +953,7 @@ fn try_style_condition_package_resolution(
     specifier: &str,
     from_style: bool,
 ) -> Option<ResolveResult> {
-    if !is_bare_style_subpath(specifier) || (!from_style && !is_style_file(from_file)) {
+    if !is_bare_style_package_reference(specifier) || (!from_style && !is_style_file(from_file)) {
         return None;
     }
 
@@ -957,9 +970,16 @@ fn try_style_condition_package_resolution(
         return None;
     };
     let resolved_path = resolved.path();
+    if !is_style_file(resolved_path) {
+        return None;
+    }
 
     if let Some(&file_id) = ctx.raw_path_to_id.get(resolved_path) {
         return Some(ResolveResult::InternalModule(file_id));
+    }
+
+    if should_preserve_node_modules_style_file(specifier, from_file, resolved_path, from_style) {
+        return Some(ResolveResult::ExternalFile(resolved_path.to_path_buf()));
     }
 
     if let Some(pkg_name) = package_usage_name_for_resolved_package(specifier, resolved_path)
@@ -984,6 +1004,9 @@ fn try_style_condition_package_resolution(
             try_pnpm_workspace_fallback(&canonical, ctx.path_to_id, ctx.workspace_roots)
         {
             return Some(ResolveResult::InternalModule(file_id));
+        }
+        if should_preserve_node_modules_style_file(specifier, from_file, &canonical, from_style) {
+            return Some(ResolveResult::ExternalFile(canonical));
         }
         if let Some(pkg_name) = package_usage_name_for_resolved_package(specifier, &canonical)
             && !ctx.workspace_roots.contains_key(pkg_name.as_str())
@@ -1182,6 +1205,7 @@ pub(super) fn resolve_specifier(
                     specifier,
                     from_file,
                     resolved_path,
+                    from_style,
                 ) {
                     ResolveResult::ExternalFile(resolved_path.to_path_buf())
                 } else {
@@ -1211,8 +1235,9 @@ pub(super) fn resolve_specifier(
                         {
                             return result;
                         }
-                        if should_preserve_node_modules_style_file(specifier, from_file, &canonical)
-                        {
+                        if should_preserve_node_modules_style_file(
+                            specifier, from_file, &canonical, from_style,
+                        ) {
                             ResolveResult::ExternalFile(canonical)
                         } else {
                             ResolveResult::NpmPackage(pkg_name)
@@ -1242,6 +1267,7 @@ pub(super) fn resolve_specifier(
                             specifier,
                             from_file,
                             resolved_path,
+                            from_style,
                         ) {
                             ResolveResult::ExternalFile(resolved_path.to_path_buf())
                         } else {
