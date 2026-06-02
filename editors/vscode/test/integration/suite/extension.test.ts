@@ -106,6 +106,7 @@ describe("Fallow VS Code extension", () => {
     const commands = await vscode.commands.getCommands(true);
 
     assert.ok(commands.includes("fallow.analyze"));
+    assert.ok(commands.includes("fallow.reloadAnalysis"));
     assert.ok(commands.includes("fallow.fix"));
     assert.ok(commands.includes("fallow.fixDryRun"));
     assert.ok(commands.includes("fallow.restart"));

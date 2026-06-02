@@ -74,6 +74,11 @@
         "icon": "$(search)"
       },
       {
+        "command": "fallow.reloadAnalysis",
+        "title": "Fallow: Reload Analysis",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "fallow.fix",
         "title": "Fallow: Auto-Fix (unexport unused, remove unused deps)"
       },
@@ -309,11 +314,20 @@
       "view/title": [
         {
           "command": "fallow.analyze",
-          "when": "view == fallow.deadCode || view == fallow.duplicates",
+          "when": "(view == fallow.deadCode || view == fallow.duplicates) && !fallow.hasAnalyzed",
+          "group": "navigation"
+        },
+        {
+          "command": "fallow.reloadAnalysis",
+          "when": "(view == fallow.deadCode || view == fallow.duplicates) && fallow.hasAnalyzed",
           "group": "navigation"
         }
       ],
       "commandPalette": [
+        {
+          "command": "fallow.reloadAnalysis",
+          "when": "false"
+        },
         {
           "command": "fallow.muteDiagnosticCategory",
           "when": "false"

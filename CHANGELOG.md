@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Ionic Angular page lifecycle methods are no longer reported as unused class members.** The new Ionic plugin activates on `@ionic/angular`, keeps `ionic.config.json` reachable, treats common Ionic CLI packages as tooling dependencies, and credits the documented Angular page lifecycle methods `ionViewWillEnter`, `ionViewDidEnter`, `ionViewWillLeave`, and `ionViewDidLeave`. Ionic invokes these methods by name through its Angular router outlet, with or without the optional TypeScript lifecycle interfaces. Other `ionView*` typos still report as unused. Thanks [@rbalet](https://github.com/rbalet) for the report. (Closes [#868](https://github.com/fallow-rs/fallow/issues/868).)
 
+- **The VS Code sidebar now switches from a search icon to a reload icon after analysis has loaded.** The initial sidebar action still uses the search icon for first-run analysis, but once results exist the title action becomes `Fallow: Reload Analysis` with the refresh icon, making it clearer that the button reruns the analysis instead of searching within findings. Thanks [@rbalet](https://github.com/rbalet) for the report. (Closes [#869](https://github.com/fallow-rs/fallow/issues/869).)
+
 ## [2.86.0] - 2026-06-02
 
 ### Added

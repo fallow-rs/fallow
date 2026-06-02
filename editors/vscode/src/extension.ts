@@ -23,10 +23,31 @@ let outputChannel: vscode.OutputChannel;
 let lastCheckResult: FallowCheckResult | null = null;
 let lastDupesResult: FallowDupesResult | null = null;
 
+const RESTART_CONFIG_KEYS = [
+  "fallow.lspPath",
+  "fallow.configPath",
+  "fallow.trace.server",
+  "fallow.issueTypes",
+  "fallow.changedSince",
+] as const;
+
+const REANALYSIS_CONFIG_KEYS = [
+  "fallow.configPath",
+  "fallow.production",
+  "fallow.duplication",
+  "fallow.issueTypes",
+  "fallow.changedSince",
+] as const;
+
 export interface ExtensionApi {
   readonly runAnalysis: typeof runAnalysis;
   readonly runFix: typeof runFix;
 }
+
+const affectsAnyConfiguration = (
+  event: vscode.ConfigurationChangeEvent,
+  keys: readonly string[],
+): boolean => keys.some((key) => event.affectsConfiguration(key));
 
 export const activate = async (context: vscode.ExtensionContext): Promise<ExtensionApi> => {
   outputChannel = vscode.window.createOutputChannel("Fallow");
@@ -125,12 +146,17 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     updateStatusBar(lastCheckResult, lastDupesResult);
   };
 
+  const runCliAnalysisCommand = async (): Promise<void> => {
+    cliAnalysisRan = true;
+    await triggerCliAnalysis();
+  };
+
   // Register commands
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.analyze", async () => {
-      cliAnalysisRan = true;
-      await triggerCliAnalysis();
-    }),
+    vscode.commands.registerCommand("fallow.analyze", runCliAnalysisCommand),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.reloadAnalysis", runCliAnalysisCommand),
   );
 
   context.subscriptions.push(
@@ -186,19 +212,8 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // Watch for config changes
   context.subscriptions.push(
     onConfigChange(async (e) => {
-      const needsRestart =
-        e.affectsConfiguration("fallow.lspPath") ||
-        e.affectsConfiguration("fallow.configPath") ||
-        e.affectsConfiguration("fallow.trace.server") ||
-        e.affectsConfiguration("fallow.issueTypes") ||
-        e.affectsConfiguration("fallow.changedSince");
-
-      const needsReanalysis =
-        e.affectsConfiguration("fallow.configPath") ||
-        e.affectsConfiguration("fallow.production") ||
-        e.affectsConfiguration("fallow.duplication") ||
-        e.affectsConfiguration("fallow.issueTypes") ||
-        e.affectsConfiguration("fallow.changedSince");
+      const needsRestart = affectsAnyConfiguration(e, RESTART_CONFIG_KEYS);
+      const needsReanalysis = affectsAnyConfiguration(e, REANALYSIS_CONFIG_KEYS);
 
       if (needsRestart) {
         outputChannel.appendLine("Configuration changed, restarting server...");
