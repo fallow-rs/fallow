@@ -14,8 +14,8 @@ use crate::{
     MemberAccess, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
-    ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference, SanitizedBinding,
-    SanitizedSinkArg, SanitizerScope, SinkArgKind, SinkShape, SinkSite, TaintedBinding,
+    ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference, SanitizedSinkArg,
+    SanitizerScope, SinkArgKind, SinkShape, SinkSite, TaintedBinding,
 };
 
 use crate::asset_url::normalize_asset_url;
@@ -568,6 +568,28 @@ impl ModuleInfoExtractor {
             .any(|scope| scope.contains(name))
     }
 
+    fn record_sanitizer_binding(&mut self, name: &str, scope: Option<SanitizerScope>) {
+        if self.is_module_scope() {
+            self.module_sanitizer_bindings
+                .insert(name.to_string(), scope);
+            return;
+        }
+        if let Some(bindings) = self.sanitizer_binding_stack.last_mut() {
+            bindings.insert(name.to_string(), scope);
+        }
+    }
+
+    fn sanitizer_scope_for_identifier(&self, name: &str) -> Option<SanitizerScope> {
+        for bindings in self.sanitizer_binding_stack.iter().rev() {
+            if let Some(scope) = bindings.get(name) {
+                return *scope;
+            }
+        }
+        self.module_sanitizer_bindings
+            .get(name)
+            .and_then(|scope| *scope)
+    }
+
     fn record_nested_declaration_names<'a>(
         &mut self,
         declarations: impl IntoIterator<Item = &'a BindingIdentifier<'a>>,
@@ -596,12 +618,18 @@ impl ModuleInfoExtractor {
                     .map(|id| id.name.to_string()),
             );
         }
+        let sanitizer_scope = scope
+            .iter()
+            .map(|name| (name.clone(), None))
+            .collect::<FxHashMap<_, _>>();
         self.nested_declaration_stack.push(scope);
+        self.sanitizer_binding_stack.push(sanitizer_scope);
     }
 
     fn pop_function_declaration_scope(&mut self) {
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.pop();
+            self.sanitizer_binding_stack.pop();
         }
     }
 
@@ -1177,16 +1205,6 @@ impl ModuleInfoExtractor {
         }
     }
 
-    fn record_sanitized_binding(&mut self, name: &str, expr: &Expression<'_>) {
-        let Some(scope) = self.sanitizer_scope_for_expr(expr) else {
-            return;
-        };
-        self.sanitized_bindings.push(SanitizedBinding {
-            local: name.to_string(),
-            scope,
-        });
-    }
-
     fn record_dompurify_import_binding(&mut self, source: &str, local: &str, is_type_only: bool) {
         if !is_type_only && self.is_module_scope() && is_dompurify_source(source) {
             self.dompurify_bindings.insert(local.to_string());
@@ -1208,6 +1226,7 @@ impl ModuleInfoExtractor {
 
     fn sanitizer_scope_for_expr(&self, expr: &Expression<'_>) -> Option<SanitizerScope> {
         match unwrap_parens(expr) {
+            Expression::Identifier(ident) => self.sanitizer_scope_for_identifier(&ident.name),
             Expression::AwaitExpression(await_expr) => {
                 self.sanitizer_scope_for_expr(&await_expr.argument)
             }
@@ -1672,10 +1691,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.block_depth += 1;
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.push(FxHashSet::default());
+            self.sanitizer_binding_stack.push(FxHashMap::default());
         }
         walk::walk_block_statement(self, stmt);
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.pop();
+            self.sanitizer_binding_stack.pop();
         }
         self.block_depth -= 1;
     }
@@ -1693,6 +1714,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 Declaration::ClassDeclaration(class) => {
                     if let Some(id) = class.id.as_ref() {
                         self.record_local_declaration_name(&id.name);
+                        self.record_sanitizer_binding(id.name.as_str(), None);
                         self.record_local_type_declaration(&id.name, id.span);
                         let is_angular = has_angular_class_decorator(class);
                         let instance_bindings =
@@ -1711,6 +1733,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 Declaration::FunctionDeclaration(function) => {
                     if let Some(id) = function.id.as_ref() {
                         self.record_local_declaration_name(&id.name);
+                        self.record_sanitizer_binding(id.name.as_str(), None);
                         let refs = Self::collect_function_signature_refs(function);
                         self.record_local_signature_refs(&id.name, refs);
 
@@ -1770,11 +1793,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 Declaration::ClassDeclaration(class) => {
                     if let Some(id) = class.id.as_ref() {
                         self.record_nested_declaration_names(std::iter::once(id));
+                        self.record_sanitizer_binding(id.name.as_str(), None);
                     }
                 }
                 Declaration::FunctionDeclaration(function) => {
                     if let Some(id) = function.id.as_ref() {
                         self.record_nested_declaration_names(std::iter::once(id));
+                        self.record_sanitizer_binding(id.name.as_str(), None);
                     }
                 }
                 _ => {}
@@ -2141,6 +2166,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             }
 
             let Some(init) = &declarator.init else {
+                for id in declarator.id.get_binding_identifiers() {
+                    self.record_sanitizer_binding(id.name.as_str(), None);
+                }
                 continue;
             };
 
@@ -2152,7 +2180,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 self.record_current_module_file_path_binding(id.name.as_str(), init);
                 self.record_child_process_fork_target_binding(id.name.as_str(), init);
                 self.record_tainted_source_binding(id.name.as_str(), init);
-                self.record_sanitized_binding(id.name.as_str(), init);
+                let sanitizer_scope = self.sanitizer_scope_for_expr(init);
+                self.record_sanitizer_binding(id.name.as_str(), sanitizer_scope);
+            } else {
+                for id in declarator.id.get_binding_identifiers() {
+                    self.record_sanitizer_binding(id.name.as_str(), None);
+                }
             }
 
             if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id {

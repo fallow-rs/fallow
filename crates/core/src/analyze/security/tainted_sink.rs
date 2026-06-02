@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use rustc_hash::FxHashMap;
 
 use fallow_types::extract::{
-    ModuleInfo, SanitizedBinding, SanitizedSinkArg, SanitizerScope, SinkSite, TaintedBinding,
+    ModuleInfo, SanitizedSinkArg, SanitizerScope, SinkSite, TaintedBinding,
 };
 use fallow_types::output::{IssueAction, SuppressFileAction, SuppressFileKind};
 use fallow_types::results::{SecurityFinding, SecurityFindingKind, TraceHop, TraceHopRole};
@@ -182,17 +182,8 @@ fn has_direct_html_sanitizer(sink: &SinkSite, args: &[SanitizedSinkArg]) -> bool
     })
 }
 
-fn has_sanitized_html_binding(sink: &SinkSite, bindings: &[SanitizedBinding]) -> bool {
-    sink.arg_idents.iter().any(|name| {
-        bindings
-            .iter()
-            .any(|binding| binding.local == name.as_str() && binding.scope == SanitizerScope::Html)
-    })
-}
-
 fn sink_has_html_sanitizer(module: &ModuleInfo, sink: &SinkSite) -> bool {
     has_direct_html_sanitizer(sink, &module.sanitized_sink_args)
-        || has_sanitized_html_binding(sink, &module.sanitized_bindings)
 }
 
 /// The matched source title if any of a sink's captured argument identifiers

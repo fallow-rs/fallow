@@ -15,8 +15,8 @@ use crate::{
     MemberAccess, MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
-    ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference, SanitizedBinding,
-    SanitizedSinkArg, SinkSite, TaintedBinding,
+    ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference, SanitizedSinkArg,
+    SanitizerScope, SinkSite, TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
 
@@ -143,13 +143,16 @@ pub(crate) struct ModuleInfoExtractor {
     /// (e.g. `const id = req.query.id`). Feeds the security `tainted_sink`
     /// source-to-sink association in the analyze layer.
     pub(crate) tainted_bindings: Vec<TaintedBinding>,
-    /// Local bindings initialized from recognized sanitizer calls.
-    pub(crate) sanitized_bindings: Vec<SanitizedBinding>,
     /// Direct sink arguments recognized as sanitizer calls.
     pub(crate) sanitized_sink_args: Vec<SanitizedSinkArg>,
     /// Module-scope default, namespace, or require bindings imported from
     /// DOMPurify-compatible packages.
     pub(crate) dompurify_bindings: FxHashSet<String>,
+    /// Module-scope local sanitizer bindings. `None` means the name is declared
+    /// but not sanitizer-backed, shadowing any outer match.
+    pub(crate) module_sanitizer_bindings: FxHashMap<String, Option<SanitizerScope>>,
+    /// Nested lexical sanitizer binding stack for functions and blocks.
+    pub(crate) sanitizer_binding_stack: Vec<FxHashMap<String, Option<SanitizerScope>>>,
 }
 
 impl ModuleInfoExtractor {
@@ -742,7 +745,6 @@ impl ModuleInfoExtractor {
             security_sinks: self.security_sinks,
             security_sinks_skipped: self.security_sinks_skipped,
             tainted_bindings: self.tainted_bindings,
-            sanitized_bindings: self.sanitized_bindings,
             sanitized_sink_args: self.sanitized_sink_args,
         }
     }
@@ -788,7 +790,6 @@ impl ModuleInfoExtractor {
         info.security_sinks.extend(self.security_sinks);
         info.security_sinks_skipped += self.security_sinks_skipped;
         info.tainted_bindings.extend(self.tainted_bindings);
-        info.sanitized_bindings.extend(self.sanitized_bindings);
         info.sanitized_sink_args.extend(self.sanitized_sink_args);
     }
 }

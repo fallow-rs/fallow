@@ -1795,7 +1795,6 @@ mod tests {
             security_sinks: Vec::new(),
             security_sinks_skipped: 0,
             tainted_bindings: Vec::new(),
-            sanitized_bindings: Vec::new(),
             sanitized_sink_args: Vec::new(),
         };
 
@@ -1837,7 +1836,6 @@ mod tests {
             security_sinks: Vec::new(),
             security_sinks_skipped: 0,
             tainted_bindings: Vec::new(),
-            sanitized_bindings: Vec::new(),
             sanitized_sink_args: Vec::new(),
             line_offsets: vec![0, 10, 20, 30, 40], // 5 lines
             complexity: vec![fallow_types::extract::FunctionComplexity {
@@ -1890,7 +1888,6 @@ mod tests {
             security_sinks: Vec::new(),
             security_sinks_skipped: 0,
             tainted_bindings: Vec::new(),
-            sanitized_bindings: Vec::new(),
             sanitized_sink_args: Vec::new(),
             line_offsets: vec![0, 10, 20], // 3 lines
             complexity: vec![
@@ -2161,7 +2158,6 @@ mod tests {
             security_sinks: Vec::new(),
             security_sinks_skipped: 0,
             tainted_bindings: Vec::new(),
-            sanitized_bindings: Vec::new(),
             sanitized_sink_args: Vec::new(),
         }
     }

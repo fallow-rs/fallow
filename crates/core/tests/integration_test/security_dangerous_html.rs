@@ -102,6 +102,15 @@ fn sanitizer_near_misses_still_fire() {
 }
 
 #[test]
+fn shadowed_sanitized_local_still_fires() {
+    let results = analyze_with_security_sink();
+    assert!(
+        anchored_on(&results, "src/shadowed-sanitized-local.ts"),
+        "a shadowing parameter must not inherit an outer sanitized binding"
+    );
+}
+
+#[test]
 fn dompurify_does_not_suppress_non_html_sinks() {
     let results = analyze_with_security_sink();
     let finding = results

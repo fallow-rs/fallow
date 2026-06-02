@@ -50,7 +50,6 @@ fn cache_roundtrip() {
         security_sinks: Vec::new(),
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
-        sanitized_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
     };
 
@@ -196,7 +195,6 @@ fn incremental_cache_prune_stale_entries() {
         security_sinks: Vec::new(),
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
-        sanitized_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
     };
 

@@ -148,10 +148,10 @@ use crate::MemberKind;
 /// until the file is re-extracted.
 ///
 /// Bumped to 112 for issue #863 (sanitizer-aware security sinks):
-/// `ModuleInfo`/`CachedModule` now carry recognized sanitizer bindings and
-/// direct sanitized sink arguments, so the security `tainted_sink` detector can
-/// suppress high-confidence DOMPurify-backed HTML sink candidates. Pre-112
-/// entries lack sanitizer metadata until the file is re-extracted.
+/// `ModuleInfo`/`CachedModule` now carry direct sanitized sink arguments, so
+/// the security `tainted_sink` detector can suppress high-confidence
+/// DOMPurify-backed HTML sink candidates. Pre-112 entries lack sanitizer
+/// metadata until the file is re-extracted.
 pub(super) const CACHE_VERSION: u32 = 112;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
@@ -195,7 +195,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 688);
+assert_cached_type_size!(CachedModule, 664);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -300,8 +300,6 @@ pub struct CachedModule {
     /// Round-trips so the security `tainted_sink` source-to-sink association
     /// sees source-tainted bindings on warm-cache loads.
     pub tainted_bindings: Vec<fallow_types::extract::TaintedBinding>,
-    /// Local bindings initialized from recognized sanitizer calls.
-    pub sanitized_bindings: Vec<fallow_types::extract::SanitizedBinding>,
     /// Direct sink arguments recognized as sanitizer calls.
     pub sanitized_sink_args: Vec<fallow_types::extract::SanitizedSinkArg>,
 }
