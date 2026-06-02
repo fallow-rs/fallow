@@ -1134,6 +1134,7 @@ mod ember;
 mod eslint;
 mod expo;
 mod expo_router;
+mod firebase;
 mod fumadocs;
 mod gatsby;
 mod graphql_codegen;

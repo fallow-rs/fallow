@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Firebase Messaging service workers are no longer reported as unused files.** The Firebase plugin activates on the exact `firebase` dependency and keeps both root and nested `public/firebase-messaging-sw.js` files reachable, while unrelated public files still report normally. Thanks [@rbalet](https://github.com/rbalet) for the report. (Closes [#873](https://github.com/fallow-rs/fallow/issues/873).)
+
 - **Ionic Angular page lifecycle methods are no longer reported as unused class members.** The new Ionic plugin activates on `@ionic/angular`, keeps `ionic.config.json` reachable, treats common Ionic CLI packages as tooling dependencies, and credits the documented Angular page lifecycle methods `ionViewWillEnter`, `ionViewDidEnter`, `ionViewWillLeave`, and `ionViewDidLeave`. Ionic invokes these methods by name through its Angular router outlet, with or without the optional TypeScript lifecycle interfaces. Other `ionView*` typos still report as unused. Thanks [@rbalet](https://github.com/rbalet) for the report. (Closes [#868](https://github.com/fallow-rs/fallow/issues/868).)
 
 - **Angular Material Sass entrypoints no longer report as unresolved or unused.** External Sass package entrypoints such as `@use "@angular/material" as mat;` can resolve through the package `sass` export and then follow package-local relative `@use` / `@forward` imports with Sass partial, extension, and index lookup. Thanks [@rbalet](https://github.com/rbalet) for the report. (Closes [#871](https://github.com/fallow-rs/fallow/issues/871).)

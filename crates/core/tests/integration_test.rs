@@ -219,6 +219,8 @@ mod issue_820_vercel_ts_config;
 mod issue_823_pnpm_package_sources;
 #[path = "integration_test/issue_868_ionic_lifecycle.rs"]
 mod issue_868_ionic_lifecycle;
+#[path = "integration_test/issue_873_firebase_messaging_sw.rs"]
+mod issue_873_firebase_messaging_sw;
 #[path = "integration_test/lexical_nodes.rs"]
 mod lexical_nodes;
 #[path = "integration_test/script_multiplexers.rs"]
