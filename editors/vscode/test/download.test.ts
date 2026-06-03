@@ -127,6 +127,28 @@ describe("getBinaryVersion", () => {
     expect(getBinaryVersion("/bin/fallow-lsp")).toBe("2.25.0");
   });
 
+  it("parses version from fallow CLI output", () => {
+    mockExecOutput = "fallow 2.88.1\n";
+    expect(getBinaryVersion("/bin/fallow")).toBe("2.88.1");
+  });
+
+  it("ignores the npm shim's appended verified line", () => {
+    mockExecOutput = "fallow-lsp 2.88.1\nverified: yes (sentinel /Users/me/.cache/2.0.0/x)\n";
+    expect(getBinaryVersion("/bin/fallow-lsp")).toBe("2.88.1");
+  });
+
+  it("does not mistake a Node crash banner for the fallow version", () => {
+    // A resolved npm shim that cannot find its platform binary can surface a
+    // Node banner; that bare semver must not be read as the fallow version.
+    mockExecOutput = "Cannot find module 'detect-libc'\nNode.js v22.22.1\n";
+    expect(getBinaryVersion("/bin/fallow-lsp")).toBeNull();
+  });
+
+  it("does not match a stray semver in a sentinel path with no version line", () => {
+    mockExecOutput = "verified: yes (sentinel /Users/me/.cache/fallow/2.0.0/sentinel)\n";
+    expect(getBinaryVersion("/bin/fallow-lsp")).toBeNull();
+  });
+
   it("returns null on exec failure", () => {
     mockExecError = true;
     expect(getBinaryVersion("/bin/fallow-lsp")).toBeNull();

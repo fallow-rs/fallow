@@ -183,8 +183,15 @@ export const getBinaryVersion = (binaryPath: string): string | null => {
       timeout: 5000,
       encoding: "utf-8",
     });
-    // Output format: "fallow-lsp 2.18.3" or "fallow 2.18.3"
-    const match = output.trim().match(/(\d+\.\d+\.\d+)/);
+    // Anchor to fallow's clap `--version` shape ("fallow 2.88.1",
+    // "fallow-lsp 2.88.1", "fallow-mcp 2.88.1"). Matching a bare semver anywhere
+    // in the output mistook unrelated numbers for the version: a resolved npm
+    // shim that cannot find its platform binary, or a crash, can surface a Node
+    // banner ("Node.js v22.22.1"), and the shim appends a "verified: ..." line;
+    // any of those could win the old loose match and produce a bogus
+    // version-mismatch warning. Require the binary-name prefix, and return null
+    // (treated as "unknown") when no fallow version line is present.
+    const match = output.match(/^fallow(?:-lsp|-mcp)?\s+v?(\d+\.\d+\.\d+)/m);
     return match?.[1] ?? null;
   } catch {
     return null;

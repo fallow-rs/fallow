@@ -1037,6 +1037,24 @@ impl FallowLspServer {
 
 #[tokio::main]
 async fn main() {
+    // Honor `--version` / `-V` / `-v` before starting the stdio server. Without
+    // this the server reads stdin, hits EOF, and exits silently, so a version
+    // probe (the VS Code extension's binary-skew check) gets no output. Match
+    // the CLI's clap output shape (`<bin> <version>`) so consumers can parse it.
+    if std::env::args()
+        .skip(1)
+        .any(|arg| arg == "--version" || arg == "-V" || arg == "-v")
+    {
+        #[expect(
+            clippy::print_stdout,
+            reason = "version query writes to stdout by design"
+        )]
+        {
+            println!("fallow-lsp {}", env!("CARGO_PKG_VERSION"));
+        }
+        return;
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter("fallow=info")
         .with_writer(std::io::stderr)
