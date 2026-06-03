@@ -116,12 +116,24 @@ Use --only/--skip to select specific analyses.";
     name = "fallow",
     about = "Codebase analyzer for TypeScript/JavaScript: unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations",
     version,
+    disable_version_flag = true,
     help_template = TOP_LEVEL_HELP_TEMPLATE,
     after_help = TOP_LEVEL_AFTER_HELP
 )]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
+
+    /// Print version.
+    /// Accepts `-v`, `-V`, and `--version`; TS/JS tooling (node, npm, pnpm,
+    /// yarn, bun, tsc) uses `-v`, while `-V` matches knip/oxlint/biome.
+    #[arg(
+        short = 'v',
+        visible_short_alias = 'V',
+        long = "version",
+        action = clap::ArgAction::Version
+    )]
+    version: Option<bool>,
 
     /// Project root directory
     #[arg(short, long, global = true)]
@@ -3572,6 +3584,25 @@ mod tests {
     fn cli_definition_has_no_flag_collisions() {
         use clap::CommandFactory;
         Cli::command().debug_assert();
+    }
+
+    /// `-v`, `-V`, and `--version` must all trigger clap's Version action so
+    /// the version prints regardless of which spelling the user reaches for
+    /// (issue #916). clap surfaces a Version action from `try_get_matches_from`
+    /// as the `DisplayVersion` error kind.
+    #[test]
+    fn version_flag_accepts_lower_v_upper_v_and_long() {
+        use clap::CommandFactory;
+        for argv in [["fallow", "-v"], ["fallow", "-V"], ["fallow", "--version"]] {
+            let err = Cli::command()
+                .try_get_matches_from(argv)
+                .expect_err("version flag should short-circuit parsing");
+            assert_eq!(
+                err.kind(),
+                clap::error::ErrorKind::DisplayVersion,
+                "{argv:?} should trigger the Version action"
+            );
+        }
     }
 
     /// Guard against deferred-work wording leaking into clap-rendered help.

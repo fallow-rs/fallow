@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **The duplication `minOccurrences` threshold is now reachable from the bare `fallow` command and the VS Code extension.** Raising the rule-of-three threshold previously required editing the config file or running the standalone `fallow dupes` subcommand. A new global `--dupes-min-occurrences N` flag now applies in combined mode (validated `>= 2`, falling back to the config value), and the VS Code extension gains a `fallow.duplication.minOccurrences` setting that forwards it. The neighbouring `fallow.duplication.threshold` extension setting was also mislabeled: it is a duplication-percentage failure cap where `0` means no limit, not a minimum line count, and it defaulted to `5`. Its description is corrected and its default aligned to `0` to match the CLI. (Closes [#894](https://github.com/fallow-rs/fallow/issues/894). Thanks [@rbalet](https://github.com/rbalet) for the report.)
+- **Lowercase `-v` now prints the version.** `fallow -v`, `fallow -V`, and `fallow --version` all print the version string. Previously only `-V` and `--version` worked (clap's default). Lowercase `-v` is what every tool in the TS/JS toolchain uses for the version (node, npm, pnpm, yarn, bun, tsc, eslint, prettier), so it is now the primary short form; `-V` is kept for back-compat (matching knip, oxlint, and biome). (Closes [#916](https://github.com/fallow-rs/fallow/issues/916). Thanks [@rbalet](https://github.com/rbalet) for the report.)
 
 ### Fixed
 
