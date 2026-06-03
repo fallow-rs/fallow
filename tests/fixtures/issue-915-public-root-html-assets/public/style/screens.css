@@ -1,0 +1,5 @@
+@media (min-width: 48rem) {
+  body {
+    max-width: 72rem;
+  }
+}

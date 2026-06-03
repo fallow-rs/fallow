@@ -1,0 +1,8 @@
+{
+  "name": "issue-915-public-root-html-assets",
+  "version": "1.0.0",
+  "main": "index.html",
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}

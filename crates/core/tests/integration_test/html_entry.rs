@@ -262,3 +262,59 @@ fn html_workspace_root_relative_no_unresolved_imports() {
         "workspace root-relative HTML asset references should resolve, got unresolved: {html_unresolved:?}"
     );
 }
+
+#[test]
+fn html_public_root_relative_assets_are_reachable() {
+    let root = fixture_path("issue-915-public-root-html-assets");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_paths: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|finding| finding.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+
+    for expected in [
+        "public/js/key.pressed.js",
+        "public/style/animations.css",
+        "public/style/index.css",
+        "public/style/screens.css",
+    ] {
+        assert!(
+            !unused_paths.iter().any(|path| path.ends_with(expected)),
+            "{expected} should be reachable via root-relative HTML asset reference, unused files: {unused_paths:?}"
+        );
+    }
+
+    let html_unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .filter(|finding| {
+            finding
+                .import
+                .path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with("index.html")
+        })
+        .map(|finding| finding.import.specifier.as_str())
+        .collect();
+
+    for resolved in [
+        "/js/key.pressed.js",
+        "/style/animations.css",
+        "/style/index.css",
+        "/style/screens.css",
+    ] {
+        assert!(
+            !html_unresolved.contains(&resolved),
+            "{resolved} should resolve from public, got unresolved: {html_unresolved:?}"
+        );
+    }
+
+    assert!(
+        html_unresolved.contains(&"/missing.js"),
+        "missing public assets should still report unresolved, got: {html_unresolved:?}"
+    );
+}

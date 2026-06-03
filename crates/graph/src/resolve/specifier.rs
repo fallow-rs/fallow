@@ -424,6 +424,23 @@ fn try_storybook_static_dir_mapping(
         .and_then(|(_, path)| resolve_filesystem_path(ctx, &path))
 }
 
+fn try_html_public_root_relative_asset(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    if from_file.extension().and_then(|ext| ext.to_str()) != Some("html") {
+        return None;
+    }
+
+    let relative = strip_url_suffix(specifier).strip_prefix('/')?;
+    if !is_safe_static_dir_relative_path(relative) {
+        return None;
+    }
+
+    resolve_filesystem_path(ctx, &ctx.root.join("public").join(relative))
+}
+
 fn resolve_tsconfig_extends_path(base_dir: &Path, extends: &str) -> PathBuf {
     let path = if is_relative_tsconfig_extends(extends) || Path::new(extends).is_absolute() {
         base_dir.join(extends)
@@ -1138,6 +1155,9 @@ pub(super) fn resolve_specifier(
                     return ResolveResult::InternalModule(file_id);
                 }
             }
+        }
+        if let Some(result) = try_html_public_root_relative_asset(ctx, from_file, specifier) {
+            return result;
         }
         return ResolveResult::Unresolvable(specifier.to_string());
     }

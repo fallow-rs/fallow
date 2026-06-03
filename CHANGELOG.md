@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Root-relative HTML assets under `public/` no longer report as unresolved or unused.** When a real HTML entry references browser-root assets such as `/js/key.pressed.js` or `/style/index.css`, resolution now tries the existing document-root candidates first, then falls back to `<root>/public/...` for HTML importers only. JS/TS root-relative imports keep their existing behavior, and genuinely missing public assets still report as unresolved. Thanks [@cope](https://github.com/cope) for the report. (Closes [#915](https://github.com/fallow-rs/fallow/issues/915).)
+
 - **Angular external templates now credit service members reached through untyped `inject()` component fields.** Exported Angular component classes now carry `ClassHeritageInfo.instance_bindings` for properties initialized with named-import `inject(Service)` or an alias such as `inject as ngInject`, so external templates like `{{ exampleService.onValueChange() }}` mark the target service member as used. Same-named `inject` functions from non-Angular modules stay ignored. Thanks [@OmerGronich](https://github.com/OmerGronich) for the report. (Closes [#911](https://github.com/fallow-rs/fallow/issues/911).)
 - **Bare `pnpm <binary>` script invocations now credit declared dependencies.** Scripts and CI commands such as `pnpm envinfo --system` now mark the matching declared package as used, while local script shorthands (`pnpm build`) and pnpm built-ins (`pnpm install`, `pnpm audit`, `pnpm add`, `pnpm test`, `pnpm start`) remain ignored. Thanks [@cope](https://github.com/cope) for the report. (Closes [#914](https://github.com/fallow-rs/fallow/issues/914).)
 
