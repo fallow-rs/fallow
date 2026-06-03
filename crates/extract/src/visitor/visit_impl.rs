@@ -79,6 +79,20 @@ impl StructuralParamMemberCollector {
         }
         shadowed
     }
+
+    fn record_shadowed_bindings<'a>(
+        &mut self,
+        bindings: impl Iterator<Item = &'a BindingIdentifier<'a>>,
+    ) {
+        let Some(scope) = self.shadowed_stack.last_mut() else {
+            return;
+        };
+        for binding in bindings {
+            if self.target_params.contains(binding.name.as_str()) {
+                scope.insert(binding.name.to_string());
+            }
+        }
+    }
 }
 
 impl<'a> Visit<'a> for StructuralParamMemberCollector {
@@ -107,6 +121,26 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
         self.shadowed_stack.push(shadowed);
         walk::walk_arrow_function_expression(self, expr);
         self.shadowed_stack.pop();
+    }
+
+    fn visit_block_statement(&mut self, stmt: &BlockStatement<'a>) {
+        self.shadowed_stack.push(FxHashSet::default());
+        walk::walk_block_statement(self, stmt);
+        self.shadowed_stack.pop();
+    }
+
+    fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
+        if matches!(
+            decl.kind,
+            VariableDeclarationKind::Const | VariableDeclarationKind::Let
+        ) {
+            self.record_shadowed_bindings(
+                decl.declarations
+                    .iter()
+                    .flat_map(|declarator| declarator.id.get_binding_identifiers()),
+            );
+        }
+        walk::walk_variable_declaration(self, decl);
     }
 }
 

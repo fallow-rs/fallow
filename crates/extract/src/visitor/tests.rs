@@ -472,6 +472,36 @@ fn structural_typed_call_same_parameter_name_other_function_does_not_credit_clas
 }
 
 #[test]
+fn structural_typed_call_shadowed_parameter_does_not_credit_class() {
+    let info = parse(
+        r"
+            interface DurationI {
+                toMs(): number;
+            }
+            function main(dur: DurationI) {
+                {
+                    const dur = {
+                        toMs() {
+                            return 0;
+                        }
+                    };
+                    dur.toMs();
+                }
+            }
+            main(new DurationMS(1000));
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "DurationMS" && a.member == "toMs"),
+        "shadowed parameter should not credit DurationMS.toMs, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn structural_typed_call_imported_callee_does_not_credit_class() {
     let info = parse(
         r"
