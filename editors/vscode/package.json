@@ -146,7 +146,7 @@
         "fallow.autoDownload": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically download the fallow-lsp binary if not found."
+          "description": "Automatically download managed fallow-lsp and fallow CLI binaries if not found."
         },
         "fallow.issueTypes": {
           "type": "object",
@@ -375,7 +375,7 @@
           {
             "id": "fallow.gettingStarted.analyze",
             "title": "Run your first analysis",
-            "description": "Fallow analyzes your codebase for unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations.\n\nOpen the Command Palette and run **Fallow: Run Analysis**, or click the search icon in the Fallow sidebar.\n\n[Run Analysis](command:fallow.analyze)",
+            "description": "Fallow analyzes your codebase for unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations. If needed, the extension downloads managed fallow-lsp and fallow CLI binaries on first use.\n\nOpen the Command Palette and run **Fallow: Run Analysis**, or click the search icon in the Fallow sidebar.\n\n[Run Analysis](command:fallow.analyze)",
             "media": {
               "markdown": "media/step-analyze.md"
             },

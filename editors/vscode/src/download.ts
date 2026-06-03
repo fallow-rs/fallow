@@ -34,6 +34,7 @@ interface GithubRelease {
 }
 
 const REQUEST_HEADERS = { "User-Agent": "fallow-vscode" };
+const EXTENSION_ID = "fallow-rs.fallow-vscode";
 
 export const platformTargetFor = (platform: NodeJS.Platform, arch: string): string | null => {
   if (platform === "darwin" && arch === "arm64") return "darwin-arm64";
@@ -146,11 +147,23 @@ const purgeManagedBinaries = (dir: string): void => {
   }
 };
 
+const purgeManagedBinary = (binaryPath: string): void => {
+  for (const candidate of [binaryPath, getSignaturePath(binaryPath), getDigestPath(binaryPath)]) {
+    try {
+      if (fs.existsSync(candidate)) {
+        fs.unlinkSync(candidate);
+      }
+    } catch {
+      // Best-effort cleanup.
+    }
+  }
+};
+
 export const writeVersionMarker = (dir: string, version: string): void => {
   try {
     fs.writeFileSync(path.join(dir, VERSION_FILE), version, "utf-8");
   } catch {
-    // Best-effort — next activation falls back to --version
+    // Best-effort. Next activation falls back to --version.
   }
 };
 
@@ -165,7 +178,7 @@ export const readVersionMarker = (dir: string): string | null => {
 /** Query the version of a fallow binary. Returns the version string or null. */
 export const getBinaryVersion = (binaryPath: string): string | null => {
   try {
-    // execFileSync is safe (no shell injection) — binary path is from our own storage dir.
+    // execFileSync is safe because there is no shell and the path is from our own storage dir.
     const output = execFileSync(binaryPath, ["--version"], {
       timeout: 5000,
       encoding: "utf-8",
@@ -214,7 +227,7 @@ const writeDigestMarker = (binaryPath: string, digest: string): void => {
   try {
     fs.writeFileSync(getDigestPath(binaryPath), digest, "utf-8");
   } catch {
-    // Best-effort — a missing digest marker forces a re-download later.
+    // Best-effort. A missing digest marker forces a re-download later.
   }
 };
 
@@ -244,7 +257,6 @@ export const verifyBinaryDigest = (binaryPath: string, expectedDigest: string): 
 };
 
 const ensureManagedBinaryTrusted = (
-  dir: string,
   binaryPath: string,
   label: string,
   outputChannel?: vscode.OutputChannel,
@@ -258,7 +270,7 @@ const ensureManagedBinaryTrusted = (
     outputChannel?.appendLine(
       `Fallow: installed ${label} binary failed Ed25519 signature verification. Re-downloading.`,
     );
-    purgeManagedBinaries(dir);
+    purgeManagedBinary(binaryPath);
     return false;
   }
 
@@ -273,8 +285,28 @@ const ensureManagedBinaryTrusted = (
   outputChannel?.appendLine(
     `Fallow: installed ${label} binary is neither signature-verified nor digest-verified. Re-downloading.`,
   );
-  purgeManagedBinaries(dir);
+  purgeManagedBinary(binaryPath);
   return false;
+};
+
+const getExtensionVersion = (): string | null => {
+  const version = vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version as
+    | string
+    | undefined;
+  return version?.trim() || null;
+};
+
+export const releaseApiUrlForVersion = (version: string | null): string =>
+  version
+    ? `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/v${version}`
+    : `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
+
+const normalizeReleaseVersion = (release: GithubRelease): string =>
+  release.tag_name.replace(/^v/, "").trim();
+
+const fetchReleaseForExtension = async (): Promise<GithubRelease> => {
+  const releaseJson = await httpsGet(releaseApiUrlForVersion(getExtensionVersion()));
+  return JSON.parse(releaseJson) as GithubRelease;
 };
 
 const matchesExtensionVersion = (
@@ -283,8 +315,7 @@ const matchesExtensionVersion = (
   label: string,
   outputChannel?: vscode.OutputChannel,
 ): boolean => {
-  const extensionVersion = vscode.extensions.getExtension("fallow-rs.fallow-vscode")?.packageJSON
-    ?.version as string | undefined;
+  const extensionVersion = getExtensionVersion();
   if (!extensionVersion) {
     return true;
   }
@@ -313,7 +344,7 @@ const getManagedBinaryPath = (
     return null;
   }
 
-  if (!ensureManagedBinaryTrusted(dir, binaryPath, label, outputChannel)) {
+  if (!ensureManagedBinaryTrusted(binaryPath, label, outputChannel)) {
     return null;
   }
 
@@ -400,12 +431,95 @@ const downloadAsset = async (
   return destPath;
 };
 
-export const downloadBinary = async (context: vscode.ExtensionContext): Promise<string | null> => {
+const promptAfterDownloadFailure = async (message: string): Promise<boolean> => {
+  const choice = await vscode.window.showErrorMessage(
+    message,
+    "Retry",
+    "Open Settings",
+    "Show Output",
+  );
+
+  if (choice === "Open Settings") {
+    void vscode.commands.executeCommand("workbench.action.openSettings", "fallow");
+  }
+
+  if (choice === "Show Output") {
+    void vscode.commands.executeCommand("fallow.showOutput");
+  }
+
+  return choice === "Retry";
+};
+
+const ensurePlatformTarget = (): string | null => {
   const target = getPlatformTarget();
   if (!target) {
     void vscode.window.showErrorMessage(
       `Fallow: unsupported platform ${os.platform()}-${os.arch()}`,
     );
+    return null;
+  }
+
+  return target;
+};
+
+const downloadManagedBinary = async (
+  context: vscode.ExtensionContext,
+  binaryName: string,
+  label: string,
+): Promise<string | null> => {
+  const target = ensurePlatformTarget();
+  if (!target) {
+    return null;
+  }
+
+  return vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `Fallow: Downloading ${label} binary...`,
+      cancellable: false,
+    },
+    async () => {
+      for (;;) {
+        try {
+          const release = await fetchReleaseForExtension();
+          const dir = getInstallDir(context);
+          const binaryPath = await downloadAsset(release, binaryName, target, dir);
+          if (!binaryPath) {
+            const shouldRetry = await promptAfterDownloadFailure(
+              `Fallow: no ${label} binary found for ${target} in release ${release.tag_name}.`,
+            );
+            if (shouldRetry) {
+              continue;
+            }
+            return null;
+          }
+
+          writeVersionMarker(dir, normalizeReleaseVersion(release));
+          void vscode.window.showInformationMessage(
+            `Fallow: ${label} ${release.tag_name} installed.`,
+          );
+          return binaryPath;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          const shouldRetry = await promptAfterDownloadFailure(
+            `Fallow: failed to download ${label} binary: ${message}`,
+          );
+          if (!shouldRetry) {
+            return null;
+          }
+        }
+      }
+    },
+  );
+};
+
+export const downloadCliBinary = async (
+  context: vscode.ExtensionContext,
+): Promise<string | null> => downloadManagedBinary(context, CLI_BINARY_NAME, "CLI");
+
+export const downloadBinary = async (context: vscode.ExtensionContext): Promise<string | null> => {
+  const target = ensurePlatformTarget();
+  if (!target) {
     return null;
   }
 
@@ -416,53 +530,71 @@ export const downloadBinary = async (context: vscode.ExtensionContext): Promise<
       cancellable: false,
     },
     async () => {
-      try {
-        const releaseJson = await httpsGet(
-          `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
-        );
-        const release: GithubRelease = JSON.parse(releaseJson);
-        const dir = getInstallDir(context);
-
-        // Download LSP binary (required)
-        const lspPath = await downloadAsset(release, LSP_BINARY_NAME, target, dir);
-        if (!lspPath) {
-          void vscode.window.showErrorMessage(
-            `Fallow: no LSP binary found for ${target} in release ${release.tag_name}`,
-          );
-          return null;
-        }
-
-        // Write version marker so future activations can detect stale binaries
-        // without needing to execute them.
-        const extensionVersion = vscode.extensions.getExtension("fallow-rs.fallow-vscode")
-          ?.packageJSON?.version as string | undefined;
-        if (extensionVersion) {
-          writeVersionMarker(dir, extensionVersion);
-        }
-
-        // Download CLI binary (best-effort — tree views and commands need it)
-        let cliPath: string | null = null;
+      for (;;) {
         try {
-          cliPath = await downloadAsset(release, CLI_BINARY_NAME, target, dir);
-        } catch (cliErr) {
-          const cliMessage = cliErr instanceof Error ? cliErr.message : String(cliErr);
-          void vscode.window.showWarningMessage(`Fallow: CLI download skipped: ${cliMessage}`);
-        }
-        if (cliPath) {
-          void vscode.window.showInformationMessage(
-            `Fallow: ${release.tag_name} installed (LSP + CLI).`,
-          );
-        } else {
-          void vscode.window.showInformationMessage(
-            `Fallow: LSP ${release.tag_name} installed. CLI binary not found in release — tree views require the fallow CLI in PATH.`,
-          );
-        }
+          const release = await fetchReleaseForExtension();
+          const dir = getInstallDir(context);
+          const lspPath = await downloadAsset(release, LSP_BINARY_NAME, target, dir);
+          if (!lspPath) {
+            const shouldRetry = await promptAfterDownloadFailure(
+              `Fallow: no LSP binary found for ${target} in release ${release.tag_name}.`,
+            );
+            if (shouldRetry) {
+              continue;
+            }
+            return null;
+          }
 
-        return lspPath;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        void vscode.window.showErrorMessage(`Fallow: failed to download binaries: ${message}`);
-        return null;
+          writeVersionMarker(dir, normalizeReleaseVersion(release));
+
+          let cliPath: string | null = null;
+          try {
+            cliPath = await downloadAsset(release, CLI_BINARY_NAME, target, dir);
+            if (!cliPath) {
+              const shouldRetry = await promptAfterDownloadFailure(
+                `Fallow: no CLI binary found for ${target} in release ${release.tag_name}. Tree views and fix commands require the fallow CLI.`,
+              );
+              if (shouldRetry) {
+                cliPath = await downloadAsset(release, CLI_BINARY_NAME, target, dir);
+              }
+            }
+          } catch (cliErr) {
+            const cliMessage = cliErr instanceof Error ? cliErr.message : String(cliErr);
+            const shouldRetry = await promptAfterDownloadFailure(
+              `Fallow: failed to download CLI binary: ${cliMessage}`,
+            );
+            if (shouldRetry) {
+              try {
+                cliPath = await downloadAsset(release, CLI_BINARY_NAME, target, dir);
+              } catch (retryErr) {
+                const retryMessage = retryErr instanceof Error ? retryErr.message : String(retryErr);
+                void vscode.window.showWarningMessage(
+                  `Fallow: CLI binary is still missing after retry: ${retryMessage}`,
+                );
+              }
+            }
+          }
+
+          if (cliPath) {
+            void vscode.window.showInformationMessage(
+              `Fallow: ${release.tag_name} installed (LSP + CLI).`,
+            );
+          } else {
+            void vscode.window.showWarningMessage(
+              `Fallow: LSP ${release.tag_name} installed. CLI binary is still missing, so tree views and fix commands need another CLI source.`,
+            );
+          }
+
+          return lspPath;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          const shouldRetry = await promptAfterDownloadFailure(
+            `Fallow: failed to download binaries: ${message}`,
+          );
+          if (!shouldRetry) {
+            return null;
+          }
+        }
       }
     },
   );

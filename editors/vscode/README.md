@@ -12,7 +12,7 @@ Codebase intelligence for TypeScript and JavaScript. Real-time diagnostics for u
 - **Tree views**: browse unused code by issue type and duplicates by clone family in the sidebar
 - **Status bar**: see total issue count and duplication percentage at a glance
 - **Auto-fix**: remove unused exports, dependencies, and enum members with one command
-- **Auto-download**: the extension downloads the `fallow-lsp` binary automatically
+- **Auto-download**: the extension downloads managed `fallow-lsp` and `fallow` CLI binaries automatically
 
 ## Installation
 
@@ -59,7 +59,7 @@ Mute state is stored in the workspace, so it survives reload but does not bleed 
 |---------|---------|-------------|
 | `fallow.lspPath` | `""` | Path to the `fallow-lsp` binary. Leave empty for auto-detection. |
 | `fallow.configPath` | `""` | Path to a Fallow config file. Relative paths are resolved from the workspace root (the first folder, in multi-root workspaces). Mirrors the CLI's `--config`; empty uses config auto-discovery. |
-| `fallow.autoDownload` | `true` | Automatically download the binary if not found. |
+| `fallow.autoDownload` | `true` | Automatically download managed `fallow-lsp` and `fallow` CLI binaries if not found. |
 | `fallow.issueTypes` | all enabled | Toggle individual issue types on/off. |
 | `fallow.duplication.threshold` | `0` | Maximum allowed duplication percentage before the analysis is marked as failing. `0` (the default) means no limit. |
 | `fallow.duplication.minOccurrences` | `2` | Minimum number of occurrences before a clone group is reported. Defaults to `2` (every duplicated pair). Raise to `3`+ to focus on widespread copy-paste and skip context-sensitive pairs. |
@@ -76,6 +76,14 @@ The extension looks for the `fallow-lsp` binary in this order:
 2. Local `node_modules/.bin/fallow-lsp`
 3. `fallow-lsp` in `PATH`
 4. Previously downloaded binary in extension storage
+5. Auto-download from GitHub releases (if `fallow.autoDownload` is enabled)
+
+Tree views and fix commands also need the `fallow` CLI. The extension resolves it in this order:
+
+1. `fallow` next to the configured `fallow.lspPath` binary
+2. Local `node_modules/.bin/fallow`
+3. `fallow` in `PATH`
+4. Previously downloaded CLI binary in extension storage
 5. Auto-download from GitHub releases (if `fallow.autoDownload` is enabled)
 
 ## Development

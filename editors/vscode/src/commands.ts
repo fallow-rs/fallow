@@ -13,10 +13,11 @@ import {
   getIssueTypes,
   getChangedSince,
   getResolvedConfigPath,
+  getAutoDownload,
 } from "./config.js";
 import { countCheckIssues } from "./analysis-utils.js";
 import { findBinaryInPath, findLocalBinary, getExecutableExtension } from "./binary-utils.js";
-import { getInstalledCliPath } from "./download.js";
+import { downloadCliBinary, getInstalledCliPath } from "./download.js";
 import { buildFixArgs, createFixPreviewItems, resolveFixLocation } from "./fix-utils.js";
 import type {
   FallowCheckResult,
@@ -26,7 +27,7 @@ import type {
   FixAction,
 } from "./types.js";
 
-const findCliBinary = (context: vscode.ExtensionContext): string | null => {
+export const findCliBinary = (context: vscode.ExtensionContext): string | null => {
   const lspPath = getLspPath();
   if (lspPath) {
     const dir = path.dirname(lspPath);
@@ -54,15 +55,35 @@ const findCliBinary = (context: vscode.ExtensionContext): string | null => {
   return null;
 };
 
-const execFallow = (
+export const resolveCliBinary = async (
+  context: vscode.ExtensionContext,
+): Promise<string | null> => {
+  const existing = findCliBinary(context);
+  if (existing) {
+    return existing;
+  }
+
+  if (!getAutoDownload()) {
+    return null;
+  }
+
+  return downloadCliBinary(context);
+};
+
+const execFallow = async (
   context: vscode.ExtensionContext,
   args: ReadonlyArray<string>,
   cwd: string,
-): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const binary = findCliBinary(context);
+): Promise<string> => {
+  const binary = await resolveCliBinary(context);
+
+  return await new Promise((resolve, reject) => {
     if (!binary) {
-      reject(new Error("fallow CLI binary not found in PATH."));
+      reject(
+        new Error(
+          "fallow CLI binary not found. Checked fallow.lspPath sibling, local node_modules/.bin, PATH, managed extension storage, and auto-download.",
+        ),
+      );
       return;
     }
 
@@ -102,6 +123,7 @@ const execFallow = (
       resolve(stdout);
     });
   });
+};
 
 /** Filter check results based on the user's issueTypes configuration. */
 const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
@@ -245,7 +267,7 @@ const showDryRunPreview = async (root: string, result: FallowFixResult): Promise
 
   const picked = await vscode.window.showQuickPick(quickPickItems, {
     title: `Fallow: ${result.fixes.length} fix${result.fixes.length === 1 ? "" : "es"} available`,
-    placeHolder: "Review fixes — select 'Apply all fixes' to apply, or click a fix to navigate",
+    placeHolder: "Review fixes. Select 'Apply all fixes' to apply, or click a fix to navigate",
   });
 
   if (!picked) {

@@ -17,6 +17,14 @@ interface MenuContribution {
 interface ExtensionPackage {
   readonly contributes: {
     readonly commands: readonly CommandContribution[];
+    readonly configuration: {
+      readonly properties: Record<
+        string,
+        {
+          readonly description?: string;
+        }
+      >;
+    };
     readonly menus: {
       readonly "view/title": readonly MenuContribution[];
       readonly commandPalette: readonly MenuContribution[];
@@ -27,6 +35,7 @@ interface ExtensionPackage {
 const pkg = JSON.parse(
   readFileSync(resolve(__dirname, "../package.json"), "utf8"),
 ) as ExtensionPackage;
+const extensionSource = readFileSync(resolve(__dirname, "../src/extension.ts"), "utf8");
 
 const command = (id: string): CommandContribution | undefined =>
   pkg.contributes.commands.find((entry) => entry.command === id);
@@ -73,5 +82,19 @@ describe("package.json view title menus", () => {
       when: "false",
     });
     expect(commandPaletteEntry("fallow.analyze")).toBeUndefined();
+  });
+});
+
+describe("package.json binary download settings", () => {
+  it("documents that auto-download manages both binaries", () => {
+    const description =
+      pkg.contributes.configuration.properties["fallow.autoDownload"]?.description ?? "";
+
+    expect(description).toContain("fallow-lsp");
+    expect(description).toContain("fallow CLI");
+  });
+
+  it("restarts binary resolution when auto-download changes", () => {
+    expect(extensionSource).toContain('"fallow.autoDownload"');
   });
 });

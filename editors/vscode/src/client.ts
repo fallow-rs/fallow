@@ -35,7 +35,7 @@ const warnIfVersionMismatch = (binaryPath: string, outputChannel?: vscode.Output
 
   const binaryVersion = getBinaryVersion(binaryPath);
   if (binaryVersion && binaryVersion !== extensionVersion) {
-    const msg = `Fallow: binary in PATH is v${binaryVersion}, extension is v${extensionVersion}. Update the binary or remove it from PATH to use the bundled version.`;
+    const msg = `Fallow: binary in PATH is v${binaryVersion}, extension is v${extensionVersion}. Update the binary or remove it from PATH to use the managed auto-download.`;
     outputChannel?.appendLine(msg);
     void vscode.window.showWarningMessage(msg);
   }

@@ -29,6 +29,7 @@ const RESTART_CONFIG_KEYS = [
   "fallow.trace.server",
   "fallow.issueTypes",
   "fallow.changedSince",
+  "fallow.autoDownload",
 ] as const;
 
 const REANALYSIS_CONFIG_KEYS = [
@@ -63,14 +64,14 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   const deadCodeProvider = new DeadCodeTreeProvider();
   const duplicatesProvider = new DuplicatesTreeProvider();
 
-  // Use createTreeView to get visibility events — defer CLI analysis until the
+  // Use createTreeView to get visibility events. Defer CLI analysis until the
   // tree view is first shown, avoiding a double analysis on activation (the LSP
   // runs its own analysis for diagnostics).
   let cliAnalysisRan = false;
 
-  const triggerCliAnalysis = async (): Promise<void> => {
+  const triggerCliAnalysis = async (): Promise<boolean> => {
     setStatusBarAnalyzing();
-    await vscode.window.withProgress(
+    return await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
         title: "Fallow: Analyzing...",
@@ -101,8 +102,10 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
           } else {
             void vscode.window.showInformationMessage("Fallow: no issues found.");
           }
+          return true;
         } catch {
           setStatusBarError();
+          return false;
         }
       },
     );
@@ -122,7 +125,11 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       return;
     }
     cliAnalysisRan = true;
-    void triggerCliAnalysis();
+    void triggerCliAnalysis().then((completed) => {
+      if (!completed) {
+        cliAnalysisRan = false;
+      }
+    });
   };
 
   context.subscriptions.push(
@@ -147,8 +154,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   };
 
   const runCliAnalysisCommand = async (): Promise<void> => {
-    cliAnalysisRan = true;
-    await triggerCliAnalysis();
+    cliAnalysisRan = await triggerCliAnalysis();
   };
 
   // Register commands
@@ -164,12 +170,11 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       // Save dirty editors first so the fix works on up-to-date content
       await vscode.workspace.saveAll(false);
       await runFix(context, false);
-      // Restart LSP to force fresh analysis — the fix modified files on disk
+      // Restart LSP to force fresh analysis. The fix modified files on disk
       // bypassing VS Code's editor, so did_save never fires for those files
       await restartClient(context, outputChannel, diagnosticFilter);
       // Re-run CLI analysis for tree views
-      cliAnalysisRan = true;
-      await triggerCliAnalysis();
+      cliAnalysisRan = await triggerCliAnalysis();
     }),
   );
 
