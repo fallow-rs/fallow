@@ -345,6 +345,7 @@ describe("getInstalledCliPath", () => {
     mockFiles[cliPath] = binaryBytes;
     mockFiles[cliSigPath] = signatureBytes;
     mockFiles[versionPath] = "2.26.0";
+    mockExecOutput = "fallow 2.26.0\n";
 
     expect(getInstalledCliPath(fakeContext)).toBe(cliPath);
   });
@@ -353,8 +354,20 @@ describe("getInstalledCliPath", () => {
     mockFiles[cliPath] = binaryBytes;
     mockFiles[cliDigestPath] = digestHex;
     mockFiles[versionPath] = "2.26.0";
+    mockExecOutput = "fallow 2.26.0\n";
 
     expect(getInstalledCliPath(fakeContext)).toBe(cliPath);
+  });
+
+  it("treats a stale CLI binary as stale even when the shared marker is current", () => {
+    mockFiles[cliPath] = binaryBytes;
+    mockFiles[cliSigPath] = signatureBytes;
+    mockFiles[versionPath] = "2.26.0";
+    mockExecOutput = "fallow 2.25.0\n";
+
+    expect(getInstalledCliPath(fakeContext)).toBeNull();
+    expect(mockFiles[cliPath]).toBeUndefined();
+    expect(mockFiles[cliSigPath]).toBeUndefined();
   });
 
   it("retries a missing managed CLI without purging a trusted LSP binary", () => {

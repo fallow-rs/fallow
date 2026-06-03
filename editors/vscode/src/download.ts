@@ -320,13 +320,19 @@ const matchesExtensionVersion = (
     return true;
   }
 
-  const binaryVersion = readVersionMarker(dir) ?? getBinaryVersion(binaryPath);
+  const markerVersion = readVersionMarker(dir);
+  const binaryVersion = getBinaryVersion(binaryPath);
+
   if (binaryVersion === extensionVersion) {
     return true;
   }
 
+  if (!binaryVersion && markerVersion === extensionVersion) {
+    return true;
+  }
+
   outputChannel?.appendLine(
-    `Fallow: installed ${label} binary is v${binaryVersion ?? "unknown"}, extension is v${extensionVersion}. Re-downloading.`,
+    `Fallow: installed ${label} binary is v${binaryVersion ?? markerVersion ?? "unknown"}, extension is v${extensionVersion}. Re-downloading.`,
   );
   purgeManagedBinaries(dir);
   return false;
