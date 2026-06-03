@@ -15,10 +15,20 @@ import {
   getResolvedConfigPath,
   getAutoDownload,
 } from "./config.js";
-import { buildAnalysisArgs, countCheckIssues, planDegradation } from "./analysis-utils.js";
+import {
+  buildAnalysisArgs,
+  compareVersions,
+  countCheckIssues,
+  planDegradation,
+} from "./analysis-utils.js";
 import { showBinarySkewToastOnce } from "./binary-skew.js";
 import { findBinaryInPath, findLocalBinary, getExecutableExtension } from "./binary-utils.js";
-import { downloadCliBinary, getBinaryVersion, getInstalledCliPath } from "./download.js";
+import {
+  downloadCliBinary,
+  getBinaryVersion,
+  getExtensionVersion,
+  getInstalledCliPath,
+} from "./download.js";
 import { buildFixArgs, createFixPreviewItems, resolveFixLocation } from "./fix-utils.js";
 import type {
   FallowCheckResult,
@@ -71,14 +81,12 @@ export const resolveCliBinary = async (
   return downloadCliBinary(context);
 };
 
-const execFallow = async (
-  context: vscode.ExtensionContext,
+const execFallow = (
+  binary: string | null,
   args: ReadonlyArray<string>,
   cwd: string,
-): Promise<string> => {
-  const binary = await resolveCliBinary(context);
-
-  return await new Promise((resolve, reject) => {
+): Promise<string> =>
+  new Promise((resolve, reject) => {
     if (!binary) {
       reject(
         new Error(
@@ -124,7 +132,6 @@ const execFallow = async (
       resolve(stdout);
     });
   });
-};
 
 /**
  * Resolved CLI versions keyed by binary path. A binary at a given path does not
@@ -142,6 +149,53 @@ const probeCliVersion = (binaryPath: string): string | null => {
   const version = getBinaryVersion(binaryPath);
   cliVersionCache.set(binaryPath, version);
   return version;
+};
+
+/**
+ * Resolve the fallow CLI to actually run, self-healing when the binary found on
+ * PATH or in `node_modules` is older than the extension itself.
+ *
+ * The extension and the CLI are versioned and distributed independently, so a
+ * user can have a stale global `fallow` (npm, Homebrew, cargo) on PATH that
+ * predates flags this extension emits, which silently turns settings such as
+ * `duplication.minOccurrences` into no-ops. When auto-download is enabled (the
+ * default), switch to the managed CLI, which is pinned to the extension version,
+ * so those settings take effect. The managed binary is reused from disk when
+ * already present (no network) and fetched once otherwise. An equal-or-newer
+ * resolved CLI is always used as-is: this never downgrades, and with
+ * auto-download off the stale binary is kept so the caller can degrade loudly.
+ *
+ * Returns the binary to spawn together with its probed version, so the caller
+ * forwards exactly the version-gated flags this binary accepts (no probe/spawn
+ * skew).
+ */
+export const resolveCliForRun = async (
+  context: vscode.ExtensionContext,
+  outputChannel?: vscode.OutputChannel,
+): Promise<{ binary: string | null; version: string | null }> => {
+  const found = findCliBinary(context);
+  if (!found) {
+    const downloaded = await resolveCliBinary(context);
+    return { binary: downloaded, version: downloaded ? probeCliVersion(downloaded) : null };
+  }
+
+  const version = probeCliVersion(found);
+  const required = getExtensionVersion();
+  const tooOld = required !== null && version !== null && compareVersions(version, required) < 0;
+
+  if (tooOld && getAutoDownload()) {
+    const managed =
+      getInstalledCliPath(context, outputChannel) ?? (await downloadCliBinary(context));
+    if (managed && managed !== found) {
+      const managedVersion = probeCliVersion(managed);
+      outputChannel?.appendLine(
+        `Fallow: resolved CLI v${version} predates the extension (v${required}); switched to the managed CLI v${managedVersion ?? "unknown"} so your settings apply.`,
+      );
+      return { binary: managed, version: managedVersion };
+    }
+  }
+
+  return { binary: found, version };
 };
 
 /**
@@ -171,7 +225,6 @@ const noteBinarySkew = (
  * untouched so genuine errors stay loud.
  */
 const execAnalysisTolerant = async (
-  context: vscode.ExtensionContext,
   initialArgs: ReadonlyArray<string>,
   cwd: string,
   binaryPath: string | null,
@@ -181,7 +234,7 @@ const execAnalysisTolerant = async (
 
   for (;;) {
     try {
-      return await execFallow(context, args, cwd);
+      return await execFallow(binaryPath, args, cwd);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const plan = planDegradation(message, args);
@@ -373,12 +426,16 @@ export const runAnalysis = async (
   let dupes: FallowDupesResult | null = null;
 
   try {
-    // Probe the resolved CLI once (no download: findCliBinary, not
-    // resolveCliBinary) so version-gated flags can be omitted up front rather
-    // than spawn-failed. A null version means "unknown"; we forward
-    // optimistically and lean on execAnalysisTolerant as the backstop.
-    const cliBinary = findCliBinary(context);
-    const cliVersion = cliBinary ? probeCliVersion(cliBinary) : null;
+    // Resolve the CLI to run, self-healing to the managed binary when the one
+    // found on PATH/node_modules is older than the extension (otherwise its
+    // settings would be silent no-ops). The probed version belongs to the
+    // binary we will actually spawn, so version-gated flags are forwarded only
+    // when accepted; a null version means "unknown" and we forward optimistically
+    // and lean on execAnalysisTolerant as the backstop.
+    const { binary: cliBinary, version: cliVersion } = await resolveCliForRun(
+      context,
+      outputChannel,
+    );
 
     const { args: analysisArgs, skipped } = buildAnalysisArgs({
       production: getProduction(),
@@ -398,13 +455,7 @@ export const runAnalysis = async (
       );
     }
 
-    const output = await execAnalysisTolerant(
-      context,
-      analysisArgs,
-      root,
-      cliBinary,
-      outputChannel,
-    );
+    const output = await execAnalysisTolerant(analysisArgs, root, cliBinary, outputChannel);
 
     if (output.trim().length === 0) {
       // execFallow already rejects on non-zero exit codes (other than 0/1);
@@ -446,7 +497,8 @@ export const runFix = async (
       fixArgs.push("--config", configPath);
     }
 
-    const output = await execFallow(context, fixArgs, root);
+    const { binary } = await resolveCliForRun(context);
+    const output = await execFallow(binary, fixArgs, root);
     const result = JSON.parse(output) as FallowFixResult;
 
     if (dryRun) {

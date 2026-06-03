@@ -296,7 +296,7 @@ const ensureManagedBinaryTrusted = (
   return false;
 };
 
-const getExtensionVersion = (): string | null => {
+export const getExtensionVersion = (): string | null => {
   const version = vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version as
     | string
     | undefined;

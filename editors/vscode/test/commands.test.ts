@@ -8,6 +8,8 @@ let mockLocalBinary: string | null = null;
 let mockPathBinary: string | null = null;
 let mockInstalledCli: string | null = null;
 let mockDownloadedCli: string | null = null;
+let mockExtensionVersion: string | null = null;
+let mockBinaryVersions: Readonly<Record<string, string | null>> = {};
 
 vi.mock("node:fs", () => ({
   existsSync: (p: string) => mockFiles.has(p),
@@ -62,12 +64,14 @@ vi.mock("../src/binary-utils.js", () => ({
 }));
 
 vi.mock("../src/download.js", () => ({
-  getInstalledCliPath: () => mockInstalledCli,
+  getInstalledCliPath: vi.fn(() => mockInstalledCli),
   downloadCliBinary: vi.fn(async () => mockDownloadedCli),
+  getBinaryVersion: (binaryPath: string) => mockBinaryVersions[binaryPath] ?? null,
+  getExtensionVersion: () => mockExtensionVersion,
 }));
 
-import { downloadCliBinary } from "../src/download.js";
-import { findCliBinary, resolveCliBinary } from "../src/commands.js";
+import { downloadCliBinary, getInstalledCliPath } from "../src/download.js";
+import { findCliBinary, resolveCliBinary, resolveCliForRun } from "../src/commands.js";
 
 const context = {} as unknown as vscode.ExtensionContext;
 
@@ -132,6 +136,98 @@ describe("resolveCliBinary", () => {
     mockDownloadedCli = "/storage/bin/fallow";
 
     await expect(resolveCliBinary(context)).resolves.toBeNull();
+    expect(downloadCliBinary).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveCliForRun", () => {
+  beforeEach(() => {
+    mockFiles = new Set();
+    mockLspPath = "";
+    mockAutoDownload = true;
+    mockLocalBinary = null;
+    mockPathBinary = null;
+    mockInstalledCli = null;
+    mockDownloadedCli = null;
+    mockExtensionVersion = "2.88.1";
+    mockBinaryVersions = {};
+    vi.clearAllMocks();
+  });
+
+  it("uses a resolved CLI at the extension version as-is, without downloading", async () => {
+    mockPathBinary = "/usr/local/bin/ok-fallow";
+    mockBinaryVersions = { "/usr/local/bin/ok-fallow": "2.88.1" };
+
+    await expect(resolveCliForRun(context)).resolves.toEqual({
+      binary: "/usr/local/bin/ok-fallow",
+      version: "2.88.1",
+    });
+    expect(getInstalledCliPath).not.toHaveBeenCalled();
+    expect(downloadCliBinary).not.toHaveBeenCalled();
+  });
+
+  it("uses a newer resolved CLI as-is (never downgrades)", async () => {
+    mockPathBinary = "/usr/local/bin/newer-fallow";
+    mockBinaryVersions = { "/usr/local/bin/newer-fallow": "2.99.0" };
+
+    await expect(resolveCliForRun(context)).resolves.toEqual({
+      binary: "/usr/local/bin/newer-fallow",
+      version: "2.99.0",
+    });
+    expect(downloadCliBinary).not.toHaveBeenCalled();
+  });
+
+  it("switches a stale PATH CLI to the already-installed managed binary (no network)", async () => {
+    mockPathBinary = "/usr/local/bin/old-fallow";
+    mockInstalledCli = "/storage/bin/fallow";
+    mockBinaryVersions = {
+      "/usr/local/bin/old-fallow": "2.86.0",
+      "/storage/bin/fallow": "2.88.1",
+    };
+
+    await expect(resolveCliForRun(context)).resolves.toEqual({
+      binary: "/storage/bin/fallow",
+      version: "2.88.1",
+    });
+    expect(downloadCliBinary).not.toHaveBeenCalled();
+  });
+
+  it("downloads the managed binary once when a stale PATH CLI has no managed copy yet", async () => {
+    mockPathBinary = "/usr/local/bin/stale-fallow";
+    mockInstalledCli = null;
+    mockDownloadedCli = "/storage/bin/fallow";
+    mockBinaryVersions = {
+      "/usr/local/bin/stale-fallow": "2.86.0",
+      "/storage/bin/fallow": "2.88.1",
+    };
+
+    await expect(resolveCliForRun(context)).resolves.toEqual({
+      binary: "/storage/bin/fallow",
+      version: "2.88.1",
+    });
+    expect(downloadCliBinary).toHaveBeenCalledWith(context);
+  });
+
+  it("keeps a stale CLI (degraded) when auto-download is disabled", async () => {
+    mockAutoDownload = false;
+    mockPathBinary = "/usr/local/bin/pinned-fallow";
+    mockBinaryVersions = { "/usr/local/bin/pinned-fallow": "2.86.0" };
+
+    await expect(resolveCliForRun(context)).resolves.toEqual({
+      binary: "/usr/local/bin/pinned-fallow",
+      version: "2.86.0",
+    });
+    expect(downloadCliBinary).not.toHaveBeenCalled();
+  });
+
+  it("does not force an upgrade when the resolved CLI version is unknown", async () => {
+    mockPathBinary = "/usr/local/bin/unknown-fallow";
+    mockBinaryVersions = { "/usr/local/bin/unknown-fallow": null };
+
+    await expect(resolveCliForRun(context)).resolves.toEqual({
+      binary: "/usr/local/bin/unknown-fallow",
+      version: null,
+    });
     expect(downloadCliBinary).not.toHaveBeenCalled();
   });
 });
