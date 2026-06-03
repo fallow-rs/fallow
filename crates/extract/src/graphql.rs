@@ -95,6 +95,7 @@ pub(crate) fn parse_graphql_to_module(
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: Vec::new(),
+        injection_tokens: Vec::new(),
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),

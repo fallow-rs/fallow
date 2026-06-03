@@ -622,6 +622,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         complexity: Vec::new(),
         flag_uses: vec![],
         class_heritage: vec![],
+        injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),

@@ -1198,6 +1198,37 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Record `const TOKEN = new InjectionToken<Interface>(...)` declarations
+    /// so the analyze layer can follow the token's interface type argument to
+    /// the classes that `implement` it. Gated on `InjectionToken` being a named
+    /// import from `@angular/core` (a same-named local class is ignored). A
+    /// token with no type argument carries no interface and is skipped. See
+    /// issue #920.
+    fn record_injection_token(&mut self, name: &str, init: &Expression<'_>) {
+        if !self.is_module_scope() {
+            return;
+        }
+        let Expression::NewExpression(new_expr) = init else {
+            return;
+        };
+        let Expression::Identifier(callee) = &new_expr.callee else {
+            return;
+        };
+        if !self.is_named_import_from(callee.name.as_str(), "@angular/core", "InjectionToken") {
+            return;
+        }
+        let Some(type_arguments) = new_expr.type_arguments.as_deref() else {
+            return;
+        };
+        let Some(TSType::TSTypeReference(type_ref)) = type_arguments.params.first() else {
+            return;
+        };
+        if let Some((interface_name, _)) = type_name_root(&type_ref.type_name) {
+            self.injection_tokens
+                .push((name.to_string(), interface_name));
+        }
+    }
+
     fn clear_literal_allowlist_on_mutating_member_call(&mut self, call: &CallExpression<'_>) {
         if let Expression::StaticMemberExpression(member) = &call.callee
             && let Expression::Identifier(object) = &member.object
@@ -2666,6 +2697,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     self.record_node_module_register_url_binding(id.name.to_string(), sources);
                 }
                 self.record_current_module_file_path_binding(id.name.as_str(), init);
+                self.record_injection_token(id.name.as_str(), init);
                 self.record_child_process_fork_target_binding(id.name.as_str(), init);
                 self.record_tainted_source_binding(id.name.as_str(), init);
                 let sanitizer_scope = self.sanitizer_scope_for_expr(init);

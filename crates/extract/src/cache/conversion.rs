@@ -215,6 +215,7 @@ pub fn cached_to_module_opts(
         },
         flag_uses: cached.flag_uses.clone(),
         class_heritage: cached.class_heritage.clone(),
+        injection_tokens: cached.injection_tokens.clone(),
         local_type_declarations: cached
             .local_type_declarations
             .iter()
@@ -403,6 +404,7 @@ pub fn module_to_cached(
         complexity: module.complexity.clone(),
         flag_uses: module.flag_uses.clone(),
         class_heritage: module.class_heritage.clone(),
+        injection_tokens: module.injection_tokens.clone(),
         local_type_declarations: module
             .local_type_declarations
             .iter()

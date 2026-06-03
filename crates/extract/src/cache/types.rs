@@ -168,7 +168,7 @@ use crate::MemberKind;
 /// identifier flows into a structurally typed parameter. Pre-115 entries can
 /// miss those synthetic `member_accesses` and surface false
 /// `unused-class-member` findings.
-pub(super) const CACHE_VERSION: u32 = 115;
+pub(super) const CACHE_VERSION: u32 = 116;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -211,7 +211,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 664);
+assert_cached_type_size!(CachedModule, 688);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -288,6 +288,8 @@ pub struct CachedModule {
     pub flag_uses: Vec<fallow_types::extract::FlagUse>,
     /// Heritage metadata for exported classes.
     pub class_heritage: Vec<fallow_types::extract::ClassHeritageInfo>,
+    /// Angular `InjectionToken<Interface>` `(token, interface)` pairs (#920).
+    pub injection_tokens: Vec<(String, String)>,
     /// Local type-capable declarations.
     pub local_type_declarations: Vec<CachedLocalTypeDeclaration>,
     /// Type references from exported public signatures.

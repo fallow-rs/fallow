@@ -3257,6 +3257,59 @@ fn non_angular_inject_property_does_not_record_instance_binding() {
 }
 
 #[test]
+fn angular_injection_token_records_interface_type_argument() {
+    let info = parse(
+        r"
+        import { InjectionToken } from '@angular/core';
+        import { Greeter } from './greeter';
+
+        export const GREETER = new InjectionToken<Greeter>('GREETER');
+        ",
+    );
+
+    assert!(
+        info.injection_tokens
+            .contains(&("GREETER".to_string(), "Greeter".to_string())),
+        "new InjectionToken<Greeter>(...) should record (GREETER, Greeter), found: {:?}",
+        info.injection_tokens
+    );
+}
+
+#[test]
+fn non_angular_injection_token_is_not_recorded() {
+    let info = parse(
+        r"
+        import { InjectionToken } from './my-di';
+
+        export const GREETER = new InjectionToken<Greeter>('GREETER');
+        ",
+    );
+
+    assert!(
+        info.injection_tokens.is_empty(),
+        "InjectionToken not imported from @angular/core must not be recorded, found: {:?}",
+        info.injection_tokens
+    );
+}
+
+#[test]
+fn untyped_injection_token_is_not_recorded() {
+    let info = parse(
+        r"
+        import { InjectionToken } from '@angular/core';
+
+        export const GREETER = new InjectionToken('GREETER');
+        ",
+    );
+
+    assert!(
+        info.injection_tokens.is_empty(),
+        "InjectionToken without a type argument has no interface to resolve, found: {:?}",
+        info.injection_tokens
+    );
+}
+
+#[test]
 fn dotted_bound_receiver_preserves_suffix() {
     let info = parse(
         r"

@@ -131,6 +131,9 @@ pub(crate) struct ModuleInfoExtractor {
     namespace_depth: u32,
     pending_namespace_members: Vec<MemberInfo>,
     pub(crate) class_heritage: Vec<ClassHeritageInfo>,
+    /// `(token_export_name, interface_name)` for `new InjectionToken<I>(...)`
+    /// declarations imported from `@angular/core`. See issue #920.
+    pub(crate) injection_tokens: Vec<(String, String)>,
     pub(crate) local_type_declarations: Vec<LocalTypeDeclaration>,
     pub(crate) public_signature_type_references: Vec<PublicSignatureTypeReference>,
     local_signature_type_references: Vec<LocalSignatureTypeReference>,
@@ -838,6 +841,7 @@ impl ModuleInfoExtractor {
             complexity: Vec::new(),
             flag_uses: Vec::new(),
             class_heritage: self.class_heritage,
+            injection_tokens: self.injection_tokens,
             local_type_declarations: self.local_type_declarations,
             public_signature_type_references: self.public_signature_type_references,
             namespace_object_aliases,
@@ -883,6 +887,7 @@ impl ModuleInfoExtractor {
         info.has_cjs_exports |= self.has_cjs_exports;
         info.has_angular_component_template_url |= self.has_angular_component_template_url;
         info.class_heritage.extend(self.class_heritage);
+        info.injection_tokens.extend(self.injection_tokens);
         info.local_type_declarations
             .extend(self.local_type_declarations);
         info.public_signature_type_references

@@ -501,6 +501,52 @@ fn export_key_with_origins(graph: &ModuleGraph, key: &ExportKey) -> Vec<ExportKe
     keys
 }
 
+/// Credit one Angular external-template member access `<object>.<member>` whose
+/// `object` is a component field bound to `type_name` (issue #920).
+///
+/// `type_name` is the field's binding target: a concrete class, an interface
+/// (the typed `x: Greeter = inject(TOKEN)` form), or an `InjectionToken` const
+/// (the untyped `x = inject(TOKEN)` form). The candidate interface set is the
+/// binding name itself plus the interface declared by any `InjectionToken` the
+/// binding resolves to; the member is credited on every class implementing any
+/// candidate interface (and directly on the resolved export, harmless for a
+/// memberless token const).
+fn credit_angular_token_chain_member<'a>(
+    graph: &ModuleGraph,
+    type_name: &'a str,
+    member: &str,
+    local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
+    token_to_interface: &FxHashMap<ExportKey, &'a str>,
+    implementers_by_name: &FxHashMap<&'a str, Vec<ExportKey>>,
+    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
+) {
+    let mut interface_names: Vec<&str> = vec![type_name];
+    if let Some(export_keys) = local_to_export_keys.get(type_name) {
+        for export_key in export_keys {
+            accessed_members
+                .entry(export_key.clone())
+                .or_default()
+                .insert(member.to_string());
+            for resolved in export_key_with_origins(graph, export_key) {
+                if let Some(interface) = token_to_interface.get(&resolved) {
+                    interface_names.push(interface);
+                }
+            }
+        }
+    }
+    for interface in interface_names {
+        let Some(implementers) = implementers_by_name.get(interface) else {
+            continue;
+        };
+        for implementer_key in implementers {
+            accessed_members
+                .entry(implementer_key.clone())
+                .or_default()
+                .insert(member.to_string());
+        }
+    }
+}
+
 fn entry_point_star_re_export_targets(
     graph: &ModuleGraph,
     public_api_entry_points: &FxHashSet<FileId>,
@@ -1302,6 +1348,17 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
     let mut class_heritage_by_export: FxHashMap<ExportKey, (Option<String>, Vec<String>)> =
         FxHashMap::default();
     let mut class_heritage_by_file = FxHashMap::default();
+    // Angular `inject(InjectionToken<Interface>)` template member crediting
+    // (issue #920): `token_to_interface` maps a token const's export key to the
+    // interface its `new InjectionToken<I>(...)` declares; `implementers_by_name`
+    // maps an interface NAME to every class that `implements` it. The Angular
+    // template-chain bridge below follows a token-typed field's access through
+    // these maps to credit the concrete implementation's member. Name-keying for
+    // implementers mirrors the existing `interface_to_implementers` pass: it can
+    // over-credit two same-named interfaces, which is the safe (false-negative,
+    // never false-positive) direction.
+    let mut token_to_interface: FxHashMap<ExportKey, &str> = FxHashMap::default();
+    let mut implementers_by_name: FxHashMap<&str, Vec<ExportKey>> = FxHashMap::default();
     for module in modules {
         class_heritage_by_file.insert(module.file_id, module.class_heritage.as_slice());
         class_heritage_by_export.extend(module.class_heritage.iter().map(|heritage| {
@@ -1310,6 +1367,21 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
                 (heritage.super_class.clone(), heritage.implements.clone()),
             )
         }));
+        for (token_name, interface_name) in &module.injection_tokens {
+            token_to_interface.insert(
+                ExportKey::new(module.file_id, token_name.clone()),
+                interface_name.as_str(),
+            );
+        }
+        for heritage in &module.class_heritage {
+            let implementer_key = ExportKey::new(module.file_id, heritage.export_name.clone());
+            for interface_name in &heritage.implements {
+                implementers_by_name
+                    .entry(interface_name.as_str())
+                    .or_default()
+                    .push(implementer_key.clone());
+            }
+        }
     }
 
     let mut interface_to_implementers: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
@@ -1530,15 +1602,15 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
                     let Some(type_name) = component_bindings.get(object) else {
                         continue;
                     };
-                    let Some(export_keys) = local_to_export_keys.get(type_name) else {
-                        continue;
-                    };
-                    for export_key in export_keys {
-                        accessed_members
-                            .entry(export_key.clone())
-                            .or_default()
-                            .insert((*member).to_string());
-                    }
+                    credit_angular_token_chain_member(
+                        graph,
+                        type_name,
+                        member,
+                        &local_to_export_keys,
+                        &token_to_interface,
+                        &implementers_by_name,
+                        &mut accessed_members,
+                    );
                 }
             }
         }
@@ -1839,6 +1911,7 @@ mod tests {
                 implements: implements.iter().map(ToString::to_string).collect(),
                 instance_bindings: Vec::new(),
             }],
+            injection_tokens: Vec::new(),
             local_type_declarations: vec![],
             public_signature_type_references: vec![],
             namespace_object_aliases: vec![],

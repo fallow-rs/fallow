@@ -84,3 +84,33 @@ fn angular_at_if_alias_credits_condition_member() {
         "ExternalTemplateComponent.externalUnused is never referenced and must still be flagged, found: {unused:?}"
     );
 }
+
+#[test]
+fn angular_inject_injection_token_credits_interface_implementer_members() {
+    // A component field `readonly greeter = inject(GREETER)` where
+    // `GREETER = new InjectionToken<Greeter>(...)` and
+    // `PoliteGreeterDirective implements Greeter`. The external template call
+    // `{{ greeter.greet() }}` must credit the concrete implementation, even
+    // though the binding resolves only to the token const (issue #920). The
+    // token is re-exported through a barrel, exercising export_key_with_origins.
+    let root = fixture_path("angular-inject-token-members");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused: Vec<(&str, &str)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.member.parent_name.as_str(), m.member.member_name.as_str()))
+        .collect();
+
+    assert!(
+        !unused.contains(&("PoliteGreeterDirective", "greet")),
+        "PoliteGreeterDirective.greet is called via {{{{ greeter.greet() }}}} through inject(GREETER) where GREETER is InjectionToken<Greeter> and the directive implements Greeter, found: {unused:?}"
+    );
+    // Non-vacuous control: a genuinely-unused member on the same directive must
+    // still be flagged, proving the detector ran and the credit is targeted.
+    assert!(
+        unused.contains(&("PoliteGreeterDirective", "unusedHelper")),
+        "PoliteGreeterDirective.unusedHelper is never referenced and must still be flagged, found: {unused:?}"
+    );
+}

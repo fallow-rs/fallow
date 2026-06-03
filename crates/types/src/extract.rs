@@ -58,6 +58,14 @@ pub struct ModuleInfo {
     pub flag_uses: Vec<FlagUse>,
     /// Heritage metadata for exported classes that declare `implements`.
     pub class_heritage: Vec<ClassHeritageInfo>,
+    /// Angular `InjectionToken<Interface>` declarations, as
+    /// `(token_export_name, interface_name)` pairs. Recorded only for
+    /// `new InjectionToken<I>(...)` initializers whose `InjectionToken` is
+    /// imported from `@angular/core`. The analyze layer follows the token's
+    /// interface type argument to the classes that `implement` it so a template
+    /// member call through `inject(TOKEN)` credits the concrete implementation.
+    /// See issue #920 (follow-up to #911 / #913).
+    pub injection_tokens: Vec<(String, String)>,
     /// Local type-capable declarations.
     pub local_type_declarations: Vec<LocalTypeDeclaration>,
     /// Type references in exported public signatures.
@@ -619,7 +627,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 64);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 648);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 672);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
