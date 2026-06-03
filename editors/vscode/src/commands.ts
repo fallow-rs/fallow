@@ -15,9 +15,10 @@ import {
   getResolvedConfigPath,
   getAutoDownload,
 } from "./config.js";
-import { countCheckIssues } from "./analysis-utils.js";
+import { buildAnalysisArgs, countCheckIssues, planDegradation } from "./analysis-utils.js";
+import { showBinarySkewToastOnce } from "./binary-skew.js";
 import { findBinaryInPath, findLocalBinary, getExecutableExtension } from "./binary-utils.js";
-import { downloadCliBinary, getInstalledCliPath } from "./download.js";
+import { downloadCliBinary, getBinaryVersion, getInstalledCliPath } from "./download.js";
 import { buildFixArgs, createFixPreviewItems, resolveFixLocation } from "./fix-utils.js";
 import type {
   FallowCheckResult,
@@ -123,6 +124,79 @@ const execFallow = async (
       resolve(stdout);
     });
   });
+};
+
+/**
+ * Resolved CLI versions keyed by binary path. A binary at a given path does not
+ * change version within a session, so probe `--version` once instead of on
+ * every sidebar analysis (config-change reanalysis can fire these frequently).
+ * `undefined` = not yet probed; `null` = probed but version could not be read.
+ */
+const cliVersionCache = new Map<string, string | null>();
+
+const probeCliVersion = (binaryPath: string): string | null => {
+  const cached = cliVersionCache.get(binaryPath);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const version = getBinaryVersion(binaryPath);
+  cliVersionCache.set(binaryPath, version);
+  return version;
+};
+
+/**
+ * Record that the resolved CLI is older than the extension for some option.
+ * Logs the specifics to the output channel on every occurrence (auditable), and
+ * surfaces a single actionable toast per session.
+ */
+const noteBinarySkew = (
+  detail: string,
+  binaryPath: string | null,
+  outputChannel?: vscode.OutputChannel,
+): void => {
+  outputChannel?.appendLine(`Fallow: ${detail}`);
+
+  const where = binaryPath ? ` (resolved binary: ${binaryPath})` : "";
+  showBinarySkewToastOnce(
+    `Fallow: the resolved CLI is older than the extension, so some options were ignored and results use CLI defaults for them${where}. Update the fallow binary, or remove the older one from PATH to use the managed auto-download. See the Fallow output channel for details.`,
+  );
+};
+
+/**
+ * Run the analysis, tolerating an older resolved CLI that rejects a flag the
+ * extension emits. Version-gated flags are normally omitted up front (see
+ * `buildAnalysisArgs`); this is the backstop for when the CLI version could not
+ * be probed. On a clap "unexpected argument" naming a known version-gated flag,
+ * the flag is stripped and the run retried; every other failure propagates
+ * untouched so genuine errors stay loud.
+ */
+const execAnalysisTolerant = async (
+  context: vscode.ExtensionContext,
+  initialArgs: ReadonlyArray<string>,
+  cwd: string,
+  binaryPath: string | null,
+  outputChannel?: vscode.OutputChannel,
+): Promise<string> => {
+  let args: string[] = [...initialArgs];
+
+  for (;;) {
+    try {
+      return await execFallow(context, args, cwd);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const plan = planDegradation(message, args);
+      if (plan.kind === "rethrow") {
+        throw err;
+      }
+
+      noteBinarySkew(
+        `dropped ${plan.dropped} after the resolved CLI rejected it; this run uses the CLI default for it.`,
+        binaryPath,
+        outputChannel,
+      );
+      args = plan.args;
+    }
+  }
 };
 
 /** Filter check results based on the user's issueTypes configuration. */
@@ -284,6 +358,7 @@ const showDryRunPreview = async (root: string, result: FallowFixResult): Promise
 
 export const runAnalysis = async (
   context: vscode.ExtensionContext,
+  outputChannel?: vscode.OutputChannel,
 ): Promise<{
   check: FallowCheckResult | null;
   dupes: FallowDupesResult | null;
@@ -298,26 +373,38 @@ export const runAnalysis = async (
   let dupes: FallowDupesResult | null = null;
 
   try {
-    const analysisArgs = ["--format", "json", "--quiet", "--skip", "health"];
-    if (getProduction()) {
-      analysisArgs.push("--production");
+    // Probe the resolved CLI once (no download: findCliBinary, not
+    // resolveCliBinary) so version-gated flags can be omitted up front rather
+    // than spawn-failed. A null version means "unknown"; we forward
+    // optimistically and lean on execAnalysisTolerant as the backstop.
+    const cliBinary = findCliBinary(context);
+    const cliVersion = cliBinary ? probeCliVersion(cliBinary) : null;
+
+    const { args: analysisArgs, skipped } = buildAnalysisArgs({
+      production: getProduction(),
+      changedSince: getChangedSince(),
+      configPath: getResolvedConfigPath(),
+      dupesMode: getDuplicationMode(),
+      dupesThreshold: getDuplicationThreshold(),
+      minOccurrences: getDuplicationMinOccurrences(),
+      cliVersion,
+    });
+
+    for (const skip of skipped) {
+      noteBinarySkew(
+        `omitted ${skip.flag} (your setting is not applied): resolved CLI v${skip.cliVersion} predates v${skip.requires}.`,
+        cliBinary,
+        outputChannel,
+      );
     }
 
-    const changedSince = getChangedSince();
-    if (changedSince) {
-      analysisArgs.push("--changed-since", changedSince);
-    }
-
-    const configPath = getResolvedConfigPath();
-    if (configPath) {
-      analysisArgs.push("--config", configPath);
-    }
-
-    analysisArgs.push("--dupes-mode", getDuplicationMode());
-    analysisArgs.push("--dupes-threshold", String(getDuplicationThreshold()));
-    analysisArgs.push("--dupes-min-occurrences", String(getDuplicationMinOccurrences()));
-
-    const output = await execFallow(context, analysisArgs, root);
+    const output = await execAnalysisTolerant(
+      context,
+      analysisArgs,
+      root,
+      cliBinary,
+      outputChannel,
+    );
 
     if (output.trim().length === 0) {
       // execFallow already rejects on non-zero exit codes (other than 0/1);

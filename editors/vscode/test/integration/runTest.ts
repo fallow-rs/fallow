@@ -84,6 +84,16 @@ const createFakeCli = (binDir: string): void => {
     `#!/usr/bin/env node
 const fs = require("node:fs");
 const args = process.argv.slice(2);
+
+// Respond to the extension's up-front version probe like a real binary: print
+// a version and exit WITHOUT logging, so it does not pollute the analysis-call
+// log the assertions read. Reported version is current, so version-gated flags
+// are not skipped in these fixtures.
+if (args[0] === "--version" || args[0] === "-V") {
+  process.stdout.write("fallow 2.88.0\\n");
+  process.exit(0);
+}
+
 const command = args[0] && !args[0].startsWith("-") ? args[0] : "combined";
 const logPath = ${JSON.stringify(logPath)};
 fs.appendFileSync(logPath, JSON.stringify({ command, args }) + "\\n");

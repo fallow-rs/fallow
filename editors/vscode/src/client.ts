@@ -17,6 +17,7 @@ import {
   getChangedSince,
   getResolvedConfigPath,
 } from "./config.js";
+import { showBinarySkewToastOnce } from "./binary-skew.js";
 import { findBinaryInPath, findLocalBinary } from "./binary-utils.js";
 import type { DiagnosticFilter } from "./diagnosticFilter.js";
 import {
@@ -37,7 +38,9 @@ const warnIfVersionMismatch = (binaryPath: string, outputChannel?: vscode.Output
   if (binaryVersion && binaryVersion !== extensionVersion) {
     const msg = `Fallow: binary in PATH is v${binaryVersion}, extension is v${extensionVersion}. Update the binary or remove it from PATH to use the managed auto-download.`;
     outputChannel?.appendLine(msg);
-    void vscode.window.showWarningMessage(msg);
+    // Shared once-per-session guard so the LSP-skew and CLI-skew toasts (same
+    // root cause) don't stack into two dismissible warnings.
+    showBinarySkewToastOnce(msg);
   }
 };
 

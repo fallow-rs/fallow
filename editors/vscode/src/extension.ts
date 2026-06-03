@@ -79,7 +79,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       },
       async () => {
         try {
-          const { check, dupes } = await runAnalysis(context);
+          const { check, dupes } = await runAnalysis(context, outputChannel);
           lastCheckResult = check;
           lastDupesResult = dupes;
           updateViews();
