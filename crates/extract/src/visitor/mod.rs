@@ -50,6 +50,29 @@ struct PendingLocalExportSpecifier {
 }
 
 #[derive(Debug, Clone)]
+struct StructuralParameterUse {
+    type_name: String,
+    members: FxHashSet<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct LocalStructuralFunction {
+    params: FxHashMap<usize, StructuralParameterUse>,
+}
+
+#[derive(Debug, Clone)]
+enum StructuralCallArgument {
+    DirectClass(String),
+    Binding(String),
+}
+
+#[derive(Debug, Clone)]
+struct StructuralClassCallCandidate {
+    callee_name: String,
+    arguments: Vec<Option<StructuralCallArgument>>,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct FactoryCallCandidate {
     pub(crate) local_name: String,
     pub(crate) callee_object: String,
@@ -103,6 +126,8 @@ pub(crate) struct ModuleInfoExtractor {
     object_binding_candidates: Vec<ObjectBindingCandidate>,
     local_declaration_names: FxHashSet<String>,
     pending_local_export_specifiers: Vec<PendingLocalExportSpecifier>,
+    local_structural_functions: FxHashMap<String, LocalStructuralFunction>,
+    structural_class_call_candidates: Vec<StructuralClassCallCandidate>,
     namespace_depth: u32,
     pending_namespace_members: Vec<MemberInfo>,
     pub(crate) class_heritage: Vec<ClassHeritageInfo>,
@@ -655,6 +680,55 @@ impl ModuleInfoExtractor {
         self.whole_object_uses.extend(additional_whole);
     }
 
+    fn resolve_structural_class_calls(&mut self) {
+        if self.local_structural_functions.is_empty()
+            || self.structural_class_call_candidates.is_empty()
+        {
+            return;
+        }
+
+        let candidates = std::mem::take(&mut self.structural_class_call_candidates);
+        let mut additional_accesses = Vec::new();
+        for candidate in candidates {
+            let Some(function) = self.local_structural_functions.get(&candidate.callee_name) else {
+                continue;
+            };
+
+            for (arg_index, arg) in candidate.arguments.iter().enumerate() {
+                let Some(param_use) = function.params.get(&arg_index) else {
+                    continue;
+                };
+                let Some(arg) = arg else {
+                    continue;
+                };
+                let Some(class_name) = self.resolve_structural_call_argument(arg) else {
+                    continue;
+                };
+                if class_name == param_use.type_name {
+                    continue;
+                }
+                for member in &param_use.members {
+                    additional_accesses.push(MemberAccess {
+                        object: class_name.clone(),
+                        member: member.clone(),
+                    });
+                }
+            }
+        }
+        self.member_accesses.extend(additional_accesses);
+    }
+
+    fn resolve_structural_call_argument(&self, arg: &StructuralCallArgument) -> Option<String> {
+        match arg {
+            StructuralCallArgument::DirectClass(class_name) => Some(class_name.clone()),
+            StructuralCallArgument::Binding(binding) => self
+                .binding_target_names
+                .get(binding.as_str())
+                .filter(|target| !target.starts_with(crate::FACTORY_CALL_SENTINEL))
+                .cloned(),
+        }
+    }
+
     fn resolve_object_binding_candidates(&mut self) {
         if self.object_binding_candidates.is_empty() {
             return;
@@ -737,6 +811,7 @@ impl ModuleInfoExtractor {
         self.resolve_object_binding_candidates();
         self.resolve_factory_call_candidates();
         self.resolve_playwright_factory_call_definitions();
+        self.resolve_structural_class_calls();
         self.resolve_bound_member_accesses();
         self.map_local_signature_refs_to_exports();
         self.apply_side_effect_registrations();
@@ -791,6 +866,7 @@ impl ModuleInfoExtractor {
         self.resolve_object_binding_candidates();
         self.resolve_factory_call_candidates();
         self.resolve_playwright_factory_call_definitions();
+        self.resolve_structural_class_calls();
         self.resolve_bound_member_accesses();
         self.map_local_signature_refs_to_exports();
         self.apply_side_effect_registrations();

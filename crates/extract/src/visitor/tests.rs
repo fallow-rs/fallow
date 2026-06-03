@@ -368,6 +368,150 @@ fn instance_member_access_mapped_to_class() {
 }
 
 #[test]
+fn structural_typed_call_direct_new_maps_parameter_members_to_class() {
+    let info = parse(
+        r"
+            interface DurationI {
+                toMs(): number;
+                toSec(): number;
+            }
+            function main(dur: DurationI) {
+                dur.toMs();
+                dur.toSec();
+            }
+            main(new DurationMS(1000));
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "DurationMS" && a.member == "toMs"),
+        "DurationMS.toMs should be credited, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "DurationMS" && a.member == "toSec"),
+        "DurationMS.toSec should be credited, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn structural_typed_call_identifier_maps_parameter_members_to_class() {
+    let info = parse(
+        r"
+            interface DurationI {
+                toMs(): number;
+            }
+            function main(dur: DurationI) {
+                dur.toMs();
+            }
+            const dur = new DurationMS(1000);
+            main(dur);
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "DurationMS" && a.member == "toMs"),
+        "DurationMS.toMs should be credited, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn structural_typed_call_wrong_argument_index_does_not_credit_class() {
+    let info = parse(
+        r"
+            interface DurationI {
+                toMs(): number;
+            }
+            function main(other: OtherI, dur: DurationI) {
+                dur.toMs();
+            }
+            const other = {};
+            main(new DurationMS(1000), other);
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "DurationMS" && a.member == "toMs"),
+        "wrong argument index should not credit DurationMS.toMs, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn structural_typed_call_same_parameter_name_other_function_does_not_credit_class() {
+    let info = parse(
+        r"
+            interface DurationI {
+                toMs(): number;
+            }
+            function main(dur: DurationI) {
+                return dur;
+            }
+            function other(dur: DurationI) {
+                dur.toMs();
+            }
+            main(new DurationMS(1000));
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "DurationMS" && a.member == "toMs"),
+        "other function should not credit main call, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn structural_typed_call_imported_callee_does_not_credit_class() {
+    let info = parse(
+        r"
+            import { main } from './main';
+            main(new DurationMS(1000));
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "DurationMS"),
+        "imported callee should not credit DurationMS members, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn bare_constructor_binding_does_not_mark_class_members_used() {
+    let info = parse(
+        r"
+            const dur = new DurationMS(1000);
+            ",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "DurationMS"),
+        "bare constructor binding should not emit DurationMS member access, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info.whole_object_uses.contains(&"DurationMS".to_string()),
+        "bare constructor binding should not emit whole-object use, found: {:?}",
+        info.whole_object_uses
+    );
+}
+
+#[test]
 fn instance_property_access_mapped_to_class() {
     let info = parse(
         r"

@@ -141,6 +141,8 @@ mod issue_758_danger_no_dep;
 mod issue_772_workspace_plugin_merge;
 #[path = "integration_test/issue_845_instanceof_narrowing.rs"]
 mod issue_845_instanceof_narrowing;
+#[path = "integration_test/issue_910_structural_class_member_usage.rs"]
+mod issue_910_structural_class_member_usage;
 
 #[path = "integration_test/issue_844_usememo_instance.rs"]
 mod issue_844_usememo_instance;

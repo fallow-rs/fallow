@@ -162,7 +162,13 @@ use crate::MemberKind;
 /// so external templates can credit service member access through the property.
 /// Pre-114 entries miss the binding and can surface false `unused-class-member`
 /// findings until the component file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 114;
+///
+/// Bumped to 115 for issue #910: local typed function calls now credit concrete
+/// class members when a direct `new Class()` argument or constructor-bound
+/// identifier flows into a structurally typed parameter. Pre-115 entries can
+/// miss those synthetic `member_accesses` and surface false
+/// `unused-class-member` findings.
+pub(super) const CACHE_VERSION: u32 = 115;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

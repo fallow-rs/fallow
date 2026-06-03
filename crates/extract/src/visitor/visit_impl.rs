@@ -49,6 +49,67 @@ impl<'a> Visit<'a> for SignatureTypeCollector {
     }
 }
 
+struct StructuralParamMemberCollector {
+    target_params: FxHashSet<String>,
+    shadowed_stack: Vec<FxHashSet<String>>,
+    members: FxHashMap<String, FxHashSet<String>>,
+}
+
+impl StructuralParamMemberCollector {
+    fn new(target_params: FxHashSet<String>) -> Self {
+        Self {
+            target_params,
+            shadowed_stack: Vec::new(),
+            members: FxHashMap::default(),
+        }
+    }
+
+    fn is_shadowed(&self, name: &str) -> bool {
+        self.shadowed_stack.iter().any(|scope| scope.contains(name))
+    }
+
+    fn collect_shadowed_params(&self, params: &FormalParameters<'_>) -> FxHashSet<String> {
+        let mut shadowed = FxHashSet::default();
+        for param in &params.items {
+            if let BindingPattern::BindingIdentifier(id) = &param.pattern
+                && self.target_params.contains(id.name.as_str())
+            {
+                shadowed.insert(id.name.to_string());
+            }
+        }
+        shadowed
+    }
+}
+
+impl<'a> Visit<'a> for StructuralParamMemberCollector {
+    fn visit_static_member_expression(&mut self, expr: &StaticMemberExpression<'a>) {
+        if let Expression::Identifier(object) = &expr.object
+            && self.target_params.contains(object.name.as_str())
+            && !self.is_shadowed(object.name.as_str())
+        {
+            self.members
+                .entry(object.name.to_string())
+                .or_default()
+                .insert(expr.property.name.to_string());
+        }
+        walk::walk_static_member_expression(self, expr);
+    }
+
+    fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
+        let shadowed = self.collect_shadowed_params(&func.params);
+        self.shadowed_stack.push(shadowed);
+        walk::walk_function(self, func, flags);
+        self.shadowed_stack.pop();
+    }
+
+    fn visit_arrow_function_expression(&mut self, expr: &ArrowFunctionExpression<'a>) {
+        let shadowed = self.collect_shadowed_params(&expr.params);
+        self.shadowed_stack.push(shadowed);
+        walk::walk_arrow_function_expression(self, expr);
+        self.shadowed_stack.pop();
+    }
+}
+
 fn type_name_root(name: &TSTypeName<'_>) -> Option<(String, Span)> {
     match name {
         TSTypeName::IdentifierReference(ident) => Some((ident.name.to_string(), ident.span)),
@@ -976,6 +1037,140 @@ impl ModuleInfoExtractor {
                 self.pending_typed_destructures
                     .push((local, key, type_name.clone()));
             }
+        }
+    }
+
+    fn record_local_structural_function(
+        &mut self,
+        name: &str,
+        params: &FormalParameters<'_>,
+        body: Option<&FunctionBody<'_>>,
+    ) {
+        let Some(body) = body else {
+            return;
+        };
+        let typed_params: Vec<(usize, String, String)> = params
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, param)| {
+                let BindingPattern::BindingIdentifier(id) = &param.pattern else {
+                    return None;
+                };
+                let type_annotation = param.type_annotation.as_deref()?;
+                let type_name = extract_type_annotation_name(type_annotation)?;
+                Some((index, id.name.to_string(), type_name))
+            })
+            .collect();
+        if typed_params.is_empty() {
+            return;
+        }
+
+        let target_params = typed_params
+            .iter()
+            .map(|(_, param_name, _)| param_name.clone())
+            .collect();
+        let mut collector = StructuralParamMemberCollector::new(target_params);
+        collector.visit_function_body(body);
+
+        let mut function = super::LocalStructuralFunction::default();
+        for (index, param_name, type_name) in typed_params {
+            let Some(members) = collector.members.remove(param_name.as_str()) else {
+                continue;
+            };
+            if members.is_empty() {
+                continue;
+            }
+            function
+                .params
+                .insert(index, super::StructuralParameterUse { type_name, members });
+        }
+
+        if !function.params.is_empty() {
+            self.local_structural_functions
+                .insert(name.to_string(), function);
+        }
+    }
+
+    fn structural_call_argument(arg: &Argument<'_>) -> Option<super::StructuralCallArgument> {
+        let expr = arg.as_expression()?;
+        match expr {
+            Expression::NewExpression(new_expr) => {
+                let Expression::Identifier(callee) = &new_expr.callee else {
+                    return None;
+                };
+                if super::helpers::is_builtin_constructor(callee.name.as_str()) {
+                    return None;
+                }
+                Some(super::StructuralCallArgument::DirectClass(
+                    callee.name.to_string(),
+                ))
+            }
+            Expression::Identifier(ident) => Some(super::StructuralCallArgument::Binding(
+                ident.name.to_string(),
+            )),
+            _ => None,
+        }
+    }
+
+    fn record_structural_class_call_candidate(&mut self, call: &CallExpression<'_>) {
+        let Expression::Identifier(callee) = &call.callee else {
+            return;
+        };
+
+        let arguments: Vec<Option<super::StructuralCallArgument>> = call
+            .arguments
+            .iter()
+            .map(Self::structural_call_argument)
+            .collect();
+        if arguments.iter().all(Option::is_none) {
+            return;
+        }
+
+        self.structural_class_call_candidates
+            .push(super::StructuralClassCallCandidate {
+                callee_name: callee.name.to_string(),
+                arguments,
+            });
+    }
+
+    fn record_local_structural_function_from_variable_declarator(
+        &mut self,
+        declarator: &VariableDeclarator<'_>,
+        init: &Expression<'_>,
+    ) {
+        if !self.is_module_scope() {
+            return;
+        }
+        let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+            return;
+        };
+        match init {
+            Expression::ArrowFunctionExpression(arrow) => {
+                self.record_local_structural_function(
+                    id.name.as_str(),
+                    &arrow.params,
+                    Some(arrow.body.as_ref()),
+                );
+            }
+            Expression::FunctionExpression(function) => {
+                self.record_local_structural_function(
+                    id.name.as_str(),
+                    &function.params,
+                    function.body.as_deref(),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    fn clear_literal_allowlist_on_mutating_member_call(&mut self, call: &CallExpression<'_>) {
+        if let Expression::StaticMemberExpression(member) = &call.callee
+            && let Expression::Identifier(object) = &member.object
+            && !matches!(member.property.name.as_str(), "has" | "includes")
+            && self.literal_allowlist_binding(&object.name)
+        {
+            self.record_literal_allowlist_binding(object.name.as_str(), false);
         }
     }
 
@@ -1965,6 +2160,11 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         self.record_path_relative_binding(id.name.as_str(), None);
                         let refs = Self::collect_function_signature_refs(function);
                         self.record_local_signature_refs(&id.name, refs);
+                        self.record_local_structural_function(
+                            id.name.as_str(),
+                            &function.params,
+                            function.body.as_deref(),
+                        );
 
                         if let Some(body) = function.body.as_deref()
                             && let Some(call) = extract_function_body_final_return_call(body)
@@ -2424,6 +2624,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 continue;
             };
 
+            self.record_local_structural_function_from_variable_declarator(declarator, init);
+
             if let BindingPattern::BindingIdentifier(id) = &declarator.id {
                 let sources = self.node_module_register_sources_from_expression(init);
                 if !sources.is_empty() {
@@ -2581,13 +2783,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_call_expression(&mut self, expr: &CallExpression<'a>) {
-        if let Expression::StaticMemberExpression(member) = &expr.callee
-            && let Expression::Identifier(object) = &member.object
-            && !matches!(member.property.name.as_str(), "has" | "includes")
-            && self.literal_allowlist_binding(&object.name)
-        {
-            self.record_literal_allowlist_binding(object.name.as_str(), false);
-        }
+        self.record_structural_class_call_candidate(expr);
+        self.clear_literal_allowlist_on_mutating_member_call(expr);
 
         if let Some(test_name) = playwright_test_callee_name(&expr.callee) {
             self.member_accesses

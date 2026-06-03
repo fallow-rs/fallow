@@ -1,0 +1,7 @@
+{
+  "name": "issue-910-structural-class-member-usage",
+  "main": "src/index.ts",
+  "dependencies": {
+    "typescript": "latest"
+  }
+}
