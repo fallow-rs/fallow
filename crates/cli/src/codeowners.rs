@@ -616,7 +616,7 @@ mod tests {
         if path.exists() {
             let co = CodeOwners::from_file(&path).unwrap();
             assert_eq!(
-                co.owner_of(Path::new("src/anything.ts")),
+                co.owner_of(Path::new(".claude/rules/detection.md")),
                 Some("@bartwaardenburg")
             );
         }
