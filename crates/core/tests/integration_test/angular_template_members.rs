@@ -26,6 +26,10 @@ fn angular_external_template_credits_inherited_and_di_injected_members() {
         "DataService.getTotal is used in external template via {{{{ dataService.getTotal() }}}}, found: {unused:?}"
     );
     assert!(
+        !unused.contains(&("DataService", "getInjectedTotal")),
+        "DataService.getInjectedTotal is used in external template via {{{{ injectedDataService.getInjectedTotal() }}}}, found: {unused:?}"
+    );
+    assert!(
         !unused.contains(&("DataService", "isEmpty")),
         "DataService.isEmpty is used in external template via @if (!dataService.isEmpty()), found: {unused:?}"
     );

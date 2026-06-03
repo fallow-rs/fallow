@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The duplication `minOccurrences` threshold is now reachable from the bare `fallow` command and the VS Code extension.** Raising the rule-of-three threshold previously required editing the config file or running the standalone `fallow dupes` subcommand. A new global `--dupes-min-occurrences N` flag now applies in combined mode (validated `>= 2`, falling back to the config value), and the VS Code extension gains a `fallow.duplication.minOccurrences` setting that forwards it. The neighbouring `fallow.duplication.threshold` extension setting was also mislabeled: it is a duplication-percentage failure cap where `0` means no limit, not a minimum line count, and it defaulted to `5`. Its description is corrected and its default aligned to `0` to match the CLI. (Closes [#894](https://github.com/fallow-rs/fallow/issues/894). Thanks [@rbalet](https://github.com/rbalet) for the report.)
 
+### Fixed
+
+- **Angular external templates now credit service members reached through untyped `inject()` component fields.** Exported Angular component classes now carry `ClassHeritageInfo.instance_bindings` for properties initialized with named-import `inject(Service)` or an alias such as `inject as ngInject`, so external templates like `{{ exampleService.onValueChange() }}` mark the target service member as used. Same-named `inject` functions from non-Angular modules stay ignored. Thanks [@OmerGronich](https://github.com/OmerGronich) for the report. (Closes [#911](https://github.com/fallow-rs/fallow/issues/911).)
+
 ## [2.87.0] - 2026-06-03
 
 ### Added

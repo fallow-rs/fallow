@@ -9,6 +9,11 @@ export class DataService {
     return this.items.length;
   }
 
+  // Used in template via {{ injectedDataService.getInjectedTotal() }}
+  getInjectedTotal(): number {
+    return this.items.length;
+  }
+
   // Used in template via @if (!dataService.isEmpty())
   isEmpty(): boolean {
     return this.items.length === 0;

@@ -1,7 +1,7 @@
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, BinaryExpression, BindingPattern, Class, ClassElement,
-    Expression, MethodDefinitionKind, ObjectPropertyKind, Statement, TSAccessibility, TSSignature,
-    TSType, TSTypeAnnotation, TSTypeName,
+    Argument, ArrayExpressionElement, BinaryExpression, BindingPattern, CallExpression, Class,
+    ClassElement, Expression, MethodDefinitionKind, ObjectPropertyKind, Statement, TSAccessibility,
+    TSSignature, TSType, TSTypeAnnotation, TSTypeName,
 };
 use oxc_span::{GetSpan, Span};
 use rustc_hash::FxHashMap;
@@ -609,7 +609,13 @@ fn collect_nested_type_bindings(
 }
 
 #[must_use]
-pub fn extract_class_instance_bindings(class: &Class<'_>) -> Vec<(String, String)> {
+pub fn extract_class_instance_bindings<F>(
+    class: &Class<'_>,
+    is_named_import_from: F,
+) -> Vec<(String, String)>
+where
+    F: Fn(&str, &str, &str) -> bool,
+{
     let type_param_constraints = collect_class_type_param_constraints(class);
     let resolve = |raw: String| -> Option<String> {
         if let Some(replacement) = type_param_constraints.get(raw.as_str()) {
@@ -682,12 +688,54 @@ pub fn extract_class_instance_bindings(class: &Class<'_>) -> Vec<(String, String
                     && !is_builtin_constructor(callee.name.as_str())
                 {
                     bindings.push((name.to_string(), callee.name.to_string()));
+                    continue;
+                }
+                if let Some(Expression::CallExpression(call)) = &prop.value
+                    && let Some(type_name) =
+                        extract_angular_inject_target(call, &is_named_import_from)
+                {
+                    bindings.push((name.to_string(), type_name));
                 }
             }
             _ => {}
         }
     }
     bindings
+}
+
+pub fn extract_angular_inject_target<F>(
+    call: &CallExpression<'_>,
+    is_named_import_from: &F,
+) -> Option<String>
+where
+    F: Fn(&str, &str, &str) -> bool,
+{
+    let Expression::Identifier(callee) = &call.callee else {
+        return None;
+    };
+    if !is_named_import_from(callee.name.as_str(), "@angular/core", "inject") {
+        return None;
+    }
+
+    if let Some(type_arguments) = call.type_arguments.as_deref()
+        && let Some(TSType::TSTypeReference(type_ref)) = type_arguments.params.first()
+        && let Some(type_name) = type_name_root(&type_ref.type_name)
+    {
+        return Some(type_name);
+    }
+
+    let Some(Argument::Identifier(target)) = call.arguments.first() else {
+        return None;
+    };
+    Some(target.name.to_string())
+}
+
+fn type_name_root(name: &TSTypeName<'_>) -> Option<String> {
+    match name {
+        TSTypeName::IdentifierReference(ident) => Some(ident.name.to_string()),
+        TSTypeName::QualifiedName(qualified) => type_name_root(&qualified.left),
+        TSTypeName::ThisExpression(_) => None,
+    }
 }
 
 #[must_use]

@@ -1120,7 +1120,12 @@ impl ModuleInfoExtractor {
         }
     }
 
-    fn is_named_import_from(&self, local_name: &str, source: &str, imported_name: &str) -> bool {
+    pub(super) fn is_named_import_from(
+        &self,
+        local_name: &str,
+        source: &str,
+        imported_name: &str,
+    ) -> bool {
         self.imports.iter().any(|import| {
             import.source == source
                 && import.local_name == local_name
@@ -1635,24 +1640,9 @@ impl ModuleInfoExtractor {
     }
 
     fn extract_angular_inject_target(&self, call: &CallExpression<'_>) -> Option<String> {
-        let Expression::Identifier(callee) = &call.callee else {
-            return None;
-        };
-        if !self.is_named_import_from(callee.name.as_str(), "@angular/core", "inject") {
-            return None;
-        }
-
-        if let Some(type_arguments) = call.type_arguments.as_deref()
-            && let Some(TSType::TSTypeReference(type_ref)) = type_arguments.params.first()
-            && let Some((type_name, _)) = type_name_root(&type_ref.type_name)
-        {
-            return Some(type_name);
-        }
-
-        let Some(Argument::Identifier(target)) = call.arguments.first() else {
-            return None;
-        };
-        Some(target.name.to_string())
+        super::helpers::extract_angular_inject_target(call, &|local_name, source, imported_name| {
+            self.is_named_import_from(local_name, source, imported_name)
+        })
     }
 
     fn copy_nested_binding_targets(&mut self, source_binding: &str, target_binding: &str) -> bool {
@@ -1949,8 +1939,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         self.record_path_relative_binding(id.name.as_str(), None);
                         self.record_local_type_declaration(&id.name, id.span);
                         let is_angular = has_angular_class_decorator(class);
-                        let instance_bindings =
-                            super::helpers::extract_class_instance_bindings(class);
+                        let instance_bindings = super::helpers::extract_class_instance_bindings(
+                            class,
+                            |local_name, source, imported_name| {
+                                self.is_named_import_from(local_name, source, imported_name)
+                            },
+                        );
                         self.record_local_class_export(
                             id.name.to_string(),
                             extract_class_members(class, is_angular),
@@ -2232,7 +2226,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         let (members, super_class, implemented_interfaces, instance_bindings) =
             if let ExportDefaultDeclarationKind::ClassDeclaration(class) = &decl.declaration {
                 let is_angular = has_angular_class_decorator(class);
-                let bindings = super::helpers::extract_class_instance_bindings(class);
+                let bindings = super::helpers::extract_class_instance_bindings(
+                    class,
+                    |local_name, source, imported_name| {
+                        self.is_named_import_from(local_name, source, imported_name)
+                    },
+                );
                 (
                     extract_class_members(class, is_angular),
                     extract_super_class_name(class),

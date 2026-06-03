@@ -156,7 +156,13 @@ use crate::MemberKind;
 /// Bumped to 113 for issue #863 follow-up: sanitizer metadata gained URL and
 /// path domains plus guarded path backpatching. Pre-113 entries may lack those
 /// sanitizer domains until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 113;
+///
+/// Bumped to 114 for issue #911: Angular component properties initialized with
+/// named-import `inject(Service)` now populate `ClassHeritageInfo.instance_bindings`
+/// so external templates can credit service member access through the property.
+/// Pre-114 entries miss the binding and can surface false `unused-class-member`
+/// findings until the component file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 114;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

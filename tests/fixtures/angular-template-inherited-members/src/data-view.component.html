@@ -1,6 +1,7 @@
 <div>
   <h2>Data View</h2>
   <p>Total: {{ dataService.getTotal() }}</p>
+  <p>Injected total: {{ injectedDataService.getInjectedTotal() }}</p>
   @if (!dataService.isEmpty()) {
     <ul>
       @for (item of dataService.items; track item) {

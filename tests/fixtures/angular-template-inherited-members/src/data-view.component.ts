@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, inject as ngInject } from '@angular/core';
 import { DataService } from './data.service';
 
 @Component({
@@ -6,5 +6,7 @@ import { DataService } from './data.service';
   templateUrl: './data-view.component.html',
 })
 export class DataViewComponent {
+  readonly injectedDataService = ngInject(DataService);
+
   constructor(public dataService: DataService) {}
 }

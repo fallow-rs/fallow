@@ -3003,6 +3003,86 @@ fn typed_getter_records_instance_binding() {
 }
 
 #[test]
+fn angular_inject_property_records_instance_binding() {
+    let info = parse(
+        r"
+        import { Component, inject } from '@angular/core';
+        import { ExampleService } from './example.service';
+
+        @Component({ templateUrl: './example.component.html' })
+        export class ExampleComponent {
+            readonly exampleService = inject(ExampleService);
+        }
+        ",
+    );
+
+    assert!(
+        info.class_heritage.iter().any(|heritage| {
+            heritage.export_name == "ExampleComponent"
+                && heritage
+                    .instance_bindings
+                    .contains(&("exampleService".to_string(), "ExampleService".to_string()))
+        }),
+        "Angular inject() property should be recorded as an instance binding, found: {:?}",
+        info.class_heritage
+    );
+}
+
+#[test]
+fn angular_inject_alias_property_records_instance_binding() {
+    let info = parse(
+        r"
+        import { Component, inject as ngInject } from '@angular/core';
+        import { ExampleService } from './example.service';
+
+        @Component({ templateUrl: './example.component.html' })
+        export class ExampleComponent {
+            readonly exampleService = ngInject(ExampleService);
+        }
+        ",
+    );
+
+    assert!(
+        info.class_heritage.iter().any(|heritage| {
+            heritage.export_name == "ExampleComponent"
+                && heritage
+                    .instance_bindings
+                    .contains(&("exampleService".to_string(), "ExampleService".to_string()))
+        }),
+        "aliased Angular inject() property should be recorded as an instance binding, found: {:?}",
+        info.class_heritage
+    );
+}
+
+#[test]
+fn non_angular_inject_property_does_not_record_instance_binding() {
+    let info = parse(
+        r"
+        import { inject } from './container';
+        import { ExampleService } from './example.service';
+
+        export class ExampleComponent {
+            readonly exampleService = inject(ExampleService);
+        }
+        ",
+    );
+
+    let bindings = info
+        .class_heritage
+        .iter()
+        .find(|heritage| heritage.export_name == "ExampleComponent")
+        .map(|heritage| &heritage.instance_bindings);
+    assert!(
+        bindings.is_none_or(|bindings| {
+            !bindings
+                .iter()
+                .any(|(name, target)| name == "exampleService" && target == "ExampleService")
+        }),
+        "non-Angular inject() must not create component instance binding, found: {bindings:?}",
+    );
+}
+
+#[test]
 fn dotted_bound_receiver_preserves_suffix() {
     let info = parse(
         r"
