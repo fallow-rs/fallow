@@ -380,9 +380,14 @@ fn static_dir_relative_path<'a>(url_path: &'a str, mount: &str) -> Option<&'a st
 }
 
 fn is_safe_static_dir_relative_path(relative: &str) -> bool {
-    !Path::new(relative)
-        .components()
-        .any(|component| matches!(component, std::path::Component::ParentDir))
+    !Path::new(relative).components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    })
 }
 
 fn resolve_filesystem_path(ctx: &ResolveContext<'_>, path: &Path) -> Option<ResolveResult> {
@@ -1427,8 +1432,9 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        glob_values_match, is_tsconfig_error, matches_nearest_tsconfig_path_alias,
-        path_alias_capture, path_alias_pattern_matches, resolve_tsconfig_extends_path,
+        glob_values_match, is_safe_static_dir_relative_path, is_tsconfig_error,
+        matches_nearest_tsconfig_path_alias, path_alias_capture, path_alias_pattern_matches,
+        resolve_tsconfig_extends_path,
     };
 
     #[test]
@@ -1509,6 +1515,20 @@ mod tests {
     #[test]
     fn wildcard_only_tsconfig_path_alias_capture_can_resolve_targets() {
         assert_eq!(path_alias_capture("*", "shared"), Some("shared"));
+    }
+
+    #[test]
+    fn static_dir_relative_path_safety_rejects_escape_paths() {
+        assert!(is_safe_static_dir_relative_path("js/app.js"));
+        assert!(is_safe_static_dir_relative_path("style/index.css"));
+        assert!(!is_safe_static_dir_relative_path("../secret.js"));
+        assert!(!is_safe_static_dir_relative_path("/absolute.js"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn static_dir_relative_path_safety_rejects_windows_prefix() {
+        assert!(!is_safe_static_dir_relative_path("C:/secret.js"));
     }
 
     #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
