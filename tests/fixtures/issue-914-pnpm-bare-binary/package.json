@@ -1,0 +1,13 @@
+{
+  "name": "issue-914-pnpm-bare-binary",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "viteinfo": "pnpm envinfo --system --npmPackages '{vite,@vitejs/*}' --binaries --browsers"
+  },
+  "devDependencies": {
+    "envinfo": "^7.14.0",
+    "unused-control": "^1.0.0"
+  }
+}

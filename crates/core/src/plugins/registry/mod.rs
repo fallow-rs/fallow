@@ -1009,8 +1009,17 @@ fn script_activation_packages(
         nm_roots.push(root);
     }
     let bin_map = scripts::build_bin_to_package_map(&nm_roots, all_deps);
+    let dep_set: FxHashSet<String> = all_deps.iter().cloned().collect();
+    let script_names: FxHashSet<String> = pkg_scripts.keys().cloned().collect();
 
-    scripts::analyze_scripts(&scripts_to_analyze, root, &bin_map).used_packages
+    scripts::analyze_scripts_with_dependency_context(
+        &scripts_to_analyze,
+        root,
+        &bin_map,
+        &dep_set,
+        &script_names,
+    )
+    .used_packages
 }
 
 #[cfg(test)]

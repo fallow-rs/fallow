@@ -22,7 +22,9 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-pub use resolve::{build_bin_to_package_map, resolve_binary_to_package};
+pub use resolve::{
+    build_bin_to_package_map, resolve_binary_to_package, resolve_known_dependency_binary,
+};
 
 /// Environment variable wrapper commands to strip before the actual binary.
 const ENV_WRAPPERS: &[&str] = &["cross-env", "dotenv", "env"];
@@ -41,6 +43,53 @@ const SCRIPT_MULTIPLEXERS: &[&str] = &[
     "run-s2",
     "run-p2",
 ];
+
+/// pnpm commands and shorthands whose next token is not a dependency binary.
+const PNPM_BUILTIN_COMMANDS: &[&str] = &[
+    "add",
+    "audit",
+    "bin",
+    "catalog",
+    "ci",
+    "config",
+    "dedupe",
+    "deploy",
+    "env",
+    "exec",
+    "fetch",
+    "import",
+    "init",
+    "install",
+    "licenses",
+    "link",
+    "list",
+    "outdated",
+    "pack",
+    "patch",
+    "prune",
+    "publish",
+    "rebuild",
+    "remove",
+    "root",
+    "run",
+    "run-script",
+    "setup",
+    "start",
+    "stop",
+    "store",
+    "test",
+    "unlink",
+    "update",
+    "why",
+];
+
+/// Boolean pnpm flags that can appear before an implicit binary invocation.
+const PNPM_IMPLICIT_EXEC_FLAGS: &[&str] = &["--silent", "-s"];
+
+struct ScriptCommandContext<'a> {
+    declared_packages: &'a FxHashSet<String>,
+    script_names: &'a FxHashSet<String>,
+}
 
 /// Result of analyzing all package.json scripts.
 #[derive(Debug, Default)]
@@ -156,6 +205,10 @@ fn is_production_script(name: &str) -> bool {
     clippy::disallowed_types,
     reason = "API matches serde-deserialized HashMap from package.json"
 )]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "kept for syntax-only callers and tests")
+)]
 pub fn analyze_scripts(
     scripts: &HashMap<String, String>,
     root: &Path,
@@ -165,6 +218,80 @@ pub fn analyze_scripts(
 
     for script_value in scripts.values() {
         accumulate_command(script_value, root, bin_map, &mut result);
+    }
+
+    result
+}
+
+/// Analyze package.json scripts with dependency context for package-manager
+/// forms that need disambiguation, such as `pnpm <binary>`.
+#[must_use]
+#[expect(
+    clippy::disallowed_types,
+    reason = "API matches serde-deserialized HashMap from package.json"
+)]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "kept for unfiltered script callers and tests")
+)]
+pub fn analyze_scripts_with_dependencies(
+    scripts: &HashMap<String, String>,
+    root: &Path,
+    bin_map: &FxHashMap<String, String>,
+    declared_packages: &FxHashSet<String>,
+) -> ScriptAnalysis {
+    let script_names: FxHashSet<String> = scripts.keys().cloned().collect();
+    analyze_scripts_with_dependency_context(
+        scripts,
+        root,
+        bin_map,
+        declared_packages,
+        &script_names,
+    )
+}
+
+/// Analyze scripts with dependency context and an explicit full package script-name set.
+#[must_use]
+#[expect(
+    clippy::disallowed_types,
+    reason = "API matches serde-deserialized HashMap from package.json"
+)]
+pub fn analyze_scripts_with_dependency_context(
+    scripts: &HashMap<String, String>,
+    root: &Path,
+    bin_map: &FxHashMap<String, String>,
+    declared_packages: &FxHashSet<String>,
+    script_names: &FxHashSet<String>,
+) -> ScriptAnalysis {
+    analyze_commands_with_context(
+        scripts.values(),
+        root,
+        bin_map,
+        declared_packages,
+        script_names,
+    )
+}
+
+/// Analyze arbitrary shell commands with dependency and script-name context.
+#[must_use]
+pub fn analyze_commands_with_context<'a, I>(
+    commands: I,
+    root: &Path,
+    bin_map: &FxHashMap<String, String>,
+    declared_packages: &FxHashSet<String>,
+    script_names: &FxHashSet<String>,
+) -> ScriptAnalysis
+where
+    I: IntoIterator<Item = &'a String>,
+{
+    let mut result = ScriptAnalysis::default();
+    let context = ScriptCommandContext {
+        declared_packages,
+        script_names,
+    };
+
+    for command in commands {
+        accumulate_command_with_context(command, root, bin_map, &context, &mut result);
     }
 
     result
@@ -198,6 +325,32 @@ fn accumulate_command(
     bin_map: &FxHashMap<String, String>,
     result: &mut ScriptAnalysis,
 ) {
+    accumulate_parsed_commands(command, root, bin_map, parse_script(command), result);
+}
+
+fn accumulate_command_with_context(
+    command: &str,
+    root: &Path,
+    bin_map: &FxHashMap<String, String>,
+    context: &ScriptCommandContext<'_>,
+    result: &mut ScriptAnalysis,
+) {
+    accumulate_parsed_commands(
+        command,
+        root,
+        bin_map,
+        parse_script_with_context(command, root, bin_map, context),
+        result,
+    );
+}
+
+fn accumulate_parsed_commands(
+    command: &str,
+    root: &Path,
+    bin_map: &FxHashMap<String, String>,
+    parsed: Vec<ScriptCommand>,
+    result: &mut ScriptAnalysis,
+) {
     for wrapper in ENV_WRAPPERS {
         if command.split_whitespace().any(|token| token == *wrapper) {
             let pkg = resolve_binary_to_package(wrapper, root, bin_map);
@@ -207,7 +360,7 @@ fn accumulate_command(
         }
     }
 
-    for cmd in parse_script(command) {
+    for cmd in parsed {
         if !cmd.binary.is_empty() && !is_builtin_command(&cmd.binary) {
             if NODE_RUNNERS.contains(&cmd.binary.as_str()) {
                 if cmd.binary != "node" && cmd.binary != "bun" {
@@ -230,6 +383,26 @@ fn accumulate_command(
 /// Splits on shell operators (`&&`, `||`, `;`, `|`, `&`) and parses each segment.
 #[must_use]
 pub fn parse_script(script: &str) -> Vec<ScriptCommand> {
+    parse_script_internal(script, |tokens, idx| {
+        shell::advance_past_package_manager(tokens, idx)
+    })
+}
+
+fn parse_script_with_context(
+    script: &str,
+    root: &Path,
+    bin_map: &FxHashMap<String, String>,
+    context: &ScriptCommandContext<'_>,
+) -> Vec<ScriptCommand> {
+    parse_script_internal(script, |tokens, idx| {
+        advance_past_package_manager_with_context(tokens, idx, root, bin_map, context)
+    })
+}
+
+fn parse_script_internal(
+    script: &str,
+    advance_package_manager: impl Fn(&[&str], usize) -> Option<usize>,
+) -> Vec<ScriptCommand> {
     let mut commands = Vec::new();
 
     for segment in shell::split_shell_operators(script) {
@@ -237,7 +410,7 @@ pub fn parse_script(script: &str) -> Vec<ScriptCommand> {
         if segment.is_empty() {
             continue;
         }
-        if let Some(cmd) = parse_command_segment(segment) {
+        if let Some(cmd) = parse_command_segment(segment, &advance_package_manager) {
             commands.push(cmd);
         }
     }
@@ -308,8 +481,49 @@ fn strip_surrounding_quotes(token: &str) -> &str {
     token
 }
 
+fn advance_past_package_manager_with_context(
+    tokens: &[&str],
+    idx: usize,
+    root: &Path,
+    bin_map: &FxHashMap<String, String>,
+    context: &ScriptCommandContext<'_>,
+) -> Option<usize> {
+    if tokens[idx] != "pnpm" {
+        return shell::advance_past_package_manager(tokens, idx);
+    }
+
+    let mut next = idx + 1;
+    while next < tokens.len() && PNPM_IMPLICIT_EXEC_FLAGS.contains(&tokens[next]) {
+        next += 1;
+    }
+    if next >= tokens.len() {
+        return None;
+    }
+
+    let subcmd = tokens[next];
+    if matches!(subcmd, "exec" | "dlx") {
+        next += 1;
+        while next < tokens.len() && PNPM_IMPLICIT_EXEC_FLAGS.contains(&tokens[next]) {
+            next += 1;
+        }
+        return (next < tokens.len()).then_some(next);
+    }
+
+    if subcmd.starts_with('-')
+        || PNPM_BUILTIN_COMMANDS.contains(&subcmd)
+        || context.script_names.contains(subcmd)
+    {
+        return None;
+    }
+
+    resolve_known_dependency_binary(subcmd, root, bin_map, context.declared_packages).map(|_| next)
+}
+
 /// Parse a single command segment (after splitting on shell operators).
-fn parse_command_segment(segment: &str) -> Option<ScriptCommand> {
+fn parse_command_segment(
+    segment: &str,
+    advance_package_manager: &impl Fn(&[&str], usize) -> Option<usize>,
+) -> Option<ScriptCommand> {
     let tokens: Vec<&str> = segment
         .split_whitespace()
         .map(strip_surrounding_quotes)
@@ -319,7 +533,7 @@ fn parse_command_segment(segment: &str) -> Option<ScriptCommand> {
     }
 
     let idx = shell::skip_initial_wrappers(&tokens, 0)?;
-    let idx = shell::advance_past_package_manager(&tokens, idx)?;
+    let idx = advance_package_manager(&tokens, idx)?;
 
     let binary = tokens[idx].to_string();
 
@@ -466,6 +680,10 @@ fn is_builtin_command(cmd: &str) -> bool {
 )]
 mod tests {
     use super::*;
+
+    fn package_set(packages: &[&str]) -> FxHashSet<String> {
+        packages.iter().map(|pkg| (*pkg).to_string()).collect()
+    }
 
     #[test]
     fn normalize_root_level_strips_dot_slash() {
@@ -868,6 +1086,90 @@ mod tests {
     }
 
     #[test]
+    fn analyze_scripts_with_dependencies_credits_pnpm_bare_declared_binary() {
+        let scripts = HashMap::from([(
+            "viteinfo".to_string(),
+            "pnpm envinfo --system --npmPackages '{vite,@vitejs/*}' --binaries --browsers"
+                .to_string(),
+        )]);
+        let result = analyze_scripts_with_dependencies(
+            &scripts,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &package_set(&["envinfo"]),
+        );
+        assert!(result.used_packages.contains("envinfo"));
+    }
+
+    #[test]
+    fn analyze_scripts_with_dependencies_credits_pnpm_silent_binary() {
+        let scripts = HashMap::from([(
+            "viteinfo".to_string(),
+            "pnpm --silent envinfo --system".to_string(),
+        )]);
+        let result = analyze_scripts_with_dependencies(
+            &scripts,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &package_set(&["envinfo"]),
+        );
+        assert!(result.used_packages.contains("envinfo"));
+    }
+
+    #[test]
+    fn analyze_scripts_with_dependencies_skips_pnpm_script_name_collision() {
+        let scripts = HashMap::from([
+            ("build".to_string(), "echo build".to_string()),
+            ("check".to_string(), "pnpm build".to_string()),
+        ]);
+        let result = analyze_scripts_with_dependencies(
+            &scripts,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &package_set(&["build"]),
+        );
+        assert!(!result.used_packages.contains("build"));
+    }
+
+    #[test]
+    fn analyze_scripts_with_dependencies_skips_pnpm_builtin_commands() {
+        let scripts = HashMap::from([(
+            "ci".to_string(),
+            "pnpm install && pnpm audit && pnpm add lodash && pnpm start && pnpm test".to_string(),
+        )]);
+        let result = analyze_scripts_with_dependencies(
+            &scripts,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &package_set(&["install", "audit", "add", "start", "test"]),
+        );
+        assert!(result.used_packages.is_empty());
+    }
+
+    #[test]
+    fn analyze_scripts_with_dependencies_credits_pnpm_divergent_bin_map() {
+        let scripts = HashMap::from([(
+            "lint".to_string(),
+            "pnpm attw --profile esm-only --pack .".to_string(),
+        )]);
+        let mut bin_map = FxHashMap::default();
+        bin_map.insert("attw".to_string(), "@arethetypeswrong/cli".to_string());
+        let result = analyze_scripts_with_dependencies(
+            &scripts,
+            Path::new("/nonexistent"),
+            &bin_map,
+            &package_set(&["@arethetypeswrong/cli"]),
+        );
+        assert!(result.used_packages.contains("@arethetypeswrong/cli"));
+    }
+
+    #[test]
+    fn parse_script_keeps_bare_pnpm_syntax_only_behavior() {
+        let cmds = parse_script("pnpm envinfo --system");
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
     fn env_assignment_valid() {
         assert!(is_env_assignment("NODE_ENV=production"));
         assert!(is_env_assignment("CI=true"));
@@ -996,6 +1298,24 @@ mod tests {
         assert!(!filtered.contains_key("test"));
         assert!(!filtered.contains_key("lint"));
         assert!(!filtered.contains_key("dev"));
+    }
+
+    #[test]
+    fn production_filtered_context_skips_non_production_script_name() {
+        let scripts = HashMap::from([
+            ("build".to_string(), "pnpm lint".to_string()),
+            ("lint".to_string(), "eslint src".to_string()),
+        ]);
+        let filtered = filter_production_scripts(&scripts);
+        let script_names: FxHashSet<String> = scripts.keys().cloned().collect();
+        let result = analyze_scripts_with_dependency_context(
+            &filtered,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &package_set(&["lint"]),
+            &script_names,
+        );
+        assert!(!result.used_packages.contains("lint"));
     }
 
     #[test]

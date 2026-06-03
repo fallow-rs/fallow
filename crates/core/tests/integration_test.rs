@@ -61,6 +61,8 @@ mod hono_html_tagged_template;
 mod html_entry;
 #[path = "integration_test/issue_546_storybook_runtime_resources.rs"]
 mod issue_546_storybook_runtime_resources;
+#[path = "integration_test/issue_914_pnpm_bare_binary.rs"]
+mod issue_914_pnpm_bare_binary;
 #[path = "integration_test/jsx_assets_and_jsdoc.rs"]
 mod jsx_assets_and_jsdoc;
 #[path = "integration_test/member_detection.rs"]

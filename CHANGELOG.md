@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Angular external templates now credit service members reached through untyped `inject()` component fields.** Exported Angular component classes now carry `ClassHeritageInfo.instance_bindings` for properties initialized with named-import `inject(Service)` or an alias such as `inject as ngInject`, so external templates like `{{ exampleService.onValueChange() }}` mark the target service member as used. Same-named `inject` functions from non-Angular modules stay ignored. Thanks [@OmerGronich](https://github.com/OmerGronich) for the report. (Closes [#911](https://github.com/fallow-rs/fallow/issues/911).)
+- **Bare `pnpm <binary>` script invocations now credit declared dependencies.** Scripts and CI commands such as `pnpm envinfo --system` now mark the matching declared package as used, while local script shorthands (`pnpm build`) and pnpm built-ins (`pnpm install`, `pnpm audit`, `pnpm add`, `pnpm test`, `pnpm start`) remain ignored. Thanks [@cope](https://github.com/cope) for the report. (Closes [#914](https://github.com/fallow-rs/fallow/issues/914).)
 
 ## [2.87.0] - 2026-06-03
 

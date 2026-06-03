@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Known binary-name → package-name mappings where they diverge.
 static BINARY_TO_PACKAGE: &[(&str, &str)] = &[
@@ -86,6 +86,39 @@ pub fn resolve_binary_to_package(
     binary.to_string()
 }
 
+/// Resolve a binary only when it is known to belong to a declared dependency.
+#[must_use]
+pub fn resolve_known_dependency_binary(
+    binary: &str,
+    root: &Path,
+    bin_map: &FxHashMap<String, String>,
+    declared_packages: &FxHashSet<String>,
+) -> Option<String> {
+    if let Some(&(_, pkg)) = BINARY_TO_PACKAGE.iter().find(|(bin, _)| *bin == binary)
+        && declared_packages.contains(pkg)
+    {
+        return Some(pkg.to_string());
+    }
+
+    let bin_link = root.join("node_modules/.bin").join(binary);
+    if let Ok(target) = std::fs::read_link(&bin_link)
+        && let Some(pkg_name) = extract_package_from_bin_path(&target)
+        && declared_packages.contains(&pkg_name)
+    {
+        return Some(pkg_name);
+    }
+
+    if let Some(pkg_name) = bin_map.get(binary)
+        && declared_packages.contains(pkg_name)
+    {
+        return Some(pkg_name.clone());
+    }
+
+    declared_packages
+        .contains(binary)
+        .then(|| binary.to_string())
+}
+
 /// Extract a package name from a `node_modules/.bin` symlink target path.
 ///
 /// Typical symlink targets:
@@ -114,6 +147,10 @@ mod tests {
 
     fn empty_map() -> FxHashMap<String, String> {
         FxHashMap::default()
+    }
+
+    fn declared(packages: &[&str]) -> FxHashSet<String> {
+        packages.iter().map(|pkg| (*pkg).to_string()).collect()
     }
 
     #[test]
@@ -187,6 +224,52 @@ mod tests {
         let pkg =
             resolve_binary_to_package("some-random-tool", Path::new("/nonexistent"), &empty_map());
         assert_eq!(pkg, "some-random-tool");
+    }
+
+    #[test]
+    fn known_dependency_binary_accepts_declared_identity() {
+        let pkg = resolve_known_dependency_binary(
+            "envinfo",
+            Path::new("/nonexistent"),
+            &empty_map(),
+            &declared(&["envinfo"]),
+        );
+        assert_eq!(pkg.as_deref(), Some("envinfo"));
+    }
+
+    #[test]
+    fn known_dependency_binary_accepts_static_mapping_when_declared() {
+        let pkg = resolve_known_dependency_binary(
+            "tsc",
+            Path::new("/nonexistent"),
+            &empty_map(),
+            &declared(&["typescript"]),
+        );
+        assert_eq!(pkg.as_deref(), Some("typescript"));
+    }
+
+    #[test]
+    fn known_dependency_binary_accepts_bin_map_when_declared() {
+        let mut map = FxHashMap::default();
+        map.insert("attw".to_string(), "@arethetypeswrong/cli".to_string());
+        let pkg = resolve_known_dependency_binary(
+            "attw",
+            Path::new("/nonexistent"),
+            &map,
+            &declared(&["@arethetypeswrong/cli"]),
+        );
+        assert_eq!(pkg.as_deref(), Some("@arethetypeswrong/cli"));
+    }
+
+    #[test]
+    fn known_dependency_binary_rejects_identity_fallback_when_not_declared() {
+        let pkg = resolve_known_dependency_binary(
+            "some-random-tool",
+            Path::new("/nonexistent"),
+            &empty_map(),
+            &FxHashSet::default(),
+        );
+        assert_eq!(pkg, None);
     }
 
     #[test]

@@ -918,6 +918,18 @@ fn analyze_all_scripts(
     }
     all_dep_names.sort_unstable();
     all_dep_names.dedup();
+    let all_dep_set: FxHashSet<String> = all_dep_names.iter().cloned().collect();
+    let mut all_script_names: FxHashSet<String> = FxHashSet::default();
+    if let Some(pkg) = root_pkg
+        && let Some(ref pkg_scripts) = pkg.scripts
+    {
+        all_script_names.extend(pkg_scripts.keys().cloned());
+    }
+    for (_, ws_pkg) in workspace_pkgs {
+        if let Some(ref ws_scripts) = ws_pkg.scripts {
+            all_script_names.extend(ws_scripts.keys().cloned());
+        }
+    }
 
     let mut nm_roots: Vec<&std::path::Path> = Vec::new();
     if config.root.join("node_modules").is_dir() {
@@ -938,7 +950,14 @@ fn analyze_all_scripts(
         } else {
             pkg_scripts.clone()
         };
-        let script_analysis = scripts::analyze_scripts(&scripts_to_analyze, &config.root, &bin_map);
+        let script_names: FxHashSet<String> = pkg_scripts.keys().cloned().collect();
+        let script_analysis = scripts::analyze_scripts_with_dependency_context(
+            &scripts_to_analyze,
+            &config.root,
+            &bin_map,
+            &all_dep_set,
+            &script_names,
+        );
         plugin_result.script_used_packages = script_analysis.used_packages;
 
         for config_file in &script_analysis.config_files {
@@ -972,7 +991,14 @@ fn analyze_all_scripts(
                 } else {
                     ws_scripts.clone()
                 };
-                let ws_analysis = scripts::analyze_scripts(&scripts_to_analyze, &ws.root, &bin_map);
+                let script_names: FxHashSet<String> = ws_scripts.keys().cloned().collect();
+                let ws_analysis = scripts::analyze_scripts_with_dependency_context(
+                    &scripts_to_analyze,
+                    &ws.root,
+                    &bin_map,
+                    &all_dep_set,
+                    &script_names,
+                );
                 used_packages.extend(ws_analysis.used_packages);
 
                 let ws_prefix = ws
@@ -1001,7 +1027,8 @@ fn analyze_all_scripts(
         plugin_result.entry_patterns.extend(entry_patterns);
     }
 
-    let ci_analysis = scripts::ci::analyze_ci_files(&config.root, &bin_map);
+    let ci_analysis =
+        scripts::ci::analyze_ci_files(&config.root, &bin_map, &all_dep_set, &all_script_names);
     plugin_result
         .script_used_packages
         .extend(ci_analysis.used_packages);
