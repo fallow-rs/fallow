@@ -896,6 +896,44 @@ fn vite_aliases_from_config_resolve_internal_modules() {
 }
 
 #[test]
+fn vite_array_aliases_from_config_resolve_internal_modules() {
+    let root = fixture_path("vite-array-alias-project");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specs: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specs.contains(&"@/auth.js"),
+        "vite array alias import should resolve, found unresolved: {unresolved_specs:?}"
+    );
+
+    let unused_file_paths: Vec<String> = results
+        .unused_files
+        .iter()
+        .filter_map(|f| f.file.path.strip_prefix(&root).ok())
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_file_paths.contains(&"src/auth.js".to_string()),
+        "src/auth.js should be reachable via vite array alias import: {unused_file_paths:?}"
+    );
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export.export_name.as_str())
+        .collect();
+    assert!(
+        unused_export_names.contains(&"unusedAuthHelper"),
+        "reachable aliased module should still report unused exports: {unused_export_names:?}"
+    );
+}
+
+#[test]
 fn webpack_aliases_from_config_resolve_internal_modules() {
     let root = fixture_path("webpack-alias-project");
     let config = create_config(root);

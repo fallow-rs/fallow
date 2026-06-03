@@ -1,0 +1,6 @@
+{
+  "name": "vite-array-alias-project",
+  "dependencies": {
+    "vite": "^5.0.0"
+  }
+}
