@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Angular external templates now credit members reached through `inject(InjectionToken<Interface>)` fields.** A component field `readonly greeter = inject(GREETER)`, where `GREETER` is a `new InjectionToken<Greeter>(...)` and a project class `implements Greeter`, previously left that class's methods reported as unused when their only reference was a template call like `{{ greeter.greet() }}`. The previous fix only covered injecting a concrete class. Fallow now records the token's interface type argument and credits the accessed member on every class implementing that interface, covering both the untyped (`inject(GREETER)`) and interface-typed (`greeter: Greeter = inject(GREETER)`) field forms. The extraction cache version is bumped so warm caches re-extract affected files once. Thanks [@OmerGronich](https://github.com/OmerGronich) for the report. (Closes [#920](https://github.com/fallow-rs/fallow/issues/920).)
+
 ## [2.88.0] - 2026-06-03
 
 ### Added
