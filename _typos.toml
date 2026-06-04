@@ -30,3 +30,8 @@ dependnecy = "dependnecy"
 # Intentional misspelling in #449 unknown-suppression-kind tests.
 # `unsed-export` is the close-typo Levenshtein-suggestion fixture.
 unsed = "unsed"
+# `unparseable` is a valid variant spelling used in VS Code license parsing.
+unparseable = "unparseable"
+# `vulnerabilit` is a deliberate truncated substring matched via `.includes()`
+# in the VS Code package-manifest test, not a misspelling of "vulnerability".
+vulnerabilit = "vulnerabilit"
