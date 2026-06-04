@@ -320,6 +320,7 @@ fallow health --top 20                    # 20 most complex functions
 fallow health --file-scores               # Per-file maintainability index (0-100)
 fallow health --hotspots                  # Riskiest files (git churn x complexity)
 fallow health --hotspots --ownership      # Add bus factor, owner, drift signals
+fallow health --hotspots --churn-file churn.json   # Import history (non-git VCS: Arc, hg, p4)
 fallow health --workspace @scope/app      # Scope vital signs + score to one package
 fallow health --group-by package --score  # Per-package vital signs + score (monorepos)
 fallow health --targets                   # Ranked refactoring recommendations
