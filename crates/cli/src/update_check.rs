@@ -152,7 +152,7 @@ pub fn maybe_nudge(output: OutputFormat, quiet: bool, telemetry_note_printed: bo
     let current = env!("CARGO_PKG_VERSION");
     if is_newer_stable(current, &cache.latest_version) {
         eprintln!(
-            "A newer fallow is available ({}, you have {current}). Changelog: {CHANGELOG_URL}",
+            "A newer fallow is available ({}, you have {current}). Changelog: {CHANGELOG_URL} (silence: {UPDATE_CHECK_ENV}=off)",
             cache.latest_version
         );
     }
