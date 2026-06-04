@@ -57,6 +57,39 @@ describe("parseLicenseJson", () => {
     }
   });
 
+  it("parses a deactivate envelope carrying the full status shape", () => {
+    // The Rust deactivate path now emits the full LicenseStatusJson field set
+    // (not just six keys), so the extension's force-cast reads real values for
+    // every non-optional field instead of `undefined`.
+    const deactivate = {
+      ...status({
+        state: "missing",
+        tier: null,
+        seats: null,
+        features: [],
+        days_until_expiry: null,
+        days_since_expiry: null,
+        refresh_suggested: false,
+        runtime_coverage_enabled: false,
+      }),
+      kind: "license-deactivate" as const,
+      message: "License removed from /home/x/.fallow/license.jwt.",
+      removed: true,
+    };
+    const result = parseLicenseJson(JSON.stringify(deactivate));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.state).toBe("missing");
+      expect(result.data.kind).toBe("license-deactivate");
+      expect(result.data.removed).toBe(true);
+      // Fields previously omitted by the deactivate envelope are now present.
+      expect(result.data.runtime_coverage_enabled).toBe(false);
+      expect(result.data.refresh_suggested).toBe(false);
+      expect(result.data.features).toEqual([]);
+      expect(result.data.days_since_expiry).toBeNull();
+    }
+  });
+
   it("parses a hard_fail envelope", () => {
     const result = parseLicenseJson(
       JSON.stringify(status({ state: "hard_fail", runtime_coverage_enabled: false })),

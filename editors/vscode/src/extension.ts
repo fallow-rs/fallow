@@ -125,11 +125,13 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // License indicator: a second status-bar item, created only when enabled
   // (`fallow.license.showStatusBar`). Decoupled from the analysis path, so it
   // adds no latency to sidebar reveal or `runAnalysis` (#902).
+  // Pushed to subscriptions for teardown and disposed directly in deactivate(),
+  // matching the main analysis status-bar pattern above (no extra
+  // `{ dispose }` wrapper, which would double-dispose the same item).
   const licenseStatusBar = createLicenseStatusBar();
   if (licenseStatusBar) {
     context.subscriptions.push(licenseStatusBar);
   }
-  context.subscriptions.push({ dispose: () => disposeLicenseStatusBar() });
 
   const workspacePicker = createWorkspacePicker(context);
   context.subscriptions.push(workspacePicker);

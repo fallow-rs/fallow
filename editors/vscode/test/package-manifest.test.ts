@@ -396,6 +396,20 @@ describe("package.json license commands", () => {
     }
   });
 
+  it("exposes every license command in the dead-code view-title menu (not just the palette)", () => {
+    for (const id of [
+      "fallow.license.activate",
+      "fallow.license.status",
+      "fallow.license.refresh",
+      "fallow.license.deactivate",
+    ]) {
+      const entry = viewTitleCommand(id);
+      expect(entry, `${id} missing from view/title menu`).toBeDefined();
+      expect(entry?.when).toBe("view == fallow.deadCode");
+      expect(entry?.group).toMatch(/^license@/);
+    }
+  });
+
   it("documents both opt-out / opt-in license settings", () => {
     const properties = pkg.contributes.configuration.properties;
     expect(properties["fallow.license.showStatusBar"]?.description).toBeTruthy();

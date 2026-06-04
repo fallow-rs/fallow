@@ -13,6 +13,7 @@ Codebase intelligence for TypeScript and JavaScript. Real-time diagnostics for u
 - **Health view**: project health score and grade, complexity findings (click to open `file:line`), plus churn-and-complexity hotspot candidates and refactoring candidates (framed as heuristics to verify, not facts). Runs a separate, lazy `fallow health` analysis only when the view is first opened, so it never slows the editor or the other views.
 - **Security Candidates view** (opt-in): surfaces local `client-server-leak` and tainted-sink CWE findings from `fallow security` as UNVERIFIED candidates for you or an AI agent to verify, never confirmed vulnerabilities. Off by default; enabling it runs a separate `fallow security` scan only when the view is opened, so it never slows the editor or the other views.
 - **Status bar**: see total issue count and duplication percentage at a glance, with an optional health score/grade segment (e.g. `health: B (82)`)
+- **License management**: activate, refresh, or deactivate a Fallow license without leaving the editor, with an optional status-bar indicator showing your tier and expiry. The activation token travels only via the CLI's stdin (never the command line), and the indicator probes status passively, so it never blocks startup.
 - **Auto-fix**: remove unused exports, dependencies, and enum members with one command
 - **Auto-download**: the extension downloads managed `fallow-lsp` and `fallow` CLI binaries automatically
 
@@ -46,6 +47,10 @@ code --install-extension fallow-rs.fallow-vscode
 | `Fallow: Toggle Mute All Findings` | Hide or restore every Fallow finding in the editor |
 | `Fallow: Manage Diagnostic Mutes...` | Multi-select picker for individual categories |
 | `Fallow: Show All Findings (Clear Mutes)` | Reset all editor mutes |
+| `Fallow: Activate License` | Activate a Fallow license by pasting a token, picking a file, or starting a 30-day trial. The token is passed to the CLI via stdin, never on the command line. |
+| `Fallow: Show License Status` | Show the active license tier, seats, features, and days remaining |
+| `Fallow: Refresh License` | Fetch a fresh license token from `api.fallow.cloud` and persist it locally |
+| `Fallow: Deactivate License` | Remove the local license file |
 
 ### Muting Fallow's editor squiggles
 
@@ -78,6 +83,8 @@ Mute state is stored in the workspace, so it survives reload but does not bleed 
 | `fallow.health.topFindings` | `20` | Maximum number of complexity findings shown in the Health view (passed to `fallow health --top`). |
 | `fallow.health.statusBar` | `true` | Show the project health score and grade in the Fallow status bar item. |
 | `fallow.security.enabled` | `false` | Show the Security Candidates view and surface local `client-server-leak` and tainted-sink CWE findings from `fallow security`. Off by default. Findings are UNVERIFIED candidates to verify, never confirmed vulnerabilities. When enabled, the scan runs only when the view is opened, so it never slows the main sidebar. |
+| `fallow.license.showStatusBar` | `true` | Show a Fallow license indicator in the status bar. Disable to remove the indicator and skip the license status probe on activation. |
+| `fallow.license.refreshOnStartup` | `false` | Probe license status once when the extension activates. Off by default so the editor never shells out to fallow on startup unless you opt in; the indicator otherwise updates only when you run a Fallow license command. |
 | `fallow.production` | `false` | Production mode: exclude test/dev files, only production scripts. |
 | `fallow.changedSince` | `""` | Git ref (tag, branch, or SHA) to scope the Problems panel and sidebar to files changed since that ref, mirroring the CLI's `--changed-since`. Tag your current commit (e.g. `fallow-baseline`) and set this to the tag to enforce "no new issues going forward" while ignoring pre-existing findings. |
 | `fallow.trace.server` | `"off"` | LSP trace level: `off`, `messages`, or `verbose`. |

@@ -554,6 +554,11 @@
           "command": "fallow.license.refresh",
           "when": "view == fallow.deadCode",
           "group": "license@3"
+        },
+        {
+          "command": "fallow.license.deactivate",
+          "when": "view == fallow.deadCode",
+          "group": "license@4"
         }
       ],
       "commandPalette": [

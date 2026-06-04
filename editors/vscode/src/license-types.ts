@@ -54,7 +54,9 @@ export interface LicenseStatusJson {
   readonly message: string;
   /**
    * Present only on the `license-deactivate` envelope: whether a file was
-   * actually removed (`false` when there was nothing to remove).
+   * actually removed (`false` when there was nothing to remove). The deactivate
+   * envelope otherwise carries the full status shape above (state `missing`),
+   * so every non-optional field is safe to read.
    */
   readonly removed?: boolean;
 }
