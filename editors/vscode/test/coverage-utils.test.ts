@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCoverageArgs,
+  buildCoverageGateMessage,
   countCoverageItems,
+  COVERAGE_ANALYZE_MIN_VERSION,
+  coverageWatermarkMessage,
+  formatConfidence,
   sortHotPaths,
   splitCleanupCandidates,
 } from "../src/coverage-utils.js";
@@ -10,6 +14,7 @@ import type {
   RuntimeCoverageHotPath,
   RuntimeCoverageReport,
   RuntimeCoverageVerdict,
+  RuntimeCoverageWatermark,
 } from "../src/types.js";
 
 const hotPath = (overrides: Partial<RuntimeCoverageHotPath>): RuntimeCoverageHotPath => ({
@@ -197,5 +202,100 @@ describe("countCoverageItems", () => {
 
   it("returns 0 for a null report", () => {
     expect(countCoverageItems(null)).toBe(0);
+  });
+});
+
+describe("COVERAGE_ANALYZE_MIN_VERSION", () => {
+  it("is pinned to 2.57.0 (when local coverage analyze --format json shipped)", () => {
+    // Pinning higher (e.g. 2.77.0) needlessly rejects valid CLIs 2.57.0-2.76.x.
+    expect(COVERAGE_ANALYZE_MIN_VERSION).toBe("2.57.0");
+  });
+});
+
+describe("buildCoverageGateMessage", () => {
+  const envelope = (message: string, exitCode: number): string =>
+    JSON.stringify({ error: true, message, exit_code: exitCode });
+
+  it("special-cases the license gate (exit 3) with an activate next-step", () => {
+    const out = buildCoverageGateMessage(
+      3,
+      envelope("Continuous runtime monitoring requires a valid license or trial.", 3),
+      "fallow exited with code 3",
+    );
+    expect(out).toContain("Continuous runtime monitoring requires a valid license or trial.");
+    expect(out).toContain("fallow license activate");
+  });
+
+  it("special-cases a missing sidecar (exit 4) with a setup next-step", () => {
+    const out = buildCoverageGateMessage(
+      4,
+      envelope("fallow-cov sidecar not found.", 4),
+      "fallow exited with code 4",
+    );
+    expect(out).toContain("fallow-cov sidecar not found.");
+    expect(out).toContain("fallow coverage setup");
+  });
+
+  it("special-cases an invalid sidecar (exit 5) with a setup next-step", () => {
+    const out = buildCoverageGateMessage(
+      5,
+      envelope("sidecar signature verification failed.", 5),
+      "fallow exited with code 5",
+    );
+    expect(out).toContain("fallow coverage setup");
+  });
+
+  it("surfaces the structured message verbatim for other non-zero codes", () => {
+    const out = buildCoverageGateMessage(
+      2,
+      envelope("runtime coverage report was not produced", 2),
+      "fallow exited with code 2",
+    );
+    expect(out).toBe("runtime coverage report was not produced");
+  });
+
+  it("falls back to the rejection message when stdout is not structured JSON", () => {
+    expect(buildCoverageGateMessage(3, "some stderr noise", "fallow exited with code 3")).toContain(
+      "fallow exited with code 3",
+    );
+    expect(buildCoverageGateMessage(3, "", "fallow exited with code 3")).toContain(
+      "fallow license activate",
+    );
+  });
+});
+
+describe("coverageWatermarkMessage", () => {
+  const withWatermark = (watermark: RuntimeCoverageWatermark): RuntimeCoverageReport =>
+    report({ watermark });
+
+  it("returns null when no watermark is present", () => {
+    expect(coverageWatermarkMessage(null)).toBeNull();
+    expect(coverageWatermarkMessage(report({}))).toBeNull();
+  });
+
+  it("warns about a license-expired grace watermark with a refresh hint", () => {
+    const message = coverageWatermarkMessage(withWatermark("license-expired-grace"));
+    expect(message).toContain("grace");
+    expect(message).toContain("fallow license refresh");
+  });
+
+  it("warns about an expired trial watermark", () => {
+    const message = coverageWatermarkMessage(withWatermark("trial-expired"));
+    expect(message).toContain("trial");
+  });
+
+  it("warns generically for an unknown watermark", () => {
+    expect(coverageWatermarkMessage(withWatermark("unknown"))).toContain("watermark");
+  });
+});
+
+describe("formatConfidence", () => {
+  it("spaces snake_case confidence values", () => {
+    expect(formatConfidence("very_high")).toBe("very high");
+  });
+
+  it("leaves single-word values unchanged", () => {
+    expect(formatConfidence("high")).toBe("high");
+    expect(formatConfidence("low")).toBe("low");
   });
 });

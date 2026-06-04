@@ -370,7 +370,7 @@
           "type": "string",
           "default": "",
           "scope": "resource",
-          "markdownDescription": "Path to a local runtime-coverage capture (a file or directory). Relative paths are resolved from the workspace root. Used by the Runtime Coverage view to show hot paths and cleanup candidates via `fallow coverage analyze --runtime-coverage`. This is local-only and offline; cloud/continuous monitoring is never invoked. Empty = you will be prompted to pick a capture on first load."
+          "markdownDescription": "Path to a local runtime-coverage capture (a file or directory). Relative paths are resolved from the workspace root. Used by the Runtime Coverage view to show hot paths and cleanup candidates via `fallow coverage analyze --runtime-coverage`. This is local-only and offline; cloud/continuous monitoring is never invoked. Requires the fallow-cov sidecar (and a runtime-coverage license or trial when a license JWT is present): run `fallow coverage setup` first. Empty = you will be prompted to pick a capture on first load."
         },
         "fallow.coverage.top": {
           "type": "integer",
@@ -632,7 +632,7 @@
       },
       {
         "view": "fallow.runtimeCoverage",
-        "contents": "No runtime coverage loaded. Point Fallow at a local capture to see hot paths and cleanup candidates.\n[$(graph) Load Runtime Coverage](command:fallow.loadCoverage)\nRuntime coverage is local-only and offline.",
+        "contents": "No runtime coverage loaded. Point Fallow at a local capture to see hot paths and cleanup candidates.\n[$(graph) Load Runtime Coverage](command:fallow.loadCoverage)\nRuntime coverage is local-only and offline. Requires the fallow-cov sidecar (and a runtime-coverage license or trial when a license is present): run `fallow coverage setup` first.",
         "when": "!fallow.hasCoverage"
       },
       {

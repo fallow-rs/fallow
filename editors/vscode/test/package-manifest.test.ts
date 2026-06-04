@@ -199,6 +199,20 @@ describe("package.json runtime coverage contributions", () => {
     expect(setting?.markdownDescription).toContain("local-only");
   });
 
+  it("discloses the sidecar/setup prerequisite on the capture-path setting", () => {
+    const setting = pkg.contributes.configuration.properties["fallow.coverage.capturePath"];
+    expect(setting?.markdownDescription).toContain("fallow coverage setup");
+    expect(setting?.markdownDescription).toContain("sidecar");
+  });
+
+  it("discloses the sidecar/setup prerequisite in the welcome state", () => {
+    const welcome = pkg.contributes.viewsWelcome.find(
+      (entry) => entry.view === "fallow.runtimeCoverage" && entry.when === "!fallow.hasCoverage",
+    );
+    expect(welcome?.contents).toContain("fallow coverage setup");
+    expect(welcome?.contents).toContain("sidecar");
+  });
+
   it("contributes the top setting", () => {
     expect(
       pkg.contributes.configuration.properties["fallow.coverage.top"]?.markdownDescription,

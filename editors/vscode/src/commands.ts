@@ -103,6 +103,24 @@ export const resolveCliBinary = async (
   return downloadCliBinary(context);
 };
 
+/**
+ * Rejection carried by {@link execFallow} on a non-zero exit (other than 1).
+ * Preserves the child's `exitCode` and captured `stdout` so a caller can recover
+ * the structured `{error:true,message,exit_code}` JSON envelope the CLI writes to
+ * stdout under `--format json` (e.g. the coverage license/sidecar gate, exit
+ * 3/4/5). Existing callers that only read `.message` keep working unchanged.
+ */
+export class FallowExecError extends Error {
+  constructor(
+    message: string,
+    readonly exitCode: number | null,
+    readonly stdout: string,
+  ) {
+    super(message);
+    this.name = "FallowExecError";
+  }
+}
+
 export const execFallow = (
   binary: string | null,
   args: ReadonlyArray<string>,
@@ -147,7 +165,12 @@ export const execFallow = (
       }
 
       if (code !== null && code !== 0 && code !== 1) {
-        reject(new Error(stderr.trim() || `fallow exited with code ${code}`));
+        // Preserve stdout so the caller can recover the structured JSON error
+        // envelope (`{error:true,message,exit_code}`) the CLI writes there under
+        // `--format json`; stderr remains the message for plain consumers.
+        reject(
+          new FallowExecError(stderr.trim() || `fallow exited with code ${code}`, code, stdout),
+        );
         return;
       }
 

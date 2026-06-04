@@ -12,6 +12,7 @@ Codebase intelligence for TypeScript and JavaScript. Real-time diagnostics for u
 - **Tree views**: browse unused code by issue type and duplicates by clone family in the sidebar
 - **Health view**: project health score and grade, complexity findings (click to open `file:line`), plus churn-and-complexity hotspot candidates and refactoring candidates (framed as heuristics to verify, not facts). Runs a separate, lazy `fallow health` analysis only when the view is first opened, so it never slows the editor or the other views.
 - **Security Candidates view** (opt-in): surfaces local `client-server-leak` and tainted-sink CWE findings from `fallow security` as UNVERIFIED candidates for you or an AI agent to verify, never confirmed vulnerabilities. Off by default; enabling it runs a separate `fallow security` scan only when the view is opened, so it never slows the editor or the other views.
+- **Runtime Coverage view**: point Fallow at a local runtime-coverage capture to see hot paths and cleanup candidates (safe-to-delete and review-required), framed as candidates to verify, not facts. Local-only and offline (cloud/continuous monitoring is never invoked). Requires the fallow-cov sidecar (and a runtime-coverage license or trial when a license is present): run `fallow coverage setup` first. Loads only when you point it at a capture, so it never slows the editor or the other views.
 - **Status bar**: see total issue count and duplication percentage at a glance, with an optional health score/grade segment (e.g. `health: B (82)`)
 - **License management**: activate, refresh, or deactivate a Fallow license without leaving the editor, with an optional status-bar indicator showing your tier and expiry. The activation token travels only via the CLI's stdin (never the command line), and the indicator probes status passively, so it never blocks startup.
 - **Auto-fix**: remove unused exports, dependencies, and enum members with one command
@@ -39,6 +40,9 @@ code --install-extension fallow-rs.fallow-vscode
 | `Fallow: Run Analysis` | Run full codebase analysis and update tree views |
 | `Fallow: Reload Health` | Re-run the Health view analysis (score, complexity, hotspot and refactoring candidates) |
 | `Fallow: Scan for Security Candidates` | Scan for local security candidates (`client-server-leak`, tainted-sink CWE findings) and populate the Security Candidates view. Requires `fallow.security.enabled`. Results are UNVERIFIED candidates to verify, never confirmed vulnerabilities. |
+| `Fallow: Load Runtime Coverage` | Analyze a local runtime-coverage capture and populate the Runtime Coverage view with hot paths and cleanup candidates. Prompts for a capture when `fallow.coverage.capturePath` is empty. Requires the fallow-cov sidecar (`fallow coverage setup`). |
+| `Fallow: Reload Runtime Coverage` | Re-run the runtime-coverage analysis against the current capture |
+| `Fallow: Clear Runtime Coverage` | Clear the Runtime Coverage view back to its empty state |
 | `Fallow: Auto-Fix Unused Exports & Dependencies` | Remove unused exports and dependencies |
 | `Fallow: Preview Fixes (Dry Run)` | Show what fixes would be applied without changing files |
 | `Fallow: Restart Language Server` | Restart the fallow-lsp process |
@@ -83,6 +87,8 @@ Mute state is stored in the workspace, so it survives reload but does not bleed 
 | `fallow.health.topFindings` | `20` | Maximum number of complexity findings shown in the Health view (passed to `fallow health --top`). |
 | `fallow.health.statusBar` | `true` | Show the project health score and grade in the Fallow status bar item. |
 | `fallow.security.enabled` | `false` | Show the Security Candidates view and surface local `client-server-leak` and tainted-sink CWE findings from `fallow security`. Off by default. Findings are UNVERIFIED candidates to verify, never confirmed vulnerabilities. When enabled, the scan runs only when the view is opened, so it never slows the main sidebar. |
+| `fallow.coverage.capturePath` | `""` | Path to a local runtime-coverage capture (a file or directory) for the Runtime Coverage view. Relative paths resolve from the workspace root. Local-only and offline. Requires the fallow-cov sidecar (run `fallow coverage setup` first). Empty prompts you to pick a capture on first load. |
+| `fallow.coverage.top` | `0` | Show only the top N hot paths and findings in the Runtime Coverage view (mirrors the CLI's `--top`). `0` (the default) means no limit. |
 | `fallow.license.showStatusBar` | `true` | Show a Fallow license indicator in the status bar. Disable to remove the indicator and skip the license status probe on activation. |
 | `fallow.license.refreshOnStartup` | `false` | Probe license status once when the extension activates. Off by default so the editor never shells out to fallow on startup unless you opt in; the indicator otherwise updates only when you run a Fallow license command. |
 | `fallow.production` | `false` | Production mode: exclude test/dev files, only production scripts. |

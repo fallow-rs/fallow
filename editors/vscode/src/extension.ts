@@ -68,6 +68,7 @@ import {
 } from "./workspacePicker.js";
 import { RuntimeCoverageTreeProvider } from "./coverageView.js";
 import { runCoverageAnalysis } from "./coverageCommand.js";
+import { coverageWatermarkMessage } from "./coverage-utils.js";
 import type {
   AuditOutput,
   FallowCheckResult,
@@ -455,6 +456,14 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
           lastCoverageReport = report;
           coverageProvider.update(report);
           void vscode.commands.executeCommand("setContext", "fallow.hasCoverage", true);
+
+          // A grace/trial watermark means these candidates were produced under a
+          // stale or expired license: surface it once per load so "Safe to
+          // Delete" rows are not mistaken for authoritative deletions.
+          const watermark = coverageWatermarkMessage(report);
+          if (watermark) {
+            void vscode.window.showWarningMessage(`Fallow runtime coverage: ${watermark}`);
+          }
         }
       },
     );

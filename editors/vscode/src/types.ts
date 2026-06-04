@@ -45,6 +45,8 @@ export type {
   RuntimeCoverageHotPath,
   RuntimeCoverageFinding,
   RuntimeCoverageVerdict,
+  RuntimeCoverageConfidence,
+  RuntimeCoverageWatermark,
   DuplicateExport,
   DuplicateExportFinding,
   DuplicateLocation,

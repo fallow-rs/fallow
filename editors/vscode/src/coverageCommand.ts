@@ -2,9 +2,13 @@
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { compareVersions } from "./analysis-utils.js";
-import { execFallow, resolveCliForRun } from "./commands.js";
+import { execFallow, FallowExecError, resolveCliForRun } from "./commands.js";
 import { getCoveragePath, getCoverageTop, getProduction, getResolvedConfigPath } from "./config.js";
-import { buildCoverageArgs, COVERAGE_ANALYZE_MIN_VERSION } from "./coverage-utils.js";
+import {
+  buildCoverageArgs,
+  buildCoverageGateMessage,
+  COVERAGE_ANALYZE_MIN_VERSION,
+} from "./coverage-utils.js";
 import type { CoverageAnalyzeOutput, RuntimeCoverageReport } from "./types.js";
 
 /** Workspace-scoped key persisting the user's chosen capture path. */
@@ -119,6 +123,16 @@ export const runCoverageAnalysis = async (
 
     return result.runtime_coverage;
   } catch (err) {
+    // A non-zero gate exit (license 3 / sidecar 4-5) rejects with a
+    // FallowExecError that still carries the CLI's structured stdout envelope,
+    // which the generic fallback would otherwise discard. Recover the actionable
+    // message and the concrete next step (`fallow license activate` / `fallow
+    // coverage setup`) for this paid, separately-installed feature.
+    if (err instanceof FallowExecError) {
+      const message = buildCoverageGateMessage(err.exitCode, err.stdout, err.message);
+      void vscode.window.showErrorMessage(`Fallow coverage failed: ${message}`);
+      return null;
+    }
     const message = err instanceof Error ? err.message : String(err);
     void vscode.window.showErrorMessage(`Fallow coverage failed: ${message}`);
     return null;
