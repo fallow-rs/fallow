@@ -512,12 +512,12 @@
         },
         {
           "command": "fallow.analyzeSecurity",
-          "when": "view == fallow.security && !fallow.hasAnalyzedSecurity",
+          "when": "view == fallow.security && fallow.security.enabled && !fallow.hasAnalyzedSecurity",
           "group": "navigation"
         },
         {
           "command": "fallow.analyzeSecurity",
-          "when": "view == fallow.security && fallow.hasAnalyzedSecurity",
+          "when": "view == fallow.security && fallow.security.enabled && fallow.hasAnalyzedSecurity",
           "group": "navigation"
         },
         {
@@ -612,13 +612,18 @@
       },
       {
         "view": "fallow.security",
-        "contents": "Security candidate scanning is off by default.\nEnable `fallow.security.enabled`, then [$(shield) Scan for Security Candidates](command:fallow.analyzeSecurity).\nResults are UNVERIFIED candidates to verify, never confirmed vulnerabilities.",
-        "when": "!fallow.hasAnalyzedSecurity"
+        "contents": "Security candidate scanning is off by default.\nEnable [fallow.security.enabled](command:fallow.openSettings) to scan for security candidates.\nResults are UNVERIFIED candidates to verify, never confirmed vulnerabilities.",
+        "when": "!fallow.security.enabled"
+      },
+      {
+        "view": "fallow.security",
+        "contents": "No security candidate scan yet.\n[$(shield) Scan for Security Candidates](command:fallow.analyzeSecurity)\nResults are UNVERIFIED candidates to verify, never confirmed vulnerabilities.",
+        "when": "fallow.security.enabled && !fallow.hasAnalyzedSecurity"
       },
       {
         "view": "fallow.security",
         "contents": "$(check) No security candidates found.\nNote: an empty result is not a clean bill of health.",
-        "when": "fallow.hasAnalyzedSecurity"
+        "when": "fallow.security.enabled && fallow.hasAnalyzedSecurity"
       },
       {
         "view": "fallow.runtimeCoverage",
@@ -688,6 +693,7 @@
   "scripts": {
     "codegen:types": "node ./scripts/codegen-types.mjs",
     "check:codegen": "node ./scripts/codegen-types.mjs --check",
+    "check:dist": "node ./scripts/check-dist-drift.mjs",
     "prebuild": "pnpm run codegen:types",
     "build": "rolldown -c",
     "watch": "rolldown -c --watch",

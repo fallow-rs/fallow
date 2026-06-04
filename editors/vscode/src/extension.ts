@@ -162,6 +162,19 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     );
   };
   syncHealthEnabledContext();
+
+  // Expose the security-enabled state to `viewsWelcome` / `menus` `when` clauses
+  // (mirrors `syncHealthEnabledContext`). Lets the welcome split between a
+  // "scanning is off, enable it" state and an "enabled, run the scan" state, and
+  // hides the scan toolbar button while the feature is disabled.
+  const syncSecurityEnabledContext = (): void => {
+    void vscode.commands.executeCommand(
+      "setContext",
+      "fallow.security.enabled",
+      getSecurityEnabled(),
+    );
+  };
+  syncSecurityEnabledContext();
   const securityProvider = new SecurityTreeProvider();
   const coverageProvider = new RuntimeCoverageTreeProvider();
 
@@ -251,8 +264,16 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 
   // Run `fallow security` and update the Security Candidates view. Findings are
   // UNVERIFIED candidates (#903), so the toast says so explicitly and never uses
-  // "vulnerability"/"confirmed". Returns whether the run completed so the lazy
-  // trigger can retry on the next visibility if it failed.
+  // "vulnerability"/"confirmed".
+  //
+  // `fallow.hasAnalyzedSecurity` (which paints the "No security candidates
+  // found" all-clear) is set ONLY after a genuinely completed scan, never after
+  // a failed or older-CLI run: a false clean bill on a security surface is the
+  // worst failure mode here, so the actionable enable/scan welcome stays in
+  // place instead. Returns whether the run COMPLETED (a non-retryable failure
+  // still counts as completed so the latch holds and a re-reveal does not
+  // re-warn); only a transient failure returns false so the caller resets the
+  // latch and a later reveal retries.
   const triggerSecurityAnalysis = async (): Promise<boolean> => {
     return await vscode.window.withProgress(
       {
@@ -262,10 +283,17 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       },
       async () => {
         const result = await runSecurityAnalysis(context, outputChannel);
-        securityProvider.update(result);
+        if (!result.ok) {
+          // Leave the existing view/welcome untouched on failure: do NOT flip
+          // `fallow.hasAnalyzedSecurity`, so a failed/unsupported scan never
+          // paints a false "No security candidates found" all-clear.
+          return !result.retryable;
+        }
+
+        securityProvider.update(result.data);
         void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzedSecurity", true);
 
-        const count = countSecurityFindings(result);
+        const count = countSecurityFindings(result.data);
         if (count > 0) {
           void vscode.window.showInformationMessage(
             `Fallow: found ${count} security candidate${count === 1 ? "" : "s"}. These are NOT verified vulnerabilities; verify each before acting.`,
@@ -721,6 +749,11 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       }
 
       if (affectsSecurity) {
+        // Keep the enabled-context (welcome split + scan-button gate) in sync
+        // when the opt-in toggles.
+        if (e.affectsConfiguration("fallow.security.enabled")) {
+          syncSecurityEnabledContext();
+        }
         // Security keys are disjoint from REANALYSIS_CONFIG_KEYS, so this never
         // re-runs the dead-code analysis. When the feature is enabled and the
         // view is open, re-scan; otherwise clear the provider so a disabled view

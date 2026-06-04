@@ -54,6 +54,10 @@ const pkg = JSON.parse(
 ) as ExtensionPackage;
 const configKeysSource = readFileSync(resolve(__dirname, "../src/configKeys.ts"), "utf8");
 const extensionSource = readFileSync(resolve(__dirname, "../src/extension.ts"), "utf8");
+const securityTreeViewSource = readFileSync(
+  resolve(__dirname, "../src/securityTreeView.ts"),
+  "utf8",
+);
 
 const command = (id: string): CommandContribution | undefined =>
   pkg.contributes.commands.find((entry) => entry.command === id);
@@ -289,14 +293,35 @@ describe("package.json security candidates contributions", () => {
     });
   });
 
-  it("contributes both view/title menu states for the scan command", () => {
+  it("contributes both view/title menu states for the scan command, gated on the opt-in", () => {
     const entries = pkg.contributes.menus["view/title"].filter(
       (entry) => entry.command === "fallow.analyzeSecurity",
     );
     expect(entries.map((entry) => entry.when)).toEqual([
-      "view == fallow.security && !fallow.hasAnalyzedSecurity",
-      "view == fallow.security && fallow.hasAnalyzedSecurity",
+      "view == fallow.security && fallow.security.enabled && !fallow.hasAnalyzedSecurity",
+      "view == fallow.security && fallow.security.enabled && fallow.hasAnalyzedSecurity",
     ]);
+    // The scan button is hidden while the feature is disabled rather than
+    // nagging the user to enable it on click.
+    for (const entry of entries) {
+      expect(entry.when).toContain("fallow.security.enabled");
+    }
+  });
+
+  it("splits the welcome into a disabled state and an enabled-not-yet-scanned state", () => {
+    const disabled = securityWelcome.find((entry) => entry.when === "!fallow.security.enabled");
+    const enabledPending = securityWelcome.find(
+      (entry) => entry.when === "fallow.security.enabled && !fallow.hasAnalyzedSecurity",
+    );
+    const enabledClean = securityWelcome.find(
+      (entry) => entry.when === "fallow.security.enabled && fallow.hasAnalyzedSecurity",
+    );
+    expect(disabled).toBeDefined();
+    expect(enabledPending).toBeDefined();
+    expect(enabledClean).toBeDefined();
+    // The "enable the setting" copy only shows when the feature is off.
+    expect(disabled?.contents.toLowerCase()).toContain("enable");
+    expect(enabledPending?.contents.toLowerCase()).not.toContain("enable ");
   });
 
   it("contributes an opt-in setting defaulting to false", () => {
@@ -326,6 +351,35 @@ describe("package.json security candidates contributions", () => {
         expect(negated, `unframed security claim: ${value}`).toBe(true);
       }
     }
+  });
+
+  it("frames the runtime info toast and tooltip prefix as candidates, never confirmed", () => {
+    // Beyond the static manifest, the two runtime-rendered security strings (the
+    // post-scan info toast in extension.ts and the per-finding tooltip prefix in
+    // securityTreeView.ts) must also carry candidate framing. A positive claim
+    // that these ARE vulnerabilities/confirmed slips past the manifest guard.
+    const runtimeStrings = [
+      // Info toast surfaced after a completed scan with findings.
+      "These are NOT verified vulnerabilities; verify each before acting.",
+      // Per-finding tooltip prefix.
+      "UNVERIFIED CANDIDATE - verify before acting",
+    ];
+
+    for (const value of runtimeStrings) {
+      const lower = value.toLowerCase();
+      expect(lower).toMatch(/candidate|verify/);
+      if (lower.includes("vulnerabilit") || lower.includes("confirmed")) {
+        const negated = /\b(?:never|not|un\w+|no)\b/.test(lower);
+        expect(negated, `unframed runtime security claim: ${value}`).toBe(true);
+      }
+    }
+
+    // Guard against drift: the literals above must still exist verbatim in the
+    // sources, so changing the runtime copy without re-framing fails here.
+    expect(extensionSource).toContain(
+      "These are NOT verified vulnerabilities; verify each before acting.",
+    );
+    expect(securityTreeViewSource).toContain("UNVERIFIED CANDIDATE - verify before acting");
   });
 });
 

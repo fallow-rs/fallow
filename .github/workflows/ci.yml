@@ -349,6 +349,8 @@ jobs:
         run: cd editors/vscode && pnpm run check:codegen
       - run: cd editors/vscode && pnpm lint
       - run: cd editors/vscode && pnpm build
+      - name: Verify committed dist bundle is not stale
+        run: cd editors/vscode && pnpm run check:dist
       - run: cd editors/vscode && pnpm test:unit
       - run: cd editors/vscode && pnpm package
 

@@ -749,6 +749,24 @@ export const runHealthAnalysis = async (
 };
 
 /**
+ * Outcome of a `fallow security` scan. The discriminant separates a genuinely
+ * completed scan (which may legitimately have zero findings) from a scan that
+ * never produced a verdict (no workspace, older CLI, or a transient failure).
+ * The caller needs that distinction so it only paints the "No security
+ * candidates found" all-clear after a real scan, never after a failure (#903).
+ *
+ * - `{ ok: true, data: SecurityOutput }`: scan ran, findings present.
+ * - `{ ok: true, data: null }`: scan ran, genuinely nothing to report.
+ * - `{ ok: false, retryable: false }`: non-retryable (no workspace, older CLI);
+ *   the latch should hold so a re-reveal does not re-warn.
+ * - `{ ok: false, retryable: true }`: transient failure; the latch should reset
+ *   so a later reveal retries.
+ */
+export type SecurityScanResult =
+  | { readonly ok: true; readonly data: SecurityOutput | null }
+  | { readonly ok: false; readonly retryable: boolean };
+
+/**
  * Run `fallow security --format json` and parse its `SecurityOutput` envelope.
  * This is a SEPARATE, independent process from the combined sidebar analysis
  * (security findings are `#[serde(skip)]` on `AnalysisResults` and never appear
@@ -758,16 +776,18 @@ export const runHealthAnalysis = async (
  * Findings are UNVERIFIED candidates, not confirmed vulnerabilities; the caller
  * frames them as such in every surface (#903). A resolved CLI that predates the
  * `security` subcommand degrades to a one-line "update fallow" warning and a
- * `null` result, rather than surfacing a raw clap stderr blob.
+ * non-retryable failure result, rather than surfacing a raw clap stderr blob.
+ * Returns a {@link SecurityScanResult} so the caller can tell a clean scan apart
+ * from a failed one and avoid painting a false all-clear.
  */
 export const runSecurityAnalysis = async (
   context: vscode.ExtensionContext,
   outputChannel?: vscode.OutputChannel,
-): Promise<SecurityOutput | null> => {
+): Promise<SecurityScanResult> => {
   const root = getWorkspaceRoot();
   if (!root) {
     void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
-    return null;
+    return { ok: false, retryable: false };
   }
 
   try {
@@ -779,16 +799,17 @@ export const runSecurityAnalysis = async (
 
     const output = await execFallow(binary, args, root);
     if (output.trim().length === 0) {
-      return null;
+      return { ok: true, data: null };
     }
 
-    return JSON.parse(output) as SecurityOutput;
+    return { ok: true, data: JSON.parse(output) as SecurityOutput };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
 
-    // An older CLI without the `security` subcommand is a known, recoverable
-    // state: warn once with an actionable message and show an empty view,
-    // rather than surfacing a raw stderr blob as an error.
+    // An older CLI without the `security` subcommand is a known, non-retryable
+    // state: warn once with an actionable message and leave the actionable
+    // enable/scan welcome in place, rather than surfacing a raw stderr blob or
+    // a false "all-clear".
     if (parseUnknownSubcommand(message)) {
       outputChannel?.appendLine(
         `Fallow: the resolved CLI does not support security candidates. ${message}`,
@@ -796,10 +817,10 @@ export const runSecurityAnalysis = async (
       void vscode.window.showWarningMessage(
         "Fallow: update the fallow CLI to scan for security candidates.",
       );
-      return null;
+      return { ok: false, retryable: false };
     }
 
     void vscode.window.showErrorMessage(`Fallow security scan failed: ${message}`);
-    return null;
+    return { ok: false, retryable: true };
   }
 };
