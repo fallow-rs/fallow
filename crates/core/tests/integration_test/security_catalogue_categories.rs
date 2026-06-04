@@ -571,3 +571,62 @@ fn issue_882_default_off_emits_nothing() {
         "security-catalogue-sinks-882"
     )));
 }
+
+// ── issue #897 catalogue-only sinks (batch 2) ───────────────────────────────
+
+#[test]
+fn issue_897_catalogue_sinks_fire() {
+    let results = analyze_with_security_sink("security-catalogue-sinks-897");
+    assert_candidate(
+        &results,
+        "src/insecure-randomness.ts",
+        "insecure-randomness",
+        338,
+    );
+    assert_candidate(
+        &results,
+        "src/deprecated-cipher.ts",
+        "deprecated-cipher",
+        327,
+    );
+    assert_candidate(
+        &results,
+        "src/template-escape.ts",
+        "template-escape-bypass",
+        79,
+    );
+    assert_candidate(&results, "src/xpath-injection.ts", "xpath-injection", 643);
+    assert_candidate(
+        &results,
+        "src/unsafe-buffer.ts",
+        "unsafe-buffer-alloc",
+        1188,
+    );
+    assert_candidate(&results, "src/webview.tsx", "webview-injection", 94);
+    assert_candidate(&results, "src/raw-sql-sequelize.ts", "sql-injection", 89);
+}
+
+#[test]
+fn issue_897_literals_do_not_fire() {
+    let results = analyze_with_security_sink("security-catalogue-sinks-897");
+    assert!(
+        !anchored_on(&results, "src/safe.ts"),
+        "literal sink arguments must not be flagged"
+    );
+}
+
+#[test]
+fn issue_897_deferred_and_excluded_patterns_do_not_fire() {
+    let results = analyze_with_security_sink("security-catalogue-sinks-897");
+    assert!(
+        !anchored_on(&results, "src/deferred-not-covered.ts"),
+        "deferred client-storage / info-exposure and the excluded libxml-find pattern must not fire"
+    );
+}
+
+#[test]
+fn issue_897_default_off_emits_nothing() {
+    assert!(no_tainted_sinks(&analyze_default_off(
+        "security-catalogue-sinks-897"
+    )));
+}

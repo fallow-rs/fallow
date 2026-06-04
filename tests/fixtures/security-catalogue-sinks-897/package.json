@@ -1,0 +1,10 @@
+{
+  "name": "security-catalogue-sinks-897-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "react-native-webview": "0.0.0",
+    "sequelize": "0.0.0",
+    "xpath": "0.0.0"
+  }
+}

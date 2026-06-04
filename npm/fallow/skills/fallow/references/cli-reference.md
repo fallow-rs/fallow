@@ -976,6 +976,7 @@ The second rule family is a data-driven `tainted-sink` catalogue: syntactic dang
 | Category | CWE | Sink |
 |----------|-----|------|
 | `dangerous-html` | 79 | `innerHTML` / `outerHTML` / `insertAdjacentHTML` / `dangerouslySetInnerHTML` |
+| `template-escape-bypass` | 79 | template-engine `SafeString(...)` wrapping a non-literal value |
 | `command-injection` | 78 | `child_process` `exec` / `execSync` / `spawn` / `spawnSync` (provenance-gated to `node:child_process`) |
 | `code-injection` | 94 | `eval` / `vm.runInNewContext` |
 | `dynamic-module-load` | 95 | dynamic `require(...)` |
@@ -986,6 +987,9 @@ The second rule family is a data-driven `tainted-sink` catalogue: syntactic dang
 | `open-redirect` | 601 | `res.redirect` / browser navigation sinks such as `location.href`, `location.assign`, and `window.open` |
 | `mass-assignment` | 915 | source-backed `Object.assign(target, source)` |
 | `weak-crypto` | 327 | runtime-selectable hash / cipher algorithm |
+| `deprecated-cipher` | 327 | `crypto.createCipher` / `createDecipher` (no IV, MD5-based KDF) |
+| `insecure-randomness` | 338 | `crypto.pseudoRandomBytes(...)` |
+| `unsafe-buffer-alloc` | 1188 | `Buffer.allocUnsafe` / `allocUnsafeSlow` (uninitialized memory) |
 | `unsafe-deserialization` | 502 | `js-yaml` `load` / `node-serialize` |
 | `angular-trusted-html` | 79 | Angular `bypassSecurityTrust*` |
 | `nextjs-open-redirect` | 601 | Next.js `redirect` / `permanentRedirect` |
@@ -996,6 +1000,8 @@ The second rule family is a data-driven `tainted-sink` catalogue: syntactic dang
 | `nosql-injection` | 943 | Mongo and Mongoose query object passthrough |
 | `ssti` | 1336 | template engine compile / render calls |
 | `xxe` | 611 | XML parse calls |
+| `xpath-injection` | 643 | `xpath.select` / `select1` with a non-literal expression |
+| `webview-injection` | 94 | react-native-webview `injectJavaScript(...)` / `injectedJavaScript=` (enabler `react-native-webview`) |
 
 Build-config and test files are excluded from candidate generation. Both rule families default to `off` and are surfaced only by `fallow security`, never under bare `fallow` or the `audit` gate. Scope which catalogue categories run with `security.categories` include / exclude lists in config.
 

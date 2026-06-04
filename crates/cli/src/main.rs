@@ -949,10 +949,12 @@ enum Command {
     /// a module reading a non-public `process.env` secret. (2) The data-driven
     /// `tainted-sink` catalogue: syntactic sink sites matched against a CWE
     /// catalogue (`security_matchers.toml`) spanning categories such as
-    /// dangerous-html, command-injection, code-injection, dynamic-module-load,
-    /// sql-injection, ssrf, path-traversal, header-injection, open-redirect,
-    /// mass-assignment, weak-crypto, unsafe-deserialization, prototype-pollution,
-    /// zip-slip, nosql-injection, ssti, and xxe. All findings are CANDIDATES for
+    /// dangerous-html, template-escape-bypass, command-injection, code-injection,
+    /// dynamic-module-load, sql-injection, ssrf, path-traversal, header-injection,
+    /// open-redirect, mass-assignment, weak-crypto, deprecated-cipher,
+    /// insecure-randomness, unsafe-buffer-alloc, unsafe-deserialization,
+    /// prototype-pollution, zip-slip, nosql-injection, ssti, xxe, xpath-injection,
+    /// and webview-injection. All findings are CANDIDATES for
     /// verification, NOT verified vulnerabilities. This command is the only
     /// surface for security findings; they never appear under bare `fallow` or
     /// the `audit` gate. Build-config and test files are excluded, and the Vite

@@ -77,6 +77,23 @@ callee_patterns = ["dangerouslySetInnerHTML"]
 arg_index = 0
 evidence_template = "Non-literal value bound to {callee}. Candidate for verification: confirm the HTML is sanitized (e.g. via DOMPurify) before render."
 
+# ── CWE-79: Template escape bypass (issue #897) ─────────────────────────────
+# Wrapping a non-literal value in a template engine's "safe string" marker tells
+# the engine to emit it WITHOUT HTML-escaping. Handlebars' `SafeString` is the
+# canonical form; pinned to the `*.SafeString` member-call (the
+# `new Handlebars.SafeString(x)` constructor form needs NewExpression capture,
+# #875). The `escapeMarkup = false` literal toggle and `mustache.escape = fn`
+# reassignment are deferred (literal-value / callable-assignment signals the
+# non-literal-arg model does not capture cleanly).
+[[matcher]]
+id = "template-escape-bypass"
+cwe = 79
+title = "Template escape bypass sink"
+sink_shape = "member-call"
+callee_patterns = ["*.SafeString"]
+arg_index = 0
+evidence_template = "Non-literal value wrapped by {callee}() (marks the string as pre-escaped). Candidate for verification: confirm the value is sanitized before bypassing the template engine's HTML escaping."
+
 # ── CWE-78: OS command injection ────────────────────────────────────────────
 [[matcher]]
 id = "command-injection"
@@ -169,6 +186,7 @@ callee_patterns = [
   "*.orderByRaw",
   "knex.raw",
   "sequelize.literal",
+  "Sequelize.literal",
 ]
 arg_index = 0
 evidence_template = "Non-literal value passed to {callee}(). Candidate for verification: raw SQL escape hatches bypass parameterization; confirm the fragment is not attacker-controlled."
@@ -297,11 +315,51 @@ arg_index = 0
 import_provenance = "node:crypto"
 evidence_template = "Runtime-selectable algorithm passed to {callee}(). Candidate for verification: confirm a weak algorithm (md5/sha1/des/rc4) cannot be selected at runtime."
 
-# CWE-338 insecure-randomness (Math.random) is DROPPED from the first ship:
-# Math.random is called with zero args, so arg_index 0 + non-literal can never
-# be satisfied (structurally dead). Re-add when the extract layer records
-# zero-arg member-calls and the detector adds the near-token-identifier
-# refinement (Open question 1).
+# ── CWE-338: Insecure randomness (issue #897) ───────────────────────────────
+# `Math.random()` remains DROPPED: it is called with zero args, so the
+# non-literal-arg trigger can never be satisfied (structurally dead). Re-add it
+# when the extract layer records zero-arg member-calls (Open question 1).
+# `crypto.pseudoRandomBytes(size)` DOES take an argument, so it is captured when
+# the size is non-literal: it is not cryptographically secure.
+[[matcher]]
+id = "insecure-randomness"
+cwe = 338
+title = "Insecure randomness sink"
+sink_shape = "member-call"
+callee_patterns = ["crypto.pseudoRandomBytes"]
+arg_index = 0
+import_provenance = "node:crypto"
+evidence_template = "Non-literal length passed to {callee}(). Candidate for verification: pseudoRandomBytes is NOT cryptographically secure; use crypto.randomBytes for tokens, salts, or keys."
+
+# ── CWE-327: Deprecated cipher constructors (issue #897) ─────────────────────
+# `crypto.createCipher` / `createDecipher` derive the key from a password with a
+# single MD5 pass and use a zero IV (distinct from the shipped `createCipheriv`
+# row above, which captures a runtime-selectable ALGORITHM). The deprecation
+# smell is the callee itself; we anchor on the non-literal key/password argument
+# (index 1), the realistic form (a fully-literal call is a static stub or the
+# separate hardcoded-secret concern, #892).
+[[matcher]]
+id = "deprecated-cipher"
+cwe = 327
+title = "Deprecated cipher constructor"
+sink_shape = "member-call"
+callee_patterns = ["crypto.createCipher", "crypto.createDecipher"]
+arg_index = 1
+import_provenance = "node:crypto"
+evidence_template = "Deprecated {callee}() (single-pass MD5 key derivation, no IV). Candidate for verification: migrate to createCipheriv with a random IV and a strong KDF (scrypt/PBKDF2)."
+
+# ── CWE-1188: Unsafe Buffer allocation (issue #897) ─────────────────────────
+# `Buffer.allocUnsafe` / `allocUnsafeSlow` return UNINITIALIZED memory. With a
+# non-literal length and an incomplete overwrite, stale heap bytes can leak into
+# output. `Buffer` is a Node global, so no import provenance is needed.
+[[matcher]]
+id = "unsafe-buffer-alloc"
+cwe = 1188
+title = "Unsafe Buffer allocation sink"
+sink_shape = "member-call"
+callee_patterns = ["Buffer.allocUnsafe", "Buffer.allocUnsafeSlow"]
+arg_index = 0
+evidence_template = "Non-literal length passed to {callee}() (uninitialized memory). Candidate for verification: use Buffer.alloc (zero-filled) or fully overwrite the buffer before it is read or sent."
 
 # ── CWE-502: Unsafe deserialization ─────────────────────────────────────────
 [[matcher]]
@@ -432,6 +490,31 @@ callee_patterns = ["*.sendFile"]
 arg_index = 0
 enabler = "hono"
 evidence_template = "Non-literal path passed to {callee}(). Candidate for verification: confirm the served path cannot escape the intended directory (reject `..`)."
+
+# ── react-native-webview: injected script sink (CWE-94, issue #897) ──────────
+# `webViewRef.injectJavaScript(code)` and the `<WebView injectedJavaScript={...}>`
+# prop run their argument as JavaScript inside the embedded web context. Both are
+# gated on the `react-native-webview` enabler so the distinctive method/prop name
+# only fires in projects that actually use it.
+[[matcher]]
+id = "webview-injection"
+cwe = 94
+title = "WebView injected-script sink"
+sink_shape = "member-call"
+callee_patterns = ["*.injectJavaScript"]
+arg_index = 0
+enabler = "react-native-webview"
+evidence_template = "Non-literal script passed to {callee}() (runs in the embedded WebView). Candidate for verification: confirm the script body is not attacker-controlled."
+
+[[matcher]]
+id = "webview-injection"
+cwe = 94
+title = "WebView injected-script sink"
+sink_shape = "jsx-attr"
+callee_patterns = ["injectedJavaScript"]
+arg_index = 0
+enabler = "react-native-webview"
+evidence_template = "Non-literal script bound to {callee} (runs in the embedded WebView). Candidate for verification: confirm the script body is not attacker-controlled."
 
 # ── Untrusted SOURCES (issue #859) ───────────────────────────────────────────
 # A [[source]] row names a member-access path that carries attacker-controlled
@@ -615,6 +698,23 @@ callee_patterns = ["libxml.parseXml", "libxml.parseXmlString", "*.parseXmlString
 arg_index = 0
 evidence_template = "Non-literal XML document passed to {callee}(). Candidate for verification: confirm the parser disables external-entity / DTD expansion (no `noent`), guarding against XXE and entity-expansion attacks."
 
+# ── CWE-643: XPath injection (issue #897) ───────────────────────────────────
+# Building an XPath expression from non-literal input lets an attacker alter the
+# query semantics. Pinned to the `xpath` package's distinctive `select` /
+# `select1` member calls. The libxmljs `node.find(expr)` form is deliberately
+# EXCLUDED: `*.find` collides with `Array.prototype.find` (the same reasoning
+# that excludes `*.find` from nosql-injection), and a callback argument there
+# classifies as the `other` shape, so a bare `*.find` row would fire on
+# ubiquitous array iteration.
+[[matcher]]
+id = "xpath-injection"
+cwe = 643
+title = "XPath injection sink"
+sink_shape = "member-call"
+callee_patterns = ["xpath.select", "xpath.select1"]
+arg_index = 0
+evidence_template = "Non-literal XPath expression passed to {callee}(). Candidate for verification: confirm user input cannot alter the query (bind variables / validate the expression)."
+
 # DEFERRED (source-model-free but signal is a LITERAL value, or needs a new
 # structural-capture path; out of scope for this TOML-only pass, see
 # .plans/issue-862-cwe-categories.md):
@@ -626,3 +726,13 @@ evidence_template = "Non-literal XML document passed to {callee}(). Candidate fo
 #   - JWT alg:none / hardcoded signing secret: signals are literals.
 # insecure-randomness (Math.random) and hardcoded-secrets-entropy are separately
 # deferred to #859 (they require its source model), not re-added here.
+#
+# DEFERRED from the #897 batch (need a gate the non-literal-arg model lacks):
+#   - sensitive client storage: `localStorage/sessionStorage.setItem(secretKey, x)`
+#     needs a secret-shaped IDENTIFIER predicate (folds into #892's hardcoded-
+#     secret gating); a bare `document.cookie = x` write is FP-dense without it.
+#   - info/error exposure: `res.send/json/end(err)` needs an "argument is an
+#     error object / `.stack`" shape check; the bare non-literal form fires on
+#     every dynamic response, so it is too FP-dense for the ADVICE channel.
+#   - `mysql({ multipleStatements: true })`: a literal option-object toggle that
+#     needs option-object capture (#875), not a callee/arg shape.
