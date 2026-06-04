@@ -1,4 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+let mockIssueTypes = {};
+let mockChangedSince = "";
+let mockConfigPath = "";
+let mockDuplicationMode = "mild";
+let mockDuplicationThreshold = 0;
+let mockDuplicationMinTokens = 50;
+let mockDuplicationMinLines = 5;
+let mockDuplicationMinOccurrences = 2;
+let mockDuplicationSkipLocal = false;
+let mockDuplicationCrossLanguage = false;
+let mockDuplicationIgnoreImports = false;
 
 vi.mock("vscode", () => ({
   extensions: {
@@ -17,7 +29,24 @@ vi.mock("vscode-languageclient/node.js", () => ({
   },
 }));
 
-import { loadDiagnosticCategories } from "../src/client.js";
+vi.mock("../src/config.js", () => ({
+  getLspPath: () => "",
+  getTraceLevel: () => "off",
+  getAutoDownload: () => false,
+  getIssueTypes: () => mockIssueTypes,
+  getChangedSince: () => mockChangedSince,
+  getResolvedConfigPath: () => mockConfigPath,
+  getDuplicationMode: () => mockDuplicationMode,
+  getDuplicationThreshold: () => mockDuplicationThreshold,
+  getDuplicationMinTokens: () => mockDuplicationMinTokens,
+  getDuplicationMinLines: () => mockDuplicationMinLines,
+  getDuplicationMinOccurrences: () => mockDuplicationMinOccurrences,
+  getDuplicationSkipLocal: () => mockDuplicationSkipLocal,
+  getDuplicationCrossLanguage: () => mockDuplicationCrossLanguage,
+  getDuplicationIgnoreImports: () => mockDuplicationIgnoreImports,
+}));
+
+import { createInitializationOptions, loadDiagnosticCategories } from "../src/client.js";
 import {
   DIAGNOSTIC_CATEGORIES,
   getDiagnosticCategories,
@@ -29,6 +58,20 @@ afterEach(() => {
   resetDiagnosticCategories();
 });
 
+beforeEach(() => {
+  mockIssueTypes = { "code-duplication": true };
+  mockChangedSince = "origin/main";
+  mockConfigPath = "/workspace/.fallowrc.jsonc";
+  mockDuplicationMode = "semantic";
+  mockDuplicationThreshold = 8;
+  mockDuplicationMinTokens = 80;
+  mockDuplicationMinLines = 9;
+  mockDuplicationMinOccurrences = 3;
+  mockDuplicationSkipLocal = true;
+  mockDuplicationCrossLanguage = true;
+  mockDuplicationIgnoreImports = true;
+});
+
 const outputChannel = () => ({
   lines: [] as string[],
   appendLine(line: string) {
@@ -36,24 +79,38 @@ const outputChannel = () => ({
   },
 });
 
+describe("createInitializationOptions", () => {
+  it("forwards duplication settings to fallow-lsp", () => {
+    expect(createInitializationOptions()).toEqual({
+      issueTypes: { "code-duplication": true },
+      changedSince: "origin/main",
+      configPath: "/workspace/.fallowrc.jsonc",
+      duplication: {
+        mode: "semantic",
+        threshold: 8,
+        minTokens: 80,
+        minLines: 9,
+        minOccurrences: 3,
+        skipLocal: true,
+        crossLanguage: true,
+        ignoreImports: true,
+      },
+    });
+  });
+});
+
 describe("loadDiagnosticCategories", () => {
   it("loads categories from fallow/issueTypes", async () => {
     const out = outputChannel();
     const client = {
-      sendRequest: vi.fn(async () => [
-        { code: "future-rule", label: "Future Rule" },
-      ]),
+      sendRequest: vi.fn(async () => [{ code: "future-rule", label: "Future Rule" }]),
     };
 
     await loadDiagnosticCategories(client as never, out as never);
 
     expect(client.sendRequest).toHaveBeenCalledWith("fallow/issueTypes");
-    expect(getDiagnosticCategories()).toEqual([
-      { code: "future-rule", label: "Future Rule" },
-    ]);
-    expect(out.lines.at(-1)).toBe(
-      "Loaded 1 diagnostic categories from fallow-lsp."
-    );
+    expect(getDiagnosticCategories()).toEqual([{ code: "future-rule", label: "Future Rule" }]);
+    expect(out.lines.at(-1)).toBe("Loaded 1 diagnostic categories from fallow-lsp.");
   });
 
   it("falls back to bundled categories when the request fails", async () => {

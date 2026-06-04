@@ -5,6 +5,11 @@ import { countCheckIssues } from "./analysis-utils.js";
 import { startClient, stopClient, restartClient } from "./client.js";
 import { onConfigChange } from "./config.js";
 import { runAnalysis, runFix } from "./commands.js";
+import {
+  REANALYSIS_CONFIG_KEYS,
+  RESTART_CONFIG_KEYS,
+  affectsAnyConfiguration,
+} from "./configKeys.js";
 import { DiagnosticFilter } from "./diagnosticFilter.js";
 import { registerDiagnosticMuteUi } from "./diagnosticMute.js";
 import {
@@ -23,32 +28,10 @@ let outputChannel: vscode.OutputChannel;
 let lastCheckResult: FallowCheckResult | null = null;
 let lastDupesResult: FallowDupesResult | null = null;
 
-const RESTART_CONFIG_KEYS = [
-  "fallow.lspPath",
-  "fallow.configPath",
-  "fallow.trace.server",
-  "fallow.issueTypes",
-  "fallow.changedSince",
-  "fallow.autoDownload",
-] as const;
-
-const REANALYSIS_CONFIG_KEYS = [
-  "fallow.configPath",
-  "fallow.production",
-  "fallow.duplication",
-  "fallow.issueTypes",
-  "fallow.changedSince",
-] as const;
-
 export interface ExtensionApi {
   readonly runAnalysis: typeof runAnalysis;
   readonly runFix: typeof runFix;
 }
-
-const affectsAnyConfiguration = (
-  event: vscode.ConfigurationChangeEvent,
-  keys: readonly string[],
-): boolean => keys.some((key) => event.affectsConfiguration(key));
 
 export const activate = async (context: vscode.ExtensionContext): Promise<ExtensionApi> => {
   outputChannel = vscode.window.createOutputChannel("Fallow");

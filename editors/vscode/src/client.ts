@@ -16,10 +16,19 @@ import {
   getIssueTypes,
   getChangedSince,
   getResolvedConfigPath,
+  getDuplicationCrossLanguage,
+  getDuplicationIgnoreImports,
+  getDuplicationMinLines,
+  getDuplicationMinOccurrences,
+  getDuplicationMinTokens,
+  getDuplicationMode,
+  getDuplicationSkipLocal,
+  getDuplicationThreshold,
 } from "./config.js";
 import { showBinarySkewToastOnce } from "./binary-skew.js";
 import { findBinaryInPath, findLocalBinary } from "./binary-utils.js";
 import type { DiagnosticFilter } from "./diagnosticFilter.js";
+import type { DuplicationMode, IssueTypeConfig } from "./types.js";
 import {
   parseDiagnosticCategories,
   resetDiagnosticCategories,
@@ -28,6 +37,58 @@ import {
 import { downloadBinary, getBinaryVersion, getInstalledBinaryPath } from "./download.js";
 
 let client: LanguageClient | null = null;
+
+const isClientNotRunningStopError = (err: unknown): boolean =>
+  err instanceof Error && err.message.includes("Client is not running and can't be stopped");
+
+const stopLanguageClient = async (
+  lspClient: LanguageClient,
+  outputChannel?: vscode.OutputChannel,
+): Promise<void> => {
+  try {
+    await lspClient.stop();
+  } catch (err) {
+    if (isClientNotRunningStopError(err)) {
+      outputChannel?.appendLine(
+        "Fallow language server stop skipped because it was still starting.",
+      );
+      return;
+    }
+    throw err;
+  }
+};
+
+export interface LspInitializationOptions {
+  readonly issueTypes: IssueTypeConfig;
+  readonly changedSince: string;
+  readonly configPath: string;
+  readonly duplication: {
+    readonly mode: DuplicationMode;
+    readonly threshold: number;
+    readonly minTokens: number;
+    readonly minLines: number;
+    readonly minOccurrences: number;
+    readonly skipLocal: boolean;
+    readonly crossLanguage: boolean;
+    readonly ignoreImports: boolean;
+  };
+}
+
+export const createInitializationOptions = (): LspInitializationOptions => ({
+  issueTypes: getIssueTypes(),
+  changedSince: getChangedSince(),
+  configPath: getResolvedConfigPath(),
+  duplication: {
+    mode: getDuplicationMode(),
+    threshold: getDuplicationThreshold(),
+    minTokens: getDuplicationMinTokens(),
+    minLines: getDuplicationMinLines(),
+    minOccurrences: getDuplicationMinOccurrences(),
+    skipLocal: getDuplicationSkipLocal(),
+    crossLanguage: getDuplicationCrossLanguage(),
+    ignoreImports: getDuplicationIgnoreImports(),
+  },
+});
 
 const warnIfVersionMismatch = (binaryPath: string, outputChannel?: vscode.OutputChannel): void => {
   const extensionVersion = vscode.extensions.getExtension("fallow-rs.fallow-vscode")?.packageJSON
@@ -163,11 +224,7 @@ export const startClient = async (
     ],
     outputChannel,
     traceOutputChannel: outputChannel,
-    initializationOptions: {
-      issueTypes: getIssueTypes(),
-      changedSince: getChangedSince(),
-      configPath: getResolvedConfigPath(),
-    },
+    initializationOptions: createInitializationOptions(),
     middleware: diagnosticFilter
       ? {
           handleDiagnostics: (uri, diagnostics, next) =>
@@ -178,35 +235,48 @@ export const startClient = async (
       : undefined,
   };
 
-  client = new LanguageClient("fallow", "Fallow Language Server", serverOptions, clientOptions);
+  const nextClient = new LanguageClient(
+    "fallow",
+    "Fallow Language Server",
+    serverOptions,
+    clientOptions,
+  );
+  client = nextClient;
 
   if (traceLevel !== "off") {
-    void client.setTrace(traceLevel === "verbose" ? Trace.Verbose : Trace.Messages);
+    void nextClient.setTrace(traceLevel === "verbose" ? Trace.Verbose : Trace.Messages);
   }
 
   try {
-    await client.start();
+    await nextClient.start();
+    if (client !== nextClient) {
+      await stopLanguageClient(nextClient, outputChannel);
+      return null;
+    }
     outputChannel.appendLine("Fallow language server started.");
-    await loadDiagnosticCategories(client, outputChannel);
+    await loadDiagnosticCategories(nextClient, outputChannel);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     outputChannel.appendLine(`Failed to start language server: ${message}`);
     void vscode.window.showErrorMessage(
       `Fallow: failed to start language server. Check the output channel for details.`,
     );
-    client = null;
+    if (client === nextClient) {
+      client = null;
+    }
     return null;
   }
 
-  diagnosticFilter?.attachClient(client);
+  diagnosticFilter?.attachClient(nextClient);
 
-  return client;
+  return nextClient;
 };
 
-export const stopClient = async (): Promise<void> => {
-  if (client) {
-    await client.stop();
+export const stopClient = async (outputChannel?: vscode.OutputChannel): Promise<void> => {
+  const currentClient = client;
+  if (currentClient) {
     client = null;
+    await stopLanguageClient(currentClient, outputChannel);
   }
 };
 
@@ -219,6 +289,6 @@ export const restartClient = async (
   // call refresh() against a disposed DiagnosticCollection. startClient
   // re-attaches once the new client is up.
   diagnosticFilter?.detachClient();
-  await stopClient();
+  await stopClient(outputChannel);
   return startClient(context, outputChannel, diagnosticFilter);
 };

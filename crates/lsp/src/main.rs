@@ -27,6 +27,7 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use serde::{Deserialize, Serialize};
 
+use fallow_config::{DetectionMode, DuplicatesConfig};
 use fallow_core::changed_files::{
     filter_duplication_by_changed_files, filter_results_by_changed_files, resolve_git_toplevel,
     try_get_changed_files_with_toplevel,
@@ -247,6 +248,7 @@ fn config_load_error_detail(
 fn analyze_project_root(
     project_root: &Path,
     config_path: Option<&Path>,
+    duplication_options: Option<&LspDuplicationOptions>,
     merged_results: &mut AnalysisResults,
     merged_duplication: &mut DuplicationReport,
     config_messages: &mut Vec<(MessageType, String)>,
@@ -282,7 +284,7 @@ fn analyze_project_root(
                 }
                 let duplication = fallow_core::duplicates::find_duplicates_in_project(
                     project_root,
-                    &fallow_config::DuplicatesConfig::default(),
+                    &DuplicatesConfig::default(),
                 );
                 merge_duplication(merged_duplication, duplication);
             }
@@ -300,8 +302,12 @@ fn analyze_project_root(
     }
 
     let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
+    let duplicates_config = duplication_options.map_or_else(
+        || config.duplicates.clone(),
+        |options| options.merge_with(&config.duplicates),
+    );
     let duplication =
-        fallow_core::duplicates::find_duplicates(project_root, &files, &config.duplicates);
+        fallow_core::duplicates::find_duplicates(project_root, &files, &duplicates_config);
     merge_duplication(merged_duplication, duplication);
 }
 
@@ -341,6 +347,47 @@ fn initialization_config_path(opts: &serde_json::Value, root: Option<&Path>) -> 
     Some(path.canonicalize().unwrap_or(path))
 }
 
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct LspDuplicationOptions {
+    mode: Option<DetectionMode>,
+    threshold: Option<f64>,
+    min_tokens: Option<usize>,
+    min_lines: Option<usize>,
+    min_occurrences: Option<usize>,
+    skip_local: Option<bool>,
+    cross_language: Option<bool>,
+    ignore_imports: Option<bool>,
+}
+
+impl LspDuplicationOptions {
+    fn merge_with(&self, config: &DuplicatesConfig) -> DuplicatesConfig {
+        DuplicatesConfig {
+            enabled: config.enabled,
+            mode: self.mode.unwrap_or(config.mode),
+            min_tokens: self.min_tokens.unwrap_or(config.min_tokens),
+            min_lines: self.min_lines.unwrap_or(config.min_lines),
+            min_occurrences: self
+                .min_occurrences
+                .filter(|min| *min >= 2)
+                .unwrap_or(config.min_occurrences),
+            threshold: self.threshold.unwrap_or(config.threshold),
+            ignore: config.ignore.clone(),
+            ignore_defaults: config.ignore_defaults,
+            skip_local: self.skip_local.unwrap_or(false) || config.skip_local,
+            cross_language: self.cross_language.unwrap_or(false) || config.cross_language,
+            ignore_imports: self.ignore_imports.unwrap_or(false) || config.ignore_imports,
+            normalization: config.normalization.clone(),
+            min_corpus_size_for_shingle_filter: config.min_corpus_size_for_shingle_filter,
+            min_corpus_size_for_token_cache: config.min_corpus_size_for_token_cache,
+        }
+    }
+}
+
+fn initialization_duplication_options(opts: &serde_json::Value) -> Option<LspDuplicationOptions> {
+    serde_json::from_value(opts.get("duplication")?.clone()).ok()
+}
+
 struct FallowLspServer {
     client: Client,
     root: Arc<RwLock<Option<PathBuf>>>,
@@ -364,6 +411,9 @@ struct FallowLspServer {
     /// Optional explicit config path from `initializationOptions.configPath`.
     /// Mirrors the CLI's `--config` flag for editor clients.
     config_path: Arc<RwLock<Option<PathBuf>>>,
+    /// Optional duplication overrides from `initializationOptions.duplication`.
+    /// VS Code sends these so live diagnostics match the sidebar CLI run.
+    duplication_options: Arc<RwLock<Option<LspDuplicationOptions>>>,
     /// Canonical git toplevel for the workspace `root`, resolved on first
     /// analysis run and reused thereafter. Cached so we do not pay for an
     /// extra `git rev-parse --show-toplevel` subprocess on every save.
@@ -468,6 +518,7 @@ impl LanguageServer for FallowLspServer {
 
             *self.config_path.write().await =
                 initialization_config_path(opts, canonical_root.as_deref());
+            *self.duplication_options.write().await = initialization_duplication_options(opts);
         }
 
         Ok(InitializeResult {
@@ -702,6 +753,7 @@ impl FallowLspServer {
             disabled_diagnostic_codes: Arc::new(RwLock::new(FxHashSet::default())),
             changed_since: Arc::new(RwLock::new(None)),
             config_path: Arc::new(RwLock::new(None)),
+            duplication_options: Arc::new(RwLock::new(None)),
             git_toplevel: Arc::new(RwLock::new(None)),
             cached_diagnostics: Arc::new(RwLock::new(FxHashMap::default())),
             cancellation: Arc::new(AtomicBool::new(false)),
@@ -791,6 +843,7 @@ impl FallowLspServer {
         let changed_since = self.changed_since.read().await.clone();
         let changed_since_for_data = changed_since.clone();
         let config_path = self.config_path.read().await.clone();
+        let duplication_options = self.duplication_options.read().await.clone();
 
         let resolved_toplevel = self.resolved_git_toplevel(&root).await;
 
@@ -806,6 +859,7 @@ impl FallowLspServer {
                 analyze_project_root(
                     project_root,
                     config_path.as_deref(),
+                    duplication_options.as_ref(),
                     &mut merged_results,
                     &mut merged_duplication,
                     &mut config_messages,
@@ -1632,6 +1686,133 @@ mod tests {
         let opts = json!({"configPath": 42});
 
         assert_eq!(initialization_config_path(&opts, None), None);
+    }
+
+    #[test]
+    fn initialization_duplication_options_reads_vscode_payload() {
+        let opts = json!({
+            "duplication": {
+                "mode": "semantic",
+                "threshold": 7.5,
+                "minTokens": 64,
+                "minLines": 8,
+                "minOccurrences": 3,
+                "skipLocal": true,
+                "crossLanguage": true,
+                "ignoreImports": true
+            }
+        });
+
+        let parsed =
+            initialization_duplication_options(&opts).expect("duplication options should parse");
+
+        assert_eq!(parsed.mode, Some(DetectionMode::Semantic));
+        assert_eq!(parsed.threshold, Some(7.5));
+        assert_eq!(parsed.min_tokens, Some(64));
+        assert_eq!(parsed.min_lines, Some(8));
+        assert_eq!(parsed.min_occurrences, Some(3));
+        assert_eq!(parsed.skip_local, Some(true));
+        assert_eq!(parsed.cross_language, Some(true));
+        assert_eq!(parsed.ignore_imports, Some(true));
+    }
+
+    #[test]
+    fn lsp_duplication_options_merge_with_project_config_like_cli() {
+        let project = DuplicatesConfig {
+            mode: DetectionMode::Weak,
+            min_tokens: 50,
+            min_lines: 5,
+            min_occurrences: 4,
+            threshold: 2.0,
+            skip_local: true,
+            cross_language: false,
+            ignore_imports: false,
+            ignore: vec!["generated/**".to_string()],
+            ..DuplicatesConfig::default()
+        };
+        let options = LspDuplicationOptions {
+            mode: Some(DetectionMode::Semantic),
+            threshold: Some(10.0),
+            min_tokens: Some(80),
+            min_lines: Some(9),
+            min_occurrences: Some(3),
+            skip_local: Some(false),
+            cross_language: Some(true),
+            ignore_imports: Some(true),
+        };
+
+        let merged = options.merge_with(&project);
+
+        assert_eq!(merged.mode, DetectionMode::Semantic);
+        assert!((merged.threshold - 10.0).abs() < f64::EPSILON);
+        assert_eq!(merged.min_tokens, 80);
+        assert_eq!(merged.min_lines, 9);
+        assert_eq!(merged.min_occurrences, 3);
+        assert!(merged.skip_local, "project true should still win for bools");
+        assert!(merged.cross_language);
+        assert!(merged.ignore_imports);
+        assert_eq!(merged.ignore, vec!["generated/**".to_string()]);
+    }
+
+    #[test]
+    fn analyze_project_root_applies_lsp_duplication_options() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).expect("create src dir");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"lsp-dupes-options","private":true,"main":"src/a.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(
+            root.join(".fallowrc.jsonc"),
+            r#"{"duplicates":{"minTokens":5,"minLines":1,"minOccurrences":2}}"#,
+        )
+        .expect("write config");
+        let source = r"
+            export const calculate = (input: number): number => {
+                const doubled = input * 2;
+                const incremented = doubled + 1;
+                return incremented;
+            };
+        ";
+        std::fs::write(root.join("src/a.ts"), source).expect("write a");
+        std::fs::write(root.join("src/b.ts"), source).expect("write b");
+
+        let mut baseline_results = AnalysisResults::default();
+        let mut baseline_duplication = DuplicationReport::default();
+        let mut baseline_messages = Vec::new();
+        analyze_project_root(
+            root,
+            None,
+            None,
+            &mut baseline_results,
+            &mut baseline_duplication,
+            &mut baseline_messages,
+        );
+
+        assert!(
+            baseline_duplication.stats.clone_groups > 0,
+            "fixture should produce pair-only duplicate findings"
+        );
+
+        let mut filtered_results = AnalysisResults::default();
+        let mut filtered_duplication = DuplicationReport::default();
+        let mut filtered_messages = Vec::new();
+        let options = LspDuplicationOptions {
+            min_occurrences: Some(3),
+            ..LspDuplicationOptions::default()
+        };
+        analyze_project_root(
+            root,
+            None,
+            Some(&options),
+            &mut filtered_results,
+            &mut filtered_duplication,
+            &mut filtered_messages,
+        );
+
+        assert_eq!(filtered_duplication.stats.clone_groups, 0);
     }
 
     #[test]

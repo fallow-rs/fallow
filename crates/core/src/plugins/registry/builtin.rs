@@ -36,7 +36,7 @@ use super::super::{
     tsd::TsdPlugin, tsdown::TsdownPlugin, tsup::TsupPlugin, turborepo::TurborepoPlugin,
     typedoc::TypedocPlugin, typeorm::TypeormPlugin, typescript::TypeScriptPlugin,
     unocss::UnoCssPlugin, varlock::VarlockPlugin, velite::VelitePlugin, vercel::VercelPlugin,
-    vite::VitePlugin, vitepress::VitePressPlugin, vitest::VitestPlugin,
+    vite::VitePlugin, vitepress::VitePressPlugin, vitest::VitestPlugin, vscode::VscodePlugin,
     webdriverio::WebdriverioPlugin, webpack::WebpackPlugin, wrangler::WranglerPlugin,
     wuchale::WuchalePlugin, wxt::WxtPlugin,
 };
@@ -87,6 +87,7 @@ pub fn create_builtin_plugins() -> Vec<Box<dyn Plugin>> {
         Box::new(VelitePlugin),
         Box::new(EmberPlugin),
         Box::new(VitePlugin),
+        Box::new(VscodePlugin),
         Box::new(WebpackPlugin),
         Box::new(RollupPlugin),
         Box::new(RolldownPlugin),

@@ -63,6 +63,8 @@ mod html_entry;
 mod issue_546_storybook_runtime_resources;
 #[path = "integration_test/issue_914_pnpm_bare_binary.rs"]
 mod issue_914_pnpm_bare_binary;
+#[path = "integration_test/issue_948_vscode_provider_members.rs"]
+mod issue_948_vscode_provider_members;
 #[path = "integration_test/jsx_assets_and_jsdoc.rs"]
 mod jsx_assets_and_jsdoc;
 #[path = "integration_test/member_detection.rs"]

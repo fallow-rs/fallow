@@ -1223,6 +1223,7 @@ mod vercel;
 mod vite;
 mod vitepress;
 mod vitest;
+mod vscode;
 mod webdriverio;
 mod webpack;
 mod wrangler;

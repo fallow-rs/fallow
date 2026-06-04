@@ -35,7 +35,7 @@ interface ExtensionPackage {
 const pkg = JSON.parse(
   readFileSync(resolve(__dirname, "../package.json"), "utf8"),
 ) as ExtensionPackage;
-const extensionSource = readFileSync(resolve(__dirname, "../src/extension.ts"), "utf8");
+const configKeysSource = readFileSync(resolve(__dirname, "../src/configKeys.ts"), "utf8");
 
 const command = (id: string): CommandContribution | undefined =>
   pkg.contributes.commands.find((entry) => entry.command === id);
@@ -95,7 +95,7 @@ describe("package.json binary download settings", () => {
   });
 
   it("restarts binary resolution when auto-download changes", () => {
-    expect(extensionSource).toContain('"fallow.autoDownload"');
+    expect(configKeysSource).toContain('"fallow.autoDownload"');
   });
 });
 
