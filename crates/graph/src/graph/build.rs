@@ -117,8 +117,26 @@ fn collect_edges_for_module(
         collect_import_edge(import, file_id, &mut edges_by_target, acc);
     }
 
+    // Glob-matched dynamic-import patterns (`import(`./${x}`)`, `require(`./${x}`)`)
+    // each resolve to a set of target files, and a single importing file can hold
+    // many such patterns whose match sets overlap heavily (or are identical). Each
+    // match would otherwise push a fresh `Namespace` symbol onto the target's edge,
+    // so a file with P patterns matching F files accumulates F*P symbols, and Phase 2
+    // attaches a `SymbolReference` per symbol: O(patterns * files) memory that drives
+    // the LSP into tens of GB on large React Native / Expo trees (issue #963). The
+    // duplicate symbols carry no information: a `Namespace` symbol with an empty
+    // `local_name` credits the whole target module for reachability, and the first
+    // one already does that (reachability BFS reads only `edge.target`, never the
+    // symbol list; Phase 2 `attach_reference` already dedups by `from_file`). Credit
+    // each distinct target at most once per importing file. The set is per-file
+    // (not global), so two different importers matching the same target still each
+    // create their own edge.
+    let mut credited_pattern_targets: FxHashSet<FileId> = FxHashSet::default();
     for (_pattern, matched_ids) in &resolved.resolved_dynamic_patterns {
         for target_id in matched_ids {
+            if !credited_pattern_targets.insert(*target_id) {
+                continue;
+            }
             record_namespace_import(*target_id, &mut acc.namespace_imported, acc.total_capacity);
             edges_by_target
                 .entry(*target_id)
@@ -776,6 +794,85 @@ mod tests {
         assert_eq!(sorted.len(), 2);
         assert!(acc.namespace_imported.contains(1));
         assert!(acc.namespace_imported.contains(2));
+    }
+
+    #[test]
+    fn collect_edges_dynamic_patterns_credit_each_target_once() {
+        // One importing file holding three dynamic-import patterns whose match sets
+        // all overlap on FileId(1). Without per-file dedup, FileId(1) would accrue one
+        // Namespace symbol per matching pattern (the O(patterns * files) blow-up of
+        // issue #963). With dedup it is credited exactly once.
+        let mk = |prefix: &str| fallow_types::extract::DynamicImportPattern {
+            prefix: prefix.to_string(),
+            suffix: None,
+            span: oxc_span::Span::new(0, 1),
+        };
+        let resolved = ResolvedModule {
+            file_id: FileId(0),
+            path: std::path::PathBuf::from("/project/loader.ts"),
+            resolved_dynamic_patterns: vec![
+                (mk("./a/"), vec![FileId(1), FileId(2)]),
+                (mk("./b/"), vec![FileId(1)]),
+                (mk("./c/"), vec![FileId(1)]),
+            ],
+            ..Default::default()
+        };
+        let mut acc = make_acc(4);
+        let sorted = collect_edges_for_module(&resolved, FileId(0), &mut acc);
+
+        assert_eq!(sorted.len(), 2, "two distinct targets (FileId 1 and 2)");
+        let target_one = sorted
+            .iter()
+            .find(|(t, _)| *t == FileId(1))
+            .expect("target 1 present");
+        assert_eq!(
+            target_one.1.len(),
+            1,
+            "FileId(1) credited once despite three matching patterns"
+        );
+        assert!(acc.namespace_imported.contains(1));
+        assert!(acc.namespace_imported.contains(2));
+    }
+
+    #[test]
+    fn collect_edges_dynamic_patterns_dedup_is_per_importing_file() {
+        // Two different importing files both pattern-match the same target FileId(2).
+        // The dedup set is per-file (rebuilt per `collect_edges_for_module` call), so
+        // each importer independently creates its own edge to FileId(2). A global
+        // dedup would silently drop the second importer's reachability contribution.
+        let mk = || fallow_types::extract::DynamicImportPattern {
+            prefix: "./x/".to_string(),
+            suffix: None,
+            span: oxc_span::Span::new(0, 1),
+        };
+        let importer_a = ResolvedModule {
+            file_id: FileId(0),
+            path: std::path::PathBuf::from("/project/a.ts"),
+            resolved_dynamic_patterns: vec![(mk(), vec![FileId(2)])],
+            ..Default::default()
+        };
+        let importer_b = ResolvedModule {
+            file_id: FileId(1),
+            path: std::path::PathBuf::from("/project/b.ts"),
+            resolved_dynamic_patterns: vec![(mk(), vec![FileId(2)])],
+            ..Default::default()
+        };
+        let mut acc = make_acc(4);
+        let edges_a = collect_edges_for_module(&importer_a, FileId(0), &mut acc);
+        let edges_b = collect_edges_for_module(&importer_b, FileId(1), &mut acc);
+
+        assert_eq!(
+            edges_a.len(),
+            1,
+            "importer A creates its own edge to target 2"
+        );
+        assert_eq!(
+            edges_b.len(),
+            1,
+            "importer B independently creates its own edge to target 2"
+        );
+        assert_eq!(edges_a[0].0, FileId(2));
+        assert_eq!(edges_b[0].0, FileId(2));
     }
 
     #[test]
