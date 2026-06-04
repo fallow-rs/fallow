@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The language server no longer balloons in memory on projects that use dynamic-import patterns.** When a file contained `` import(`./${x}`) `` or `` require(`./${x}`) `` style dynamic imports, the module-graph builder credited every matched target file once per pattern. A file holding many such patterns over a large source tree accumulated a number of internal graph symbols (and their references) proportional to patterns times files, which on large React Native / Expo codebases could drive `fallow-lsp` into tens of GB of RAM. Each distinct target is now credited at most once per importing file. Reachability and analysis output are unchanged (the duplicate symbols were redundant), and recursive cross-directory matching is preserved. Thanks [@ReallyFloppyPenguin](https://github.com/ReallyFloppyPenguin) for the detailed report. (Closes [#963](https://github.com/fallow-rs/fallow/issues/963).)
+
 ### Added
 
 - **The VS Code extension now exposes every duplication knob used by sidebar analysis.** The settings page now includes `fallow.duplication.minTokens`, `minLines`, `skipLocal`, `crossLanguage`, and `ignoreImports`, alongside the existing mode, threshold, and minOccurrences controls. The bare `fallow` command gains matching combined-mode flags (`--dupes-min-tokens`, `--dupes-min-lines`, `--dupes-skip-local`, `--dupes-cross-language`, and `--dupes-ignore-imports`) so the extension can apply those settings without requiring a config-file edit. Older resolved CLIs still degrade through the existing version-gated retry path instead of failing the whole sidebar run. Thanks [@BartWaardenburg](https://github.com/BartWaardenburg) for the report. (Closes [#909](https://github.com/fallow-rs/fallow/issues/909).)
