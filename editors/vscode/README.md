@@ -10,7 +10,8 @@ Codebase intelligence for TypeScript and JavaScript. Real-time diagnostics for u
 - **Code Lens**: reference counts above each export declaration with click-to-navigate (opens Peek References panel)
 - **Hover information**: export usage status, unused status, and duplicate block locations
 - **Tree views**: browse unused code by issue type and duplicates by clone family in the sidebar
-- **Status bar**: see total issue count and duplication percentage at a glance
+- **Health view**: project health score and grade, complexity findings (click to open `file:line`), plus churn-and-complexity hotspot candidates and refactoring candidates (framed as heuristics to verify, not facts). Runs a separate, lazy `fallow health` analysis only when the view is first opened, so it never slows the editor or the other views.
+- **Status bar**: see total issue count and duplication percentage at a glance, with an optional health score/grade segment (e.g. `health: B (82)`)
 - **Auto-fix**: remove unused exports, dependencies, and enum members with one command
 - **Auto-download**: the extension downloads managed `fallow-lsp` and `fallow` CLI binaries automatically
 
@@ -34,6 +35,7 @@ code --install-extension fallow-rs.fallow-vscode
 | Command | Description |
 |---------|-------------|
 | `Fallow: Run Analysis` | Run full codebase analysis and update tree views |
+| `Fallow: Reload Health` | Re-run the Health view analysis (score, complexity, hotspot and refactoring candidates) |
 | `Fallow: Auto-Fix Unused Exports & Dependencies` | Remove unused exports and dependencies |
 | `Fallow: Preview Fixes (Dry Run)` | Show what fixes would be applied without changing files |
 | `Fallow: Restart Language Server` | Restart the fallow-lsp process |
@@ -69,6 +71,10 @@ Mute state is stored in the workspace, so it survives reload but does not bleed 
 | `fallow.duplication.skipLocal` | `false` | Only report duplicate code that appears across different directories. |
 | `fallow.duplication.crossLanguage` | `false` | Compare TypeScript and JavaScript files after stripping TypeScript type annotations. |
 | `fallow.duplication.ignoreImports` | `false` | Exclude import declarations from duplicate-code detection. |
+| `fallow.health.enabled` | `true` | Show the Fallow Health view (score and grade, complexity findings, hotspot candidates, refactoring candidates). When off, the Health view stays empty and no extra analysis runs. |
+| `fallow.health.hotspots` | `true` | Include git churn hotspots in the Health view. Hotspot analysis walks git history; disable on very large repositories to keep the Health refresh fast. Has no effect outside a git repository. |
+| `fallow.health.topFindings` | `20` | Maximum number of complexity findings shown in the Health view (passed to `fallow health --top`). |
+| `fallow.health.statusBar` | `true` | Show the project health score and grade in the Fallow status bar item. |
 | `fallow.production` | `false` | Production mode: exclude test/dev files, only production scripts. |
 | `fallow.changedSince` | `""` | Git ref (tag, branch, or SHA) to scope the Problems panel and sidebar to files changed since that ref, mirroring the CLI's `--changed-since`. Tag your current commit (e.g. `fallow-baseline`) and set this to the tag to enforce "no new issues going forward" while ignoring pre-existing findings. |
 | `fallow.trace.server` | `"off"` | LSP trace level: `off`, `messages`, or `verbose`. |
