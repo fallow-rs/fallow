@@ -1189,12 +1189,24 @@ fn load_audit_config(opts: &AuditOptions<'_>) -> Option<AuditConfig> {
         .map(|(config, _path)| config.audit)
 }
 
-/// Remove persistent reusable base-snapshot worktree caches whose sidecar
-/// `.last-used` file is older than `max_age`.
+/// Reclaim persistent reusable base-snapshot worktree caches.
+///
+/// Two reclaim conditions, checked per entry:
+/// - Prunable orphan: the cache directory no longer exists (an external
+///   `$TMPDIR` reaper, a container restart, or a CI cache eviction deleted it
+///   but left git's admin entry behind). Reclaimed eagerly, independent of
+///   `max_age`, because the `.last-used` sidecar lives next to the deleted
+///   directory and survives the reaper, so the age branch would re-touch a
+///   fresh sidecar and never reclaim the dead entry. Passing `max_age = None`
+///   (age-based GC disabled) still runs this reclaim.
+/// - Aged-out: the sidecar `.last-used` file is older than `max_age` (only
+///   when `max_age` is `Some`).
 ///
 /// Concurrency: each candidate is gated by [`ReusableWorktreeLock`] before
 /// removal, so an in-flight `fallow audit` mid-rebuild against the same
-/// cache entry will not be disturbed (the sweep skips on contention).
+/// cache entry will not be disturbed (the sweep skips on contention). The
+/// orphan branch re-checks existence under the lock so a rebuild that
+/// recreated the directory between the check and the lock is preserved.
 ///
 /// Pre-upgrade caches lacking a sidecar are NOT removed: instead the sweep
 /// seeds a fresh sidecar so the next invocation can age them from real
@@ -1207,7 +1219,7 @@ fn load_audit_config(opts: &AuditOptions<'_>) -> Option<AuditConfig> {
 /// `open(O_CREAT)` at the same path would produce two processes each
 /// holding a kernel flock on different inodes. Lock files are tens of
 /// bytes; leaking them is harmless.
-fn sweep_old_reusable_caches(repo_root: &Path, max_age: Duration, quiet: bool) {
+fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, quiet: bool) {
     let Some(worktrees) = list_audit_worktrees(repo_root) else {
         return;
     };
@@ -1217,6 +1229,31 @@ fn sweep_old_reusable_caches(repo_root: &Path, max_age: Duration, quiet: bool) {
         if !is_reusable_audit_worktree_path(&path) {
             continue;
         }
+        // Prunable orphan: an external temp-reaper (macOS `$TMPDIR` cleanup,
+        // container restart, CI cache eviction) removed the cache directory but
+        // git's admin entry survives. The sidecar lives next to the dir and is
+        // not deleted by such a reaper, so the age branch below would re-touch a
+        // fresh sidecar and never reclaim the dead entry. Reclaim eagerly,
+        // independent of `max_age`, so orphans do not accumulate even when
+        // age-based GC is disabled (`cacheMaxAgeDays = 0`).
+        if !path.exists() {
+            let Some(_lock) = ReusableWorktreeLock::try_acquire(&path) else {
+                continue;
+            };
+            // Re-check under the lock: a concurrent `reuse_or_create` rebuild may
+            // have recreated the directory between the existence check and the
+            // lock acquisition.
+            if path.exists() {
+                continue;
+            }
+            remove_audit_worktree(repo_root, &path);
+            let _ = std::fs::remove_file(reusable_worktree_last_used_path(&path));
+            removed += 1;
+            continue;
+        }
+        let Some(max_age) = max_age else {
+            continue;
+        };
         let sidecar = reusable_worktree_last_used_path(&path);
         let sidecar_mtime = std::fs::metadata(&sidecar)
             .ok()
@@ -2480,9 +2517,10 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
 
     let base_ref = resolve_base_ref(opts)?;
 
-    if let Some(max_age) = resolve_cache_max_age(opts) {
-        sweep_old_reusable_caches(opts.root, max_age, opts.quiet);
-    }
+    // Always sweep: prunable orphans (cache dir externally reaped, git admin
+    // entry left behind) are reclaimed regardless of the age threshold, so the
+    // sweep runs even when age-based GC is disabled (`max_age` is `None`).
+    sweep_old_reusable_caches(opts.root, resolve_cache_max_age(opts), opts.quiet);
 
     let Some(changed_files) = crate::check::get_changed_files(opts.root, &base_ref) else {
         return Err(emit_error(
@@ -3474,6 +3512,31 @@ mod tests {
             .is_some_and(|paths| paths.iter().any(|p| paths_equal(p, worktree_path)))
     }
 
+    /// True when `git worktree list --porcelain` still carries an admin entry
+    /// whose path ends with `worktree_path`'s basename. Unlike
+    /// `worktree_is_registered_with_git`, this matches by basename against the
+    /// raw porcelain output, so it stays correct even when the directory has
+    /// been deleted (a prunable orphan): `paths_equal` canonicalization cannot
+    /// match a missing path across the macOS `/var` -> `/private/var` symlink,
+    /// but the unique nanos-suffixed basename is stable.
+    fn worktree_admin_entry_present(repo_root: &std::path::Path, worktree_path: &Path) -> bool {
+        let basename = worktree_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("reusable worktree path has a utf-8 basename");
+        let output = Command::new("git")
+            .args(["worktree", "list", "--porcelain"])
+            .current_dir(repo_root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .output()
+            .expect("git worktree list should run");
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| line.strip_prefix("worktree "))
+            .any(|p| p.ends_with(basename))
+    }
+
     #[test]
     fn worktree_cleanup_guard_runs_on_drop() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
@@ -3691,7 +3754,7 @@ mod tests {
         register_reusable_worktree(&repo, &worktree_path);
         write_sidecar_with_age(&worktree_path, Duration::from_hours(31 * 24));
 
-        sweep_old_reusable_caches(&repo, Duration::from_hours(30 * 24), true);
+        sweep_old_reusable_caches(&repo, Some(Duration::from_hours(30 * 24)), true);
 
         assert!(
             !worktree_path.exists(),
@@ -3716,7 +3779,7 @@ mod tests {
         register_reusable_worktree(&repo, &worktree_path);
         write_sidecar_with_age(&worktree_path, Duration::from_mins(1));
 
-        sweep_old_reusable_caches(&repo, Duration::from_hours(30 * 24), true);
+        sweep_old_reusable_caches(&repo, Some(Duration::from_hours(30 * 24)), true);
 
         assert!(
             worktree_path.is_dir(),
@@ -3740,7 +3803,7 @@ mod tests {
         let lock = ReusableWorktreeLock::try_acquire(&worktree_path)
             .expect("test should acquire the lock first");
 
-        sweep_old_reusable_caches(&repo, Duration::from_hours(30 * 24), true);
+        sweep_old_reusable_caches(&repo, Some(Duration::from_hours(30 * 24)), true);
 
         assert!(
             worktree_path.is_dir(),
@@ -3766,7 +3829,7 @@ mod tests {
             "test pre-condition: sidecar should not exist",
         );
 
-        sweep_old_reusable_caches(&repo, Duration::from_hours(30 * 24), true);
+        sweep_old_reusable_caches(&repo, Some(Duration::from_hours(30 * 24)), true);
 
         assert!(
             worktree_path.is_dir(),
@@ -3790,6 +3853,79 @@ mod tests {
     }
 
     #[test]
+    fn reusable_cache_gc_reclaims_prunable_orphan_when_dir_missing() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = init_throwaway_repo(tmp.path(), "repo-gc-orphan");
+        let worktree_path = make_reusable_path("gc-orphan");
+        register_reusable_worktree(&repo, &worktree_path);
+        // Fresh sidecar: the age branch alone would KEEP this entry, so a
+        // successful reclaim proves the dir-missing branch drove it.
+        write_sidecar_with_age(&worktree_path, Duration::from_mins(1));
+        let sidecar = reusable_worktree_last_used_path(&worktree_path);
+
+        // Simulate an external temp-reaper: delete only the worktree directory,
+        // leaving git's admin entry and the sidecar behind.
+        fs::remove_dir_all(&worktree_path).expect("test should remove the cache dir");
+        assert!(
+            !worktree_path.exists(),
+            "test pre-condition: cache dir should be gone",
+        );
+        assert!(
+            worktree_admin_entry_present(&repo, &worktree_path),
+            "test pre-condition: git admin entry should still be registered (prunable)",
+        );
+        assert!(
+            sidecar.exists(),
+            "test pre-condition: sidecar survives a dir-only reaper",
+        );
+
+        sweep_old_reusable_caches(&repo, Some(Duration::from_hours(30 * 24)), true);
+
+        assert!(
+            !worktree_admin_entry_present(&repo, &worktree_path),
+            "sweep should unregister a prunable orphan whose dir was externally removed",
+        );
+        assert!(
+            !sidecar.exists(),
+            "sweep should remove the stale sidecar for a reclaimed orphan",
+        );
+        cleanup_reusable_worktree(&repo, &worktree_path);
+    }
+
+    #[test]
+    fn reusable_cache_gc_reclaims_prunable_orphan_even_when_age_gc_disabled() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = init_throwaway_repo(tmp.path(), "repo-gc-orphan-nogc");
+        let worktree_path = make_reusable_path("gc-orphan-nogc");
+        register_reusable_worktree(&repo, &worktree_path);
+        write_sidecar_with_age(&worktree_path, Duration::from_mins(1));
+        let sidecar = reusable_worktree_last_used_path(&worktree_path);
+        fs::remove_dir_all(&worktree_path).expect("test should remove the cache dir");
+        assert!(
+            worktree_admin_entry_present(&repo, &worktree_path),
+            "test pre-condition: git admin entry should still be registered (prunable)",
+        );
+        assert!(
+            sidecar.exists(),
+            "test pre-condition: sidecar survives a dir-only reaper",
+        );
+
+        // `None` = age-based GC disabled (`cacheMaxAgeDays = 0`). Orphan reclaim
+        // must still run so dead admin entries do not accumulate forever.
+        sweep_old_reusable_caches(&repo, None, true);
+
+        assert!(
+            !worktree_admin_entry_present(&repo, &worktree_path),
+            "orphan reclaim must run even when age-based GC is disabled",
+        );
+        assert!(
+            !sidecar.exists(),
+            "sweep should remove the stale sidecar even when age-based GC is disabled",
+        );
+        cleanup_reusable_worktree(&repo, &worktree_path);
+    }
+
+    #[test]
     fn reusable_cache_gc_preserves_lock_file_after_removal() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let repo = init_throwaway_repo(tmp.path(), "repo-gc-lockfile");
@@ -3806,7 +3942,7 @@ mod tests {
             "test pre-condition: lock file should exist before sweep",
         );
 
-        sweep_old_reusable_caches(&repo, Duration::from_hours(30 * 24), true);
+        sweep_old_reusable_caches(&repo, Some(Duration::from_hours(30 * 24)), true);
 
         assert!(
             !worktree_path.exists(),
