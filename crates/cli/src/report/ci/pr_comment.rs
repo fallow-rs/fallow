@@ -4,6 +4,8 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
+use crate::output_envelope::{CodeClimateIssue, CodeClimateSeverity};
+
 /// Workspace name, set once by `main()` when the binary is invoked with
 /// `--workspace <name>`. Read by `sticky_marker_id` to auto-suffix the
 /// sticky-comment marker per workspace, which keeps parallel per-workspace
@@ -91,8 +93,17 @@ pub fn issues_from_codeclimate(value: &Value) -> Vec<CiIssue> {
         .flatten()
         .filter_map(issue_from_codeclimate)
         .collect::<Vec<_>>();
+    sort_ci_issues(&mut issues);
     issues
-        .sort_by(|a, b| (&a.path, a.line, &a.fingerprint).cmp(&(&b.path, b.line, &b.fingerprint)));
+}
+
+#[must_use]
+pub fn issues_from_codeclimate_issues(issues: &[CodeClimateIssue]) -> Vec<CiIssue> {
+    let mut issues = issues
+        .iter()
+        .map(issue_from_codeclimate_issue)
+        .collect::<Vec<_>>();
+    sort_ci_issues(&mut issues);
     issues
 }
 
@@ -128,6 +139,32 @@ fn issue_from_codeclimate(value: &Value) -> Option<CiIssue> {
     })
 }
 
+fn issue_from_codeclimate_issue(issue: &CodeClimateIssue) -> CiIssue {
+    CiIssue {
+        rule_id: issue.check_name.clone(),
+        description: issue.description.clone(),
+        severity: codeclimate_severity_label(issue.severity).to_owned(),
+        path: issue.location.path.clone(),
+        line: u64::from(issue.location.lines.begin),
+        fingerprint: issue.fingerprint.clone(),
+    }
+}
+
+const fn codeclimate_severity_label(severity: CodeClimateSeverity) -> &'static str {
+    match severity {
+        CodeClimateSeverity::Info => "info",
+        CodeClimateSeverity::Minor => "minor",
+        CodeClimateSeverity::Major => "major",
+        CodeClimateSeverity::Critical => "critical",
+        CodeClimateSeverity::Blocker => "blocker",
+    }
+}
+
+fn sort_ci_issues(issues: &mut [CiIssue]) {
+    issues
+        .sort_by(|a, b| (&a.path, a.line, &a.fingerprint).cmp(&(&b.path, b.line, &b.fingerprint)));
+}
+
 #[must_use]
 #[expect(clippy::expect_used, reason = "formatting into String is infallible")]
 pub fn render_pr_comment(command: &str, provider: Provider, issues: &[CiIssue]) -> String {
@@ -152,8 +189,8 @@ pub fn render_pr_comment(command: &str, provider: Provider, issues: &[CiIssue]) 
     } else {
         write!(&mut out, "Found **{count}** {noun}.\n\n").expect("write to string");
         let groups = group_by_category(issues);
-        if groups.len() == 1 {
-            render_findings_table(&mut out, issues, max, "Details");
+        if let [(_, group_issues)] = groups.as_slice() {
+            render_findings_table(&mut out, group_issues, max, "Details");
         } else {
             for (category, group_issues) in &groups {
                 let summary_label = summary_label(category, group_issues.len(), max);
@@ -179,7 +216,7 @@ fn summary_label(category: &str, total: usize, max: usize) -> String {
 }
 
 #[expect(clippy::expect_used, reason = "formatting into String is infallible")]
-fn render_findings_table(out: &mut String, issues: &[CiIssue], max: usize, summary: &str) {
+fn render_findings_table(out: &mut String, issues: &[&CiIssue], max: usize, summary: &str) {
     writeln!(out, "<details>\n<summary>{summary}</summary>\n").expect("write to string");
     out.push_str("| Severity | Rule | Location | Description |\n");
     out.push_str("| --- | --- | --- | --- |\n");
@@ -263,14 +300,14 @@ const CATEGORY_ORDER: [&str; 6] = [
     "Suppressions",
 ];
 
-fn group_by_category(issues: &[CiIssue]) -> Vec<(&'static str, Vec<CiIssue>)> {
-    let mut buckets: std::collections::BTreeMap<&'static str, Vec<CiIssue>> =
+fn group_by_category(issues: &[CiIssue]) -> Vec<(&'static str, Vec<&CiIssue>)> {
+    let mut buckets: std::collections::BTreeMap<&'static str, Vec<&CiIssue>> =
         std::collections::BTreeMap::new();
     for issue in issues {
         let category = category_for_rule(&issue.rule_id);
-        buckets.entry(category).or_default().push(issue.clone());
+        buckets.entry(category).or_default().push(issue);
     }
-    let mut ordered: Vec<(&'static str, Vec<CiIssue>)> = Vec::with_capacity(buckets.len());
+    let mut ordered: Vec<(&'static str, Vec<&CiIssue>)> = Vec::with_capacity(buckets.len());
     for category in CATEGORY_ORDER {
         if let Some(items) = buckets.remove(category) {
             ordered.push((category, items));
@@ -341,7 +378,27 @@ fn sanitize_marker_segment(value: &str) -> String {
 pub fn print_pr_comment(command: &str, provider: Provider, codeclimate: &Value) -> ExitCode {
     let issues =
         super::diff_filter::filter_issues_for_summary(issues_from_codeclimate(codeclimate));
-    println!("{}", render_pr_comment(command, provider, &issues));
+    print_pr_comment_from_ci_issues(command, provider, &issues)
+}
+
+#[must_use]
+pub fn print_pr_comment_from_codeclimate_issues(
+    command: &str,
+    provider: Provider,
+    codeclimate: &[CodeClimateIssue],
+) -> ExitCode {
+    let issues =
+        super::diff_filter::filter_issues_for_summary(issues_from_codeclimate_issues(codeclimate));
+    print_pr_comment_from_ci_issues(command, provider, &issues)
+}
+
+#[must_use]
+fn print_pr_comment_from_ci_issues(
+    command: &str,
+    provider: Provider,
+    issues: &[CiIssue],
+) -> ExitCode {
+    println!("{}", render_pr_comment(command, provider, issues));
     ExitCode::SUCCESS
 }
 
@@ -428,6 +485,50 @@ mod tests {
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].path, "src/a.ts");
         assert_eq!(issues[0].line, 7);
+    }
+
+    #[test]
+    fn typed_codeclimate_issues_extract_like_json_codeclimate() {
+        let severities = [
+            (CodeClimateSeverity::Info, "info"),
+            (CodeClimateSeverity::Minor, "minor"),
+            (CodeClimateSeverity::Major, "major"),
+            (CodeClimateSeverity::Critical, "critical"),
+            (CodeClimateSeverity::Blocker, "blocker"),
+        ];
+        let typed = severities
+            .iter()
+            .enumerate()
+            .map(|(index, (severity, _))| CodeClimateIssue {
+                kind: crate::output_envelope::CodeClimateIssueKind::Issue,
+                check_name: format!("fallow/rule-{index}"),
+                description: format!("Finding {index}"),
+                categories: vec!["Complexity".to_owned()],
+                severity: *severity,
+                fingerprint: format!("fp-{index}"),
+                location: crate::output_envelope::CodeClimateLocation {
+                    path: format!("src/{index}.ts"),
+                    lines: crate::output_envelope::CodeClimateLines {
+                        begin: u32::try_from(index + 1).expect("small fixture index"),
+                    },
+                },
+            })
+            .collect::<Vec<_>>();
+        let value = serde_json::to_value(&typed).expect("typed fixture serializes");
+
+        assert_eq!(
+            issues_from_codeclimate_issues(&typed),
+            issues_from_codeclimate(&value)
+        );
+        let typed_labels = issues_from_codeclimate_issues(&typed)
+            .into_iter()
+            .map(|issue| issue.severity)
+            .collect::<Vec<_>>();
+        let expected_labels = severities
+            .iter()
+            .map(|(_, label)| (*label).to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(typed_labels, expected_labels);
     }
 
     #[test]

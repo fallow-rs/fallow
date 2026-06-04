@@ -346,44 +346,48 @@ fn print_combined_report(
             }
         }
         OutputFormat::PrCommentGithub => {
-            let value = build_combined_codeclimate(check_result, dupes_result, health_result);
-            let code = report::ci::pr_comment::print_pr_comment(
+            let issues =
+                build_combined_codeclimate_issues(check_result, dupes_result, health_result);
+            let code = report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
                 "combined",
                 report::ci::pr_comment::Provider::Github,
-                &value,
+                &issues,
             );
             if code != ExitCode::SUCCESS {
                 return Err(code);
             }
         }
         OutputFormat::PrCommentGitlab => {
-            let value = build_combined_codeclimate(check_result, dupes_result, health_result);
-            let code = report::ci::pr_comment::print_pr_comment(
+            let issues =
+                build_combined_codeclimate_issues(check_result, dupes_result, health_result);
+            let code = report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
                 "combined",
                 report::ci::pr_comment::Provider::Gitlab,
-                &value,
+                &issues,
             );
             if code != ExitCode::SUCCESS {
                 return Err(code);
             }
         }
         OutputFormat::ReviewGithub => {
-            let value = build_combined_codeclimate(check_result, dupes_result, health_result);
-            let code = report::ci::review::print_review_envelope(
+            let issues =
+                build_combined_codeclimate_issues(check_result, dupes_result, health_result);
+            let code = report::ci::review::print_review_envelope_from_codeclimate_issues(
                 "combined",
                 report::ci::pr_comment::Provider::Github,
-                &value,
+                &issues,
             );
             if code != ExitCode::SUCCESS {
                 return Err(code);
             }
         }
         OutputFormat::ReviewGitlab => {
-            let value = build_combined_codeclimate(check_result, dupes_result, health_result);
-            let code = report::ci::review::print_review_envelope(
+            let issues =
+                build_combined_codeclimate_issues(check_result, dupes_result, health_result);
+            let code = report::ci::review::print_review_envelope_from_codeclimate_issues(
                 "combined",
                 report::ci::pr_comment::Provider::Gitlab,
-                &value,
+                &issues,
             );
             if code != ExitCode::SUCCESS {
                 return Err(code);
@@ -807,6 +811,15 @@ fn build_combined_codeclimate(
     dupes: Option<&DupesResult>,
     health: Option<&HealthResult>,
 ) -> serde_json::Value {
+    let all_issues = build_combined_codeclimate_issues(check, dupes, health);
+    serde_json::to_value(&all_issues).expect("CodeClimateIssue serializes infallibly")
+}
+
+fn build_combined_codeclimate_issues(
+    check: Option<&CheckResult>,
+    dupes: Option<&DupesResult>,
+    health: Option<&HealthResult>,
+) -> Vec<crate::output_envelope::CodeClimateIssue> {
     let mut all_issues: Vec<crate::output_envelope::CodeClimateIssue> = Vec::new();
     if let Some(result) = check {
         all_issues.extend(report::build_codeclimate(
@@ -830,7 +843,7 @@ fn build_combined_codeclimate(
         ));
     }
 
-    serde_json::to_value(&all_issues).expect("CodeClimateIssue serializes infallibly")
+    all_issues
 }
 
 /// Build the dupes options and dispatch to either `execute_dupes` or

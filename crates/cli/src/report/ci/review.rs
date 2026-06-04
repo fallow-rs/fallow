@@ -4,13 +4,15 @@ use serde_json::Value;
 
 use super::diff_filter::DiffIndex;
 use super::fingerprint::{composite_fingerprint, summary_fingerprint};
-use super::pr_comment::{CiIssue, Provider, command_title, escape_md};
+use super::pr_comment::{
+    CiIssue, Provider, command_title, escape_md, issues_from_codeclimate_issues,
+};
 use super::severity;
 use crate::output_envelope::{
-    GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
-    GitLabReviewPositionType, ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent,
-    ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewEnvelopeSummary,
-    ReviewProvider, default_marker_regex, default_marker_regex_flags,
+    CodeClimateIssue, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
+    GitLabReviewPosition, GitLabReviewPositionType, ReviewCheckConclusion, ReviewComment,
+    ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema,
+    ReviewEnvelopeSummary, ReviewProvider, default_marker_regex, default_marker_regex_flags,
 };
 use crate::report::emit_json;
 
@@ -81,11 +83,10 @@ pub fn render_review_envelope_with_diff(
         .flatten();
     let include_guidance = review_guidance_enabled();
 
-    let merged_groups = group_by_path_line(issues);
+    let merged_groups = group_by_path_line(issues, max);
 
     let comments: Vec<ReviewComment> = merged_groups
         .iter()
-        .take(max)
         .map(|group| {
             render_merged_comment(
                 provider,
@@ -143,15 +144,35 @@ pub fn render_review_envelope_with_diff(
 }
 
 #[must_use]
-#[expect(
-    clippy::expect_used,
-    reason = "review envelope contains only infallibly serializable fields"
-)]
 pub fn print_review_envelope(command: &str, provider: Provider, codeclimate: &Value) -> ExitCode {
     let issues = super::diff_filter::filter_issues_from_env(
         super::pr_comment::issues_from_codeclimate(codeclimate),
     );
-    let envelope = render_review_envelope(command, provider, &issues);
+    print_review_envelope_from_ci_issues(command, provider, &issues)
+}
+
+#[must_use]
+pub fn print_review_envelope_from_codeclimate_issues(
+    command: &str,
+    provider: Provider,
+    codeclimate: &[CodeClimateIssue],
+) -> ExitCode {
+    let issues =
+        super::diff_filter::filter_issues_from_env(issues_from_codeclimate_issues(codeclimate));
+    print_review_envelope_from_ci_issues(command, provider, &issues)
+}
+
+#[must_use]
+#[expect(
+    clippy::expect_used,
+    reason = "review envelope contains only infallibly serializable fields"
+)]
+fn print_review_envelope_from_ci_issues(
+    command: &str,
+    provider: Provider,
+    issues: &[CiIssue],
+) -> ExitCode {
+    let envelope = render_review_envelope(command, provider, issues);
     let value = crate::output_envelope::serialize_root_output(
         crate::output_envelope::FallowOutput::ReviewEnvelope(envelope),
     )
@@ -202,8 +223,11 @@ fn env_truthy(value: &str) -> bool {
 
 /// Group consecutive same-(path, line) issues. Input is already sorted by
 /// `(path, line, fingerprint)` so a single linear pass collects runs.
-fn group_by_path_line(issues: &[CiIssue]) -> Vec<Vec<&CiIssue>> {
-    let mut groups: Vec<Vec<&CiIssue>> = Vec::new();
+fn group_by_path_line(issues: &[CiIssue], max_groups: usize) -> Vec<Vec<&CiIssue>> {
+    if max_groups == 0 {
+        return Vec::new();
+    }
+    let mut groups: Vec<Vec<&CiIssue>> = Vec::with_capacity(max_groups.min(issues.len()));
     let mut current: Vec<&CiIssue> = Vec::new();
     let mut current_key: Option<(&str, u64)> = None;
     for issue in issues {
@@ -211,12 +235,15 @@ fn group_by_path_line(issues: &[CiIssue]) -> Vec<Vec<&CiIssue>> {
         if Some(key) != current_key {
             if !current.is_empty() {
                 groups.push(std::mem::take(&mut current));
+                if groups.len() == max_groups {
+                    return groups;
+                }
             }
             current_key = Some(key);
         }
         current.push(issue);
     }
-    if !current.is_empty() {
+    if !current.is_empty() && groups.len() < max_groups {
         groups.push(current);
     }
     groups
@@ -612,6 +639,34 @@ mod tests {
         assert!(
             merged.get("constituent_fingerprints").is_none(),
             "v2 hashed-composite design does not emit constituent_fingerprints"
+        );
+    }
+
+    #[test]
+    fn group_by_path_line_respects_max_groups_without_splitting_same_line_findings() {
+        let a = issue("fallow/unused-export", "minor", "src/foo.ts", 42, "fp_a");
+        let b = issue("fallow/duplicate-export", "minor", "src/foo.ts", 42, "fp_b");
+        let c = issue("fallow/unused-type", "minor", "src/z.ts", 7, "fp_c");
+        let issues = vec![a, b, c];
+
+        assert!(group_by_path_line(&issues, 0).is_empty());
+
+        let max_one = group_by_path_line(&issues, 1);
+        assert_eq!(max_one.len(), 1);
+        assert_eq!(max_one[0].len(), 2);
+        assert_eq!(max_one[0][0].path, "src/foo.ts");
+        assert_eq!(max_one[0][0].line, 42);
+
+        let max_two = group_by_path_line(&issues, 2);
+        assert_eq!(max_two.len(), 2);
+        assert_eq!(max_two[0].len(), 2);
+        assert_eq!(max_two[1].len(), 1);
+        assert_eq!(
+            max_two[0]
+                .iter()
+                .map(|issue| issue.fingerprint.as_str())
+                .collect::<Vec<_>>(),
+            ["fp_a", "fp_b"]
         );
     }
 
