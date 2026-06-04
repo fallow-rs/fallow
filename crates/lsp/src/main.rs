@@ -834,10 +834,7 @@ impl FallowLspServer {
         let project_roots = find_project_roots(&root);
 
         self.client
-            .log_message(
-                MessageType::INFO,
-                format!("Found {} project root(s)", project_roots.len()),
-            )
+            .log_message(MessageType::INFO, "Analyzing workspace root")
             .await;
 
         let changed_since = self.changed_since.read().await.clone();
@@ -865,8 +862,6 @@ impl FallowLspServer {
                     &mut config_messages,
                 );
             }
-
-            dedup_results(&mut merged_results);
 
             let changed_message = if let Some(ref git_ref) = changed_since {
                 let toplevel = blocking_toplevel
@@ -1125,32 +1120,34 @@ async fn main() {
     Server::new(stdin, stdout, socket).serve(service).await;
 }
 
-/// Find all project roots under a workspace directory.
+/// Resolve the single analysis root for an LSP run: the canonicalized
+/// workspace root.
 ///
-/// Uses the workspace root plus any configured monorepo workspaces
-/// (package.json `workspaces`, pnpm-workspace.yaml, tsconfig references).
-/// All returned paths are canonicalized so they agree with the canonical
-/// `git_toplevel` used by the `--changed-since` filter; otherwise file
-/// paths in `AnalysisResults` and the changed-files set start from
-/// different prefixes for the same files (e.g. `/tmp/x` vs `/private/tmp/x`
-/// on macOS) and the filter silently drops everything.
+/// The LSP analyzes the workspace root ONCE over the whole tree, matching the
+/// CLI (`fallow check` loads one config via `find_and_load(root)` and runs one
+/// `analyze_full` pass). `analyze_full` is already workspace-aware: it discovers
+/// every workspace package and runs `run_workspace_fast` per package for plugin
+/// and script detection, so a single root pass covers all sub-package source
+/// files, all per-package plugin configs, and full cross-package reachability.
+///
+/// The root is canonicalized so it agrees with the canonical `git_toplevel`
+/// used by the `--changed-since` filter; otherwise file paths in
+/// `AnalysisResults` and the changed-files set start from different prefixes
+/// for the same files (e.g. `/tmp/x` vs `/private/tmp/x` on macOS) and the
+/// filter silently drops everything.
+///
+/// Earlier revisions returned the workspace root plus every sub-package and
+/// re-ran the entire pipeline per root (issue #971). That re-walked overlapping
+/// files once per root, and analyzing a sub-package in isolation lost
+/// cross-package reachability, surfacing false-positive `unused-export`
+/// findings the root pass resolves. Single-root removes both and keeps the LSP
+/// in agreement with the CLI. A `Vec` is returned (always length one) so the
+/// caller's accumulate-then-publish structure stays uniform.
 fn find_project_roots(workspace_root: &std::path::Path) -> Vec<std::path::PathBuf> {
-    let mut roots = vec![workspace_root.to_path_buf()];
-
-    let workspaces = fallow_config::discover_workspaces(workspace_root);
-    for ws in &workspaces {
-        roots.push(ws.root.clone());
-    }
-
-    for root in &mut roots {
-        if let Ok(canon) = root.canonicalize() {
-            *root = canon;
-        }
-    }
-
-    roots.sort();
-    roots.dedup();
-    roots
+    let root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    vec![root]
 }
 
 /// Stamp `Diagnostic.data` with `{ "changedSince": "<git_ref>" }` on every
@@ -1194,225 +1191,20 @@ fn attach_changed_since_data(
     }
 }
 
-/// Drop entries with duplicate identity keys, preserving the original
-/// insertion order of the first occurrence.
-///
-/// Identity-based dedup helper: two entries with the same key are
-/// considered the same finding (e.g., same file at same line/col)
-/// regardless of any other fields. Used by [`dedup_results`] to collapse
-/// the cross-root duplicates that `merge_results` accumulates when a
-/// monorepo's workspace root and a sub-package both walk the same source
-/// files.
-///
-/// Order preservation matters: `build_diagnostics` and downstream
-/// consumers receive results in the order detection emitted them, which
-/// for many issue types is source-position-aligned. Sort-then-dedup would
-/// silently reorder diagnostics; the `FxHashSet`-backed retain here
-/// keeps the contract intact.
-fn dedup_by_key_preserving_order<T, K, F>(vec: &mut Vec<T>, mut key: F)
-where
-    K: Eq + std::hash::Hash,
-    F: FnMut(&T) -> K,
-{
-    let mut seen: FxHashSet<K> = FxHashSet::default();
-    vec.retain(|item| seen.insert(key(item)));
-}
-
-/// Collapse cross-root duplicates in `target`.
-///
-/// `merge_results` accumulates findings from every project root (the
-/// workspace root plus each sub-package in `find_project_roots`). When two
-/// roots overlap (the most common case is the workspace root and a
-/// sub-package both walking `apps/web/src/foo.ts`), the same finding
-/// appears N times in the merged vec and `build_diagnostics` produces N
-/// stacked diagnostics on the same range. Identity-based dedup here
-/// removes the duplicates without collapsing genuinely distinct findings:
-/// the same export *name* in two different files keeps both entries
-/// because the keys include the file path.
-///
-/// `UnlistedDependency` is the one case that gets a real merge instead of
-/// a plain dedup: two roots typically observe overlapping but non-equal
-/// `imported_from` site lists for the same package, and the union is the
-/// correct combined view (no over- or under-reporting). All other types
-/// are deterministic per (path, position) so plain key-based dedup is
-/// sufficient.
-#[expect(
-    clippy::too_many_lines,
-    reason = "one dedup-by-key block per issue type keeps each rule's identity key local; the line count grows linearly with new issue types and the structure is intentional"
-)]
-fn dedup_results(target: &mut AnalysisResults) {
-    dedup_by_key_preserving_order(&mut target.unused_files, |f| f.file.path.clone());
-    dedup_by_key_preserving_order(&mut target.unused_exports, |e| {
-        (
-            e.export.path.clone(),
-            e.export.export_name.clone(),
-            e.export.line,
-            e.export.col,
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.unused_types, |e| {
-        (
-            e.export.path.clone(),
-            e.export.export_name.clone(),
-            e.export.line,
-            e.export.col,
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.private_type_leaks, |e| {
-        (
-            e.leak.path.clone(),
-            e.leak.export_name.clone(),
-            e.leak.type_name.clone(),
-            e.leak.line,
-            e.leak.col,
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.unused_dependencies, |d| {
-        (d.dep.package_name.clone(), d.dep.path.clone(), d.dep.line)
-    });
-    dedup_by_key_preserving_order(&mut target.unused_dev_dependencies, |d| {
-        (d.dep.package_name.clone(), d.dep.path.clone(), d.dep.line)
-    });
-    dedup_by_key_preserving_order(&mut target.unused_optional_dependencies, |d| {
-        (d.dep.package_name.clone(), d.dep.path.clone(), d.dep.line)
-    });
-    dedup_by_key_preserving_order(&mut target.unused_enum_members, |m| {
-        (
-            m.member.path.clone(),
-            m.member.parent_name.clone(),
-            m.member.member_name.clone(),
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.unused_class_members, |m| {
-        (
-            m.member.path.clone(),
-            m.member.parent_name.clone(),
-            m.member.member_name.clone(),
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.unresolved_imports, |i| {
-        (
-            i.import.path.clone(),
-            i.import.specifier.clone(),
-            i.import.line,
-            i.import.col,
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.duplicate_exports, |d| {
-        let mut locs: Vec<_> = d
-            .export
-            .locations
-            .iter()
-            .map(|l| (l.path.clone(), l.line, l.col))
-            .collect();
-        locs.sort();
-        (d.export.export_name.clone(), locs)
-    });
-    dedup_by_key_preserving_order(&mut target.type_only_dependencies, |d| {
-        (d.dep.package_name.clone(), d.dep.path.clone(), d.dep.line)
-    });
-    dedup_by_key_preserving_order(&mut target.test_only_dependencies, |d| {
-        (d.dep.package_name.clone(), d.dep.path.clone(), d.dep.line)
-    });
-    dedup_by_key_preserving_order(&mut target.circular_dependencies, |c| {
-        let mut files: Vec<_> = c.cycle.files.clone();
-        files.sort();
-        (files, c.cycle.length)
-    });
-    dedup_by_key_preserving_order(&mut target.re_export_cycles, |c| {
-        let mut files: Vec<_> = c.cycle.files.clone();
-        files.sort();
-        let kind = match c.cycle.kind {
-            fallow_core::results::ReExportCycleKind::SelfLoop => 1u8,
-            fallow_core::results::ReExportCycleKind::MultiNode => 0u8,
-        };
-        (kind, files)
-    });
-    dedup_by_key_preserving_order(&mut target.boundary_violations, |v| {
-        (
-            v.violation.from_path.clone(),
-            v.violation.to_path.clone(),
-            v.violation.import_specifier.clone(),
-            v.violation.line,
-            v.violation.col,
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.export_usages, |u| {
-        (u.path.clone(), u.export_name.clone(), u.line, u.col)
-    });
-    dedup_by_key_preserving_order(&mut target.stale_suppressions, |s| {
-        (s.path.clone(), s.line, s.col)
-    });
-    dedup_by_key_preserving_order(&mut target.unused_catalog_entries, |e| {
-        (
-            e.entry.path.clone(),
-            e.entry.catalog_name.clone(),
-            e.entry.entry_name.clone(),
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.empty_catalog_groups, |g| {
-        (g.group.path.clone(), g.group.catalog_name.clone())
-    });
-    dedup_by_key_preserving_order(&mut target.unresolved_catalog_references, |f| {
-        (
-            f.reference.path.clone(),
-            f.reference.line,
-            f.reference.catalog_name.clone(),
-            f.reference.entry_name.clone(),
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.unused_dependency_overrides, |o| {
-        (
-            o.entry.path.clone(),
-            o.entry.source,
-            o.entry.raw_key.clone(),
-        )
-    });
-    dedup_by_key_preserving_order(&mut target.misconfigured_dependency_overrides, |o| {
-        (
-            o.entry.path.clone(),
-            o.entry.source,
-            o.entry.raw_key.clone(),
-        )
-    });
-
-    if target.unlisted_dependencies.len() > 1 {
-        let mut merged: FxHashMap<String, fallow_core::results::UnlistedDependencyFinding> =
-            FxHashMap::default();
-        for dep in target.unlisted_dependencies.drain(..) {
-            merged
-                .entry(dep.dep.package_name.clone())
-                .and_modify(|existing| {
-                    existing
-                        .dep
-                        .imported_from
-                        .extend(dep.dep.imported_from.clone());
-                })
-                .or_insert(dep);
-        }
-        target.unlisted_dependencies = merged.into_values().collect();
-        for dep in &mut target.unlisted_dependencies {
-            dedup_by_key_preserving_order(&mut dep.dep.imported_from, |s| {
-                (s.path.clone(), s.line, s.col)
-            });
-        }
-        target
-            .unlisted_dependencies
-            .sort_by(|a, b| a.dep.package_name.cmp(&b.dep.package_name));
-    }
-}
-
-/// Merge analysis results from a sub-project into the accumulated results.
+/// Fold the analysis results from the single project root into the accumulator.
 ///
 /// Thin wrapper over [`AnalysisResults::merge_into`], the single
-/// field-exhaustive union (issue #444). Cross-root duplicates this
-/// `.extend()`-based union accumulates are collapsed afterwards by
-/// [`dedup_results`].
+/// field-exhaustive union (issue #444). The LSP analyzes one root per run
+/// (see [`find_project_roots`]), so this folds exactly one result; the wrapper
+/// stays because [`AnalysisResults::merge_into`] is the field-drift guard that
+/// `merge_results_covers_all_fields` pins against new `AnalysisResults` fields.
 fn merge_results(target: &mut AnalysisResults, source: AnalysisResults) {
     target.merge_into(source);
 }
 
-/// Merge duplication reports from a sub-project into the accumulated report.
+/// Fold the duplication report from the single project root into the
+/// accumulator. The LSP analyzes one root per run (see [`find_project_roots`]),
+/// so this folds exactly one report.
 fn merge_duplication(target: &mut DuplicationReport, source: DuplicationReport) {
     target.clone_groups.extend(source.clone_groups);
     target.clone_families.extend(source.clone_families);
@@ -1813,6 +1605,49 @@ mod tests {
         );
 
         assert_eq!(filtered_duplication.stats.clone_groups, 0);
+    }
+
+    #[test]
+    fn find_project_roots_returns_only_workspace_root() {
+        // A monorepo with two workspace packages must still yield exactly one
+        // analysis root: the workspace root. The single root pass already walks
+        // the whole tree and is workspace-aware, so the LSP no longer re-runs
+        // the pipeline per sub-package (issue #971).
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        std::fs::write(
+            root.join("pnpm-workspace.yaml"),
+            "packages:\n  - 'packages/*'\n",
+        )
+        .expect("write pnpm-workspace");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"monorepo","private":true,"workspaces":["packages/*"]}"#,
+        )
+        .expect("write root package");
+        for pkg in ["a", "b"] {
+            let pkg_dir = root.join("packages").join(pkg);
+            std::fs::create_dir_all(&pkg_dir).expect("create package dir");
+            std::fs::write(
+                pkg_dir.join("package.json"),
+                format!(r#"{{"name":"@monorepo/{pkg}","main":"index.ts"}}"#),
+            )
+            .expect("write package");
+        }
+
+        // Sanity: the fixture really does have discoverable workspace packages,
+        // so a single returned root proves the per-package loop is gone (not
+        // that discovery found nothing).
+        assert_eq!(
+            fallow_config::discover_workspaces(root).len(),
+            2,
+            "fixture should expose two workspace packages"
+        );
+
+        let roots = find_project_roots(root);
+        assert_eq!(roots.len(), 1, "LSP analyzes exactly one root per run");
+        let expected = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        assert_eq!(roots[0], expected, "the single root is the workspace root");
     }
 
     #[test]
@@ -2221,152 +2056,6 @@ mod tests {
         assert_eq!(target.unused_files.len(), 1);
     }
 
-    #[test]
-    fn dedup_results_collapses_cross_root_unused_files() {
-        let mut results = AnalysisResults::default();
-        results
-            .unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: "/repo/apps/web/src/foo.ts".into(),
-            }));
-        results
-            .unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: "/repo/apps/web/src/foo.ts".into(),
-            }));
-        results
-            .unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: "/repo/apps/api/src/bar.ts".into(),
-            }));
-
-        dedup_results(&mut results);
-
-        assert_eq!(results.unused_files.len(), 2);
-    }
-
-    #[test]
-    fn dedup_results_keeps_same_export_name_in_distinct_files() {
-        let mut results = AnalysisResults::default();
-        results
-            .unused_exports
-            .push(UnusedExportFinding::with_actions(UnusedExport {
-                path: "/a.ts".into(),
-                export_name: "helper".to_string(),
-                is_type_only: false,
-                line: 1,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-            }));
-        results
-            .unused_exports
-            .push(UnusedExportFinding::with_actions(UnusedExport {
-                path: "/b.ts".into(),
-                export_name: "helper".to_string(),
-                is_type_only: false,
-                line: 1,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-            }));
-        results
-            .unused_exports
-            .push(UnusedExportFinding::with_actions(UnusedExport {
-                path: "/a.ts".into(),
-                export_name: "helper".to_string(),
-                is_type_only: false,
-                line: 1,
-                col: 0,
-                span_start: 0,
-                is_re_export: false,
-            }));
-
-        dedup_results(&mut results);
-
-        assert_eq!(results.unused_exports.len(), 2);
-    }
-
-    #[test]
-    fn dedup_results_keeps_distinct_circular_dependencies() {
-        let mut results = AnalysisResults::default();
-        let cycle_ab = CircularDependencyFinding::with_actions(CircularDependency {
-            files: vec!["/a.ts".into(), "/b.ts".into()],
-            length: 2,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
-        let cycle_cd = CircularDependencyFinding::with_actions(CircularDependency {
-            files: vec!["/c.ts".into(), "/d.ts".into()],
-            length: 2,
-            line: 5,
-            col: 0,
-            is_cross_package: false,
-        });
-        let cycle_ab_reversed = CircularDependencyFinding::with_actions(CircularDependency {
-            files: vec!["/b.ts".into(), "/a.ts".into()],
-            length: 2,
-            line: 1,
-            col: 0,
-            is_cross_package: false,
-        });
-        results
-            .circular_dependencies
-            .extend([cycle_ab, cycle_cd, cycle_ab_reversed]);
-
-        dedup_results(&mut results);
-
-        assert_eq!(results.circular_dependencies.len(), 2);
-    }
-
-    #[test]
-    fn dedup_results_merges_unlisted_dependency_imported_from() {
-        let mut results = AnalysisResults::default();
-        results
-            .unlisted_dependencies
-            .push(UnlistedDependencyFinding::with_actions(
-                UnlistedDependency {
-                    package_name: "lodash".to_string(),
-                    imported_from: vec![
-                        fallow_core::results::ImportSite {
-                            path: "/repo/packages/a/x.ts".into(),
-                            line: 1,
-                            col: 0,
-                        },
-                        fallow_core::results::ImportSite {
-                            path: "/repo/packages/b/y.ts".into(),
-                            line: 2,
-                            col: 0,
-                        },
-                    ],
-                },
-            ));
-        results
-            .unlisted_dependencies
-            .push(UnlistedDependencyFinding::with_actions(
-                UnlistedDependency {
-                    package_name: "lodash".to_string(),
-                    imported_from: vec![fallow_core::results::ImportSite {
-                        path: "/repo/packages/a/x.ts".into(),
-                        line: 1,
-                        col: 0,
-                    }],
-                },
-            ));
-
-        dedup_results(&mut results);
-
-        assert_eq!(results.unlisted_dependencies.len(), 1);
-        let merged = &results.unlisted_dependencies[0];
-        assert_eq!(merged.dep.package_name, "lodash");
-        assert_eq!(
-            merged.dep.imported_from.len(),
-            2,
-            "imported_from should be the union of import sites, not duplicated"
-        );
-    }
-
     fn make_diagnostic() -> Diagnostic {
         Diagnostic {
             range: Range {
@@ -2456,35 +2145,6 @@ mod tests {
             Some(serde_json::Value::String("custom-token".to_string())),
             "non-object data must be preserved verbatim"
         );
-    }
-
-    #[test]
-    fn dedup_results_collapses_cross_root_dependencies() {
-        let mut results = AnalysisResults::default();
-        for _ in 0..2 {
-            results
-                .unused_dependencies
-                .push(UnusedDependencyFinding::with_actions(UnusedDependency {
-                    package_name: "lodash".to_string(),
-                    location: fallow_core::results::DependencyLocation::Dependencies,
-                    path: "/repo/package.json".into(),
-                    line: 5,
-                    used_in_workspaces: Vec::new(),
-                }));
-        }
-        results
-            .unused_dependencies
-            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
-                package_name: "lodash".to_string(),
-                location: fallow_core::results::DependencyLocation::Dependencies,
-                path: "/repo/packages/web/package.json".into(),
-                line: 5,
-                used_in_workspaces: Vec::new(),
-            }));
-
-        dedup_results(&mut results);
-
-        assert_eq!(results.unused_dependencies.len(), 2);
     }
 
     #[test]
