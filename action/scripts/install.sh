@@ -58,19 +58,28 @@ project_spec="$(project_fallow_spec "$root" 2>/dev/null || true)"
 project_spec="$(trim "$project_spec")"
 install_spec=""
 
+# version_source records WHERE the resolved CLI version came from, so a later
+# verification failure can name the knob to turn (the CLI version is distinct
+# from the Action ref, the exact confusion behind #944).
+version_source=""
+
 if [ -n "$requested_version" ]; then
   install_spec="$requested_version"
+  version_source="the action 'version' input"
   echo "::notice::Using fallow version from action input: ${install_spec}"
 elif [ -n "$project_spec" ]; then
   if is_safe_version_spec "$project_spec"; then
     install_spec="$project_spec"
+    version_source="the fallow dependency in ${root}/package.json"
     echo "::notice::Using fallow version from ${root}/package.json: ${install_spec}"
   else
     echo "::warning::Ignoring unsupported fallow package.json spec '${project_spec}'. Use a semver version or range, or set the action 'version' input explicitly."
     install_spec="latest"
+    version_source="the latest published release"
   fi
 else
   install_spec="latest"
+  version_source="the latest published release"
 fi
 
 if ! is_safe_version_spec "$install_spec"; then
@@ -104,7 +113,17 @@ if [ ! -f "$verify_script" ]; then
   exit 1
 fi
 
-ACTION_VERIFY_SCRIPT="$verify_script" FALLOW_VERIFY_RESOLVE_FROM="$global_fallow_root" node <<'NODE'
+# The actually-installed CLI version, read from the global package manifest
+# rather than `fallow --version` (which re-runs the lazy verify and would fail
+# again on the same binary). Best-effort; used only for the failure context.
+# Strip CR/LF before this value lands in a `::error::` workflow command: it is
+# read from a manifest that may be tampered with (this context only renders on a
+# verification FAILURE), and an embedded newline could otherwise inject a
+# spoofed workflow command. `|| true` keeps the pipeline from tripping set -e.
+installed_fallow_version="$(node -p "require('${global_fallow_root}/package.json').version" 2>/dev/null | tr -d '\r\n' || true)"
+[ -n "$installed_fallow_version" ] || installed_fallow_version="unknown"
+
+if ! ACTION_VERIFY_SCRIPT="$verify_script" FALLOW_VERIFY_RESOLVE_FROM="$global_fallow_root" node <<'NODE'
 (async () => {
   const { verifyInstalled, SKIP_ENV } = require(process.env.ACTION_VERIFY_SCRIPT);
   const result = await verifyInstalled({ resolveFrom: process.env.FALLOW_VERIFY_RESOLVE_FROM });
@@ -123,6 +142,15 @@ ACTION_VERIFY_SCRIPT="$verify_script" FALLOW_VERIFY_RESOLVE_FROM="$global_fallow
   process.exit(1);
 });
 NODE
+then
+  # The verifier above printed the version-aware fix (bump the pin for a
+  # pre-signing version, or treat a missing signature on a signed-era package
+  # as tampering). Add the locate-the-knob context: which version was installed
+  # and from where, since the Action ref is a different knob from the CLI
+  # version. Neutral wording so it stays correct for both failure causes.
+  echo "::error::Verification ran against fallow ${installed_fallow_version}, installed from ${version_source}. The Action ref (${GITHUB_ACTION_REF:-see your workflow}) selects the Action code, not the CLI version. Apply the recommended fix in the verification error above."
+  exit 1
+fi
 
 installed_version="$(fallow --version 2>/dev/null || echo 'unknown version')"
 echo "Installed fallow ${installed_version}"

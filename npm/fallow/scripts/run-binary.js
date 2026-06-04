@@ -14,6 +14,7 @@ const fs = require("node:fs");
 
 const { getPlatformPackage } = require("./platform-package");
 const { ensureVerified } = require("./lazy-verify");
+const { isPreSigningVersion } = require("./verify-binary");
 
 function resolvePlatformPackageName() {
   if (process.platform !== "linux") {
@@ -37,7 +38,26 @@ function isVersionQuery(argv) {
   return tail[0] === "--version" || tail[0] === "-V" || tail[0] === "-v";
 }
 
-function describeVerified(result) {
+// Signing status of the resolved CLI version, appended to the `verified:` line.
+// Most informative on the `skipped` path: a fleet running with
+// FALLOW_SKIP_BINARY_VERIFY can see whether the pinned version is even signable
+// (pre-signing versions predate the 2.77.0 epoch and have no signature to
+// verify). Best-effort: an unknown/unreadable version yields no annotation.
+function describeSigning(version) {
+  if (typeof version !== "string" || version.length === 0) {
+    return "";
+  }
+  return isPreSigningVersion(version)
+    ? `; fallow ${version} unsigned (predates 2.77.0)`
+    : `; fallow ${version} signed`;
+}
+
+function describeVerified(result, version) {
+  const status = describeVerifiedStatus(result);
+  return `${status}${describeSigning(version)}`;
+}
+
+function describeVerifiedStatus(result) {
   if (result.skipped) {
     return `verified: skipped (${result.reason})`;
   }
@@ -81,9 +101,21 @@ function printVerifyError(verifyResult) {
   );
 }
 
-function writeVerifiedLineIfVersionQuery(verifyResult) {
+function writeVerifiedLineIfVersionQuery(verifyResult, version) {
   if (isVersionQuery(process.argv)) {
-    process.stdout.write(`${describeVerified(verifyResult)}\n`);
+    process.stdout.write(`${describeVerified(verifyResult, version)}\n`);
+  }
+}
+
+// Read the resolved CLI version from the platform package manifest (its version
+// is released in lockstep with the CLI). Best-effort: never throws, so a
+// missing/garbled manifest just omits the signing annotation on --version.
+function readResolvedVersion(manifestPath) {
+  try {
+    const version = JSON.parse(fs.readFileSync(manifestPath, "utf8")).version;
+    return typeof version === "string" ? version : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -107,6 +139,7 @@ function guardBrokenStdout() {
 function runBinary(binaryBaseName) {
   guardBrokenStdout();
   const { pkg, manifestPath, platformPkgDir } = resolvePlatformPaths();
+  const resolvedVersion = readResolvedVersion(manifestPath);
 
   const binaryName = process.platform === "win32" ? `${binaryBaseName}.exe` : binaryBaseName;
   const binaryPath = path.join(platformPkgDir, binaryName);
@@ -128,11 +161,11 @@ function runBinary(binaryBaseName) {
     if (e.status === undefined) throw e;
     // Child has already written its --version line via inherited stdio;
     // append the verified line here only on a clean exit.
-    if (e.status === 0) writeVerifiedLineIfVersionQuery(verifyResult);
+    if (e.status === 0) writeVerifiedLineIfVersionQuery(verifyResult, resolvedVersion);
     process.exit(e.status);
   }
 
-  writeVerifiedLineIfVersionQuery(verifyResult);
+  writeVerifiedLineIfVersionQuery(verifyResult, resolvedVersion);
 }
 
 module.exports = {

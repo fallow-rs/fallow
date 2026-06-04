@@ -55,3 +55,19 @@ test("isVersionQuery recognizes --version, -V, and -v as the first argument", ()
     "-v only counts as the first arg",
   );
 });
+
+test("describeVerified annotates the resolved version's signing status", () => {
+  const { describeVerified } = require(RUN_BINARY);
+  const ok = { ok: true, sentinelPath: "/c/s" };
+  // Signed-era version: appended as `signed`.
+  assert.match(describeVerified(ok, "2.83.0"), /verified: yes \(sentinel \/c\/s\); fallow 2\.83\.0 signed/);
+  // Pre-signing version: the fleet pre-flight signal, most useful on skip.
+  const skipped = { skipped: true, reason: "FALLOW_SKIP_BINARY_VERIFY is set" };
+  assert.match(
+    describeVerified(skipped, "2.76.0"),
+    /verified: skipped \(.*\); fallow 2\.76\.0 unsigned \(predates 2\.77\.0\)/,
+  );
+  // Unknown / unreadable version: no annotation, version line stays intact.
+  assert.equal(describeVerified(ok, undefined), "verified: yes (sentinel /c/s)");
+  assert.equal(describeVerified(ok, ""), "verified: yes (sentinel /c/s)");
+});
