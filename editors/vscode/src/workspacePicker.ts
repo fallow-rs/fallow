@@ -13,18 +13,14 @@ import {
 import type { WorkspaceQuickPickItem } from "./workspacePicker-utils.js";
 import type { WorkspacesOutput } from "./workspace-types.js";
 
-export {
-  CLEAR_WORKSPACE_SCOPE,
-  parseWorkspacesOutput,
-  resolveWorkspaceScope,
-} from "./workspacePicker-utils.js";
+export { parseWorkspacesOutput } from "./workspacePicker-utils.js";
 
 /**
  * `workspaceState` key holding the picker's per-folder workspace-scope
  * override (a package name). Absent / empty = fall back to the
  * `fallow.workspace` setting, then to whole-project.
  */
-export const WORKSPACE_STATE_KEY = "fallow.workspaceScope";
+const WORKSPACE_STATE_KEY = "fallow.workspaceScope";
 
 let pickerItem: vscode.StatusBarItem | null = null;
 
@@ -37,7 +33,7 @@ let pickerItem: vscode.StatusBarItem | null = null;
 const workspacesCache = new Map<string, WorkspacesOutput>();
 
 /** Read the persisted per-folder override (empty string when unset). */
-export const getWorkspaceStateOverride = (context: vscode.ExtensionContext): string =>
+const getWorkspaceStateOverride = (context: vscode.ExtensionContext): string =>
   context.workspaceState.get<string>(WORKSPACE_STATE_KEY, CLEAR_WORKSPACE_SCOPE);
 
 /**

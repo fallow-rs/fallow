@@ -8,6 +8,10 @@
   "ignorePatterns": [
     "test/integration/fixtures/**"
   ],
+  "ignoreUnresolvedImports": [
+    "./generated/output-contract.js",
+    "../src/generated/output-contract.js"
+  ],
   "ignoreDependencies": ["@vscode/vsce"],
   "ignoreUnresolvedImports": [
     "./generated/output-contract.js",
