@@ -3,7 +3,12 @@
 import * as vscode from "vscode";
 import { countCheckIssues } from "./analysis-utils.js";
 import { startClient, stopClient, restartClient } from "./client.js";
-import { getHealthEnabled, getSecurityEnabled, onConfigChange } from "./config.js";
+import {
+  getHealthEnabled,
+  getSecurityEnabled,
+  getLicenseRefreshOnStartup,
+  onConfigChange,
+} from "./config.js";
 import { runAnalysis, runFix, runHealthAnalysis, runSecurityAnalysis } from "./commands.js";
 import {
   HEALTH_CONFIG_KEYS,
@@ -13,6 +18,15 @@ import {
 } from "./configKeys.js";
 import { countSecurityFindings } from "./security-utils.js";
 import { SecurityTreeProvider } from "./securityTreeView.js";
+import {
+  activateLicenseCommand,
+  createLicenseStatusBar,
+  deactivateLicenseCommand,
+  disposeLicenseStatusBar,
+  licenseStatusCommand,
+  refreshLicenseCommand,
+  refreshLicenseStatus,
+} from "./license.js";
 import { DiagnosticFilter } from "./diagnosticFilter.js";
 import { registerDiagnosticMuteUi } from "./diagnosticMute.js";
 import { HealthTreeProvider } from "./healthTreeView.js";
@@ -55,6 +69,15 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 
   const statusBar = createStatusBar();
   context.subscriptions.push(statusBar);
+
+  // License indicator: a second status-bar item, created only when enabled
+  // (`fallow.license.showStatusBar`). Decoupled from the analysis path, so it
+  // adds no latency to sidebar reveal or `runAnalysis` (#902).
+  const licenseStatusBar = createLicenseStatusBar();
+  if (licenseStatusBar) {
+    context.subscriptions.push(licenseStatusBar);
+  }
+  context.subscriptions.push({ dispose: () => disposeLicenseStatusBar() });
 
   const diagnosticFilter = new DiagnosticFilter(context.workspaceState);
   context.subscriptions.push({ dispose: () => diagnosticFilter.dispose() });
@@ -353,6 +376,29 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     }),
   );
 
+  // License management commands (activate / status / refresh / deactivate).
+  // All are one-shot CLI invocations; none touch the analysis path.
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.license.activate", () =>
+      activateLicenseCommand(context, outputChannel),
+    ),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.license.status", () =>
+      licenseStatusCommand(context, outputChannel),
+    ),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.license.refresh", () =>
+      refreshLicenseCommand(context, outputChannel),
+    ),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.license.deactivate", () =>
+      deactivateLicenseCommand(context, outputChannel),
+    ),
+  );
+
   // Fallback command for Code Lens items with 0 references (display-only)
   context.subscriptions.push(vscode.commands.registerCommand("fallow.noop", () => {}));
 
@@ -430,6 +476,13 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     context.subscriptions.push(notificationDisposable);
   }
 
+  // Opt-in license probe on startup (`fallow.license.refreshOnStartup`,
+  // default false). Fire-and-forget so it never blocks activation or sidebar
+  // reveal (#902); the indicator updates asynchronously when it resolves.
+  if (licenseStatusBar && getLicenseRefreshOnStartup()) {
+    void refreshLicenseStatus(context, outputChannel);
+  }
+
   // Show walkthrough on first install
   const walkthroughShown = context.globalState.get<boolean>("fallow.walkthroughShown");
   if (!walkthroughShown) {
@@ -450,5 +503,6 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 
 export const deactivate = async (): Promise<void> => {
   disposeStatusBar();
+  disposeLicenseStatusBar();
   await stopClient();
 };

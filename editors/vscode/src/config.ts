@@ -118,6 +118,12 @@ export const getTraceLevel = (): TraceLevel => getConfig().get<TraceLevel>("trac
 export const getSecurityEnabled = (): boolean =>
   getConfig().get<boolean>("security.enabled", false);
 
+export const getLicenseShowStatusBar = (): boolean =>
+  getConfig().get<boolean>("license.showStatusBar", true);
+
+export const getLicenseRefreshOnStartup = (): boolean =>
+  getConfig().get<boolean>("license.refreshOnStartup", false);
+
 export const onConfigChange = (
   callback: (e: vscode.ConfigurationChangeEvent) => void,
 ): vscode.Disposable =>

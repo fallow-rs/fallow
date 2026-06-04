@@ -52,6 +52,7 @@ const pkg = JSON.parse(
   readFileSync(resolve(__dirname, "../package.json"), "utf8"),
 ) as ExtensionPackage;
 const configKeysSource = readFileSync(resolve(__dirname, "../src/configKeys.ts"), "utf8");
+const extensionSource = readFileSync(resolve(__dirname, "../src/extension.ts"), "utf8");
 
 const command = (id: string): CommandContribution | undefined =>
   pkg.contributes.commands.find((entry) => entry.command === id);
@@ -204,5 +205,34 @@ describe("package.json security candidates contributions", () => {
         expect(negated, `unframed security claim: ${value}`).toBe(true);
       }
     }
+  });
+});
+
+describe("package.json license commands", () => {
+  it("contributes the four license commands and registers each in extension.ts", () => {
+    for (const id of [
+      "fallow.license.activate",
+      "fallow.license.status",
+      "fallow.license.refresh",
+      "fallow.license.deactivate",
+    ]) {
+      expect(command(id)?.title).toMatch(/^Fallow: /);
+      expect(extensionSource).toContain(`registerCommand("${id}"`);
+    }
+  });
+
+  it("documents both opt-out / opt-in license settings", () => {
+    const properties = pkg.contributes.configuration.properties;
+    expect(properties["fallow.license.showStatusBar"]?.description).toBeTruthy();
+    expect(properties["fallow.license.refreshOnStartup"]?.description).toBeTruthy();
+  });
+
+  it("keeps the startup probe off by default (does not shell out on activation)", () => {
+    const properties = pkg.contributes.configuration.properties as Record<
+      string,
+      { readonly default?: unknown }
+    >;
+    expect(properties["fallow.license.refreshOnStartup"]?.default).toBe(false);
+    expect(properties["fallow.license.showStatusBar"]?.default).toBe(true);
   });
 });

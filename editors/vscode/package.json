@@ -138,6 +138,28 @@
       {
         "command": "fallow.muteDiagnosticCategory",
         "title": "Fallow: Mute Diagnostic Category"
+      },
+      {
+        "command": "fallow.license.activate",
+        "title": "Fallow: Activate License",
+        "category": "Fallow",
+        "icon": "$(key)"
+      },
+      {
+        "command": "fallow.license.status",
+        "title": "Fallow: Show License Status",
+        "category": "Fallow"
+      },
+      {
+        "command": "fallow.license.refresh",
+        "title": "Fallow: Refresh License",
+        "category": "Fallow",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "fallow.license.deactivate",
+        "title": "Fallow: Deactivate License",
+        "category": "Fallow"
       }
     ],
     "configuration": {
@@ -355,6 +377,16 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Surface local **security candidates** (`client-server-leak`, the tainted-sink CWE catalogue) from `fallow security` in the Security Candidates sidebar view. Off by default. Findings are UNVERIFIED candidates for you or an AI agent to verify, never confirmed vulnerabilities. Enabling this runs a separate `fallow security` analysis only when the Security Candidates view is opened, so it does not affect the main sidebar's speed."
+        },
+        "fallow.license.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a Fallow license indicator in the status bar. Disable to remove the indicator and skip the license status probe on activation."
+        },
+        "fallow.license.refreshOnStartup": {
+          "type": "boolean",
+          "default": false,
+          "description": "Probe license status once when the extension activates. Off by default so the editor never shells out to fallow on startup unless you opt in; the indicator otherwise updates only when you run a Fallow license command."
         }
       }
     },
@@ -413,6 +445,21 @@
           "command": "fallow.analyzeSecurity",
           "when": "view == fallow.security && fallow.hasAnalyzedSecurity",
           "group": "navigation"
+        },
+        {
+          "command": "fallow.license.activate",
+          "when": "view == fallow.deadCode",
+          "group": "license@1"
+        },
+        {
+          "command": "fallow.license.status",
+          "when": "view == fallow.deadCode",
+          "group": "license@2"
+        },
+        {
+          "command": "fallow.license.refresh",
+          "when": "view == fallow.deadCode",
+          "group": "license@3"
         }
       ],
       "commandPalette": [

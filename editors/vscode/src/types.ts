@@ -121,3 +121,11 @@ export type { DuplicationMode, IssueTypeConfig, TraceLevel } from "./settings.js
 export type { IssueCategory } from "./labels.js";
 export { ISSUE_CATEGORY_LABELS } from "./labels.js";
 export type { FallowFixResult, FixAction } from "./fix-types.js";
+export type {
+  LicenseActionResult,
+  LicenseErrorJson,
+  LicenseKind,
+  LicenseParseResult,
+  LicenseState,
+  LicenseStatusJson,
+} from "./license-types.js";
