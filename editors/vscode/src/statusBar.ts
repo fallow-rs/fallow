@@ -25,7 +25,10 @@ let healthPart: string | null = null;
 
 const liveChangedSince = (): string | null => getChangedSince() || null;
 
-const healthSuffix = (): string => (healthPart ? ` | health ${healthPart}` : "");
+// Use `health:` (colon) so the score binds visually to its label and does not
+// read as another issue/duplication count in the ` | `-joined segment list
+// (e.g. `5 issues | 2.3% duplication | health: B (82)`) (#902).
+const healthSuffix = (): string => (healthPart ? ` | health: ${healthPart}` : "");
 
 export const createStatusBar = (): vscode.StatusBarItem => {
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);

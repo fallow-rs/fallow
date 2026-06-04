@@ -222,8 +222,15 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 
   // Lazy, opt-out health spawn. Separate from the combined run so the
   // latency-critical sidebar is never coupled to complexity scoring or the
-  // git-churn hotspot walk. Returns false on failure so the latch can reset and
-  // a later reveal retries.
+  // git-churn hotspot walk.
+  //
+  // Returns whether the run COMPLETED, not whether it produced data. A null
+  // report from a non-retryable outcome (no workspace, empty output, older CLI)
+  // still counts as completed, so the latch holds and a re-reveal does not
+  // re-spawn or repeat the no-workspace / update-CLI toast (#902). Only a
+  // genuine transient failure (rethrown by runHealthAnalysis) returns false so
+  // the caller resets the latch and a later reveal retries. Mirrors Security's
+  // unconditional-true completion contract.
   const triggerHealthAnalysis = async (): Promise<boolean> => {
     if (!getHealthEnabled()) {
       lastHealthResult = null;
@@ -236,7 +243,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       lastHealthResult = report;
       healthProvider.update(report);
       updateStatusBarHealth(report);
-      return report !== null;
+      return true;
     } catch {
       return false;
     }

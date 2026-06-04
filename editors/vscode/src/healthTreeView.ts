@@ -5,6 +5,7 @@
 import * as vscode from "vscode";
 import {
   countHealthItems,
+  escapeHealthMarkdown,
   formatHotspotDescription,
   formatScoreLabel,
   gradeIcon,
@@ -95,14 +96,17 @@ const buildScoreTooltip = (report: HealthReport): vscode.MarkdownString => {
     md.appendMarkdown("Project health score (run with `--score`).");
     return md;
   }
-  md.appendMarkdown(
-    `**Health score:** ${score.score.toFixed(1)} (grade ${score.grade.trim() || "?"})\n\n`,
-  );
+  // Round to a whole number so the tooltip header matches the tree row label
+  // (`formatScoreLabel` rounds too); a one-decimal header read inconsistently
+  // next to the rounded row.
+  const roundedScore = Number.isFinite(score.score) ? Math.round(score.score) : 0;
+  const safeGrade = escapeHealthMarkdown(score.grade.trim() || "?");
+  md.appendMarkdown(`**Health score:** ${roundedScore} (grade ${safeGrade})\n\n`);
   const penalties = topPenalties(score.penalties);
   if (penalties.length > 0) {
     md.appendMarkdown("Top penalty contributors:\n\n");
     for (const penalty of penalties) {
-      md.appendMarkdown(`- ${penalty.key}: -${penalty.points.toFixed(1)}\n`);
+      md.appendMarkdown(`- ${escapeHealthMarkdown(penalty.key)}: -${penalty.points.toFixed(1)}\n`);
     }
   } else {
     md.appendMarkdown("No penalties applied.");
@@ -139,7 +143,7 @@ const buildHotspotLeaves = (report: HealthReport): HealthLeafItem[] =>
     const { relative } = resolveFilePath(hotspot.path);
     const tooltip = new vscode.MarkdownString();
     tooltip.appendMarkdown(
-      `**${relative}**\n\nChurn x complexity hotspot (score ${hotspot.score.toFixed(1)}, ${hotspot.commits} commit${hotspot.commits === 1 ? "" : "s"}).\n\n_Heuristic candidate, verify before acting._`,
+      `**${escapeHealthMarkdown(relative)}**\n\nChurn x complexity hotspot (score ${hotspot.score.toFixed(1)}, ${hotspot.commits} commit${hotspot.commits === 1 ? "" : "s"}).\n\n_Heuristic candidate, verify before acting._`,
     );
     return new HealthLeafItem(relative, "git-commit", {
       description: formatHotspotDescription(hotspot.score, hotspot.commits),
@@ -153,7 +157,7 @@ const buildTargetLeaves = (report: HealthReport): HealthLeafItem[] =>
     const { relative } = resolveFilePath(target.path);
     const tooltip = new vscode.MarkdownString();
     tooltip.appendMarkdown(
-      `**${target.recommendation}**\n\nEffort: ${target.effort}, Confidence: ${target.confidence}, Priority: ${target.priority.toFixed(0)}\n\n_Heuristic suggestion, verify before acting._`,
+      `**${escapeHealthMarkdown(target.recommendation)}**\n\nEffort: ${escapeHealthMarkdown(target.effort)}, Confidence: ${escapeHealthMarkdown(target.confidence)}, Priority: ${target.priority.toFixed(0)}\n\n_Heuristic suggestion, verify before acting._`,
     );
     return new HealthLeafItem(target.recommendation, "tools", {
       description: relative,

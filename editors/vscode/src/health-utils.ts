@@ -62,6 +62,37 @@ export const buildHealthArgs = (options: HealthArgsOptions): string[] => {
 };
 
 /**
+ * Escape text destined for a trusted `MarkdownString` health tooltip. Health
+ * tooltips interpolate user-controlled strings (file paths, finding names,
+ * recommendation text) into bold/list markdown. Those tooltips are trusted
+ * (`appendMarkdown` on a default-trusted `MarkdownString`), so per the global
+ * trusted-markdown rule any user-derived field is escaped to neutralize markdown
+ * control characters (a command-link injection vector). Strips the control
+ * characters that could break out of the bold span or inject a link.
+ */
+export const escapeHealthMarkdown = (raw: string): string =>
+  raw.replace(/[\\`*_{}[\]()#+\-.!|<>]/g, (ch) => `\\${ch}`);
+
+/**
+ * Detect a clap "unrecognized subcommand" error for `health`, raised when the
+ * resolved CLI predates the `fallow health` command. Lets the caller degrade to
+ * a one-line "update fallow" warning instead of surfacing a raw stderr blob and
+ * re-spawning on every Health-view reveal. Handles modern clap (`unrecognized
+ * subcommand 'health'`) and the legacy phrasing (`The subcommand 'health'
+ * wasn't recognized`). Unrelated errors return false so genuine failures stay
+ * loud. Mirrors {@link parseUnknownSubcommand} in `security-utils.ts`.
+ */
+export const parseUnknownHealthSubcommand = (message: string): boolean => {
+  if (/unrecognized subcommand '?health'?/i.test(message)) {
+    return true;
+  }
+  if (/subcommand '?health'? (?:wasn't|was not) recognized/i.test(message)) {
+    return true;
+  }
+  return false;
+};
+
+/**
  * Format the score label shown in the Score tree row and status bar, e.g.
  * `B (82)`. The score is rounded to a whole number for a compact, stable
  * display; the grade is taken verbatim from the CLI.
@@ -146,7 +177,14 @@ export interface PenaltyContribution {
   readonly points: number;
 }
 
-/** Human-readable labels for the penalty components shown in the tooltip. */
+/**
+ * Human-readable labels for the penalty components shown in the tooltip. The
+ * key set must stay in lockstep with the `HealthScorePenalties` wire contract
+ * (`crates/cli/src/health_types/scores.rs` via the generated TS interface): a
+ * new penalty field that is not labelled here is silently omitted from the
+ * score tooltip. The parity is guarded by a test in `health-utils.test.ts` that
+ * diffs these keys against the generated `HealthScorePenalties` interface.
+ */
 const PENALTY_LABELS: Record<keyof HealthScorePenalties, string> = {
   dead_files: "Dead files",
   dead_exports: "Dead exports",
@@ -160,6 +198,16 @@ const PENALTY_LABELS: Record<keyof HealthScorePenalties, string> = {
   coupling: "Coupling",
   duplication: "Duplication",
 };
+
+/**
+ * The penalty wire keys this module knows how to label. Exposed so a drift test
+ * can assert it matches the generated `HealthScorePenalties` contract; a Rust
+ * penalty field that flows through codegen but is missing here would otherwise
+ * be silently dropped from the score tooltip.
+ */
+export const recognizedPenaltyKeys: ReadonlyArray<keyof HealthScorePenalties> = Object.keys(
+  PENALTY_LABELS,
+) as (keyof HealthScorePenalties)[];
 
 /**
  * Sorted, non-zero penalty contributors for the score tooltip, highest first.

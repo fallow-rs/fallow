@@ -1,12 +1,17 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildHealthArgs,
   countHealthItems,
+  escapeHealthMarkdown,
   formatHealthStatusPart,
   formatHotspotDescription,
   formatScoreLabel,
   gradeIcon,
   gradeThemeColor,
+  parseUnknownHealthSubcommand,
+  recognizedPenaltyKeys,
   severityIcon,
   topPenalties,
 } from "../src/health-utils.js";
@@ -197,5 +202,68 @@ describe("formatHotspotDescription", () => {
   it("pluralizes commits and rounds the score", () => {
     expect(formatHotspotDescription(12.6, 1)).toBe("score 13 · 1 commit");
     expect(formatHotspotDescription(4, 7)).toBe("score 4 · 7 commits");
+  });
+});
+
+describe("escapeHealthMarkdown", () => {
+  it("escapes markdown control characters that could break out of a tooltip", () => {
+    expect(escapeHealthMarkdown("a*b_c`d")).toBe("a\\*b\\_c\\`d");
+    expect(escapeHealthMarkdown("[link](http://x)")).toBe("\\[link\\]\\(http://x\\)");
+    expect(escapeHealthMarkdown("a < b > c | d")).toBe("a \\< b \\> c \\| d");
+  });
+
+  it("leaves plain text untouched", () => {
+    expect(escapeHealthMarkdown("src/foo/bar.ts")).toBe("src/foo/bar\\.ts");
+    expect(escapeHealthMarkdown("plain name")).toBe("plain name");
+  });
+});
+
+describe("parseUnknownHealthSubcommand", () => {
+  it("matches modern and legacy clap phrasings for an unknown `health` subcommand", () => {
+    expect(parseUnknownHealthSubcommand("error: unrecognized subcommand 'health'")).toBe(true);
+    expect(parseUnknownHealthSubcommand("unrecognized subcommand health")).toBe(true);
+    expect(parseUnknownHealthSubcommand("The subcommand 'health' wasn't recognized")).toBe(true);
+    expect(parseUnknownHealthSubcommand("subcommand health was not recognized")).toBe(true);
+  });
+
+  it("returns false for unrelated errors so genuine failures stay loud", () => {
+    expect(parseUnknownHealthSubcommand("fallow exited with code 101")).toBe(false);
+    expect(parseUnknownHealthSubcommand("unrecognized subcommand 'security'")).toBe(false);
+    expect(parseUnknownHealthSubcommand("")).toBe(false);
+  });
+});
+
+describe("penalty label parity with the HealthScorePenalties wire contract", () => {
+  // Parse the field names of the generated HealthScorePenalties interface and
+  // assert this module labels every one of them. A new Rust penalty field that
+  // flows through codegen but is not added to PENALTY_LABELS would otherwise be
+  // silently omitted from the score tooltip.
+  const contract = readFileSync(
+    resolve(__dirname, "../src/generated/output-contract.d.ts"),
+    "utf8",
+  );
+  const interfaceMatch = contract.match(
+    /export interface HealthScorePenalties \{([\s\S]*?)\n\}/,
+  );
+
+  it("locates the generated HealthScorePenalties interface", () => {
+    expect(interfaceMatch).not.toBeNull();
+  });
+
+  it("labels every penalty key emitted on the wire (no silent omissions)", () => {
+    const body = interfaceMatch?.[1] ?? "";
+    const wireKeys = [...body.matchAll(/^\s*([a-z0-9_]+)\??:/gim)].map((m) => m[1]);
+    expect(wireKeys.length).toBeGreaterThan(0);
+
+    const labelled = new Set<string>(recognizedPenaltyKeys);
+    const unlabelled = wireKeys.filter((key) => !labelled.has(key));
+    expect(unlabelled, `unlabelled penalty wire keys: ${unlabelled.join(", ")}`).toEqual([]);
+  });
+
+  it("does not carry stale labels for keys no longer on the wire", () => {
+    const body = interfaceMatch?.[1] ?? "";
+    const wireKeys = new Set([...body.matchAll(/^\s*([a-z0-9_]+)\??:/gim)].map((m) => m[1]));
+    const stale = recognizedPenaltyKeys.filter((key) => !wireKeys.has(key));
+    expect(stale, `stale penalty labels: ${stale.join(", ")}`).toEqual([]);
   });
 });

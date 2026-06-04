@@ -49,6 +49,7 @@ vi.mock("../src/config.js", () => ({
   getLspPath: () => mockLspPath,
   getAutoDownload: () => mockAutoDownload,
   getProduction: () => false,
+  getAuditGate: () => "new-only",
   getDuplicationCrossLanguageOverride: () => undefined,
   getDuplicationIgnoreImportsOverride: () => undefined,
   getDuplicationMinLinesOverride: () => undefined,
@@ -57,6 +58,8 @@ vi.mock("../src/config.js", () => ({
   getDuplicationModeOverride: () => undefined,
   getDuplicationSkipLocalOverride: () => undefined,
   getDuplicationThresholdOverride: () => undefined,
+  getHealthHotspots: () => true,
+  getHealthTopFindings: () => 20,
   getIssueTypes: () => ({}),
   getChangedSince: () => "",
   getResolvedConfigPath: () => "",
@@ -75,8 +78,15 @@ vi.mock("../src/download.js", () => ({
   getExtensionVersion: () => mockExtensionVersion,
 }));
 
+import { window as mockWindow } from "vscode";
 import { downloadCliBinary, getInstalledCliPath } from "../src/download.js";
-import { findCliBinary, resolveCliBinary, resolveCliForRun } from "../src/commands.js";
+import {
+  findCliBinary,
+  resolveCliBinary,
+  resolveCliForRun,
+  runHealthAnalysis,
+  resetHealthNoWorkspaceWarning,
+} from "../src/commands.js";
 
 const context = {} as unknown as vscode.ExtensionContext;
 
@@ -234,5 +244,35 @@ describe("resolveCliForRun", () => {
       version: null,
     });
     expect(downloadCliBinary).not.toHaveBeenCalled();
+  });
+});
+
+describe("runHealthAnalysis no-workspace gate (#902)", () => {
+  beforeEach(() => {
+    resetHealthNoWorkspaceWarning();
+    vi.clearAllMocks();
+  });
+
+  it("returns null and warns exactly once across repeated reveals with no workspace folder", async () => {
+    // The mocked vscode.workspace.workspaceFolders is undefined, so every call
+    // hits the no-workspace path. The Health view re-spawns on every reveal
+    // until it latches, so the warning must not repeat on each re-reveal.
+    await expect(runHealthAnalysis(context)).resolves.toBeNull();
+    await expect(runHealthAnalysis(context)).resolves.toBeNull();
+    await expect(runHealthAnalysis(context)).resolves.toBeNull();
+
+    expect(mockWindow.showWarningMessage).toHaveBeenCalledTimes(1);
+    expect(mockWindow.showWarningMessage).toHaveBeenCalledWith(
+      "Fallow: no workspace folder open.",
+    );
+  });
+
+  it("warns again after the once-per-session gate is reset (reactivation)", async () => {
+    await runHealthAnalysis(context);
+    expect(mockWindow.showWarningMessage).toHaveBeenCalledTimes(1);
+
+    resetHealthNoWorkspaceWarning();
+    await runHealthAnalysis(context);
+    expect(mockWindow.showWarningMessage).toHaveBeenCalledTimes(2);
   });
 });

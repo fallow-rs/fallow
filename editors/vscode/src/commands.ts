@@ -39,7 +39,7 @@ import {
   getInstalledCliPath,
 } from "./download.js";
 import { buildFixArgs, createFixPreviewItems, resolveFixLocation } from "./fix-utils.js";
-import { buildHealthArgs } from "./health-utils.js";
+import { buildHealthArgs, parseUnknownHealthSubcommand } from "./health-utils.js";
 import { buildSecurityArgs, parseUnknownSubcommand } from "./security-utils.js";
 import {
   cacheWorkspacesOutput,
@@ -661,6 +661,19 @@ export const runFix = async (
 };
 
 /**
+ * Whether the per-session "no workspace folder" warning has already been shown
+ * for the Health view. The Health view re-spawns on every reveal until it
+ * latches a completed run, so without this gate a workspace-less window would
+ * repeat the same toast on every re-reveal (#902).
+ */
+let healthNoWorkspaceWarned = false;
+
+/** Test-only: reset the once-per-session no-workspace gate. */
+export const resetHealthNoWorkspaceWarning = (): void => {
+  healthNoWorkspaceWarned = false;
+};
+
+/**
  * Run a standalone `fallow health` analysis for the Health view. This is a
  * separate spawn from {@link runAnalysis}, fired lazily only when the Health
  * view is first revealed, so it never slows the latency-critical combined run
@@ -669,8 +682,13 @@ export const runFix = async (
  *
  * Reuses the same binary resolution and spawn primitive as the combined run.
  * `execFallow` already tolerates exit 0/1 (health exits 1 when findings exist)
- * and rejects only on signal or other non-zero codes. Returns null on no
- * workspace, empty output, or failure; the caller renders an empty view.
+ * and rejects only on signal or other non-zero codes.
+ *
+ * Returns null for the non-retryable outcomes (no workspace, empty output, or a
+ * resolved CLI that predates `fallow health`), so the caller latches the run as
+ * complete and does not re-spawn or re-toast on the next reveal. A genuine
+ * transient failure (spawn/parse error) is rethrown so the caller can reset its
+ * latch and retry on a later reveal (#902).
  */
 export const runHealthAnalysis = async (
   context: vscode.ExtensionContext,
@@ -678,7 +696,12 @@ export const runHealthAnalysis = async (
 ): Promise<HealthReport | null> => {
   const root = getWorkspaceRoot();
   if (!root) {
-    void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    // Non-retryable until a folder is opened; warn once so re-reveals stay
+    // quiet rather than repeating the toast on every Health-view visibility.
+    if (!healthNoWorkspaceWarned) {
+      healthNoWorkspaceWarned = true;
+      void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    }
     return null;
   }
 
@@ -703,8 +726,25 @@ export const runHealthAnalysis = async (
     return JSON.parse(output) as HealthOutput;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+
+    // An older CLI without the `health` subcommand is a known, non-retryable
+    // state (mirrors runSecurityAnalysis): warn once with an actionable
+    // message and render an empty view, rather than re-spawning on every
+    // reveal or surfacing a raw clap stderr blob as an error.
+    if (parseUnknownHealthSubcommand(message)) {
+      outputChannel?.appendLine(
+        `Fallow: the resolved CLI does not support \`fallow health\`. ${message}`,
+      );
+      void vscode.window.showWarningMessage(
+        "Fallow: update the fallow CLI to analyze project health.",
+      );
+      return null;
+    }
+
+    // Genuine transient failure: surface it and rethrow so the caller resets
+    // its latch and a later reveal retries.
     void vscode.window.showErrorMessage(`Fallow health analysis failed: ${message}`);
-    return null;
+    throw err;
   }
 };
 
