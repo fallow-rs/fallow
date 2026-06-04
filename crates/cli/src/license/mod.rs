@@ -110,6 +110,7 @@ enum LicenseKind {
     Status,
     Activate,
     Refresh,
+    Deactivate,
 }
 
 impl LicenseKind {
@@ -118,6 +119,7 @@ impl LicenseKind {
             Self::Status => "license-status",
             Self::Activate => "license-activate",
             Self::Refresh => "license-refresh",
+            Self::Deactivate => "license-deactivate",
         }
     }
 }
@@ -503,7 +505,8 @@ fn print_status(status: &LicenseStatus) {
 /// contract: `state` is the discriminant a UI keys on, `message` carries the
 /// single human-facing sentence (so consumers never re-derive wording), and the
 /// claim-derived fields (`tier` / `seats` / `features`) are `null` only on the
-/// states that have no claims (`hard_fail` / `missing`). The raw JWT is NEVER
+/// state that has no claims (`missing`). `hard_fail` keeps its claims (so the UI
+/// can still show tier/seats) but blocks paid features. The raw JWT is NEVER
 /// serialized; only the verified, derived claims.
 #[derive(Serialize)]
 struct LicenseStatusJson {
@@ -521,6 +524,11 @@ struct LicenseStatusJson {
     runtime_coverage_enabled: bool,
     license_path: String,
     message: String,
+    /// Present only on the `license-deactivate` envelope: whether a file was
+    /// actually removed. `None` (omitted) on every status / activate / refresh
+    /// envelope, mirroring the optional `removed?` field on the TS interface.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    removed: Option<bool>,
 }
 
 /// Schema version for [`LicenseStatusJson`]. Bump on any breaking field change.
@@ -608,21 +616,45 @@ const fn plural(n: u64) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
-/// Resolve the license path the loader would actually use, honoring the
-/// `$FALLOW_LICENSE_PATH` override and falling back to the canonical default.
-/// `$FALLOW_LICENSE` (inline JWT, no file) is reported as the default path,
-/// since there is no file to point at.
+/// Sentinel reported for the inline-JWT source: `$FALLOW_LICENSE` carries the
+/// JWT string directly, so there is no file path to point at.
+const INLINE_LICENSE_SENTINEL: &str = "<inline FALLOW_LICENSE>";
+
+/// Resolve the license source the loader would actually use, mirroring the
+/// precedence in `fallow_license::load_raw_jwt`: `$FALLOW_LICENSE` (inline JWT)
+/// wins over `$FALLOW_LICENSE_PATH` (file), which wins over the canonical
+/// default path. The inline case has no file to point at, so it reports the
+/// [`INLINE_LICENSE_SENTINEL`] rather than a misleading default file path.
 fn active_license_path() -> String {
-    if let Ok(raw) = std::env::var("FALLOW_LICENSE_PATH") {
-        let trimmed = raw.trim();
-        if !trimmed.is_empty() {
-            return trimmed.to_owned();
-        }
+    resolve_active_license_path(
+        std::env::var("FALLOW_LICENSE").ok().as_deref(),
+        std::env::var("FALLOW_LICENSE_PATH").ok().as_deref(),
+    )
+}
+
+/// Pure core of [`active_license_path`], split out so the env precedence is
+/// unit-testable without mutating process-wide environment (which is racy under
+/// parallel tests and `unsafe` in edition 2024).
+fn resolve_active_license_path(inline: Option<&str>, path: Option<&str>) -> String {
+    if inline.is_some_and(|raw| !raw.trim().is_empty()) {
+        return INLINE_LICENSE_SENTINEL.to_owned();
+    }
+    if let Some(trimmed) = path.map(str::trim).filter(|s| !s.is_empty()) {
+        return trimmed.to_owned();
     }
     default_license_path().display().to_string()
 }
 
-fn print_status_json(status: &LicenseStatus, kind: LicenseKind) {
+/// Build the [`LicenseStatusJson`] payload for a verified status. Shared by the
+/// status / activate / refresh path and the deactivate path so every envelope
+/// carries the same field set (the VS Code extension force-casts every license
+/// envelope to `LicenseStatusJson`, so a missing field would be a silent
+/// contract break).
+fn build_status_payload(
+    status: &LicenseStatus,
+    kind: LicenseKind,
+    license_path: String,
+) -> LicenseStatusJson {
     let claims = status_claims(status);
     let (days_until_expiry, days_since_expiry) = match status {
         LicenseStatus::Valid {
@@ -640,7 +672,7 @@ fn print_status_json(status: &LicenseStatus, kind: LicenseKind) {
         LicenseStatus::Missing => (None, None),
     };
 
-    let payload = LicenseStatusJson {
+    LicenseStatusJson {
         kind: kind.as_str(),
         schema_version: LICENSE_STATUS_SCHEMA_VERSION,
         state: status_state(status),
@@ -651,32 +683,45 @@ fn print_status_json(status: &LicenseStatus, kind: LicenseKind) {
         days_since_expiry,
         refresh_suggested: refresh_suggested(status),
         runtime_coverage_enabled: status.permits(&Feature::RuntimeCoverage),
-        license_path: active_license_path(),
+        license_path,
         message: status_message(status),
-    };
-
-    if let Ok(json) = serde_json::to_string_pretty(&payload) {
-        println!("{json}");
+        removed: None,
     }
 }
 
+fn print_status_json(status: &LicenseStatus, kind: LicenseKind) {
+    let payload = build_status_payload(status, kind, active_license_path());
+    print_json_payload(&payload);
+}
+
 /// JSON envelope for `fallow license deactivate --format json`.
+///
+/// Deactivation leaves no active license, so the payload reuses the full
+/// `LicenseStatusJson` shape for the `Missing` state (every documented field is
+/// present, not just the six the previous hand-rolled `json!` literal emitted)
+/// and overrides `message` plus the deactivate-only `removed` flag.
 fn print_deactivate_json(path: &Path, removed: bool) {
     let message = if removed {
         format!("License removed from {}.", path.display())
     } else {
         format!("No license file at {} to remove.", path.display())
     };
-    let payload = serde_json::json!({
-        "kind": "license-deactivate",
-        "schema_version": LICENSE_STATUS_SCHEMA_VERSION,
-        "state": "missing",
-        "removed": removed,
-        "license_path": path.display().to_string(),
-        "message": message,
-    });
-    if let Ok(json) = serde_json::to_string_pretty(&payload) {
-        println!("{json}");
+    let mut payload = build_status_payload(
+        &LicenseStatus::Missing,
+        LicenseKind::Deactivate,
+        path.display().to_string(),
+    );
+    payload.message = message;
+    payload.removed = Some(removed);
+    print_json_payload(&payload);
+}
+
+/// Serialize a [`LicenseStatusJson`] envelope to stdout, logging on the rare
+/// serialization failure rather than swallowing it silently.
+fn print_json_payload(payload: &LicenseStatusJson) {
+    match serde_json::to_string_pretty(payload) {
+        Ok(json) => println!("{json}"),
+        Err(err) => eprintln!("fallow license: failed to serialize JSON output: {err}"),
     }
 }
 
@@ -751,37 +796,98 @@ mod tests {
     }
 
     fn json_value(status: &LicenseStatus, kind: LicenseKind) -> serde_json::Value {
-        let claims = status_claims(status);
-        let (days_until_expiry, days_since_expiry) = match status {
-            LicenseStatus::Valid {
-                days_until_expiry, ..
-            } => (Some(*days_until_expiry), None),
-            LicenseStatus::ExpiredWarning {
-                days_since_expiry, ..
-            }
-            | LicenseStatus::ExpiredWatermark {
-                days_since_expiry, ..
-            }
-            | LicenseStatus::HardFail {
-                days_since_expiry, ..
-            } => (None, Some(*days_since_expiry)),
-            LicenseStatus::Missing => (None, None),
-        };
-        let payload = LicenseStatusJson {
-            kind: kind.as_str(),
-            schema_version: LICENSE_STATUS_SCHEMA_VERSION,
-            state: status_state(status),
-            tier: claims.map(|c| c.tier.clone()),
-            seats: claims.map(|c| c.seats),
-            features: claims.map(|c| c.features.clone()).unwrap_or_default(),
-            days_until_expiry,
-            days_since_expiry,
-            refresh_suggested: refresh_suggested(status),
-            runtime_coverage_enabled: status.permits(&Feature::RuntimeCoverage),
-            license_path: active_license_path(),
-            message: status_message(status),
-        };
+        let payload = build_status_payload(status, kind, active_license_path());
         serde_json::to_value(&payload).unwrap()
+    }
+
+    /// The non-optional keys the VS Code extension's `LicenseStatusJson`
+    /// interface (`editors/vscode/src/license-types.ts`) reads off every license
+    /// envelope. The deactivate path force-casts its JSON to this interface, so
+    /// it MUST carry the full set (the previous hand-rolled `json!` literal only
+    /// emitted six of them).
+    const TS_LICENSE_STATUS_KEYS: &[&str] = &[
+        "kind",
+        "schema_version",
+        "state",
+        "tier",
+        "seats",
+        "features",
+        "days_until_expiry",
+        "days_since_expiry",
+        "refresh_suggested",
+        "runtime_coverage_enabled",
+        "license_path",
+        "message",
+    ];
+
+    #[test]
+    fn deactivate_json_matches_ts_interface_keys() {
+        for removed in [true, false] {
+            let path = std::path::Path::new("/tmp/license.jwt");
+            let message = if removed {
+                format!("License removed from {}.", path.display())
+            } else {
+                format!("No license file at {} to remove.", path.display())
+            };
+            let mut payload = build_status_payload(
+                &LicenseStatus::Missing,
+                LicenseKind::Deactivate,
+                path.display().to_string(),
+            );
+            payload.message = message;
+            payload.removed = Some(removed);
+            let value = serde_json::to_value(&payload).unwrap();
+            let obj = value.as_object().unwrap();
+
+            // Every non-optional field the extension dereferences is present.
+            for key in TS_LICENSE_STATUS_KEYS {
+                assert!(
+                    obj.contains_key(*key),
+                    "deactivate envelope missing key the TS interface reads: {key} (removed={removed})"
+                );
+            }
+            // The deactivate-only flag is emitted with the expected value.
+            assert_eq!(value["kind"], "license-deactivate");
+            assert_eq!(value["state"], "missing");
+            assert_eq!(value["removed"], removed);
+            assert!(value["tier"].is_null());
+            assert!(value["seats"].is_null());
+            assert_eq!(value["features"].as_array().unwrap().len(), 0);
+            assert_eq!(value["runtime_coverage_enabled"], false);
+            assert!(value["days_until_expiry"].is_null());
+            assert!(value["days_since_expiry"].is_null());
+        }
+    }
+
+    #[test]
+    fn active_license_path_reports_inline_sentinel_over_file_and_default() {
+        // Inline JWT wins, even when a path is also set (loader precedence).
+        assert_eq!(
+            resolve_active_license_path(Some("eyJ.payload.sig"), Some("/etc/fallow/license.jwt")),
+            INLINE_LICENSE_SENTINEL
+        );
+        // Whitespace-only inline value is ignored; the path is reported.
+        assert_eq!(
+            resolve_active_license_path(Some("   "), Some("/etc/fallow/license.jwt")),
+            "/etc/fallow/license.jwt"
+        );
+        // No env override falls back to the canonical default path.
+        assert_eq!(
+            resolve_active_license_path(None, None),
+            default_license_path().display().to_string()
+        );
+    }
+
+    #[test]
+    fn status_envelope_omits_deactivate_only_removed_flag() {
+        // `removed` is deactivate-only; status / activate / refresh envelopes
+        // stay byte-identical to before (no `removed` key) via
+        // `skip_serializing_if`.
+        let value = json_value(&LicenseStatus::Missing, LicenseKind::Status);
+        assert!(
+            !value.as_object().unwrap().contains_key("removed"),
+            "status envelope leaked the deactivate-only removed flag: {value}"
+        );
     }
 
     #[test]
