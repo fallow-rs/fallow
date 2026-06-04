@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type * as vscode from "vscode";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -81,6 +84,8 @@ vi.mock("../src/download.js", () => ({
 import { window as mockWindow } from "vscode";
 import { downloadCliBinary, getInstalledCliPath } from "../src/download.js";
 import {
+  execFallow,
+  FallowExecError,
   findCliBinary,
   resolveCliBinary,
   resolveCliForRun,
@@ -89,6 +94,45 @@ import {
 } from "../src/commands.js";
 
 const context = {} as unknown as vscode.ExtensionContext;
+
+describe("execFallow", () => {
+  it("preserves structured stdout on nonzero coverage gate exits", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-exec-"));
+    const structuredError = {
+      error: true,
+      message: "license missing",
+      exit_code: 3,
+    };
+
+    try {
+      const script = join(dir, "gate-error.mjs");
+      await writeFile(
+        script,
+        [
+          `process.stdout.write(${JSON.stringify(JSON.stringify(structuredError))});`,
+          'process.stderr.write("license gate failed\\n");',
+          "process.exit(3);",
+        ].join("\n"),
+        "utf8",
+      );
+
+      let caught: unknown = null;
+      try {
+        await execFallow(process.execPath, [script], dir);
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeInstanceOf(FallowExecError);
+      const error = caught as FallowExecError;
+      expect(error.exitCode).toBe(3);
+      expect(error.stdout).toBe(JSON.stringify(structuredError));
+      expect(error.message).toBe("license gate failed");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("findCliBinary", () => {
   beforeEach(() => {
@@ -262,9 +306,7 @@ describe("runHealthAnalysis no-workspace gate (#902)", () => {
     await expect(runHealthAnalysis(context)).resolves.toBeNull();
 
     expect(mockWindow.showWarningMessage).toHaveBeenCalledTimes(1);
-    expect(mockWindow.showWarningMessage).toHaveBeenCalledWith(
-      "Fallow: no workspace folder open.",
-    );
+    expect(mockWindow.showWarningMessage).toHaveBeenCalledWith("Fallow: no workspace folder open.");
   });
 
   it("warns again after the once-per-session gate is reset (reactivation)", async () => {
