@@ -112,6 +112,8 @@ npm install --save-dev fallow   # or: pnpm add -D fallow / yarn add -D fallow / 
 
 Installs the CLI, LSP server, MCP server, and version-matched Agent Skill into `node_modules`. For one-off CLI use, run `npx fallow`; Rust users can also run `cargo install fallow-cli`.
 
+Interactive human runs can show a one-line upgrade hint when a cached latest-version check says the local fallow is stale. Machine formats, CI, quiet runs, and non-TTY agent paths never show the hint; set `FALLOW_UPDATE_CHECK=off` to disable the hint and background check.
+
 Parsing `fallow --format json` in TypeScript? `import type { CheckOutput } from "fallow/types"` gives you the full output contract, version-pinned to your installed CLI.
 
 Programmatic Node API:
