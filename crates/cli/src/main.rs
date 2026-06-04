@@ -297,9 +297,29 @@ struct Cli {
     #[arg(long = "dupes-threshold", global = true)]
     dupes_threshold: Option<f64>,
 
+    /// Override the minimum token count for clones in combined mode.
+    #[arg(long = "dupes-min-tokens", global = true)]
+    dupes_min_tokens: Option<usize>,
+
+    /// Override the minimum line count for clones in combined mode.
+    #[arg(long = "dupes-min-lines", global = true)]
+    dupes_min_lines: Option<usize>,
+
     /// Override the minimum clone occurrences in combined mode (must be >= 2).
     #[arg(long = "dupes-min-occurrences", global = true, value_parser = parse_min_occurrences)]
     dupes_min_occurrences: Option<usize>,
+
+    /// Only report cross-directory duplicates in combined mode.
+    #[arg(long = "dupes-skip-local", global = true)]
+    dupes_skip_local: bool,
+
+    /// Enable cross-language duplicate detection in combined mode.
+    #[arg(long = "dupes-cross-language", global = true)]
+    dupes_cross_language: bool,
+
+    /// Exclude import declarations from duplicate detection in combined mode.
+    #[arg(long = "dupes-ignore-imports", global = true)]
+    dupes_ignore_imports: bool,
 
     /// Compute health score in combined mode.
     #[arg(long)]
@@ -1905,8 +1925,18 @@ fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
         Some("--dupes-mode")
     } else if cli.dupes_threshold.is_some() {
         Some("--dupes-threshold")
+    } else if cli.dupes_min_tokens.is_some() {
+        Some("--dupes-min-tokens")
+    } else if cli.dupes_min_lines.is_some() {
+        Some("--dupes-min-lines")
     } else if cli.dupes_min_occurrences.is_some() {
         Some("--dupes-min-occurrences")
+    } else if cli.dupes_skip_local {
+        Some("--dupes-skip-local")
+    } else if cli.dupes_cross_language {
+        Some("--dupes-cross-language")
+    } else if cli.dupes_ignore_imports {
+        Some("--dupes-ignore-imports")
     } else if cli.include_entry_exports {
         Some("--include-entry-exports")
     } else {
@@ -2176,6 +2206,12 @@ where
         "--skip",
         "--dupes-mode",
         "--dupes-threshold",
+        "--dupes-min-tokens",
+        "--dupes-min-lines",
+        "--dupes-min-occurrences",
+        "--dupes-skip-local",
+        "--dupes-cross-language",
+        "--dupes-ignore-imports",
         "--save-snapshot",
         "--regression-baseline",
         "--tolerance",
@@ -2477,7 +2513,12 @@ fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
         run_health,
         dupes_mode: cli.dupes_mode,
         dupes_threshold: cli.dupes_threshold,
+        dupes_min_tokens: cli.dupes_min_tokens,
+        dupes_min_lines: cli.dupes_min_lines,
         dupes_min_occurrences: cli.dupes_min_occurrences,
+        dupes_skip_local: cli.dupes_skip_local,
+        dupes_cross_language: cli.dupes_cross_language,
+        dupes_ignore_imports: cli.dupes_ignore_imports,
         score: cli.score || cli.trend,
         trend: cli.trend,
         save_snapshot: cli.save_snapshot.as_ref(),

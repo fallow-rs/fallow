@@ -13,7 +13,12 @@ const baseOptions = {
   configPath: "",
   dupesMode: "mild" as const,
   dupesThreshold: 0,
+  dupesMinTokens: 50,
+  dupesMinLines: 5,
   minOccurrences: 2,
+  dupesSkipLocal: false,
+  dupesCrossLanguage: false,
+  dupesIgnoreImports: false,
   cliVersion: null,
 };
 
@@ -30,9 +35,48 @@ describe("buildAnalysisArgs", () => {
         "mild",
         "--dupes-threshold",
         "0",
+        "--dupes-min-tokens",
+        "50",
+        "--dupes-min-lines",
+        "5",
       ],
       skipped: [],
     });
+  });
+
+  it("forwards every configured duplication knob when enabled", () => {
+    const { args, skipped } = buildAnalysisArgs({
+      ...baseOptions,
+      dupesMinTokens: 80,
+      dupesMinLines: 8,
+      minOccurrences: 3,
+      dupesSkipLocal: true,
+      dupesCrossLanguage: true,
+      dupesIgnoreImports: true,
+      cliVersion: "2.88.3",
+    });
+
+    expect(args).toEqual([
+      "--format",
+      "json",
+      "--quiet",
+      "--skip",
+      "health",
+      "--dupes-mode",
+      "mild",
+      "--dupes-threshold",
+      "0",
+      "--dupes-min-tokens",
+      "80",
+      "--dupes-min-lines",
+      "8",
+      "--dupes-min-occurrences",
+      "3",
+      "--dupes-skip-local",
+      "--dupes-cross-language",
+      "--dupes-ignore-imports",
+    ]);
+    expect(skipped).toEqual([]);
   });
 
   it("omits --dupes-min-occurrences at the floor so older pinned binaries don't reject it", () => {
@@ -51,7 +95,7 @@ describe("buildAnalysisArgs", () => {
     const { args, skipped } = buildAnalysisArgs({
       ...baseOptions,
       minOccurrences: 3,
-      cliVersion: "2.88.0",
+      cliVersion: "2.88.3",
     });
     expect(args).toContain("--dupes-min-occurrences");
     expect(skipped).toEqual([]);
@@ -61,11 +105,18 @@ describe("buildAnalysisArgs", () => {
     const { args, skipped } = buildAnalysisArgs({
       ...baseOptions,
       minOccurrences: 5,
+      dupesSkipLocal: true,
       cliVersion: "2.87.0",
     });
+    expect(args).not.toContain("--dupes-min-tokens");
+    expect(args).not.toContain("--dupes-min-lines");
     expect(args).not.toContain("--dupes-min-occurrences");
+    expect(args).not.toContain("--dupes-skip-local");
     expect(skipped).toEqual([
+      { flag: "--dupes-min-tokens", requires: "2.88.3", cliVersion: "2.87.0" },
+      { flag: "--dupes-min-lines", requires: "2.88.3", cliVersion: "2.87.0" },
       { flag: "--dupes-min-occurrences", requires: "2.88.0", cliVersion: "2.87.0" },
+      { flag: "--dupes-skip-local", requires: "2.88.3", cliVersion: "2.87.0" },
     ]);
   });
 

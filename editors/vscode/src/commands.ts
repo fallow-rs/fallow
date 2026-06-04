@@ -7,8 +7,13 @@ import * as vscode from "vscode";
 import {
   getLspPath,
   getProduction,
+  getDuplicationCrossLanguage,
+  getDuplicationIgnoreImports,
+  getDuplicationMinLines,
   getDuplicationMinOccurrences,
+  getDuplicationMinTokens,
   getDuplicationMode,
+  getDuplicationSkipLocal,
   getDuplicationThreshold,
   getIssueTypes,
   getChangedSince,
@@ -443,7 +448,12 @@ export const runAnalysis = async (
       configPath: getResolvedConfigPath(),
       dupesMode: getDuplicationMode(),
       dupesThreshold: getDuplicationThreshold(),
+      dupesMinTokens: getDuplicationMinTokens(),
+      dupesMinLines: getDuplicationMinLines(),
       minOccurrences: getDuplicationMinOccurrences(),
+      dupesSkipLocal: getDuplicationSkipLocal(),
+      dupesCrossLanguage: getDuplicationCrossLanguage(),
+      dupesIgnoreImports: getDuplicationIgnoreImports(),
       cliVersion,
     });
 

@@ -98,3 +98,22 @@ describe("package.json binary download settings", () => {
     expect(extensionSource).toContain('"fallow.autoDownload"');
   });
 });
+
+describe("package.json duplication settings", () => {
+  it("contributes every duplication knob used by sidebar analysis", () => {
+    const properties = pkg.contributes.configuration.properties;
+
+    for (const key of [
+      "fallow.duplication.mode",
+      "fallow.duplication.threshold",
+      "fallow.duplication.minTokens",
+      "fallow.duplication.minLines",
+      "fallow.duplication.minOccurrences",
+      "fallow.duplication.skipLocal",
+      "fallow.duplication.crossLanguage",
+      "fallow.duplication.ignoreImports",
+    ]) {
+      expect(properties[key]?.description).toBeTruthy();
+    }
+  });
+});

@@ -7,7 +7,9 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{fixture_path, parse_json, redact_all, run_fallow, run_fallow_in_root};
+use common::{
+    fixture_path, parse_json, redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
+};
 use tempfile::tempdir;
 
 fn init_git_index(root: &std::path::Path) {
@@ -123,6 +125,43 @@ fn dupes_min_tokens_filter() {
     assert!(
         groups.is_empty(),
         "high min-tokens should filter out all clones"
+    );
+}
+
+#[test]
+fn combined_dupes_min_tokens_filter() {
+    let output = run_fallow_combined(
+        "duplicate-code",
+        &["--dupes-min-tokens", "1000", "--format", "json", "--quiet"],
+    );
+    let json = parse_json(&output);
+    let groups = json["dupes"]["clone_groups"].as_array().unwrap();
+    assert!(
+        groups.is_empty(),
+        "high combined-mode --dupes-min-tokens should filter out all clones"
+    );
+}
+
+#[test]
+fn combined_dupes_accepts_remaining_config_knobs() {
+    let output = run_fallow_combined(
+        "duplicate-code",
+        &[
+            "--dupes-min-lines",
+            "1",
+            "--dupes-skip-local",
+            "--dupes-cross-language",
+            "--dupes-ignore-imports",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert!(
+        output.code == 0 || output.code == 1,
+        "combined mode should accept dupes config knobs, got exit code {}. stderr: {}",
+        output.code,
+        output.stderr
     );
 }
 

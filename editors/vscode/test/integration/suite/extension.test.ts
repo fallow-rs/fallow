@@ -13,7 +13,7 @@ interface ExtensionApi {
   }>;
   readonly runFix: (
     context: vscode.ExtensionContext,
-    dryRun: boolean
+    dryRun: boolean,
   ) => Promise<FallowFixResult | null>;
 }
 
@@ -41,13 +41,10 @@ const workspaceFolder = (): vscode.WorkspaceFolder => {
 
 const testContext = (): vscode.ExtensionContext =>
   ({
-    globalStorageUri: vscode.Uri.file(
-      path.join(workspaceFolder().uri.fsPath, ".global-storage")
-    ),
+    globalStorageUri: vscode.Uri.file(path.join(workspaceFolder().uri.fsPath, ".global-storage")),
   }) as vscode.ExtensionContext;
 
-const cliLogPath = (): string =>
-  path.join(workspaceFolder().uri.fsPath, ".fallow-cli-log.jsonl");
+const cliLogPath = (): string => path.join(workspaceFolder().uri.fsPath, ".fallow-cli-log.jsonl");
 
 const readCliLog = (): Array<{ command: string; args: string[] }> => {
   const logPath = cliLogPath();
@@ -65,6 +62,17 @@ const readCliLog = (): Array<{ command: string; args: string[] }> => {
 
 const readFixCommands = (): Array<{ command: string; args: string[] }> =>
   readCliLog().filter((entry) => entry.command === "fix");
+
+const runAnalysisAndReadCliLog = async (
+  api: ExtensionApi,
+): Promise<Array<{ command: string; args: string[] }>> => {
+  const result = await api.runAnalysis(testContext());
+
+  assert.ok(result.check, "check result should be available");
+  assert.ok(result.dupes, "duplication result should be available");
+
+  return readCliLog();
+};
 
 describe("Fallow VS Code extension", () => {
   let api: ExtensionApi;
@@ -87,14 +95,28 @@ describe("Fallow VS Code extension", () => {
 
     await vscode.workspace
       .getConfiguration("fallow")
-      .update(
-        "issueTypes",
-        defaultIssueTypes,
-        vscode.ConfigurationTarget.Workspace
-      );
+      .update("issueTypes", defaultIssueTypes, vscode.ConfigurationTarget.Workspace);
     await vscode.workspace
       .getConfiguration("fallow")
       .update("changedSince", "", vscode.ConfigurationTarget.Workspace);
+    await vscode.workspace
+      .getConfiguration("fallow")
+      .update("duplication.minTokens", 50, vscode.ConfigurationTarget.Workspace);
+    await vscode.workspace
+      .getConfiguration("fallow")
+      .update("duplication.minLines", 5, vscode.ConfigurationTarget.Workspace);
+    await vscode.workspace
+      .getConfiguration("fallow")
+      .update("duplication.minOccurrences", 2, vscode.ConfigurationTarget.Workspace);
+    await vscode.workspace
+      .getConfiguration("fallow")
+      .update("duplication.skipLocal", false, vscode.ConfigurationTarget.Workspace);
+    await vscode.workspace
+      .getConfiguration("fallow")
+      .update("duplication.crossLanguage", false, vscode.ConfigurationTarget.Workspace);
+    await vscode.workspace
+      .getConfiguration("fallow")
+      .update("duplication.ignoreImports", false, vscode.ConfigurationTarget.Workspace);
 
     windowApi.showQuickPick = originalShowQuickPick;
     windowApi.showTextDocument = originalShowTextDocument;
@@ -113,16 +135,14 @@ describe("Fallow VS Code extension", () => {
   });
 
   it("runs analysis against the configured CLI and filters disabled issue types", async () => {
-    await vscode.workspace
-      .getConfiguration("fallow")
-      .update(
-        "issueTypes",
-        {
-          ...defaultIssueTypes,
-          "unused-exports": false,
-        },
-        vscode.ConfigurationTarget.Workspace
-      );
+    await vscode.workspace.getConfiguration("fallow").update(
+      "issueTypes",
+      {
+        ...defaultIssueTypes,
+        "unused-exports": false,
+      },
+      vscode.ConfigurationTarget.Workspace,
+    );
 
     const result = await api.runAnalysis(testContext());
 
@@ -137,17 +157,38 @@ describe("Fallow VS Code extension", () => {
     assert.ok(analysisCalls.length >= 1, "expected at least one CLI analysis call");
     assert.ok(
       analysisCalls.every((entry) => entry.command === "combined"),
-      "analysis should use combined mode only"
+      "analysis should use combined mode only",
     );
     // `.some`, not `.every`: a config change in a prior test's afterEach fires a
     // background `triggerCliAnalysis()` whose log entry can race into this test's
     // log. The awaited direct call is what we assert produced the expected argv.
     assert.ok(
-      analysisCalls.some((entry) =>
-        entry.args.join(" ") ===
-        "--format json --quiet --skip health --dupes-mode mild --dupes-threshold 0"
+      analysisCalls.some(
+        (entry) =>
+          entry.args.join(" ") ===
+          "--format json --quiet --skip health --dupes-mode mild --dupes-threshold 0 --dupes-min-tokens 50 --dupes-min-lines 5",
       ),
-      "combined analysis should pass the expected arguments (no --dupes-min-occurrences at the floor)"
+      "combined analysis should pass the expected arguments (no --dupes-min-occurrences at the floor)",
+    );
+  });
+
+  it("forwards duplication settings to the CLI analysis path", async () => {
+    const config = vscode.workspace.getConfiguration("fallow");
+    await config.update("duplication.minTokens", 80, vscode.ConfigurationTarget.Workspace);
+    await config.update("duplication.minLines", 8, vscode.ConfigurationTarget.Workspace);
+    await config.update("duplication.minOccurrences", 3, vscode.ConfigurationTarget.Workspace);
+    await config.update("duplication.skipLocal", true, vscode.ConfigurationTarget.Workspace);
+    await config.update("duplication.crossLanguage", true, vscode.ConfigurationTarget.Workspace);
+    await config.update("duplication.ignoreImports", true, vscode.ConfigurationTarget.Workspace);
+
+    const analysisCalls = await runAnalysisAndReadCliLog(api);
+    assert.ok(
+      analysisCalls.some(
+        (entry) =>
+          entry.args.join(" ") ===
+          "--format json --quiet --skip health --dupes-mode mild --dupes-threshold 0 --dupes-min-tokens 80 --dupes-min-lines 8 --dupes-min-occurrences 3 --dupes-skip-local --dupes-cross-language --dupes-ignore-imports",
+      ),
+      "combined analysis should include configured duplication settings",
     );
   });
 
@@ -156,22 +197,18 @@ describe("Fallow VS Code extension", () => {
       .getConfiguration("fallow")
       .update("changedSince", "origin/main", vscode.ConfigurationTarget.Workspace);
 
-    const result = await api.runAnalysis(testContext());
-
-    assert.ok(result.check, "check result should be available");
-    assert.ok(result.dupes, "duplication result should be available");
-
-    const analysisCalls = readCliLog();
+    const analysisCalls = await runAnalysisAndReadCliLog(api);
     assert.ok(analysisCalls.length >= 1, "expected at least one CLI analysis call");
     // `.some` for the same reason as above: assert the awaited direct call's
     // argv is present, tolerating a stray background analysis from a prior
     // afterEach config reset.
     assert.ok(
-      analysisCalls.some((entry) =>
-        entry.args.join(" ") ===
-        "--format json --quiet --skip health --changed-since origin/main --dupes-mode mild --dupes-threshold 0"
+      analysisCalls.some(
+        (entry) =>
+          entry.args.join(" ") ===
+          "--format json --quiet --skip health --changed-since origin/main --dupes-mode mild --dupes-threshold 0 --dupes-min-tokens 50 --dupes-min-lines 5",
       ),
-      "combined analysis should include --changed-since before duplication options"
+      "combined analysis should include --changed-since before duplication options",
     );
   });
 
@@ -179,11 +216,10 @@ describe("Fallow VS Code extension", () => {
     let openedPath = "";
     let openedLine = -1;
 
-    windowApi.showQuickPick = async (items: readonly vscode.QuickPickItem[]) =>
-      items[1];
+    windowApi.showQuickPick = async (items: readonly vscode.QuickPickItem[]) => items[1];
     windowApi.showTextDocument = async (
       uri: vscode.Uri,
-      options?: vscode.TextDocumentShowOptions
+      options?: vscode.TextDocumentShowOptions,
     ) => {
       openedPath = uri.fsPath;
       openedLine = options?.selection?.start.line ?? -1;

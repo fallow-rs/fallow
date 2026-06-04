@@ -250,6 +250,18 @@
           "minimum": 0,
           "description": "Maximum allowed duplication percentage before the analysis is marked as failing. Set to 0 (the default) for no limit."
         },
+        "fallow.duplication.minTokens": {
+          "type": "integer",
+          "default": 50,
+          "minimum": 1,
+          "description": "Minimum token count for a clone before it can be reported as duplicated code."
+        },
+        "fallow.duplication.minLines": {
+          "type": "integer",
+          "default": 5,
+          "minimum": 1,
+          "description": "Minimum line count for a clone before it can be reported as duplicated code."
+        },
         "fallow.duplication.minOccurrences": {
           "type": "integer",
           "default": 2,
@@ -272,6 +284,21 @@
             "Ignores different literals",
             "Renames variables for semantic matching"
           ]
+        },
+        "fallow.duplication.skipLocal": {
+          "type": "boolean",
+          "default": false,
+          "description": "Only report duplicate code that appears across different directories."
+        },
+        "fallow.duplication.crossLanguage": {
+          "type": "boolean",
+          "default": false,
+          "description": "Compare TypeScript and JavaScript files after stripping TypeScript type annotations."
+        },
+        "fallow.duplication.ignoreImports": {
+          "type": "boolean",
+          "default": false,
+          "description": "Exclude import declarations from duplicate-code detection."
         },
         "fallow.production": {
           "type": "boolean",

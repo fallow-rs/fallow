@@ -62,8 +62,13 @@ Mute state is stored in the workspace, so it survives reload but does not bleed 
 | `fallow.autoDownload` | `true` | Automatically download managed `fallow-lsp` and `fallow` CLI binaries if not found. |
 | `fallow.issueTypes` | all enabled | Toggle individual issue types on/off. |
 | `fallow.duplication.threshold` | `0` | Maximum allowed duplication percentage before the analysis is marked as failing. `0` (the default) means no limit. |
+| `fallow.duplication.minTokens` | `50` | Minimum token count for a clone before it can be reported as duplicated code. |
+| `fallow.duplication.minLines` | `5` | Minimum line count for a clone before it can be reported as duplicated code. |
 | `fallow.duplication.minOccurrences` | `2` | Minimum number of occurrences before a clone group is reported. Defaults to `2` (every duplicated pair). Raise to `3`+ to focus on widespread copy-paste and skip context-sensitive pairs. |
 | `fallow.duplication.mode` | `"mild"` | Detection mode: `strict`, `mild`, `weak`, or `semantic`. |
+| `fallow.duplication.skipLocal` | `false` | Only report duplicate code that appears across different directories. |
+| `fallow.duplication.crossLanguage` | `false` | Compare TypeScript and JavaScript files after stripping TypeScript type annotations. |
+| `fallow.duplication.ignoreImports` | `false` | Exclude import declarations from duplicate-code detection. |
 | `fallow.production` | `false` | Production mode: exclude test/dev files, only production scripts. |
 | `fallow.changedSince` | `""` | Git ref (tag, branch, or SHA) to scope the Problems panel and sidebar to files changed since that ref, mirroring the CLI's `--changed-since`. Tag your current commit (e.g. `fallow-baseline`) and set this to the tag to enforce "no new issues going forward" while ignoring pre-existing findings. |
 | `fallow.trace.server` | `"off"` | LSP trace level: `off`, `messages`, or `verbose`. |

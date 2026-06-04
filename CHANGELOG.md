@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The VS Code extension now exposes every duplication knob used by sidebar analysis.** The settings page now includes `fallow.duplication.minTokens`, `minLines`, `skipLocal`, `crossLanguage`, and `ignoreImports`, alongside the existing mode, threshold, and minOccurrences controls. The bare `fallow` command gains matching combined-mode flags (`--dupes-min-tokens`, `--dupes-min-lines`, `--dupes-skip-local`, `--dupes-cross-language`, and `--dupes-ignore-imports`) so the extension can apply those settings without requiring a config-file edit. Older resolved CLIs still degrade through the existing version-gated retry path instead of failing the whole sidebar run. Thanks [@BartWaardenburg](https://github.com/BartWaardenburg) for the report. (Closes [#909](https://github.com/fallow-rs/fallow/issues/909).)
+
 ## [2.88.3] - 2026-06-04
 
 ### Fixed

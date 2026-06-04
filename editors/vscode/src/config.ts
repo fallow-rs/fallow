@@ -54,11 +54,26 @@ export const getIssueTypes = (): IssueTypeConfig =>
 export const getDuplicationThreshold = (): number =>
   getConfig().get<number>("duplication.threshold", 0);
 
+export const getDuplicationMinTokens = (): number =>
+  getConfig().get<number>("duplication.minTokens", 50);
+
+export const getDuplicationMinLines = (): number =>
+  getConfig().get<number>("duplication.minLines", 5);
+
 export const getDuplicationMode = (): DuplicationMode =>
   getConfig().get<DuplicationMode>("duplication.mode", "mild");
 
 export const getDuplicationMinOccurrences = (): number =>
   clampMinOccurrences(getConfig().get<number>("duplication.minOccurrences", MIN_OCCURRENCES_FLOOR));
+
+export const getDuplicationSkipLocal = (): boolean =>
+  getConfig().get<boolean>("duplication.skipLocal", false);
+
+export const getDuplicationCrossLanguage = (): boolean =>
+  getConfig().get<boolean>("duplication.crossLanguage", false);
+
+export const getDuplicationIgnoreImports = (): boolean =>
+  getConfig().get<boolean>("duplication.ignoreImports", false);
 
 export const getProduction = (): boolean => getConfig().get<boolean>("production", false);
 

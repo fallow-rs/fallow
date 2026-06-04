@@ -90,7 +90,7 @@ const args = process.argv.slice(2);
 // log the assertions read. Reported version is current, so version-gated flags
 // are not skipped in these fixtures.
 if (args[0] === "--version" || args[0] === "-V") {
-  process.stdout.write("fallow 2.88.0\\n");
+  process.stdout.write("fallow 2.88.3\\n");
   process.exit(0);
 }
 
