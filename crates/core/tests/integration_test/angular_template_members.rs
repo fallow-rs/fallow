@@ -107,6 +107,10 @@ fn angular_inject_injection_token_credits_interface_implementer_members() {
         !unused.contains(&("PoliteGreeterDirective", "greet")),
         "PoliteGreeterDirective.greet is called via {{{{ greeter.greet() }}}} through inject(GREETER) where GREETER is InjectionToken<Greeter> and the directive implements Greeter, found: {unused:?}"
     );
+    assert!(
+        !unused.contains(&("PoliteGreeterDirective", "inlineGreet")),
+        "PoliteGreeterDirective.inlineGreet is called via an inline template through inject(GREETER) where GREETER is InjectionToken<Greeter> and the directive implements Greeter, found: {unused:?}"
+    );
     // Non-vacuous control: a genuinely-unused member on the same directive must
     // still be flagged, proving the detector ran and the credit is targeted.
     assert!(

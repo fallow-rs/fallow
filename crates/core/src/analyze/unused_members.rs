@@ -1591,6 +1591,22 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
                 continue;
             }
             let local_to_export_keys = build_local_to_export_keys(resolved);
+            if let Some(chains) = angular_tpl_chain_accesses.get(&resolved.file_id) {
+                for (object, member) in chains {
+                    let Some(type_name) = component_bindings.get(object) else {
+                        continue;
+                    };
+                    credit_angular_token_chain_member(
+                        graph,
+                        type_name,
+                        member,
+                        &local_to_export_keys,
+                        &token_to_interface,
+                        &implementers_by_name,
+                        &mut accessed_members,
+                    );
+                }
+            }
             for import in resolved.all_resolved_imports() {
                 let Some(target_id) = import.target.internal_file_id() else {
                     continue;

@@ -11,6 +11,10 @@ export class PoliteGreeterDirective implements Greeter {
     return 'hello';
   }
 
+  inlineGreet(): string {
+    return 'inline hello';
+  }
+
   unusedHelper(): string {
     return 'never called from anywhere';
   }
