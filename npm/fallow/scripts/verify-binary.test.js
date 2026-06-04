@@ -7,6 +7,8 @@ const path = require("node:path");
 
 const {
   _verifyWithKey,
+  isPreSigningVersion,
+  describeSigMissing,
   verifyBinaryAt,
   verifyDigestAt,
   verifyInstalled,
@@ -131,6 +133,56 @@ test("_verifyWithKey returns sig-missing when the signature file does not exist"
   } finally {
     cleanup(dir);
   }
+});
+
+// The version-aware remediation lives in describeSigMissing (attached by
+// verifyOneBinary{,Sync}), not in the low-level _verifyWithKey result. Refs #944.
+test("isPreSigningVersion is true below 2.77.0 and false at/above it", () => {
+  assert.equal(isPreSigningVersion("2.76.0"), true);
+  assert.equal(isPreSigningVersion("2.73.0"), true);
+  assert.equal(isPreSigningVersion("1.9.0"), true);
+  assert.equal(isPreSigningVersion("2.77.0"), false);
+  assert.equal(isPreSigningVersion("2.83.0"), false);
+  assert.equal(isPreSigningVersion("2.88.2"), false);
+  // Unknown / unparsable versions default to false so the caller uses the
+  // cautious possible-tampering message rather than telling the user to bump.
+  assert.equal(isPreSigningVersion("unknown"), false);
+  assert.equal(isPreSigningVersion(undefined), false);
+});
+
+test("describeSigMissing gives upgrade guidance for a pre-signing version", () => {
+  const base = { ok: false, code: "sig-missing", message: "signature not found at /x/fallow.sig" };
+  const result = describeSigMissing(base, "2.76.0");
+  // The security-critical invariant: enriching the message must never flip the
+  // verdict. A sig-missing result stays a hard failure.
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "sig-missing");
+  assert.match(result.message, /predates signed binaries/);
+  assert.match(result.message, /2\.77\.0/);
+  // Names WHERE the pin lives so the user can act.
+  assert.match(result.message, /package\.json/);
+  // The bypass escape hatch is owned by the caller's trailer + SECURITY.md, not
+  // surfaced inline, so it is not normalized in CI logs.
+  assert.doesNotMatch(result.message, new RegExp(SKIP_ENV));
+  // The original low-level detail is preserved.
+  assert.match(result.message, /signature not found/);
+});
+
+test("describeSigMissing flags possible tampering for a signed-era version", () => {
+  const base = { ok: false, code: "sig-missing", message: "signature not found at /x/fallow.sig" };
+  const result = describeSigMissing(base, "2.83.0");
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "sig-missing");
+  assert.match(result.message, /tampered with or incomplete/);
+  assert.match(result.message, /Reinstall/);
+  // Must NOT nudge a possible-tampering victim toward bypassing verification.
+  assert.doesNotMatch(result.message, new RegExp(SKIP_ENV));
+});
+
+test("describeSigMissing passes non-sig-missing results through untouched", () => {
+  const base = { ok: false, code: "digest-mismatch", message: "digest mismatch" };
+  const result = describeSigMissing(base, "2.76.0");
+  assert.equal(result.message, "digest mismatch");
 });
 
 test("_verifyWithKey returns binary-missing when the binary does not exist", () => {
@@ -341,6 +393,32 @@ test("verifyInstalled with dirOverride reports sig-missing when a .sig is absent
   assert.equal(result.ok, false);
   assert.equal(result.code, "sig-missing");
   assert.match(result.binary, /fallow-mcp/);
+});
+
+test("verifyInstalled threads the resolved version into the sig-missing message", async (t) => {
+  const { privateKey, rawPub } = makeKeypair();
+  const preDir = makePlatformDir(privateKey, { skipSigFor: "fallow-mcp" });
+  const eraDir = makePlatformDir(privateKey, { skipSigFor: "fallow-mcp" });
+  t.after(() => {
+    cleanup(preDir);
+    cleanup(eraDir);
+  });
+  const pre = await verifyInstalled({
+    dirOverride: preDir,
+    version: "2.76.0",
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
+    digestProvider: makeDigestProvider(preDir),
+  });
+  assert.equal(pre.code, "sig-missing");
+  assert.match(pre.message, /predates signed binaries/);
+  const era = await verifyInstalled({
+    dirOverride: eraDir,
+    version: "2.83.0",
+    verifyFn: (p) => _verifyWithKey(p, rawPub),
+    digestProvider: makeDigestProvider(eraDir),
+  });
+  assert.equal(era.code, "sig-missing");
+  assert.match(era.message, /tampered with or incomplete/);
 });
 
 test("verifyInstalled reports digest-mismatch when SHA-256 disagrees with the provider", async (t) => {

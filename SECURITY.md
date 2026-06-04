@@ -60,6 +60,15 @@ You can copy this value out-of-band (a release blog post, this file at a tag you
 
 The lazy first-run model is stronger than the npm-tarball-shasum-only baseline used by most Rust/Go npm wrappers (esbuild verifies SHA-256 only on its HTTP fallback path; biome, oxlint, rolldown, turbo, rspack, swc, and tailwindcss-oxide ship no in-package binary verification). fallow's Ed25519 signature check uses a key the project controls; provenance attestations from `npm publish --provenance` and the npm registry shasum are complementary signals, not the trust root.
 
+### Signed-binary epoch: versions before 2.77.0
+
+Signed platform binaries ship from **fallow 2.77.0 onward**. The Ed25519 signing step, the `.sig` files inside each `@fallow-cli/<platform>` package, and the verifier itself all landed together and first released in 2.77.0; every release before that predates signed binaries and has no `.sig` to verify (and never will, since published npm versions are immutable).
+
+This matters when the verifier (2.77.0+, including the GitHub Action) runs against an *older resolved CLI*. The resolved CLI version comes from your project's `fallow` dependency pin, not from the Action ref in your workflow, so pinning `fallow` to 2.76.0 or earlier while using a current Action produces a `sig-missing` failure. The error distinguishes the two causes:
+
+- **Resolved version below 2.77.0** (predates signing): expected. Bump the `fallow` dependency in your project's `package.json` to >=2.77.0 (`npm install fallow@latest`). This is the fix; do not reach for the escape hatch below unless you must stay on a pre-signing version for an unrelated reason.
+- **Resolved version 2.77.0 or newer but the signature is absent**: unexpected, and treated as a possible tampering or incomplete-install signal. Reinstall, and report it (see "Reporting binary tampering" below) if it persists on a clean install. Do not bypass verification to work around it.
+
 ### Out-of-band verification recipe
 
 To verify a binary manually, download both the binary and its `.sig` from a GitHub Release (e.g. `fallow-aarch64-apple-darwin` + `fallow-aarch64-apple-darwin.sig`) and run the workflow's verification script with the public key set in env:

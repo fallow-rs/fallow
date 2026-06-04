@@ -81,6 +81,10 @@ function _verifyWithKey(binaryPath, rawPubKey) {
     signature = fs.readFileSync(sigPath);
   } catch (err) {
     if (err && err.code === "ENOENT") {
+      // Low-level result: the version-aware guidance is attached one layer up
+      // in verifyOneBinary{,Sync}, which knows the resolved platform-package
+      // version and can distinguish a pre-signing version from a >=2.77.0
+      // package whose signature is missing (a tampering signal). Refs #944.
       return { ok: false, code: "sig-missing", message: `signature not found at ${sigPath}` };
     }
     return {
@@ -389,16 +393,69 @@ function resolvePlatformPackageForVerify(opts) {
   };
 }
 
+// Signed platform binaries ship from fallow 2.77.0 onward (the `.sig` staging
+// step, the `files` entries, and this verifier all landed in #488, first
+// released in 2.77.0). A resolved version below this epoch has no signature and
+// never will (npm is immutable), so its missing-sig failure is expected and the
+// fix is to upgrade the pin. A version at or above the epoch whose signature is
+// absent is a different, alarming case (tampered or incomplete package).
+const SIGNING_EPOCH = [2, 77, 0];
+
+// True when `version` is a parseable semver strictly below the signing epoch.
+// An unparsable / unknown version returns false so the caller uses the
+// cautious (possible-tampering) message rather than telling the user to bump.
+function isPreSigningVersion(version) {
+  if (typeof version !== "string") {
+    return false;
+  }
+  const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!match) {
+    return false;
+  }
+  const parts = [Number(match[1]), Number(match[2]), Number(match[3])];
+  for (let i = 0; i < SIGNING_EPOCH.length; i += 1) {
+    if (parts[i] < SIGNING_EPOCH[i]) {
+      return true;
+    }
+    if (parts[i] > SIGNING_EPOCH[i]) {
+      return false;
+    }
+  }
+  return false;
+}
+
+// Attach version-aware remediation to a `sig-missing` low-level result. Other
+// failure codes pass through untouched. The split distinguishes a pre-signing
+// version (no signature exists and never will, so the fix is to upgrade the
+// pin) from a >=2.77.0 package whose signature is unexpectedly absent (a
+// tampering signal). Each message gives the CONSTRUCTIVE fix only; the bypass
+// escape hatch (FALLOW_SKIP_BINARY_VERIFY) is owned by the caller's trailer and
+// SECURITY.md, deliberately not surfaced here so a tampering victim is never
+// nudged to bypass and the env is not normalized in CI logs.
+function describeSigMissing(result, version) {
+  if (result.code !== "sig-missing") {
+    return result;
+  }
+  const message = isPreSigningVersion(version)
+    ? `${result.message}. fallow ${version} predates signed binaries (signatures ship in 2.77.0 ` +
+      `and later), so this package has no signature to verify. Bump the \`fallow\` dependency in ` +
+      `your project's package.json to >=2.77.0 (for example \`npm install fallow@latest\`).`
+    : `${result.message}. fallow ${version} should be signed but its signature is missing; the ` +
+      `platform package may be tampered with or incomplete. Reinstall with \`npm install fallow@latest\` ` +
+      `and report it if it persists on a clean install.`;
+  return { ...result, message };
+}
+
 // Verify one binary against its sig + expected SHA-256. Used by both the
 // sync and async verify-installed entry points; the digest provider may be
 // sync (returns string) or async (returns Promise<string>), and the loop body
 // awaits the value regardless. Keeps the outer functions a flat for-loop so
 // cyclomatic + cognitive complexity stays low.
-async function verifyOneBinary(target, dir, pkg, manifestPath, verifyFn, digestProvider) {
+async function verifyOneBinary(target, dir, pkg, manifestPath, verifyFn, digestProvider, version) {
   const binaryPath = path.join(dir, target.binary);
   const sigResult = verifyFn(binaryPath);
   if (!sigResult.ok) {
-    return { ...sigResult, binary: binaryPath, package: pkg };
+    return { ...describeSigMissing(sigResult, version), binary: binaryPath, package: pkg };
   }
   // Prefer the digest embedded in the platform package's package.json
   // (written at release time by `npm-prep`). Falling back to the GitHub
@@ -478,7 +535,15 @@ async function verifyInstalled(options) {
   const boundProvider = async (args) => digestProvider({ ...args, version });
 
   for (const target of binaryTargetsForPlatform(platformId)) {
-    const result = await verifyOneBinary(target, dir, pkg, manifestPath, verify, boundProvider);
+    const result = await verifyOneBinary(
+      target,
+      dir,
+      pkg,
+      manifestPath,
+      verify,
+      boundProvider,
+      version,
+    );
     if (!result.ok) return result;
   }
   return { ok: true, package: pkg, version };
@@ -518,7 +583,15 @@ function verifyInstalledSync(options) {
   const { dir, manifestPath, pkg, version, platformId } = resolved;
 
   for (const target of binaryTargetsForPlatform(platformId)) {
-    const result = verifyOneBinarySync(target, dir, pkg, manifestPath, verify, digestProvider);
+    const result = verifyOneBinarySync(
+      target,
+      dir,
+      pkg,
+      manifestPath,
+      verify,
+      digestProvider,
+      version,
+    );
     if (!result.ok) return result;
   }
   return { ok: true, package: pkg, version };
@@ -529,11 +602,11 @@ function verifyInstalledSync(options) {
 // actionable error pointing the user at `npm install fallow@latest` (since
 // there is no network fallback in lazy mode), and the digestProvider is
 // optional (tests inject one; production callers rely on the embedded digest).
-function verifyOneBinarySync(target, dir, pkg, manifestPath, verifyFn, digestProvider) {
+function verifyOneBinarySync(target, dir, pkg, manifestPath, verifyFn, digestProvider, version) {
   const binaryPath = path.join(dir, target.binary);
   const sigResult = verifyFn(binaryPath);
   if (!sigResult.ok) {
-    return { ...sigResult, binary: binaryPath, package: pkg };
+    return { ...describeSigMissing(sigResult, version), binary: binaryPath, package: pkg };
   }
   let expectedDigest = manifestPath ? readEmbeddedDigest(manifestPath, target.binary) : null;
   if (!expectedDigest && digestProvider) {
@@ -575,6 +648,8 @@ module.exports = {
   verifyInstalled,
   verifyInstalledSync,
   _verifyWithKey,
+  isPreSigningVersion,
+  describeSigMissing,
   normalizeDigest,
   readEmbeddedDigest,
   sha256Hex,

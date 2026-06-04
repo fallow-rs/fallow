@@ -91,6 +91,7 @@ jobs:
             npm-package:
               - 'npm/fallow/**'
               - 'schema.json'
+              - '.github/scripts/**'
               - '.github/workflows/ci.yml'
             self-analyze:
               - '.github/workflows/ci.yml'
@@ -253,6 +254,9 @@ jobs:
             throw new Error(`npm package is missing expected files: ${missing.join(', ')}`);
           }
           NODE
+
+      - name: Test release packaging gate
+        run: node --test .github/scripts/verify-pack-contents.test.mjs
 
       - name: Run npm wrapper unit tests
         run: |

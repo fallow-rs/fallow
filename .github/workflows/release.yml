@@ -705,6 +705,19 @@ jobs:
           echo "--- manifest ---"
           cat tarballs/manifest.tsv
 
+      # Fail the release if any packed tarball omits a file it declares in its
+      # own `files` whitelist. npm silently drops a `files` entry with no
+      # matching file on disk, so a broken `.sig` staging step would otherwise
+      # publish a platform package missing `fallow.sig` (the Action installer
+      # then hard-fails every install with `sig-missing`). Runs in the
+      # token-free prep job, before upload, so the publish job never sees a
+      # broken tarball. Refs #944.
+      - name: Verify packed tarballs contain every declared file
+        run: |
+          node .github/scripts/verify-pack-contents.mjs \
+            tarballs/10-cli-platform/*.tgz \
+            tarballs/20-cli-root/*.tgz
+
       - name: Upload npm tarballs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

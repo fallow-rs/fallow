@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Binary verification now gives a version-aware error instead of a bare `signature not found`.** Signed platform binaries ship in fallow 2.77.0 and later, so the GitHub Action installer and the npm wrapper can hard-fail when they verify an older resolved CLI (for example a project pinned to 2.76.0 or earlier) that has no signature and never will. The missing-signature error now distinguishes the two cases: for a version below 2.77.0 it explains the version predates signed binaries and points at the fix (bump the pinned `fallow` to >=2.77.0, e.g. `npm install fallow@latest`, or set `FALLOW_SKIP_BINARY_VERIFY=1` as a last resort); for a 2.77.0-or-newer package whose signature is unexpectedly absent it flags possible tampering and advises reinstalling rather than bypassing. Verification still fails closed in both cases. Thanks [@hc-12](https://github.com/hc-12) for the report. (Closes [#944](https://github.com/fallow-rs/fallow/issues/944).)
+
+### Changed
+
+- **The release now fails if any platform npm tarball is missing a file it declares, or ships an unsigned binary.** npm silently drops a `files` whitelist entry that has no matching file on disk, so a broken signature-staging step could publish a `@fallow-cli/<platform>` package without its `fallow.sig` siblings (the exact shape that breaks the Action installer). A new release-time gate inspects each packed tarball against its own declared `files`, and independently requires every binary in a CLI platform package to have a `.sig` sibling, aborting the publish if either check fails. Refs [#944](https://github.com/fallow-rs/fallow/issues/944).
+
 ## [2.88.2] - 2026-06-03
 
 ### Fixed
