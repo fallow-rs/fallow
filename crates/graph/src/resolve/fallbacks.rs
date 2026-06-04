@@ -1606,6 +1606,30 @@ mod tests {
     }
 
     #[test]
+    fn package_source_path_accepts_relative_source_entries() {
+        assert_eq!(
+            safe_relative_package_source_path("src/index.js"),
+            Some(Path::new("src/index.js"))
+        );
+        assert_eq!(
+            safe_relative_package_source_path("./custom/entry.ts"),
+            Some(Path::new("custom/entry.ts"))
+        );
+    }
+
+    #[test]
+    fn package_source_path_rejects_unsafe_entries() {
+        assert_eq!(safe_relative_package_source_path(""), None);
+        assert_eq!(safe_relative_package_source_path("./"), None);
+        assert_eq!(safe_relative_package_source_path("../src/index.js"), None);
+        assert_eq!(safe_relative_package_source_path("src/../index.js"), None);
+        assert_eq!(safe_relative_package_source_path("/src/index.js"), None);
+
+        #[cfg(windows)]
+        assert_eq!(safe_relative_package_source_path("C:\\src\\index.js"), None);
+    }
+
+    #[test]
     fn test_pnpm_store_path_extract_package_name() {
         let path =
             PathBuf::from("/project/node_modules/.pnpm/react@18.2.0/node_modules/react/index.js");

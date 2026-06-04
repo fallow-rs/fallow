@@ -5,13 +5,30 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import { join, resolve, dirname, relative } from "node:path";
+import { join, resolve, dirname, isAbsolute, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const fallowBin = join(rootDir, "target", "release", "fallow");
 const knipBin = join(__dirname, "node_modules", ".bin", "knip");
+
+function normalizeProjectPath(projectDir, value) {
+  if (typeof value === "string") {
+    return isAbsolute(value) ? relative(projectDir, value) : value;
+  }
+  if (value && typeof value === "object") {
+    for (const key of ["path", "file", "filename"]) {
+      if (key in value) return normalizeProjectPath(projectDir, value[key]);
+    }
+    if ("location" in value) return normalizeProjectPath(projectDir, value.location);
+  }
+  return String(value);
+}
+
+function parseJsonOutput(stdout) {
+  return JSON.parse(stdout.trimStart().replace(/^\uFEFF/, ""));
+}
 
 function run(cmd, args, cwd) {
   const result = spawnSync(cmd, args, {
@@ -29,7 +46,7 @@ function run(cmd, args, cwd) {
 }
 
 function parseFallow(stdout, projectDir) {
-  const data = JSON.parse(stdout);
+  const data = parseJsonOutput(stdout);
   const result = {
     unused_files: new Set(),
     unused_exports: new Set(),
@@ -41,34 +58,35 @@ function parseFallow(stdout, projectDir) {
     unused_enum_members: new Set(),
     duplicate_exports: new Set(),
   };
-  for (const f of data.unused_files ?? []) result.unused_files.add(relative(projectDir, f.path));
+  for (const f of data.unused_files ?? [])
+    result.unused_files.add(normalizeProjectPath(projectDir, f.path));
   for (const e of data.unused_exports ?? [])
-    result.unused_exports.add(`${relative(projectDir, e.path)}:${e.export_name}`);
+    result.unused_exports.add(`${normalizeProjectPath(projectDir, e.path)}:${e.export_name}`);
   for (const t of data.unused_types ?? [])
-    result.unused_types.add(`${relative(projectDir, t.path)}:${t.export_name}`);
+    result.unused_types.add(`${normalizeProjectPath(projectDir, t.path)}:${t.export_name}`);
   for (const d of data.unused_dependencies ?? [])
     result.unused_dependencies.add(d.package_name ?? d.name);
   for (const d of data.unused_dev_dependencies ?? [])
     result.unused_dev_dependencies.add(d.package_name ?? d.name);
   for (const u of data.unresolved_imports ?? [])
-    result.unresolved_imports.add(`${relative(projectDir, u.path)}:${u.specifier}`);
+    result.unresolved_imports.add(`${normalizeProjectPath(projectDir, u.path)}:${u.specifier}`);
   for (const u of data.unlisted_dependencies ?? [])
     result.unlisted_dependencies.add(
-      u.package_name ?? `${relative(projectDir, u.path)}:${u.specifier}`,
+      u.package_name ?? `${normalizeProjectPath(projectDir, u.path)}:${u.specifier}`,
     );
   for (const e of data.unused_enum_members ?? [])
     result.unused_enum_members.add(
-      `${relative(projectDir, e.path)}:${e.enum_name}.${e.member_name}`,
+      `${normalizeProjectPath(projectDir, e.path)}:${e.enum_name}.${e.member_name}`,
     );
   for (const d of data.duplicate_exports ?? [])
     result.duplicate_exports.add(
-      `${d.export_name}@${(d.locations ?? d.files ?? []).map((f) => relative(projectDir, f)).join(",")}`,
+      `${d.export_name}@${(d.locations ?? d.files ?? []).map((f) => normalizeProjectPath(projectDir, f)).join(",")}`,
     );
   return result;
 }
 
 function parseKnip(stdout, _projectDir) {
-  const data = JSON.parse(stdout);
+  const data = parseJsonOutput(stdout);
   const result = {
     unused_files: new Set(),
     unused_exports: new Set(),
@@ -154,7 +172,11 @@ function compareProject(name, dir) {
   try {
     knip = parseKnip(kr.stdout, dir);
   } catch (e) {
-    console.log(`  knip parse error: ${e.message}`);
+    if (kr.status !== 0) {
+      console.log(`  knip ERROR: ${(kr.stderr || kr.stdout).slice(0, 200)}`);
+    } else {
+      console.log(`  knip parse error: ${e.message}`);
+    }
     return null;
   }
 
