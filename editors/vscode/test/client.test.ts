@@ -12,6 +12,24 @@ let mockDuplicationSkipLocal = false;
 let mockDuplicationCrossLanguage = false;
 let mockDuplicationIgnoreImports = false;
 
+const mockBinaryResolution = vi.hoisted(() => ({
+  localBinary: "/mock/fallow-lsp" as string | null,
+  pathBinary: null as string | null,
+  installedBinary: null as string | null,
+}));
+
+const mockLanguageClient = vi.hoisted(() => ({
+  instances: [] as Array<{
+    start: ReturnType<typeof vi.fn>;
+    stop: ReturnType<typeof vi.fn>;
+    setTrace: ReturnType<typeof vi.fn>;
+    sendRequest: ReturnType<typeof vi.fn>;
+    state: number;
+    onDidChangeState: ReturnType<typeof vi.fn>;
+    emitState: (newState: number) => void;
+  }>,
+}));
+
 vi.mock("vscode", () => ({
   extensions: {
     getExtension: vi.fn(),
@@ -23,7 +41,33 @@ vi.mock("vscode", () => ({
 }));
 
 vi.mock("vscode-languageclient/node.js", () => ({
-  LanguageClient: class {},
+  LanguageClient: class {
+    state = 2;
+    private stateListeners: Array<(event: { newState: number }) => void> = [];
+    readonly start = vi.fn(async () => undefined);
+    readonly stop = vi.fn(async () => undefined);
+    readonly setTrace = vi.fn(async () => undefined);
+    readonly sendRequest = vi.fn(async () => []);
+    readonly onDidChangeState = vi.fn((listener: (event: { newState: number }) => void) => {
+      this.stateListeners.push(listener);
+      return {
+        dispose: () => {
+          this.stateListeners = this.stateListeners.filter((item) => item !== listener);
+        },
+      };
+    });
+
+    emitState(newState: number) {
+      this.state = newState;
+      for (const listener of this.stateListeners) {
+        listener({ newState });
+      }
+    }
+
+    constructor() {
+      mockLanguageClient.instances.push(this);
+    }
+  },
   State: {
     Stopped: 1,
     Running: 2,
@@ -32,6 +76,17 @@ vi.mock("vscode-languageclient/node.js", () => ({
   TransportKind: {
     stdio: 0,
   },
+}));
+
+vi.mock("../src/binary-utils.js", () => ({
+  findLocalBinary: () => mockBinaryResolution.localBinary,
+  findBinaryInPath: () => mockBinaryResolution.pathBinary,
+}));
+
+vi.mock("../src/download.js", () => ({
+  downloadBinary: vi.fn(async () => null),
+  getBinaryVersion: vi.fn(() => null),
+  getInstalledBinaryPath: vi.fn(() => mockBinaryResolution.installedBinary),
 }));
 
 vi.mock("../src/config.js", () => ({
@@ -51,7 +106,12 @@ vi.mock("../src/config.js", () => ({
   getDuplicationIgnoreImportsOverride: () => mockDuplicationIgnoreImports,
 }));
 
-import { createInitializationOptions, loadDiagnosticCategories } from "../src/client.js";
+import {
+  createInitializationOptions,
+  loadDiagnosticCategories,
+  startClient,
+  stopClient,
+} from "../src/client.js";
 import {
   DIAGNOSTIC_CATEGORIES,
   getDiagnosticCategories,
@@ -59,8 +119,9 @@ import {
   setDiagnosticCategories,
 } from "../src/diagnosticFilter.js";
 
-afterEach(() => {
+afterEach(async () => {
   resetDiagnosticCategories();
+  await stopClient();
 });
 
 beforeEach(() => {
@@ -75,6 +136,10 @@ beforeEach(() => {
   mockDuplicationSkipLocal = true;
   mockDuplicationCrossLanguage = true;
   mockDuplicationIgnoreImports = true;
+  mockBinaryResolution.localBinary = "/mock/fallow-lsp";
+  mockBinaryResolution.pathBinary = null;
+  mockBinaryResolution.installedBinary = null;
+  mockLanguageClient.instances = [];
 });
 
 const outputChannel = () => ({
@@ -131,5 +196,27 @@ describe("loadDiagnosticCategories", () => {
 
     expect(getDiagnosticCategories()).toBe(DIAGNOSTIC_CATEGORIES);
     expect(out.lines.at(-1)).toContain("using bundled diagnostic categories");
+  });
+});
+
+describe("stopClient", () => {
+  it("waits for a starting client before stopping it", async () => {
+    const out = outputChannel();
+    const client = await startClient({} as never, out as never);
+
+    expect(client).not.toBeNull();
+    expect(mockLanguageClient.instances).toHaveLength(1);
+    const instance = mockLanguageClient.instances[0];
+    expect(instance).toBeDefined();
+
+    instance!.state = 3;
+    const stopped = stopClient();
+
+    expect(instance!.stop).not.toHaveBeenCalled();
+    instance!.emitState(2);
+
+    await expect(stopped).resolves.toBeUndefined();
+    expect(instance!.onDidChangeState).toHaveBeenCalledOnce();
+    expect(instance!.stop).toHaveBeenCalledOnce();
   });
 });
