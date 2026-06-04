@@ -894,6 +894,7 @@ dependencies = [
  "rayon",
  "rustc-hash 2.1.2",
  "schemars",
+ "semver",
  "serde",
  "serde_json",
  "serde_yaml_ng",

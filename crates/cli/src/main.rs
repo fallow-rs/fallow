@@ -52,6 +52,7 @@ mod security;
 mod setup_hooks;
 mod signal;
 mod telemetry;
+mod update_check;
 mod validate;
 mod vital_signs;
 mod watch;
@@ -2408,7 +2409,8 @@ fn main() -> ExitCode {
         parent_run: cli.parent_run.as_deref(),
     });
     if exit_code == ExitCode::SUCCESS {
-        telemetry::maybe_print_opt_in_note(output, quiet);
+        let note_printed = telemetry::maybe_print_opt_in_note(output, quiet);
+        update_check::maybe_nudge(output, quiet, note_printed);
     }
     exit_code
 }

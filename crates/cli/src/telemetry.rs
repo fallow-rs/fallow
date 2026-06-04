@@ -200,20 +200,25 @@ pub fn record_workflow(record: &WorkflowRecord<'_>) {
     }
 }
 
-pub fn maybe_print_opt_in_note(output: OutputFormat, quiet: bool) {
+/// Print the one-time telemetry opt-in note if this is the first eligible run.
+///
+/// Returns `true` when the note was printed this run, so the caller can enforce
+/// mutual exclusion with the upgrade nudge (at most one unsolicited stderr
+/// notice per run; the consent-bearing note wins).
+pub fn maybe_print_opt_in_note(output: OutputFormat, quiet: bool) -> bool {
     if quiet
         || !matches!(output, OutputFormat::Human)
         || !std::io::stderr().is_terminal()
         || admin_disabled()
     {
-        return;
+        return false;
     }
     let Some(path) = config_path() else {
-        return;
+        return false;
     };
     let mut config = read_config_from(&path).unwrap_or_default();
     if config.enabled || config.prompt_shown {
-        return;
+        return false;
     }
     config.prompt_shown = true;
     let _ = write_config_to(&path, &config);
@@ -225,6 +230,7 @@ pub fn maybe_print_opt_in_note(output: OutputFormat, quiet: bool) {
          This notice is shown once; your preference (still off) is stored at {}",
         path.display()
     );
+    true
 }
 
 fn print_status(output: OutputFormat) -> ExitCode {
