@@ -211,6 +211,32 @@ describe("package.json runtime coverage contributions", () => {
   });
 });
 
+describe("package.json audit verdict surface", () => {
+  it("contributes the on-demand audit command with a shield icon", () => {
+    expect(command("fallow.audit")).toMatchObject({
+      title: "Fallow: Audit Changed Files",
+      icon: "$(shield)",
+    });
+  });
+
+  it("keeps the audit command palette-discoverable (no when:false hide)", () => {
+    const entry = commandPaletteEntry("fallow.audit");
+    expect(entry?.when).not.toBe("false");
+  });
+
+  it("contributes the audit gate, status-bar toggle, and run-on-save settings", () => {
+    const properties = pkg.contributes.configuration.properties;
+    for (const key of [
+      "fallow.audit.gate",
+      "fallow.audit.statusBar.enabled",
+      "fallow.audit.runOnSave",
+    ]) {
+      const prop = properties[key];
+      expect(prop?.description ?? prop?.markdownDescription).toBeTruthy();
+    }
+  });
+});
+
 describe("package.json duplication settings", () => {
   it("contributes every duplication knob used by sidebar analysis", () => {
     const properties = pkg.contributes.configuration.properties;

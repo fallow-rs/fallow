@@ -113,6 +113,11 @@
         "icon": "$(clear-all)"
       },
       {
+        "command": "fallow.audit",
+        "title": "Fallow: Audit Changed Files",
+        "icon": "$(shield)"
+      },
+      {
         "command": "fallow.fix",
         "title": "Fallow: Auto-Fix (unexport unused, remove unused deps)"
       },
@@ -404,6 +409,29 @@
           "default": "",
           "markdownDescription": "Scope Fallow's sidebar analysis to a single monorepo workspace package, by name. Empty = analyze the whole project. Use the **Fallow: Select Workspace Scope** command (or the layers icon in the status bar) to pick interactively; that per-folder choice overrides this pinned default. Mirrors the CLI `--workspace` flag.",
           "scope": "resource"
+        },
+        "fallow.audit.gate": {
+          "type": "string",
+          "enum": [
+            "new-only",
+            "all"
+          ],
+          "default": "new-only",
+          "enumDescriptions": [
+            "Fail only on findings introduced by the current change set (runs an extra base-snapshot pass).",
+            "Fail on every finding in changed files (no base-snapshot attribution)."
+          ],
+          "markdownDescription": "Which findings affect the audit verdict shown in the editor. Mirrors `fallow audit --gate`."
+        },
+        "fallow.audit.statusBar.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the audit verdict (pass/warn/fail) for the current change set in the status bar."
+        },
+        "fallow.audit.runOnSave": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Re-run the audit verdict automatically when a JS/TS file is saved. Off by default to avoid added latency; the **Fallow: Audit Changed Files** command and the status-bar item run it on demand."
         },
         "fallow.trace.server": {
           "type": "string",

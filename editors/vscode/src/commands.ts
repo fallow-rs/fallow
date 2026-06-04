@@ -7,6 +7,7 @@ import * as vscode from "vscode";
 import {
   getLspPath,
   getProduction,
+  getAuditGate,
   getDuplicationCrossLanguageOverride,
   getDuplicationIgnoreImportsOverride,
   getDuplicationMinLinesOverride,
@@ -28,6 +29,7 @@ import {
   countCheckIssues,
   planDegradation,
 } from "./analysis-utils.js";
+import { buildAuditArgs, parseAuditOutput } from "./audit-utils.js";
 import { showBinarySkewToastOnce } from "./binary-skew.js";
 import { findBinaryInPath, findLocalBinary, getExecutableExtension } from "./binary-utils.js";
 import {
@@ -46,6 +48,7 @@ import {
   resolveActiveWorkspaceScope,
 } from "./workspacePicker.js";
 import type {
+  AuditOutput,
   FallowCheckResult,
   FallowCombinedResult,
   FallowDupesResult,
@@ -557,6 +560,61 @@ export const runWorkspaces = async (
       void vscode.window.showErrorMessage(`Fallow: failed to list workspaces: ${message}`);
     }
     return null;
+  }
+};
+
+/**
+ * Single-flight guard for the audit run. A second invocation while one is in
+ * flight is ignored, preventing overlapping base-snapshot worktree-cache
+ * contention when a user spams the command or rapid save-triggers fire.
+ */
+let auditInFlight = false;
+
+/**
+ * Run `fallow audit --format json` against the workspace and parse the verdict
+ * envelope. Mirrors `runAnalysis`: resolves the self-healing managed CLI,
+ * builds a lean argv (only flags that shipped with the `audit` command, so no
+ * version-gated degradation is needed), spawns via `execFallow`, and returns
+ * the parsed `AuditOutput`.
+ *
+ * Returns null when there is no workspace, the run is already in flight, or the
+ * output is not a parseable audit envelope. Audit exits 1 on a `fail` verdict,
+ * which `execFallow` resolves as success, so a failing verdict still returns a
+ * non-null result. On a spawn error the error toast surfaces and the error is
+ * rethrown so the caller can flip the status bar to its error state.
+ */
+export const runAudit = async (
+  context: vscode.ExtensionContext,
+  outputChannel?: vscode.OutputChannel,
+): Promise<AuditOutput | null> => {
+  const root = getWorkspaceRoot();
+  if (!root) {
+    void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    return null;
+  }
+
+  if (auditInFlight) {
+    return null;
+  }
+  auditInFlight = true;
+
+  try {
+    const { binary: cliBinary } = await resolveCliForRun(context, outputChannel);
+    const auditArgs = buildAuditArgs({
+      production: getProduction(),
+      changedSince: getChangedSince(),
+      configPath: getResolvedConfigPath(),
+      gate: getAuditGate(),
+    });
+
+    const output = await execFallow(cliBinary, auditArgs, root);
+    return parseAuditOutput(output);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    void vscode.window.showErrorMessage(`Fallow audit failed: ${message}`);
+    throw err;
+  } finally {
+    auditInFlight = false;
   }
 };
 

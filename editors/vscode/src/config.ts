@@ -3,7 +3,7 @@ import * as path from "node:path";
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { clampMinLines, clampMinOccurrences } from "./duplication-utils.js";
-import type { DuplicationMode, IssueTypeConfig, TraceLevel } from "./types.js";
+import type { AuditGate, DuplicationMode, IssueTypeConfig, TraceLevel } from "./types.js";
 
 const SECTION = "fallow";
 
@@ -112,6 +112,29 @@ export const getCoveragePath = (): string => {
 
 /** `--top N` cap on hot paths and findings; `0` (default) means no cap. */
 export const getCoverageTop = (): number => getConfig().get<number>("coverage.top", 0);
+
+/**
+ * Which findings affect the audit verdict. Mirrors `fallow audit --gate`:
+ * `new-only` (default) fails on findings introduced by the current change set,
+ * `all` fails on every finding in changed files.
+ */
+export const getAuditGate = (): AuditGate =>
+  getConfig().get<AuditGate>("audit.gate", "new-only");
+
+/**
+ * Whether the audit verdict status-bar item is created. Default on; creating an
+ * idle item runs no analysis, so this only controls the surface, not cost.
+ */
+export const getAuditEnabled = (): boolean =>
+  getConfig().get<boolean>("audit.statusBar.enabled", true);
+
+/**
+ * Whether to re-run the audit on save of a JS/TS file. Default OFF so it cannot
+ * regress idle latency; the command and status-bar item are the primary entry
+ * points.
+ */
+export const getAuditRunOnSave = (): boolean =>
+  getConfig().get<boolean>("audit.runOnSave", false);
 
 export const getChangedSince = (): string => getConfig().get<string>("changedSince", "").trim();
 

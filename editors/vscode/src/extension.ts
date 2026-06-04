@@ -8,9 +8,18 @@ import {
   getSecurityEnabled,
   getLicenseRefreshOnStartup,
   getCoveragePath,
+  getAuditEnabled,
+  getAuditRunOnSave,
   onConfigChange,
 } from "./config.js";
-import { runAnalysis, runFix, runHealthAnalysis, runSecurityAnalysis, runWorkspaces } from "./commands.js";
+import {
+  runAnalysis,
+  runAudit,
+  runFix,
+  runHealthAnalysis,
+  runSecurityAnalysis,
+  runWorkspaces,
+} from "./commands.js";
 import {
   HEALTH_CONFIG_KEYS,
   REANALYSIS_CONFIG_KEYS,
@@ -40,6 +49,14 @@ import {
   setStatusBarError,
   disposeStatusBar,
 } from "./statusBar.js";
+import { gatingCount } from "./audit-utils.js";
+import {
+  createAuditStatusBar,
+  disposeAuditStatusBar,
+  setAuditAnalyzing,
+  setAuditError,
+  updateAuditStatusBar,
+} from "./auditStatusBar.js";
 import type { AnalysisCompleteParams } from "./statusBar.js";
 import { DeadCodeTreeProvider, DuplicatesTreeProvider } from "./treeView.js";
 import {
@@ -52,17 +69,34 @@ import {
 import { RuntimeCoverageTreeProvider } from "./coverageView.js";
 import { runCoverageAnalysis } from "./coverageCommand.js";
 import type {
+  AuditOutput,
   FallowCheckResult,
   FallowDupesResult,
   HealthReport,
   RuntimeCoverageReport,
 } from "./types.js";
 
+/** Languages whose saves trigger an opt-in audit re-run (`audit.runOnSave`). */
+const AUDIT_SAVE_LANGUAGES: ReadonlySet<string> = new Set([
+  "javascript",
+  "javascriptreact",
+  "typescript",
+  "typescriptreact",
+  "vue",
+  "svelte",
+  "astro",
+  "mdx",
+]);
+
+/** Debounce window (ms) for coalescing rapid saves into a single audit run. */
+const AUDIT_SAVE_DEBOUNCE_MS = 600;
+
 let outputChannel: vscode.OutputChannel;
 let lastCheckResult: FallowCheckResult | null = null;
 let lastDupesResult: FallowDupesResult | null = null;
 let lastHealthResult: HealthReport | null = null;
 let lastCoverageReport: RuntimeCoverageReport | null = null;
+let lastAuditResult: AuditOutput | null = null;
 
 // The security run is a separate, view-gated process with disjoint config keys
 // from the dead-code analysis: toggling security never re-runs the main
@@ -76,6 +110,7 @@ const SECURITY_CONFIG_KEYS = [
 
 export interface ExtensionApi {
   readonly runAnalysis: typeof runAnalysis;
+  readonly runAudit: typeof runAudit;
   readonly runFix: typeof runFix;
   readonly runSecurityAnalysis: typeof runSecurityAnalysis;
 }
@@ -99,6 +134,16 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   const workspacePicker = createWorkspacePicker(context);
   context.subscriptions.push(workspacePicker);
   context.subscriptions.push({ dispose: () => disposeWorkspacePicker() });
+
+  // Audit verdict status bar. Gated on the setting (default on); creating an
+  // idle item runs no analysis, so it never touches the startup/visibility hot
+  // path (#902). When disabled, the command still runs and reports its verdict
+  // via an information message instead of the status bar.
+  const auditStatusBarEnabled = getAuditEnabled();
+  if (auditStatusBarEnabled) {
+    const auditStatusBar = createAuditStatusBar();
+    context.subscriptions.push(auditStatusBar);
+  }
 
   const diagnosticFilter = new DiagnosticFilter(context.workspaceState);
   context.subscriptions.push({ dispose: () => diagnosticFilter.dispose() });
@@ -466,6 +511,91 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     }),
   );
 
+  // On-demand audit verdict for the current change set. Uses a quiet
+  // status-bar-area progress spinner (not a notification) so an audit is less
+  // noisy than the full analysis. The audit run is single-flighted in
+  // `runAudit`, so a click while one is in flight is a no-op.
+  const reportAuditVerdict = (audit: AuditOutput): void => {
+    lastAuditResult = audit;
+    if (auditStatusBarEnabled) {
+      updateAuditStatusBar(audit);
+      return;
+    }
+    // Status bar surface disabled: still report the verdict so the command is
+    // never a silent no-op, and offer the details breakdown.
+    const count = gatingCount(audit);
+    const suffix = count > 0 ? ` (${count} gating candidate${count === 1 ? "" : "s"})` : "";
+    void vscode.window
+      .showInformationMessage(`Fallow audit: ${audit.verdict}${suffix}`, "Details")
+      .then((choice) => {
+        if (choice === "Details") {
+          outputChannel.show();
+        }
+        return undefined;
+      });
+  };
+
+  const runAuditCommand = async (): Promise<void> => {
+    setAuditAnalyzing();
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Window,
+        title: "Fallow: Auditing changes...",
+        cancellable: false,
+      },
+      async () => {
+        try {
+          const audit = await runAudit(context, outputChannel);
+          // A null result with no error means the run was skipped (already in
+          // flight or no workspace); leave the prior verdict in place rather
+          // than flashing an error state.
+          if (audit) {
+            reportAuditVerdict(audit);
+          } else if (lastAuditResult) {
+            updateAuditStatusBar(lastAuditResult);
+          } else {
+            setAuditError();
+          }
+        } catch {
+          setAuditError();
+        }
+      },
+    );
+  };
+  context.subscriptions.push(vscode.commands.registerCommand("fallow.audit", runAuditCommand));
+
+  // Opt-in re-run on save (default off; #902). Debounced and scoped to
+  // JS/TS-family saves so it cannot regress idle latency on unrelated files.
+  // Only active when the status-bar surface exists: a passive verdict refresh
+  // makes sense there, whereas firing an information message on every save would
+  // be noisy.
+  let auditSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument((doc) => {
+      if (!auditStatusBarEnabled || !getAuditRunOnSave()) {
+        return;
+      }
+      if (!AUDIT_SAVE_LANGUAGES.has(doc.languageId)) {
+        return;
+      }
+      if (auditSaveTimer) {
+        clearTimeout(auditSaveTimer);
+      }
+      auditSaveTimer = setTimeout(() => {
+        auditSaveTimer = null;
+        void runAuditCommand();
+      }, AUDIT_SAVE_DEBOUNCE_MS);
+    }),
+  );
+  context.subscriptions.push({
+    dispose: () => {
+      if (auditSaveTimer) {
+        clearTimeout(auditSaveTimer);
+        auditSaveTimer = null;
+      }
+    },
+  });
+
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.fix", async () => {
       // Save dirty editors first so the fix works on up-to-date content
@@ -646,6 +776,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 
   return {
     runAnalysis,
+    runAudit,
     runFix,
     runSecurityAnalysis,
   };
@@ -655,5 +786,6 @@ export const deactivate = async (): Promise<void> => {
   disposeStatusBar();
   disposeLicenseStatusBar();
   disposeWorkspacePicker();
+  disposeAuditStatusBar();
   await stopClient();
 };
