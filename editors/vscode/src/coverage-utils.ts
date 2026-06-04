@@ -74,9 +74,7 @@ export interface CleanupCandidates {
  * human output. All findings are CANDIDATES pending verification (#903), never
  * facts.
  */
-export const splitCleanupCandidates = (
-  report: RuntimeCoverageReport | null,
-): CleanupCandidates => {
+export const splitCleanupCandidates = (report: RuntimeCoverageReport | null): CleanupCandidates => {
   const findings = report?.findings ?? [];
   const safeToDelete: RuntimeCoverageFinding[] = [];
   const reviewRequired: RuntimeCoverageFinding[] = [];

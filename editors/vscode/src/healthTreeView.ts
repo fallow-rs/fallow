@@ -31,10 +31,7 @@ class HealthSectionItem extends vscode.TreeItem {
     count: number,
   ) {
     const base = HEALTH_SECTION_LABELS[section];
-    super(
-      count > 0 ? `${base} (${count})` : base,
-      vscode.TreeItemCollapsibleState.Collapsed,
-    );
+    super(count > 0 ? `${base} (${count})` : base, vscode.TreeItemCollapsibleState.Collapsed);
     this.contextValue = `healthSection.${section}`;
     this.iconPath = new vscode.ThemeIcon(HEALTH_SECTION_ICONS[section]);
   }
@@ -65,8 +62,7 @@ class HealthLeafItem extends vscode.TreeItem {
       this.tooltip = options.tooltip;
     }
 
-    const color =
-      options.iconColor != null ? new vscode.ThemeColor(options.iconColor) : undefined;
+    const color = options.iconColor != null ? new vscode.ThemeColor(options.iconColor) : undefined;
     this.iconPath = new vscode.ThemeIcon(icon, color);
 
     if (options.open) {
@@ -129,8 +125,7 @@ const buildScoreLeaves = (report: HealthReport): HealthLeafItem[] => {
 
 const buildComplexityLeaves = (report: HealthReport): HealthLeafItem[] =>
   (report.findings ?? []).map((finding) => {
-    const crapNote =
-      typeof finding.crap === "number" ? `, CRAP ${finding.crap.toFixed(0)}` : "";
+    const crapNote = typeof finding.crap === "number" ? `, CRAP ${finding.crap.toFixed(0)}` : "";
     const tooltip = `${finding.name} (${finding.severity}): cyclomatic ${finding.cyclomatic}, cognitive ${finding.cognitive}${crapNote}`;
     return new HealthLeafItem(finding.name, severityIcon(finding.severity), {
       tooltip,

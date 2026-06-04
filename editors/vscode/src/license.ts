@@ -87,8 +87,7 @@ const execLicense = (
   });
 
 /** Workspace root when one is open, else the home directory (license is global). */
-const licenseCwd = (): string =>
-  vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+const licenseCwd = (): string => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
 
 /**
  * Run a `fallow license <sub> --format json` invocation and normalize the
@@ -122,7 +121,8 @@ const runLicense = async (
 
   // Non-status exit, or unparseable output: prefer the structured error
   // message, then stderr, then a generic line.
-  const message = parsed.error.length > 0 ? parsed.error : stderr.trim() || "fallow license failed.";
+  const message =
+    parsed.error.length > 0 ? parsed.error : stderr.trim() || "fallow license failed.";
   outputChannel?.appendLine(`Fallow license error (exit ${code ?? "?"}): ${message}`);
   return { ok: false, status: null, message };
 };
@@ -267,11 +267,7 @@ const activateFromFile = async (
     return;
   }
   const absolute = picked[0].fsPath;
-  const result = await runLicense(
-    context,
-    ["activate", "--from-file", absolute],
-    outputChannel,
-  );
+  const result = await runLicense(context, ["activate", "--from-file", absolute], outputChannel);
   await afterAction(context, outputChannel, result);
 };
 

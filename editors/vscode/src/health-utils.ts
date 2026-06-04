@@ -28,15 +28,7 @@ export interface HealthArgsOptions {
  * is untouched (it keeps `--skip health`); this is a separate, lazy spawn.
  */
 export const buildHealthArgs = (options: HealthArgsOptions): string[] => {
-  const args = [
-    "health",
-    "--format",
-    "json",
-    "--quiet",
-    "--score",
-    "--complexity",
-    "--targets",
-  ];
+  const args = ["health", "--format", "json", "--quiet", "--score", "--complexity", "--targets"];
 
   if (options.hotspots) {
     args.push("--hotspots");
@@ -243,9 +235,7 @@ export const countHealthItems = (report: HealthReport | null): number => {
     return 0;
   }
   return (
-    (report.findings?.length ?? 0) +
-    (report.hotspots?.length ?? 0) +
-    (report.targets?.length ?? 0)
+    (report.findings?.length ?? 0) + (report.hotspots?.length ?? 0) + (report.targets?.length ?? 0)
   );
 };
 

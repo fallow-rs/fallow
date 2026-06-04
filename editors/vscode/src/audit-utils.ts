@@ -52,9 +52,7 @@ export const buildAuditArgs = (options: AuditArgsOptions): string[] => {
  * severity theme colors so the surface respects the user's theme rather than
  * hard-coding any color.
  */
-export type AuditSeverityKey =
-  | "statusBarItem.errorBackground"
-  | "statusBarItem.warningBackground";
+export type AuditSeverityKey = "statusBarItem.errorBackground" | "statusBarItem.warningBackground";
 
 export interface AuditVerdictPresentation {
   readonly icon: string;
@@ -67,9 +65,7 @@ export interface AuditVerdictPresentation {
  * `pass` carries no background tint; `warn` and `fail` map to the built-in
  * status-bar warning / error theme colors.
  */
-export const auditVerdictPresentation = (
-  verdict: AuditVerdict,
-): AuditVerdictPresentation => {
+export const auditVerdictPresentation = (verdict: AuditVerdict): AuditVerdictPresentation => {
   if (verdict === "fail") {
     return { icon: "$(error)", label: "fail", background: "statusBarItem.errorBackground" };
   }
@@ -166,9 +162,7 @@ export const buildAuditTooltipMarkdown = (
 
   const baseRef = escapeMarkdownText(audit.base_ref);
   const fileWord = audit.changed_files_count === 1 ? "file" : "files";
-  lines.push(
-    `$(git-branch) ${audit.changed_files_count} changed ${fileWord} vs ${baseRef}`,
-  );
+  lines.push(`$(git-branch) ${audit.changed_files_count} changed ${fileWord} vs ${baseRef}`);
 
   if (changedSinceRef) {
     lines.push(`$(history) Scoped to changes since ${escapeMarkdownText(changedSinceRef)}`);

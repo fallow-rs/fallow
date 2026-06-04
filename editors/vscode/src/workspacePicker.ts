@@ -62,9 +62,7 @@ export const cacheWorkspacesOutput = (
 export const getCachedWorkspacesOutput = (binaryPath: string): WorkspacesOutput | undefined =>
   workspacesCache.get(binaryPath);
 
-export const createWorkspacePicker = (
-  context: vscode.ExtensionContext,
-): vscode.StatusBarItem => {
+export const createWorkspacePicker = (context: vscode.ExtensionContext): vscode.StatusBarItem => {
   // Priority 49 sits just to the right of the main Fallow status item (50).
   pickerItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 49);
   pickerItem.command = "fallow.selectWorkspace";
@@ -94,9 +92,7 @@ interface WorkspaceScopeQuickPick extends vscode.QuickPickItem {
   readonly item: WorkspaceQuickPickItem;
 }
 
-const toQuickPickItems = (
-  rows: ReadonlyArray<WorkspaceQuickPickItem>,
-): WorkspaceScopeQuickPick[] =>
+const toQuickPickItems = (rows: ReadonlyArray<WorkspaceQuickPickItem>): WorkspaceScopeQuickPick[] =>
   rows.map((row) => ({
     label: row.label,
     description: row.description,
@@ -180,19 +176,13 @@ export const showWorkspacePicker = async (
  * Clear the per-folder scope override back to whole-project. Returns true when
  * a change was made (so the caller can skip a no-op re-analysis).
  */
-export const clearWorkspaceScope = async (
-  context: vscode.ExtensionContext,
-): Promise<boolean> => {
+export const clearWorkspaceScope = async (context: vscode.ExtensionContext): Promise<boolean> => {
   const previous = getWorkspaceStateOverride(context);
   if (previous === CLEAR_WORKSPACE_SCOPE) {
-    void vscode.window.showInformationMessage(
-      "Fallow: already analyzing the whole project.",
-    );
+    void vscode.window.showInformationMessage("Fallow: already analyzing the whole project.");
     return false;
   }
   await context.workspaceState.update(WORKSPACE_STATE_KEY, CLEAR_WORKSPACE_SCOPE);
-  void vscode.window.showInformationMessage(
-    "Fallow: scope cleared. Analyzing the whole project.",
-  );
+  void vscode.window.showInformationMessage("Fallow: scope cleared. Analyzing the whole project.");
   return true;
 };

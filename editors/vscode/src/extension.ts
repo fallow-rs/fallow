@@ -158,11 +158,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 
   // Expose the health-enabled state to `viewsWelcome` / `menus` `when` clauses.
   const syncHealthEnabledContext = (): void => {
-    void vscode.commands.executeCommand(
-      "setContext",
-      "fallow.health.enabled",
-      getHealthEnabled(),
-    );
+    void vscode.commands.executeCommand("setContext", "fallow.health.enabled", getHealthEnabled());
   };
   syncHealthEnabledContext();
 
@@ -326,13 +322,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     treeDataProvider: coverageProvider,
   });
   coverageProvider.setView(coverageView);
-  context.subscriptions.push(
-    deadCodeView,
-    duplicatesView,
-    healthView,
-    securityView,
-    coverageView,
-  );
+  context.subscriptions.push(deadCodeView, duplicatesView, healthView, securityView, coverageView);
 
   const onHealthViewVisible = (): void => {
     if (healthAnalysisRan) {

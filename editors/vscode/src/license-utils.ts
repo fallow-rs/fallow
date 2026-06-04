@@ -5,11 +5,7 @@
  * `statusBar-utils.ts` vs `statusBar.ts`).
  */
 
-import type {
-  LicenseParseResult,
-  LicenseState,
-  LicenseStatusJson,
-} from "./license-types.js";
+import type { LicenseParseResult, LicenseState, LicenseStatusJson } from "./license-types.js";
 
 /**
  * Theme color key the status-bar item uses for each severity. `null` =

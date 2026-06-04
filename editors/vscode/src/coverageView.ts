@@ -104,7 +104,9 @@ export class RuntimeCoverageTreeProvider implements vscode.TreeDataProvider<Cove
     }
     const count = countCoverageItems(this.report);
     this.view.badge =
-      count > 0 ? { value: count, tooltip: `${count} runtime item${count === 1 ? "" : "s"}` } : undefined;
+      count > 0
+        ? { value: count, tooltip: `${count} runtime item${count === 1 ? "" : "s"}` }
+        : undefined;
   }
 
   getTreeItem(element: CoverageItem): vscode.TreeItem {

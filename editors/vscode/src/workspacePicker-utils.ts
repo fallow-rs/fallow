@@ -64,9 +64,7 @@ export const parseWorkspacesOutput = (stdout: string): WorkspacesOutput | null =
 
   return {
     workspace_count:
-      typeof candidate.workspace_count === "number"
-        ? candidate.workspace_count
-        : workspaces.length,
+      typeof candidate.workspace_count === "number" ? candidate.workspace_count : workspaces.length,
     workspaces,
   };
 };

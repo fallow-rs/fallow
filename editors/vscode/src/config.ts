@@ -118,8 +118,7 @@ export const getCoverageTop = (): number => getConfig().get<number>("coverage.to
  * `new-only` (default) fails on findings introduced by the current change set,
  * `all` fails on every finding in changed files.
  */
-export const getAuditGate = (): AuditGate =>
-  getConfig().get<AuditGate>("audit.gate", "new-only");
+export const getAuditGate = (): AuditGate => getConfig().get<AuditGate>("audit.gate", "new-only");
 
 /**
  * Whether the audit verdict status-bar item is created. Default on; creating an
@@ -133,8 +132,7 @@ export const getAuditEnabled = (): boolean =>
  * regress idle latency; the command and status-bar item are the primary entry
  * points.
  */
-export const getAuditRunOnSave = (): boolean =>
-  getConfig().get<boolean>("audit.runOnSave", false);
+export const getAuditRunOnSave = (): boolean => getConfig().get<boolean>("audit.runOnSave", false);
 
 export const getChangedSince = (): string => getConfig().get<string>("changedSince", "").trim();
 
@@ -147,8 +145,7 @@ export const getHealthTopFindings = (): number => {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : 20;
 };
 
-export const getHealthStatusBar = (): boolean =>
-  getConfig().get<boolean>("health.statusBar", true);
+export const getHealthStatusBar = (): boolean => getConfig().get<boolean>("health.statusBar", true);
 
 /**
  * The pinned `fallow.workspace` setting (a monorepo package name). Empty =
