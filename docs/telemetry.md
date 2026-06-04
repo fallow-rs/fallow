@@ -74,7 +74,7 @@ V1 events are workflow-level and coarse:
   "event": "workflow_completed",
   "fallow_version": "2.85.0",
   "workflow": "audit",
-  "integration_surface": "cli_json",
+  "integration_surface": "mcp",
   "invocation_context": "agent",
   "agent_source": "codex",
   "output_format": "json",
@@ -86,24 +86,34 @@ V1 events are workflow-level and coarse:
   "duration_bucket_ms": "500-2000",
   "outcome": "issues_found",
   "exit_code_bucket": "1",
+  "findings_present": true,
+  "mcp_tool": "find_dupes",
   "parent_run": "tmp_8x7p4k"
 }
 ```
 
-`agent_source` and `parent_run` are optional: `agent_source` appears only on agent-driven runs, and `parent_run` only when a run is explicitly correlated to a previous one. Both are omitted otherwise.
+`agent_source`, `findings_present`, `mcp_tool`, and `parent_run` are optional. `agent_source` appears only on agent-driven runs. `findings_present` is omitted by commands that run no analysis (and by older binaries). `mcp_tool` appears only when a run came through the MCP server. `parent_run` appears only when a run is explicitly correlated to a previous one. All are omitted otherwise.
 
 Field purposes:
 
 | Field | Purpose |
 | --- | --- |
-| `workflow` | Prioritize audit, dead-code, health, duplication, CI, and runtime-coverage setup workflows. |
+| `workflow` | Prioritize the audit, dead-code, health, duplication, CI, runtime-coverage setup, impact, security, fix, and explain workflows. |
 | `integration_surface` | Understand whether Fallow is used through human CLI, CLI JSON, MCP, CI, editor, or programmatic surfaces. |
 | `invocation_context` | Separate human, CI, editor, and agent-driven use without uploading detection evidence. |
 | `agent_source` | Improve compatibility with specific agent integrations using a documented allowlist. |
 | `output_format` / `quiet` | Protect the output contracts that users and agents rely on most. |
 | `duration_bucket_ms` | Find slow workflow classes without collecting exact timings. |
 | `outcome` / `exit_code_bucket` | Measure clean runs, findings, and failures without uploading raw error text. |
+| `findings_present` | Whether the analysis surfaced any findings, decoupled from the exit-code gate (so informational analyses like default-config `dupes`, which never exit non-zero, are still measurable). On the combined and audit workflows it is an OR across the sub-analyses; per-analysis find-rate is answerable only on the standalone `dead_code`, `dupes`, and `health` workflows. |
+| `mcp_tool` | Attribute MCP usage to a specific tool, from a fixed allowlist of tool names. |
 | `parent_run` | Link explicit agent follow-up runs using a short allowlisted token, never a path or free-form string. |
+
+## Integration surfaces
+
+The MCP server runs Fallow by invoking the CLI, so an MCP tool call already produces one CLI telemetry event. The server tags that spawned process (via the `FALLOW_INTEGRATION_SURFACE` and `FALLOW_MCP_TOOL` environment variables) so the single event is attributed to the `mcp` surface and the specific tool, instead of looking like any other `cli_json` run. No second event is emitted, and the privacy posture is identical because it is the same CLI code path and consent check. `FALLOW_MCP_TOOL` is validated CLI-side against a fixed allowlist of tool names; any other value is dropped.
+
+The LSP server, VS Code extension, N-API bindings, and programmatic embedding run analysis in-process rather than by spawning the CLI, so the environment-variable tagging does not reach them and they emit no telemetry today. Their `integration_surface` values are reserved for when a future shared telemetry layer lets them emit directly.
 
 ## Agent Source
 

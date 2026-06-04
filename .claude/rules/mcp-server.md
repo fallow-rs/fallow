@@ -64,3 +64,7 @@ All params structs derive `Default` for ergonomic test construction except those
 Built with `rmcp` (official Rust MCP SDK). Thin subprocess wrapper — all analysis logic stays in the CLI.
 - `FALLOW_BIN` — binary path (defaults to sibling binary or `fallow` in PATH)
 - `FALLOW_TIMEOUT_SECS` — subprocess timeout in seconds (default: 120)
+
+## Telemetry surface tagging
+
+Every tool dispatches through `tools::run_tool` / `run_tool_with_top_level_warnings` (NOT the bare `run_fallow*`, which are now `#[cfg(test)]`-only). `run_tool` takes a `tool: &'static str` literal (the MCP tool name, matching the method name) and the shared `spawn_fallow` sets `FALLOW_INTEGRATION_SURFACE=mcp` + `FALLOW_MCP_TOOL=<tool>` on the spawned CLI `Command`. Because the CLI inherits this env, its existing telemetry path emits ONE event tagged `integration_surface = mcp` with a per-tool `mcp_tool` dimension instead of `cli_json`; the MCP server emits no event of its own (no double counting), and consent/privacy posture is identical (same CLI code path). When adding a new tool, pass its name to `run_tool` AND add the name to the `MCP_TOOLS` allowlist in `crates/cli/src/telemetry.rs`, or the CLI drops the unknown `mcp_tool` value. LSP/vscode/napi/programmatic run in-process (no CLI subprocess) so they are deliberately untagged/silent.

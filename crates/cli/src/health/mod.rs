@@ -777,6 +777,13 @@ fn execute_health_inner(
         None
     };
 
+    // Report findings presence to telemetry from the real result (complexity
+    // findings or coverage gaps), independent of the exit-code gate. See
+    // `telemetry::note_findings_present`.
+    crate::telemetry::note_findings_present(
+        !report.findings.is_empty() || coverage_gaps_has_findings,
+    );
+
     Ok(HealthResult {
         report,
         grouping,

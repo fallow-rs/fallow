@@ -3064,25 +3064,25 @@ fn telemetry_workflow_for_command(
             _ => telemetry::Workflow::GithubAction,
         },
         Some(Command::Coverage { .. }) => telemetry::Workflow::RuntimeCoverageSetup,
+        Some(Command::Impact { .. }) => telemetry::Workflow::Impact,
+        Some(Command::Security) => telemetry::Workflow::Security,
+        Some(Command::Fix { .. }) => telemetry::Workflow::Fix,
+        Some(Command::Explain { .. }) => telemetry::Workflow::Explain,
         Some(
             Command::List { .. }
             | Command::Workspaces
-            | Command::Fix { .. }
             | Command::Watch { .. }
             | Command::Init { .. }
             | Command::Hooks { .. }
             | Command::ConfigSchema
             | Command::PluginSchema
             | Command::Config { .. }
-            | Command::Explain { .. }
             | Command::Schema
             | Command::CiTemplate { .. }
             | Command::Migrate { .. }
             | Command::License { .. }
             | Command::Telemetry { .. }
-            | Command::SetupHooks { .. }
-            | Command::Impact { .. }
-            | Command::Security,
+            | Command::SetupHooks { .. },
         ) => telemetry::Workflow::Unknown,
     }
 }
@@ -3631,6 +3631,46 @@ mod tests {
     fn cli_definition_has_no_flag_collisions() {
         use clap::CommandFactory;
         Cli::command().debug_assert();
+    }
+
+    /// The high-value commands each get their own telemetry workflow instead of
+    /// the `Unknown` catch-all, so "is anyone using `fallow impact`?" is
+    /// answerable. Admin / low-signal commands stay `Unknown`.
+    #[test]
+    fn high_value_commands_route_to_distinct_workflows() {
+        use clap::Parser;
+        use fallow_config::OutputFormat;
+
+        let distinct = [
+            (vec!["fallow", "impact"], telemetry::Workflow::Impact),
+            (vec!["fallow", "security"], telemetry::Workflow::Security),
+            (vec!["fallow", "fix"], telemetry::Workflow::Fix),
+            (
+                vec!["fallow", "explain", "unused-exports"],
+                telemetry::Workflow::Explain,
+            ),
+        ];
+        for (argv, expected) in distinct {
+            let cli = Cli::try_parse_from(&argv).expect("argv parses");
+            assert_eq!(
+                telemetry_workflow_for_command(cli.command.as_ref(), OutputFormat::Json),
+                expected,
+                "{argv:?} should map to {expected:?}"
+            );
+        }
+
+        for argv in [
+            vec!["fallow", "list"],
+            vec!["fallow", "config"],
+            vec!["fallow", "schema"],
+        ] {
+            let cli = Cli::try_parse_from(&argv).expect("argv parses");
+            assert_eq!(
+                telemetry_workflow_for_command(cli.command.as_ref(), OutputFormat::Json),
+                telemetry::Workflow::Unknown,
+                "{argv:?} should stay Unknown"
+            );
+        }
     }
 
     /// `-v`, `-V`, and `--version` must all trigger clap's Version action so

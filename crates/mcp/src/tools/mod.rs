@@ -163,44 +163,78 @@ fn timeout_duration() -> Duration {
 }
 
 /// Execute the fallow CLI binary with the given arguments and return the result.
+///
+/// Untagged variant retained for the subprocess-behavior tests (timeouts, exit
+/// codes, signal handling); production tool dispatch goes through `run_tool` so
+/// the spawned CLI's telemetry is attributed to the `mcp` surface.
+#[cfg(test)]
 pub async fn run_fallow(binary: &str, args: &[String]) -> Result<CallToolResult, McpError> {
-    run_fallow_with_timeout(binary, args, timeout_duration()).await
+    spawn_fallow(binary, args, timeout_duration(), None).await
 }
 
+/// Execute the fallow CLI for a named MCP tool. Tags the spawned process so its
+/// telemetry event is attributed to the `mcp` integration surface and the
+/// specific tool, instead of looking like any other `cli_json` run. The CLI
+/// only reads these when telemetry is enabled; they carry no paths or
+/// identifiers, and the tool name is allowlist-validated CLI-side.
+pub async fn run_tool(
+    binary: &str,
+    tool: &'static str,
+    args: &[String],
+) -> Result<CallToolResult, McpError> {
+    spawn_fallow(binary, args, timeout_duration(), Some(tool)).await
+}
+
+#[cfg(test)]
 pub async fn run_fallow_with_timeout(
     binary: &str,
     args: &[String],
     timeout: Duration,
 ) -> Result<CallToolResult, McpError> {
-    let output = tokio::time::timeout(
-        timeout,
-        Command::new(binary)
-            .args(args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output(),
-    )
-    .await
-    .map_err(|_| {
-        McpError::internal_error(
-            format!(
-                "fallow subprocess timed out after {}s. \
+    spawn_fallow(binary, args, timeout, None).await
+}
+
+async fn spawn_fallow(
+    binary: &str,
+    args: &[String],
+    timeout: Duration,
+    tool: Option<&'static str>,
+) -> Result<CallToolResult, McpError> {
+    let mut command = Command::new(binary);
+    command
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(tool) = tool {
+        // Re-tag the spawned CLI's telemetry event as the MCP surface + tool.
+        // The CLI inherits this process's env, so the existing telemetry path
+        // emits a single, correctly-attributed event (no second emit here).
+        command
+            .env("FALLOW_INTEGRATION_SURFACE", "mcp")
+            .env("FALLOW_MCP_TOOL", tool);
+    }
+    let output = tokio::time::timeout(timeout, command.output())
+        .await
+        .map_err(|_| {
+            McpError::internal_error(
+                format!(
+                    "fallow subprocess timed out after {}s. \
                  Set FALLOW_TIMEOUT_SECS to increase the limit.",
-                timeout.as_secs()
-            ),
-            None,
-        )
-    })?
-    .map_err(|e| {
-        McpError::internal_error(
-            format!(
-                "Failed to execute fallow binary '{binary}': {e}. \
+                    timeout.as_secs()
+                ),
+                None,
+            )
+        })?
+        .map_err(|e| {
+            McpError::internal_error(
+                format!(
+                    "Failed to execute fallow binary '{binary}': {e}. \
                  Ensure fallow is installed and available in PATH, \
                  or set the FALLOW_BIN environment variable."
-            ),
-            None,
-        )
-    })?;
+                ),
+                None,
+            )
+        })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -252,32 +286,49 @@ pub async fn run_fallow_with_timeout(
 }
 
 /// Execute fallow and ensure successful JSON responses have a top-level
-/// `warnings` array for agent-facing runtime context tools.
+/// `warnings` array for agent-facing runtime context tools. Untagged variant
+/// retained for tests; production goes through `run_tool_with_top_level_warnings`.
+#[cfg(test)]
 pub async fn run_fallow_with_top_level_warnings(
     binary: &str,
     args: &[String],
 ) -> Result<CallToolResult, McpError> {
-    let result = run_fallow(binary, args).await?;
+    Ok(ensure_top_level_warnings(run_fallow(binary, args).await?))
+}
+
+/// Tool-attributed variant of `run_fallow_with_top_level_warnings` (see
+/// `run_tool`).
+pub async fn run_tool_with_top_level_warnings(
+    binary: &str,
+    tool: &'static str,
+    args: &[String],
+) -> Result<CallToolResult, McpError> {
+    Ok(ensure_top_level_warnings(
+        run_tool(binary, tool, args).await?,
+    ))
+}
+
+fn ensure_top_level_warnings(result: CallToolResult) -> CallToolResult {
     if result.is_error == Some(true) {
-        return Ok(result);
+        return result;
     }
 
     let Some(content) = result.content.first() else {
-        return Ok(result);
+        return result;
     };
     let RawContent::Text(text) = &content.raw else {
-        return Ok(result);
+        return result;
     };
     let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&text.text) else {
-        return Ok(result);
+        return result;
     };
     let Some(map) = value.as_object_mut() else {
-        return Ok(result);
+        return result;
     };
 
     map.entry("warnings".to_string())
         .or_insert_with(|| serde_json::Value::Array(Vec::new()));
 
     let text = serde_json::to_string_pretty(&value).unwrap_or_else(|_| text.text.clone());
-    Ok(CallToolResult::success(vec![Content::text(text)]))
+    CallToolResult::success(vec![Content::text(text)])
 }

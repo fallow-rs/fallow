@@ -16,8 +16,8 @@ use crate::tools::{
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
     build_get_importance_args, build_health_args, build_impact_args, build_list_boundaries_args,
     build_project_info_args, build_security_candidates_args, build_trace_clone_args,
-    build_trace_dependency_args, build_trace_export_args, build_trace_file_args, run_fallow,
-    run_fallow_with_top_level_warnings,
+    build_trace_dependency_args, build_trace_export_args, build_trace_file_args, run_tool,
+    run_tool_with_top_level_warnings,
 };
 
 #[cfg(test)]
@@ -74,7 +74,7 @@ impl FallowMcp {
     async fn analyze(&self, params: Parameters<AnalyzeParams>) -> Result<CallToolResult, McpError> {
         let params = params.0;
         match build_analyze_args(&params) {
-            Ok(args) => run_fallow(&self.binary, &args).await,
+            Ok(args) => run_tool(&self.binary, "analyze", &args).await,
             Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
         }
     }
@@ -88,7 +88,7 @@ impl FallowMcp {
         params: Parameters<CheckChangedParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_check_changed_args(params.0);
-        run_fallow(&self.binary, &args).await
+        run_tool(&self.binary, "check_changed", &args).await
     }
 
     #[tool(
@@ -101,7 +101,7 @@ impl FallowMcp {
     ) -> Result<CallToolResult, McpError> {
         let params = params.0;
         match build_security_candidates_args(&params) {
-            Ok(args) => run_fallow(&self.binary, &args).await,
+            Ok(args) => run_tool(&self.binary, "security_candidates", &args).await,
             Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
         }
     }
@@ -116,7 +116,7 @@ impl FallowMcp {
     ) -> Result<CallToolResult, McpError> {
         let params = params.0;
         match build_find_dupes_args(&params) {
-            Ok(args) => run_fallow(&self.binary, &args).await,
+            Ok(args) => run_tool(&self.binary, "find_dupes", &args).await,
             Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
         }
     }
@@ -127,7 +127,7 @@ impl FallowMcp {
     )]
     async fn fix_preview(&self, params: Parameters<FixParams>) -> Result<CallToolResult, McpError> {
         let args = build_fix_preview_args(&params.0);
-        run_fallow(&self.binary, &args).await
+        run_tool(&self.binary, "fix_preview", &args).await
     }
 
     #[tool(
@@ -136,7 +136,7 @@ impl FallowMcp {
     )]
     async fn fix_apply(&self, params: Parameters<FixParams>) -> Result<CallToolResult, McpError> {
         let args = build_fix_apply_args(&params.0);
-        run_fallow(&self.binary, &args).await
+        run_tool(&self.binary, "fix_apply", &args).await
     }
 
     #[tool(
@@ -148,7 +148,7 @@ impl FallowMcp {
         params: Parameters<ProjectInfoParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_project_info_args(&params.0);
-        run_fallow(&self.binary, &args).await
+        run_tool(&self.binary, "project_info", &args).await
     }
 
     #[tool(
@@ -160,7 +160,7 @@ impl FallowMcp {
         params: Parameters<TraceExportParams>,
     ) -> Result<CallToolResult, McpError> {
         match build_trace_export_args(&params.0) {
-            Ok(args) => run_fallow(&self.binary, &args).await,
+            Ok(args) => run_tool(&self.binary, "trace_export", &args).await,
             Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
         }
     }
@@ -174,7 +174,7 @@ impl FallowMcp {
         params: Parameters<TraceFileParams>,
     ) -> Result<CallToolResult, McpError> {
         match build_trace_file_args(&params.0) {
-            Ok(args) => run_fallow(&self.binary, &args).await,
+            Ok(args) => run_tool(&self.binary, "trace_file", &args).await,
             Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
         }
     }
@@ -188,7 +188,7 @@ impl FallowMcp {
         params: Parameters<TraceDependencyParams>,
     ) -> Result<CallToolResult, McpError> {
         match build_trace_dependency_args(&params.0) {
-            Ok(args) => run_fallow(&self.binary, &args).await,
+            Ok(args) => run_tool(&self.binary, "trace_dependency", &args).await,
             Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
         }
     }
@@ -202,7 +202,7 @@ impl FallowMcp {
         params: Parameters<TraceCloneParams>,
     ) -> Result<CallToolResult, McpError> {
         match build_trace_clone_args(&params.0) {
-            Ok(args) => run_fallow(&self.binary, &args).await,
+            Ok(args) => run_tool(&self.binary, "trace_clone", &args).await,
             Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
         }
     }
@@ -216,7 +216,7 @@ impl FallowMcp {
         params: Parameters<HealthParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_health_args(&params.0);
-        run_fallow(&self.binary, &args).await
+        run_tool(&self.binary, "check_health", &args).await
     }
 
     #[tool(
@@ -225,7 +225,7 @@ impl FallowMcp {
     )]
     async fn audit(&self, params: Parameters<AuditParams>) -> Result<CallToolResult, McpError> {
         match build_audit_args(&params.0) {
-            Ok(args) => run_fallow(&self.binary, &args).await,
+            Ok(args) => run_tool(&self.binary, "audit", &args).await,
             Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
         }
     }
@@ -239,7 +239,7 @@ impl FallowMcp {
         params: Parameters<ExplainParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_explain_args(&params.0);
-        run_fallow(&self.binary, &args).await
+        run_tool(&self.binary, "fallow_explain", &args).await
     }
 
     #[tool(
@@ -251,7 +251,7 @@ impl FallowMcp {
         params: Parameters<ListBoundariesParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_list_boundaries_args(&params.0);
-        run_fallow(&self.binary, &args).await
+        run_tool(&self.binary, "list_boundaries", &args).await
     }
 
     #[tool(
@@ -263,7 +263,7 @@ impl FallowMcp {
         params: Parameters<FeatureFlagsParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_feature_flags_args(&params.0);
-        run_fallow(&self.binary, &args).await
+        run_tool(&self.binary, "feature_flags", &args).await
     }
 
     #[tool(
@@ -272,7 +272,7 @@ impl FallowMcp {
     )]
     async fn impact(&self, params: Parameters<ImpactParams>) -> Result<CallToolResult, McpError> {
         let args = build_impact_args(&params.0);
-        run_fallow(&self.binary, &args).await
+        run_tool(&self.binary, "impact", &args).await
     }
 
     #[tool(
@@ -284,7 +284,7 @@ impl FallowMcp {
         params: Parameters<CheckRuntimeCoverageParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_check_runtime_coverage_args(&params.0);
-        run_fallow(&self.binary, &args).await
+        run_tool(&self.binary, "check_runtime_coverage", &args).await
     }
 
     #[tool(
@@ -296,7 +296,7 @@ impl FallowMcp {
         params: Parameters<CheckRuntimeCoverageParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_get_hot_paths_args(&params.0);
-        run_fallow_with_top_level_warnings(&self.binary, &args).await
+        run_tool_with_top_level_warnings(&self.binary, "get_hot_paths", &args).await
     }
 
     #[tool(
@@ -308,7 +308,7 @@ impl FallowMcp {
         params: Parameters<CheckRuntimeCoverageParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_get_blast_radius_args(&params.0);
-        run_fallow_with_top_level_warnings(&self.binary, &args).await
+        run_tool_with_top_level_warnings(&self.binary, "get_blast_radius", &args).await
     }
 
     #[tool(
@@ -320,7 +320,7 @@ impl FallowMcp {
         params: Parameters<CheckRuntimeCoverageParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_get_importance_args(&params.0);
-        run_fallow_with_top_level_warnings(&self.binary, &args).await
+        run_tool_with_top_level_warnings(&self.binary, "get_importance", &args).await
     }
 
     #[tool(
@@ -332,7 +332,7 @@ impl FallowMcp {
         params: Parameters<CheckRuntimeCoverageParams>,
     ) -> Result<CallToolResult, McpError> {
         let args = build_get_cleanup_candidates_args(&params.0);
-        run_fallow_with_top_level_warnings(&self.binary, &args).await
+        run_tool_with_top_level_warnings(&self.binary, "get_cleanup_candidates", &args).await
     }
 }
 

@@ -8,6 +8,7 @@ use std::ffi::OsString;
 use std::io::{IsTerminal, Write as _};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
 use fallow_config::OutputFormat;
@@ -31,6 +32,89 @@ const DISABLED_ENV: &str = "FALLOW_TELEMETRY_DISABLED";
 const MODE_ENV: &str = "FALLOW_TELEMETRY";
 const DEBUG_ENV: &str = "FALLOW_TELEMETRY_DEBUG";
 const AGENT_SOURCE_ENV: &str = "FALLOW_AGENT_SOURCE";
+const INTEGRATION_SURFACE_ENV: &str = "FALLOW_INTEGRATION_SURFACE";
+const MCP_TOOL_ENV: &str = "FALLOW_MCP_TOOL";
+
+/// Allowlist of MCP tool names accepted in the `mcp_tool` dimension. Anything
+/// outside this set is dropped (the field becomes absent) so a user-set or
+/// adversarial `FALLOW_MCP_TOOL` value can never inject a free-form string into
+/// the allowlisted payload. Kept in sync with the tools the MCP server exposes
+/// (see `crates/mcp/src/server/mod.rs`).
+const MCP_TOOLS: &[&str] = &[
+    "analyze",
+    "check_changed",
+    "security_candidates",
+    "find_dupes",
+    "check_health",
+    "check_runtime_coverage",
+    "get_hot_paths",
+    "get_blast_radius",
+    "get_importance",
+    "get_cleanup_candidates",
+    "audit",
+    "fallow_explain",
+    "fix_preview",
+    "fix_apply",
+    "project_info",
+    "list_boundaries",
+    "feature_flags",
+    "impact",
+    "trace_export",
+    "trace_file",
+    "trace_dependency",
+    "trace_clone",
+];
+
+/// Process-wide accumulator for whether the analysis that ran this invocation
+/// actually surfaced any findings, independent of the exit-code gate.
+///
+/// `outcome` is derived purely from the exit code, but several analyses are
+/// informational (non-gating) under their default config: `fallow dupes`
+/// exits 0 even at 100% duplication because the default duplication threshold
+/// is `0.0` ("never gate"). So the exit-code-derived `outcome` cannot tell a
+/// genuinely-clean dupes run from one that surfaced clones. This accumulator
+/// lets each analysis report findings presence from its real result.
+///
+/// States: `0` = unset (no analysis reported), `1` = ran and found nothing,
+/// `2` = ran and found something. `fetch_max` gives OR semantics for free in
+/// combined mode (bare `fallow` runs check + dupes + health), where "found
+/// something" wins. The accumulator assumes one analysis batch per process
+/// (the CLI one-shot model); an in-process embedder running several batches
+/// would see the bit stick at the max across all of them.
+static FINDINGS_PRESENT: AtomicU8 = AtomicU8::new(FINDINGS_UNSET);
+
+const FINDINGS_UNSET: u8 = 0;
+const FINDINGS_CLEAN: u8 = 1;
+const FINDINGS_FOUND: u8 = 2;
+
+/// Record whether the analysis that just completed surfaced any findings.
+///
+/// Called from each analysis `execute` path with the real result
+/// (`results.total_issues() > 0`, clone groups present, non-empty health
+/// findings, etc.), independent of the exit code. Safe to call repeatedly; the
+/// "found something" state is sticky so combined-mode sub-analyses OR together.
+pub fn note_findings_present(present: bool) {
+    let value = if present {
+        FINDINGS_FOUND
+    } else {
+        FINDINGS_CLEAN
+    };
+    FINDINGS_PRESENT.fetch_max(value, Ordering::Relaxed);
+}
+
+/// Map the accumulator state to the optional payload field. Pure so it can be
+/// unit-tested without touching the process-global atomic.
+fn findings_present_from_state(state: u8) -> Option<bool> {
+    match state {
+        FINDINGS_CLEAN => Some(false),
+        FINDINGS_FOUND => Some(true),
+        _ => None,
+    }
+}
+
+fn findings_present() -> Option<bool> {
+    findings_present_from_state(FINDINGS_PRESENT.load(Ordering::Relaxed))
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TelemetryCommand {
@@ -58,6 +142,10 @@ pub enum Workflow {
     EditorDiagnostic,
     ProgrammaticAnalysis,
     RuntimeCoverageSetup,
+    Impact,
+    Security,
+    Fix,
+    Explain,
     Unknown,
 }
 
@@ -170,6 +258,18 @@ struct TelemetryEvent {
     duration_bucket_ms: &'static str,
     outcome: &'static str,
     exit_code_bucket: &'static str,
+    /// Whether the analysis surfaced any findings, independent of the exit-code
+    /// `outcome` gate. Absent on commands that run no analysis (admin commands)
+    /// and on older binaries. On the combined `code_quality_review` and `audit`
+    /// workflows this is an OR across the sub-analyses; per-analysis find-rate
+    /// is answerable only on the standalone `dead_code` / `dupes` / `health`
+    /// workflows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    findings_present: Option<bool>,
+    /// The MCP tool that triggered this run, when invoked through the MCP
+    /// server. Allowlisted to the fixed set of tool names; absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mcp_tool: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     parent_run: Option<String>,
 }
@@ -402,6 +502,8 @@ fn build_workflow_event(record: &WorkflowRecord<'_>) -> TelemetryEvent {
         duration_bucket_ms: duration_bucket(record.elapsed),
         outcome: outcome(record.exit_code),
         exit_code_bucket: exit_code_bucket(record.exit_code),
+        findings_present: findings_present(),
+        mcp_tool: mcp_tool(),
         parent_run: record.parent_run.and_then(sanitize_parent_run),
     }
 }
@@ -424,6 +526,8 @@ fn status_changed_event(enabled: bool) -> TelemetryEvent {
         duration_bucket_ms: "<100",
         outcome: if enabled { "enabled" } else { "disabled" },
         exit_code_bucket: "0",
+        findings_present: None,
+        mcp_tool: None,
         parent_run: None,
     }
 }
@@ -446,6 +550,8 @@ fn example_event() -> TelemetryEvent {
         duration_bucket_ms: "500-2000",
         outcome: "issues_found",
         exit_code_bucket: "1",
+        findings_present: Some(true),
+        mcp_tool: Some("find_dupes"),
         parent_run: Some("tmp_8x7p4k".to_owned()),
     }
 }
@@ -479,6 +585,14 @@ fn field_purposes() -> Vec<(&'static str, &'static str)> {
         (
             "exit_code_bucket",
             "Measures success, findings, and failure classes without raw errors.",
+        ),
+        (
+            "findings_present",
+            "Whether the analysis surfaced any findings, decoupled from the exit-code gate. On combined and audit workflows it is an OR across sub-analyses; per-analysis find-rate is answerable only on standalone dead_code, dupes, and health.",
+        ),
+        (
+            "mcp_tool",
+            "Which MCP tool an agent called, from a fixed allowlist, so MCP usage is attributable per tool.",
         ),
     ]
 }
@@ -728,6 +842,17 @@ fn is_ci() -> bool {
 }
 
 fn integration_surface(output: OutputFormat) -> IntegrationSurface {
+    // An explicit surface override (set by the MCP server, and reserved for the
+    // other non-CLI surfaces) wins over env/format derivation. This is how an
+    // MCP tool call, which shells out to the CLI and would otherwise look like
+    // any other `cli_json` run, is correctly tagged `mcp`. Only an allowlisted
+    // value is honored; anything else falls through to the existing derivation.
+    if let Some(surface) = std::env::var(INTEGRATION_SURFACE_ENV)
+        .ok()
+        .and_then(|v| parse_integration_surface_override(&v))
+    {
+        return surface;
+    }
     if std::env::var_os("GITHUB_ACTIONS").is_some() {
         IntegrationSurface::GithubAction
     } else if std::env::var_os("GITLAB_CI").is_some() {
@@ -737,6 +862,37 @@ fn integration_surface(output: OutputFormat) -> IntegrationSurface {
     } else {
         IntegrationSurface::CliHuman
     }
+}
+
+/// Parse an allowlisted `FALLOW_INTEGRATION_SURFACE` override. Only the non-CLI
+/// surfaces are accepted; the CLI surfaces stay auto-derived from env + format,
+/// so an override cannot relabel a genuine CLI run as one of those.
+fn parse_integration_surface_override(value: &str) -> Option<IntegrationSurface> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "mcp" => Some(IntegrationSurface::Mcp),
+        "lsp" => Some(IntegrationSurface::Lsp),
+        "vscode" => Some(IntegrationSurface::Vscode),
+        "napi" => Some(IntegrationSurface::Napi),
+        "programmatic" => Some(IntegrationSurface::Programmatic),
+        _ => None,
+    }
+}
+
+/// The MCP tool that triggered this run, when set via `FALLOW_MCP_TOOL` and
+/// present in the allowlist. Returns the `&'static str` from `MCP_TOOLS` (never
+/// the caller's string) so an off-allowlist or adversarial value is dropped to
+/// `None` rather than echoed into the payload.
+fn mcp_tool() -> Option<&'static str> {
+    mcp_tool_from_value(&std::env::var(MCP_TOOL_ENV).ok()?)
+}
+
+/// Resolve an `FALLOW_MCP_TOOL` value against the allowlist. Pure so it can be
+/// unit-tested without touching process env. Returns the `&'static str` from
+/// `MCP_TOOLS`, so an off-allowlist value drops to `None` and cannot be echoed
+/// into the payload.
+fn mcp_tool_from_value(value: &str) -> Option<&'static str> {
+    let value = value.trim();
+    MCP_TOOLS.iter().copied().find(|name| *name == value)
 }
 
 fn output_format_label(output: OutputFormat) -> &'static str {
@@ -1072,5 +1228,45 @@ mod tests {
             "docs/telemetry.md example payload fields are out of sync with the emitted \
              TelemetryEvent (compare against `fallow telemetry inspect --example`)"
         );
+    }
+
+    #[test]
+    fn findings_present_state_maps_to_tristate() {
+        assert_eq!(findings_present_from_state(FINDINGS_UNSET), None);
+        assert_eq!(findings_present_from_state(FINDINGS_CLEAN), Some(false));
+        assert_eq!(findings_present_from_state(FINDINGS_FOUND), Some(true));
+        // Any unexpected value is treated as unset, never a misleading false.
+        assert_eq!(findings_present_from_state(99), None);
+    }
+
+    #[test]
+    fn mcp_tool_value_is_allowlist_validated() {
+        // Known tool names round-trip to the static allowlist entry.
+        assert_eq!(mcp_tool_from_value("find_dupes"), Some("find_dupes"));
+        assert_eq!(mcp_tool_from_value("  audit  "), Some("audit"));
+        // Anything off-allowlist is dropped, never echoed into the payload.
+        assert_eq!(mcp_tool_from_value("/etc/passwd"), None);
+        assert_eq!(mcp_tool_from_value(""), None);
+        assert_eq!(mcp_tool_from_value("dupes"), None);
+    }
+
+    #[test]
+    fn integration_surface_override_accepts_only_non_cli_surfaces() {
+        assert_eq!(
+            parse_integration_surface_override("mcp"),
+            Some(IntegrationSurface::Mcp)
+        );
+        assert_eq!(
+            parse_integration_surface_override("LSP"),
+            Some(IntegrationSurface::Lsp)
+        );
+        assert_eq!(
+            parse_integration_surface_override(" programmatic "),
+            Some(IntegrationSurface::Programmatic)
+        );
+        // CLI surfaces stay auto-derived; an override cannot relabel them.
+        assert_eq!(parse_integration_surface_override("cli_json"), None);
+        assert_eq!(parse_integration_surface_override("github_action"), None);
+        assert_eq!(parse_integration_surface_override(""), None);
     }
 }

@@ -125,3 +125,154 @@ fn invalid_explicit_agent_source_is_ignored() {
     assert_ne!(event["agent_source"].as_str(), Some("private-agent-x"));
     assert!(event.get("agent_source").is_none());
 }
+
+/// Run a fallow command in telemetry inspect mode against `root`, applying
+/// `extra_env`, and return the parsed telemetry event emitted to stderr.
+fn inspect_event(
+    root: &std::path::Path,
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+) -> serde_json::Value {
+    let home = tempfile::tempdir().expect("temp home");
+    let mut cmd = Command::new(fallow_bin());
+    cmd.env_remove("CI")
+        .env_remove("GITHUB_ACTIONS")
+        .env_remove("GITLAB_CI")
+        .env_remove("DO_NOT_TRACK")
+        .env_remove("FALLOW_TELEMETRY_DISABLED")
+        .env_remove("FALLOW_AGENT_SOURCE")
+        .env_remove("FALLOW_INTEGRATION_SURFACE")
+        .env_remove("FALLOW_MCP_TOOL")
+        .env("FALLOW_TELEMETRY", "inspect")
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .env("APPDATA", home.path().join("AppData"))
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .args(["--root", &root.to_string_lossy()])
+        .args(args);
+    for (key, value) in extra_env {
+        cmd.env(key, value);
+    }
+    let raw = cmd.output().expect("failed to run fallow binary");
+    let stderr = String::from_utf8_lossy(&raw.stderr).to_string();
+    let event_start = stderr.find('{').unwrap_or_else(|| {
+        panic!("inspect stderr should contain telemetry JSON; stderr was: {stderr}")
+    });
+    serde_json::from_str(&stderr[event_start..])
+        .expect("inspect stderr should contain valid telemetry JSON")
+}
+
+/// Minimal project with a function duplicated across two files, sized to clear
+/// the default duplication thresholds (min_tokens 50, min_lines 5,
+/// min_occurrences 2).
+fn write_duplicated_project(dir: &std::path::Path) {
+    let src = dir.join("src");
+    std::fs::create_dir_all(&src).expect("create src");
+    std::fs::write(
+        dir.join("package.json"),
+        "{\n  \"name\": \"dup-fixture\"\n}\n",
+    )
+    .expect("write package.json");
+    let block = "  let total = 0;\n  let count = 0;\n  for (const item of items) {\n    total = total + item * 2;\n    count = count + 1;\n  }\n  const average = total / Math.max(count, 1);\n  const doubled = average * 2;\n  const adjusted = doubled + count - 1;\n  return adjusted + total + count;\n";
+    for name in ["a", "b"] {
+        std::fs::write(
+            src.join(format!("{name}.ts")),
+            format!("export function compute_{name}(items: number[]): number {{\n{block}}}\n"),
+        )
+        .expect("write source file");
+    }
+}
+
+#[test]
+fn dupes_with_duplication_sets_findings_present_despite_success_outcome() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_duplicated_project(dir.path());
+    let event = inspect_event(dir.path(), &["dupes", "--format", "json", "--quiet"], &[]);
+    assert_eq!(event["workflow"].as_str(), Some("dupes"));
+    // The default duplication threshold is 0.0 ("never gate"), so the run exits
+    // 0 / outcome=success even with 100% duplication. findings_present is the
+    // signal that decouples "found something" from the gate.
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert_eq!(
+        event["findings_present"].as_bool(),
+        Some(true),
+        "dupes with real duplication must report findings_present=true"
+    );
+}
+
+#[test]
+fn dupes_on_clean_project_sets_findings_present_false() {
+    let dir = tempfile::tempdir().expect("temp project");
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("create src");
+    std::fs::write(
+        dir.path().join("package.json"),
+        "{\n  \"name\": \"clean\"\n}\n",
+    )
+    .expect("write package.json");
+    std::fs::write(src.join("only.ts"), "export const value = 41 + 1;\n").expect("write source");
+    let event = inspect_event(dir.path(), &["dupes", "--format", "json", "--quiet"], &[]);
+    assert_eq!(event["workflow"].as_str(), Some("dupes"));
+    assert_eq!(
+        event["findings_present"].as_bool(),
+        Some(false),
+        "a genuinely clean dupes run must report findings_present=false"
+    );
+}
+
+#[test]
+fn admin_command_emits_no_findings_present_key() {
+    let dir = tempfile::tempdir().expect("temp project");
+    std::fs::write(dir.path().join("package.json"), "{\n  \"name\": \"x\"\n}\n")
+        .expect("write package.json");
+    // `explain` runs no analysis, so the findings-present accumulator stays
+    // unset and the key is absent (distinguishable from a clean false).
+    let event = inspect_event(dir.path(), &["explain", "unused-exports"], &[]);
+    assert_eq!(event["workflow"].as_str(), Some("explain"));
+    assert!(
+        event.get("findings_present").is_none(),
+        "commands that run no analysis must omit findings_present"
+    );
+}
+
+#[test]
+fn mcp_surface_override_tags_event_with_tool() {
+    let dir = tempfile::tempdir().expect("temp project");
+    std::fs::write(dir.path().join("package.json"), "{\n  \"name\": \"x\"\n}\n")
+        .expect("write package.json");
+    let event = inspect_event(
+        dir.path(),
+        &["dupes", "--format", "json", "--quiet"],
+        &[
+            ("FALLOW_INTEGRATION_SURFACE", "mcp"),
+            ("FALLOW_MCP_TOOL", "find_dupes"),
+        ],
+    );
+    assert_eq!(
+        event["integration_surface"].as_str(),
+        Some("mcp"),
+        "the surface override must re-tag the event as mcp instead of cli_json"
+    );
+    assert_eq!(event["mcp_tool"].as_str(), Some("find_dupes"));
+}
+
+#[test]
+fn off_allowlist_mcp_tool_is_dropped() {
+    let dir = tempfile::tempdir().expect("temp project");
+    std::fs::write(dir.path().join("package.json"), "{\n  \"name\": \"x\"\n}\n")
+        .expect("write package.json");
+    let event = inspect_event(
+        dir.path(),
+        &["dupes", "--format", "json", "--quiet"],
+        &[
+            ("FALLOW_INTEGRATION_SURFACE", "mcp"),
+            ("FALLOW_MCP_TOOL", "/etc/passwd"),
+        ],
+    );
+    assert_eq!(event["integration_surface"].as_str(), Some("mcp"));
+    assert!(
+        event.get("mcp_tool").is_none(),
+        "an off-allowlist FALLOW_MCP_TOOL value must be dropped, never echoed"
+    );
+}

@@ -88,6 +88,12 @@ mod license;
 /// `fallow dupes --format json`. Lives here (rather than in `fallow-types`)
 /// because the bare findings live in `fallow-core` and `crates/cli/src/report/dupes_grouping.rs`.
 pub mod output_dupes;
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse; the findings-present accumulator must be reachable from the lib-compiled analysis modules"
+)]
+mod telemetry;
 
 /// Typed envelope structs for the JSON output contract. Live here rather
 /// than in `fallow-types` because the body fields reach into `fallow-core`
