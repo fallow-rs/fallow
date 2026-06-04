@@ -95,6 +95,18 @@ export const getProduction = (): boolean => getConfig().get<boolean>("production
 
 export const getChangedSince = (): string => getConfig().get<string>("changedSince", "").trim();
 
+export const getHealthEnabled = (): boolean => getConfig().get<boolean>("health.enabled", true);
+
+export const getHealthHotspots = (): boolean => getConfig().get<boolean>("health.hotspots", true);
+
+export const getHealthTopFindings = (): number => {
+  const value = getConfig().get<number>("health.topFindings", 20);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 20;
+};
+
+export const getHealthStatusBar = (): boolean =>
+  getConfig().get<boolean>("health.statusBar", true);
+
 export const getTraceLevel = (): TraceLevel => getConfig().get<TraceLevel>("trace.server", "off");
 
 export const onConfigChange = (

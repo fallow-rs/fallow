@@ -79,6 +79,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "fallow.health.reload",
+        "title": "Fallow: Reload Health",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "fallow.fix",
         "title": "Fallow: Auto-Fix (unexport unused, remove unused deps)"
       },
@@ -310,6 +315,27 @@
           "default": "",
           "markdownDescription": "Show only issues in files changed since the given git ref. Tag your current commit (`git tag fallow-baseline`) and set this to the tag name to keep existing issues hidden while flagging new ones in the Problems panel. Mirrors the CLI's `--changed-since`. Empty = full scope."
         },
+        "fallow.health.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Fallow Health view (score and grade, complexity findings, hotspot candidates, refactoring candidates). When off, the Health view stays empty and no extra analysis runs."
+        },
+        "fallow.health.hotspots": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include git churn hotspots in the Health view. Hotspot analysis walks git history; disable on very large repositories to keep the Health refresh fast. Has no effect outside a git repository."
+        },
+        "fallow.health.topFindings": {
+          "type": "integer",
+          "default": 20,
+          "minimum": 1,
+          "markdownDescription": "Maximum number of complexity findings shown in the Health view (passed to `fallow health --top`)."
+        },
+        "fallow.health.statusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the project health score and grade in the Fallow status bar item."
+        },
         "fallow.trace.server": {
           "type": "string",
           "default": "off",
@@ -340,6 +366,10 @@
         {
           "id": "fallow.duplicates",
           "name": "Duplicates"
+        },
+        {
+          "id": "fallow.health",
+          "name": "Health"
         }
       ]
     },
@@ -353,6 +383,11 @@
         {
           "command": "fallow.reloadAnalysis",
           "when": "(view == fallow.deadCode || view == fallow.duplicates) && fallow.hasAnalyzed",
+          "group": "navigation"
+        },
+        {
+          "command": "fallow.health.reload",
+          "when": "view == fallow.health",
           "group": "navigation"
         }
       ],
@@ -391,6 +426,16 @@
         "view": "fallow.duplicates",
         "contents": "$(check) No code duplication found.",
         "when": "fallow.hasAnalyzed"
+      },
+      {
+        "view": "fallow.health",
+        "contents": "The Health view is turned off.\nEnable [fallow.health.enabled](command:fallow.openSettings) to see the project health score, complexity findings, hotspot candidates, and refactoring candidates.",
+        "when": "!fallow.health.enabled"
+      },
+      {
+        "view": "fallow.health",
+        "contents": "No health results yet.\n[$(refresh) Reload Health](command:fallow.health.reload)\nFallow reports a project health score and grade, complexity findings, hotspot candidates, and refactoring candidates. Hotspots and refactoring targets are heuristic suggestions, so verify before acting.",
+        "when": "fallow.health.enabled"
       }
     ],
     "walkthroughs": [

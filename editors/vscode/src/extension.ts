@@ -3,30 +3,34 @@
 import * as vscode from "vscode";
 import { countCheckIssues } from "./analysis-utils.js";
 import { startClient, stopClient, restartClient } from "./client.js";
-import { onConfigChange } from "./config.js";
-import { runAnalysis, runFix } from "./commands.js";
+import { getHealthEnabled, onConfigChange } from "./config.js";
+import { runAnalysis, runFix, runHealthAnalysis } from "./commands.js";
 import {
+  HEALTH_CONFIG_KEYS,
   REANALYSIS_CONFIG_KEYS,
   RESTART_CONFIG_KEYS,
   affectsAnyConfiguration,
 } from "./configKeys.js";
 import { DiagnosticFilter } from "./diagnosticFilter.js";
 import { registerDiagnosticMuteUi } from "./diagnosticMute.js";
+import { HealthTreeProvider } from "./healthTreeView.js";
 import {
   createStatusBar,
   updateStatusBar,
   updateStatusBarFromLsp,
+  updateStatusBarHealth,
   setStatusBarAnalyzing,
   setStatusBarError,
   disposeStatusBar,
 } from "./statusBar.js";
 import type { AnalysisCompleteParams } from "./statusBar.js";
 import { DeadCodeTreeProvider, DuplicatesTreeProvider } from "./treeView.js";
-import type { FallowCheckResult, FallowDupesResult } from "./types.js";
+import type { FallowCheckResult, FallowDupesResult, HealthReport } from "./types.js";
 
 let outputChannel: vscode.OutputChannel;
 let lastCheckResult: FallowCheckResult | null = null;
 let lastDupesResult: FallowDupesResult | null = null;
+let lastHealthResult: HealthReport | null = null;
 
 export interface ExtensionApi {
   readonly runAnalysis: typeof runAnalysis;
@@ -46,11 +50,26 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 
   const deadCodeProvider = new DeadCodeTreeProvider();
   const duplicatesProvider = new DuplicatesTreeProvider();
+  const healthProvider = new HealthTreeProvider();
+
+  // Expose the health-enabled state to `viewsWelcome` / `menus` `when` clauses.
+  const syncHealthEnabledContext = (): void => {
+    void vscode.commands.executeCommand(
+      "setContext",
+      "fallow.health.enabled",
+      getHealthEnabled(),
+    );
+  };
+  syncHealthEnabledContext();
 
   // Use createTreeView to get visibility events. Defer CLI analysis until the
   // tree view is first shown, avoiding a double analysis on activation (the LSP
   // runs its own analysis for diagnostics).
   let cliAnalysisRan = false;
+  // The health spawn has its own latch and visibility trigger, fully
+  // independent of the combined run, so opening the editor or the existing two
+  // views never triggers any health work (#902 latency isolation).
+  let healthAnalysisRan = false;
 
   const triggerCliAnalysis = async (): Promise<boolean> => {
     setStatusBarAnalyzing();
@@ -94,6 +113,28 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     );
   };
 
+  // Lazy, opt-out health spawn. Separate from the combined run so the
+  // latency-critical sidebar is never coupled to complexity scoring or the
+  // git-churn hotspot walk. Returns false on failure so the latch can reset and
+  // a later reveal retries.
+  const triggerHealthAnalysis = async (): Promise<boolean> => {
+    if (!getHealthEnabled()) {
+      lastHealthResult = null;
+      healthProvider.update(null);
+      updateStatusBarHealth(null);
+      return true;
+    }
+    try {
+      const report = await runHealthAnalysis(context, outputChannel);
+      lastHealthResult = report;
+      healthProvider.update(report);
+      updateStatusBarHealth(report);
+      return report !== null;
+    } catch {
+      return false;
+    }
+  };
+
   const deadCodeView = vscode.window.createTreeView("fallow.deadCode", {
     treeDataProvider: deadCodeProvider,
   });
@@ -101,7 +142,32 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   const duplicatesView = vscode.window.createTreeView("fallow.duplicates", {
     treeDataProvider: duplicatesProvider,
   });
-  context.subscriptions.push(deadCodeView, duplicatesView);
+  const healthView = vscode.window.createTreeView("fallow.health", {
+    treeDataProvider: healthProvider,
+  });
+  healthProvider.setView(healthView);
+  context.subscriptions.push(deadCodeView, duplicatesView, healthView);
+
+  const onHealthViewVisible = (): void => {
+    if (healthAnalysisRan) {
+      return;
+    }
+    healthAnalysisRan = true;
+    void (async (): Promise<void> => {
+      const completed = await triggerHealthAnalysis();
+      if (!completed) {
+        healthAnalysisRan = false;
+      }
+    })();
+  };
+
+  context.subscriptions.push(
+    healthView.onDidChangeVisibility((e) => {
+      if (e.visible) {
+        onHealthViewVisible();
+      }
+    }),
+  );
 
   const onViewVisible = (): void => {
     if (cliAnalysisRan) {
@@ -141,12 +207,19 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     cliAnalysisRan = await triggerCliAnalysis();
   };
 
+  const runHealthAnalysisCommand = async (): Promise<void> => {
+    healthAnalysisRan = await triggerHealthAnalysis();
+  };
+
   // Register commands
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.analyze", runCliAnalysisCommand),
   );
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.reloadAnalysis", runCliAnalysisCommand),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.health.reload", runHealthAnalysisCommand),
   );
 
   context.subscriptions.push(
@@ -203,6 +276,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     onConfigChange(async (e) => {
       const needsRestart = affectsAnyConfiguration(e, RESTART_CONFIG_KEYS);
       const needsReanalysis = affectsAnyConfiguration(e, REANALYSIS_CONFIG_KEYS);
+      const needsHealthReanalysis = affectsAnyConfiguration(e, HEALTH_CONFIG_KEYS);
 
       if (needsRestart) {
         outputChannel.appendLine("Configuration changed, restarting server...");
@@ -213,6 +287,26 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
         // Re-run CLI analysis for tree views and status bar
         // (sequenced after LSP restart if both apply)
         void triggerCliAnalysis();
+      }
+
+      if (needsHealthReanalysis) {
+        // Health settings never restart the LSP nor re-run the combined
+        // analysis. Toggling only the status-bar visibility re-renders from the
+        // cached report (no respawn); the spawn-affecting settings (enabled,
+        // hotspots, topFindings) re-run the standalone health spawn, but only
+        // if the user already revealed the Health view (preserving the lazy
+        // trigger when they have not).
+        syncHealthEnabledContext();
+        const onlyStatusBarChanged =
+          e.affectsConfiguration("fallow.health.statusBar") &&
+          !e.affectsConfiguration("fallow.health.enabled") &&
+          !e.affectsConfiguration("fallow.health.hotspots") &&
+          !e.affectsConfiguration("fallow.health.topFindings");
+        if (onlyStatusBarChanged) {
+          updateStatusBarHealth(lastHealthResult);
+        } else if (healthAnalysisRan) {
+          void triggerHealthAnalysis();
+        }
       }
     }),
   );

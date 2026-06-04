@@ -15,6 +15,8 @@ import {
   getDuplicationModeOverride,
   getDuplicationSkipLocalOverride,
   getDuplicationThresholdOverride,
+  getHealthHotspots,
+  getHealthTopFindings,
   getIssueTypes,
   getChangedSince,
   getResolvedConfigPath,
@@ -35,12 +37,15 @@ import {
   getInstalledCliPath,
 } from "./download.js";
 import { buildFixArgs, createFixPreviewItems, resolveFixLocation } from "./fix-utils.js";
+import { buildHealthArgs } from "./health-utils.js";
 import type {
   FallowCheckResult,
   FallowCombinedResult,
   FallowDupesResult,
   FallowFixResult,
   FixAction,
+  HealthOutput,
+  HealthReport,
 } from "./types.js";
 
 export const findCliBinary = (context: vscode.ExtensionContext): string | null => {
@@ -524,6 +529,54 @@ export const runFix = async (
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     void vscode.window.showErrorMessage(`Fallow fix failed: ${message}`);
+    return null;
+  }
+};
+
+/**
+ * Run a standalone `fallow health` analysis for the Health view. This is a
+ * separate spawn from {@link runAnalysis}, fired lazily only when the Health
+ * view is first revealed, so it never slows the latency-critical combined run
+ * (which keeps `--skip health`). Hotspots (a git-churn walk) are requested only
+ * when the user opted in via `fallow.health.hotspots`.
+ *
+ * Reuses the same binary resolution and spawn primitive as the combined run.
+ * `execFallow` already tolerates exit 0/1 (health exits 1 when findings exist)
+ * and rejects only on signal or other non-zero codes. Returns null on no
+ * workspace, empty output, or failure; the caller renders an empty view.
+ */
+export const runHealthAnalysis = async (
+  context: vscode.ExtensionContext,
+  outputChannel?: vscode.OutputChannel,
+): Promise<HealthReport | null> => {
+  const root = getWorkspaceRoot();
+  if (!root) {
+    void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    return null;
+  }
+
+  try {
+    const { binary } = await resolveCliForRun(context, outputChannel);
+
+    const args = buildHealthArgs({
+      hotspots: getHealthHotspots(),
+      topFindings: getHealthTopFindings(),
+      configPath: getResolvedConfigPath(),
+      changedSince: getChangedSince(),
+      production: getProduction(),
+    });
+
+    const output = await execFallow(binary, args, root);
+
+    if (output.trim().length === 0) {
+      // A successful exit with empty stdout means there was nothing to report.
+      return null;
+    }
+
+    return JSON.parse(output) as HealthOutput;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    void vscode.window.showErrorMessage(`Fallow health analysis failed: ${message}`);
     return null;
   }
 };
