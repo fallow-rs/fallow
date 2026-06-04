@@ -14,6 +14,10 @@ export const REANALYSIS_CONFIG_KEYS = [
   "fallow.duplication",
   "fallow.issueTypes",
   "fallow.changedSince",
+  // A pinned workspace-scope change re-runs the dead-code/dupes sidebar + status
+  // bar so they reflect the new scope. Deliberately NOT in RESTART_CONFIG_KEYS:
+  // the LSP is not workspace-scoped, so a workspace change must not restart it.
+  "fallow.workspace",
 ] as const;
 
 // Health is a separate, lazy spawn with its own latch, so its settings drive

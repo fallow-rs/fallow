@@ -11,6 +11,14 @@ import type { SecurityFinding, SecurityOutput, TraceHopRole } from "./types.js";
 export interface SecurityArgsOptions {
   readonly configPath: string;
   readonly changedSince: string;
+  /**
+   * Monorepo workspace scope (a package name). When a non-empty string,
+   * forwarded as `--workspace <name>` so the Security Candidates view honors the
+   * selected workspace. `--workspace` is a global flag accepted by `fallow
+   * security` (unlike `--production` / `--dupes-*`, which it rejects). Mirrors
+   * the workspace forwarding in `buildAnalysisArgs`.
+   */
+  readonly workspace?: string;
 }
 
 /**
@@ -24,6 +32,10 @@ export const buildSecurityArgs = (options: SecurityArgsOptions): string[] => {
 
   if (options.changedSince) {
     args.push("--changed-since", options.changedSince);
+  }
+
+  if (options.workspace) {
+    args.push("--workspace", options.workspace);
   }
 
   if (options.configPath) {

@@ -83,6 +83,21 @@ export const partitionWorkspaces = (
   return { real, internal };
 };
 
+/**
+ * Whether the workspace picker status-bar item is worth showing for a given
+ * resolved workspaces list. A single-package repo (or one with no listable
+ * workspaces) can never use scoping, so the picker is hidden there to avoid a
+ * dead status-bar control. `null` (the list was never probed / unavailable)
+ * keeps the item shown, so the picker stays reachable on an older CLI that
+ * cannot list workspaces. Pure so the rule is unit-tested without a status bar.
+ */
+export const shouldShowWorkspacePicker = (output: WorkspacesOutput | null): boolean => {
+  if (output === null) {
+    return true;
+  }
+  return output.workspaces.length > 1;
+};
+
 /** Kinds of entries the picker renders, so the UI layer needs no `vscode` enum here. */
 export type WorkspaceQuickPickItemKind = "clear" | "package" | "separator" | "refresh";
 
@@ -155,11 +170,21 @@ export const buildWorkspaceQuickPickItems = (
 export const renderWorkspaceStatusBarText = (active: string): string =>
   active === CLEAR_WORKSPACE_SCOPE ? "$(layers) Fallow: All" : `$(layers) ${active}`;
 
+/**
+ * Disclosure appended to the picker tooltip and select/clear toasts. The scope
+ * drives the CLI-backed views (Unused Code, Duplicates, Health, Security); the
+ * LSP is not yet workspace-scoped, so editor gutter diagnostics stay
+ * project-wide. Stated plainly so a scoped developer is not surprised by
+ * whole-project squiggles. Health and Security ARE scoped (see #906 C2).
+ */
+export const WORKSPACE_SCOPE_DISCLOSURE =
+  "Scopes the Unused Code, Duplicates, Health, and Security views; editor diagnostics remain project-wide for now.";
+
 /** Tooltip for the picker status-bar item. Neutral copy: it scopes, not judges. */
 export const renderWorkspaceStatusBarTooltip = (active: string): string =>
   active === CLEAR_WORKSPACE_SCOPE
-    ? "Fallow: analyzing the whole project. Click to scope to a single workspace."
-    : `Fallow: scoped to ${active}. Click to change or clear the scope.`;
+    ? `Fallow: analyzing the whole project. Click to scope to a single workspace. ${WORKSPACE_SCOPE_DISCLOSURE}`
+    : `Fallow: scoped to ${active}. Click to change or clear the scope. ${WORKSPACE_SCOPE_DISCLOSURE}`;
 
 /**
  * Resolve the effective workspace scope. A per-folder `workspaceState`
@@ -179,3 +204,18 @@ export const resolveWorkspaceScope = (
   }
   return CLEAR_WORKSPACE_SCOPE;
 };
+
+/**
+ * The info-toast text shown after the user clears the picker override.
+ *
+ * Clearing the override does not always reach whole-project: a pinned
+ * `fallow.workspace` setting still scopes the analysis. So the message reports
+ * the ACTUAL residual scope. `residualScope` is the scope after the override is
+ * cleared, i.e. `resolveWorkspaceScope("", settingScope)`: empty means
+ * whole-project, a non-empty value is the still-pinned setting. Pure so the
+ * branch is unit-tested without a `vscode` mock.
+ */
+export const clearedScopeToast = (residualScope: string): string =>
+  residualScope === CLEAR_WORKSPACE_SCOPE
+    ? "Fallow: scope cleared. Analyzing the whole project."
+    : `Fallow: cleared the picker override; still scoped to ${residualScope} via the fallow.workspace setting.`;

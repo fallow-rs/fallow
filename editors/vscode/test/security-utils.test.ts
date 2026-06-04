@@ -49,6 +49,16 @@ describe("buildSecurityArgs", () => {
     expect(args).not.toContain("--production");
     expect(args.some((arg) => arg.startsWith("--dupes"))).toBe(false);
   });
+
+  it("forwards --workspace only when a workspace scope is set (#906 C2)", () => {
+    expect(buildSecurityArgs({ configPath: "", changedSince: "" })).not.toContain("--workspace");
+    expect(
+      buildSecurityArgs({ configPath: "", changedSince: "", workspace: "" }),
+    ).not.toContain("--workspace");
+    const scoped = buildSecurityArgs({ configPath: "", changedSince: "", workspace: "pkg-a" });
+    expect(scoped).toContain("--workspace");
+    expect(scoped[scoped.indexOf("--workspace") + 1]).toBe("pkg-a");
+  });
 });
 
 describe("countSecurityFindings", () => {

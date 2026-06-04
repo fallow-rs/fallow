@@ -232,6 +232,29 @@ describe("Fallow VS Code extension", () => {
     );
   });
 
+  it("forwards --workspace to the CLI analysis path when a workspace is selected", async () => {
+    // The picker persists its choice under this workspaceState key; the analysis
+    // path reads it via resolveActiveWorkspaceScope and appends --workspace.
+    const context = testContext();
+    await context.workspaceState.update("fallow.workspaceScope", "pkg-a");
+
+    const result = await api.runAnalysis(context);
+    assert.ok(result.check, "check result should be available");
+
+    const analysisCalls = readCliLog();
+    // `.some` (not `.every`): a stray background analysis from a prior test's
+    // afterEach config reset can race into this log. Assert the awaited direct
+    // call's argv includes the scoped --workspace flag.
+    assert.ok(
+      analysisCalls.some(
+        (entry) =>
+          entry.command === "combined" &&
+          entry.args.join(" ") === "--format json --quiet --skip health --workspace pkg-a",
+      ),
+      "combined analysis should forward --workspace <name> for the selected workspace",
+    );
+  });
+
   it("navigates to the selected dry-run fix even when labels collide", async () => {
     let openedPath = "";
     let openedLine = -1;

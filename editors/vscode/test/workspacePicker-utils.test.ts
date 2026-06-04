@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   CLEAR_WORKSPACE_SCOPE,
+  WORKSPACE_SCOPE_DISCLOSURE,
   buildWorkspaceQuickPickItems,
+  clearedScopeToast,
   parseWorkspacesOutput,
   partitionWorkspaces,
   renderWorkspaceStatusBarText,
   renderWorkspaceStatusBarTooltip,
   resolveWorkspaceScope,
+  shouldShowWorkspacePicker,
 } from "../src/workspacePicker-utils.js";
 import { buildAnalysisArgs } from "../src/analysis-utils.js";
-import type { WorkspaceInfo } from "../src/workspace-types.js";
+import type { WorkspaceInfo, WorkspacesOutput } from "../src/workspace-types.js";
 
 const ws = (
   name: string,
@@ -181,6 +184,63 @@ describe("renderWorkspaceStatusBarTooltip", () => {
 
     const all = renderWorkspaceStatusBarTooltip(CLEAR_WORKSPACE_SCOPE);
     expect(all).toContain("whole project");
+  });
+
+  it("discloses that editor diagnostics stay project-wide (#906 C3)", () => {
+    // Health and Security ARE scoped now (#906 C2); only the LSP gutter stays
+    // project-wide, and the disclosure must say so on both tooltip states.
+    expect(renderWorkspaceStatusBarTooltip("my-pkg")).toContain(WORKSPACE_SCOPE_DISCLOSURE);
+    expect(renderWorkspaceStatusBarTooltip(CLEAR_WORKSPACE_SCOPE)).toContain(
+      WORKSPACE_SCOPE_DISCLOSURE,
+    );
+    expect(WORKSPACE_SCOPE_DISCLOSURE).toContain("Health");
+    expect(WORKSPACE_SCOPE_DISCLOSURE).toContain("Security");
+    expect(WORKSPACE_SCOPE_DISCLOSURE).toContain("editor diagnostics remain project-wide");
+  });
+});
+
+describe("clearedScopeToast", () => {
+  it("claims whole-project only when the residual scope is truly empty (#906 C4)", () => {
+    expect(clearedScopeToast(CLEAR_WORKSPACE_SCOPE)).toContain("Analyzing the whole project");
+    expect(clearedScopeToast(CLEAR_WORKSPACE_SCOPE).toLowerCase()).not.toContain(
+      "fallow.workspace setting",
+    );
+  });
+
+  it("reports the residual setting scope when a pinned workspace setting remains", () => {
+    // Regression for #906 C4: clearing the picker override while `fallow.workspace`
+    // is pinned must NOT falsely claim whole-project.
+    const toast = clearedScopeToast("pinned-pkg");
+    expect(toast).toContain("pinned-pkg");
+    expect(toast).toContain("fallow.workspace setting");
+    expect(toast.toLowerCase()).not.toContain("whole project");
+  });
+});
+
+describe("shouldShowWorkspacePicker", () => {
+  const output = (count: number): WorkspacesOutput => ({
+    workspace_count: count,
+    workspaces: Array.from({ length: count }, (_unused, i) => ({
+      name: `pkg-${i}`,
+      path: `/repo/pkg-${i}`,
+      is_internal_dependency: false,
+    })),
+  });
+
+  it("hides the picker on a single-package repo (#906 n2)", () => {
+    expect(shouldShowWorkspacePicker(output(1))).toBe(false);
+  });
+
+  it("hides the picker when no workspaces are listable", () => {
+    expect(shouldShowWorkspacePicker(output(0))).toBe(false);
+  });
+
+  it("shows the picker on a multi-package monorepo", () => {
+    expect(shouldShowWorkspacePicker(output(2))).toBe(true);
+  });
+
+  it("keeps the picker shown when the list was never probed (older CLI)", () => {
+    expect(shouldShowWorkspacePicker(null)).toBe(true);
   });
 });
 

@@ -15,6 +15,13 @@ export interface HealthArgsOptions {
   readonly changedSince: string;
   /** Production mode (`--production`), forwarded when true. */
   readonly production: boolean;
+  /**
+   * Monorepo workspace scope (a package name). When a non-empty string,
+   * forwarded as `--workspace <name>` so the Health view honors the selected
+   * workspace. NOT version-gated: `--workspace` is a long-standing global CLI
+   * flag. Mirrors the workspace forwarding in `buildAnalysisArgs`.
+   */
+  readonly workspace?: string;
 }
 
 /**
@@ -44,6 +51,10 @@ export const buildHealthArgs = (options: HealthArgsOptions): string[] => {
 
   if (options.changedSince) {
     args.push("--changed-since", options.changedSince);
+  }
+
+  if (options.workspace) {
+    args.push("--workspace", options.workspace);
   }
 
   if (options.configPath) {

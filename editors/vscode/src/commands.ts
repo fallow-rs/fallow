@@ -534,23 +534,33 @@ export const runAnalysis = async (
  * busts the cache. On a missing-subcommand failure (an old CLI), shows an
  * actionable toast and returns null so the picker leaves scope unchanged.
  * Not routed through `planDegradation` (its allowlist is analysis flags).
+ *
+ * `silent` suppresses every user-facing toast (errors still go to the output
+ * channel). The background single-package-visibility probe (n2) passes it so a
+ * passive scope check never nags about an old CLI or a missing binary; the
+ * user-initiated picker path leaves it false so genuine failures stay loud.
  */
 export const runWorkspaces = async (
   context: vscode.ExtensionContext,
   forceRefresh: boolean,
   outputChannel?: vscode.OutputChannel,
+  silent = false,
 ): Promise<WorkspacesOutput | null> => {
   const root = getWorkspaceRoot();
   if (!root) {
-    void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    if (!silent) {
+      void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    }
     return null;
   }
 
   const { binary } = await resolveCliForRun(context, outputChannel);
   if (!binary) {
-    void vscode.window.showErrorMessage(
-      "Fallow: CLI binary not found. Enable fallow.autoDownload or set fallow.lspPath.",
-    );
+    if (!silent) {
+      void vscode.window.showErrorMessage(
+        "Fallow: CLI binary not found. Enable fallow.autoDownload or set fallow.lspPath.",
+      );
+    }
     return null;
   }
 
@@ -575,6 +585,9 @@ export const runWorkspaces = async (
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     outputChannel?.appendLine(`Fallow: failed to list workspaces: ${message}`);
+    if (silent) {
+      return null;
+    }
     if (/unrecognized subcommand|unexpected argument|wasn't expected/i.test(message)) {
       void vscode.window.showWarningMessage(
         "Fallow: this CLI version does not support `fallow workspaces`. Update the fallow binary to scope analysis to a monorepo package.",
@@ -626,6 +639,7 @@ export const runAudit = async (
     const auditArgs = buildAuditArgs({
       production: getProduction(),
       changedSince: getChangedSince(),
+      workspace: resolveActiveWorkspaceScope(context),
       configPath: getResolvedConfigPath(),
       gate: getAuditGate(),
     });
@@ -737,6 +751,7 @@ export const runHealthAnalysis = async (
       configPath: getResolvedConfigPath(),
       changedSince: getChangedSince(),
       production: getProduction(),
+      workspace: resolveActiveWorkspaceScope(context),
     });
 
     const output = await execFallow(binary, args, root);
@@ -818,6 +833,7 @@ export const runSecurityAnalysis = async (
     const args = buildSecurityArgs({
       configPath: getResolvedConfigPath(),
       changedSince: getChangedSince(),
+      workspace: resolveActiveWorkspaceScope(context),
     });
 
     const output = await execFallow(binary, args, root);

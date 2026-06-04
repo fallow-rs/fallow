@@ -85,6 +85,14 @@ describe("buildHealthArgs", () => {
     expect(buildHealthArgs({ ...baseArgs, topFindings: 0 })).not.toContain("--top");
     expect(buildHealthArgs({ ...baseArgs, topFindings: -5 })).not.toContain("--top");
   });
+
+  it("forwards --workspace only when a workspace scope is set (#906 C2)", () => {
+    expect(buildHealthArgs(baseArgs)).not.toContain("--workspace");
+    expect(buildHealthArgs({ ...baseArgs, workspace: "" })).not.toContain("--workspace");
+    const scoped = buildHealthArgs({ ...baseArgs, workspace: "pkg-a" });
+    expect(scoped).toContain("--workspace");
+    expect(scoped[scoped.indexOf("--workspace") + 1]).toBe("pkg-a");
+  });
 });
 
 describe("formatScoreLabel", () => {

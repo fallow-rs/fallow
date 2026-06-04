@@ -20,4 +20,11 @@ describe("config keys", () => {
     expect(affectsAnyConfiguration(event, RESTART_CONFIG_KEYS)).toBe(true);
     expect(affectsAnyConfiguration(event, ["fallow.production"])).toBe(false);
   });
+
+  it("re-analyzes (but never restarts the LSP) on a workspace-scope change", () => {
+    // A pinned `fallow.workspace` change must re-run the dead-code/dupes sidebar
+    // + status bar, but the LSP is not workspace-scoped so it must not restart.
+    expect(REANALYSIS_CONFIG_KEYS).toContain("fallow.workspace");
+    expect(RESTART_CONFIG_KEYS).not.toContain("fallow.workspace");
+  });
 });
