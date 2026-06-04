@@ -12,7 +12,7 @@
 //! costs nothing (a local file read) and leaks nothing; the network fetch is
 //! consent-gated and throttled.
 //!
-//! Invariants (see `.plans/issue-978-upgrade-nudge.md`):
+//! Invariants:
 //! - Never writes to stdout, never into JSON / SARIF / any machine format.
 //! - Suppressed when quiet, non-TTY (either stream), non-human, or in CI.
 //! - Suppressed by the universal kill switches (`DO_NOT_TRACK`,
@@ -243,7 +243,17 @@ fn cache_path() -> Option<PathBuf> {
 
 fn read_cache_from(path: &std::path::Path) -> Result<UpdateCache, String> {
     let raw = std::fs::read_to_string(path).map_err(|err| err.to_string())?;
-    serde_json::from_str(&raw).map_err(|err| err.to_string())
+    let cache: UpdateCache = serde_json::from_str(&raw).map_err(|err| err.to_string())?;
+    if cache.schema_version == CACHE_SCHEMA_VERSION {
+        return Ok(cache);
+    }
+    Ok(UpdateCache {
+        // Preserve a downgrade-safe opt-out if the old reader can still see it,
+        // but discard the version answer because future schema semantics are
+        // unknown.
+        disabled: cache.disabled,
+        ..UpdateCache::default()
+    })
 }
 
 fn write_cache_to(path: &std::path::Path, cache: &UpdateCache) -> Result<(), String> {
@@ -429,6 +439,28 @@ mod tests {
         assert!(loaded.disabled);
         assert_eq!(loaded.latest_version, "2.88.3");
         assert_eq!(loaded.checked_at_secs, 1234);
+    }
+
+    #[test]
+    fn cache_schema_mismatch_discards_version_answer_but_preserves_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("update-check.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "schema_version": 99,
+              "disabled": true,
+              "latest_version": "99.0.0",
+              "checked_at_secs": 9999999999
+            }"#,
+        )
+        .unwrap();
+
+        let loaded = read_cache_from(&path).unwrap();
+        assert_eq!(loaded.schema_version, CACHE_SCHEMA_VERSION);
+        assert!(loaded.disabled);
+        assert!(loaded.latest_version.is_empty());
+        assert_eq!(loaded.checked_at_secs, 0);
     }
 
     #[test]
