@@ -80,8 +80,8 @@ export const partitionWorkspaces = (
   workspaces: ReadonlyArray<WorkspaceInfo>,
 ): PartitionedWorkspaces => {
   const byName = (a: WorkspaceInfo, b: WorkspaceInfo): number => a.name.localeCompare(b.name);
-  const real = workspaces.filter((w) => !w.is_internal_dependency).slice().sort(byName);
-  const internal = workspaces.filter((w) => w.is_internal_dependency).slice().sort(byName);
+  const real = workspaces.filter((w) => !w.is_internal_dependency).toSorted(byName);
+  const internal = workspaces.filter((w) => w.is_internal_dependency).toSorted(byName);
   return { real, internal };
 };
 

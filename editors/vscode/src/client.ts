@@ -262,25 +262,23 @@ export const stopClient = async (): Promise<void> => {
   }
 
   if (current.state === State.Starting) {
-    await new Promise<void>((resolve) => {
-      let done = false;
-      let disposable: vscode.Disposable | undefined;
-      const finish = (): void => {
-        if (done) {
-          return;
-        }
-        done = true;
-        clearTimeout(timeout);
-        disposable?.dispose();
-        resolve();
-      };
-      const timeout = setTimeout(finish, 2_000);
-      disposable = current.onDidChangeState((event) => {
-        if (event.newState !== State.Starting) {
-          finish();
-        }
-      });
-    });
+    let disposable: vscode.Disposable | undefined;
+    try {
+      await Promise.race([
+        new Promise<void>((resolve) => {
+          disposable = current.onDidChangeState((event) => {
+            if (event.newState !== State.Starting) {
+              disposable?.dispose();
+              disposable = undefined;
+              resolve();
+            }
+          });
+        }),
+        new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
+      ]);
+    } finally {
+      disposable?.dispose();
+    }
   }
 
   if (current.state === State.Running) {

@@ -9,10 +9,23 @@
     "test/integration/fixtures/**"
   ],
   "ignoreDependencies": ["@vscode/vsce"],
+  "ignoreUnresolvedImports": [
+    "./generated/output-contract.js",
+    "../src/generated/output-contract.js"
+  ],
   "ignoreExports": [
     {
       "file": "src/types.ts",
       "exports": ["*"]
+    },
+    {
+      "file": "src/workspacePicker.ts",
+      "exports": [
+        "CLEAR_WORKSPACE_SCOPE",
+        "WORKSPACE_STATE_KEY",
+        "getWorkspaceStateOverride",
+        "resolveWorkspaceScope"
+      ]
     }
   ],
   "rules": {

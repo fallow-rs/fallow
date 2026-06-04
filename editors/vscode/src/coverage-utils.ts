@@ -101,7 +101,7 @@ export const sortHotPaths = (
   report: RuntimeCoverageReport | null,
 ): readonly RuntimeCoverageHotPath[] => {
   const hotPaths = report?.hot_paths ?? [];
-  return [...hotPaths].sort((a, b) => b.invocations - a.invocations);
+  return hotPaths.toSorted((a, b) => b.invocations - a.invocations);
 };
 
 /**
