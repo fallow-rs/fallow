@@ -109,6 +109,15 @@ export const getHealthStatusBar = (): boolean =>
 
 export const getTraceLevel = (): TraceLevel => getConfig().get<TraceLevel>("trace.server", "off");
 
+/**
+ * Whether the opt-in Security Candidates view is enabled. Off by default: no
+ * `fallow security` process runs and no security view work happens until the
+ * user turns this on AND opens the Security Candidates view (#902 latency
+ * protection; #903 enable toggle).
+ */
+export const getSecurityEnabled = (): boolean =>
+  getConfig().get<boolean>("security.enabled", false);
+
 export const onConfigChange = (
   callback: (e: vscode.ConfigurationChangeEvent) => void,
 ): vscode.Disposable =>

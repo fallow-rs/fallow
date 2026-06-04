@@ -38,6 +38,7 @@ import {
 } from "./download.js";
 import { buildFixArgs, createFixPreviewItems, resolveFixLocation } from "./fix-utils.js";
 import { buildHealthArgs } from "./health-utils.js";
+import { buildSecurityArgs, parseUnknownSubcommand } from "./security-utils.js";
 import type {
   FallowCheckResult,
   FallowCombinedResult,
@@ -46,6 +47,7 @@ import type {
   FixAction,
   HealthOutput,
   HealthReport,
+  SecurityOutput,
 } from "./types.js";
 
 export const findCliBinary = (context: vscode.ExtensionContext): string | null => {
@@ -577,6 +579,62 @@ export const runHealthAnalysis = async (
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     void vscode.window.showErrorMessage(`Fallow health analysis failed: ${message}`);
+    return null;
+  }
+};
+
+/**
+ * Run `fallow security --format json` and parse its `SecurityOutput` envelope.
+ * This is a SEPARATE, independent process from the combined sidebar analysis
+ * (security findings are `#[serde(skip)]` on `AnalysisResults` and never appear
+ * under bare `fallow`), so the dead-code / duplicates sidebar latency path is
+ * untouched (#902).
+ *
+ * Findings are UNVERIFIED candidates, not confirmed vulnerabilities; the caller
+ * frames them as such in every surface (#903). A resolved CLI that predates the
+ * `security` subcommand degrades to a one-line "update fallow" warning and a
+ * `null` result, rather than surfacing a raw clap stderr blob.
+ */
+export const runSecurityAnalysis = async (
+  context: vscode.ExtensionContext,
+  outputChannel?: vscode.OutputChannel,
+): Promise<SecurityOutput | null> => {
+  const root = getWorkspaceRoot();
+  if (!root) {
+    void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    return null;
+  }
+
+  try {
+    const { binary } = await resolveCliForRun(context, outputChannel);
+    const args = buildSecurityArgs({
+      configPath: getResolvedConfigPath(),
+      changedSince: getChangedSince(),
+    });
+
+    const output = await execFallow(binary, args, root);
+    if (output.trim().length === 0) {
+      return null;
+    }
+
+    return JSON.parse(output) as SecurityOutput;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+
+    // An older CLI without the `security` subcommand is a known, recoverable
+    // state: warn once with an actionable message and show an empty view,
+    // rather than surfacing a raw stderr blob as an error.
+    if (parseUnknownSubcommand(message)) {
+      outputChannel?.appendLine(
+        `Fallow: the resolved CLI does not support security candidates. ${message}`,
+      );
+      void vscode.window.showWarningMessage(
+        "Fallow: update the fallow CLI to scan for security candidates.",
+      );
+      return null;
+    }
+
+    void vscode.window.showErrorMessage(`Fallow security scan failed: ${message}`);
     return null;
   }
 };

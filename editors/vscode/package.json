@@ -84,6 +84,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "fallow.analyzeSecurity",
+        "title": "Fallow: Scan for Security Candidates",
+        "icon": "$(shield)"
+      },
+      {
         "command": "fallow.fix",
         "title": "Fallow: Auto-Fix (unexport unused, remove unused deps)"
       },
@@ -345,6 +350,11 @@
             "verbose"
           ],
           "description": "Trace level for the LSP server communication."
+        },
+        "fallow.security.enabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Surface local **security candidates** (`client-server-leak`, the tainted-sink CWE catalogue) from `fallow security` in the Security Candidates sidebar view. Off by default. Findings are UNVERIFIED candidates for you or an AI agent to verify, never confirmed vulnerabilities. Enabling this runs a separate `fallow security` analysis only when the Security Candidates view is opened, so it does not affect the main sidebar's speed."
         }
       }
     },
@@ -370,6 +380,10 @@
         {
           "id": "fallow.health",
           "name": "Health"
+        },
+        {
+          "id": "fallow.security",
+          "name": "Security Candidates"
         }
       ]
     },
@@ -388,6 +402,16 @@
         {
           "command": "fallow.health.reload",
           "when": "view == fallow.health",
+          "group": "navigation"
+        },
+        {
+          "command": "fallow.analyzeSecurity",
+          "when": "view == fallow.security && !fallow.hasAnalyzedSecurity",
+          "group": "navigation"
+        },
+        {
+          "command": "fallow.analyzeSecurity",
+          "when": "view == fallow.security && fallow.hasAnalyzedSecurity",
           "group": "navigation"
         }
       ],
@@ -436,6 +460,16 @@
         "view": "fallow.health",
         "contents": "No health results yet.\n[$(refresh) Reload Health](command:fallow.health.reload)\nFallow reports a project health score and grade, complexity findings, hotspot candidates, and refactoring candidates. Hotspots and refactoring targets are heuristic suggestions, so verify before acting.",
         "when": "fallow.health.enabled"
+      },
+      {
+        "view": "fallow.security",
+        "contents": "Security candidate scanning is off by default.\nEnable `fallow.security.enabled`, then [$(shield) Scan for Security Candidates](command:fallow.analyzeSecurity).\nResults are UNVERIFIED candidates to verify, never confirmed vulnerabilities.",
+        "when": "!fallow.hasAnalyzedSecurity"
+      },
+      {
+        "view": "fallow.security",
+        "contents": "$(check) No security candidates found.\nNote: an empty result is not a clean bill of health.",
+        "when": "fallow.hasAnalyzedSecurity"
       }
     ],
     "walkthroughs": [

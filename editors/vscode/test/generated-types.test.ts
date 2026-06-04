@@ -19,6 +19,7 @@ import type {
   IssueAction,
   UnusedFileFinding,
 } from "../src/generated/output-contract.js";
+import type { SecurityFinding, SecurityOutput } from "../src/types.js";
 
 describe("generated/output-contract.d.ts", () => {
   it("exposes CombinedOutput with optional check/dupes/health branches", () => {
@@ -109,5 +110,24 @@ describe("generated/output-contract.d.ts", () => {
     expect(sample.actions).toHaveLength(2);
     const first: IssueAction = sample.actions[0]!;
     expect(first.type).toBe("delete-file");
+  });
+
+  it("re-exports the SecurityOutput / SecurityFinding contract from ../src/types.js", () => {
+    const finding: SecurityFinding = {
+      kind: "client-server-leak",
+      path: "src/app.tsx",
+      line: 12,
+      col: 0,
+      evidence: "imports a server-only secret",
+      trace: [{ path: "src/lib/secret.ts", line: 8, col: 0, role: "secret-source" }],
+      actions: [],
+    };
+    const sample: SecurityOutput = {
+      schema_version: "1",
+      security_findings: [finding],
+      unresolved_edge_files: 0,
+      unresolved_callee_sites: 0,
+    };
+    expect(sample.security_findings[0]!.kind).toBe("client-server-leak");
   });
 });

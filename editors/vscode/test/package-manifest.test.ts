@@ -14,17 +14,33 @@ interface MenuContribution {
   readonly group?: string;
 }
 
+interface ViewContribution {
+  readonly id: string;
+  readonly name: string;
+}
+
+interface ViewsWelcomeContribution {
+  readonly view: string;
+  readonly contents: string;
+  readonly when?: string;
+}
+
+interface ConfigProperty {
+  readonly description?: string;
+  readonly markdownDescription?: string;
+  readonly default?: unknown;
+}
+
 interface ExtensionPackage {
   readonly contributes: {
     readonly commands: readonly CommandContribution[];
     readonly configuration: {
-      readonly properties: Record<
-        string,
-        {
-          readonly description?: string;
-        }
-      >;
+      readonly properties: Record<string, ConfigProperty>;
     };
+    readonly views: {
+      readonly fallow: readonly ViewContribution[];
+    };
+    readonly viewsWelcome: readonly ViewsWelcomeContribution[];
     readonly menus: {
       readonly "view/title": readonly MenuContribution[];
       readonly commandPalette: readonly MenuContribution[];
@@ -130,5 +146,63 @@ describe("package.json duplication settings", () => {
 
   it("restarts and reruns analysis when duplication settings change", () => {
     expect(configKeysSource).toContain('"fallow.duplication"');
+  });
+});
+
+describe("package.json security candidates contributions", () => {
+  const securityView = pkg.contributes.views.fallow.find((view) => view.id === "fallow.security");
+  const securityWelcome = pkg.contributes.viewsWelcome.filter(
+    (entry) => entry.view === "fallow.security",
+  );
+  const securitySetting = pkg.contributes.configuration.properties["fallow.security.enabled"];
+
+  it("contributes the Security Candidates view", () => {
+    expect(securityView).toMatchObject({ name: "Security Candidates" });
+  });
+
+  it("contributes the scan command with a shield icon", () => {
+    expect(command("fallow.analyzeSecurity")).toMatchObject({
+      title: "Fallow: Scan for Security Candidates",
+      icon: "$(shield)",
+    });
+  });
+
+  it("contributes both view/title menu states for the scan command", () => {
+    const entries = pkg.contributes.menus["view/title"].filter(
+      (entry) => entry.command === "fallow.analyzeSecurity",
+    );
+    expect(entries.map((entry) => entry.when)).toEqual([
+      "view == fallow.security && !fallow.hasAnalyzedSecurity",
+      "view == fallow.security && fallow.hasAnalyzedSecurity",
+    ]);
+  });
+
+  it("contributes an opt-in setting defaulting to false", () => {
+    expect(securitySetting?.default).toBe(false);
+    expect(securitySetting?.markdownDescription).toBeTruthy();
+  });
+
+  it("frames every security string as a candidate, never a confirmed vulnerability", () => {
+    const strings = [
+      securityView?.name ?? "",
+      command("fallow.analyzeSecurity")?.title ?? "",
+      securitySetting?.markdownDescription ?? "",
+      ...securityWelcome.map((entry) => entry.contents),
+    ].filter((value) => value.length > 0);
+
+    expect(strings.length).toBeGreaterThan(0);
+
+    for (const value of strings) {
+      const lower = value.toLowerCase();
+      // Every surface must name them as candidates.
+      expect(lower).toContain("candidate");
+      // "vulnerabilit"/"confirmed" may only appear in honest negations
+      // ("never confirmed vulnerabilities", "NOT verified vulnerabilities");
+      // a positive claim that these ARE vulnerabilities/confirmed is forbidden.
+      if (lower.includes("vulnerabilit") || lower.includes("confirmed")) {
+        const negated = /\b(?:never|not|un\w+|no)\b/.test(lower);
+        expect(negated, `unframed security claim: ${value}`).toBe(true);
+      }
+    }
   });
 });

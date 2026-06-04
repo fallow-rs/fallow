@@ -3,14 +3,16 @@
 import * as vscode from "vscode";
 import { countCheckIssues } from "./analysis-utils.js";
 import { startClient, stopClient, restartClient } from "./client.js";
-import { getHealthEnabled, onConfigChange } from "./config.js";
-import { runAnalysis, runFix, runHealthAnalysis } from "./commands.js";
+import { getHealthEnabled, getSecurityEnabled, onConfigChange } from "./config.js";
+import { runAnalysis, runFix, runHealthAnalysis, runSecurityAnalysis } from "./commands.js";
 import {
   HEALTH_CONFIG_KEYS,
   REANALYSIS_CONFIG_KEYS,
   RESTART_CONFIG_KEYS,
   affectsAnyConfiguration,
 } from "./configKeys.js";
+import { countSecurityFindings } from "./security-utils.js";
+import { SecurityTreeProvider } from "./securityTreeView.js";
 import { DiagnosticFilter } from "./diagnosticFilter.js";
 import { registerDiagnosticMuteUi } from "./diagnosticMute.js";
 import { HealthTreeProvider } from "./healthTreeView.js";
@@ -32,9 +34,19 @@ let lastCheckResult: FallowCheckResult | null = null;
 let lastDupesResult: FallowDupesResult | null = null;
 let lastHealthResult: HealthReport | null = null;
 
+// The security run is a separate, view-gated process with disjoint config keys
+// from the dead-code analysis: toggling security never re-runs the main
+// analysis, and dead-code config changes never trigger a security re-run (#902).
+const SECURITY_CONFIG_KEYS = [
+  "fallow.security.enabled",
+  "fallow.configPath",
+  "fallow.changedSince",
+] as const;
+
 export interface ExtensionApi {
   readonly runAnalysis: typeof runAnalysis;
   readonly runFix: typeof runFix;
+  readonly runSecurityAnalysis: typeof runSecurityAnalysis;
 }
 
 export const activate = async (context: vscode.ExtensionContext): Promise<ExtensionApi> => {
@@ -61,6 +73,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     );
   };
   syncHealthEnabledContext();
+  const securityProvider = new SecurityTreeProvider();
 
   // Use createTreeView to get visibility events. Defer CLI analysis until the
   // tree view is first shown, avoiding a double analysis on activation (the LSP
@@ -70,6 +83,10 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // independent of the combined run, so opening the editor or the existing two
   // views never triggers any health work (#902 latency isolation).
   let healthAnalysisRan = false;
+  // The security run is decoupled from the dead-code run: it fires only on first
+  // visibility of the Security Candidates view, behind its own flag, so a user
+  // who never opens that view pays nothing even with the feature enabled (#902).
+  let securityAnalysisRan = false;
 
   const triggerCliAnalysis = async (): Promise<boolean> => {
     setStatusBarAnalyzing();
@@ -135,6 +152,33 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     }
   };
 
+  // Run `fallow security` and update the Security Candidates view. Findings are
+  // UNVERIFIED candidates (#903), so the toast says so explicitly and never uses
+  // "vulnerability"/"confirmed". Returns whether the run completed so the lazy
+  // trigger can retry on the next visibility if it failed.
+  const triggerSecurityAnalysis = async (): Promise<boolean> => {
+    return await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "Fallow: Scanning for security candidates...",
+        cancellable: false,
+      },
+      async () => {
+        const result = await runSecurityAnalysis(context, outputChannel);
+        securityProvider.update(result);
+        void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzedSecurity", true);
+
+        const count = countSecurityFindings(result);
+        if (count > 0) {
+          void vscode.window.showInformationMessage(
+            `Fallow: found ${count} security candidate${count === 1 ? "" : "s"}. These are NOT verified vulnerabilities; verify each before acting.`,
+          );
+        }
+        return true;
+      },
+    );
+  };
+
   const deadCodeView = vscode.window.createTreeView("fallow.deadCode", {
     treeDataProvider: deadCodeProvider,
   });
@@ -146,7 +190,11 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     treeDataProvider: healthProvider,
   });
   healthProvider.setView(healthView);
-  context.subscriptions.push(deadCodeView, duplicatesView, healthView);
+  const securityView = vscode.window.createTreeView("fallow.security", {
+    treeDataProvider: securityProvider,
+  });
+  securityProvider.setView(securityView);
+  context.subscriptions.push(deadCodeView, duplicatesView, healthView, securityView);
 
   const onHealthViewVisible = (): void => {
     if (healthAnalysisRan) {
@@ -197,6 +245,30 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     }),
   );
 
+  // Lazily run the security scan on first visibility of its own view, behind a
+  // separate flag and gated on the opt-in setting. This is the #902 protection:
+  // the run never touches the dead-code / duplicates sidebar latency path.
+  const onSecurityViewVisible = (): void => {
+    if (securityAnalysisRan || !getSecurityEnabled()) {
+      return;
+    }
+    securityAnalysisRan = true;
+    void (async (): Promise<void> => {
+      const completed = await triggerSecurityAnalysis();
+      if (!completed) {
+        securityAnalysisRan = false;
+      }
+    })();
+  };
+
+  context.subscriptions.push(
+    securityView.onDidChangeVisibility((e) => {
+      if (e.visible) {
+        onSecurityViewVisible();
+      }
+    }),
+  );
+
   const updateViews = (): void => {
     deadCodeProvider.update(lastCheckResult);
     duplicatesProvider.update(lastDupesResult);
@@ -211,6 +283,16 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     healthAnalysisRan = await triggerHealthAnalysis();
   };
 
+  const runSecurityAnalysisCommand = async (): Promise<void> => {
+    if (!getSecurityEnabled()) {
+      void vscode.window.showInformationMessage(
+        "Fallow: enable `fallow.security.enabled` to scan for security candidates.",
+      );
+      return;
+    }
+    securityAnalysisRan = await triggerSecurityAnalysis();
+  };
+
   // Register commands
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.analyze", runCliAnalysisCommand),
@@ -220,6 +302,9 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   );
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.health.reload", runHealthAnalysisCommand),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.analyzeSecurity", runSecurityAnalysisCommand),
   );
 
   context.subscriptions.push(
@@ -277,6 +362,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       const needsRestart = affectsAnyConfiguration(e, RESTART_CONFIG_KEYS);
       const needsReanalysis = affectsAnyConfiguration(e, REANALYSIS_CONFIG_KEYS);
       const needsHealthReanalysis = affectsAnyConfiguration(e, HEALTH_CONFIG_KEYS);
+      const affectsSecurity = affectsAnyConfiguration(e, SECURITY_CONFIG_KEYS);
 
       if (needsRestart) {
         outputChannel.appendLine("Configuration changed, restarting server...");
@@ -306,6 +392,22 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
           updateStatusBarHealth(lastHealthResult);
         } else if (healthAnalysisRan) {
           void triggerHealthAnalysis();
+        }
+      }
+
+      if (affectsSecurity) {
+        // Security keys are disjoint from REANALYSIS_CONFIG_KEYS, so this never
+        // re-runs the dead-code analysis. When the feature is enabled and the
+        // view is open, re-scan; otherwise clear the provider so a disabled view
+        // shows nothing stale.
+        if (getSecurityEnabled()) {
+          if (securityView.visible) {
+            securityAnalysisRan = await triggerSecurityAnalysis();
+          }
+        } else {
+          securityAnalysisRan = false;
+          securityProvider.update(null);
+          void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzedSecurity", false);
         }
       }
     }),
@@ -342,6 +444,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   return {
     runAnalysis,
     runFix,
+    runSecurityAnalysis,
   };
 };
 
