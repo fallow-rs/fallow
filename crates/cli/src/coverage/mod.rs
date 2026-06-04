@@ -1079,7 +1079,9 @@ fn offer_trial_if_needed(root: &Path, args: SetupArgs) -> Option<ExitCode> {
         }
     };
 
-    match license::activate_trial(&email) {
+    // `coverage setup` is the interactive human first-run flow, so it always
+    // wants the human-readable "stored at" line regardless of `--format`.
+    match license::activate_trial(&email, false) {
         Ok(status) => {
             println!(
                 "  -> This license is machine-scoped (stored at {}).",

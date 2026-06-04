@@ -15,11 +15,13 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use ed25519_dalek::VerifyingKey;
+use fallow_config::OutputFormat;
 use fallow_license::{
-    DEFAULT_HARD_FAIL_DAYS, Feature, LicenseError, LicenseStatus, current_unix_seconds,
-    default_license_path, normalize_jwt, skew_tolerance_seconds_from_env, verify_jwt_with_skew,
+    DEFAULT_HARD_FAIL_DAYS, Feature, LicenseClaims, LicenseError, LicenseStatus,
+    current_unix_seconds, default_license_path, normalize_jwt, skew_tolerance_seconds_from_env,
+    verify_jwt_with_skew,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::api::{
     NETWORK_EXIT_CODE, api_url, http_status_message, sanitize_network_error, try_api_agent,
@@ -100,33 +102,85 @@ struct JwtResponse {
     trial_ends_at: Option<String>,
 }
 
-/// Dispatch a `fallow license <sub>` invocation.
-pub fn run(subcommand: &LicenseSubcommand) -> ExitCode {
-    match subcommand {
-        LicenseSubcommand::Activate(args) => run_activate(args),
-        LicenseSubcommand::Status => run_status(),
-        LicenseSubcommand::Refresh => run_refresh(),
-        LicenseSubcommand::Deactivate => run_deactivate(),
+/// The `kind` discriminator on the JSON envelope each subcommand emits under
+/// `--format json`. Lets a consumer (e.g. the VS Code extension) tell a status
+/// probe apart from a post-activation / post-refresh result.
+#[derive(Clone, Copy)]
+enum LicenseKind {
+    Status,
+    Activate,
+    Refresh,
+}
+
+impl LicenseKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Status => "license-status",
+            Self::Activate => "license-activate",
+            Self::Refresh => "license-refresh",
+        }
     }
 }
 
-fn run_activate(args: &ActivateArgs) -> ExitCode {
+/// Dispatch a `fallow license <sub>` invocation.
+///
+/// `output` is the globally-resolved [`OutputFormat`]; the human path is
+/// byte-for-byte unchanged from before, and `--format json` switches every
+/// subcommand to the machine-readable [`LicenseStatusJson`] / error envelope.
+pub fn run(subcommand: &LicenseSubcommand, output: OutputFormat) -> ExitCode {
+    let json = matches!(output, OutputFormat::Json);
+    match subcommand {
+        LicenseSubcommand::Activate(args) => run_activate(args, json),
+        LicenseSubcommand::Status => run_status(json),
+        LicenseSubcommand::Refresh => run_refresh(json),
+        LicenseSubcommand::Deactivate => run_deactivate(json),
+    }
+}
+
+/// Surface a setup / input error: JSON envelope on stdout under `--format json`
+/// (so the extension parses one stream), plain stderr otherwise.
+fn fail(message: &str, exit_code: u8, json: bool) -> ExitCode {
+    if json {
+        emit_error_json(message, exit_code);
+    } else {
+        eprintln!("fallow license: {message}");
+    }
+    ExitCode::from(exit_code)
+}
+
+fn emit_error_json(message: &str, exit_code: u8) {
+    let error_obj = serde_json::json!({
+        "error": true,
+        "message": message,
+        "exit_code": exit_code,
+    });
+    if let Ok(json) = serde_json::to_string_pretty(&error_obj) {
+        println!("{json}");
+    }
+}
+
+/// Render a verified status either as the existing human lines or as the JSON
+/// envelope, depending on `json`. Used by every success path so the two
+/// renderings never drift.
+fn emit_status(status: &LicenseStatus, kind: LicenseKind, json: bool) {
+    if json {
+        print_status_json(status, kind);
+    } else {
+        print_status(status);
+    }
+}
+
+fn run_activate(args: &ActivateArgs, json: bool) -> ExitCode {
     if args.trial {
-        return run_trial(args.email.as_deref());
+        return run_trial(args.email.as_deref(), json);
     }
     let jwt = match read_jwt(args) {
         Ok(jwt) => jwt,
-        Err(msg) => {
-            eprintln!("fallow license: {msg}");
-            return ExitCode::from(2);
-        }
+        Err(msg) => return fail(&msg, 2, json),
     };
     let key = match verifying_key() {
         Ok(k) => k,
-        Err(msg) => {
-            eprintln!("fallow license: {msg}");
-            return ExitCode::from(2);
-        }
+        Err(msg) => return fail(&msg, 2, json),
     };
     match verify_jwt_with_skew(
         &jwt,
@@ -136,95 +190,85 @@ fn run_activate(args: &ActivateArgs) -> ExitCode {
         skew_tolerance_seconds_from_env(),
     ) {
         Ok(status) => {
-            if let Err(msg) = persist_jwt(&jwt) {
-                eprintln!("fallow license: {msg}");
-                return ExitCode::from(2);
+            if let Err(msg) = persist_jwt(&jwt, json) {
+                return fail(&msg, 2, json);
             }
-            print_status(&status);
+            emit_status(&status, LicenseKind::Activate, json);
             ExitCode::SUCCESS
         }
-        Err(LicenseError::Truncated { .. }) => {
-            eprintln!(
-                "fallow license: {}",
-                LicenseError::Truncated { actual: jwt.len() }
-            );
-            ExitCode::from(3)
-        }
-        Err(err) => {
-            eprintln!("fallow license: failed to verify JWT: {err}");
-            ExitCode::from(3)
-        }
+        Err(LicenseError::Truncated { .. }) => fail(
+            &format!("{}", LicenseError::Truncated { actual: jwt.len() }),
+            3,
+            json,
+        ),
+        Err(err) => fail(&format!("failed to verify JWT: {err}"), 3, json),
     }
 }
 
-fn run_status() -> ExitCode {
+fn run_status(json: bool) -> ExitCode {
     let key = match verifying_key() {
         Ok(k) => k,
-        Err(msg) => {
-            eprintln!("fallow license: {msg}");
-            return ExitCode::from(2);
-        }
+        Err(msg) => return fail(&msg, 2, json),
     };
     match fallow_license::load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS) {
         Ok(status) => {
-            print_status(&status);
+            emit_status(&status, LicenseKind::Status, json);
             match status {
                 LicenseStatus::HardFail { .. } | LicenseStatus::Missing => ExitCode::from(3),
                 _ => ExitCode::SUCCESS,
             }
         }
-        Err(err) => {
-            eprintln!("fallow license: {err}");
-            ExitCode::from(3)
-        }
+        Err(err) => fail(&format!("{err}"), 3, json),
     }
 }
 
-fn run_refresh() -> ExitCode {
-    match refresh_active_license() {
+fn run_refresh(json: bool) -> ExitCode {
+    match refresh_active_license(json) {
         Ok(status) => {
-            print_status(&status);
+            emit_status(&status, LicenseKind::Refresh, json);
             ExitCode::SUCCESS
         }
-        Err(message) => {
-            eprintln!("fallow license refresh: {message}");
-            ExitCode::from(NETWORK_EXIT_CODE)
-        }
+        Err(message) => fail(&message, NETWORK_EXIT_CODE, json),
     }
 }
 
-fn run_trial(email: Option<&str>) -> ExitCode {
+fn run_trial(email: Option<&str>, json: bool) -> ExitCode {
     let Some(email) = email else {
-        eprintln!("fallow license activate --trial requires --email <addr>");
-        return ExitCode::from(2);
+        return fail("activate --trial requires --email <addr>", 2, json);
     };
-    match activate_trial(email) {
+    match activate_trial(email, json) {
         Ok(status) => {
-            print_status(&status);
+            emit_status(&status, LicenseKind::Activate, json);
             ExitCode::SUCCESS
         }
-        Err(message) => {
-            eprintln!("fallow license activate --trial: {message}");
-            ExitCode::from(NETWORK_EXIT_CODE)
-        }
+        Err(message) => fail(&message, NETWORK_EXIT_CODE, json),
     }
 }
 
-fn run_deactivate() -> ExitCode {
+fn run_deactivate(json: bool) -> ExitCode {
     let path = default_license_path();
     if !path.exists() {
-        println!("fallow license: no license file at {}", path.display());
+        if json {
+            print_deactivate_json(&path, false);
+        } else {
+            println!("fallow license: no license file at {}", path.display());
+        }
         return ExitCode::SUCCESS;
     }
     match std::fs::remove_file(&path) {
         Ok(()) => {
-            println!("fallow license: removed {}", path.display());
+            if json {
+                print_deactivate_json(&path, true);
+            } else {
+                println!("fallow license: removed {}", path.display());
+            }
             ExitCode::SUCCESS
         }
-        Err(err) => {
-            eprintln!("fallow license: failed to remove {}: {err}", path.display());
-            ExitCode::from(2)
-        }
+        Err(err) => fail(
+            &format!("failed to remove {}: {err}", path.display()),
+            2,
+            json,
+        ),
     }
 }
 
@@ -249,9 +293,11 @@ fn read_jwt(args: &ActivateArgs) -> Result<String, String> {
     )
 }
 
-fn persist_jwt(jwt: &str) -> Result<(), String> {
+fn persist_jwt(jwt: &str, json: bool) -> Result<(), String> {
     let path = write_jwt(jwt)?;
-    println!("fallow license: stored at {}", path.display());
+    if !json {
+        println!("fallow license: stored at {}", path.display());
+    }
     Ok(())
 }
 
@@ -299,7 +345,7 @@ pub fn verifying_key() -> Result<VerifyingKey, String> {
         .map_err(|err| format!("invalid compiled-in public key: {err}"))
 }
 
-pub fn activate_trial(email: &str) -> Result<LicenseStatus, String> {
+pub fn activate_trial(email: &str, json: bool) -> Result<LicenseStatus, String> {
     let mut response = try_api_agent()
         .map_err(|err| err.to_string())?
         .post(&api_url("/v1/auth/license/trial"))
@@ -308,10 +354,10 @@ pub fn activate_trial(email: &str) -> Result<LicenseStatus, String> {
     if !response.status().is_success() {
         return Err(http_status_message(&mut response, "trial"));
     }
-    store_verified_jwt(&mut response, "trial")
+    store_verified_jwt(&mut response, "trial", json)
 }
 
-pub fn refresh_active_license() -> Result<LicenseStatus, String> {
+pub fn refresh_active_license(json: bool) -> Result<LicenseStatus, String> {
     let current = load_current_jwt()?;
     let mut response = try_api_agent()
         .map_err(|err| err.to_string())?
@@ -324,7 +370,7 @@ pub fn refresh_active_license() -> Result<LicenseStatus, String> {
     if !response.status().is_success() {
         return Err(http_status_message(&mut response, "refresh"));
     }
-    store_verified_jwt(&mut response, "refresh")
+    store_verified_jwt(&mut response, "refresh", json)
 }
 
 fn load_current_jwt() -> Result<String, String> {
@@ -341,6 +387,7 @@ fn load_current_jwt() -> Result<String, String> {
 fn store_verified_jwt(
     response: &mut impl crate::api::ResponseBodyReader,
     operation: &str,
+    json: bool,
 ) -> Result<LicenseStatus, String> {
     let payload: JwtResponse = response
         .read_json()
@@ -349,11 +396,13 @@ fn store_verified_jwt(
     let jwt = normalize_jwt(&payload.jwt);
     let status = verify_downloaded_jwt(&jwt)?;
     let path = write_jwt(&jwt)?;
-    println!("fallow license: stored at {}", path.display());
-    if let Some(trial_ends_at) = payload.trial_ends_at.as_deref() {
-        let trimmed = trial_ends_at.trim();
-        if !trimmed.is_empty() {
-            println!("fallow license: trial ends at {trimmed}");
+    if !json {
+        println!("fallow license: stored at {}", path.display());
+        if let Some(trial_ends_at) = payload.trial_ends_at.as_deref() {
+            let trimmed = trial_ends_at.trim();
+            if !trimmed.is_empty() {
+                println!("fallow license: trial ends at {trimmed}");
+            }
         }
     }
     Ok(status)
@@ -448,6 +497,189 @@ fn print_status(status: &LicenseStatus) {
     }
 }
 
+/// Machine-readable license status emitted under `--format json`.
+///
+/// The shape mirrors what [`print_status`] renders for humans, but as a stable
+/// contract: `state` is the discriminant a UI keys on, `message` carries the
+/// single human-facing sentence (so consumers never re-derive wording), and the
+/// claim-derived fields (`tier` / `seats` / `features`) are `null` only on the
+/// states that have no claims (`hard_fail` / `missing`). The raw JWT is NEVER
+/// serialized; only the verified, derived claims.
+#[derive(Serialize)]
+struct LicenseStatusJson {
+    kind: &'static str,
+    schema_version: u32,
+    /// One of `valid`, `expired_warning`, `expired_watermark`, `hard_fail`,
+    /// `missing`.
+    state: &'static str,
+    tier: Option<String>,
+    seats: Option<u32>,
+    features: Vec<String>,
+    days_until_expiry: Option<i64>,
+    days_since_expiry: Option<u64>,
+    refresh_suggested: bool,
+    runtime_coverage_enabled: bool,
+    license_path: String,
+    message: String,
+}
+
+/// Schema version for [`LicenseStatusJson`]. Bump on any breaking field change.
+const LICENSE_STATUS_SCHEMA_VERSION: u32 = 1;
+
+/// True when the license is in `Valid` state and its `refresh_after` claim has
+/// already passed (the human path prints a proactive-refresh hint here).
+fn refresh_suggested(status: &LicenseStatus) -> bool {
+    match status {
+        LicenseStatus::Valid { claims, .. } => claims
+            .refresh_after
+            .is_some_and(|after| current_unix_seconds() >= after),
+        _ => false,
+    }
+}
+
+/// Borrow the `LicenseClaims` for the states that carry them.
+fn status_claims(status: &LicenseStatus) -> Option<&LicenseClaims> {
+    match status {
+        LicenseStatus::Valid { claims, .. }
+        | LicenseStatus::ExpiredWarning { claims, .. }
+        | LicenseStatus::ExpiredWatermark { claims, .. }
+        | LicenseStatus::HardFail { claims, .. } => Some(claims),
+        LicenseStatus::Missing => None,
+    }
+}
+
+/// The machine discriminant for a status. Kept in lockstep with the union the
+/// VS Code extension hand-types in `license-types.ts`.
+fn status_state(status: &LicenseStatus) -> &'static str {
+    match status {
+        LicenseStatus::Valid { .. } => "valid",
+        LicenseStatus::ExpiredWarning { .. } => "expired_warning",
+        LicenseStatus::ExpiredWatermark { .. } => "expired_watermark",
+        LicenseStatus::HardFail { .. } => "hard_fail",
+        LicenseStatus::Missing => "missing",
+    }
+}
+
+/// Compose the single human-facing sentence for a status. Distinct from
+/// [`print_status`]'s multi-line, hint-laden output: this is the one line a UI
+/// shows verbatim (status bar tooltip, info toast), so it states the fact
+/// plainly without embedding CLI remediation commands.
+fn status_message(status: &LicenseStatus) -> String {
+    match status {
+        LicenseStatus::Valid {
+            claims,
+            days_until_expiry,
+        } => format!(
+            "License active ({}, {} seat{}), {} day{} until expiry.",
+            claims.tier,
+            claims.seats,
+            plural(u64::from(claims.seats)),
+            days_until_expiry,
+            plural(days_until_expiry.unsigned_abs()),
+        ),
+        LicenseStatus::ExpiredWarning {
+            days_since_expiry, ..
+        } => format!(
+            "License expired {} day{} ago. Analysis still runs; refresh to clear the warning.",
+            days_since_expiry,
+            plural(*days_since_expiry),
+        ),
+        LicenseStatus::ExpiredWatermark {
+            days_since_expiry, ..
+        } => format!(
+            "License expired {} day{} ago. Output is watermarked until you refresh.",
+            days_since_expiry,
+            plural(*days_since_expiry),
+        ),
+        LicenseStatus::HardFail {
+            days_since_expiry, ..
+        } => format!(
+            "License expired {} day{} ago, past the grace window. Paid features are blocked until you refresh or start a trial.",
+            days_since_expiry,
+            plural(*days_since_expiry),
+        ),
+        LicenseStatus::Missing => {
+            "No license active. Start a 30-day trial or activate a license token.".to_owned()
+        }
+    }
+}
+
+const fn plural(n: u64) -> &'static str {
+    if n == 1 { "" } else { "s" }
+}
+
+/// Resolve the license path the loader would actually use, honoring the
+/// `$FALLOW_LICENSE_PATH` override and falling back to the canonical default.
+/// `$FALLOW_LICENSE` (inline JWT, no file) is reported as the default path,
+/// since there is no file to point at.
+fn active_license_path() -> String {
+    if let Ok(raw) = std::env::var("FALLOW_LICENSE_PATH") {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_owned();
+        }
+    }
+    default_license_path().display().to_string()
+}
+
+fn print_status_json(status: &LicenseStatus, kind: LicenseKind) {
+    let claims = status_claims(status);
+    let (days_until_expiry, days_since_expiry) = match status {
+        LicenseStatus::Valid {
+            days_until_expiry, ..
+        } => (Some(*days_until_expiry), None),
+        LicenseStatus::ExpiredWarning {
+            days_since_expiry, ..
+        }
+        | LicenseStatus::ExpiredWatermark {
+            days_since_expiry, ..
+        }
+        | LicenseStatus::HardFail {
+            days_since_expiry, ..
+        } => (None, Some(*days_since_expiry)),
+        LicenseStatus::Missing => (None, None),
+    };
+
+    let payload = LicenseStatusJson {
+        kind: kind.as_str(),
+        schema_version: LICENSE_STATUS_SCHEMA_VERSION,
+        state: status_state(status),
+        tier: claims.map(|c| c.tier.clone()),
+        seats: claims.map(|c| c.seats),
+        features: claims.map(|c| c.features.clone()).unwrap_or_default(),
+        days_until_expiry,
+        days_since_expiry,
+        refresh_suggested: refresh_suggested(status),
+        runtime_coverage_enabled: status.permits(&Feature::RuntimeCoverage),
+        license_path: active_license_path(),
+        message: status_message(status),
+    };
+
+    if let Ok(json) = serde_json::to_string_pretty(&payload) {
+        println!("{json}");
+    }
+}
+
+/// JSON envelope for `fallow license deactivate --format json`.
+fn print_deactivate_json(path: &Path, removed: bool) {
+    let message = if removed {
+        format!("License removed from {}.", path.display())
+    } else {
+        format!("No license file at {} to remove.", path.display())
+    };
+    let payload = serde_json::json!({
+        "kind": "license-deactivate",
+        "schema_version": LICENSE_STATUS_SCHEMA_VERSION,
+        "state": "missing",
+        "removed": removed,
+        "license_path": path.display().to_string(),
+        "message": message,
+    });
+    if let Ok(json) = serde_json::to_string_pretty(&payload) {
+        println!("{json}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,7 +731,173 @@ mod tests {
 
     #[test]
     fn run_trial_without_email_errors() {
-        let exit = run_trial(None);
+        let exit = run_trial(None, false);
         assert_eq!(format!("{exit:?}"), format!("{:?}", ExitCode::from(2)));
+    }
+
+    fn sample_claims(features: &[&str]) -> LicenseClaims {
+        LicenseClaims {
+            iss: "https://api.fallow.cloud".to_owned(),
+            sub: "org_1".to_owned(),
+            tid: "tenant_1".to_owned(),
+            seats: 5,
+            tier: "team".to_owned(),
+            features: features.iter().map(|s| (*s).to_owned()).collect(),
+            iat: 1_700_000_000,
+            exp: 1_800_000_000,
+            jti: "jti_1".to_owned(),
+            refresh_after: None,
+        }
+    }
+
+    fn json_value(status: &LicenseStatus, kind: LicenseKind) -> serde_json::Value {
+        let claims = status_claims(status);
+        let (days_until_expiry, days_since_expiry) = match status {
+            LicenseStatus::Valid {
+                days_until_expiry, ..
+            } => (Some(*days_until_expiry), None),
+            LicenseStatus::ExpiredWarning {
+                days_since_expiry, ..
+            }
+            | LicenseStatus::ExpiredWatermark {
+                days_since_expiry, ..
+            }
+            | LicenseStatus::HardFail {
+                days_since_expiry, ..
+            } => (None, Some(*days_since_expiry)),
+            LicenseStatus::Missing => (None, None),
+        };
+        let payload = LicenseStatusJson {
+            kind: kind.as_str(),
+            schema_version: LICENSE_STATUS_SCHEMA_VERSION,
+            state: status_state(status),
+            tier: claims.map(|c| c.tier.clone()),
+            seats: claims.map(|c| c.seats),
+            features: claims.map(|c| c.features.clone()).unwrap_or_default(),
+            days_until_expiry,
+            days_since_expiry,
+            refresh_suggested: refresh_suggested(status),
+            runtime_coverage_enabled: status.permits(&Feature::RuntimeCoverage),
+            license_path: active_license_path(),
+            message: status_message(status),
+        };
+        serde_json::to_value(&payload).unwrap()
+    }
+
+    #[test]
+    fn status_json_valid_has_all_documented_keys() {
+        let status = LicenseStatus::Valid {
+            claims: sample_claims(&["runtime_coverage"]),
+            days_until_expiry: 12,
+        };
+        let value = json_value(&status, LicenseKind::Status);
+        let obj = value.as_object().unwrap();
+        for key in [
+            "kind",
+            "schema_version",
+            "state",
+            "tier",
+            "seats",
+            "features",
+            "days_until_expiry",
+            "days_since_expiry",
+            "refresh_suggested",
+            "runtime_coverage_enabled",
+            "license_path",
+            "message",
+        ] {
+            assert!(obj.contains_key(key), "missing key: {key}");
+        }
+        assert_eq!(value["kind"], "license-status");
+        assert_eq!(value["state"], "valid");
+        assert_eq!(value["tier"], "team");
+        assert_eq!(value["seats"], 5);
+        assert_eq!(value["days_until_expiry"], 12);
+        assert!(value["days_since_expiry"].is_null());
+        assert_eq!(value["runtime_coverage_enabled"], true);
+        assert_eq!(value["refresh_suggested"], false);
+        assert!(
+            value["message"]
+                .as_str()
+                .unwrap()
+                .contains("License active")
+        );
+    }
+
+    #[test]
+    fn status_json_missing_nulls_claims() {
+        let value = json_value(&LicenseStatus::Missing, LicenseKind::Status);
+        assert_eq!(value["state"], "missing");
+        assert!(value["tier"].is_null());
+        assert!(value["seats"].is_null());
+        assert_eq!(value["features"].as_array().unwrap().len(), 0);
+        assert_eq!(value["runtime_coverage_enabled"], false);
+        assert!(value["days_until_expiry"].is_null());
+        assert!(value["days_since_expiry"].is_null());
+    }
+
+    #[test]
+    fn status_json_hard_fail_reports_days_since_and_no_runtime_coverage() {
+        let status = LicenseStatus::HardFail {
+            claims: sample_claims(&["runtime_coverage"]),
+            days_since_expiry: 45,
+        };
+        let value = json_value(&status, LicenseKind::Status);
+        assert_eq!(value["state"], "hard_fail");
+        assert_eq!(value["days_since_expiry"], 45);
+        // HardFail blocks paid features even though the claim lists the feature.
+        assert_eq!(value["runtime_coverage_enabled"], false);
+    }
+
+    #[test]
+    fn status_json_expired_warning_keeps_claims_visible() {
+        let status = LicenseStatus::ExpiredWarning {
+            claims: sample_claims(&["runtime_coverage"]),
+            days_since_expiry: 3,
+        };
+        let value = json_value(&status, LicenseKind::Status);
+        assert_eq!(value["state"], "expired_warning");
+        assert_eq!(value["tier"], "team");
+        assert_eq!(value["days_since_expiry"], 3);
+        // Warning window still permits the feature.
+        assert_eq!(value["runtime_coverage_enabled"], true);
+    }
+
+    #[test]
+    fn activate_and_refresh_kinds_are_distinct() {
+        let status = LicenseStatus::Missing;
+        assert_eq!(
+            json_value(&status, LicenseKind::Activate)["kind"],
+            "license-activate"
+        );
+        assert_eq!(
+            json_value(&status, LicenseKind::Refresh)["kind"],
+            "license-refresh"
+        );
+    }
+
+    #[test]
+    fn refresh_suggested_true_when_refresh_after_passed() {
+        let mut claims = sample_claims(&["runtime_coverage"]);
+        claims.refresh_after = Some(current_unix_seconds() - 10);
+        let status = LicenseStatus::Valid {
+            claims,
+            days_until_expiry: 5,
+        };
+        let value = json_value(&status, LicenseKind::Status);
+        assert_eq!(value["refresh_suggested"], true);
+    }
+
+    #[test]
+    fn message_pluralizes_seats_and_days() {
+        let mut claims = sample_claims(&[]);
+        claims.seats = 1;
+        let status = LicenseStatus::Valid {
+            claims,
+            days_until_expiry: 1,
+        };
+        let msg = status_message(&status);
+        assert!(msg.contains("1 seat)"), "got: {msg}");
+        assert!(msg.contains("1 day until expiry"), "got: {msg}");
     }
 }

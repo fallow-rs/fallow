@@ -3008,7 +3008,9 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             dry_run,
             from,
         } => migrate::run_migrate(root, toml, jsonc, dry_run, from.as_deref()),
-        Command::License { subcommand } => license::run(&map_license_subcommand(subcommand)),
+        Command::License { subcommand } => {
+            license::run(&map_license_subcommand(subcommand), output)
+        }
         Command::Telemetry { .. } => unreachable!("handled before root validation"),
         Command::Coverage { subcommand } => coverage::run(
             map_coverage_subcommand(&subcommand, cli.explain),
