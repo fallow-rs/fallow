@@ -621,6 +621,7 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
         min_score: Some(70.0),
         since: Some("6m".to_string()),
         min_commits: Some(5),
+        churn_file: Some("churn.json".to_string()),
         workspace: Some("packages/ui".to_string()),
         production: Some(true),
         save_snapshot: Some("snap.json".to_string()),
@@ -654,6 +655,8 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
     assert!(args.contains(&"70".to_string()));
     assert!(args.contains(&"--save-snapshot".to_string()));
     assert!(args.contains(&"snap.json".to_string()));
+    assert!(args.contains(&"--churn-file".to_string()));
+    assert!(args.contains(&"churn.json".to_string()));
     assert!(args.contains(&"--complexity".to_string()));
     assert!(args.contains(&"--file-scores".to_string()));
     assert!(args.contains(&"--hotspots".to_string()));

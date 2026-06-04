@@ -848,6 +848,9 @@ fn build_complexity_options<'a>(
         min_severity: None,
         report_only: false,
         runtime_coverage: None,
+        // The programmatic facade has no churn-file knob; embedders that want
+        // imported hotspots call the CLI. Git churn is used when available.
+        churn_file: None,
     }
 }
 

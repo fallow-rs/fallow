@@ -373,6 +373,14 @@ pub struct HealthParams {
     /// Minimum commits for a file to appear in hotspot ranking.
     pub min_commits: Option<u32>,
 
+    /// Import change history from a `fallow-churn/v1` JSON file instead of `git
+    /// log`, so `hotspots` / `ownership` work on projects with no git repository
+    /// (Yandex Arc, Mercurial, Perforce). A small wrapper translates the VCS log
+    /// into the contract. Resolved relative to `root`. Powers hotspots /
+    /// ownership only; the `since` window labels the header but does not filter
+    /// imported events (the file is authoritative).
+    pub churn_file: Option<String>,
+
     /// Scope output to one or more workspaces. Accepts a single package name
     /// for the common case, or a comma-separated list with globs and `!` negation
     /// (e.g. `"web,admin"`, `"apps/*"`, `"apps/*,!apps/legacy"`). Patterns match

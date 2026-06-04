@@ -22,6 +22,10 @@ pub struct CombinedOptions<'a> {
     pub fail_on_issues: bool,
     pub sarif_file: Option<&'a std::path::Path>,
     pub changed_since: Option<&'a str>,
+    /// Import churn from a `fallow-churn/v1` file (`--churn-file`) for the
+    /// health hotspots / ownership pass instead of `git log`. Resolved relative
+    /// to `root` inside the health pipeline.
+    pub churn_file: Option<&'a std::path::Path>,
     pub baseline: Option<&'a std::path::Path>,
     pub save_baseline: Option<&'a std::path::Path>,
     pub production: bool,
@@ -979,6 +983,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         min_severity: None,
         report_only: false,
         runtime_coverage: None,
+        churn_file: opts.churn_file,
     }
 }
 

@@ -38,6 +38,30 @@ pub(super) fn fetch_churn_data(
 ) -> Option<ChurnFetchResult> {
     use fallow_core::churn;
 
+    // `--churn-file` imports change history from a normalized JSON file and
+    // bypasses git entirely, so projects on a non-git VCS (Yandex Arc,
+    // Mercurial, Perforce) still get hotspots / ownership. The file is
+    // authoritative for the analysis window, so `--since` is NOT applied to
+    // imported events; it would only mislabel the header, hence `imported_since`.
+    if let Some(churn_file) = opts.churn_file {
+        let resolved =
+            crate::health::scoring::resolve_relative_to_root(churn_file, Some(opts.root));
+        let t = std::time::Instant::now();
+        let result = match churn::analyze_churn_from_file(&resolved, opts.root) {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = emit_error(&e, 2, opts.output);
+                return None;
+            }
+        };
+        return Some(ChurnFetchResult {
+            result,
+            since: imported_since(),
+            cache_hit: false,
+            git_log_ms: t.elapsed().as_secs_f64() * 1000.0,
+        });
+    }
+
     if !churn::is_git_repo(opts.root) {
         if !opts.quiet {
             eprintln!("note: hotspot analysis skipped: no git repository found at project root");
@@ -69,6 +93,16 @@ pub(super) fn fetch_churn_data(
         cache_hit,
         git_log_ms,
     })
+}
+
+/// Header label for imported churn (`--churn-file`). The imported window is
+/// whatever the wrapper exported, so reusing the `--since` duration ("since 6
+/// months") would misdescribe it. `git_after` is unused on the import path.
+fn imported_since() -> fallow_core::churn::SinceDuration {
+    fallow_core::churn::SinceDuration {
+        git_after: String::new(),
+        display: "imported churn".to_string(),
+    }
 }
 
 /// Find the maximum weighted-commits and complexity-density across eligible files.

@@ -72,6 +72,7 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
     if let Some(min_commits) = params.min_commits {
         args.extend(["--min-commits".to_string(), min_commits.to_string()]);
     }
+    push_str_flag(&mut args, "--churn-file", params.churn_file.as_deref());
     if let Some(ref path) = params.save_snapshot {
         if path.is_empty() {
             args.push("--save-snapshot".to_string());

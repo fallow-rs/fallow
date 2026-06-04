@@ -182,6 +182,8 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
         min_severity: None,
         report_only: false,
         runtime_coverage: Some(runtime_coverage),
+        // coverage analyze focuses on runtime data, not churn hotspots.
+        churn_file: None,
     }) {
         Ok(result) => result,
         Err(code) => return code,

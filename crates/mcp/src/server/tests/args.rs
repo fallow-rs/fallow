@@ -1213,6 +1213,7 @@ fn health_args_with_all_options() {
         min_score: None,
         since: Some("6m".to_string()),
         min_commits: Some(5),
+        churn_file: None,
         workspace: Some("packages/ui".to_string()),
         production: Some(true),
         save_snapshot: None,

@@ -182,6 +182,15 @@ struct Cli {
     #[arg(long = "diff-stdin", global = true)]
     diff_stdin: bool,
 
+    /// Import change history from a `fallow-churn/v1` JSON file instead of `git
+    /// log`, powering hotspots, ownership, and bus-factor on projects with no
+    /// git repository (Yandex Arc, Mercurial, Perforce). A small wrapper
+    /// translates your VCS log into the contract. Resolved relative to `--root`.
+    /// Affects `health --hotspots` / `--ownership` only; `audit`, `impact`, and
+    /// `--changed-since` still require git.
+    #[arg(long = "churn-file", value_name = "PATH", global = true)]
+    churn_file: Option<PathBuf>,
+
     /// Compare against a previously saved baseline file
     #[arg(long, global = true)]
     baseline: Option<PathBuf>,
@@ -2499,6 +2508,7 @@ fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
         fail_on_issues,
         sarif_file: cli.sarif_file.as_deref(),
         changed_since: cli.changed_since.as_deref(),
+        churn_file: cli.churn_file.as_deref(),
         baseline: cli.baseline.as_deref(),
         save_baseline: cli.save_baseline.as_deref(),
         production: cli.production,
@@ -3617,6 +3627,7 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         coverage_root,
         performance: cli.performance,
         runtime_coverage,
+        churn_file: cli.churn_file.as_deref(),
     })
 }
 

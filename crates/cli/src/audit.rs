@@ -2886,6 +2886,8 @@ fn run_audit_health<'a>(
         min_severity: None,
         report_only: false,
         runtime_coverage,
+        // audit runs no hotspot/ownership pass; --churn-file is health-only.
+        churn_file: None,
     };
     let health_run = if let Some(shared) = shared_parse {
         crate::health::execute_health_with_shared_parse(&health_opts, shared)

@@ -2343,3 +2343,122 @@ fn health_min_score_gate_fails_below_threshold() {
         output.stdout, output.stderr
     );
 }
+
+#[test]
+fn health_churn_file_powers_hotspots_and_ownership_without_git() {
+    let dir = tempdir().unwrap();
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"churn-import","type":"module"}"#,
+    );
+    // A genuinely complex function so the file can rank as a hotspot.
+    write_file(
+        &dir.path().join("src/hot.ts"),
+        r#"export function classify(n: number, mode: string): string {
+  let out = "";
+  if (mode === "a") { if (n > 10) out = "big"; else if (n > 5) out = "mid"; else out = "small"; }
+  else if (mode === "b") { for (let i = 0; i < n; i++) { if (i % 2 === 0) out += "x"; else out += "y"; } }
+  else if (mode === "c") { switch (n) { case 1: out = "one"; break; case 2: out = "two"; break; default: out = "z"; } }
+  else { out = n > 0 ? (n > 100 ? "huge" : "pos") : "neg"; }
+  return out;
+}
+"#,
+    );
+
+    // Timestamps relative to now so the recency window stays valid as the
+    // calendar moves (no hardcoded absolute dates).
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let day = 86_400;
+    let churn = serde_json::json!({
+        "schema": "fallow-churn/v1",
+        "events": [
+            { "path": "src/hot.ts", "timestamp": now - day, "author": "alice@corp", "added": 40, "deleted": 12 },
+            { "path": "src/hot.ts", "timestamp": now - 2 * day, "author": "alice@corp", "added": 20, "deleted": 5 },
+            { "path": "src/hot.ts", "timestamp": now - 4 * day, "author": "alice@corp", "added": 10, "deleted": 3 },
+            { "path": "src/hot.ts", "timestamp": now - 3 * day, "author": "bob@corp", "added": 15, "deleted": 8 }
+        ]
+    });
+    write_file(
+        &dir.path().join("churn.json"),
+        &serde_json::to_string(&churn).unwrap(),
+    );
+
+    // Imported churn powers hotspots on a directory with NO .git.
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--hotspots",
+            "--ownership",
+            "--churn-file",
+            "churn.json",
+            "--format",
+            "json",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    let hotspots = json["hotspots"].as_array().expect("hotspots array");
+    assert!(
+        !hotspots.is_empty(),
+        "imported churn should produce hotspots: {}",
+        output.stdout
+    );
+    assert!(
+        hotspots[0]["path"]
+            .as_str()
+            .unwrap()
+            .replace('\\', "/")
+            .ends_with("src/hot.ts"),
+        "top hotspot should be hot.ts: {}",
+        output.stdout
+    );
+    // Header reflects the imported window, not a git "--since" duration.
+    assert_eq!(
+        json["hotspot_summary"]["since"].as_str(),
+        Some("imported churn")
+    );
+    // Ownership / bus-factor derives from the imported authors.
+    let ownership = &hotspots[0]["ownership"];
+    assert_eq!(ownership["bus_factor"].as_u64(), Some(1));
+    assert_eq!(ownership["contributor_count"].as_u64(), Some(2));
+
+    // Neuter check: WITHOUT --churn-file the same non-git dir skips hotspots,
+    // proving the imported data (not git) is what lit them up.
+    let no_churn = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--hotspots", "--ownership", "--format", "json"],
+    );
+    assert_eq!(no_churn.code, 0, "stderr: {}", no_churn.stderr);
+    let no_churn_json = parse_json(&no_churn);
+    let absent_or_empty = no_churn_json
+        .get("hotspots")
+        .and_then(|v| v.as_array())
+        .is_none_or(|a| a.is_empty());
+    assert!(
+        absent_or_empty,
+        "no git + no churn-file should skip hotspots: {}",
+        no_churn.stdout
+    );
+
+    // A malformed churn file is a hard error (exit 2), not a silent skip.
+    write_file(
+        &dir.path().join("bad.json"),
+        r#"{ "schema": "nope", "events": [] }"#,
+    );
+    let bad = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--hotspots", "--churn-file", "bad.json", "--format", "json"],
+    );
+    assert_eq!(
+        bad.code, 2,
+        "malformed churn file should exit 2: stdout={} stderr={}",
+        bad.stdout, bad.stderr
+    );
+    assert_eq!(parse_json(&bad)["error"].as_bool(), Some(true));
+}

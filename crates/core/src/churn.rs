@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Function pointer signature used by `set_spawn_hook` to intercept the
 /// `git log --numstat` subprocess. Lets the CLI route long-running git
@@ -42,6 +42,25 @@ const SECS_PER_DAY: f64 = 86_400.0;
 /// Recency weight half-life in days. A commit from 90 days ago counts half
 /// as much as today's commit; 180 days ago counts 25%.
 const HALF_LIFE_DAYS: f64 = 90.0;
+
+/// Schema discriminator a `--churn-file` document must declare.
+const CHURN_FILE_SCHEMA: &str = "fallow-churn/v1";
+
+/// Upper bound on imported churn events. A file past this size is a sign of a
+/// pathological export (whole-history dump of a giant monorepo) rather than a
+/// useful hotspot window; parsing is rejected so we never allocate unbounded
+/// state from a single untrusted file. Mirrors the diff parser's
+/// `MAX_ADDED_LINES` guard in the CLI.
+const MAX_CHURN_EVENTS: usize = 5_000_000;
+
+/// Reject an imported `timestamp` more than this many seconds in the future
+/// (one year). A unix-seconds commit time is never legitimately this far ahead
+/// even with clock skew, so a value past it is almost always a millisecond
+/// timestamp (~52000 years out) or corruption. Caught loudly because the
+/// recency decay uses `saturating_sub`, so a future timestamp would otherwise
+/// clamp to age 0, give every commit full weight, and silently collapse the
+/// recency signal that distinguishes recent from old churn.
+const MAX_FUTURE_TIMESTAMP_SECS: u64 = 365 * 24 * 60 * 60;
 
 /// Parsed duration for the `--since` flag.
 #[derive(Debug, Clone)]
@@ -112,6 +131,7 @@ pub struct FileChurn {
 }
 
 /// Result of churn analysis.
+#[derive(Debug)]
 pub struct ChurnResult {
     /// Per-file churn data, keyed by absolute path.
     pub files: FxHashMap<PathBuf, FileChurn>,
@@ -191,6 +211,121 @@ pub fn analyze_churn(root: &Path, since: &SinceDuration) -> Option<ChurnResult> 
     let shallow = is_shallow_clone(root);
     let state = analyze_churn_events(root, since, None)?;
     Some(build_churn_result(state, shallow))
+}
+
+/// A `fallow-churn/v1` import document: a normalized, VCS-agnostic stand-in for
+/// `git log --numstat` output. Unknown fields are ignored (no
+/// `deny_unknown_fields`) so wrappers may carry extra metadata and so the
+/// reserved `commit` field can be added in a future revision without breaking
+/// v1 consumers.
+#[derive(Debug, Deserialize)]
+struct ChurnFileDoc {
+    schema: String,
+    #[serde(default)]
+    events: Vec<ChurnFileEvent>,
+}
+
+/// One per-(commit, file) change event, the natural shape of a `<vcs> log
+/// --numstat` row. `commit` is intentionally NOT a field: extra keys are
+/// already ignored, so a wrapper emitting `commit` is forward-compatible and a
+/// future revision can promote it to a real field without a breaking change.
+#[derive(Debug, Deserialize)]
+struct ChurnFileEvent {
+    /// Repo-root-relative, forward-slash path. Joined to `root`.
+    path: String,
+    /// Commit time, unix SECONDS UTC (not milliseconds).
+    timestamp: u64,
+    /// Opaque author identity (email recommended); absent contributes no
+    /// ownership signal. fallow does NOT apply mailmap to imported authors.
+    #[serde(default)]
+    author: Option<String>,
+    /// Lines added in this file in this commit.
+    added: u32,
+    /// Lines deleted in this file in this commit.
+    deleted: u32,
+}
+
+/// Build churn data from a normalized `fallow-churn/v1` JSON import instead of
+/// `git log`. Lets projects on a non-git VCS (Yandex Arc, Mercurial, Perforce)
+/// feed change history into hotspot / ownership / bus-factor analysis: a small
+/// wrapper translates the VCS log into the contract and fallow runs all the
+/// usual recency-weighting, trend, and ownership logic on the imported events.
+///
+/// `root` is the project root that relative event paths are joined to (matching
+/// how the git path joins numstat paths), so the churn keys line up with the
+/// analyzed files. Returns a human-readable error (the CLI maps it to exit code
+/// 2) on a missing file, malformed JSON, wrong `schema`, an empty event path, a
+/// far-future timestamp, or an event count past `MAX_CHURN_EVENTS`. An empty
+/// `events` array is valid (no hotspots), not an error. Never runs `git`.
+pub fn analyze_churn_from_file(path: &Path, root: &Path) -> Result<ChurnResult, String> {
+    let raw = std::fs::read_to_string(path)
+        .map_err(|e| format!("failed to read churn file {}: {e}", path.display()))?;
+    let doc: ChurnFileDoc = serde_json::from_str(&raw)
+        .map_err(|e| format!("failed to parse churn file {}: {e}", path.display()))?;
+    if doc.schema != CHURN_FILE_SCHEMA {
+        return Err(format!(
+            "churn file {} declares schema \"{}\", expected \"{CHURN_FILE_SCHEMA}\"",
+            path.display(),
+            doc.schema
+        ));
+    }
+    if doc.events.len() > MAX_CHURN_EVENTS {
+        return Err(format!(
+            "churn file {} has {} events, exceeding the {MAX_CHURN_EVENTS} limit",
+            path.display(),
+            doc.events.len()
+        ));
+    }
+
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let future_limit = now_secs.saturating_add(MAX_FUTURE_TIMESTAMP_SECS);
+
+    let mut files: FxHashMap<PathBuf, FileEvents> = FxHashMap::default();
+    let mut author_pool: Vec<String> = Vec::new();
+    let mut author_index: FxHashMap<String, u32> = FxHashMap::default();
+
+    for event in doc.events {
+        let normalized = event.path.replace('\\', "/");
+        let rel = normalized.trim();
+        if rel.is_empty() {
+            return Err(format!(
+                "churn file {} has an event with an empty path",
+                path.display()
+            ));
+        }
+        if event.timestamp > future_limit {
+            return Err(format!(
+                "churn file {} has event timestamp {} for \"{rel}\" more than a year in the \
+                 future; timestamps must be unix SECONDS (not milliseconds), UTC",
+                path.display(),
+                event.timestamp
+            ));
+        }
+        let abs_path = root.join(rel);
+        let author_idx = event
+            .author
+            .as_deref()
+            .filter(|email| !email.trim().is_empty())
+            .map(|email| intern_author(email, &mut author_pool, &mut author_index));
+        files
+            .entry(abs_path)
+            .or_insert_with(|| FileEvents { events: Vec::new() })
+            .events
+            .push(CachedCommitEvent {
+                timestamp: event.timestamp,
+                lines_added: event.added,
+                lines_deleted: event.deleted,
+                author_idx,
+            });
+    }
+
+    Ok(build_churn_result(
+        ChurnEventState { files, author_pool },
+        false,
+    ))
 }
 
 /// Check if the repository is a shallow clone.
@@ -1351,5 +1486,205 @@ mod tests {
 
         let cache = load_churn_cache(cache.path(), &since.git_after).unwrap();
         assert_eq!(cache.last_indexed_sha, head);
+    }
+
+    fn write_churn_file(dir: &std::path::Path, contents: &str) -> PathBuf {
+        let path = dir.join("churn.json");
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+
+    #[test]
+    fn churn_file_happy_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Path::new("/project");
+        let path = write_churn_file(
+            dir.path(),
+            r#"{
+              "schema": "fallow-churn/v1",
+              "events": [
+                { "path": "src/a.ts", "timestamp": 1700000000, "author": "alice@corp", "added": 10, "deleted": 5 },
+                { "path": "src/a.ts", "timestamp": 1700100000, "author": "bob@corp", "added": 3, "deleted": 2 }
+              ]
+            }"#,
+        );
+        let result = analyze_churn_from_file(&path, root).unwrap();
+        let churn = &result.files[&PathBuf::from("/project/src/a.ts")];
+        assert_eq!(churn.commits, 2);
+        assert_eq!(churn.lines_added, 13);
+        assert_eq!(churn.lines_deleted, 7);
+        assert_eq!(churn.authors.len(), 2);
+        assert!(result.author_pool.contains(&"alice@corp".to_string()));
+        assert!(result.author_pool.contains(&"bob@corp".to_string()));
+        assert!(!result.shallow_clone);
+    }
+
+    #[test]
+    fn churn_file_matches_git_parse() {
+        // The same events fed via git numstat and via the JSON import must
+        // produce identical aggregate churn: the import reuses
+        // build_churn_result, so only the SOURCE differs.
+        let dir = tempfile::tempdir().unwrap();
+        let root = Path::new("/project");
+        let git_output = "1700000000|alice@corp\n10\t5\tsrc/a.ts\n3\t1\tsrc/b.ts\n\n1700100000|bob@corp\n3\t2\tsrc/a.ts\n";
+        let (git_files, git_pool) = parse_git_log(git_output, root);
+
+        let path = write_churn_file(
+            dir.path(),
+            r#"{
+              "schema": "fallow-churn/v1",
+              "events": [
+                { "path": "src/a.ts", "timestamp": 1700000000, "author": "alice@corp", "added": 10, "deleted": 5 },
+                { "path": "src/b.ts", "timestamp": 1700000000, "author": "alice@corp", "added": 3, "deleted": 1 },
+                { "path": "src/a.ts", "timestamp": 1700100000, "author": "bob@corp", "added": 3, "deleted": 2 }
+              ]
+            }"#,
+        );
+        let imported = analyze_churn_from_file(&path, root).unwrap();
+
+        assert_eq!(git_pool, imported.author_pool, "author pools diverge");
+        assert_eq!(git_files.len(), imported.files.len());
+        for (file, git_churn) in &git_files {
+            let imp = &imported.files[file];
+            assert_eq!(git_churn.commits, imp.commits, "commits for {file:?}");
+            assert_eq!(git_churn.lines_added, imp.lines_added, "added for {file:?}");
+            assert_eq!(
+                git_churn.lines_deleted, imp.lines_deleted,
+                "deleted for {file:?}"
+            );
+            assert_eq!(git_churn.trend, imp.trend, "trend for {file:?}");
+            assert_eq!(
+                git_churn.authors.len(),
+                imp.authors.len(),
+                "authors for {file:?}"
+            );
+            assert!(
+                (git_churn.weighted_commits - imp.weighted_commits).abs() < 0.02,
+                "weighted_commits for {file:?}: {} vs {}",
+                git_churn.weighted_commits,
+                imp.weighted_commits
+            );
+        }
+    }
+
+    #[test]
+    fn churn_file_empty_events_is_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_churn_file(
+            dir.path(),
+            r#"{ "schema": "fallow-churn/v1", "events": [] }"#,
+        );
+        let result = analyze_churn_from_file(&path, Path::new("/project")).unwrap();
+        assert!(result.files.is_empty());
+        assert!(result.author_pool.is_empty());
+    }
+
+    #[test]
+    fn churn_file_missing_events_key_is_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_churn_file(dir.path(), r#"{ "schema": "fallow-churn/v1" }"#);
+        let result = analyze_churn_from_file(&path, Path::new("/project")).unwrap();
+        assert!(result.files.is_empty());
+    }
+
+    #[test]
+    fn churn_file_bad_schema_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_churn_file(
+            dir.path(),
+            r#"{ "schema": "fallow-churn/v2", "events": [] }"#,
+        );
+        let err = analyze_churn_from_file(&path, Path::new("/project")).unwrap_err();
+        assert!(err.contains("expected \"fallow-churn/v1\""), "{err}");
+    }
+
+    #[test]
+    fn churn_file_malformed_json_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_churn_file(dir.path(), "{ not json");
+        assert!(analyze_churn_from_file(&path, Path::new("/project")).is_err());
+    }
+
+    #[test]
+    fn churn_file_missing_file_rejected() {
+        let err = analyze_churn_from_file(Path::new("/no/such/churn.json"), Path::new("/project"))
+            .unwrap_err();
+        assert!(err.contains("failed to read churn file"), "{err}");
+    }
+
+    #[test]
+    fn churn_file_empty_path_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_churn_file(
+            dir.path(),
+            r#"{ "schema": "fallow-churn/v1", "events": [ { "path": "  ", "timestamp": 1700000000, "added": 1, "deleted": 0 } ] }"#,
+        );
+        let err = analyze_churn_from_file(&path, Path::new("/project")).unwrap_err();
+        assert!(err.contains("empty path"), "{err}");
+    }
+
+    #[test]
+    fn churn_file_millisecond_timestamp_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        // 1700000000000 is milliseconds; ~52000 years in the future as seconds.
+        let path = write_churn_file(
+            dir.path(),
+            r#"{ "schema": "fallow-churn/v1", "events": [ { "path": "src/a.ts", "timestamp": 1700000000000, "added": 1, "deleted": 0 } ] }"#,
+        );
+        let err = analyze_churn_from_file(&path, Path::new("/project")).unwrap_err();
+        assert!(err.contains("milliseconds"), "{err}");
+    }
+
+    #[test]
+    fn churn_file_missing_author_contributes_no_signal() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_churn_file(
+            dir.path(),
+            r#"{ "schema": "fallow-churn/v1", "events": [ { "path": "src/a.ts", "timestamp": 1700000000, "added": 1, "deleted": 0 } ] }"#,
+        );
+        let result = analyze_churn_from_file(&path, Path::new("/project")).unwrap();
+        let churn = &result.files[&PathBuf::from("/project/src/a.ts")];
+        assert_eq!(churn.commits, 1);
+        assert!(churn.authors.is_empty());
+        assert!(result.author_pool.is_empty());
+    }
+
+    #[test]
+    fn churn_file_empty_author_string_treated_as_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_churn_file(
+            dir.path(),
+            r#"{ "schema": "fallow-churn/v1", "events": [ { "path": "src/a.ts", "timestamp": 1700000000, "author": "  ", "added": 1, "deleted": 0 } ] }"#,
+        );
+        let result = analyze_churn_from_file(&path, Path::new("/project")).unwrap();
+        assert!(result.author_pool.is_empty());
+    }
+
+    #[test]
+    fn churn_file_unknown_fields_ignored() {
+        // Extra keys (including the reserved `commit`) are accepted and ignored,
+        // so a wrapper carrying extra metadata stays forward-compatible.
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_churn_file(
+            dir.path(),
+            r#"{ "schema": "fallow-churn/v1", "extra": true, "events": [ { "path": "src/a.ts", "timestamp": 1700000000, "author": "alice@corp", "added": 1, "deleted": 0, "commit": "abc123", "tz": "+0200" } ] }"#,
+        );
+        let result = analyze_churn_from_file(&path, Path::new("/project")).unwrap();
+        assert_eq!(result.files[&PathBuf::from("/project/src/a.ts")].commits, 1);
+    }
+
+    #[test]
+    fn churn_file_backslash_paths_normalized() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_churn_file(
+            dir.path(),
+            r#"{ "schema": "fallow-churn/v1", "events": [ { "path": "src\\a.ts", "timestamp": 1700000000, "added": 1, "deleted": 0 } ] }"#,
+        );
+        let result = analyze_churn_from_file(&path, Path::new("/project")).unwrap();
+        assert!(
+            result
+                .files
+                .contains_key(&PathBuf::from("/project/src/a.ts"))
+        );
     }
 }
