@@ -282,11 +282,13 @@ pub fn find_tainted_sinks(
         let tainted_locals = source_tainted_locals(&module.tainted_bindings);
 
         for sink in &module.security_sinks {
+            let source_title = sink_source_title(sink, &tainted_locals);
             let Some(matcher) = active.iter().copied().find(|m| {
                 m.sink_shape == sink.sink_shape
                     && m.arg_index == sink.arg_index
                     && sink.arg_is_non_literal
                     && m.admits_arg_kind(sink.arg_kind)
+                    && (!m.requires_source || source_title.is_some())
                     && m.first_matching_pattern(&sink.callee_path).is_some()
                     && provenance_satisfied(m, module, &sink.callee_path)
             }) else {
@@ -327,7 +329,6 @@ pub fn find_tainted_sinks(
                 .replace("{callee}", &sink.callee_path)
                 .replace("{pattern}", pattern);
 
-            let source_title = sink_source_title(sink, &tainted_locals);
             let source_backed = source_title.is_some();
             // Annotate the evidence when source-backed so the ranking signal is
             // visible in every output format (the boolean drives ordering; the

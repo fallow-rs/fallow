@@ -536,3 +536,38 @@ fn xxe_literal_document_does_not_fire() {
 fn xxe_default_off_emits_nothing() {
     assert!(no_tainted_sinks(&analyze_default_off("security-xxe")));
 }
+
+// ── issue #882 catalogue-only sinks ─────────────────────────────────────────
+
+#[test]
+fn issue_882_catalogue_sinks_fire() {
+    let results = analyze_with_security_sink("security-catalogue-sinks-882");
+    assert_candidate(
+        &results,
+        "src/dynamic-module-load.ts",
+        "dynamic-module-load",
+        95,
+    );
+    assert_candidate(&results, "src/fs-path.ts", "path-traversal", 22);
+    assert_candidate(&results, "src/header-injection.ts", "header-injection", 113);
+    assert_candidate(&results, "src/raw-sql-escape.ts", "sql-injection", 89);
+    assert_candidate(&results, "src/dom-navigation.ts", "open-redirect", 601);
+    assert_candidate(&results, "src/mass-assignment.ts", "mass-assignment", 915);
+    assert_candidate(&results, "src/ssrf-clients.ts", "ssrf", 918);
+}
+
+#[test]
+fn issue_882_literals_and_source_free_mass_assignment_do_not_fire() {
+    let results = analyze_with_security_sink("security-catalogue-sinks-882");
+    assert!(
+        !anchored_on(&results, "src/safe.ts"),
+        "literal sinks and source-free mass assignment must not be flagged"
+    );
+}
+
+#[test]
+fn issue_882_default_off_emits_nothing() {
+    assert!(no_tainted_sinks(&analyze_default_off(
+        "security-catalogue-sinks-882"
+    )));
+}

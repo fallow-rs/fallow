@@ -40,6 +40,11 @@
 # is simply not a matcher row at all. Unset arg_kinds admits any non-literal
 # shape (the default for shape-only matchers like dangerous-html).
 #
+# Optional requires_source = true gates a matcher on the existing untrusted
+# source model: at least one captured argument identifier must reference a local
+# binding sourced from a [[source]] path. Use this for broad sinks like
+# Object.assign, where source-free non-literal values are too noisy.
+#
 # Multiple [[matcher]] rows may share an `id` (e.g. dangerous-html spans three
 # shapes). Uniqueness is keyed on the full row (id + sink_shape +
 # callee_patterns), not on `id` alone.
@@ -118,6 +123,18 @@ arg_index = 0
 import_provenance = "node:vm"
 evidence_template = "Non-literal code passed to {callee}(). Candidate for verification: confirm the script source is trusted."
 
+# Dynamic CommonJS module loading can execute attacker-selected code or load a
+# local file outside the intended module set. Static `require("pkg")` calls are
+# literals and never captured here.
+[[matcher]]
+id = "dynamic-module-load"
+cwe = 95
+title = "Dynamic module load sink"
+sink_shape = "call"
+callee_patterns = ["require"]
+arg_index = 0
+evidence_template = "Non-literal module specifier passed to {callee}(). Candidate for verification: confirm attacker input cannot select the module path or package name."
+
 # ── CWE-89: SQL injection ───────────────────────────────────────────────────
 # Tightened to honor the "prefer false-negatives over false-positives"
 # principle. A bare parameterized `sql`...${x}...`` tagged template (Drizzle,
@@ -142,9 +159,19 @@ id = "sql-injection"
 cwe = 89
 title = "SQL injection sink"
 sink_shape = "member-call"
-callee_patterns = ["sql.raw", "*.sql.raw"]
+callee_patterns = [
+  "sql.raw",
+  "*.sql.raw",
+  "*.$queryRawUnsafe",
+  "*.$executeRawUnsafe",
+  "*.whereRaw",
+  "*.havingRaw",
+  "*.orderByRaw",
+  "knex.raw",
+  "sequelize.literal",
+]
 arg_index = 0
-evidence_template = "Non-literal value passed to {callee}(). Candidate for verification: sql.raw bypasses parameterization (Drizzle's documented injection escape hatch); confirm the fragment is not attacker-controlled."
+evidence_template = "Non-literal value passed to {callee}(). Candidate for verification: raw SQL escape hatches bypass parameterization; confirm the fragment is not attacker-controlled."
 
 # ── CWE-918: SSRF ───────────────────────────────────────────────────────────
 [[matcher]]
@@ -152,7 +179,7 @@ id = "ssrf"
 cwe = 918
 title = "Server-side request forgery sink"
 sink_shape = "call"
-callee_patterns = ["fetch"]
+callee_patterns = ["fetch", "got", "ky", "needle", "request"]
 arg_index = 0
 evidence_template = "Non-literal URL passed to {callee}(). Candidate for verification: confirm the destination host is not attacker-controlled (allowlist outbound targets)."
 
@@ -161,7 +188,7 @@ id = "ssrf"
 cwe = 918
 title = "Server-side request forgery sink"
 sink_shape = "member-call"
-callee_patterns = ["axios.get", "axios.post", "http.request", "https.request"]
+callee_patterns = ["axios.get", "axios.post", "http.request", "https.request", "superagent.get", "undici.request"]
 arg_index = 0
 evidence_template = "Non-literal URL passed to {callee}(). Candidate for verification: confirm the destination is not attacker-controlled."
 
@@ -176,6 +203,45 @@ arg_index = 0
 import_provenance = "node:path"
 evidence_template = "Non-literal path component passed to {callee}(). Candidate for verification: confirm the input cannot escape the intended directory (reject `..`)."
 
+[[matcher]]
+id = "path-traversal"
+cwe = 22
+title = "File-system path traversal sink"
+sink_shape = "member-call"
+callee_patterns = ["fs.readFile", "fs.readFileSync", "fs.writeFile", "fs.createReadStream", "fs.unlink", "fs.rename"]
+arg_index = 0
+import_provenance = "node:fs"
+evidence_template = "Non-literal file-system path passed to {callee}(). Candidate for verification: confirm the input cannot escape the intended directory (reject `..`)."
+
+[[matcher]]
+id = "path-traversal"
+cwe = 22
+title = "File-system path traversal sink"
+sink_shape = "member-call"
+callee_patterns = ["fs.rename"]
+arg_index = 1
+import_provenance = "node:fs"
+evidence_template = "Non-literal file-system path passed to {callee}(). Candidate for verification: confirm the destination cannot escape the intended directory (reject `..`)."
+
+# ── CWE-113: HTTP response header injection ─────────────────────────────────
+[[matcher]]
+id = "header-injection"
+cwe = 113
+title = "HTTP response header injection sink"
+sink_shape = "member-call"
+callee_patterns = ["*.setHeader"]
+arg_index = 1
+evidence_template = "Non-literal header value passed to {callee}(). Candidate for verification: confirm CR/LF and untrusted header content are rejected before writing the response."
+
+[[matcher]]
+id = "header-injection"
+cwe = 113
+title = "HTTP response header injection sink"
+sink_shape = "member-call"
+callee_patterns = ["*.writeHead"]
+arg_index = 1
+evidence_template = "Non-literal headers object passed to {callee}(). Candidate for verification: confirm attacker input cannot inject response header names or values."
+
 # ── CWE-601: Open redirect ──────────────────────────────────────────────────
 [[matcher]]
 id = "open-redirect"
@@ -185,6 +251,36 @@ sink_shape = "member-call"
 callee_patterns = ["res.redirect", "*.redirect"]
 arg_index = 0
 evidence_template = "Non-literal redirect target passed to {callee}(). Candidate for verification: confirm the target is a relative path or allowlisted host."
+
+[[matcher]]
+id = "open-redirect"
+cwe = 601
+title = "DOM navigation sink"
+sink_shape = "member-assign"
+callee_patterns = ["location.href", "*.location.href"]
+arg_index = 0
+evidence_template = "Non-literal navigation target assigned to {callee}. Candidate for verification: confirm the target is a relative path or allowlisted host and cannot be a javascript URL."
+
+[[matcher]]
+id = "open-redirect"
+cwe = 601
+title = "DOM navigation sink"
+sink_shape = "member-call"
+callee_patterns = ["location.assign", "location.replace", "*.location.assign", "*.location.replace", "window.open"]
+arg_index = 0
+evidence_template = "Non-literal navigation target passed to {callee}(). Candidate for verification: confirm the target is a relative path or allowlisted host and cannot be a javascript URL."
+
+# ── CWE-915: Mass assignment ────────────────────────────────────────────────
+[[matcher]]
+id = "mass-assignment"
+cwe = 915
+title = "Mass assignment sink"
+sink_shape = "member-call"
+callee_patterns = ["Object.assign"]
+arg_index = 1
+arg_kinds = ["other"]
+requires_source = true
+evidence_template = "Source-backed object passed to {callee}(). Candidate for verification: confirm attacker-controlled properties cannot overwrite sensitive fields or prototypes."
 
 # ── CWE-327: Runtime-selectable crypto algorithm (opt-in tier) ──────────────
 # RE-TITLED from "weak crypto" so it does not over-claim CWE-327: the high-signal

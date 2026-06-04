@@ -67,6 +67,10 @@ struct RawMatcher {
     /// any non-literal argument shape matches (the prior behavior).
     #[serde(default)]
     arg_kinds: Option<Vec<String>>,
+    /// Optional precision gate: require the captured sink argument to reference
+    /// a local binding that came from a configured untrusted source.
+    #[serde(default)]
+    requires_source: bool,
 }
 
 /// A pre-segmented callee pattern. Matching is segment-aware (NOT substring):
@@ -166,6 +170,9 @@ pub struct Matcher {
     /// Resolved allowlist of admitted argument shapes. `None` admits any
     /// non-literal shape; `Some` requires the captured `arg_kind` to be listed.
     pub arg_kinds: Option<Vec<SinkArgKind>>,
+    /// Whether this matcher only fires when the sink argument traces to a
+    /// configured untrusted source binding.
+    pub requires_source: bool,
 }
 
 /// A parsed, validated untrusted-source matcher (issue #859). Its
@@ -399,6 +406,7 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
             import_provenance: entry.import_provenance,
             enabler,
             arg_kinds,
+            requires_source: entry.requires_source,
         });
     }
 
@@ -483,7 +491,10 @@ mod tests {
             // legitimately share id + shape + patterns and differ only by their
             // framework gate (e.g. one `route-send-file` row per framework).
             let enabler = m.enabler.as_deref().unwrap_or("");
-            let key = format!("{}::{}::{pats}::{enabler}", m.id, m.sink_shape);
+            let key = format!(
+                "{}::{}::{pats}::{enabler}::{}",
+                m.id, m.sink_shape, m.requires_source
+            );
             assert!(seen.insert(key.clone()), "duplicate matcher row: {key}");
         }
     }
@@ -736,6 +747,19 @@ evidence_template = "   "
                 "sql-injection .query/.execute admits the concat (unsafe) form"
             );
         }
+    }
+
+    #[test]
+    fn source_required_matchers_are_explicit() {
+        let mass_assignment = catalogue()
+            .matchers()
+            .iter()
+            .find(|m| m.id == "mass-assignment")
+            .expect("mass-assignment row present");
+        assert!(
+            mass_assignment.requires_source,
+            "mass-assignment should only fire for source-backed arguments"
+        );
     }
 
     #[test]

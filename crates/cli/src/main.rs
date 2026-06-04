@@ -947,11 +947,11 @@ enum Command {
     /// `client-server-leak` rule: a `"use client"` file that transitively imports
     /// a module reading a non-public `process.env` secret. (2) The data-driven
     /// `tainted-sink` catalogue: syntactic sink sites matched against a CWE
-    /// catalogue (`security_matchers.toml`) spanning 9 categories including
-    /// dangerous-html (CWE-79), command-injection (CWE-78), code-injection
-    /// (CWE-94), sql-injection (CWE-89), ssrf (CWE-918), path-traversal (CWE-22),
-    /// open-redirect (CWE-601), runtime-selectable crypto (CWE-327), and
-    /// unsafe-deserialization (CWE-502). All findings are CANDIDATES for
+    /// catalogue (`security_matchers.toml`) spanning categories such as
+    /// dangerous-html, command-injection, code-injection, dynamic-module-load,
+    /// sql-injection, ssrf, path-traversal, header-injection, open-redirect,
+    /// mass-assignment, weak-crypto, unsafe-deserialization, prototype-pollution,
+    /// zip-slip, nosql-injection, ssti, and xxe. All findings are CANDIDATES for
     /// verification, NOT verified vulnerabilities. This command is the only
     /// surface for security findings; they never appear under bare `fallow` or
     /// the `audit` gate. Build-config and test files are excluded, and the Vite

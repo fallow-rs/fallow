@@ -1,0 +1,9 @@
+{
+  "name": "security-catalogue-sinks-882-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "got": "0.0.0",
+    "undici": "0.0.0"
+  }
+}
