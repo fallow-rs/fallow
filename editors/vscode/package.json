@@ -89,6 +89,15 @@
         "icon": "$(shield)"
       },
       {
+        "command": "fallow.selectWorkspace",
+        "title": "Fallow: Select Workspace Scope...",
+        "icon": "$(layers)"
+      },
+      {
+        "command": "fallow.clearWorkspace",
+        "title": "Fallow: Clear Workspace Scope (Analyze All)"
+      },
+      {
         "command": "fallow.fix",
         "title": "Fallow: Auto-Fix (unexport unused, remove unused deps)"
       },
@@ -363,6 +372,12 @@
           "default": true,
           "description": "Show the project health score and grade in the Fallow status bar item."
         },
+        "fallow.workspace": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Scope Fallow's sidebar analysis to a single monorepo workspace package, by name. Empty = analyze the whole project. Use the **Fallow: Select Workspace Scope** command (or the layers icon in the status bar) to pick interactively; that per-folder choice overrides this pinned default. Mirrors the CLI `--workspace` flag.",
+          "scope": "resource"
+        },
         "fallow.trace.server": {
           "type": "string",
           "default": "off",
@@ -445,6 +460,11 @@
           "command": "fallow.analyzeSecurity",
           "when": "view == fallow.security && fallow.hasAnalyzedSecurity",
           "group": "navigation"
+        },
+        {
+          "command": "fallow.selectWorkspace",
+          "when": "view == fallow.deadCode || view == fallow.duplicates",
+          "group": "navigation@9"
         },
         {
           "command": "fallow.license.activate",

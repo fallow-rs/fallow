@@ -39,9 +39,31 @@ const workspaceFolder = (): vscode.WorkspaceFolder => {
   return folder;
 };
 
+/**
+ * Minimal in-memory `Memento` so `runAnalysis` can resolve the workspace-scope
+ * override (`context.workspaceState`) the way the real extension context does.
+ */
+const inMemoryMemento = (): vscode.Memento => {
+  const store = new Map<string, unknown>();
+  return {
+    keys: () => [...store.keys()],
+    get: <T>(key: string, defaultValue?: T): T | undefined =>
+      store.has(key) ? (store.get(key) as T) : defaultValue,
+    update: (key: string, value: unknown): Thenable<void> => {
+      if (value === undefined) {
+        store.delete(key);
+      } else {
+        store.set(key, value);
+      }
+      return Promise.resolve();
+    },
+  };
+};
+
 const testContext = (): vscode.ExtensionContext =>
   ({
     globalStorageUri: vscode.Uri.file(path.join(workspaceFolder().uri.fsPath, ".global-storage")),
+    workspaceState: inMemoryMemento(),
   }) as vscode.ExtensionContext;
 
 const cliLogPath = (): string => path.join(workspaceFolder().uri.fsPath, ".fallow-cli-log.jsonl");

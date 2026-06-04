@@ -10,6 +10,7 @@ import {
 const baseOptions = {
   production: false,
   changedSince: "",
+  workspace: "",
   configPath: "",
   dupesMode: undefined,
   dupesThreshold: undefined,

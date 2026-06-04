@@ -9,7 +9,7 @@ import {
   getLicenseRefreshOnStartup,
   onConfigChange,
 } from "./config.js";
-import { runAnalysis, runFix, runHealthAnalysis, runSecurityAnalysis } from "./commands.js";
+import { runAnalysis, runFix, runHealthAnalysis, runSecurityAnalysis, runWorkspaces } from "./commands.js";
 import {
   HEALTH_CONFIG_KEYS,
   REANALYSIS_CONFIG_KEYS,
@@ -41,6 +41,13 @@ import {
 } from "./statusBar.js";
 import type { AnalysisCompleteParams } from "./statusBar.js";
 import { DeadCodeTreeProvider, DuplicatesTreeProvider } from "./treeView.js";
+import {
+  clearWorkspaceScope,
+  createWorkspacePicker,
+  disposeWorkspacePicker,
+  refreshWorkspacePicker,
+  showWorkspacePicker,
+} from "./workspacePicker.js";
 import type { FallowCheckResult, FallowDupesResult, HealthReport } from "./types.js";
 
 let outputChannel: vscode.OutputChannel;
@@ -55,6 +62,7 @@ const SECURITY_CONFIG_KEYS = [
   "fallow.security.enabled",
   "fallow.configPath",
   "fallow.changedSince",
+  "fallow.workspace",
 ] as const;
 
 export interface ExtensionApi {
@@ -78,6 +86,10 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     context.subscriptions.push(licenseStatusBar);
   }
   context.subscriptions.push({ dispose: () => disposeLicenseStatusBar() });
+
+  const workspacePicker = createWorkspacePicker(context);
+  context.subscriptions.push(workspacePicker);
+  context.subscriptions.push({ dispose: () => disposeWorkspacePicker() });
 
   const diagnosticFilter = new DiagnosticFilter(context.workspaceState);
   context.subscriptions.push({ dispose: () => diagnosticFilter.dispose() });
@@ -330,6 +342,37 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     vscode.commands.registerCommand("fallow.analyzeSecurity", runSecurityAnalysisCommand),
   );
 
+  // Re-run the sidebar after a scope change so the tree views and status bar
+  // reflect the newly selected workspace. The picker persists the choice to
+  // workspaceState; resolveActiveWorkspaceScope picks it up on the next run.
+  // Mark the analysis as run so a later first-open of the sidebar does not
+  // trigger a redundant second pass.
+  const onWorkspaceScopeChange = (): void => {
+    refreshWorkspacePicker(context);
+    void (async (): Promise<void> => {
+      cliAnalysisRan = await triggerCliAnalysis();
+    })();
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.selectWorkspace", async () => {
+      await showWorkspacePicker(
+        context,
+        (forceRefresh) => runWorkspaces(context, forceRefresh, outputChannel),
+        onWorkspaceScopeChange,
+      );
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.clearWorkspace", async () => {
+      const changed = await clearWorkspaceScope(context);
+      if (changed) {
+        onWorkspaceScopeChange();
+      }
+    }),
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.fix", async () => {
       // Save dirty editors first so the fix works on up-to-date content
@@ -409,6 +452,12 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       const needsReanalysis = affectsAnyConfiguration(e, REANALYSIS_CONFIG_KEYS);
       const needsHealthReanalysis = affectsAnyConfiguration(e, HEALTH_CONFIG_KEYS);
       const affectsSecurity = affectsAnyConfiguration(e, SECURITY_CONFIG_KEYS);
+
+      if (e.affectsConfiguration("fallow.workspace")) {
+        // Keep the picker label in sync with a pinned-default setting change.
+        // The workspaceState override (if any) still wins inside the picker.
+        refreshWorkspacePicker(context);
+      }
 
       if (needsRestart) {
         outputChannel.appendLine("Configuration changed, restarting server...");
@@ -504,5 +553,6 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 export const deactivate = async (): Promise<void> => {
   disposeStatusBar();
   disposeLicenseStatusBar();
+  disposeWorkspacePicker();
   await stopClient();
 };

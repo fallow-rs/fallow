@@ -21,6 +21,12 @@ const VERSION_GATED_FLAGS: Readonly<Record<string, string>> = {
 interface AnalysisArgsOptions {
   readonly production: boolean;
   readonly changedSince: string;
+  /**
+   * Monorepo workspace scope (a package name). When non-empty, forwarded as
+   * `--workspace <name>` so the combined run analyzes only that package. NOT
+   * version-gated: `--workspace` is a long-standing global CLI flag.
+   */
+  readonly workspace: string;
   readonly configPath: string;
   readonly dupesMode: DuplicationMode | undefined;
   readonly dupesThreshold: number | undefined;
@@ -107,6 +113,10 @@ export const buildAnalysisArgs = (options: AnalysisArgsOptions): BuiltAnalysisAr
 
   if (options.changedSince) {
     args.push("--changed-since", options.changedSince);
+  }
+
+  if (options.workspace) {
+    args.push("--workspace", options.workspace);
   }
 
   if (options.configPath) {

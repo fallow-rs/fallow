@@ -116,6 +116,37 @@ describe("package.json binary download settings", () => {
   });
 });
 
+describe("package.json workspace picker contributions", () => {
+  it("contributes the select and clear workspace commands", () => {
+    expect(command("fallow.selectWorkspace")).toMatchObject({
+      title: "Fallow: Select Workspace Scope...",
+      icon: "$(layers)",
+    });
+    expect(command("fallow.clearWorkspace")).toMatchObject({
+      title: "Fallow: Clear Workspace Scope (Analyze All)",
+    });
+  });
+
+  it("contributes the fallow.workspace setting with an empty default", () => {
+    const property = pkg.contributes.configuration.properties["fallow.workspace"];
+    expect(property).toBeDefined();
+  });
+
+  it("surfaces the workspace picker in both view title bars", () => {
+    expect(viewTitleCommand("fallow.selectWorkspace")).toMatchObject({
+      when: "view == fallow.deadCode || view == fallow.duplicates",
+      group: "navigation@9",
+    });
+  });
+
+  it("keeps both workspace commands available in the command palette", () => {
+    // Not gated to "false", so they show in the palette (no-op gracefully
+    // outside a monorepo).
+    expect(commandPaletteEntry("fallow.selectWorkspace")).toBeUndefined();
+    expect(commandPaletteEntry("fallow.clearWorkspace")).toBeUndefined();
+  });
+});
+
 describe("package.json duplication settings", () => {
   it("contributes every duplication knob used by sidebar analysis", () => {
     const properties = pkg.contributes.configuration.properties;

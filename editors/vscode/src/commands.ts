@@ -39,6 +39,12 @@ import {
 import { buildFixArgs, createFixPreviewItems, resolveFixLocation } from "./fix-utils.js";
 import { buildHealthArgs } from "./health-utils.js";
 import { buildSecurityArgs, parseUnknownSubcommand } from "./security-utils.js";
+import {
+  cacheWorkspacesOutput,
+  getCachedWorkspacesOutput,
+  parseWorkspacesOutput,
+  resolveActiveWorkspaceScope,
+} from "./workspacePicker.js";
 import type {
   FallowCheckResult,
   FallowCombinedResult,
@@ -48,6 +54,7 @@ import type {
   HealthOutput,
   HealthReport,
   SecurityOutput,
+  WorkspacesOutput,
 } from "./types.js";
 
 export const findCliBinary = (context: vscode.ExtensionContext): string | null => {
@@ -452,6 +459,7 @@ export const runAnalysis = async (
     const { args: analysisArgs, skipped } = buildAnalysisArgs({
       production: getProduction(),
       changedSince: getChangedSince(),
+      workspace: resolveActiveWorkspaceScope(context),
       configPath: getResolvedConfigPath(),
       dupesMode: getDuplicationModeOverride(),
       dupesThreshold: getDuplicationThresholdOverride(),
@@ -491,6 +499,65 @@ export const runAnalysis = async (
   }
 
   return { check, dupes };
+};
+
+/**
+ * List monorepo workspace packages via `fallow workspaces --format json`,
+ * populating the workspace picker. Cached per resolved binary path for the
+ * session (the package list is stable within a session); `forceRefresh`
+ * busts the cache. On a missing-subcommand failure (an old CLI), shows an
+ * actionable toast and returns null so the picker leaves scope unchanged.
+ * Not routed through `planDegradation` (its allowlist is analysis flags).
+ */
+export const runWorkspaces = async (
+  context: vscode.ExtensionContext,
+  forceRefresh: boolean,
+  outputChannel?: vscode.OutputChannel,
+): Promise<WorkspacesOutput | null> => {
+  const root = getWorkspaceRoot();
+  if (!root) {
+    void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    return null;
+  }
+
+  const { binary } = await resolveCliForRun(context, outputChannel);
+  if (!binary) {
+    void vscode.window.showErrorMessage(
+      "Fallow: CLI binary not found. Enable fallow.autoDownload or set fallow.lspPath.",
+    );
+    return null;
+  }
+
+  if (!forceRefresh) {
+    const cached = getCachedWorkspacesOutput(binary);
+    if (cached) {
+      return cached;
+    }
+  }
+
+  try {
+    const output = await execFallow(binary, ["workspaces", "--format", "json", "--quiet"], root);
+    const parsed = parseWorkspacesOutput(output);
+    if (!parsed) {
+      outputChannel?.appendLine(
+        "Fallow: `fallow workspaces` returned no parseable JSON; workspace scoping unavailable.",
+      );
+      return null;
+    }
+    cacheWorkspacesOutput(binary, parsed);
+    return parsed;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    outputChannel?.appendLine(`Fallow: failed to list workspaces: ${message}`);
+    if (/unrecognized subcommand|unexpected argument|wasn't expected/i.test(message)) {
+      void vscode.window.showWarningMessage(
+        "Fallow: this CLI version does not support `fallow workspaces`. Update the fallow binary to scope analysis to a monorepo package.",
+      );
+    } else {
+      void vscode.window.showErrorMessage(`Fallow: failed to list workspaces: ${message}`);
+    }
+    return null;
+  }
 };
 
 export const runFix = async (

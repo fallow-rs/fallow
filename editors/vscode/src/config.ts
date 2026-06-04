@@ -107,6 +107,13 @@ export const getHealthTopFindings = (): number => {
 export const getHealthStatusBar = (): boolean =>
   getConfig().get<boolean>("health.statusBar", true);
 
+/**
+ * The pinned `fallow.workspace` setting (a monorepo package name). Empty =
+ * whole project. A per-folder `workspaceState` override set via the picker
+ * takes precedence over this; see `resolveWorkspaceScope`.
+ */
+export const getWorkspaceScope = (): string => getConfig().get<string>("workspace", "").trim();
+
 export const getTraceLevel = (): TraceLevel => getConfig().get<TraceLevel>("trace.server", "off");
 
 /**

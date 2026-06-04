@@ -129,3 +129,4 @@ export type {
   LicenseState,
   LicenseStatusJson,
 } from "./license-types.js";
+export type { WorkspaceInfo, WorkspacesOutput } from "./workspace-types.js";
