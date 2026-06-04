@@ -502,6 +502,53 @@ pub(super) fn try_package_imports_fallback(
     )
 }
 
+/// Resolve a relative import that lands on a known package root whose built
+/// entry points are absent but whose package metadata points at source files.
+pub(super) fn try_relative_package_root_source_fallback(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    if !specifier.starts_with("./") && !specifier.starts_with("../") {
+        return None;
+    }
+
+    let from_dir = from_file.parent()?;
+    let candidate = from_dir.join(specifier);
+    let normalized_candidate = normalize_path_lexically(&candidate);
+    let canonical_candidate = dunce::canonicalize(&candidate).ok();
+
+    ctx.package_manifests.iter().find_map(|manifest| {
+        let matches_manifest = candidate == manifest.root
+            || normalized_candidate == manifest.root
+            || canonical_candidate
+                .as_deref()
+                .is_some_and(|canonical| canonical == manifest.canonical_root);
+        matches_manifest
+            .then(|| try_source_subpath(ctx, manifest, Path::new("")))
+            .flatten()
+            .map(ResolveResult::InternalModule)
+    })
+}
+
+fn normalize_path_lexically(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            std::path::Component::Prefix(_)
+            | std::path::Component::RootDir
+            | std::path::Component::Normal(_) => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PackageMapTarget {
     NoMatch,
@@ -718,8 +765,8 @@ fn try_source_subpath(
 ) -> Option<FileId> {
     if subpath.as_os_str().is_empty()
         && let Some(source) = manifest.package_json.source.as_deref()
-        && let Some(source) = source.strip_prefix("./")
-        && let Some(file_id) = lookup_internal_file_id(ctx, &manifest.root.join(source))
+        && let Some(source_path) = safe_relative_package_source_path(source)
+        && let Some(file_id) = lookup_internal_file_id(ctx, &manifest.root.join(source_path))
     {
         return Some(file_id);
     }
@@ -754,6 +801,25 @@ fn try_source_subpath(
     }
 
     None
+}
+
+fn safe_relative_package_source_path(source: &str) -> Option<&Path> {
+    let source = source.strip_prefix("./").unwrap_or(source);
+    let path = Path::new(source);
+    if path.as_os_str().is_empty()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        None
+    } else {
+        Some(path)
+    }
 }
 
 fn lookup_internal_file_id(ctx: &ResolveContext<'_>, candidate: &Path) -> Option<FileId> {
@@ -1508,6 +1574,32 @@ mod tests {
                 assert!(matches!(
                     result,
                     Some(ResolveResult::InternalModule(FileId(7)))
+                ));
+            },
+        );
+    }
+
+    #[test]
+    fn relative_package_root_source_fallback_uses_package_source_entry() {
+        let root = PathBuf::from("/project");
+        let source_path = root.join("custom/entry.js");
+        with_package_map_ctx(
+            root,
+            Some("pkg"),
+            fallow_config::PackageJson {
+                source: Some("custom/entry.js".to_string()),
+                ..Default::default()
+            },
+            &[(source_path, FileId(11))],
+            |ctx, _, root| {
+                let result = try_relative_package_root_source_fallback(
+                    ctx,
+                    &root.join("test/shared/exports.test.js"),
+                    "../../",
+                );
+                assert!(matches!(
+                    result,
+                    Some(ResolveResult::InternalModule(FileId(11)))
                 ));
             },
         );

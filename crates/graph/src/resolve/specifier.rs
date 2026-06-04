@@ -11,8 +11,9 @@ use serde_json::Value;
 use super::fallbacks::{
     extract_package_name_from_node_modules_path, try_css_extension_fallback,
     try_package_imports_fallback, try_path_alias_fallback, try_pnpm_workspace_fallback,
-    try_scss_include_path_fallback, try_scss_node_modules_fallback, try_scss_partial_fallback,
-    try_source_fallback, try_workspace_package_fallback,
+    try_relative_package_root_source_fallback, try_scss_include_path_fallback,
+    try_scss_node_modules_fallback, try_scss_partial_fallback, try_source_fallback,
+    try_workspace_package_fallback,
 };
 use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
@@ -1330,6 +1331,12 @@ pub(super) fn resolve_specifier(
             }
 
             if let Some(result) = try_package_imports_fallback(ctx, from_file, specifier) {
+                return result;
+            }
+
+            if let Some(result) =
+                try_relative_package_root_source_fallback(ctx, from_file, specifier)
+            {
                 return result;
             }
 
