@@ -1673,7 +1673,7 @@ fn render_hotspots(
     if any_ownership && no_codeowners_anywhere {
         lines.push(format!(
             "  {}",
-            "No CODEOWNERS file discovered, ownership signals limited to git history.".dimmed()
+            "No CODEOWNERS file discovered, ownership signals limited to change history.".dimmed()
         ));
     }
     lines.push(format!(

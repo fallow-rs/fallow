@@ -2461,4 +2461,18 @@ fn health_churn_file_powers_hotspots_and_ownership_without_git() {
         bad.stdout, bad.stderr
     );
     assert_eq!(parse_json(&bad)["error"].as_bool(), Some(true));
+
+    // Inert: with no churn-consuming section (--score only), the same malformed
+    // file is never validated, so it does not fail the run. The gate is
+    // validate-iff-consume.
+    let inert = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--score", "--churn-file", "bad.json", "--format", "json"],
+    );
+    assert_eq!(
+        inert.code, 0,
+        "churn-file is inert without a churn-consuming section: stdout={} stderr={}",
+        inert.stdout, inert.stderr
+    );
 }

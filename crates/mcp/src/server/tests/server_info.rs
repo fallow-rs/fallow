@@ -636,6 +636,7 @@ fn check_health_schema_contains_expected_properties() {
         "targets",
         "since",
         "min_commits",
+        "churn_file",
         "workspace",
         "production",
         "save_snapshot",

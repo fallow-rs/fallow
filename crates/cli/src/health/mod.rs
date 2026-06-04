@@ -156,16 +156,17 @@ struct HealthPipelineInput {
     pre_computed_analysis: Option<fallow_core::AnalysisOutput>,
 }
 
-/// Run health analysis using pre-parsed modules from the dead-code pipeline.
-///
-/// Skips file discovery and parsing (saves ~1.9s on 21K-file projects).
 /// Validate an explicit `--churn-file` up front so a malformed import is a loud
 /// hard error (exit 2) rather than a silent hotspot skip. Runs before the
 /// pipeline, and only when churn would actually be consumed (`--hotspots` /
-/// `--targets`), so an inert `--churn-file` on a non-churn run is not penalized.
-/// Failing here (instead of inside the parallel hotspot pass) keeps combined
-/// `--format json` to a single error document. The file is re-read in
-/// `hotspots::fetch_churn_data`; the duplicate read is negligible.
+/// `--targets`; `--ownership` is subsumed because the dispatch layer sets
+/// `hotspots = hotspots || ownership` before building `HealthOptions`), so an
+/// inert `--churn-file` on a non-churn run is not penalized. The gate condition
+/// mirrors `hotspots::fetch_churn_data`'s `needs_churn` exactly, keeping the
+/// validate-iff-consume invariant. Failing here (instead of inside the parallel
+/// hotspot pass) keeps combined `--format json` to a single error document. The
+/// file is re-read in `fetch_churn_data`; the duplicate read is negligible for
+/// realistic churn files and bounded by `MAX_CHURN_EVENTS`.
 fn validate_churn_file(opts: &HealthOptions<'_>) -> Result<(), ExitCode> {
     if let Some(churn_file) = opts.churn_file
         && (opts.hotspots || opts.targets)
@@ -177,6 +178,9 @@ fn validate_churn_file(opts: &HealthOptions<'_>) -> Result<(), ExitCode> {
     Ok(())
 }
 
+/// Run health analysis using pre-parsed modules from the dead-code pipeline.
+///
+/// Skips file discovery and parsing (saves ~1.9s on 21K-file projects).
 pub fn execute_health_with_shared_parse(
     opts: &HealthOptions<'_>,
     shared: SharedParseData,

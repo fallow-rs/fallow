@@ -50,7 +50,13 @@ pub(super) fn fetch_churn_data(
         let result = match churn::analyze_churn_from_file(&resolved, opts.root) {
             Ok(r) => r,
             Err(e) => {
-                let _ = emit_error(&e, 2, opts.output);
+                // The up-front `health::validate_churn_file` gate already
+                // emitted this error and aborted with exit 2 for a malformed
+                // file, so reaching here means the file changed between the
+                // gate and this re-read (a TOCTOU race). Skip silently rather
+                // than emit a SECOND error document, which would break the
+                // single-document `--format json` contract (#294).
+                tracing::warn!("churn file became unreadable after validation: {e}");
                 return None;
             }
         };

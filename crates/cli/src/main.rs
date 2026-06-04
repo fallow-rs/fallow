@@ -186,8 +186,8 @@ struct Cli {
     /// log`, powering hotspots, ownership, and bus-factor on projects with no
     /// git repository (Yandex Arc, Mercurial, Perforce). A small wrapper
     /// translates your VCS log into the contract. Resolved relative to `--root`.
-    /// Affects `health --hotspots` / `--ownership` only; `audit`, `impact`, and
-    /// `--changed-since` still require git.
+    /// Affects `health --hotspots` / `--ownership` / `--targets` only; `audit`,
+    /// `impact`, and `--changed-since` still require git.
     #[arg(long = "churn-file", value_name = "PATH", global = true)]
     churn_file: Option<PathBuf>,
 

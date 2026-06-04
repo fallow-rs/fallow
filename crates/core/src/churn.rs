@@ -308,7 +308,8 @@ pub fn analyze_churn_from_file(path: &Path, root: &Path) -> Result<ChurnResult, 
         let author_idx = event
             .author
             .as_deref()
-            .filter(|email| !email.trim().is_empty())
+            .map(str::trim)
+            .filter(|email| !email.is_empty())
             .map(|email| intern_author(email, &mut author_pool, &mut author_index));
         files
             .entry(abs_path)
