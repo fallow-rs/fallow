@@ -6,10 +6,19 @@
  * Non-integers are truncated; non-finite values fall back to the default.
  */
 export const MIN_OCCURRENCES_FLOOR = 2;
+export const MIN_LINES_DEFAULT = 5;
+export const MIN_LINES_FLOOR = 1;
 
 export const clampMinOccurrences = (value: number): number => {
   if (!Number.isFinite(value)) {
     return MIN_OCCURRENCES_FLOOR;
   }
   return Math.max(MIN_OCCURRENCES_FLOOR, Math.trunc(value));
+};
+
+export const clampMinLines = (value: number): number => {
+  if (!Number.isFinite(value)) {
+    return MIN_LINES_DEFAULT;
+  }
+  return Math.max(MIN_LINES_FLOOR, Math.trunc(value));
 };

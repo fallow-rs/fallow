@@ -11,35 +11,21 @@ const baseOptions = {
   production: false,
   changedSince: "",
   configPath: "",
-  dupesMode: "mild" as const,
-  dupesThreshold: 0,
-  dupesMinTokens: 50,
-  dupesMinLines: 5,
-  minOccurrences: 2,
-  dupesSkipLocal: false,
-  dupesCrossLanguage: false,
-  dupesIgnoreImports: false,
+  dupesMode: undefined,
+  dupesThreshold: undefined,
+  dupesMinTokens: undefined,
+  dupesMinLines: undefined,
+  minOccurrences: undefined,
+  dupesSkipLocal: undefined,
+  dupesCrossLanguage: undefined,
+  dupesIgnoreImports: undefined,
   cliVersion: null,
 };
 
 describe("buildAnalysisArgs", () => {
-  it("emits the combined-analysis flags with dupes mode and threshold", () => {
+  it("does not emit duplication overrides when VS Code settings are unconfigured", () => {
     expect(buildAnalysisArgs(baseOptions)).toEqual({
-      args: [
-        "--format",
-        "json",
-        "--quiet",
-        "--skip",
-        "health",
-        "--dupes-mode",
-        "mild",
-        "--dupes-threshold",
-        "0",
-        "--dupes-min-tokens",
-        "50",
-        "--dupes-min-lines",
-        "5",
-      ],
+      args: ["--format", "json", "--quiet", "--skip", "health"],
       skipped: [],
     });
   });
@@ -47,6 +33,8 @@ describe("buildAnalysisArgs", () => {
   it("forwards every configured duplication knob when enabled", () => {
     const { args, skipped } = buildAnalysisArgs({
       ...baseOptions,
+      dupesMode: "mild",
+      dupesThreshold: 0,
       dupesMinTokens: 80,
       dupesMinLines: 8,
       minOccurrences: 3,
@@ -79,9 +67,9 @@ describe("buildAnalysisArgs", () => {
     expect(skipped).toEqual([]);
   });
 
-  it("omits --dupes-min-occurrences at the floor so older pinned binaries don't reject it", () => {
+  it("forwards --dupes-min-occurrences at the floor when explicitly configured", () => {
     const { args, skipped } = buildAnalysisArgs({ ...baseOptions, minOccurrences: 2 });
-    expect(args).not.toContain("--dupes-min-occurrences");
+    expect(args[args.indexOf("--dupes-min-occurrences") + 1]).toBe("2");
     expect(skipped).toEqual([]);
   });
 
@@ -104,6 +92,8 @@ describe("buildAnalysisArgs", () => {
   it("omits --dupes-min-occurrences and records the skip when the CLI predates it", () => {
     const { args, skipped } = buildAnalysisArgs({
       ...baseOptions,
+      dupesMinTokens: 50,
+      dupesMinLines: 5,
       minOccurrences: 5,
       dupesSkipLocal: true,
       cliVersion: "2.87.0",

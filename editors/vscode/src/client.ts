@@ -6,6 +6,7 @@ import {
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
+  State,
   TransportKind,
 } from "vscode-languageclient/node.js";
 import { Trace } from "vscode-languageserver-protocol";
@@ -16,14 +17,14 @@ import {
   getIssueTypes,
   getChangedSince,
   getResolvedConfigPath,
-  getDuplicationCrossLanguage,
-  getDuplicationIgnoreImports,
-  getDuplicationMinLines,
-  getDuplicationMinOccurrences,
-  getDuplicationMinTokens,
-  getDuplicationMode,
-  getDuplicationSkipLocal,
-  getDuplicationThreshold,
+  getDuplicationCrossLanguageOverride,
+  getDuplicationIgnoreImportsOverride,
+  getDuplicationMinLinesOverride,
+  getDuplicationMinOccurrencesOverride,
+  getDuplicationMinTokensOverride,
+  getDuplicationModeOverride,
+  getDuplicationSkipLocalOverride,
+  getDuplicationThresholdOverride,
 } from "./config.js";
 import { showBinarySkewToastOnce } from "./binary-skew.js";
 import { findBinaryInPath, findLocalBinary } from "./binary-utils.js";
@@ -38,39 +39,19 @@ import { downloadBinary, getBinaryVersion, getInstalledBinaryPath } from "./down
 
 let client: LanguageClient | null = null;
 
-const isClientNotRunningStopError = (err: unknown): boolean =>
-  err instanceof Error && err.message.includes("Client is not running and can't be stopped");
-
-const stopLanguageClient = async (
-  lspClient: LanguageClient,
-  outputChannel?: vscode.OutputChannel,
-): Promise<void> => {
-  try {
-    await lspClient.stop();
-  } catch (err) {
-    if (isClientNotRunningStopError(err)) {
-      outputChannel?.appendLine(
-        "Fallow language server stop skipped because it was still starting.",
-      );
-      return;
-    }
-    throw err;
-  }
-};
-
 export interface LspInitializationOptions {
   readonly issueTypes: IssueTypeConfig;
   readonly changedSince: string;
   readonly configPath: string;
   readonly duplication: {
-    readonly mode: DuplicationMode;
-    readonly threshold: number;
-    readonly minTokens: number;
-    readonly minLines: number;
-    readonly minOccurrences: number;
-    readonly skipLocal: boolean;
-    readonly crossLanguage: boolean;
-    readonly ignoreImports: boolean;
+    readonly mode: DuplicationMode | undefined;
+    readonly threshold: number | undefined;
+    readonly minTokens: number | undefined;
+    readonly minLines: number | undefined;
+    readonly minOccurrences: number | undefined;
+    readonly skipLocal: boolean | undefined;
+    readonly crossLanguage: boolean | undefined;
+    readonly ignoreImports: boolean | undefined;
   };
 }
 
@@ -79,14 +60,14 @@ export const createInitializationOptions = (): LspInitializationOptions => ({
   changedSince: getChangedSince(),
   configPath: getResolvedConfigPath(),
   duplication: {
-    mode: getDuplicationMode(),
-    threshold: getDuplicationThreshold(),
-    minTokens: getDuplicationMinTokens(),
-    minLines: getDuplicationMinLines(),
-    minOccurrences: getDuplicationMinOccurrences(),
-    skipLocal: getDuplicationSkipLocal(),
-    crossLanguage: getDuplicationCrossLanguage(),
-    ignoreImports: getDuplicationIgnoreImports(),
+    mode: getDuplicationModeOverride(),
+    threshold: getDuplicationThresholdOverride(),
+    minTokens: getDuplicationMinTokensOverride(),
+    minLines: getDuplicationMinLinesOverride(),
+    minOccurrences: getDuplicationMinOccurrencesOverride(),
+    skipLocal: getDuplicationSkipLocalOverride(),
+    crossLanguage: getDuplicationCrossLanguageOverride(),
+    ignoreImports: getDuplicationIgnoreImportsOverride(),
   },
 });
 
@@ -250,7 +231,9 @@ export const startClient = async (
   try {
     await nextClient.start();
     if (client !== nextClient) {
-      await stopLanguageClient(nextClient, outputChannel);
+      if (nextClient.state === State.Running) {
+        await nextClient.stop();
+      }
       return null;
     }
     outputChannel.appendLine("Fallow language server started.");
@@ -272,11 +255,40 @@ export const startClient = async (
   return nextClient;
 };
 
-export const stopClient = async (outputChannel?: vscode.OutputChannel): Promise<void> => {
-  const currentClient = client;
-  if (currentClient) {
+export const stopClient = async (): Promise<void> => {
+  const current = client;
+  if (!current) {
+    return;
+  }
+
+  if (current.state === State.Starting) {
+    await new Promise<void>((resolve) => {
+      let done = false;
+      let disposable: vscode.Disposable | undefined;
+      const finish = (): void => {
+        if (done) {
+          return;
+        }
+        done = true;
+        clearTimeout(timeout);
+        disposable?.dispose();
+        resolve();
+      };
+      const timeout = setTimeout(finish, 2_000);
+      disposable = current.onDidChangeState((event) => {
+        if (event.newState !== State.Starting) {
+          finish();
+        }
+      });
+    });
+  }
+
+  if (current.state === State.Running) {
+    await current.stop();
+  }
+
+  if (client === current) {
     client = null;
-    await stopLanguageClient(currentClient, outputChannel);
   }
 };
 
@@ -289,6 +301,6 @@ export const restartClient = async (
   // call refresh() against a disposed DiagnosticCollection. startClient
   // re-attaches once the new client is up.
   diagnosticFilter?.detachClient();
-  await stopClient(outputChannel);
+  await stopClient();
   return startClient(context, outputChannel, diagnosticFilter);
 };

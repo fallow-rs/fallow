@@ -117,3 +117,18 @@ describe("package.json duplication settings", () => {
     }
   });
 });
+
+describe("package.json duplication settings", () => {
+  it("contributes the sidebar duplication filter settings", () => {
+    const properties = pkg.contributes.configuration.properties;
+
+    expect(properties["fallow.duplication.mode"]).toBeDefined();
+    expect(properties["fallow.duplication.threshold"]).toBeDefined();
+    expect(properties["fallow.duplication.minLines"]).toBeDefined();
+    expect(properties["fallow.duplication.minOccurrences"]).toBeDefined();
+  });
+
+  it("restarts and reruns analysis when duplication settings change", () => {
+    expect(configKeysSource).toContain('"fallow.duplication"');
+  });
+});

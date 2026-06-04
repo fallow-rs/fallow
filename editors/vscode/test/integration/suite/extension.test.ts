@@ -99,24 +99,19 @@ describe("Fallow VS Code extension", () => {
     await vscode.workspace
       .getConfiguration("fallow")
       .update("changedSince", "", vscode.ConfigurationTarget.Workspace);
-    await vscode.workspace
-      .getConfiguration("fallow")
-      .update("duplication.minTokens", 50, vscode.ConfigurationTarget.Workspace);
-    await vscode.workspace
-      .getConfiguration("fallow")
-      .update("duplication.minLines", 5, vscode.ConfigurationTarget.Workspace);
-    await vscode.workspace
-      .getConfiguration("fallow")
-      .update("duplication.minOccurrences", 2, vscode.ConfigurationTarget.Workspace);
-    await vscode.workspace
-      .getConfiguration("fallow")
-      .update("duplication.skipLocal", false, vscode.ConfigurationTarget.Workspace);
-    await vscode.workspace
-      .getConfiguration("fallow")
-      .update("duplication.crossLanguage", false, vscode.ConfigurationTarget.Workspace);
-    await vscode.workspace
-      .getConfiguration("fallow")
-      .update("duplication.ignoreImports", false, vscode.ConfigurationTarget.Workspace);
+    const config = vscode.workspace.getConfiguration("fallow");
+    for (const key of [
+      "duplication.mode",
+      "duplication.threshold",
+      "duplication.minTokens",
+      "duplication.minLines",
+      "duplication.minOccurrences",
+      "duplication.skipLocal",
+      "duplication.crossLanguage",
+      "duplication.ignoreImports",
+    ]) {
+      await config.update(key, undefined, vscode.ConfigurationTarget.Workspace);
+    }
 
     windowApi.showQuickPick = originalShowQuickPick;
     windowApi.showTextDocument = originalShowTextDocument;
@@ -165,15 +160,16 @@ describe("Fallow VS Code extension", () => {
     assert.ok(
       analysisCalls.some(
         (entry) =>
-          entry.args.join(" ") ===
-          "--format json --quiet --skip health --dupes-mode mild --dupes-threshold 0 --dupes-min-tokens 50 --dupes-min-lines 5",
+          entry.args.join(" ") === "--format json --quiet --skip health",
       ),
-      "combined analysis should pass the expected arguments (no --dupes-min-occurrences at the floor)",
+      "combined analysis should not pass package default duplication settings as overrides",
     );
   });
 
   it("forwards duplication settings to the CLI analysis path", async () => {
     const config = vscode.workspace.getConfiguration("fallow");
+    await config.update("duplication.mode", "mild", vscode.ConfigurationTarget.Workspace);
+    await config.update("duplication.threshold", 0, vscode.ConfigurationTarget.Workspace);
     await config.update("duplication.minTokens", 80, vscode.ConfigurationTarget.Workspace);
     await config.update("duplication.minLines", 8, vscode.ConfigurationTarget.Workspace);
     await config.update("duplication.minOccurrences", 3, vscode.ConfigurationTarget.Workspace);
@@ -206,9 +202,9 @@ describe("Fallow VS Code extension", () => {
       analysisCalls.some(
         (entry) =>
           entry.args.join(" ") ===
-          "--format json --quiet --skip health --changed-since origin/main --dupes-mode mild --dupes-threshold 0 --dupes-min-tokens 50 --dupes-min-lines 5",
+          "--format json --quiet --skip health --changed-since origin/main",
       ),
-      "combined analysis should include --changed-since before duplication options",
+      "combined analysis should include --changed-since without package default duplication overrides",
     );
   });
 

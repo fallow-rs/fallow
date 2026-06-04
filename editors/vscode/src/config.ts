@@ -2,12 +2,24 @@ import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
-import { MIN_OCCURRENCES_FLOOR, clampMinOccurrences } from "./duplication-utils.js";
+import { clampMinLines, clampMinOccurrences } from "./duplication-utils.js";
 import type { DuplicationMode, IssueTypeConfig, TraceLevel } from "./types.js";
 
 const SECTION = "fallow";
 
 const getConfig = (): vscode.WorkspaceConfiguration => vscode.workspace.getConfiguration(SECTION);
+
+const getConfiguredValue = <T>(key: string): T | undefined => {
+  const inspected = getConfig().inspect<T>(key);
+  return (
+    inspected?.workspaceFolderLanguageValue ??
+    inspected?.workspaceLanguageValue ??
+    inspected?.globalLanguageValue ??
+    inspected?.workspaceFolderValue ??
+    inspected?.workspaceValue ??
+    inspected?.globalValue
+  );
+};
 
 export const getLspPath = (): string => getConfig().get<string>("lspPath", "");
 
@@ -51,29 +63,33 @@ export const getIssueTypes = (): IssueTypeConfig =>
     "misconfigured-dependency-overrides": true,
   });
 
-export const getDuplicationThreshold = (): number =>
-  getConfig().get<number>("duplication.threshold", 0);
+export const getDuplicationThresholdOverride = (): number | undefined =>
+  getConfiguredValue<number>("duplication.threshold");
 
-export const getDuplicationMinTokens = (): number =>
-  getConfig().get<number>("duplication.minTokens", 50);
+export const getDuplicationMinTokensOverride = (): number | undefined =>
+  getConfiguredValue<number>("duplication.minTokens");
 
-export const getDuplicationMinLines = (): number =>
-  getConfig().get<number>("duplication.minLines", 5);
+export const getDuplicationMinLinesOverride = (): number | undefined => {
+  const value = getConfiguredValue<number>("duplication.minLines");
+  return value === undefined ? undefined : clampMinLines(value);
+};
 
-export const getDuplicationMode = (): DuplicationMode =>
-  getConfig().get<DuplicationMode>("duplication.mode", "mild");
+export const getDuplicationModeOverride = (): DuplicationMode | undefined =>
+  getConfiguredValue<DuplicationMode>("duplication.mode");
 
-export const getDuplicationMinOccurrences = (): number =>
-  clampMinOccurrences(getConfig().get<number>("duplication.minOccurrences", MIN_OCCURRENCES_FLOOR));
+export const getDuplicationMinOccurrencesOverride = (): number | undefined => {
+  const value = getConfiguredValue<number>("duplication.minOccurrences");
+  return value === undefined ? undefined : clampMinOccurrences(value);
+};
 
-export const getDuplicationSkipLocal = (): boolean =>
-  getConfig().get<boolean>("duplication.skipLocal", false);
+export const getDuplicationSkipLocalOverride = (): boolean | undefined =>
+  getConfiguredValue<boolean>("duplication.skipLocal");
 
-export const getDuplicationCrossLanguage = (): boolean =>
-  getConfig().get<boolean>("duplication.crossLanguage", false);
+export const getDuplicationCrossLanguageOverride = (): boolean | undefined =>
+  getConfiguredValue<boolean>("duplication.crossLanguage");
 
-export const getDuplicationIgnoreImports = (): boolean =>
-  getConfig().get<boolean>("duplication.ignoreImports", false);
+export const getDuplicationIgnoreImportsOverride = (): boolean | undefined =>
+  getConfiguredValue<boolean>("duplication.ignoreImports");
 
 export const getProduction = (): boolean => getConfig().get<boolean>("production", false);
 

@@ -374,9 +374,9 @@ impl LspDuplicationOptions {
             threshold: self.threshold.unwrap_or(config.threshold),
             ignore: config.ignore.clone(),
             ignore_defaults: config.ignore_defaults,
-            skip_local: self.skip_local.unwrap_or(false) || config.skip_local,
-            cross_language: self.cross_language.unwrap_or(false) || config.cross_language,
-            ignore_imports: self.ignore_imports.unwrap_or(false) || config.ignore_imports,
+            skip_local: self.skip_local.unwrap_or(config.skip_local),
+            cross_language: self.cross_language.unwrap_or(config.cross_language),
+            ignore_imports: self.ignore_imports.unwrap_or(config.ignore_imports),
             normalization: config.normalization.clone(),
             min_corpus_size_for_shingle_filter: config.min_corpus_size_for_shingle_filter,
             min_corpus_size_for_token_cache: config.min_corpus_size_for_token_cache,
@@ -1717,7 +1717,7 @@ mod tests {
     }
 
     #[test]
-    fn lsp_duplication_options_merge_with_project_config_like_cli() {
+    fn lsp_duplication_options_override_project_config() {
         let project = DuplicatesConfig {
             mode: DetectionMode::Weak,
             min_tokens: 50,
@@ -1748,7 +1748,7 @@ mod tests {
         assert_eq!(merged.min_tokens, 80);
         assert_eq!(merged.min_lines, 9);
         assert_eq!(merged.min_occurrences, 3);
-        assert!(merged.skip_local, "project true should still win for bools");
+        assert!(!merged.skip_local);
         assert!(merged.cross_language);
         assert!(merged.ignore_imports);
         assert_eq!(merged.ignore, vec!["generated/**".to_string()]);

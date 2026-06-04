@@ -24,6 +24,11 @@ vi.mock("vscode", () => ({
 
 vi.mock("vscode-languageclient/node.js", () => ({
   LanguageClient: class {},
+  State: {
+    Stopped: 1,
+    Running: 2,
+    Starting: 3,
+  },
   TransportKind: {
     stdio: 0,
   },
@@ -36,14 +41,14 @@ vi.mock("../src/config.js", () => ({
   getIssueTypes: () => mockIssueTypes,
   getChangedSince: () => mockChangedSince,
   getResolvedConfigPath: () => mockConfigPath,
-  getDuplicationMode: () => mockDuplicationMode,
-  getDuplicationThreshold: () => mockDuplicationThreshold,
-  getDuplicationMinTokens: () => mockDuplicationMinTokens,
-  getDuplicationMinLines: () => mockDuplicationMinLines,
-  getDuplicationMinOccurrences: () => mockDuplicationMinOccurrences,
-  getDuplicationSkipLocal: () => mockDuplicationSkipLocal,
-  getDuplicationCrossLanguage: () => mockDuplicationCrossLanguage,
-  getDuplicationIgnoreImports: () => mockDuplicationIgnoreImports,
+  getDuplicationModeOverride: () => mockDuplicationMode,
+  getDuplicationThresholdOverride: () => mockDuplicationThreshold,
+  getDuplicationMinTokensOverride: () => mockDuplicationMinTokens,
+  getDuplicationMinLinesOverride: () => mockDuplicationMinLines,
+  getDuplicationMinOccurrencesOverride: () => mockDuplicationMinOccurrences,
+  getDuplicationSkipLocalOverride: () => mockDuplicationSkipLocal,
+  getDuplicationCrossLanguageOverride: () => mockDuplicationCrossLanguage,
+  getDuplicationIgnoreImportsOverride: () => mockDuplicationIgnoreImports,
 }));
 
 import { createInitializationOptions, loadDiagnosticCategories } from "../src/client.js";

@@ -1,4 +1,3 @@
-import { MIN_OCCURRENCES_FLOOR } from "./duplication-utils.js";
 import type { DuplicationMode, FallowCheckResult } from "./types.js";
 
 /**
@@ -23,14 +22,14 @@ interface AnalysisArgsOptions {
   readonly production: boolean;
   readonly changedSince: string;
   readonly configPath: string;
-  readonly dupesMode: DuplicationMode;
-  readonly dupesThreshold: number;
-  readonly dupesMinTokens: number;
-  readonly dupesMinLines: number;
-  readonly minOccurrences: number;
-  readonly dupesSkipLocal: boolean;
-  readonly dupesCrossLanguage: boolean;
-  readonly dupesIgnoreImports: boolean;
+  readonly dupesMode: DuplicationMode | undefined;
+  readonly dupesThreshold: number | undefined;
+  readonly dupesMinTokens: number | undefined;
+  readonly dupesMinLines: number | undefined;
+  readonly minOccurrences: number | undefined;
+  readonly dupesSkipLocal: boolean | undefined;
+  readonly dupesCrossLanguage: boolean | undefined;
+  readonly dupesIgnoreImports: boolean | undefined;
   /**
    * Version of the resolved CLI (`getBinaryVersion`), or null when it could not
    * be probed. When known, version-gated flags below their introducing version
@@ -114,30 +113,35 @@ export const buildAnalysisArgs = (options: AnalysisArgsOptions): BuiltAnalysisAr
     args.push("--config", options.configPath);
   }
 
-  args.push("--dupes-mode", options.dupesMode);
-  args.push("--dupes-threshold", String(options.dupesThreshold));
-  pushVersionGatedFlag(
-    args,
-    skipped,
-    "--dupes-min-tokens",
-    options.cliVersion,
-    String(options.dupesMinTokens),
-  );
-  pushVersionGatedFlag(
-    args,
-    skipped,
-    "--dupes-min-lines",
-    options.cliVersion,
-    String(options.dupesMinLines),
-  );
+  if (options.dupesMode !== undefined) {
+    args.push("--dupes-mode", options.dupesMode);
+  }
 
-  // `--dupes-min-occurrences` (CLI v2.88.0+). The floor (2) is also the CLI
-  // default, so a default value is a no-op we simply omit. When the user raised
-  // it, forward the flag only if the resolved CLI is new enough; if we know the
-  // CLI predates it, record the skip so the caller can warn that the setting was
-  // not honored. When the version is unknown, forward optimistically and let the
-  // spawn-failure backstop handle a genuinely too-old binary.
-  if (options.minOccurrences > MIN_OCCURRENCES_FLOOR) {
+  if (options.dupesThreshold !== undefined) {
+    args.push("--dupes-threshold", String(options.dupesThreshold));
+  }
+
+  if (options.dupesMinTokens !== undefined) {
+    pushVersionGatedFlag(
+      args,
+      skipped,
+      "--dupes-min-tokens",
+      options.cliVersion,
+      String(options.dupesMinTokens),
+    );
+  }
+
+  if (options.dupesMinLines !== undefined) {
+    pushVersionGatedFlag(
+      args,
+      skipped,
+      "--dupes-min-lines",
+      options.cliVersion,
+      String(options.dupesMinLines),
+    );
+  }
+
+  if (options.minOccurrences !== undefined) {
     pushVersionGatedFlag(
       args,
       skipped,
@@ -147,15 +151,15 @@ export const buildAnalysisArgs = (options: AnalysisArgsOptions): BuiltAnalysisAr
     );
   }
 
-  if (options.dupesSkipLocal) {
+  if (options.dupesSkipLocal === true) {
     pushVersionGatedFlag(args, skipped, "--dupes-skip-local", options.cliVersion);
   }
 
-  if (options.dupesCrossLanguage) {
+  if (options.dupesCrossLanguage === true) {
     pushVersionGatedFlag(args, skipped, "--dupes-cross-language", options.cliVersion);
   }
 
-  if (options.dupesIgnoreImports) {
+  if (options.dupesIgnoreImports === true) {
     pushVersionGatedFlag(args, skipped, "--dupes-ignore-imports", options.cliVersion);
   }
 
