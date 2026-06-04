@@ -1,7 +1,7 @@
 // VS Code injects this module into the extension host at runtime.
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
-import { auditVerdictPresentation, buildAuditTooltipMarkdown, gatingCount } from "./audit-utils.js";
+import { auditGatingSuffix, auditVerdictPresentation, buildAuditTooltipMarkdown } from "./audit-utils.js";
 import { getChangedSince } from "./config.js";
 import type { AuditOutput } from "./types.js";
 
@@ -22,6 +22,9 @@ export const createAuditStatusBar = (): vscode.StatusBarItem => {
   return auditStatusBarItem;
 };
 
+/** Whether the audit status-bar item currently exists (for live create/dispose). */
+export const hasAuditStatusBar = (): boolean => auditStatusBarItem !== null;
+
 export const setAuditAnalyzing = (): void => {
   if (auditStatusBarItem) {
     auditStatusBarItem.text = "$(loading~spin) Audit: running...";
@@ -38,6 +41,21 @@ export const setAuditError = (): void => {
   }
 };
 
+/**
+ * Reset the item to its idle "click to audit" state, with no error tint. Used
+ * when a run was skipped for a non-error reason (no workspace folder, run
+ * already in flight) and there is no prior verdict to restore: flashing the
+ * error state would mislabel a benign skip as a failure (#908 n4).
+ */
+export const setAuditIdle = (): void => {
+  if (auditStatusBarItem) {
+    auditStatusBarItem.text = "$(shield) Audit";
+    auditStatusBarItem.backgroundColor = undefined;
+    auditStatusBarItem.tooltip =
+      "Fallow: audit the current change set for a pass/warn/fail verdict.";
+  }
+};
+
 /** Render the verdict (and gating-candidate count) from a completed audit run. */
 export const updateAuditStatusBar = (audit: AuditOutput): void => {
   if (!auditStatusBarItem) {
@@ -45,8 +63,9 @@ export const updateAuditStatusBar = (audit: AuditOutput): void => {
   }
 
   const presentation = auditVerdictPresentation(audit.verdict);
-  const count = gatingCount(audit);
-  const suffix = audit.verdict === "fail" && count > 0 ? ` (${count})` : "";
+  // Show the gating count for any non-zero count (not just `fail`), so a `warn`
+  // verdict's glance matches the tooltip's own `count > 0` branch.
+  const suffix = auditGatingSuffix(audit);
   auditStatusBarItem.text = `${presentation.icon} Audit: ${presentation.label}${suffix}`;
   auditStatusBarItem.backgroundColor = presentation.background
     ? new vscode.ThemeColor(presentation.background)

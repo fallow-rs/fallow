@@ -1,4 +1,5 @@
 import { countCheckIssues } from "./analysis-utils.js";
+import { escapeMarkdownText, normalizeInlineText } from "./markdown-utils.js";
 import type { FallowCheckResult, FallowDupesResult } from "./types.js";
 
 export interface AnalysisCompleteParams {
@@ -194,8 +195,6 @@ export const getStatusBarSeverityKey = (params: AnalysisCompleteParams): Severit
   return null;
 };
 
-const normalizeInlineText = (value: string): string => value.replace(/\s+/g, " ").trim();
-
 export const formatChangedSinceRefForStatusBar = (ref: string): string => {
   const normalized = normalizeInlineText(ref);
   return normalized.length > 48 ? `${normalized.slice(0, 45).trimEnd()}...` : normalized;
@@ -222,9 +221,6 @@ export const renderStatusBarText = (base: string, changedSince: string | null): 
   }
   return `${base} (since ${formatChangedSinceRefForStatusBar(changedSince)})`;
 };
-
-const escapeMarkdownText = (value: string): string =>
-  normalizeInlineText(value).replace(/([\\`*_{}[\]()#+.!|>-])/g, "\\$1");
 
 export const buildStatusBarTooltipMarkdown = (
   params: AnalysisCompleteParams,

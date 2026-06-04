@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   AUDIT_CANDIDATE_HEADER,
+  auditGatingSuffix,
+  auditScopeSummary,
   auditVerdictPresentation,
   buildAuditArgs,
   buildAuditTooltipMarkdown,
@@ -12,6 +14,7 @@ import type { AuditOutput } from "../src/types.js";
 const baseAuditArgsOptions = {
   production: false,
   changedSince: "",
+  workspace: "",
   configPath: "",
   gate: "new-only" as const,
 };
@@ -96,10 +99,11 @@ describe("buildAuditArgs", () => {
     expect(args).toEqual(["audit", "--format", "json", "--quiet", "--gate", "all"]);
   });
 
-  it("forwards changedSince, production, and configPath with correct flag spelling", () => {
+  it("forwards changedSince, workspace, production, and configPath with correct flag spelling", () => {
     const args = buildAuditArgs({
       production: true,
       changedSince: "main",
+      workspace: "pkg-a",
       configPath: "/abs/.fallowrc.json",
       gate: "all",
     });
@@ -110,6 +114,8 @@ describe("buildAuditArgs", () => {
       "--quiet",
       "--changed-since",
       "main",
+      "--workspace",
+      "pkg-a",
       "--production",
       "--config",
       "/abs/.fallowrc.json",
@@ -118,14 +124,22 @@ describe("buildAuditArgs", () => {
     ]);
   });
 
+  it("forwards --workspace when a workspace scope is set", () => {
+    const args = buildAuditArgs({ ...baseAuditArgsOptions, workspace: "@scope/pkg" });
+    expect(args).toContain("--workspace");
+    expect(args[args.indexOf("--workspace") + 1]).toBe("@scope/pkg");
+  });
+
   it("omits optional flags when their values are empty strings", () => {
     const args = buildAuditArgs({
       production: false,
       changedSince: "",
+      workspace: "",
       configPath: "",
       gate: "new-only",
     });
     expect(args).not.toContain("--changed-since");
+    expect(args).not.toContain("--workspace");
     expect(args).not.toContain("--config");
     expect(args).not.toContain("--production");
   });
@@ -202,6 +216,59 @@ describe("gatingCount", () => {
       },
     };
     expect(gatingCount(audit)).toBe(0);
+  });
+});
+
+describe("auditGatingSuffix", () => {
+  it("is empty when nothing is gating", () => {
+    expect(auditGatingSuffix(passAudit)).toBe("");
+  });
+
+  it("shows the count for a warn verdict with gating findings (not just fail)", () => {
+    // Regression for #908 C2: a warn verdict previously suppressed the count,
+    // so a warn read as a clean pass at a glance. The suffix is verdict-agnostic.
+    const warnAudit: AuditOutput = {
+      ...passAudit,
+      verdict: "warn",
+      attribution: {
+        gate: "new-only",
+        dead_code_introduced: 2,
+        dead_code_inherited: 0,
+        complexity_introduced: 1,
+        complexity_inherited: 0,
+        duplication_introduced: 0,
+        duplication_inherited: 0,
+      },
+    };
+    expect(auditGatingSuffix(warnAudit)).toBe(" (3)");
+  });
+
+  it("shows the count for a fail verdict", () => {
+    const audit: AuditOutput = {
+      ...failAudit,
+      summary: {
+        dead_code_issues: 4,
+        dead_code_has_errors: true,
+        complexity_findings: 0,
+        max_cyclomatic: null,
+        duplication_clone_groups: 0,
+      },
+    };
+    expect(auditGatingSuffix(audit)).toBe(" (4)");
+  });
+});
+
+describe("auditScopeSummary", () => {
+  it("singularizes a single changed file", () => {
+    expect(auditScopeSummary({ ...failAudit, changed_files_count: 1, base_ref: "main" })).toBe(
+      "1 changed file vs main",
+    );
+  });
+
+  it("pluralizes multiple changed files and includes the base ref", () => {
+    expect(auditScopeSummary({ ...failAudit, changed_files_count: 3, base_ref: "develop" })).toBe(
+      "3 changed files vs develop",
+    );
   });
 });
 

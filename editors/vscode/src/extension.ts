@@ -49,17 +49,20 @@ import {
   setStatusBarError,
   disposeStatusBar,
 } from "./statusBar.js";
-import { gatingCount } from "./audit-utils.js";
+import { auditScopeSummary, gatingCount } from "./audit-utils.js";
 import {
   createAuditStatusBar,
   disposeAuditStatusBar,
+  hasAuditStatusBar,
   setAuditAnalyzing,
   setAuditError,
+  setAuditIdle,
   updateAuditStatusBar,
 } from "./auditStatusBar.js";
 import type { AnalysisCompleteParams } from "./statusBar.js";
 import { DeadCodeTreeProvider, DuplicatesTreeProvider } from "./treeView.js";
 import {
+  applyWorkspaceVisibility,
   clearWorkspaceScope,
   createWorkspacePicker,
   disposeWorkspacePicker,
@@ -142,11 +145,25 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // idle item runs no analysis, so it never touches the startup/visibility hot
   // path (#902). When disabled, the command still runs and reports its verdict
   // via an information message instead of the status bar.
-  const auditStatusBarEnabled = getAuditEnabled();
-  if (auditStatusBarEnabled) {
-    const auditStatusBar = createAuditStatusBar();
-    context.subscriptions.push(auditStatusBar);
-  }
+  //
+  // The item is created/disposed LIVE when `fallow.audit.statusBar.enabled`
+  // toggles (see the config-change handler), so it never needs a window reload.
+  // Lifecycle goes through the module's create/dispose helpers (which own the
+  // singleton item) rather than pushing the raw item to `subscriptions`, so a
+  // live dispose/recreate cannot leave a dangling subscription. A teardown
+  // disposer guarantees cleanup on extension deactivate.
+  const syncAuditStatusBar = (): void => {
+    if (getAuditEnabled()) {
+      // Idempotent: createAuditStatusBar disposes nothing, so guard re-creates.
+      if (!hasAuditStatusBar()) {
+        createAuditStatusBar();
+      }
+    } else {
+      disposeAuditStatusBar();
+    }
+  };
+  syncAuditStatusBar();
+  context.subscriptions.push({ dispose: () => disposeAuditStatusBar() });
 
   const diagnosticFilter = new DiagnosticFilter(context.workspaceState);
   context.subscriptions.push({ dispose: () => diagnosticFilter.dispose() });
@@ -190,6 +207,23 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // who never opens that view pays nothing even with the feature enabled (#902).
   let securityAnalysisRan = false;
 
+  // One-shot, lazy workspace-visibility probe. The picker is shown by default;
+  // after the first sidebar analysis we list workspaces (cheap, cached) and hide
+  // the picker on single-package repos that can never use scoping (n2). Probed
+  // off the activation hot path so #902 latency isolation is preserved, and
+  // fire-and-forget so it never blocks the analysis it follows.
+  let workspaceVisibilityProbed = false;
+  const probeWorkspaceVisibility = (): void => {
+    if (workspaceVisibilityProbed) {
+      return;
+    }
+    workspaceVisibilityProbed = true;
+    void (async (): Promise<void> => {
+      const output = await runWorkspaces(context, false, outputChannel, true);
+      applyWorkspaceVisibility(output);
+    })();
+  };
+
   const triggerCliAnalysis = async (): Promise<boolean> => {
     setStatusBarAnalyzing();
     return await vscode.window.withProgress(
@@ -204,6 +238,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
           lastCheckResult = check;
           lastDupesResult = dupes;
           updateViews();
+          probeWorkspaceVisibility();
           void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
 
           const issueCount = countCheckIssues(check);
@@ -553,16 +588,21 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // `runAudit`, so a click while one is in flight is a no-op.
   const reportAuditVerdict = (audit: AuditOutput): void => {
     lastAuditResult = audit;
-    if (auditStatusBarEnabled) {
+    // Read the surface live: the status-bar item is created/disposed when the
+    // setting toggles, so its presence is the source of truth.
+    if (hasAuditStatusBar()) {
       updateAuditStatusBar(audit);
       return;
     }
     // Status bar surface disabled: still report the verdict so the command is
-    // never a silent no-op, and offer the details breakdown.
+    // never a silent no-op, and offer the details breakdown. Include the
+    // change-set scope (changed files vs base ref) so the verdict is not a
+    // contextless word (#908 n3).
     const count = gatingCount(audit);
     const suffix = count > 0 ? ` (${count} gating candidate${count === 1 ? "" : "s"})` : "";
+    const scope = auditScopeSummary(audit);
     void vscode.window
-      .showInformationMessage(`Fallow audit: ${audit.verdict}${suffix}`, "Details")
+      .showInformationMessage(`Fallow audit: ${audit.verdict}${suffix} - ${scope}`, "Details")
       .then((choice) => {
         if (choice === "Details") {
           outputChannel.show();
@@ -583,14 +623,16 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
         try {
           const audit = await runAudit(context, outputChannel);
           // A null result with no error means the run was skipped (already in
-          // flight or no workspace); leave the prior verdict in place rather
-          // than flashing an error state.
+          // flight or no workspace). Prefer restoring the prior verdict; with no
+          // prior verdict, reset to the idle "click to audit" state rather than
+          // flashing a misleading error state (#908 n4). `runAudit` already
+          // surfaces the no-workspace warning toast, so this stays silent.
           if (audit) {
             reportAuditVerdict(audit);
           } else if (lastAuditResult) {
             updateAuditStatusBar(lastAuditResult);
           } else {
-            setAuditError();
+            setAuditIdle();
           }
         } catch {
           setAuditError();
@@ -608,7 +650,9 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   let auditSaveTimer: ReturnType<typeof setTimeout> | null = null;
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument((doc) => {
-      if (!auditStatusBarEnabled || !getAuditRunOnSave()) {
+      // Read both settings live so toggling either takes effect without a window
+      // reload: the surface must exist and run-on-save must be on.
+      if (!hasAuditStatusBar() || !getAuditRunOnSave()) {
         return;
       }
       if (!AUDIT_SAVE_LANGUAGES.has(doc.languageId)) {
@@ -714,8 +758,19 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 
       if (e.affectsConfiguration("fallow.workspace")) {
         // Keep the picker label in sync with a pinned-default setting change.
-        // The workspaceState override (if any) still wins inside the picker.
+        // The workspaceState override (if any) still wins inside the picker. The
+        // dead-code/dupes sidebar + status bar re-run is handled by the
+        // REANALYSIS_CONFIG_KEYS path below (`fallow.workspace` is a member), so
+        // a workspace change both refreshes the label and re-analyzes.
         refreshWorkspacePicker(context);
+      }
+
+      if (e.affectsConfiguration("fallow.audit.statusBar.enabled")) {
+        // Create/dispose the audit status-bar item live (mirrors the health
+        // status-bar handling) so toggling the setting never needs a window
+        // reload. The runOnSave path and reportAuditVerdict both read the item's
+        // presence live, so they follow automatically.
+        syncAuditStatusBar();
       }
 
       if (needsRestart) {

@@ -1,3 +1,4 @@
+import { escapeMarkdownText } from "./markdown-utils.js";
 import type { AuditGate, AuditOutput, AuditVerdict } from "./types.js";
 
 interface AuditArgsOptions {
@@ -5,6 +6,13 @@ interface AuditArgsOptions {
   readonly changedSince: string;
   readonly configPath: string;
   readonly gate: AuditGate;
+  /**
+   * Monorepo workspace scope (a package name). When non-empty, forwarded as
+   * `--workspace <name>` so the audit verdict reflects only that package. NOT
+   * version-gated: `--workspace` is a long-standing global CLI flag. Mirrors
+   * the workspace forwarding in `buildAnalysisArgs`.
+   */
+  readonly workspace: string;
 }
 
 /**
@@ -29,6 +37,10 @@ export const buildAuditArgs = (options: AuditArgsOptions): string[] => {
 
   if (options.changedSince) {
     args.push("--changed-since", options.changedSince);
+  }
+
+  if (options.workspace) {
+    args.push("--workspace", options.workspace);
   }
 
   if (options.production) {
@@ -104,10 +116,28 @@ export const gatingCount = (audit: AuditOutput): number => {
 export const AUDIT_CANDIDATE_HEADER =
   "Audit verdict for your current changes (static candidates, verify before acting).";
 
-const normalizeInlineText = (value: string): string => value.replace(/\s+/g, " ").trim();
+/**
+ * Plain-text change-set scope summary for the audit verdict, e.g.
+ * `1 changed file vs main`. Used in the disabled-status-bar info toast so the
+ * verdict word carries scope context rather than standing alone (#908 n3).
+ * Plain text (not markdown), since it goes into a `showInformationMessage`.
+ */
+export const auditScopeSummary = (audit: AuditOutput): string => {
+  const fileWord = audit.changed_files_count === 1 ? "file" : "files";
+  return `${audit.changed_files_count} changed ${fileWord} vs ${audit.base_ref}`;
+};
 
-const escapeMarkdownText = (value: string): string =>
-  normalizeInlineText(value).replace(/([\\`*_{}[\]()#+.!|>-])/g, "\\$1");
+/**
+ * The trailing ` (N)` gating-count suffix for the status-bar verdict label.
+ * Shown for any non-zero gating count regardless of verdict, so a `warn`
+ * verdict's glance matches the tooltip's own `count > 0` branch (a `warn` that
+ * suppressed the count read as a clean pass at a glance). Empty when nothing is
+ * gating. Pure so the rule is unit-tested without a status-bar mock.
+ */
+export const auditGatingSuffix = (audit: AuditOutput): string => {
+  const count = gatingCount(audit);
+  return count > 0 ? ` (${count})` : "";
+};
 
 interface GatingRow {
   readonly count: number;

@@ -14,6 +14,7 @@ Codebase intelligence for TypeScript and JavaScript. Real-time diagnostics for u
 - **Security Candidates view** (opt-in): surfaces local `client-server-leak` and tainted-sink CWE findings from `fallow security` as UNVERIFIED candidates for you or an AI agent to verify, never confirmed vulnerabilities. Off by default; enabling it runs a separate `fallow security` scan only when the view is opened, so it never slows the editor or the other views.
 - **Runtime Coverage view**: point Fallow at a local runtime-coverage capture to see hot paths and cleanup candidates (safe-to-delete and review-required), framed as candidates to verify, not facts. Local-only and offline (cloud/continuous monitoring is never invoked). Requires the fallow-cov sidecar (and a runtime-coverage license or trial when a license is present): run `fallow coverage setup` first. Loads only when you point it at a capture, so it never slows the editor or the other views.
 - **Status bar**: see total issue count and duplication percentage at a glance, with an optional health score/grade segment (e.g. `health: B (82)`)
+- **Audit verdict status bar** (on by default): run `Fallow: Audit Changed Files` to get a pass/warn/fail verdict for your current change set, shown in a dedicated status-bar item with a gating-candidate count and a per-category tooltip breakdown. Opt into re-running it on every JS/TS save with `fallow.audit.runOnSave`. The verdict is the CLI's own gate result; findings are static candidates to verify.
 - **License management**: activate, refresh, or deactivate a Fallow license without leaving the editor, with an optional status-bar indicator showing your tier and expiry. The activation token travels only via the CLI's stdin (never the command line), and the indicator probes status passively, so it never blocks startup.
 - **Auto-fix**: remove unused exports, dependencies, and enum members with one command
 - **Auto-download**: the extension downloads managed `fallow-lsp` and `fallow` CLI binaries automatically
@@ -38,6 +39,7 @@ code --install-extension fallow-rs.fallow-vscode
 | Command | Description |
 |---------|-------------|
 | `Fallow: Run Analysis` | Run full codebase analysis and update tree views |
+| `Fallow: Audit Changed Files` | Audit the current change set for a pass/warn/fail verdict, shown in the audit verdict status-bar item (or an information message when that item is disabled). Findings are static candidates to verify. |
 | `Fallow: Reload Health` | Re-run the Health view analysis (score, complexity, hotspot and refactoring candidates) |
 | `Fallow: Scan for Security Candidates` | Scan for local security candidates (`client-server-leak`, tainted-sink CWE findings) and populate the Security Candidates view. Requires `fallow.security.enabled`. Results are UNVERIFIED candidates to verify, never confirmed vulnerabilities. |
 | `Fallow: Load Runtime Coverage` | Analyze a local runtime-coverage capture and populate the Runtime Coverage view with hot paths and cleanup candidates. Prompts for a capture when `fallow.coverage.capturePath` is empty. Requires the fallow-cov sidecar (`fallow coverage setup`). |
@@ -93,6 +95,9 @@ Mute state is stored in the workspace, so it survives reload but does not bleed 
 | `fallow.license.refreshOnStartup` | `false` | Probe license status once when the extension activates. Off by default so the editor never shells out to fallow on startup unless you opt in; the indicator otherwise updates only when you run a Fallow license command. |
 | `fallow.production` | `false` | Production mode: exclude test/dev files, only production scripts. |
 | `fallow.changedSince` | `""` | Git ref (tag, branch, or SHA) to scope the Problems panel and sidebar to files changed since that ref, mirroring the CLI's `--changed-since`. Tag your current commit (e.g. `fallow-baseline`) and set this to the tag to enforce "no new issues going forward" while ignoring pre-existing findings. |
+| `fallow.audit.gate` | `"new-only"` | Which findings affect the audit verdict. `new-only` fails only on findings introduced by the current change set (runs an extra base-snapshot pass); `all` fails on every finding in changed files. Mirrors `fallow audit --gate`. |
+| `fallow.audit.statusBar.enabled` | `true` | Show the audit verdict (pass/warn/fail) for the current change set in the status bar. Toggling takes effect immediately, no window reload needed. |
+| `fallow.audit.runOnSave` | `false` | Re-run the audit verdict automatically when a JS/TS file is saved. Off by default to avoid added latency; the **Fallow: Audit Changed Files** command and the status-bar item run it on demand. |
 | `fallow.trace.server` | `"off"` | LSP trace level: `off`, `messages`, or `verbose`. |
 
 ## Binary resolution
