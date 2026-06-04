@@ -28,6 +28,7 @@ interface ViewsWelcomeContribution {
 interface ConfigProperty {
   readonly description?: string;
   readonly markdownDescription?: string;
+  readonly scope?: string;
   readonly default?: unknown;
 }
 
@@ -40,11 +41,11 @@ interface ExtensionPackage {
     readonly views: {
       readonly fallow: readonly ViewContribution[];
     };
-    readonly viewsWelcome: readonly ViewsWelcomeContribution[];
     readonly menus: {
       readonly "view/title": readonly MenuContribution[];
       readonly commandPalette: readonly MenuContribution[];
     };
+    readonly viewsWelcome: readonly ViewsWelcomeContribution[];
   };
 }
 
@@ -144,6 +145,69 @@ describe("package.json workspace picker contributions", () => {
     // outside a monorepo).
     expect(commandPaletteEntry("fallow.selectWorkspace")).toBeUndefined();
     expect(commandPaletteEntry("fallow.clearWorkspace")).toBeUndefined();
+  });
+});
+
+describe("package.json runtime coverage contributions", () => {
+  it("contributes the load/reload/clear commands with distinct icons", () => {
+    expect(command("fallow.loadCoverage")).toMatchObject({
+      title: "Fallow: Load Runtime Coverage",
+      icon: "$(graph)",
+    });
+    expect(command("fallow.reloadCoverage")).toMatchObject({ icon: "$(refresh)" });
+    expect(command("fallow.clearCoverage")).toMatchObject({ icon: "$(clear-all)" });
+  });
+
+  it("adds the Runtime Coverage view to the fallow container", () => {
+    expect(pkg.contributes.views.fallow).toContainEqual({
+      id: "fallow.runtimeCoverage",
+      name: "Runtime Coverage",
+    });
+  });
+
+  it("gates load before a capture is loaded and reload/clear after", () => {
+    expect(viewTitleCommand("fallow.loadCoverage")).toMatchObject({
+      when: "view == fallow.runtimeCoverage && !fallow.hasCoverage",
+      group: "navigation",
+    });
+    expect(viewTitleCommand("fallow.reloadCoverage")).toMatchObject({
+      when: "view == fallow.runtimeCoverage && fallow.hasCoverage",
+      group: "navigation",
+    });
+    expect(viewTitleCommand("fallow.clearCoverage")).toMatchObject({
+      when: "view == fallow.runtimeCoverage && fallow.hasCoverage",
+      group: "navigation",
+    });
+  });
+
+  it("gates reload/clear in the command palette on a loaded capture", () => {
+    expect(commandPaletteEntry("fallow.reloadCoverage")).toMatchObject({
+      when: "fallow.hasCoverage",
+    });
+    expect(commandPaletteEntry("fallow.clearCoverage")).toMatchObject({
+      when: "fallow.hasCoverage",
+    });
+  });
+
+  it("documents the capture-path setting as local-only and resource-scoped", () => {
+    const setting = pkg.contributes.configuration.properties["fallow.coverage.capturePath"];
+    expect(setting?.scope).toBe("resource");
+    expect(setting?.markdownDescription).toContain("local-only");
+  });
+
+  it("contributes the top setting", () => {
+    expect(
+      pkg.contributes.configuration.properties["fallow.coverage.top"]?.markdownDescription,
+    ).toBeTruthy();
+  });
+
+  it("frames the welcome state as candidates, not vulnerabilities", () => {
+    const welcome = pkg.contributes.viewsWelcome.find(
+      (entry) => entry.view === "fallow.runtimeCoverage" && entry.when === "!fallow.hasCoverage",
+    );
+    expect(welcome?.contents).toContain("candidates");
+    expect(welcome?.contents.toLowerCase()).not.toContain("vulnerability");
+    expect(welcome?.contents.toLowerCase()).not.toContain("vulnerabilities");
   });
 });
 

@@ -93,6 +93,26 @@ export const getDuplicationIgnoreImportsOverride = (): boolean | undefined =>
 
 export const getProduction = (): boolean => getConfig().get<boolean>("production", false);
 
+const getCoverageCapturePath = (): string =>
+  getConfig().get<string>("coverage.capturePath", "").trim();
+
+/**
+ * Resolve `fallow.coverage.capturePath` to an absolute path against the
+ * workspace root, mirroring `getResolvedConfigPath`. Empty when unset.
+ */
+export const getCoveragePath = (): string => {
+  const capturePath = getCoverageCapturePath();
+  if (!capturePath || path.isAbsolute(capturePath)) {
+    return capturePath;
+  }
+
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  return workspaceRoot ? path.resolve(workspaceRoot, capturePath) : capturePath;
+};
+
+/** `--top N` cap on hot paths and findings; `0` (default) means no cap. */
+export const getCoverageTop = (): number => getConfig().get<number>("coverage.top", 0);
+
 export const getChangedSince = (): string => getConfig().get<string>("changedSince", "").trim();
 
 export const getHealthEnabled = (): boolean => getConfig().get<boolean>("health.enabled", true);

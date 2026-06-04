@@ -7,6 +7,7 @@ import {
   getHealthEnabled,
   getSecurityEnabled,
   getLicenseRefreshOnStartup,
+  getCoveragePath,
   onConfigChange,
 } from "./config.js";
 import { runAnalysis, runFix, runHealthAnalysis, runSecurityAnalysis, runWorkspaces } from "./commands.js";
@@ -48,12 +49,20 @@ import {
   refreshWorkspacePicker,
   showWorkspacePicker,
 } from "./workspacePicker.js";
-import type { FallowCheckResult, FallowDupesResult, HealthReport } from "./types.js";
+import { RuntimeCoverageTreeProvider } from "./coverageView.js";
+import { runCoverageAnalysis } from "./coverageCommand.js";
+import type {
+  FallowCheckResult,
+  FallowDupesResult,
+  HealthReport,
+  RuntimeCoverageReport,
+} from "./types.js";
 
 let outputChannel: vscode.OutputChannel;
 let lastCheckResult: FallowCheckResult | null = null;
 let lastDupesResult: FallowDupesResult | null = null;
 let lastHealthResult: HealthReport | null = null;
+let lastCoverageReport: RuntimeCoverageReport | null = null;
 
 // The security run is a separate, view-gated process with disjoint config keys
 // from the dead-code analysis: toggling security never re-runs the main
@@ -109,6 +118,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   };
   syncHealthEnabledContext();
   const securityProvider = new SecurityTreeProvider();
+  const coverageProvider = new RuntimeCoverageTreeProvider();
 
   // Use createTreeView to get visibility events. Defer CLI analysis until the
   // tree view is first shown, avoiding a double analysis on activation (the LSP
@@ -229,7 +239,17 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     treeDataProvider: securityProvider,
   });
   securityProvider.setView(securityView);
-  context.subscriptions.push(deadCodeView, duplicatesView, healthView, securityView);
+  const coverageView = vscode.window.createTreeView("fallow.runtimeCoverage", {
+    treeDataProvider: coverageProvider,
+  });
+  coverageProvider.setView(coverageView);
+  context.subscriptions.push(
+    deadCodeView,
+    duplicatesView,
+    healthView,
+    securityView,
+    coverageView,
+  );
 
   const onHealthViewVisible = (): void => {
     if (healthAnalysisRan) {
@@ -328,6 +348,58 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     securityAnalysisRan = await triggerSecurityAnalysis();
   };
 
+  // Runtime coverage is loaded ONLY on explicit command (or lazily on first
+  // view visibility when a capture path is already configured). It is fully
+  // decoupled from the always-on dead-code/dupes pipeline and the LSP (#902):
+  // never wired into triggerCliAnalysis, runAnalysis, the analysisComplete
+  // notification, or REANALYSIS_CONFIG_KEYS. A user who never touches coverage
+  // pays zero cost.
+  const loadCoverage = async (): Promise<void> => {
+    // Intentionally leaves the shared status bar (dead-code/dupes counts)
+    // untouched: runtime coverage is an independent surface (#902). The
+    // progress notification is enough feedback for the load itself.
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "Fallow: Loading runtime coverage...",
+        cancellable: false,
+      },
+      async () => {
+        const report = await runCoverageAnalysis(context, outputChannel);
+        // A null report means cancelled / no path / failure; only surfacing a
+        // loaded report flips the view out of its welcome state. A failed run
+        // already showed its own toast inside runCoverageAnalysis.
+        if (report) {
+          lastCoverageReport = report;
+          coverageProvider.update(report);
+          void vscode.commands.executeCommand("setContext", "fallow.hasCoverage", true);
+        }
+      },
+    );
+  };
+
+  let coverageLoadAttempted = false;
+  const onCoverageViewVisible = (): void => {
+    if (coverageLoadAttempted || lastCoverageReport) {
+      return;
+    }
+    // Lazy auto-load only when the user already pointed at a capture; otherwise
+    // the welcome view's call-to-action drives the first load.
+    if (!getCoveragePath()) {
+      return;
+    }
+    coverageLoadAttempted = true;
+    void loadCoverage();
+  };
+
+  context.subscriptions.push(
+    coverageView.onDidChangeVisibility((e) => {
+      if (e.visible) {
+        onCoverageViewVisible();
+      }
+    }),
+  );
+
   // Register commands
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.analyze", runCliAnalysisCommand),
@@ -370,6 +442,27 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       if (changed) {
         onWorkspaceScopeChange();
       }
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.loadCoverage", async () => {
+      coverageLoadAttempted = true;
+      await loadCoverage();
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.reloadCoverage", async () => {
+      coverageLoadAttempted = true;
+      await loadCoverage();
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.clearCoverage", () => {
+      lastCoverageReport = null;
+      coverageLoadAttempted = false;
+      coverageProvider.update(null);
+      void vscode.commands.executeCommand("setContext", "fallow.hasCoverage", false);
     }),
   );
 
@@ -504,6 +597,14 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
           securityProvider.update(null);
           void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzedSecurity", false);
         }
+      }
+
+      // Scoped to the coverage view only, deliberately NOT in
+      // REANALYSIS_CONFIG_KEYS (#902): re-run coverage when the capture path
+      // changes, but only if a capture was already loaded, so changing the
+      // setting never kicks off work for a user who has not opted in.
+      if (e.affectsConfiguration("fallow.coverage.capturePath") && lastCoverageReport) {
+        void loadCoverage();
       }
     }),
   );

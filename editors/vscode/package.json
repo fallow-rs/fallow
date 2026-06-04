@@ -98,6 +98,21 @@
         "title": "Fallow: Clear Workspace Scope (Analyze All)"
       },
       {
+        "command": "fallow.loadCoverage",
+        "title": "Fallow: Load Runtime Coverage",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "fallow.reloadCoverage",
+        "title": "Fallow: Reload Runtime Coverage",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "fallow.clearCoverage",
+        "title": "Fallow: Clear Runtime Coverage",
+        "icon": "$(clear-all)"
+      },
+      {
         "command": "fallow.fix",
         "title": "Fallow: Auto-Fix (unexport unused, remove unused deps)"
       },
@@ -346,6 +361,18 @@
           "default": false,
           "description": "Enable production mode (excludes test/dev files, only production scripts)."
         },
+        "fallow.coverage.capturePath": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Path to a local runtime-coverage capture (a file or directory). Relative paths are resolved from the workspace root. Used by the Runtime Coverage view to show hot paths and cleanup candidates via `fallow coverage analyze --runtime-coverage`. This is local-only and offline; cloud/continuous monitoring is never invoked. Empty = you will be prompted to pick a capture on first load."
+        },
+        "fallow.coverage.top": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "Show only the top N hot paths and findings in the Runtime Coverage view (mirrors the CLI's `--top`). Set to 0 (the default) for no limit."
+        },
         "fallow.changedSince": {
           "type": "string",
           "default": "",
@@ -431,6 +458,10 @@
         {
           "id": "fallow.security",
           "name": "Security Candidates"
+        },
+        {
+          "id": "fallow.runtimeCoverage",
+          "name": "Runtime Coverage"
         }
       ]
     },
@@ -462,6 +493,21 @@
           "group": "navigation"
         },
         {
+          "command": "fallow.loadCoverage",
+          "when": "view == fallow.runtimeCoverage && !fallow.hasCoverage",
+          "group": "navigation"
+        },
+        {
+          "command": "fallow.reloadCoverage",
+          "when": "view == fallow.runtimeCoverage && fallow.hasCoverage",
+          "group": "navigation"
+        },
+        {
+          "command": "fallow.clearCoverage",
+          "when": "view == fallow.runtimeCoverage && fallow.hasCoverage",
+          "group": "navigation"
+        },
+        {
           "command": "fallow.selectWorkspace",
           "when": "view == fallow.deadCode || view == fallow.duplicates",
           "group": "navigation@9"
@@ -486,6 +532,14 @@
         {
           "command": "fallow.reloadAnalysis",
           "when": "false"
+        },
+        {
+          "command": "fallow.reloadCoverage",
+          "when": "fallow.hasCoverage"
+        },
+        {
+          "command": "fallow.clearCoverage",
+          "when": "fallow.hasCoverage"
         },
         {
           "command": "fallow.muteDiagnosticCategory",
@@ -537,6 +591,16 @@
         "view": "fallow.security",
         "contents": "$(check) No security candidates found.\nNote: an empty result is not a clean bill of health.",
         "when": "fallow.hasAnalyzedSecurity"
+      },
+      {
+        "view": "fallow.runtimeCoverage",
+        "contents": "No runtime coverage loaded. Point Fallow at a local capture to see hot paths and cleanup candidates.\n[$(graph) Load Runtime Coverage](command:fallow.loadCoverage)\nRuntime coverage is local-only and offline.",
+        "when": "!fallow.hasCoverage"
+      },
+      {
+        "view": "fallow.runtimeCoverage",
+        "contents": "$(check) No hot paths or cleanup candidates in this capture.",
+        "when": "fallow.hasCoverage"
       }
     ],
     "walkthroughs": [

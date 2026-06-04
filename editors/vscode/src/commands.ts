@@ -100,7 +100,7 @@ export const resolveCliBinary = async (
   return downloadCliBinary(context);
 };
 
-const execFallow = (
+export const execFallow = (
   binary: string | null,
   args: ReadonlyArray<string>,
   cwd: string,
