@@ -227,6 +227,8 @@ mod issue_823_pnpm_package_sources;
 mod issue_868_ionic_lifecycle;
 #[path = "integration_test/issue_873_firebase_messaging_sw.rs"]
 mod issue_873_firebase_messaging_sw;
+#[path = "integration_test/issue_956_playwright_pnpm_exec.rs"]
+mod issue_956_playwright_pnpm_exec;
 #[path = "integration_test/lexical_nodes.rs"]
 mod lexical_nodes;
 #[path = "integration_test/script_multiplexers.rs"]

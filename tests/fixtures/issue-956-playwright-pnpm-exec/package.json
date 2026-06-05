@@ -1,0 +1,10 @@
+{
+  "name": "issue-956-playwright-pnpm-exec",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "srvx": "^0.11.15",
+    "unused-control": "^1.0.0"
+  }
+}

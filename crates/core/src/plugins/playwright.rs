@@ -85,13 +85,13 @@ fn collect_web_server(
     let mut commands: Vec<(String, Option<String>)> = Vec::new();
 
     if let Some(command) =
-        config_parser::extract_config_string(source, config_path, &["webServer", "command"])
+        config_parser::extract_config_command(source, config_path, &["webServer", "command"])
     {
         let cwd = config_parser::extract_config_string(source, config_path, &["webServer", "cwd"]);
         commands.push((command, cwd));
     }
 
-    commands.extend(config_parser::extract_config_array_object_string_pairs(
+    commands.extend(config_parser::extract_config_array_object_command_pairs(
         source,
         config_path,
         &["webServer"],
@@ -291,6 +291,24 @@ mod tests {
             result.setup_files.is_empty(),
             "a flag-only command seeds no files, got {:?}",
             result.setup_files
+        );
+    }
+
+    #[test]
+    fn web_server_template_command_credits_pnpm_exec_cli_dependency() {
+        let source = r"
+            const PORT = 3000;
+            export default {
+                webServer: {
+                    command: `pnpm build && pnpm exec srvx --prod --port ${PORT} --hostname 127.0.0.1`
+                }
+            };
+        ";
+        let result = resolve(source);
+        assert!(
+            result.referenced_dependencies.contains(&"srvx".to_string()),
+            "srvx CLI binary should be credited from pnpm exec template command, got {:?}",
+            result.referenced_dependencies
         );
     }
 

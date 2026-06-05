@@ -72,6 +72,15 @@ pub fn extract_config_string(source: &str, path: &Path, prop_path: &[&str]) -> O
     })
 }
 
+/// Extract a shell command string from a property at a nested path.
+#[must_use]
+pub fn extract_config_command(source: &str, path: &Path, prop_path: &[&str]) -> Option<String> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        get_nested_command_from_object(obj, prop_path)
+    })
+}
+
 /// Extract string values from top-level properties of the default export or
 /// `module.exports` object.
 #[must_use]
@@ -625,6 +634,42 @@ pub fn extract_config_array_object_string_pairs(
             };
             let Some(primary) = find_property(item, primary_key)
                 .and_then(|prop| expression_to_path_string(&prop.value))
+            else {
+                continue;
+            };
+            let secondary = find_property(item, secondary_key)
+                .and_then(|prop| expression_to_path_string(&prop.value));
+            results.push((primary, secondary));
+        }
+
+        (!results.is_empty()).then_some(results)
+    })
+    .unwrap_or_default()
+}
+
+/// Extract paired shell command and string values from each object element of an array.
+#[must_use]
+pub fn extract_config_array_object_command_pairs(
+    source: &str,
+    path: &Path,
+    array_path: &[&str],
+    primary_key: &str,
+    secondary_key: &str,
+) -> Vec<(String, Option<String>)> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let array_expr = get_nested_expression(obj, array_path)?;
+        let Expression::ArrayExpression(arr) = array_expr else {
+            return None;
+        };
+
+        let mut results = Vec::new();
+        for element in &arr.elements {
+            let Some(Expression::ObjectExpression(item)) = element.as_expression() else {
+                continue;
+            };
+            let Some(primary) = find_property(item, primary_key)
+                .and_then(|prop| expression_to_command(&prop.value))
             else {
                 continue;
             };
@@ -1243,6 +1288,22 @@ fn get_nested_string_from_object(obj: &ObjectExpression, path: &[&str]) -> Optio
     }
 }
 
+/// Navigate a nested property path and get a shell command value.
+fn get_nested_command_from_object(obj: &ObjectExpression, path: &[&str]) -> Option<String> {
+    if path.is_empty() {
+        return None;
+    }
+    if path.len() == 1 {
+        return find_property(obj, path[0]).and_then(|prop| expression_to_command(&prop.value));
+    }
+    let prop = find_property(obj, path[0])?;
+    if let Expression::ObjectExpression(nested) = &prop.value {
+        get_nested_command_from_object(nested, &path[1..])
+    } else {
+        None
+    }
+}
+
 /// Convert an expression to a string if it's a string literal.
 pub(crate) fn expression_to_string(expr: &Expression) -> Option<String> {
     match expr {
@@ -1252,6 +1313,54 @@ pub(crate) fn expression_to_string(expr: &Expression) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// Convert an expression to a shell command when static command tokens are recoverable.
+fn expression_to_command(expr: &Expression) -> Option<String> {
+    match expr {
+        Expression::StringLiteral(s) => Some(s.value.to_string()),
+        Expression::TemplateLiteral(template) => template_literal_to_command(template),
+        Expression::ParenthesizedExpression(paren) => expression_to_command(&paren.expression),
+        Expression::TSAsExpression(ts_as) => expression_to_command(&ts_as.expression),
+        Expression::TSSatisfiesExpression(ts_sat) => expression_to_command(&ts_sat.expression),
+        _ => None,
+    }
+}
+
+fn template_literal_to_command(template: &TemplateLiteral<'_>) -> Option<String> {
+    let first = template.quasis.first()?.value.raw.as_str();
+    if first.trim_start().is_empty() {
+        return None;
+    }
+
+    let mut command = String::new();
+    for (idx, quasi) in template.quasis.iter().enumerate() {
+        command.push_str(quasi.value.raw.as_str());
+        if idx < template.expressions.len() {
+            let next = template
+                .quasis
+                .get(idx + 1)
+                .map_or("", |next| next.value.raw.as_str());
+            if dynamic_template_boundary_splits_static_token(quasi.value.raw.as_str(), next) {
+                return None;
+            }
+            command.push(' ');
+        }
+    }
+
+    Some(command)
+}
+
+fn dynamic_template_boundary_splits_static_token(before: &str, after: &str) -> bool {
+    before
+        .chars()
+        .next_back()
+        .is_some_and(is_command_token_char)
+        && after.chars().next().is_some_and(is_command_token_char)
+}
+
+fn is_command_token_char(ch: char) -> bool {
+    !ch.is_whitespace() && !matches!(ch, '&' | '|' | ';' | '"' | '\'')
 }
 
 /// Convert an expression to a path-like string if it's statically recoverable.
