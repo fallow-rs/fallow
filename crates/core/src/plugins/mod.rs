@@ -16,6 +16,7 @@ use regex::Regex;
 
 const TEST_ENTRY_POINT_PLUGINS: &[&str] = &[
     "ava",
+    "bun",
     "cucumber",
     "cypress",
     "jest",
@@ -1593,6 +1594,7 @@ mod tests {
     #[test]
     fn test_plugins_have_test_entry_patterns() {
         let test_plugins: Vec<&dyn Plugin> = vec![
+            &bun::BunPlugin,
             &jest::JestPlugin,
             &vitest::VitestPlugin,
             &mocha::MochaPlugin,

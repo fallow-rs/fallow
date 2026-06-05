@@ -238,6 +238,48 @@ fn bun_bare_runtime_module_is_not_unlisted() {
 }
 
 #[test]
+fn bun_test_discovery_uses_default_patterns_scoped_by_test_root() {
+    let root = fixture_path("issue-951-bun-test-discovery");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| {
+            file.file
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&file.file.path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+
+    for used in [
+        "test/unit/example.test.ts",
+        "test/unit/smoke_spec.ts",
+        "test/unit/helpers/helper.ts",
+        "test/setup.ts",
+    ] {
+        assert!(
+            !unused_files.iter().any(|path| path == used),
+            "{used} should be reachable through Bun test discovery or preload: {unused_files:?}"
+        );
+    }
+
+    for still_unused in [
+        "test/outside/outside.test.ts",
+        "test/unit/helpers/orphan.ts",
+    ] {
+        assert!(
+            unused_files.iter().any(|path| path == still_unused),
+            "{still_unused} should remain reportable: {unused_files:?}"
+        );
+    }
+}
+
+#[test]
 fn wildcard_tsconfig_paths_do_not_misclassify_bare_imports() {
     let root = fixture_path("issue-327-wildcard-paths-node-builtins");
     let config = create_config(root);

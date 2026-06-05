@@ -1,0 +1,12 @@
+{
+  "name": "issue-951-bun-test-discovery",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "bun test test/unit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
