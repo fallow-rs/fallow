@@ -1583,6 +1583,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn relative_package_root_source_fallback_uses_package_source_entry() {
         let root = PathBuf::from("/project");
         let source_path = root.join("custom/entry.js");
