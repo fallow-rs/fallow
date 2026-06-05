@@ -65,6 +65,8 @@ mod issue_546_storybook_runtime_resources;
 mod issue_914_pnpm_bare_binary;
 #[path = "integration_test/issue_948_vscode_provider_members.rs"]
 mod issue_948_vscode_provider_members;
+#[path = "integration_test/issue_952_package_path_resolution.rs"]
+mod issue_952_package_path_resolution;
 #[path = "integration_test/issue_954_pino_transport_target.rs"]
 mod issue_954_pino_transport_target;
 #[path = "integration_test/jsx_assets_and_jsdoc.rs"]

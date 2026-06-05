@@ -197,6 +197,7 @@ pub fn cached_to_module_opts(
         dynamic_imports,
         dynamic_import_patterns,
         require_calls,
+        package_path_references: cached.package_path_references.clone(),
         member_accesses: cached.member_accesses.clone(),
         whole_object_uses: cached.whole_object_uses.clone(),
         has_cjs_exports: cached.has_cjs_exports,
@@ -364,6 +365,7 @@ pub fn module_to_cached(
                 local_name: r.local_name.clone(),
             })
             .collect(),
+        package_path_references: module.package_path_references.clone(),
         member_accesses: module.member_accesses.clone(),
         whole_object_uses: module.whole_object_uses.clone(),
         dynamic_import_patterns: module

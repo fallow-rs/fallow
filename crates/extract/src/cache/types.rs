@@ -180,7 +180,13 @@ use crate::MemberKind;
 /// dynamic imports so runtime transport dependencies are credited. Pre-118
 /// entries can surface false `unused-dependency` findings until the file is
 /// re-extracted.
-pub(super) const CACHE_VERSION: u32 = 118;
+///
+/// Bumped to 119 for issue #952: JS/TS extraction now records static package
+/// path resolution references so packages consumed via package-root and
+/// `pkg/package.json` lookups are credited as dependency usage. Pre-119
+/// entries omit those references and can surface false `unused-dependency`
+/// findings until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 119;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -223,7 +229,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 712);
+assert_cached_type_size!(CachedModule, 736);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -270,6 +276,8 @@ pub struct CachedModule {
     pub dynamic_imports: Vec<CachedDynamicImport>,
     /// `require()` specifiers.
     pub require_calls: Vec<CachedRequireCall>,
+    /// Package names statically referenced through package path resolution.
+    pub package_path_references: Vec<String>,
     /// Static member accesses (e.g., `Status.Active`).
     pub member_accesses: Vec<crate::MemberAccess>,
     /// Identifiers used as whole objects (Object.values, for..in, spread, etc.).

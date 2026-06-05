@@ -132,6 +132,14 @@ fn credit_workspace_package_usage(
     }
 }
 
+fn credit_package_path_references(graph: &mut graph::ModuleGraph, modules: &[extract::ModuleInfo]) {
+    for module in modules {
+        for package_name in &module.package_path_references {
+            record_graph_package_usage(graph, package_name, module.file_id, false);
+        }
+    }
+}
+
 /// Result of the full analysis pipeline, including optional performance timings.
 pub struct AnalysisOutput {
     pub results: AnalysisResults,
@@ -512,6 +520,7 @@ pub fn analyze_with_parse_result(
         &entry_points.test,
         files,
     );
+    credit_package_path_references(&mut graph, modules);
     credit_workspace_package_usage(&mut graph, &resolved, workspaces);
     let graph_ms = t.elapsed().as_secs_f64() * 1000.0;
 
@@ -766,6 +775,7 @@ fn analyze_full(
         &entry_points.test,
         files,
     );
+    credit_package_path_references(&mut graph, &modules);
     credit_workspace_package_usage(&mut graph, &resolved, workspaces);
     let graph_ms = t.elapsed().as_secs_f64() * 1000.0;
 

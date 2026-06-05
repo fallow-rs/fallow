@@ -22,6 +22,8 @@ pub struct ModuleInfo {
     pub dynamic_import_patterns: Vec<DynamicImportPattern>,
     /// All `require()` calls.
     pub require_calls: Vec<RequireCallInfo>,
+    /// Package names statically referenced through package path resolution.
+    pub package_path_references: Vec<String>,
     /// Static member access expressions (e.g., `Status.Active`).
     pub member_accesses: Vec<MemberAccess>,
     /// Identifiers used in whole-object access patterns.
@@ -630,7 +632,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 64);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 696);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 720);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]

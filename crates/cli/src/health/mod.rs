@@ -2554,6 +2554,7 @@ mod tests {
             dynamic_imports: vec![],
             dynamic_import_patterns: vec![],
             require_calls: vec![],
+            package_path_references: vec![],
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,

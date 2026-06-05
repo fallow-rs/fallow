@@ -594,6 +594,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
             destructured_names: vec![],
             local_name: None,
         }],
+        package_path_references: vec![],
         member_accesses: vec![
             MemberAccess {
                 object: "Status".to_string(),

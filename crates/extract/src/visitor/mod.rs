@@ -112,6 +112,7 @@ pub(crate) struct ModuleInfoExtractor {
     pub(crate) dynamic_imports: Vec<DynamicImportInfo>,
     pub(crate) dynamic_import_patterns: Vec<DynamicImportPattern>,
     pub(crate) require_calls: Vec<RequireCallInfo>,
+    pub(crate) package_path_references: Vec<String>,
     pub(crate) member_accesses: Vec<MemberAccess>,
     pub(crate) whole_object_uses: Vec<String>,
     pub(crate) has_cjs_exports: bool,
@@ -153,6 +154,12 @@ pub(crate) struct ModuleInfoExtractor {
     pub(crate) node_url_file_url_to_path_bindings: FxHashSet<String>,
     pub(crate) current_module_file_path_bindings: FxHashSet<String>,
     pub(crate) child_process_fork_target_bindings: FxHashMap<String, Vec<String>>,
+    pub(crate) static_string_bindings: FxHashMap<String, String>,
+    pub(crate) static_string_arrays: FxHashMap<String, Vec<String>>,
+    pub(crate) static_object_property_values: FxHashMap<String, FxHashMap<String, Vec<String>>>,
+    pub(crate) loop_string_bindings: Vec<FxHashMap<String, Vec<String>>>,
+    pub(crate) loop_object_property_values: Vec<FxHashMap<String, FxHashMap<String, Vec<String>>>>,
+    pub(crate) package_resolution_function_args: FxHashMap<String, usize>,
     pub(crate) nested_declaration_stack: Vec<FxHashSet<String>>,
     pub(crate) class_type_param_constraints: Vec<FxHashMap<String, Option<String>>>,
     pub(crate) pending_playwright_factory_calls: Vec<PendingPlaywrightFactory>,
@@ -827,6 +834,7 @@ impl ModuleInfoExtractor {
             dynamic_imports: self.dynamic_imports,
             dynamic_import_patterns: self.dynamic_import_patterns,
             require_calls: self.require_calls,
+            package_path_references: self.package_path_references,
             member_accesses: self.member_accesses,
             whole_object_uses: self.whole_object_uses,
             has_cjs_exports: self.has_cjs_exports,
@@ -883,6 +891,8 @@ impl ModuleInfoExtractor {
         info.dynamic_import_patterns
             .extend(self.dynamic_import_patterns);
         info.require_calls.extend(self.require_calls);
+        info.package_path_references
+            .extend(self.package_path_references);
         info.member_accesses.extend(self.member_accesses);
         info.whole_object_uses.extend(self.whole_object_uses);
         info.has_cjs_exports |= self.has_cjs_exports;

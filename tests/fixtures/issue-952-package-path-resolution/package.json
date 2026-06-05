@@ -1,0 +1,17 @@
+{
+  "name": "issue-952-package-path-resolution",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsx scripts/build.ts"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
+    "unused-control": "^1.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}
