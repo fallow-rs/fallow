@@ -461,7 +461,20 @@ fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
     let bytes = body.as_bytes();
     let mut cursor = 0;
     while let Some(rel) = body[cursor..].find("import(") {
-        let open = cursor + rel + "import(".len();
+        let import_pos = cursor + rel;
+        // JSDoc type expressions live inside a `{...}` brace group — that is the
+        // shared syntax for every tag context (`@type`, `@param`, `@returns`,
+        // `@typedef`, `@callback`, ...). A bare `import('...')` in JSDoc prose
+        // (e.g. a header comment that documents which import forms a file
+        // handles) is *example documentation*, not a type annotation, so it
+        // must not be treated as a real import. Without this check, files whose
+        // JSDoc mentions `import('./x')` in prose surface as false-positive
+        // unresolved-import findings.
+        if !is_inside_jsdoc_brace_group(bytes, import_pos) {
+            cursor = import_pos + "import(".len();
+            continue;
+        }
+        let open = import_pos + "import(".len();
         cursor = open;
         if open >= bytes.len() {
             break;
@@ -532,6 +545,23 @@ fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
             source_span: oxc_span::Span::default(),
         });
     }
+}
+
+/// Returns true iff byte index `pos` falls inside an open `{...}` brace group
+/// within `body`. Used to scope JSDoc `import('...')` matching to actual type
+/// expressions (which live in braces, e.g. `@type {import('./X').Y}`) and skip
+/// prose mentions of `import(...)` in JSDoc descriptions.
+fn is_inside_jsdoc_brace_group(body: &[u8], pos: usize) -> bool {
+    let mut depth: i32 = 0;
+    let limit = pos.min(body.len());
+    for &b in &body[..limit] {
+        match b {
+            b'{' => depth += 1,
+            b'}' if depth > 0 => depth -= 1,
+            _ => {}
+        }
+    }
+    depth > 0
 }
 
 /// Check if a JSDoc comment body contains a `@public` or `@api public` tag.
@@ -977,6 +1007,39 @@ mod tests {
     #[test]
     fn scan_jsdoc_no_import_in_body_is_empty() {
         assert!(scan(" * @param foo The foo parameter").is_empty());
+    }
+
+    /// Regression: `import('...')` in JSDoc prose (outside any `{...}` brace
+    /// group) is documentation/example syntax, not a type annotation. It must
+    /// not be reported as a real import. Without this scoping check, files
+    /// whose header doc documents which import forms they handle would surface
+    /// false-positive unresolved-import findings.
+    #[test]
+    fn scan_jsdoc_prose_import_outside_braces_is_skipped() {
+        // Mirrors the exact shape of an extractor's header doc that lists
+        // import forms as bullet-point examples.
+        let body = "\n * Handles:\n * - Dynamic imports (await import('./prose')) \n * - Barrel exports (export * from './prose')\n";
+        let imports = scan(body);
+        assert!(
+            imports.is_empty(),
+            "prose import() should not be matched; got: {:?}",
+            imports.iter().map(|i| i.source.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    /// A real `{@type ...}` annotation following a prose mention of `import()`
+    /// must still be matched — the fix narrows scope without breaking the
+    /// intended JSDoc type-annotation behavior.
+    #[test]
+    fn scan_jsdoc_braced_import_after_prose_is_still_matched() {
+        let body = " * Note: dynamic imports like import('./prose') are not types.\n * @type {import('./real').Foo}";
+        let imports = scan(body);
+        assert_eq!(imports.len(), 1, "got: {imports:?}");
+        assert_eq!(imports[0].source, "./real");
+        assert_eq!(
+            imports[0].imported_name,
+            ImportedName::Named("Foo".to_string())
+        );
     }
 
     #[test]
