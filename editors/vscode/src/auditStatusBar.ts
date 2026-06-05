@@ -1,7 +1,11 @@
 // VS Code injects this module into the extension host at runtime.
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
-import { auditGatingSuffix, auditVerdictPresentation, buildAuditTooltipMarkdown } from "./audit-utils.js";
+import {
+  auditGatingSuffix,
+  auditVerdictPresentation,
+  buildAuditTooltipMarkdown,
+} from "./audit-utils.js";
 import { getChangedSince } from "./config.js";
 import type { AuditOutput } from "./types.js";
 
