@@ -9,55 +9,182 @@ use fallow_core::results::AnalysisResults;
 
 use super::{FIRST_LINE_RANGE, doc_link};
 
+/// Basename of `path`, falling back to the full display string.
+fn cycle_file_name(path: &std::path::Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    )
+}
+
+/// Stable identifier shared by every per-file diagnostic of one cycle, so
+/// editors / agents can fold the N squigglies into a single "one cycle shown
+/// N times" concept. FNV-1a over the sorted file paths, so the id is
+/// independent of which file the cycle is rotated to start at.
+fn cycle_fingerprint(files: &[std::path::PathBuf]) -> String {
+    let mut sorted: Vec<String> = files
+        .iter()
+        .map(|f| f.to_string_lossy().into_owned())
+        .collect();
+    sorted.sort();
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for entry in &sorted {
+        for byte in entry.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        hash ^= u64::from(b'\n');
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("cycle:{hash:016x}")
+}
+
+/// Legacy single-diagnostic emission for cycles whose data carries no
+/// per-file `edges` anchors (historical baseline JSON, or test fixtures that
+/// build `CircularDependency` without populating `edges`). One diagnostic on
+/// the first file, with the other members listed as related info at line 0.
+fn push_legacy_circular_diagnostic(
+    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    cycle: &fallow_core::results::CircularDependency,
+    names: &[String],
+) {
+    let Some(first_file) = cycle.files.first() else {
+        return;
+    };
+    let Ok(uri) = Url::from_file_path(first_file) else {
+        return;
+    };
+    let message = format!("Circular dependency: {}", names.join(" \u{2192} "));
+    let line = cycle.line.saturating_sub(1);
+
+    let related_info: Vec<DiagnosticRelatedInformation> = cycle
+        .files
+        .iter()
+        .skip(1)
+        .enumerate()
+        .filter_map(|(i, f)| {
+            let file_uri = Url::from_file_path(f).ok()?;
+            Some(DiagnosticRelatedInformation {
+                location: Location {
+                    uri: file_uri,
+                    range: FIRST_LINE_RANGE,
+                },
+                message: format!("Step {} in cycle: {}", i + 2, cycle_file_name(f)),
+            })
+        })
+        .collect();
+
+    map.entry(uri).or_default().push(Diagnostic {
+        range: Range {
+            start: Position {
+                line,
+                character: cycle.col,
+            },
+            end: Position {
+                line,
+                character: u32::MAX,
+            },
+        },
+        severity: Some(DiagnosticSeverity::WARNING),
+        source: Some("fallow".to_string()),
+        code: Some(NumberOrString::String("circular-dependency".to_string())),
+        code_description: doc_link("circular-dependencies"),
+        message,
+        related_information: if related_info.is_empty() {
+            None
+        } else {
+            Some(related_info)
+        },
+        ..Default::default()
+    });
+}
+
 pub fn push_circular_dep_diagnostics(
     map: &mut FxHashMap<Url, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
     for cycle in &results.circular_dependencies {
-        if let Some(first_file) = cycle.cycle.files.first()
-            && let Ok(uri) = Url::from_file_path(first_file)
-        {
-            let chain: Vec<String> = cycle
-                .cycle
-                .files
-                .iter()
-                .map(|f| {
-                    f.file_name().map_or_else(
-                        || f.display().to_string(),
-                        |n| n.to_string_lossy().into_owned(),
-                    )
-                })
-                .collect();
-            let message = format!("Circular dependency: {}", chain.join(" \u{2192} "));
-            let line = cycle.cycle.line.saturating_sub(1);
+        let files = &cycle.cycle.files;
+        if files.is_empty() {
+            continue;
+        }
+        // No per-file anchors (old data): fall back to the single-first-file
+        // diagnostic so behavior is unchanged for consumers predating `edges`.
+        if cycle.cycle.edges.is_empty() {
+            let file_names: Vec<String> = files.iter().map(|f| cycle_file_name(f)).collect();
+            push_legacy_circular_diagnostic(map, &cycle.cycle, &file_names);
+            continue;
+        }
 
-            let related_info: Vec<DiagnosticRelatedInformation> = cycle
-                .cycle
-                .files
-                .iter()
-                .skip(1)
-                .enumerate()
-                .filter_map(|(i, f)| {
-                    let file_uri = Url::from_file_path(f).ok()?;
-                    let name = f.file_name().map_or_else(
-                        || f.display().to_string(),
-                        |n| n.to_string_lossy().into_owned(),
-                    );
-                    Some(DiagnosticRelatedInformation {
-                        location: Location {
-                            uri: file_uri,
-                            range: FIRST_LINE_RANGE,
-                        },
-                        message: format!("Step {} in cycle: {name}", i + 2),
+        // Names are derived from the EDGES (not `files`) so all the rotated
+        // message and related-info index math below stays in bounds even if a
+        // caller ever passes `edges.len() != files.len()`. Core enforces the
+        // invariant; the LSP renders without depending on it.
+        let names: Vec<String> = cycle
+            .cycle
+            .edges
+            .iter()
+            .map(|edge| cycle_file_name(&edge.path))
+            .collect();
+        let n = names.len();
+        let cycle_id = cycle_fingerprint(files);
+        let suffix = if n == 1 { "" } else { "s" };
+
+        for (i, edge) in cycle.cycle.edges.iter().enumerate() {
+            let Ok(uri) = Url::from_file_path(&edge.path) else {
+                // Render-only drop: an unopenable URL (e.g. a relative or
+                // malformed path) is skipped here, but the `edges` data still
+                // carries every hop. Never let this filter touch the data.
+                continue;
+            };
+            let line = edge.line.saturating_sub(1);
+            // Rotate the chain so the message reads from the file the user is
+            // standing in: on `b` of a -> b -> c -> a it reads
+            // "Circular dependency (3 files): b -> c -> a -> b".
+            let rotated: Vec<&str> = (0..=n).map(|k| names[(i + k) % n].as_str()).collect();
+            let message = format!(
+                "Circular dependency ({n} file{suffix}): {}",
+                rotated.join(" \u{2192} "),
+            );
+
+            let related_info: Vec<DiagnosticRelatedInformation> =
+                cycle
+                    .cycle
+                    .edges
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, _)| *j != i)
+                    .filter_map(|(j, other)| {
+                        let other_uri = Url::from_file_path(&other.path).ok()?;
+                        let other_line = other.line.saturating_sub(1);
+                        Some(DiagnosticRelatedInformation {
+                            location: Location {
+                                uri: other_uri,
+                                range: Range {
+                                    start: Position {
+                                        line: other_line,
+                                        character: other.col,
+                                    },
+                                    end: Position {
+                                        line: other_line,
+                                        character: u32::MAX,
+                                    },
+                                },
+                            },
+                            message: format!(
+                                "Cycle hop: {} \u{2192} {}",
+                                names[j],
+                                names[(j + 1) % n],
+                            ),
+                        })
                     })
-                })
-                .collect();
+                    .collect();
 
             map.entry(uri).or_default().push(Diagnostic {
                 range: Range {
                     start: Position {
                         line,
-                        character: cycle.cycle.col,
+                        character: edge.col,
                     },
                     end: Position {
                         line,
@@ -74,6 +201,12 @@ pub fn push_circular_dep_diagnostics(
                 } else {
                     Some(related_info)
                 },
+                // Shared cycle identity so editors / agents can correlate the
+                // N per-file squigglies into one cycle. `attach_changed_since_data`
+                // merges `changedSince` into this object without clobbering it.
+                data: Some(serde_json::json!({
+                    "circularDependency": { "cycleId": cycle_id, "fileCount": n }
+                })),
                 ..Default::default()
             });
         }
@@ -222,7 +355,7 @@ mod tests {
     use fallow_core::duplicates::{DuplicationReport, DuplicationStats};
     use fallow_core::results::{
         AnalysisResults, BoundaryViolation, BoundaryViolationFinding, CircularDependency,
-        CircularDependencyFinding,
+        CircularDependencyEdge, CircularDependencyFinding,
     };
     use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString, Url};
 
@@ -272,6 +405,7 @@ mod tests {
                     length: 3,
                     line: 2,
                     col: 20,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -324,6 +458,7 @@ mod tests {
                     length: 1,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -348,6 +483,7 @@ mod tests {
                     length: 0,
                     line: 0,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -355,6 +491,156 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
         assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn circular_dependency_with_edges_emits_per_file_diagnostics() {
+        let root = test_root();
+        let file_a = root.join("src/a.ts");
+        let file_b = root.join("src/b.ts");
+        let file_c = root.join("src/c.ts");
+
+        let mut results = AnalysisResults::default();
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![file_a.clone(), file_b.clone(), file_c.clone()],
+                    length: 3,
+                    line: 5,
+                    col: 8,
+                    edges: vec![
+                        CircularDependencyEdge {
+                            path: file_a.clone(),
+                            line: 5,
+                            col: 8,
+                        },
+                        CircularDependencyEdge {
+                            path: file_b.clone(),
+                            line: 3,
+                            col: 4,
+                        },
+                        CircularDependencyEdge {
+                            path: file_c.clone(),
+                            line: 7,
+                            col: 2,
+                        },
+                    ],
+                    is_cross_package: false,
+                },
+            ));
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri_a = Url::from_file_path(&file_a).unwrap();
+        let uri_b = Url::from_file_path(&file_b).unwrap();
+        let uri_c = Url::from_file_path(&file_c).unwrap();
+
+        // One squiggly per file in the cycle, each anchored at that file's
+        // outgoing import.
+        assert_eq!(diags[&uri_a].len(), 1);
+        assert_eq!(diags[&uri_b].len(), 1);
+        assert_eq!(diags[&uri_c].len(), 1);
+
+        let da = &diags[&uri_a][0];
+        assert_eq!(da.range.start.line, 4); // 1-based 5 -> 0-based 4
+        assert_eq!(da.range.start.character, 8);
+        assert_eq!(
+            da.code,
+            Some(NumberOrString::String("circular-dependency".to_string()))
+        );
+        // Message rotates to start at the current file.
+        assert_eq!(
+            da.message,
+            "Circular dependency (3 files): a.ts \u{2192} b.ts \u{2192} c.ts \u{2192} a.ts"
+        );
+
+        let db = &diags[&uri_b][0];
+        assert_eq!(db.range.start.line, 2);
+        assert_eq!(db.range.start.character, 4);
+        assert_eq!(
+            db.message,
+            "Circular dependency (3 files): b.ts \u{2192} c.ts \u{2192} a.ts \u{2192} b.ts"
+        );
+
+        let dc = &diags[&uri_c][0];
+        assert_eq!(dc.range.start.line, 6);
+        assert_eq!(dc.range.start.character, 2);
+
+        // related_information points at the OTHER hops' REAL locations, not
+        // line 0.
+        let related = da.related_information.as_ref().unwrap();
+        assert_eq!(related.len(), 2);
+        let b_related = related
+            .iter()
+            .find(|r| r.location.uri == uri_b)
+            .expect("file_b should be a related hop");
+        assert_eq!(b_related.location.range.start.line, 2); // edge_b line 3 -> 0-based 2
+        assert_eq!(b_related.location.range.start.character, 4);
+
+        // Every per-file diagnostic shares one cycleId so editors / agents can
+        // fold them into a single cycle; fileCount reflects the cycle size.
+        let id_a = da.data.as_ref().unwrap()["circularDependency"]["cycleId"]
+            .as_str()
+            .unwrap();
+        let id_b = db.data.as_ref().unwrap()["circularDependency"]["cycleId"]
+            .as_str()
+            .unwrap();
+        let id_c = dc.data.as_ref().unwrap()["circularDependency"]["cycleId"]
+            .as_str()
+            .unwrap();
+        assert_eq!(id_a, id_b);
+        assert_eq!(id_b, id_c);
+        assert!(id_a.starts_with("cycle:"));
+        assert_eq!(
+            da.data.as_ref().unwrap()["circularDependency"]["fileCount"],
+            serde_json::json!(3)
+        );
+    }
+
+    #[test]
+    fn circular_dependency_edge_with_unopenable_path_is_dropped_from_render_only() {
+        // An edge whose path is not an absolute file path cannot become a
+        // file URI, so it gets no squiggly, but the OTHER hops still render.
+        // This proves the render-side filter never short-circuits the loop.
+        let root = test_root();
+        let file_a = root.join("src/a.ts");
+        let relative = PathBuf::from("relative/b.ts");
+
+        let mut results = AnalysisResults::default();
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![file_a.clone(), relative.clone()],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    edges: vec![
+                        CircularDependencyEdge {
+                            path: file_a.clone(),
+                            line: 2,
+                            col: 0,
+                        },
+                        CircularDependencyEdge {
+                            path: relative.clone(),
+                            line: 4,
+                            col: 0,
+                        },
+                    ],
+                    is_cross_package: false,
+                },
+            ));
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        // file_a (absolute) still renders; the relative hop is silently
+        // skipped from rendering only.
+        let uri_a = Url::from_file_path(&file_a).unwrap();
+        assert_eq!(diags[&uri_a].len(), 1);
+        assert!(Url::from_file_path(&relative).is_err());
     }
 
     #[test]

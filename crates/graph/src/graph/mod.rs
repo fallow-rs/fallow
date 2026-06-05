@@ -234,7 +234,11 @@ impl ModuleGraph {
         self.edges[range.clone()].iter().map(|e| e.target).collect()
     }
 
-    /// Find the byte offset of the first import statement from `source` to `target`.
+    /// Find the byte offset of the import statement from `source` to `target`.
+    ///
+    /// Mixed type/value imports to the same target are stored as one edge. Prefer
+    /// the first value-carrying import so runtime-cycle diagnostics and line
+    /// suppressions anchor on the import that actually participates in the cycle.
     /// Returns `None` if no edge exists or the edge has no symbols.
     #[must_use]
     pub fn find_import_span_start(&self, source: FileId, target: FileId) -> Option<u32> {
@@ -245,7 +249,12 @@ impl ModuleGraph {
         let range = &self.modules[idx].edge_range;
         for edge in &self.edges[range.clone()] {
             if edge.target == target {
-                return edge.symbols.first().map(|s| s.import_span.start);
+                return edge
+                    .symbols
+                    .iter()
+                    .find(|s| !s.is_type_only)
+                    .or_else(|| edge.symbols.first())
+                    .map(|s| s.import_span.start);
             }
         }
         None
@@ -257,16 +266,12 @@ impl ModuleGraph {
     /// span start of the first value-carrying symbol (or the first symbol
     /// when every symbol is type-only).
     ///
-    /// The span pick differs from `find_import_span_start` (which always
-    /// returns the first symbol's span). When `featureB` has both
-    /// `import type { Foo } from './x'` and `import { bar } from './x'`,
-    /// fallow groups them into ONE edge with the type-only symbol first
-    /// and the value symbol second. The boundary detector needs the span
-    /// of the value symbol so that the violation is anchored on the
-    /// runtime import line; otherwise a `// fallow-ignore-next-line` above
-    /// the type-only line would silently suppress the real violation
-    /// (and conversely, the violation would point at a line that doesn't
-    /// actually carry the offending runtime dependency).
+    /// When `featureB` has both `import type { Foo } from './x'` and
+    /// `import { bar } from './x'`, fallow groups them into ONE edge with the
+    /// type-only symbol first and the value symbol second. Consumers need the
+    /// value span so findings anchor on the runtime import line; otherwise a
+    /// `// fallow-ignore-next-line` above the type-only line would silently
+    /// suppress the real violation.
     ///
     /// Returns an empty iterator for out-of-range file ids.
     pub fn outgoing_edge_summaries(
@@ -865,6 +870,67 @@ mod tests {
         let span_start = graph.find_import_span_start(FileId(0), FileId(1));
         assert!(span_start.is_some());
         assert_eq!(span_start.unwrap(), 0);
+    }
+
+    #[test]
+    fn graph_find_import_span_start_prefers_value_import_on_mixed_edge() {
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/entry.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/utils.ts"),
+                size_bytes: 50,
+            },
+        ];
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/entry.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/entry.ts"),
+                resolved_imports: vec![
+                    ResolvedImport {
+                        info: ImportInfo {
+                            source: "./utils".to_string(),
+                            imported_name: ImportedName::Named("Foo".to_string()),
+                            local_name: "Foo".to_string(),
+                            is_type_only: true,
+                            from_style: false,
+                            span: oxc_span::Span::new(10, 20),
+                            source_span: oxc_span::Span::default(),
+                        },
+                        target: ResolveResult::InternalModule(FileId(1)),
+                    },
+                    ResolvedImport {
+                        info: ImportInfo {
+                            source: "./utils".to_string(),
+                            imported_name: ImportedName::Named("foo".to_string()),
+                            local_name: "foo".to_string(),
+                            is_type_only: false,
+                            from_style: false,
+                            span: oxc_span::Span::new(50, 60),
+                            source_span: oxc_span::Span::default(),
+                        },
+                        target: ResolveResult::InternalModule(FileId(1)),
+                    },
+                ],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/project/utils.ts"),
+                ..Default::default()
+            },
+        ];
+
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+        assert_eq!(graph.find_import_span_start(FileId(0), FileId(1)), Some(50));
     }
 
     #[test]

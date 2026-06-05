@@ -383,6 +383,7 @@ expression: redact_version(&json_str)
       "length": 2,
       "line": 3,
       "col": 0,
+      "edges": [],
       "actions": [
         {
           "type": "refactor-cycle",

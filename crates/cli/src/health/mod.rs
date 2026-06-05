@@ -85,6 +85,10 @@ pub struct HealthOptions<'a> {
     pub baseline: Option<&'a std::path::Path>,
     pub save_baseline: Option<&'a std::path::Path>,
     pub complexity: bool,
+    /// Include the per-decision-point complexity breakdown (`contributions[]`)
+    /// on each complexity finding in JSON output. Drives the VS Code inline
+    /// editor breakdown; off by default to keep CI/default output lean.
+    pub complexity_breakdown: bool,
     pub file_scores: bool,
     /// Explicitly include coverage gaps in the rendered report.
     pub coverage_gaps: bool,
@@ -345,6 +349,7 @@ fn execute_health_inner(
         ws_roots.as_deref(),
         max_cyclomatic,
         max_cognitive,
+        opts.complexity_breakdown,
     );
     let mut findings = findings;
     let complexity_ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -514,6 +519,7 @@ fn execute_health_inner(
             max_crap,
             max_cyclomatic,
             max_cognitive,
+            opts.complexity_breakdown,
         );
     }
     let template_owner_lookup = score_output
@@ -1880,6 +1886,7 @@ fn collect_findings(
     ws_roots: Option<&[std::path::PathBuf]>,
     max_cyclomatic: u16,
     max_cognitive: u16,
+    complexity_breakdown: bool,
 ) -> (Vec<ComplexityViolation>, usize, usize) {
     let mut files_analyzed = 0usize;
     let mut total_functions = 0usize;
@@ -1949,12 +1956,27 @@ fn collect_findings(
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: contributions_for(complexity_breakdown, fc),
                 });
             }
         }
     }
 
     (findings, files_analyzed, total_functions)
+}
+
+/// Clone the per-decision-point breakdown onto a finding only when the caller
+/// opted in via `health --complexity-breakdown`; otherwise leave it empty so it
+/// is omitted from JSON.
+fn contributions_for(
+    complexity_breakdown: bool,
+    fc: &fallow_types::extract::FunctionComplexity,
+) -> Vec<fallow_types::extract::ComplexityContribution> {
+    if complexity_breakdown {
+        fc.contributions.clone()
+    } else {
+        Vec::new()
+    }
 }
 
 /// Merge per-function CRAP data into an existing complexity findings vector.
@@ -1981,6 +2003,7 @@ fn merge_crap_findings(
     max_crap: f64,
     max_cyclomatic: u16,
     max_cognitive: u16,
+    complexity_breakdown: bool,
 ) {
     let finding_index: rustc_hash::FxHashMap<(std::path::PathBuf, u32, u32), usize> = findings
         .iter()
@@ -2106,6 +2129,7 @@ fn merge_crap_findings(
                         template_inherit_provenance,
                     ),
                     component_rollup: None,
+                    contributions: contributions_for(complexity_breakdown, fc),
                 });
             }
         }
@@ -2253,6 +2277,7 @@ fn append_component_rollup_findings(
                 template_cyclomatic: template.cyclomatic,
                 template_cognitive: template.cognitive,
             }),
+            contributions: Vec::new(),
         });
     }
     findings.extend(to_push);
@@ -2594,7 +2619,83 @@ mod tests {
             line_count,
             param_count: 0,
             source_hash: None,
+            contributions: Vec::new(),
         }
+    }
+
+    fn make_fc_with_contributions(
+        name: &str,
+        cyclomatic: u16,
+        cognitive: u16,
+    ) -> FunctionComplexity {
+        use fallow_types::extract::{
+            ComplexityContribution, ComplexityContributionKind, ComplexityMetric,
+        };
+        let mut fc = make_fc(name, cyclomatic, cognitive, 50);
+        fc.contributions = vec![ComplexityContribution {
+            line: 2,
+            col: 4,
+            metric: ComplexityMetric::Cyclomatic,
+            kind: ComplexityContributionKind::If,
+            weight: 1,
+            nesting: 0,
+        }];
+        fc
+    }
+
+    #[test]
+    fn collect_findings_omits_contributions_without_breakdown_flag() {
+        let path = PathBuf::from("/project/src/a.ts");
+        let modules = vec![make_module(
+            FileId(0),
+            vec![make_fc_with_contributions("complexFn", 25, 5)],
+        )];
+        let mut file_paths = FxHashMap::default();
+        file_paths.insert(FileId(0), &path);
+        let (findings, _, _) = collect_findings(
+            &modules,
+            &file_paths,
+            Path::new("/project"),
+            &globset::GlobSet::empty(),
+            None,
+            None,
+            20,
+            15,
+            false,
+        );
+        assert_eq!(findings.len(), 1);
+        assert!(
+            findings[0].contributions.is_empty(),
+            "contributions must be omitted without the breakdown flag"
+        );
+    }
+
+    #[test]
+    fn collect_findings_includes_contributions_with_breakdown_flag() {
+        let path = PathBuf::from("/project/src/a.ts");
+        let modules = vec![make_module(
+            FileId(0),
+            vec![make_fc_with_contributions("complexFn", 25, 5)],
+        )];
+        let mut file_paths = FxHashMap::default();
+        file_paths.insert(FileId(0), &path);
+        let (findings, _, _) = collect_findings(
+            &modules,
+            &file_paths,
+            Path::new("/project"),
+            &globset::GlobSet::empty(),
+            None,
+            None,
+            20,
+            15,
+            true,
+        );
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].contributions.len(),
+            1,
+            "contributions must flow through when the breakdown flag is set"
+        );
     }
 
     #[test]
@@ -2657,6 +2758,7 @@ mod tests {
             coverage_source: None,
             inherited_from: None,
             component_rollup: None,
+            contributions: Vec::new(),
         }
     }
 
@@ -2701,6 +2803,7 @@ mod tests {
             None,
             20,
             15,
+            false,
         );
         assert!(findings.is_empty());
         assert_eq!(files, 0);
@@ -2723,6 +2826,7 @@ mod tests {
             None,
             20,
             15,
+            false,
         );
         assert!(findings.is_empty());
         assert_eq!(files, 1);
@@ -2748,6 +2852,7 @@ mod tests {
             None,
             20,
             15,
+            false,
         );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].cyclomatic, 25);
@@ -2773,6 +2878,7 @@ mod tests {
             None,
             20,
             15,
+            false,
         );
         assert_eq!(findings.len(), 1);
         assert!(matches!(findings[0].exceeded, ExceededThreshold::Cognitive));
@@ -2797,6 +2903,7 @@ mod tests {
             None,
             20,
             15,
+            false,
         );
         assert_eq!(findings.len(), 1);
         assert!(matches!(findings[0].exceeded, ExceededThreshold::Both));
@@ -2825,6 +2932,7 @@ mod tests {
             None,
             20,
             15,
+            false,
         );
         assert_eq!(findings.len(), 2);
         assert_eq!(files, 1);
@@ -2848,6 +2956,7 @@ mod tests {
             None,
             20,
             15,
+            false,
         );
         assert!(findings.is_empty());
         assert_eq!(files, 0);
@@ -2877,6 +2986,7 @@ mod tests {
             None,
             20,
             15,
+            false,
         );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].name, "fnA");
@@ -2906,6 +3016,7 @@ mod tests {
             coverage_source: None,
             inherited_from: None,
             component_rollup: None,
+            contributions: Vec::new(),
         }];
         let diff = build_diff(
             "diff --git a/src/big.ts b/src/big.ts\n\
@@ -2938,6 +3049,7 @@ mod tests {
             coverage_source: None,
             inherited_from: None,
             component_rollup: None,
+            contributions: Vec::new(),
         }];
         let diff = build_diff(
             "diff --git a/src/big.ts b/src/big.ts\n\
@@ -2970,6 +3082,7 @@ mod tests {
             coverage_source: None,
             inherited_from: None,
             component_rollup: None,
+            contributions: Vec::new(),
         }];
         let diff = build_diff(
             "diff --git a/src/a.ts b/src/a.ts\n\
@@ -3070,6 +3183,7 @@ mod tests {
             None,
             20,
             15,
+            false,
         );
         assert!(findings.is_empty());
         assert_eq!(files, 0);
@@ -3094,6 +3208,7 @@ mod tests {
             None,
             20,
             15,
+            false,
         );
         assert!(findings.is_empty());
     }
@@ -3112,6 +3227,7 @@ mod tests {
                 line_count: 75,
                 param_count: 2,
                 source_hash: None,
+                contributions: Vec::new(),
             }],
         )];
         let mut file_paths = FxHashMap::default();
@@ -3126,6 +3242,7 @@ mod tests {
             None,
             20,
             15,
+            false,
         );
         assert_eq!(findings.len(), 1);
         let f = &findings[0];
@@ -3150,6 +3267,7 @@ mod tests {
             line_count: 11,
             param_count: 1,
             source_hash: None,
+            contributions: Vec::new(),
         };
         let inner = FunctionComplexity {
             name: "<arrow>".to_string(),
@@ -3160,6 +3278,7 @@ mod tests {
             line_count: 10,
             param_count: 1,
             source_hash: None,
+            contributions: Vec::new(),
         };
         let modules = vec![make_module(FileId(0), vec![inner.clone(), outer.clone()])];
         let mut file_paths: FxHashMap<FileId, &PathBuf> = FxHashMap::default();
@@ -3204,6 +3323,7 @@ mod tests {
             30.0,
             20,
             15,
+            false,
         );
 
         assert_eq!(
@@ -3247,6 +3367,7 @@ mod tests {
             line_count: 20,
             param_count: 1,
             source_hash: None,
+            contributions: Vec::new(),
         };
         let inner = FunctionComplexity {
             name: "<arrow>".to_string(),
@@ -3257,6 +3378,7 @@ mod tests {
             line_count: 1,
             param_count: 1,
             source_hash: None,
+            contributions: Vec::new(),
         };
         let modules = vec![make_module(FileId(0), vec![inner.clone(), outer.clone()])];
         let mut file_paths: FxHashMap<FileId, &PathBuf> = FxHashMap::default();
@@ -3300,6 +3422,7 @@ mod tests {
             30.0,
             20,
             15,
+            false,
         );
 
         assert_eq!(findings.len(), 1);
@@ -4257,6 +4380,7 @@ mod tests {
             coverage_source: None,
             inherited_from: None,
             component_rollup: None,
+            contributions: Vec::new(),
         }
     }
 
@@ -4283,6 +4407,7 @@ mod tests {
             coverage_source: None,
             inherited_from: None,
             component_rollup: None,
+            contributions: Vec::new(),
         }
     }
 

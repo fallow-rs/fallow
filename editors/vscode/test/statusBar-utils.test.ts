@@ -4,7 +4,6 @@ import {
   buildStatusBarPartsFromLsp,
   buildStatusBarTooltipMarkdown,
   formatChangedSinceRefForStatusBar,
-  getStatusBarSeverityKey,
   getDuplicationPercentage,
   renderStatusBarText,
 } from "../src/statusBar-utils.js";
@@ -59,26 +58,6 @@ describe("buildStatusBarPartsFromLsp", () => {
         baseParams({ totalIssues: 3, duplicationPercentage: 1.234 })
       )
     ).toEqual(["3 issues", "1.2% duplication"]);
-  });
-});
-
-describe("getStatusBarSeverityKey", () => {
-  it("prefers error styling for unresolved imports", () => {
-    expect(
-      getStatusBarSeverityKey(
-        baseParams({ totalIssues: 2, unresolvedImports: 1 })
-      )
-    ).toBe("statusBarItem.errorBackground");
-  });
-
-  it("uses warning styling when issues exist without unresolved imports", () => {
-    expect(
-      getStatusBarSeverityKey(baseParams({ totalIssues: 2 }))
-    ).toBe("statusBarItem.warningBackground");
-  });
-
-  it("returns null when there are no issues", () => {
-    expect(getStatusBarSeverityKey(baseParams())).toBeNull();
   });
 });
 

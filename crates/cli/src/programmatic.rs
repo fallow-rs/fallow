@@ -822,6 +822,7 @@ fn build_complexity_options<'a>(
         baseline: None,
         save_baseline: None,
         complexity: eff_complexity,
+        complexity_breakdown: false,
         file_scores: eff_file_scores,
         coverage_gaps: eff_coverage_gaps,
         config_activates_coverage_gaps: !any_section,

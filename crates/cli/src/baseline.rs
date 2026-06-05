@@ -1722,6 +1722,7 @@ mod tests {
             coverage_source: None,
             inherited_from: None,
             component_rollup: None,
+            contributions: Vec::new(),
         }
     }
 
@@ -1949,6 +1950,7 @@ mod tests {
             length: 2,
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: false,
         });
         let dep_ba = CircularDependencyFinding::with_actions(CircularDependency {
@@ -1956,6 +1958,7 @@ mod tests {
             length: 2,
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: false,
         });
         assert_eq!(
@@ -1974,6 +1977,7 @@ mod tests {
             length: 2,
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: false,
         });
         let dep2 = CircularDependencyFinding::with_actions(CircularDependency {
@@ -1981,6 +1985,7 @@ mod tests {
             length: 2,
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: false,
         });
         assert_ne!(
@@ -2002,6 +2007,7 @@ mod tests {
             length: 3,
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: false,
         });
         let dep_cab = CircularDependencyFinding::with_actions(CircularDependency {
@@ -2013,6 +2019,7 @@ mod tests {
             length: 3,
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: false,
         });
         assert_eq!(
@@ -2033,6 +2040,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -2186,6 +2194,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -2197,6 +2206,7 @@ mod tests {
                     length: 2,
                     line: 5,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -2359,6 +2369,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             )],

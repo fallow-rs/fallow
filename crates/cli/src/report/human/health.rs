@@ -2041,6 +2041,7 @@ mod tests {
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
                 }
                 .into(),
             ],
@@ -2085,6 +2086,7 @@ mod tests {
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
                 }
                 .into(),
             ],
@@ -2123,6 +2125,7 @@ mod tests {
                     coverage_source: Some(crate::health_types::CoverageSource::Estimated),
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
                 }
                 .into(),
             ],
@@ -2163,6 +2166,7 @@ mod tests {
                     coverage_source: Some(crate::health_types::CoverageSource::Istanbul),
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
                 }
                 .into(),
             ],
@@ -2209,6 +2213,7 @@ mod tests {
                     coverage_source: Some(crate::health_types::CoverageSource::Estimated),
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
                 }
                 .into(),
             ],
@@ -2255,6 +2260,7 @@ mod tests {
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
                 }
                 .into(),
                 crate::health_types::ComplexityViolation {
@@ -2274,6 +2280,7 @@ mod tests {
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
                 }
                 .into(),
             ],
@@ -3825,6 +3832,7 @@ mod tests {
                 coverage_source: None,
                 inherited_from: None,
                 component_rollup: None,
+                contributions: Vec::new(),
             }
             .into(),
         ];
@@ -3930,6 +3938,7 @@ mod tests {
                 coverage_source: None,
                 inherited_from: None,
                 component_rollup: None,
+                contributions: Vec::new(),
             }
             .into(),
         ];
@@ -3962,6 +3971,7 @@ mod tests {
                 coverage_source: None,
                 inherited_from: None,
                 component_rollup: None,
+                contributions: Vec::new(),
             }
             .into(),
         ];
@@ -3994,6 +4004,7 @@ mod tests {
                 coverage_source: None,
                 inherited_from: None,
                 component_rollup: None,
+                contributions: Vec::new(),
             }
             .into(),
             crate::health_types::ComplexityViolation {
@@ -4013,6 +4024,7 @@ mod tests {
                 coverage_source: None,
                 inherited_from: None,
                 component_rollup: None,
+                contributions: Vec::new(),
             }
             .into(),
         ];
@@ -4045,6 +4057,7 @@ mod tests {
                 coverage_source: None,
                 inherited_from: None,
                 component_rollup: None,
+                contributions: Vec::new(),
             }
             .into(),
         ];
@@ -4139,6 +4152,7 @@ mod tests {
                 template_cyclomatic: 13,
                 template_cognitive: 12,
             }),
+            contributions: Vec::new(),
         };
         let line = render_component_rollup_breakdown(&finding, &root)
             .expect("rollup payload should render a breakdown line");
@@ -4179,6 +4193,7 @@ mod tests {
                     ),
                     inherited_from: Some(owner),
                     component_rollup: None,
+                    contributions: Vec::new(),
                 }
                 .into(),
             ],

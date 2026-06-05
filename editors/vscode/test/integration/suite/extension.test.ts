@@ -85,6 +85,22 @@ const readCliLog = (): Array<{ command: string; args: string[] }> => {
 const readFixCommands = (): Array<{ command: string; args: string[] }> =>
   readCliLog().filter((entry) => entry.command === "fix");
 
+/**
+ * CLI commands the extension spawns that are NOT the sidebar dead-code +
+ * duplication analysis: monorepo discovery for the workspace picker, and the
+ * lazily-spawned health / audit / security / coverage / fix surfaces. The
+ * combined-mode assertions filter these out so they only inspect the analysis
+ * itself.
+ */
+const NON_ANALYSIS_COMMANDS = new Set([
+  "workspaces",
+  "health",
+  "audit",
+  "security",
+  "coverage",
+  "fix",
+]);
+
 const runAnalysisAndReadCliLog = async (
   api: ExtensionApi,
 ): Promise<Array<{ command: string; args: string[] }>> => {
@@ -155,6 +171,9 @@ describe("Fallow VS Code extension", () => {
     assert.ok(commands.includes("fallow.fix"));
     assert.ok(commands.includes("fallow.fixDryRun"));
     assert.ok(commands.includes("fallow.restart"));
+    // The "N references" Code Lens routes here; if it is unregistered, clicking a
+    // lens throws "command 'fallow.showReferences' not found".
+    assert.ok(commands.includes("fallow.showReferences"));
   });
 
   it("runs analysis against the configured CLI and filters disabled issue types", async () => {
@@ -176,18 +195,24 @@ describe("Fallow VS Code extension", () => {
     assert.equal(result.check.unused_optional_dependencies?.length, 1);
     assert.equal(result.dupes.clone_groups.length, 1);
 
-    const cliCalls = readCliLog();
-    const analysisCalls = cliCalls.filter((entry) => entry.command !== "workspaces");
-    assert.ok(analysisCalls.length >= 1, "expected at least one CLI analysis call");
+    // The sidebar's dead-code + duplication analysis must be ONE combined call,
+    // never split into per-issue-type calls. Calls that are not the sidebar
+    // analysis are excluded: `fallow workspaces` (monorepo discovery for the
+    // workspace picker, #906) and the lazily-spawned health / audit / security /
+    // coverage surfaces are orthogonal commands, not the dead-code analysis.
+    const sidebarAnalysisCalls = readCliLog().filter(
+      (entry) => !NON_ANALYSIS_COMMANDS.has(entry.command),
+    );
+    assert.ok(sidebarAnalysisCalls.length >= 1, "expected at least one CLI analysis call");
     assert.ok(
-      analysisCalls.every((entry) => entry.command === "combined"),
-      `analysis should use combined mode only: ${JSON.stringify(cliCalls)}`,
+      sidebarAnalysisCalls.every((entry) => entry.command === "combined"),
+      "sidebar analysis should use combined mode only (not split per issue type)",
     );
     // `.some`, not `.every`: a config change in a prior test's afterEach fires a
     // background `triggerCliAnalysis()` whose log entry can race into this test's
     // log. The awaited direct call is what we assert produced the expected argv.
     assert.ok(
-      analysisCalls.some(
+      sidebarAnalysisCalls.some(
         (entry) =>
           entry.args.join(" ") === "--format json --quiet --skip health",
       ),

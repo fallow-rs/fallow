@@ -1908,6 +1908,25 @@ fn namespace_require_has_local_name() {
 }
 
 #[test]
+fn require_source_span_points_at_specifier_literal() {
+    // The specifier string-literal span anchors the unresolved-import squiggly
+    // under `'./x'`, not the `require` keyword. It must begin strictly past the
+    // call span start (after `require(`) and cover the quoted specifier.
+    let info = parse("const x = require('./gone');");
+    assert_eq!(info.require_calls.len(), 1);
+    let call = &info.require_calls[0];
+    assert!(
+        call.source_span.start > call.span.start,
+        "specifier span should start after the `require` keyword"
+    );
+    assert_eq!(
+        call.source_span.end - call.source_span.start,
+        "'./gone'".len() as u32,
+        "specifier span should cover the quoted literal"
+    );
+}
+
+#[test]
 fn destructured_await_import_captures_names() {
     let info = parse("const { foo, bar } = await import('./mod');");
     assert_eq!(info.dynamic_imports.len(), 1);

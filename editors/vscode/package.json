@@ -404,6 +404,22 @@
           "default": true,
           "description": "Show the project health score and grade in the Fallow status bar item."
         },
+        "fallow.complexity.breakdownEnabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the inline complexity breakdown in the editor: a per-line marker and hover that explain WHY a function scored high (each `else if`, nested `if`, boolean operator, loop, ... with its cyclomatic/cognitive weight), plus a CRAP explanation on the function line. Backed by the Health view's analysis, so the breakdown appears after the Health view first runs."
+        },
+        "fallow.complexity.afterText": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When the inline complexity breakdown is on, also show the dim `+N` token after each contributing line. Turn this off to keep only the hover (no inline text). Inert unless `#fallow.complexity.breakdownEnabled#` is enabled."
+        },
+        "fallow.complexity.decorationCap": {
+          "type": "integer",
+          "default": 200,
+          "minimum": 1,
+          "markdownDescription": "How many top complexity findings to fetch for inline editor decorations when the breakdown is enabled. Decoupled from `#fallow.health.topFindings#` so a complex function open in the editor but outside the Health view's top-N still gets decorated; the tree still shows only `#fallow.health.topFindings#`."
+        },
         "fallow.workspace": {
           "type": "string",
           "default": "",
@@ -451,7 +467,7 @@
         "fallow.license.showStatusBar": {
           "type": "boolean",
           "default": true,
-          "description": "Show a Fallow license indicator in the status bar. Disable to remove the indicator and skip the license status probe on activation."
+          "description": "Show a Fallow license indicator in the status bar, but only when license material is present (active, in grace, or expired). Machines with no license never show the indicator. Disable to remove it entirely and skip the license status probe on activation."
         },
         "fallow.license.refreshOnStartup": {
           "type": "boolean",

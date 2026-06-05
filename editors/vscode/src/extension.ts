@@ -14,8 +14,11 @@ import {
   getCoveragePath,
   getAuditEnabled,
   getAuditRunOnSave,
+  getComplexityBreakdownEnabled,
+  getComplexityAfterText,
   onConfigChange,
 } from "./config.js";
+import { ComplexityDecorationController } from "./complexityDecorations.js";
 import {
   runAnalysis,
   runAudit,
@@ -293,6 +296,24 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     );
   };
 
+  // Inline complexity breakdown: per-line editor decorations driven by the same
+  // health findings the tree renders. Reads the workspace root live so it tracks
+  // the active folder; rendering and staleness live in the controller.
+  const complexityDecorations = new ComplexityDecorationController(
+    getComplexityBreakdownEnabled,
+    getComplexityAfterText,
+    () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+  );
+  context.subscriptions.push(complexityDecorations);
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      complexityDecorations.renderEditor(editor);
+    }),
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      complexityDecorations.handleDocumentChange(event.document);
+    }),
+  );
+
   // Lazy, opt-out health spawn. Separate from the combined run so the
   // latency-critical sidebar is never coupled to complexity scoring or the
   // git-churn hotspot walk.
@@ -309,6 +330,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       lastHealthResult = null;
       healthProvider.update(null);
       updateStatusBarHealth(null);
+      complexityDecorations.setFindings([]);
       return true;
     }
     try {
@@ -316,6 +338,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       lastHealthResult = report;
       healthProvider.update(report);
       updateStatusBarHealth(report);
+      complexityDecorations.setFindings(report?.findings ?? []);
       return true;
     } catch {
       return false;
@@ -774,6 +797,45 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // Fallback command for Code Lens items with 0 references (display-only)
   context.subscriptions.push(vscode.commands.registerCommand("fallow.noop", () => {}));
 
+  // The "N references" Code Lens routes here instead of calling the built-in
+  // `editor.action.showReferences` directly: that built-in validates its args
+  // with `instanceof URI / Position / Location`, which the LSP's JSON wire
+  // payload (a string URI, a plain position, plain locations) fails with
+  // "argument does not match one of these constraints". Convert to real vscode
+  // types, then delegate to the built-in.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "fallow.showReferences",
+      (
+        uri: string,
+        position: { line: number; character: number },
+        locations: ReadonlyArray<{
+          uri: string;
+          range: {
+            start: { line: number; character: number };
+            end: { line: number; character: number };
+          };
+        }>,
+      ) => {
+        const toPosition = (p: { line: number; character: number }): vscode.Position =>
+          new vscode.Position(p.line, p.character);
+        const refs = (locations ?? []).map(
+          (loc) =>
+            new vscode.Location(
+              vscode.Uri.parse(loc.uri),
+              new vscode.Range(toPosition(loc.range.start), toPosition(loc.range.end)),
+            ),
+        );
+        void vscode.commands.executeCommand(
+          "editor.action.showReferences",
+          vscode.Uri.parse(uri),
+          toPosition(position),
+          refs,
+        );
+      },
+    ),
+  );
+
   // Watch for config changes
   context.subscriptions.push(
     onConfigChange(async (e) => {
@@ -827,7 +889,17 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
           updateStatusBarHealth(lastHealthResult);
         } else if (healthAnalysisRan) {
           void triggerHealthAnalysis();
+        } else {
+          // The Health view has not run yet, so there is nothing to respawn, but
+          // toggling the breakdown off should still clear any stale decorations.
+          complexityDecorations.renderVisibleEditors();
         }
+      }
+
+      // `complexity.afterText` is render-only (the inline tier on/off): re-render
+      // from the cached findings without respawning health.
+      if (e.affectsConfiguration("fallow.complexity.afterText")) {
+        complexityDecorations.renderVisibleEditors();
       }
 
       if (affectsSecurity) {

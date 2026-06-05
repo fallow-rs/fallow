@@ -2302,6 +2302,13 @@
             }
           ]
         },
+        "contributions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ComplexityContribution"
+          },
+          "description": "Per-decision-point complexity breakdown explaining WHICH constructs drove\nthe cyclomatic and cognitive scores. Populated only when the caller opts\nin via `health --complexity-breakdown`; empty (and omitted from JSON)\notherwise so default and CI output stay lean."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -3912,6 +3919,13 @@
           "type": "integer",
           "description": "0-based byte column offset of the import that starts the cycle."
         },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CircularDependencyEdge"
+          },
+          "description": "Per-file import anchors, one entry per hop in cycle order: `edges[i]`\nis the import in `files[i]` pointing to `files[(i + 1) % len]`. Always\nthe same length as `files`. Drives the per-file LSP diagnostic\nsquiggly. `#[serde(default)]` so pre-`edges` baselines deserialize;\nalways emitted on output but intentionally not in the schema's\n`required` set (see the struct doc)."
+        },
         "is_cross_package": {
           "type": "boolean",
           "description": "Whether this cycle crosses workspace package boundaries."
@@ -3923,7 +3937,7 @@
         "line",
         "col"
       ],
-      "description": "A circular dependency chain detected in the module graph.\n\nThe `line` and `col` fields carry `#[serde(default)]` so callers reading\nhistorical baseline JSON without these fields can still deserialize the\nstruct, but the JSON output layer always emits them (u32 always\nserializes, never via `skip_serializing_if`). The schemars derive sees\nthe serde defaults and marks both fields optional in the generated\nschema; the explicit `extend(\"required\" = ...)` override here keeps the\nschema's `required` array honest about what the JSON output actually\ncontains."
+      "description": "A circular dependency chain detected in the module graph.\n\nThe `line` and `col` fields carry `#[serde(default)]` so callers reading\nhistorical baseline JSON without these fields can still deserialize the\nstruct, but the JSON output layer always emits them (u32 always\nserializes, never via `skip_serializing_if`). The schemars derive sees\nthe serde defaults and marks both fields optional in the generated\nschema; the explicit `extend(\"required\" = ...)` override here keeps the\nschema's `required` array honest about what the JSON output actually\ncontains.\n\n`edges` is deliberately kept OUT of the `required` extend: it is\n`#[serde(default)]` (so historical baseline JSON without it still\ndeserializes) and the output layer always emits it, but listing it in\n`required` would make pre-upgrade JSON fail validation against the new\nschema. It is a normal additive field: always present in current output,\noptional for backward compatibility."
     },
     "BoundaryViolation": {
       "type": "object",
@@ -8101,6 +8115,13 @@
           "type": "integer",
           "description": "0-based byte column offset of the import that starts the cycle."
         },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CircularDependencyEdge"
+          },
+          "description": "Per-file import anchors, one entry per hop in cycle order: `edges[i]`\nis the import in `files[i]` pointing to `files[(i + 1) % len]`. Always\nthe same length as `files`. Drives the per-file LSP diagnostic\nsquiggly. `#[serde(default)]` so pre-`edges` baselines deserialize;\nalways emitted on output but intentionally not in the schema's\n`required` set (see the struct doc)."
+        },
         "is_cross_package": {
           "type": "boolean",
           "description": "Whether this cycle crosses workspace package boundaries."
@@ -8661,6 +8682,13 @@
               "type": "null"
             }
           ]
+        },
+        "contributions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ComplexityContribution"
+          },
+          "description": "Per-decision-point complexity breakdown explaining WHICH constructs drove\nthe cyclomatic and cognitive scores. Populated only when the caller opts\nin via `health --complexity-breakdown`; empty (and omitted from JSON)\notherwise so default and CI output stay lean."
         }
       },
       "required": [
@@ -8959,6 +8987,13 @@
         "fingerprint": {
           "type": "string",
           "description": "Stable content fingerprint, usually `dup:<8hex>` and widened on rare\nreport collisions. Addressable via `fallow dupes --trace dup:<fp>` (and\nthe `trace_clone` MCP tool) to deep-dive this group; shown alongside\neach group in the human listing."
+        },
+        "suggested_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Best-effort human-readable name for the clone: the dominant repeated\nidentifier across the duplicated fragment (e.g. a shared `parseCsv`\nfunction). `None` when the clone has no clear dominant name (generic or\ntied identifiers); consumers then fall back to a file-based label. Lets\neditors and agents label a clone by what it is rather than an opaque\nordinal."
         },
         "actions": {
           "type": "array",
@@ -9981,6 +10016,182 @@
         "crosses_boundary"
       ],
       "description": "Graph-derived reachability ranking signal for a security candidate. Computed\nfrom the EXISTING module graph (runtime reachability + reverse-dep fan-in)\nafter detection, never proven exploitable. Used to surface candidates that\nsit on a request/runtime-reachable surface above isolated helpers or scripts.\n\nThis is a relative-ordering signal, NOT a `confidence` or `signal_strength`\nscore: fallow does not prove the path is exploitable."
+    },
+    "ComplexityContribution": {
+      "type": "object",
+      "properties": {
+        "line": {
+          "type": "integer",
+          "description": "1-based line number where the construct begins."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column where the construct begins."
+        },
+        "metric": {
+          "description": "Which metric this increment contributes to.",
+          "$ref": "#/definitions/ComplexityMetric"
+        },
+        "kind": {
+          "description": "The syntactic construct responsible for the increment.",
+          "$ref": "#/definitions/ComplexityContributionKind"
+        },
+        "weight": {
+          "type": "integer",
+          "description": "The amount added to `metric` at this site (`1 + nesting` for nested\ncognitive increments, otherwise `1`)."
+        },
+        "nesting": {
+          "type": "integer",
+          "description": "The nesting depth at the increment site (`0` when not nested). Lets a\nconsumer explain a cognitive `+3` as \"+1 base, +2 nesting\"."
+        }
+      },
+      "required": [
+        "line",
+        "col",
+        "metric",
+        "kind",
+        "weight",
+        "nesting"
+      ],
+      "description": "A single complexity increment, located at its source line/column.\n\n`weight` is the amount this construct added to `metric`; for nested\ncognitive increments `weight == 1 + nesting`. Consumers that render inline\n(the VS Code editor breakdown) group contributions by `line` and sum the\nweights, deferring the per-kind list to a hover."
+    },
+    "ComplexityMetric": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "cyclomatic",
+          "description": "`McCabe` cyclomatic complexity (independent execution paths)."
+        },
+        {
+          "type": "string",
+          "const": "cognitive",
+          "description": "`SonarSource` cognitive complexity (structural + nesting penalty)."
+        }
+      ],
+      "description": "Which complexity metric a [`ComplexityContribution`] adds to."
+    },
+    "ComplexityContributionKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "if",
+          "description": "An `if` condition."
+        },
+        {
+          "type": "string",
+          "const": "else",
+          "description": "A bare `else` branch (cognitive only)."
+        },
+        {
+          "type": "string",
+          "const": "else-if",
+          "description": "An `else if` continuation (both metrics: cyclomatic +1, cognitive flat\n+1 with no nesting penalty)."
+        },
+        {
+          "type": "string",
+          "const": "ternary",
+          "description": "A `?:` conditional (ternary) expression."
+        },
+        {
+          "type": "string",
+          "const": "logical-and",
+          "description": "A logical `&&` operator."
+        },
+        {
+          "type": "string",
+          "const": "logical-or",
+          "description": "A logical `||` operator."
+        },
+        {
+          "type": "string",
+          "const": "nullish-coalescing",
+          "description": "A `??` nullish-coalescing operator."
+        },
+        {
+          "type": "string",
+          "const": "logical-assignment",
+          "description": "A logical assignment operator (`&&=`, `||=`, `??=`); cyclomatic only."
+        },
+        {
+          "type": "string",
+          "const": "optional-chain",
+          "description": "An optional-chaining link (`?.`); cyclomatic only."
+        },
+        {
+          "type": "string",
+          "const": "for",
+          "description": "A `for` loop."
+        },
+        {
+          "type": "string",
+          "const": "for-in",
+          "description": "A `for...in` loop."
+        },
+        {
+          "type": "string",
+          "const": "for-of",
+          "description": "A `for...of` loop."
+        },
+        {
+          "type": "string",
+          "const": "while",
+          "description": "A `while` loop."
+        },
+        {
+          "type": "string",
+          "const": "do-while",
+          "description": "A `do...while` loop."
+        },
+        {
+          "type": "string",
+          "const": "switch",
+          "description": "A `switch` statement (cognitive only; each `case` adds cyclomatic)."
+        },
+        {
+          "type": "string",
+          "const": "case",
+          "description": "A `case` label carrying a test (cyclomatic only)."
+        },
+        {
+          "type": "string",
+          "const": "catch",
+          "description": "A `catch` clause."
+        },
+        {
+          "type": "string",
+          "const": "labeled-break",
+          "description": "A labeled `break` (cognitive only)."
+        },
+        {
+          "type": "string",
+          "const": "labeled-continue",
+          "description": "A labeled `continue` (cognitive only)."
+        }
+      ],
+      "description": "The syntactic construct that produced a single complexity increment.\n\nMirrors `SonarSource` cognitive-complexity vocabulary where it overlaps.\n`Case` means a `case` label carrying a test; a bare `default` adds nothing\nto cyclomatic complexity and so produces no contribution."
+    },
+    "CircularDependencyEdge": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The file containing the import (the hop SOURCE; equal to `files[i]`)."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the import statement pointing to the next file."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the import statement."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col"
+      ],
+      "description": "One import hop in a circular dependency: the file containing the import\nand where that import statement sits.\n\n`edges[i]` is the import IN `path` (the hop SOURCE, equal to the cycle's\n`files[i]`) that points to the NEXT file in the cycle\n(`files[(i + 1) % files.len()]`); the target is not repeated here to keep\nthe wire compact. Enables a per-file diagnostic squiggly anchored under\nthe offending import rather than a single squiggly on the first file.\n\n`col` is a 0-based BYTE column, matching the cycle's top-level `col`;\nconverting it to a UTF-16 code-unit column for LSP clients is a tracked\nfollow-up shared with the existing field."
     }
   }
 }

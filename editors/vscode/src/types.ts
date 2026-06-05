@@ -40,6 +40,8 @@ export type {
   CloneGroupFinding,
   CloneInstance,
   CombinedOutput,
+  ComplexityContribution,
+  ComplexityContributionKind,
   CoverageAnalyzeOutput,
   RuntimeCoverageReport,
   RuntimeCoverageHotPath,

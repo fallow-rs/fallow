@@ -354,6 +354,18 @@ export type CoverageTier = ("none" | "partial" | "high")
  */
 export type CoverageSource = ("istanbul" | "estimated" | "estimated_component_inherited")
 /**
+ * Which complexity metric a [`ComplexityContribution`] adds to.
+ */
+export type ComplexityMetric = ("cyclomatic" | "cognitive")
+/**
+ * The syntactic construct that produced a single complexity increment.
+ *
+ * Mirrors `SonarSource` cognitive-complexity vocabulary where it overlaps.
+ * `Case` means a `case` label carrying a test; a bare `default` adds nothing
+ * to cyclomatic complexity and so produces no contribution.
+ */
+export type ComplexityContributionKind = ("if" | "else" | "else-if" | "ternary" | "logical-and" | "logical-or" | "nullish-coalescing" | "logical-assignment" | "optional-chain" | "for" | "for-in" | "for-of" | "while" | "do-while" | "switch" | "case" | "catch" | "labeled-break" | "labeled-continue")
+/**
  * Discriminant for [`HealthFindingAction::kind`]. Mirrors the action types
  * emitted by `build_health_finding_actions`. A single finding's `actions`
  * array may carry multiple entries of different types: a finding that
@@ -1655,6 +1667,15 @@ line: number
  */
 col: number
 /**
+ * Per-file import anchors, one entry per hop in cycle order: `edges[i]`
+ * is the import in `files[i]` pointing to `files[(i + 1) % len]`. Always
+ * the same length as `files`. Drives the per-file LSP diagnostic
+ * squiggly. `#[serde(default)]` so pre-`edges` baselines deserialize;
+ * always emitted on output but intentionally not in the schema's
+ * `required` set (see the struct doc).
+ */
+edges?: CircularDependencyEdge[]
+/**
  * Whether this cycle crosses workspace package boundaries.
  */
 is_cross_package?: boolean
@@ -1668,6 +1689,34 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+}
+/**
+ * One import hop in a circular dependency: the file containing the import
+ * and where that import statement sits.
+ *
+ * `edges[i]` is the import IN `path` (the hop SOURCE, equal to the cycle's
+ * `files[i]`) that points to the NEXT file in the cycle
+ * (`files[(i + 1) % files.len()]`); the target is not repeated here to keep
+ * the wire compact. Enables a per-file diagnostic squiggly anchored under
+ * the offending import rather than a single squiggly on the first file.
+ *
+ * `col` is a 0-based BYTE column, matching the cycle's top-level `col`;
+ * converting it to a UTF-16 code-unit column for LSP clients is a tracked
+ * follow-up shared with the existing field.
+ */
+export interface CircularDependencyEdge {
+/**
+ * The file containing the import (the hop SOURCE; equal to `files[i]`).
+ */
+path: string
+/**
+ * 1-based line number of the import statement pointing to the next file.
+ */
+line: number
+/**
+ * 0-based byte column offset of the import statement.
+ */
+col: number
 }
 /**
  * Wire-shape envelope for a [`ReExportCycle`] finding. Mirrors
@@ -2201,6 +2250,15 @@ line_count: number
  */
 fingerprint: string
 /**
+ * Best-effort human-readable name for the clone: the dominant repeated
+ * identifier across the duplicated fragment (e.g. a shared `parseCsv`
+ * function). `None` when the clone has no clear dominant name (generic or
+ * tied identifiers); consumers then fall back to a file-based label. Lets
+ * editors and agents label a clone by what it is rather than an opaque
+ * ordinal.
+ */
+suggested_name?: (string | null)
+/**
  * Suggested next steps: an `extract-shared` primary and a
  * `suppress-line` secondary. Always emitted (possibly empty for
  * forward-compat).
@@ -2535,6 +2593,13 @@ coverage_source?: (CoverageSource | null)
 inherited_from?: (string | null)
 component_rollup?: (ComponentRollup | null)
 /**
+ * Per-decision-point complexity breakdown explaining WHICH constructs drove
+ * the cyclomatic and cognitive scores. Populated only when the caller opts
+ * in via `health --complexity-breakdown`; empty (and omitted from JSON)
+ * otherwise so default and CI output stay lean.
+ */
+contributions?: ComplexityContribution[]
+/**
  * Machine-actionable fix and suppress hints.
  */
 actions: HealthFindingAction[]
@@ -2552,6 +2617,36 @@ class_cognitive: number
 template_path: string
 template_cyclomatic: number
 template_cognitive: number
+}
+/**
+ * A single complexity increment, located at its source line/column.
+ *
+ * `weight` is the amount this construct added to `metric`; for nested
+ * cognitive increments `weight == 1 + nesting`. Consumers that render inline
+ * (the VS Code editor breakdown) group contributions by `line` and sum the
+ * weights, deferring the per-kind list to a hover.
+ */
+export interface ComplexityContribution {
+/**
+ * 1-based line number where the construct begins.
+ */
+line: number
+/**
+ * 0-based byte column where the construct begins.
+ */
+col: number
+metric: ComplexityMetric
+kind: ComplexityContributionKind
+/**
+ * The amount added to `metric` at this site (`1 + nesting` for nested
+ * cognitive increments, otherwise `1`).
+ */
+weight: number
+/**
+ * The nesting depth at the increment site (`0` when not nested). Lets a
+ * consumer explain a cognitive `+3` as "+1 base, +2 nesting".
+ */
+nesting: number
 }
 /**
  * Suggested action attached to a [`ComplexityViolation`].

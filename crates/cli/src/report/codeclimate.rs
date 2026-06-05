@@ -1628,6 +1628,7 @@ mod tests {
                     length: 2,
                     line: 3,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -2001,6 +2002,7 @@ mod tests {
                     coverage_source: None,
                     inherited_from: None,
                     component_rollup: None,
+                    contributions: Vec::new(),
                 }
                 .into(),
             ],

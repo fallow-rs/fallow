@@ -1853,6 +1853,7 @@ mod tests {
                     length: 2,
                     line: 10,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             )],

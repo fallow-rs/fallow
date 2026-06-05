@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   escapeMarkdown,
+  hasLicenseMaterial,
   licensePlaceholderParts,
   licenseStateLabel,
   licenseStatusBarParts,
@@ -232,5 +233,35 @@ describe("validateEmail", () => {
 
   it("rejects empty input", () => {
     expect(validateEmail("")).not.toBeNull();
+  });
+});
+
+describe("hasLicenseMaterial", () => {
+  const noFiles = (): boolean => false;
+  const defaultPath = "/home/u/.fallow/license.jwt";
+
+  it("is true when an inline $FALLOW_LICENSE JWT is set", () => {
+    expect(hasLicenseMaterial("eyJ.payload.sig", undefined, defaultPath, noFiles)).toBe(true);
+  });
+
+  it("ignores a blank / whitespace-only inline value", () => {
+    expect(hasLicenseMaterial("   ", undefined, defaultPath, noFiles)).toBe(false);
+  });
+
+  it("uses $FALLOW_LICENSE_PATH (and does NOT fall back to the default) when set", () => {
+    const exists = (p: string): boolean => p === "/custom/license.jwt";
+    expect(hasLicenseMaterial(undefined, "/custom/license.jwt", defaultPath, exists)).toBe(true);
+    // Path env set but the file is missing => not present, default is never consulted.
+    expect(hasLicenseMaterial(undefined, "/missing/license.jwt", defaultPath, exists)).toBe(false);
+  });
+
+  it("falls back to the default path when no env is set", () => {
+    const exists = (p: string): boolean => p === defaultPath;
+    expect(hasLicenseMaterial(undefined, undefined, defaultPath, exists)).toBe(true);
+  });
+
+  it("is false for a never-licensed machine (no env, no default file)", () => {
+    expect(hasLicenseMaterial(undefined, undefined, defaultPath, noFiles)).toBe(false);
+    expect(hasLicenseMaterial(undefined, "", defaultPath, noFiles)).toBe(false);
   });
 });

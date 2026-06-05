@@ -147,6 +147,30 @@ export const getHealthTopFindings = (): number => {
 
 export const getHealthStatusBar = (): boolean => getConfig().get<boolean>("health.statusBar", true);
 
+/** Whether the inline complexity breakdown (per-line markers + hover) is shown. */
+export const getComplexityBreakdownEnabled = (): boolean =>
+  getConfig().get<boolean>("complexity.breakdownEnabled", true);
+
+/**
+ * Whether the inline `+N` after-text tier is rendered. When false the hover
+ * still attaches, so a user can keep the quiet tier without the dense per-line
+ * text. Inert unless `complexity.breakdownEnabled` is on.
+ */
+export const getComplexityAfterText = (): boolean =>
+  getConfig().get<boolean>("complexity.afterText", true);
+
+/**
+ * How many top complexity findings to fetch for inline decorations when the
+ * breakdown is enabled, decoupled from the tree's `health.topFindings` so an
+ * open file outside the tree's top-N still gets decorated. The health spawn
+ * requests `max(topFindings, decorationCap)`; the tree still displays only
+ * `topFindings`.
+ */
+export const getComplexityDecorationCap = (): number => {
+  const value = getConfig().get<number>("complexity.decorationCap", 200);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 200;
+};
+
 /**
  * The pinned `fallow.workspace` setting (a monorepo package name). Empty =
  * whole project. A per-folder `workspaceState` override set via the picker

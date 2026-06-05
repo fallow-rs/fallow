@@ -6,16 +6,19 @@ import * as vscode from "vscode";
 import {
   countHealthItems,
   escapeHealthMarkdown,
+  formatComplexityOffense,
   formatHotspotDescription,
   formatScoreLabel,
   gradeIcon,
   gradeThemeColor,
   severityIcon,
+  severityThemeColor,
   topPenalties,
 } from "./health-utils.js";
+import { getHealthTopFindings } from "./config.js";
 import { HEALTH_SECTION_ICONS, HEALTH_SECTION_LABELS } from "./health-labels.js";
 import type { HealthSection } from "./health-labels.js";
-import { resolveFilePath as resolveFilePathPure } from "./treeView-utils.js";
+import { middleElidePath, resolveFilePath as resolveFilePathPure } from "./treeView-utils.js";
 import type { HealthReport } from "./types.js";
 
 const resolveFilePath = (filePath: string | undefined) =>
@@ -38,40 +41,48 @@ class HealthSectionItem extends vscode.TreeItem {
 }
 
 /**
- * A leaf row. Optionally opens a file:line on click (complexity findings,
- * hotspots, targets all carry a path). The Score row is a leaf with no command.
+ * A health row. File-bearing rows render as two lines: the file is the parent
+ * (auto-expanded) and the detail (metrics / recommendation) is a single child,
+ * which carries the open-on-click command. The Score row is a childless leaf
+ * with no command. Pass `icon: undefined` for an icon-less child detail row.
  */
 class HealthLeafItem extends vscode.TreeItem {
+  readonly children: ReadonlyArray<HealthLeafItem>;
+
   constructor(
     label: string,
-    icon: string,
+    icon: string | undefined,
     options: {
-      readonly description?: string;
       readonly tooltip?: string | vscode.MarkdownString;
       readonly iconColor?: string | null;
       readonly open?: { readonly path: string; readonly line: number; readonly col: number };
+      readonly children?: ReadonlyArray<HealthLeafItem>;
     } = {},
   ) {
-    super(label, vscode.TreeItemCollapsibleState.None);
+    const children = options.children ?? [];
+    super(
+      label,
+      children.length > 0
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.None,
+    );
+    this.children = children;
     this.contextValue = "healthItem";
 
-    if (options.description !== undefined) {
-      this.description = options.description;
-    }
     if (options.tooltip !== undefined) {
       this.tooltip = options.tooltip;
     }
 
-    const color = options.iconColor != null ? new vscode.ThemeColor(options.iconColor) : undefined;
-    this.iconPath = new vscode.ThemeIcon(icon, color);
+    if (icon !== undefined) {
+      const color =
+        options.iconColor != null ? new vscode.ThemeColor(options.iconColor) : undefined;
+      this.iconPath = new vscode.ThemeIcon(icon, color);
+    }
 
     if (options.open) {
-      const { absolute, relative } = resolveFilePath(options.open.path);
+      const { absolute } = resolveFilePath(options.open.path);
       const line = Math.max(0, options.open.line - 1);
       const col = Math.max(0, options.open.col);
-      if (options.description === undefined) {
-        this.description = `${relative}:${options.open.line}`;
-      }
       this.command = {
         command: "vscode.open",
         title: "Open File",
@@ -123,14 +134,35 @@ const buildScoreLeaves = (report: HealthReport): HealthLeafItem[] => {
   ];
 };
 
+// Each file-bearing Health row is two lines: the file is the parent (auto-
+// expanded) and the detail (metrics / recommendation) is the indented child
+// that carries the open-on-click command.
+
+// The health spawn may fetch more findings than the tree shows (a higher
+// `--top` so the inline editor breakdown can decorate files outside the tree's
+// top-N). The tree still displays only `health.topFindings`.
+const visibleComplexityFindings = (report: HealthReport): HealthReport["findings"] =>
+  (report.findings ?? []).slice(0, getHealthTopFindings());
+
 const buildComplexityLeaves = (report: HealthReport): HealthLeafItem[] =>
-  (report.findings ?? []).map((finding) => {
-    const crapNote = typeof finding.crap === "number" ? `, CRAP ${finding.crap.toFixed(0)}` : "";
-    const tooltip = `${finding.name} (${finding.severity}): cyclomatic ${finding.cyclomatic}, cognitive ${finding.cognitive}${crapNote}`;
-    return new HealthLeafItem(finding.name, severityIcon(finding.severity), {
+  visibleComplexityFindings(report).map((finding) => {
+    const { relative } = resolveFilePath(finding.path);
+    const crapNote =
+      typeof finding.crap === "number" ? `, CRAP ${finding.crap.toFixed(0)}` : "";
+    const tooltip = `${finding.name} (${finding.severity})\ncyclomatic ${finding.cyclomatic}, cognitive ${finding.cognitive}${crapNote}\n${relative}:${finding.line}`;
+    const detail = new HealthLeafItem(formatComplexityOffense(finding), undefined, {
       tooltip,
       open: { path: finding.path, line: finding.line, col: finding.col },
     });
+    return new HealthLeafItem(
+      `${middleElidePath(relative)}:${finding.line}`,
+      severityIcon(finding.severity),
+      {
+        iconColor: severityThemeColor(finding.severity),
+        tooltip,
+        children: [detail],
+      },
+    );
   });
 
 const buildHotspotLeaves = (report: HealthReport): HealthLeafItem[] =>
@@ -140,10 +172,14 @@ const buildHotspotLeaves = (report: HealthReport): HealthLeafItem[] =>
     tooltip.appendMarkdown(
       `**${escapeHealthMarkdown(relative)}**\n\nChurn x complexity hotspot (score ${hotspot.score.toFixed(1)}, ${hotspot.commits} commit${hotspot.commits === 1 ? "" : "s"}).\n\n_Heuristic candidate, verify before acting._`,
     );
-    return new HealthLeafItem(relative, "git-commit", {
-      description: formatHotspotDescription(hotspot.score, hotspot.commits),
+    const detail = new HealthLeafItem(
+      formatHotspotDescription(hotspot.score, hotspot.commits),
+      undefined,
+      { tooltip, open: { path: hotspot.path, line: 1, col: 0 } },
+    );
+    return new HealthLeafItem(middleElidePath(relative), "git-commit", {
       tooltip,
-      open: { path: hotspot.path, line: 1, col: 0 },
+      children: [detail],
     });
   });
 
@@ -152,12 +188,15 @@ const buildTargetLeaves = (report: HealthReport): HealthLeafItem[] =>
     const { relative } = resolveFilePath(target.path);
     const tooltip = new vscode.MarkdownString();
     tooltip.appendMarkdown(
-      `**${escapeHealthMarkdown(target.recommendation)}**\n\nEffort: ${escapeHealthMarkdown(target.effort)}, Confidence: ${escapeHealthMarkdown(target.confidence)}, Priority: ${target.priority.toFixed(0)}\n\n_Heuristic suggestion, verify before acting._`,
+      `**${escapeHealthMarkdown(target.recommendation)}**\n\nEffort: ${escapeHealthMarkdown(target.effort)}, Confidence: ${escapeHealthMarkdown(target.confidence)}, Priority: ${target.priority.toFixed(0)}\n\n${escapeHealthMarkdown(relative)}\n\n_Heuristic suggestion, verify before acting._`,
     );
-    return new HealthLeafItem(target.recommendation, "tools", {
-      description: relative,
+    const detail = new HealthLeafItem(target.recommendation, undefined, {
       tooltip,
       open: { path: target.path, line: 1, col: 0 },
+    });
+    return new HealthLeafItem(middleElidePath(relative), "tools", {
+      tooltip,
+      children: [detail],
     });
   });
 
@@ -200,6 +239,10 @@ export class HealthTreeProvider implements vscode.TreeDataProvider<HealthItem> {
       return [...element.leaves];
     }
 
+    if (element instanceof HealthLeafItem) {
+      return [...element.children];
+    }
+
     if (!this.report) {
       return [];
     }
@@ -217,7 +260,11 @@ export class HealthTreeProvider implements vscode.TreeDataProvider<HealthItem> {
 
     // The score is a single summary row, so suppress the redundant "(1)" count.
     addSection("score", buildScoreLeaves(this.report), 0);
-    addSection("complexity", buildComplexityLeaves(this.report), this.report.findings?.length ?? 0);
+    addSection(
+      "complexity",
+      buildComplexityLeaves(this.report),
+      visibleComplexityFindings(this.report).length,
+    );
     addSection("hotspots", buildHotspotLeaves(this.report), this.report.hotspots?.length ?? 0);
     addSection("targets", buildTargetLeaves(this.report), this.report.targets?.length ?? 0);
 

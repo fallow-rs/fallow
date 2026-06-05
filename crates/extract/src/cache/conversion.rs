@@ -150,6 +150,7 @@ pub fn cached_to_module_opts(
         .map(|r| RequireCallInfo {
             source: r.source.clone(),
             span: Span::new(r.span_start, r.span_end),
+            source_span: Span::new(r.source_span_start, r.source_span_end),
             destructured_names: r.destructured_names.clone(),
             local_name: r.local_name.clone(),
         })
@@ -361,6 +362,8 @@ pub fn module_to_cached(
                 source: r.source.clone(),
                 span_start: r.span.start,
                 span_end: r.span.end,
+                source_span_start: r.source_span.start,
+                source_span_end: r.source_span.end,
                 destructured_names: r.destructured_names.clone(),
                 local_name: r.local_name.clone(),
             })

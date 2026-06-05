@@ -10,8 +10,6 @@
 
 use std::path::Path;
 
-use oxc_span::Span;
-
 use fallow_types::extract::{ImportInfo, ImportedName, RequireCallInfo};
 
 use super::ResolvedImport;
@@ -48,7 +46,7 @@ pub(super) fn resolve_single_require(
                 is_type_only: false,
                 from_style: false,
                 span: req.span,
-                source_span: Span::default(),
+                source_span: req.source_span,
             },
             target,
         }];
@@ -64,7 +62,7 @@ pub(super) fn resolve_single_require(
                 is_type_only: false,
                 from_style: false,
                 span: req.span,
-                source_span: Span::default(),
+                source_span: req.source_span,
             },
             target: target.clone(),
         })

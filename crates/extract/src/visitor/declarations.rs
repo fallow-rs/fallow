@@ -4,7 +4,7 @@
 //! declaration AST nodes, binding patterns, and require/import patterns.
 
 use oxc_ast::ast::{
-    BindingPattern, CallExpression, Declaration, ImportExpression, TSEnumMemberName,
+    Argument, BindingPattern, CallExpression, Declaration, ImportExpression, TSEnumMemberName,
     TSModuleDeclarationName, VariableDeclarator,
 };
 
@@ -296,12 +296,20 @@ impl ModuleInfoExtractor {
         call: &CallExpression<'_>,
         source: &str,
     ) {
+        // Span of the specifier string literal (with quotes) for the diagnostic
+        // squiggly; falls back to the whole call when the argument is not a
+        // plain string literal.
+        let source_span = match call.arguments.first() {
+            Some(Argument::StringLiteral(lit)) => lit.span,
+            _ => call.span,
+        };
         match &declarator.id {
             BindingPattern::ObjectPattern(obj_pat) => {
                 let names = extract_destructured_names(obj_pat);
                 self.require_calls.push(RequireCallInfo {
                     source: source.to_string(),
                     span: call.span,
+                    source_span,
                     destructured_names: names,
                     local_name: None,
                 });
@@ -313,6 +321,7 @@ impl ModuleInfoExtractor {
                 self.require_calls.push(RequireCallInfo {
                     source: source.to_string(),
                     span: call.span,
+                    source_span,
                     destructured_names: Vec::new(),
                     local_name: Some(local),
                 });

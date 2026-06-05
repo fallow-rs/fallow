@@ -1036,6 +1036,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -1467,6 +1468,7 @@ mod tests {
                     length: 3,
                     line: 5,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -2190,6 +2192,7 @@ mod tests {
                         .ok()?,
                 })
             }),
+            contributions: Vec::new(),
         }
     }
 
@@ -2412,6 +2415,7 @@ mod tests {
             coverage_source: None,
             inherited_from: None,
             component_rollup: None,
+            contributions: Vec::new(),
         };
         let ctx = crate::health_types::HealthActionContext {
             opts: action_opts,
@@ -2581,6 +2585,7 @@ mod tests {
             coverage_source: None,
             inherited_from: None,
             component_rollup: None,
+            contributions: Vec::new(),
         };
         let narrow_ctx = crate::health_types::HealthActionContext {
             opts: crate::health_types::HealthActionOptions::default(),

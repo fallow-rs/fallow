@@ -146,6 +146,7 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
                 length: 2,
                 line: 3,
                 col: 0,
+                edges: Vec::new(),
                 is_cross_package: false,
             },
         ));

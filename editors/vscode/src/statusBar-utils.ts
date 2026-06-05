@@ -66,7 +66,6 @@ export const buildParamsFromCli = (
   cloneGroups: dupes?.stats.clone_groups ?? 0,
 });
 
-type SeverityKey = "statusBarItem.errorBackground" | "statusBarItem.warningBackground";
 
 interface BreakdownLine {
   readonly count: keyof AnalysisCompleteParams;
@@ -182,18 +181,6 @@ export const buildStatusBarPartsFromLsp = (params: AnalysisCompleteParams): stri
   `${params.totalIssues} issues`,
   `${getDuplicationPercentage(params.duplicationPercentage).toFixed(1)}% duplication`,
 ];
-
-export const getStatusBarSeverityKey = (params: AnalysisCompleteParams): SeverityKey | null => {
-  if (params.unresolvedImports > 0) {
-    return "statusBarItem.errorBackground";
-  }
-
-  if (params.totalIssues > 0) {
-    return "statusBarItem.warningBackground";
-  }
-
-  return null;
-};
 
 export const formatChangedSinceRefForStatusBar = (ref: string): string => {
   const normalized = normalizeInlineText(ref);

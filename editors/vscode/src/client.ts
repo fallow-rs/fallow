@@ -206,12 +206,21 @@ export const startClient = async (
     outputChannel,
     traceOutputChannel: outputChannel,
     initializationOptions: createInitializationOptions(),
+    // fallow-lsp advertises the LSP 3.17 pull provider (for strict-3.17 clients
+    // like Helix/Zed) AND publishes diagnostics via push. vscode-languageclient
+    // would surface BOTH for the same document, showing every diagnostic twice.
+    // VS Code already receives timely diagnostics via push, so disable pull here
+    // (`match` short-circuits every pull). Push muting still runs through the
+    // `handleDiagnostics` middleware below.
+    diagnosticPullOptions: {
+      onChange: false,
+      onSave: false,
+      match: () => false,
+    },
     middleware: diagnosticFilter
       ? {
           handleDiagnostics: (uri, diagnostics, next) =>
             diagnosticFilter.handleDiagnostics(uri, diagnostics, next),
-          provideDiagnostics: (document, previousResultId, token, next) =>
-            diagnosticFilter.provideDiagnostics(document, previousResultId, token, next),
         }
       : undefined,
   };

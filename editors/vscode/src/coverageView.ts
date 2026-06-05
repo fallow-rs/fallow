@@ -9,7 +9,7 @@ import {
   sortHotPaths,
   splitCleanupCandidates,
 } from "./coverage-utils.js";
-import { resolveFilePath as resolveFilePathPure } from "./treeView-utils.js";
+import { middleElidePath, resolveFilePath as resolveFilePathPure } from "./treeView-utils.js";
 import type {
   RuntimeCoverageFinding,
   RuntimeCoverageHotPath,
@@ -47,7 +47,7 @@ class CoverageLeafItem extends vscode.TreeItem {
 
     const { absolute, relative } = resolveFilePath(filePath);
 
-    this.description = `${relative}:${line}`;
+    this.description = `${middleElidePath(relative)}:${line}`;
     this.tooltip = tooltip;
     this.contextValue = "coverageItem";
     this.iconPath = new vscode.ThemeIcon(icon);

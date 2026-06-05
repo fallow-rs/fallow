@@ -42,6 +42,9 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
     if params.complexity == Some(true) {
         args.push("--complexity".to_string());
     }
+    if params.complexity_breakdown == Some(true) {
+        args.push("--complexity-breakdown".to_string());
+    }
     if params.file_scores == Some(true) {
         args.push("--file-scores".to_string());
     }

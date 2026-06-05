@@ -196,7 +196,15 @@ use crate::MemberKind;
 /// flow into `ModuleInfo.security_sinks` for Svelte `{@html ...}`, Vue
 /// `v-html`, and Angular `[innerHTML]`. Pre-121 entries omit those sink sites
 /// until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 121;
+///
+/// Bumped to 122: `FunctionComplexity` now carries a `contributions` vector
+/// (per-decision-point complexity breakdown) and `RequireCallInfo` carries
+/// `source_span` (the specifier string-literal span so an `unresolved-import`
+/// squiggly anchors under the `'./x'` specifier rather than the `require`
+/// keyword). Pre-122 entries lack the breakdown (empty under
+/// `health --complexity-breakdown`) and carry `Span::default()` for the
+/// require specifier until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 122;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -248,13 +256,14 @@ assert_cached_type_size!(CachedUnknownSuppressionKind, 32);
 assert_cached_type_size!(CachedExport, 112);
 assert_cached_type_size!(CachedImport, 96);
 assert_cached_type_size!(CachedDynamicImport, 88);
-assert_cached_type_size!(CachedRequireCall, 80);
+assert_cached_type_size!(CachedRequireCall, 88);
 assert_cached_type_size!(CachedReExport, 88);
 assert_cached_type_size!(CachedMember, 64);
 assert_cached_type_size!(CachedDynamicImportPattern, 56);
 assert_cached_type_size!(crate::MemberAccess, 48);
 assert_cached_type_size!(fallow_types::extract::SinkSite, 64);
-assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 72);
+assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
+assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
 assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 96);
 
@@ -492,6 +501,10 @@ pub struct CachedRequireCall {
     pub span_start: u32,
     /// Byte offset of the span end.
     pub span_end: u32,
+    /// Byte offset of the specifier string-literal span start.
+    pub source_span_start: u32,
+    /// Byte offset of the specifier string-literal span end.
+    pub source_span_end: u32,
     /// Names destructured from the require result.
     pub destructured_names: Vec<String>,
     /// Local variable name for namespace requires.

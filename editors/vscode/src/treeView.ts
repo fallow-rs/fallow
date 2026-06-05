@@ -5,8 +5,17 @@ import * as path from "node:path";
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { countCheckIssues } from "./analysis-utils.js";
-import { resolveFilePath as resolveFilePathPure } from "./treeView-utils.js";
-import type { CloneGroup, FallowCheckResult, FallowDupesResult, IssueCategory } from "./types.js";
+import {
+  middleElidePath,
+  resolveFilePath as resolveFilePathPure,
+  sortCloneGroupsBySize,
+} from "./treeView-utils.js";
+import type {
+  CloneGroupFinding,
+  FallowCheckResult,
+  FallowDupesResult,
+  IssueCategory,
+} from "./types.js";
 import { ISSUE_CATEGORY_LABELS } from "./types.js";
 
 const resolveFilePath = (filePath: string | undefined) =>
@@ -76,14 +85,14 @@ const staleSuppressionLabel = (
   return origin.is_file_level ? "file suppression" : "line suppression";
 };
 
-type DeadCodeItem = CategoryItem | IssueItem;
+type DeadCodeItem = CategoryItem | IssueItem | CycleItem;
 
 class CategoryItem extends vscode.TreeItem {
-  readonly issues: ReadonlyArray<IssueItem>;
+  readonly issues: ReadonlyArray<IssueItem | CycleItem>;
 
   constructor(
     readonly category: IssueCategory,
-    issues: ReadonlyArray<IssueItem>,
+    issues: ReadonlyArray<IssueItem | CycleItem>,
   ) {
     super(
       `${ISSUE_CATEGORY_LABELS[category]} (${issues.length})`,
@@ -107,7 +116,7 @@ class IssueItem extends vscode.TreeItem {
 
     const { absolute, relative } = resolveFilePath(filePath);
 
-    this.description = `${relative}:${line}`;
+    this.description = `${middleElidePath(relative)}:${line}`;
     this.tooltip = `${label}\n${absolute}:${line}:${col}`;
     this.contextValue = "issue";
 
@@ -122,6 +131,31 @@ class IssueItem extends vscode.TreeItem {
       ],
     };
 
+    this.iconPath = new vscode.ThemeIcon(ISSUE_ICONS[category] ?? "warning");
+  }
+}
+
+/**
+ * A dependency cycle (circular dependency or re-export cycle). Collapsible: the
+ * label summarizes the cycle (`N files`) and the children are every file in the
+ * cycle, each clickable, so the whole loop is visible rather than just the
+ * entry file.
+ */
+class CycleItem extends vscode.TreeItem {
+  readonly fileItems: ReadonlyArray<IssueItem>;
+
+  constructor(label: string, files: ReadonlyArray<string>, category: IssueCategory) {
+    super(
+      label,
+      files.length > 0
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None,
+    );
+    this.fileItems = files.map((f) => new IssueItem(path.basename(f), f, 1, 0, category));
+    const { relative } = resolveFilePath(files[0] ?? "");
+    this.description = relative ? middleElidePath(relative) : undefined;
+    this.tooltip = files.map((f) => resolveFilePath(f).absolute).join("\n");
+    this.contextValue = "cycle";
     this.iconPath = new vscode.ThemeIcon(ISSUE_ICONS[category] ?? "warning");
   }
 }
@@ -168,13 +202,20 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
       return [...element.issues];
     }
 
+    if (element instanceof CycleItem) {
+      return [...element.fileItems];
+    }
+
     if (!this.result) {
       return [];
     }
 
     const categories: DeadCodeItem[] = [];
 
-    const addCategory = (category: IssueCategory, items: ReadonlyArray<IssueItem>): void => {
+    const addCategory = (
+      category: IssueCategory,
+      items: ReadonlyArray<IssueItem | CycleItem>,
+    ): void => {
       if (items.length > 0) {
         categories.push(new CategoryItem(category, items));
       }
@@ -314,14 +355,7 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
       addCategory(
         "circular-dependencies",
         this.result.circular_dependencies.map(
-          (c) =>
-            new IssueItem(
-              `${c.length} files`,
-              c.files[0] ?? "",
-              c.line,
-              c.col,
-              "circular-dependencies",
-            ),
+          (c) => new CycleItem(`${c.length} files`, c.files, "circular-dependencies"),
         ),
       );
     }
@@ -331,11 +365,9 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
         "re-export-cycles",
         this.result.re_export_cycles.map(
           (c) =>
-            new IssueItem(
+            new CycleItem(
               c.kind === "self-loop" ? "Self-loop" : `${c.files.length} files`,
-              c.files[0] ?? "",
-              1,
-              0,
+              c.files,
               "re-export-cycles",
             ),
         ),
@@ -455,14 +487,21 @@ type DuplicateItem = CloneFamilyItem | CloneInstanceItem;
 class CloneFamilyItem extends vscode.TreeItem {
   readonly instances: ReadonlyArray<CloneInstanceItem>;
 
-  constructor(group: CloneGroup, index: number) {
+  constructor(group: CloneGroupFinding) {
     const instanceItems = group.instances.map(
       (inst) => new CloneInstanceItem(inst.file, inst.start_line, inst.end_line),
     );
-    super(
-      `Clone #${index + 1} (${group.line_count} lines, ${group.instances.length} instances)`,
-      vscode.TreeItemCollapsibleState.Collapsed,
-    );
+    // Name the clone by what it is: fallow's dominant repeated identifier (e.g.
+    // a shared `parseCsv` function), falling back to the first instance's file
+    // basename when the clone has no clear name. The list is already ordered by
+    // impact, so an opaque "Clone #N" ordinal is not needed.
+    const name =
+      group.suggested_name ??
+      (group.instances[0] ? path.basename(group.instances[0].file) : "Duplicated code");
+    const count = group.instances.length;
+    super(name, vscode.TreeItemCollapsibleState.Collapsed);
+    this.description = `${group.line_count} lines · ${count} instance${count === 1 ? "" : "s"}`;
+    this.tooltip = `${name}\n${group.line_count} lines · ${count} instance${count === 1 ? "" : "s"} · ${group.fingerprint}`;
     this.instances = instanceItems;
     this.contextValue = "cloneFamily";
     this.iconPath = new vscode.ThemeIcon("files");
@@ -480,7 +519,7 @@ class CloneInstanceItem extends vscode.TreeItem {
 
     const { absolute, relative } = resolveFilePath(filePath);
 
-    this.description = relative;
+    this.description = middleElidePath(relative);
     this.tooltip = `${absolute}:${startLine}-${endLine}`;
     this.contextValue = "cloneInstance";
 
@@ -525,7 +564,9 @@ export class DuplicatesTreeProvider implements vscode.TreeDataProvider<Duplicate
       return [];
     }
 
-    return this.result.clone_groups.map((group, i) => new CloneFamilyItem(group, i));
+    return sortCloneGroupsBySize(this.result.clone_groups).map(
+      (group) => new CloneFamilyItem(group),
+    );
   }
 
   dispose(): void {

@@ -4,7 +4,7 @@
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { countSecurityFindings, hopRoleLabel, securityFindingLabel } from "./security-utils.js";
-import { resolveFilePath as resolveFilePathPure } from "./treeView-utils.js";
+import { middleElidePath, resolveFilePath as resolveFilePathPure } from "./treeView-utils.js";
 import type { SecurityFinding, SecurityOutput, TraceHop } from "./types.js";
 
 const resolveFilePath = (filePath: string | undefined): { absolute: string; relative: string } =>
@@ -45,7 +45,7 @@ type SecurityItem = SecurityFindingItem | SecurityHopItem;
 class SecurityHopItem extends vscode.TreeItem {
   constructor(hop: TraceHop) {
     const { absolute, relative } = resolveFilePath(hop.path);
-    super(`${relative}:${hop.line}`, vscode.TreeItemCollapsibleState.None);
+    super(`${middleElidePath(relative)}:${hop.line}`, vscode.TreeItemCollapsibleState.None);
 
     this.description = hopRoleLabel(hop.role);
     this.tooltip = `${hopRoleLabel(hop.role)}\n${absolute}:${hop.line}`;
@@ -70,7 +70,7 @@ class SecurityFindingItem extends vscode.TreeItem {
 
     const { absolute, relative } = resolveFilePath(finding.path);
 
-    this.description = `${relative}:${finding.line}`;
+    this.description = `${middleElidePath(relative)}:${finding.line}`;
     this.contextValue = "securityCandidate";
     this.iconPath = new vscode.ThemeIcon("shield");
     this.hops = hops;

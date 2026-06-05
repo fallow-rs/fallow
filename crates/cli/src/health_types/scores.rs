@@ -168,6 +168,12 @@ pub struct ComplexityViolation {
     pub inherited_from: Option<std::path::PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub component_rollup: Option<ComponentRollup>,
+    /// Per-decision-point complexity breakdown explaining WHICH constructs drove
+    /// the cyclomatic and cognitive scores. Populated only when the caller opts
+    /// in via `health --complexity-breakdown`; empty (and omitted from JSON)
+    /// otherwise so default and CI output stay lean.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contributions: Vec<fallow_types::extract::ComplexityContribution>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

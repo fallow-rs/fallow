@@ -1,11 +1,14 @@
 import * as child_process from "node:child_process";
+import * as fs from "node:fs";
 import * as os from "node:os";
+import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { resolveCliForRun } from "./commands.js";
 import { getLicenseShowStatusBar } from "./config.js";
 import {
+  hasLicenseMaterial,
   isValidEmail,
   isValidJwtShape,
   licensePlaceholderParts,
@@ -133,8 +136,38 @@ const runLicense = async (
 
 let licenseStatusBarItem: vscode.StatusBarItem | null = null;
 
+/** Default license path mirrored from `fallow_license` (`~/.fallow/license.jwt`). */
+const defaultLicensePath = (): string => path.join(os.homedir(), ".fallow", "license.jwt");
+
+/**
+ * Whether license material exists on this machine, without shelling out to
+ * `fallow`. Checks `$FALLOW_LICENSE` / `$FALLOW_LICENSE_PATH` / the default
+ * file, matching the Rust loader precedence. Drives whether the indicator is
+ * shown at all: users who never had a license get no badge.
+ */
+const licenseMaterialPresent = (): boolean =>
+  hasLicenseMaterial(
+    process.env["FALLOW_LICENSE"],
+    process.env["FALLOW_LICENSE_PATH"],
+    defaultLicensePath(),
+    (filePath) => {
+      try {
+        return fs.existsSync(filePath);
+      } catch {
+        return false;
+      }
+    },
+  );
+
 const applyParts = (status: LicenseStatusJson | null): void => {
   if (!licenseStatusBarItem) {
+    return;
+  }
+  // A probed `missing` state means there is no valid license material (e.g. a
+  // deactivated or invalid file). Never advertise "no license" in the status
+  // bar: hide the item rather than show a paid-feature nudge to free users.
+  if (status !== null && status.state === "missing") {
+    licenseStatusBarItem.hide();
     return;
   }
   const parts = status === null ? licensePlaceholderParts() : licenseStatusBarParts(status);
@@ -146,35 +179,52 @@ const applyParts = (status: LicenseStatusJson | null): void => {
   tooltip.isTrusted = true;
   tooltip.supportThemeIcons = true;
   licenseStatusBarItem.tooltip = tooltip;
+  licenseStatusBarItem.show();
 };
 
 /**
- * Create the license status-bar item, or `null` when the indicator is disabled
- * (`fallow.license.showStatusBar: false`). Sits just right of the analysis item
- * (priority 49 vs 50). Renders a neutral placeholder immediately; callers
- * update it asynchronously via {@link refreshLicenseStatus}.
+ * Create the singleton license status-bar item, but only when the indicator is
+ * enabled (`fallow.license.showStatusBar`) AND license material is present.
+ * No-op when the item already exists. Idempotent: callers run it before a probe
+ * so the badge appears the moment a license is activated (without a reload).
  */
-export const createLicenseStatusBar = (): vscode.StatusBarItem | null => {
-  if (!getLicenseShowStatusBar()) {
-    return null;
+const ensureLicenseStatusBar = (): void => {
+  if (licenseStatusBarItem) {
+    return;
+  }
+  if (!getLicenseShowStatusBar() || !licenseMaterialPresent()) {
+    return;
   }
   licenseStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 49);
   licenseStatusBarItem.command = "fallow.license.status";
   applyParts(null);
   licenseStatusBarItem.show();
+};
+
+/**
+ * Create the license status-bar item, or return `null` when the indicator is
+ * disabled (`fallow.license.showStatusBar: false`) OR no license material is
+ * present (free users never see a license badge). Sits just right of the
+ * analysis item (priority 49 vs 50). Renders a neutral placeholder immediately;
+ * callers update it asynchronously via {@link refreshLicenseStatus}.
+ */
+export const createLicenseStatusBar = (): vscode.StatusBarItem | null => {
+  ensureLicenseStatusBar();
   return licenseStatusBarItem;
 };
 
 /**
  * Probe `fallow license status` and update the indicator. Best-effort: a
  * missing binary or spawn error leaves the placeholder in place and is logged,
- * never surfaced as an error toast (the probe is passive). Safe to call when
- * the status bar is disabled (no-op).
+ * never surfaced as an error toast (the probe is passive). Creates the item
+ * first if a license was just activated; stays a no-op for free users (no
+ * material, so no item).
  */
 export const refreshLicenseStatus = async (
   context: vscode.ExtensionContext,
   outputChannel?: vscode.OutputChannel,
 ): Promise<void> => {
+  ensureLicenseStatusBar();
   if (!licenseStatusBarItem) {
     return;
   }
@@ -326,6 +376,7 @@ export const licenseStatusCommand = async (
 ): Promise<void> => {
   try {
     const result = await runLicense(context, ["status"], outputChannel);
+    ensureLicenseStatusBar();
     applyParts(result.status);
     void vscode.window.showInformationMessage(`Fallow: ${result.message}`);
   } catch (err) {

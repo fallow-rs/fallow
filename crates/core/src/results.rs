@@ -8,15 +8,15 @@ pub use fallow_types::output_dead_code::{
     UnusedExportFinding, UnusedFileFinding, UnusedOptionalDependencyFinding, UnusedTypeFinding,
 };
 pub use fallow_types::results::{
-    ActiveSuppression, AnalysisResults, BoundaryViolation, CircularDependency, DependencyLocation,
-    DependencyOverrideMisconfigReason, DependencyOverrideSource, DuplicateExport,
-    DuplicateLocation, EmptyCatalogGroup, EntryPointSummary, ExportUsage, FeatureFlag,
-    FlagConfidence, FlagKind, ImportSite, MisconfiguredDependencyOverride, PrivateTypeLeak,
-    ReExportCycle, ReExportCycleKind, ReferenceLocation, SecurityFinding, SecurityFindingKind,
-    StaleSuppression, SuppressionOrigin, TestOnlyDependency, TraceHop, TraceHopRole,
-    TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport,
-    UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
-    UnusedMember,
+    ActiveSuppression, AnalysisResults, BoundaryViolation, CircularDependency,
+    CircularDependencyEdge, DependencyLocation, DependencyOverrideMisconfigReason,
+    DependencyOverrideSource, DuplicateExport, DuplicateLocation, EmptyCatalogGroup,
+    EntryPointSummary, ExportUsage, FeatureFlag, FlagConfidence, FlagKind, ImportSite,
+    MisconfiguredDependencyOverride, PrivateTypeLeak, ReExportCycle, ReExportCycleKind,
+    ReferenceLocation, SecurityFinding, SecurityFindingKind, StaleSuppression, SuppressionOrigin,
+    TestOnlyDependency, TraceHop, TraceHopRole, TypeOnlyDependency, UnlistedDependency,
+    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
+    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
 
 #[cfg(test)]

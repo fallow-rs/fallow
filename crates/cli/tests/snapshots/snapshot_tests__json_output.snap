@@ -383,6 +383,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
       "length": 2,
       "line": 3,
       "col": 0,
+      "edges": [],
       "actions": [
         {
           "type": "refactor-cycle",

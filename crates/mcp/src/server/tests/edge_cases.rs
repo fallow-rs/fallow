@@ -146,6 +146,19 @@ fn health_args_complexity_flag_only() {
 }
 
 #[test]
+fn health_args_complexity_breakdown_flag() {
+    let on = build_health_args(&HealthParams {
+        complexity_breakdown: Some(true),
+        ..Default::default()
+    });
+    assert!(on.contains(&"--complexity-breakdown".to_string()));
+
+    // The breakdown flag is independent of --complexity and absent by default.
+    let off = build_health_args(&HealthParams::default());
+    assert!(!off.contains(&"--complexity-breakdown".to_string()));
+}
+
+#[test]
 fn health_args_hotspots_flag_only() {
     let params = HealthParams {
         hotspots: Some(true),
@@ -613,6 +626,7 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
         sort: Some("cognitive".to_string()),
         changed_since: Some("develop".to_string()),
         complexity: Some(true),
+        complexity_breakdown: Some(true),
         file_scores: Some(true),
         hotspots: Some(true),
         targets: Some(true),

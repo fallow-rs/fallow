@@ -338,6 +338,9 @@ pub fn compute_angular_template_complexity(source: &str) -> Option<FunctionCompl
         line_count,
         param_count: 0,
         source_hash: None,
+        // The hand-rolled Angular template scanner emits only aggregate metrics;
+        // per-construct contributions are out of scope for the first cut.
+        contributions: Vec::new(),
     })
 }
 

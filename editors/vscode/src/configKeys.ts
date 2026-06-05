@@ -27,6 +27,11 @@ export const HEALTH_CONFIG_KEYS = [
   "fallow.health.hotspots",
   "fallow.health.topFindings",
   "fallow.health.statusBar",
+  // The inline complexity breakdown is backed by the same health spawn:
+  // enabling it (or changing the decoration cap) changes the spawn's args, so a
+  // re-run is needed. `afterText` is render-only and handled separately.
+  "fallow.complexity.breakdownEnabled",
+  "fallow.complexity.decorationCap",
 ] as const;
 
 export interface ConfigurationChangeLike {

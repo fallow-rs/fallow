@@ -1177,6 +1177,30 @@ pub struct TestOnlyDependency {
     pub line: u32,
 }
 
+/// One import hop in a circular dependency: the file containing the import
+/// and where that import statement sits.
+///
+/// `edges[i]` is the import IN `path` (the hop SOURCE, equal to the cycle's
+/// `files[i]`) that points to the NEXT file in the cycle
+/// (`files[(i + 1) % files.len()]`); the target is not repeated here to keep
+/// the wire compact. Enables a per-file diagnostic squiggly anchored under
+/// the offending import rather than a single squiggly on the first file.
+///
+/// `col` is a 0-based BYTE column, matching the cycle's top-level `col`;
+/// converting it to a UTF-16 code-unit column for LSP clients is a tracked
+/// follow-up shared with the existing field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CircularDependencyEdge {
+    /// The file containing the import (the hop SOURCE; equal to `files[i]`).
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number of the import statement pointing to the next file.
+    pub line: u32,
+    /// 0-based byte column offset of the import statement.
+    pub col: u32,
+}
+
 /// A circular dependency chain detected in the module graph.
 ///
 /// The `line` and `col` fields carry `#[serde(default)]` so callers reading
@@ -1187,6 +1211,13 @@ pub struct TestOnlyDependency {
 /// schema; the explicit `extend("required" = ...)` override here keeps the
 /// schema's `required` array honest about what the JSON output actually
 /// contains.
+///
+/// `edges` is deliberately kept OUT of the `required` extend: it is
+/// `#[serde(default)]` (so historical baseline JSON without it still
+/// deserializes) and the output layer always emits it, but listing it in
+/// `required` would make pre-upgrade JSON fail validation against the new
+/// schema. It is a normal additive field: always present in current output,
+/// optional for backward compatibility.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(extend("required" = ["files", "length", "line", "col"])))]
@@ -1202,6 +1233,14 @@ pub struct CircularDependency {
     /// 0-based byte column offset of the import that starts the cycle.
     #[serde(default)]
     pub col: u32,
+    /// Per-file import anchors, one entry per hop in cycle order: `edges[i]`
+    /// is the import in `files[i]` pointing to `files[(i + 1) % len]`. Always
+    /// the same length as `files`. Drives the per-file LSP diagnostic
+    /// squiggly. `#[serde(default)]` so pre-`edges` baselines deserialize;
+    /// always emitted on output but intentionally not in the schema's
+    /// `required` set (see the struct doc).
+    #[serde(default)]
+    pub edges: Vec<CircularDependencyEdge>,
     /// Whether this cycle crosses workspace package boundaries.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_cross_package: bool,
@@ -1726,6 +1765,7 @@ mod tests {
                     length: 2,
                     line: 3,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             )],
@@ -2252,6 +2292,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -2262,6 +2303,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: true,
                 },
             ));
@@ -2449,6 +2491,7 @@ mod tests {
             length: 2,
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: false,
         };
         let json = serde_json::to_value(&cd).unwrap();
@@ -2463,6 +2506,7 @@ mod tests {
             length: 2,
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: true,
         };
         let json = serde_json::to_value(&cd).unwrap();

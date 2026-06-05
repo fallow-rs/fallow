@@ -7,7 +7,6 @@ import {
   buildParamsFromCli,
   buildStatusBarPartsFromLsp,
   buildStatusBarTooltipMarkdown,
-  getStatusBarSeverityKey,
   renderStatusBarText,
 } from "./statusBar-utils.js";
 import type { FallowCheckResult, FallowDupesResult, HealthReport } from "./types.js";
@@ -75,8 +74,10 @@ const applyTooltipAndSeverity = (params: AnalysisCompleteParams): void => {
     return;
   }
 
-  const severity = getStatusBarSeverityKey(params);
-  statusBarItem.backgroundColor = severity ? new vscode.ThemeColor(severity) : undefined;
+  // The main status bar item is intentionally left uncolored: a full-width
+  // red/yellow background for a poor health score is more distracting than
+  // informative, and the grade + issue counts in the text already convey it.
+  statusBarItem.backgroundColor = undefined;
 
   const tooltip = new vscode.MarkdownString(
     buildStatusBarTooltipMarkdown(params, getChangedSince() || null),

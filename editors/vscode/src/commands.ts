@@ -18,6 +18,8 @@ import {
   getDuplicationThresholdOverride,
   getHealthHotspots,
   getHealthTopFindings,
+  getComplexityBreakdownEnabled,
+  getComplexityDecorationCap,
   getIssueTypes,
   getChangedSince,
   getResolvedConfigPath,
@@ -745,13 +747,22 @@ export const runHealthAnalysis = async (
   try {
     const { binary } = await resolveCliForRun(context, outputChannel);
 
+    // When the inline breakdown is on, fetch a larger top-N so files outside
+    // the tree's top-N still get decorated; the tree slices back to
+    // `getHealthTopFindings()` for display.
+    const breakdownEnabled = getComplexityBreakdownEnabled();
+    const topFindings = breakdownEnabled
+      ? Math.max(getHealthTopFindings(), getComplexityDecorationCap())
+      : getHealthTopFindings();
+
     const args = buildHealthArgs({
       hotspots: getHealthHotspots(),
-      topFindings: getHealthTopFindings(),
+      topFindings,
       configPath: getResolvedConfigPath(),
       changedSince: getChangedSince(),
       production: getProduction(),
       workspace: resolveActiveWorkspaceScope(context),
+      complexityBreakdown: breakdownEnabled,
     });
 
     const output = await execFallow(binary, args, root);

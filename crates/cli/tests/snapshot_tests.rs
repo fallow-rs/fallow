@@ -158,6 +158,7 @@ fn sample_results(root: &Path) -> AnalysisResults {
                 length: 2,
                 line: 3,
                 col: 0,
+                edges: Vec::new(),
                 is_cross_package: false,
             },
         ));
@@ -1606,6 +1607,7 @@ fn codeclimate_circular_deps_only_snapshot() {
                 length: 2,
                 line: 3,
                 col: 0,
+                edges: Vec::new(),
                 is_cross_package: false,
             },
         ));
@@ -1739,6 +1741,7 @@ fn json_circular_deps_only_snapshot() {
                 length: 2,
                 line: 3,
                 col: 0,
+                edges: Vec::new(),
                 is_cross_package: false,
             },
         ));
@@ -1759,6 +1762,7 @@ fn sarif_circular_deps_only_snapshot() {
                 length: 2,
                 line: 3,
                 col: 0,
+                edges: Vec::new(),
                 is_cross_package: false,
             },
         ));
@@ -1779,6 +1783,7 @@ fn compact_circular_deps_only_snapshot() {
                 length: 2,
                 line: 3,
                 col: 0,
+                edges: Vec::new(),
                 is_cross_package: false,
             },
         ));
@@ -2202,6 +2207,7 @@ fn markdown_circular_deps_only_snapshot() {
                 length: 2,
                 line: 3,
                 col: 0,
+                edges: Vec::new(),
                 is_cross_package: false,
             },
         ));
@@ -2290,6 +2296,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
                 coverage_source: None,
                 inherited_from: None,
                 component_rollup: None,
+                contributions: Vec::new(),
             },
             &action_ctx,
         )],

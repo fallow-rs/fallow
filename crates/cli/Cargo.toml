@@ -39,7 +39,7 @@ test-sidecar-key = []
 # single `JsonSchema` document covering health alongside the rest of the
 # output contract. Strictly additive: non-schema builds pay zero compile cost
 # because every derive is gated behind `#[cfg_attr(feature = "schema", ...)]`.
-schema = ["dep:schemars"]
+schema = ["dep:schemars", "fallow-types/schema"]
 # Build-only feature that enables the `fallow-schema-emit` binary, which
 # regenerates `docs/output-schema.json` from the Rust source of truth. Pulls in
 # schemars across the workspace via the per-crate `schema` features. Not part

@@ -5,6 +5,7 @@ import {
   buildHealthArgs,
   countHealthItems,
   escapeHealthMarkdown,
+  formatComplexityOffense,
   formatHealthStatusPart,
   formatHotspotDescription,
   formatScoreLabel,
@@ -13,6 +14,7 @@ import {
   parseUnknownHealthSubcommand,
   recognizedPenaltyKeys,
   severityIcon,
+  severityThemeColor,
   topPenalties,
 } from "../src/health-utils.js";
 import type { HealthReport, HealthScorePenalties } from "../src/types.js";
@@ -152,11 +154,45 @@ describe("gradeThemeColor", () => {
 });
 
 describe("severityIcon", () => {
-  it("maps severities to distinct codicons with a fallback", () => {
-    expect(severityIcon("critical")).toBe("error");
+  it("maps severities to distinct non-error codicons with a fallback", () => {
+    // `critical` uses the section's `flame` glyph, not the alarming error `X`,
+    // because complexity findings are heuristic candidates, not broken code.
+    expect(severityIcon("critical")).toBe("flame");
     expect(severityIcon("high")).toBe("warning");
     expect(severityIcon("moderate")).toBe("info");
     expect(severityIcon("unknown")).toBe("circle-outline");
+  });
+});
+
+describe("severityThemeColor", () => {
+  it("pairs each severity with a distinct neutral chart color, null for unknown", () => {
+    expect(severityThemeColor("critical")).toBe("charts.red");
+    expect(severityThemeColor("high")).toBe("charts.orange");
+    expect(severityThemeColor("moderate")).toBe("charts.blue");
+    expect(severityThemeColor("unknown")).toBeNull();
+  });
+});
+
+describe("formatComplexityOffense", () => {
+  it("leads with the function and abbreviates the metrics", () => {
+    expect(
+      formatComplexityOffense({ name: "parseArgs", cyclomatic: 24, cognitive: 18, crap: 31 }),
+    ).toBe("parseArgs · 24 cyc · 18 cog · CRAP 31");
+  });
+
+  it("omits the CRAP segment when there is no score", () => {
+    expect(
+      formatComplexityOffense({ name: "render", cyclomatic: 9, cognitive: 7, crap: null }),
+    ).toBe("render · 9 cyc · 7 cog");
+    expect(formatComplexityOffense({ name: "render", cyclomatic: 9, cognitive: 7 })).toBe(
+      "render · 9 cyc · 7 cog",
+    );
+  });
+
+  it("rounds the CRAP score to a whole number", () => {
+    expect(
+      formatComplexityOffense({ name: "f", cyclomatic: 5, cognitive: 4, crap: 30.7 }),
+    ).toBe("f · 5 cyc · 4 cog · CRAP 31");
   });
 });
 

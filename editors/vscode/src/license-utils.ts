@@ -109,6 +109,35 @@ export interface LicenseStatusBarParts {
 export const escapeMarkdown = (raw: string): string =>
   raw.replace(/[\\`*_{}[\]()#+\-.!|<>]/g, (ch) => `\\${ch}`);
 
+/**
+ * Whether any license material is present, mirroring the source precedence in
+ * `fallow_license::load_raw_jwt` (`crates/license/src/lib.rs`): an inline
+ * `$FALLOW_LICENSE` JWT, then a `$FALLOW_LICENSE_PATH` file, then the default
+ * `~/.fallow/license.jwt`. Pure: the caller supplies the env values, the
+ * resolved default path, and a file-exists predicate, so this stays
+ * unit-testable without touching the real filesystem or process env. Keep the
+ * precedence in sync with the Rust loader. Used to keep the license indicator
+ * off the status bar entirely for users who never had a license (the indicator
+ * advertises nothing to free users).
+ */
+export const hasLicenseMaterial = (
+  inlineEnv: string | undefined,
+  pathEnv: string | undefined,
+  defaultPath: string,
+  fileExists: (filePath: string) => boolean,
+): boolean => {
+  if (inlineEnv !== undefined && inlineEnv.trim().length > 0) {
+    return true;
+  }
+  const explicitPath = pathEnv?.trim();
+  if (explicitPath !== undefined && explicitPath.length > 0) {
+    // `$FALLOW_LICENSE_PATH` takes over from the default entirely: the Rust
+    // loader does not fall back to `~/.fallow/license.jwt` once it is set.
+    return fileExists(explicitPath);
+  }
+  return fileExists(defaultPath);
+};
+
 const PLACEHOLDER_TEXT = "$(key) Fallow License";
 
 /** Status-bar parts before any probe has run (or when probing is disabled). */

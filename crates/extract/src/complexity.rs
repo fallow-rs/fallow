@@ -16,9 +16,12 @@ use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk;
 use oxc_semantic::ScopeFlags;
+use oxc_span::GetSpan;
 use oxc_span::Span;
 
-use fallow_types::extract::FunctionComplexity;
+use fallow_types::extract::{
+    ComplexityContribution, ComplexityContributionKind, ComplexityMetric, FunctionComplexity,
+};
 
 /// Per-function state on the scope stack.
 struct FunctionFrame {
@@ -31,6 +34,8 @@ struct FunctionFrame {
     last_logical_operator: Option<LogicalOperator>,
     /// Number of parameters (excluding TypeScript's `this` parameter).
     param_count: u8,
+    /// Per-increment breakdown accumulated as the function body is walked.
+    contributions: Vec<ComplexityContribution>,
 }
 
 /// AST visitor that computes per-function complexity metrics.
@@ -81,6 +86,7 @@ impl<'a> ComplexityVisitor<'a> {
             nesting_level: 0,
             last_logical_operator: None,
             param_count,
+            contributions: Vec::new(),
         });
     }
 
@@ -100,26 +106,60 @@ impl<'a> ComplexityVisitor<'a> {
                 line_count: end_line.saturating_sub(line) + 1,
                 param_count: frame.param_count,
                 source_hash,
+                contributions: frame.contributions,
             });
         }
     }
 
-    /// Increment cyclomatic complexity for the current function.
-    fn inc_cyclomatic(&mut self) {
+    /// Record one increment event at `span` and return nothing; the caller is
+    /// responsible for applying the matching `+weight` to the counter so the
+    /// recorded breakdown can never drift from the aggregate metric.
+    fn push_contribution(
+        &mut self,
+        span: Span,
+        metric: ComplexityMetric,
+        kind: ComplexityContributionKind,
+        weight: u16,
+        nesting: u16,
+    ) {
+        let (line, col) =
+            fallow_types::extract::byte_offset_to_line_col(self.line_offsets, span.start);
+        if let Some(frame) = self.stack.last_mut() {
+            frame.contributions.push(ComplexityContribution {
+                line,
+                col,
+                metric,
+                kind,
+                weight,
+                nesting,
+            });
+        }
+    }
+
+    /// Increment cyclomatic complexity for the current function and record the
+    /// contributing construct. Cyclomatic increments are flat `+1`.
+    fn inc_cyclomatic(&mut self, span: Span, kind: ComplexityContributionKind) {
+        self.push_contribution(span, ComplexityMetric::Cyclomatic, kind, 1, 0);
         if let Some(frame) = self.stack.last_mut() {
             frame.cyclomatic = frame.cyclomatic.saturating_add(1);
         }
     }
 
-    /// Increment cognitive complexity: +1 structural + nesting penalty.
-    fn inc_cognitive_with_nesting(&mut self) {
+    /// Increment cognitive complexity: +1 structural + nesting penalty, and
+    /// record the contribution with `weight == 1 + nesting`.
+    fn inc_cognitive_with_nesting(&mut self, span: Span, kind: ComplexityContributionKind) {
+        let nesting = self.stack.last().map_or(0, |frame| frame.nesting_level);
+        let weight = 1 + nesting;
+        self.push_contribution(span, ComplexityMetric::Cognitive, kind, weight, nesting);
         if let Some(frame) = self.stack.last_mut() {
-            frame.cognitive = frame.cognitive.saturating_add(1 + frame.nesting_level);
+            frame.cognitive = frame.cognitive.saturating_add(weight);
         }
     }
 
-    /// Increment cognitive complexity: flat +1 (no nesting penalty).
-    fn inc_cognitive_flat(&mut self) {
+    /// Increment cognitive complexity: flat +1 (no nesting penalty), and record
+    /// the contribution.
+    fn inc_cognitive_flat(&mut self, span: Span, kind: ComplexityContributionKind) {
+        self.push_contribution(span, ComplexityMetric::Cognitive, kind, 1, 0);
         if let Some(frame) = self.stack.last_mut() {
             frame.cognitive = frame.cognitive.saturating_add(1);
         }
@@ -160,14 +200,22 @@ impl<'a> ComplexityVisitor<'a> {
 
     /// Handle a logical expression for cognitive complexity.
     /// Sequences of the same operator get +1 total; each operator change adds +1.
-    fn handle_logical_operator(&mut self, op: LogicalOperator) {
-        if let Some(frame) = self.stack.last_mut() {
-            match frame.last_logical_operator {
-                Some(prev) if prev == op => {}
-                None | Some(_) => {
-                    frame.cognitive = frame.cognitive.saturating_add(1);
-                    frame.last_logical_operator = Some(op);
-                }
+    /// `span` anchors the recorded contribution to the same node as the
+    /// cyclomatic sibling so consumers can group both by line.
+    fn handle_logical_operator(&mut self, op: LogicalOperator, span: Span) {
+        let changed = match self
+            .stack
+            .last()
+            .and_then(|frame| frame.last_logical_operator)
+        {
+            Some(prev) => prev != op,
+            None => true,
+        };
+        if changed {
+            self.push_contribution(span, ComplexityMetric::Cognitive, logical_kind(op), 1, 0);
+            if let Some(frame) = self.stack.last_mut() {
+                frame.cognitive = frame.cognitive.saturating_add(1);
+                frame.last_logical_operator = Some(op);
             }
         }
     }
@@ -183,6 +231,57 @@ impl<'a> ComplexityVisitor<'a> {
     /// Used to avoid resetting the logical operator tracker in the middle of a chain.
     const fn is_nested_logical(expr: &Expression<'_>) -> bool {
         matches!(expr, Expression::LogicalExpression(_))
+    }
+
+    /// Walk an `if` (or an `else if` continuation) computing both metrics.
+    ///
+    /// `is_else_if` is `true` when the statement is the `alternate` of a parent
+    /// `if`. An `else if` adds a flat `+1` to cognitive complexity (SonarSource
+    /// treats it as a same-level continuation, no nesting penalty), replacing
+    /// the previous "+1+nesting then subtract nesting" arithmetic. This keeps
+    /// the recorded contribution honest (the else-if is genuinely `+1`) while
+    /// producing byte-identical cyclomatic and cognitive totals.
+    fn visit_if_chain(&mut self, stmt: &IfStatement<'_>, is_else_if: bool) {
+        let condition_kind = if is_else_if {
+            ComplexityContributionKind::ElseIf
+        } else {
+            ComplexityContributionKind::If
+        };
+        self.inc_cyclomatic(stmt.span, condition_kind);
+        if is_else_if {
+            self.inc_cognitive_flat(stmt.span, ComplexityContributionKind::ElseIf);
+        } else {
+            self.inc_cognitive_with_nesting(stmt.span, ComplexityContributionKind::If);
+        }
+
+        self.visit_expression(&stmt.test);
+
+        self.inc_nesting();
+        self.visit_statement(&stmt.consequent);
+        self.dec_nesting();
+
+        if let Some(alternate) = &stmt.alternate {
+            match alternate {
+                Statement::IfStatement(else_if) => {
+                    self.visit_if_chain(else_if, true);
+                }
+                _ => {
+                    self.inc_cognitive_flat(alternate.span(), ComplexityContributionKind::Else);
+                    self.inc_nesting();
+                    self.visit_statement(alternate);
+                    self.dec_nesting();
+                }
+            }
+        }
+    }
+}
+
+/// Map a logical operator to its [`ComplexityContributionKind`].
+const fn logical_kind(op: LogicalOperator) -> ComplexityContributionKind {
+    match op {
+        LogicalOperator::And => ComplexityContributionKind::LogicalAnd,
+        LogicalOperator::Or => ComplexityContributionKind::LogicalOr,
+        LogicalOperator::Coalesce => ComplexityContributionKind::NullishCoalescing,
     }
 }
 
@@ -273,37 +372,12 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
     }
 
     fn visit_if_statement(&mut self, stmt: &IfStatement<'ast>) {
-        self.inc_cyclomatic();
-
-        self.inc_cognitive_with_nesting();
-
-        self.visit_expression(&stmt.test);
-
-        self.inc_nesting();
-        self.visit_statement(&stmt.consequent);
-        self.dec_nesting();
-
-        if let Some(alternate) = &stmt.alternate {
-            match alternate {
-                Statement::IfStatement(else_if) => {
-                    self.visit_if_statement(else_if);
-                    if let Some(frame) = self.stack.last_mut() {
-                        frame.cognitive = frame.cognitive.saturating_sub(frame.nesting_level);
-                    }
-                }
-                _ => {
-                    self.inc_cognitive_flat();
-                    self.inc_nesting();
-                    self.visit_statement(alternate);
-                    self.dec_nesting();
-                }
-            }
-        }
+        self.visit_if_chain(stmt, false);
     }
 
     fn visit_for_statement(&mut self, stmt: &ForStatement<'ast>) {
-        self.inc_cyclomatic();
-        self.inc_cognitive_with_nesting();
+        self.inc_cyclomatic(stmt.span, ComplexityContributionKind::For);
+        self.inc_cognitive_with_nesting(stmt.span, ComplexityContributionKind::For);
         if let Some(init) = &stmt.init {
             self.visit_for_statement_init(init);
         }
@@ -319,8 +393,8 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
     }
 
     fn visit_for_in_statement(&mut self, stmt: &ForInStatement<'ast>) {
-        self.inc_cyclomatic();
-        self.inc_cognitive_with_nesting();
+        self.inc_cyclomatic(stmt.span, ComplexityContributionKind::ForIn);
+        self.inc_cognitive_with_nesting(stmt.span, ComplexityContributionKind::ForIn);
         self.visit_for_statement_left(&stmt.left);
         self.visit_expression(&stmt.right);
         self.inc_nesting();
@@ -329,8 +403,8 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
     }
 
     fn visit_for_of_statement(&mut self, stmt: &ForOfStatement<'ast>) {
-        self.inc_cyclomatic();
-        self.inc_cognitive_with_nesting();
+        self.inc_cyclomatic(stmt.span, ComplexityContributionKind::ForOf);
+        self.inc_cognitive_with_nesting(stmt.span, ComplexityContributionKind::ForOf);
         self.visit_for_statement_left(&stmt.left);
         self.visit_expression(&stmt.right);
         self.inc_nesting();
@@ -339,8 +413,8 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
     }
 
     fn visit_while_statement(&mut self, stmt: &WhileStatement<'ast>) {
-        self.inc_cyclomatic();
-        self.inc_cognitive_with_nesting();
+        self.inc_cyclomatic(stmt.span, ComplexityContributionKind::While);
+        self.inc_cognitive_with_nesting(stmt.span, ComplexityContributionKind::While);
         self.visit_expression(&stmt.test);
         self.inc_nesting();
         self.visit_statement(&stmt.body);
@@ -348,8 +422,8 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
     }
 
     fn visit_do_while_statement(&mut self, stmt: &DoWhileStatement<'ast>) {
-        self.inc_cyclomatic();
-        self.inc_cognitive_with_nesting();
+        self.inc_cyclomatic(stmt.span, ComplexityContributionKind::DoWhile);
+        self.inc_cognitive_with_nesting(stmt.span, ComplexityContributionKind::DoWhile);
         self.inc_nesting();
         self.visit_statement(&stmt.body);
         self.dec_nesting();
@@ -357,7 +431,7 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
     }
 
     fn visit_switch_statement(&mut self, stmt: &SwitchStatement<'ast>) {
-        self.inc_cognitive_with_nesting();
+        self.inc_cognitive_with_nesting(stmt.span, ComplexityContributionKind::Switch);
         self.visit_expression(&stmt.discriminant);
         self.inc_nesting();
         for case in &stmt.cases {
@@ -368,22 +442,22 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
 
     fn visit_switch_case(&mut self, case: &SwitchCase<'ast>) {
         if case.test.is_some() {
-            self.inc_cyclomatic();
+            self.inc_cyclomatic(case.span, ComplexityContributionKind::Case);
         }
         walk::walk_switch_case(self, case);
     }
 
     fn visit_catch_clause(&mut self, clause: &CatchClause<'ast>) {
-        self.inc_cyclomatic();
-        self.inc_cognitive_with_nesting();
+        self.inc_cyclomatic(clause.span, ComplexityContributionKind::Catch);
+        self.inc_cognitive_with_nesting(clause.span, ComplexityContributionKind::Catch);
         self.inc_nesting();
         walk::walk_catch_clause(self, clause);
         self.dec_nesting();
     }
 
     fn visit_conditional_expression(&mut self, expr: &ConditionalExpression<'ast>) {
-        self.inc_cyclomatic();
-        self.inc_cognitive_with_nesting();
+        self.inc_cyclomatic(expr.span, ComplexityContributionKind::Ternary);
+        self.inc_cognitive_with_nesting(expr.span, ComplexityContributionKind::Ternary);
         self.visit_expression(&expr.test);
         self.inc_nesting();
         self.visit_expression(&expr.consequent);
@@ -392,9 +466,9 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
     }
 
     fn visit_logical_expression(&mut self, expr: &LogicalExpression<'ast>) {
-        self.inc_cyclomatic();
+        self.inc_cyclomatic(expr.span, logical_kind(expr.operator));
 
-        self.handle_logical_operator(expr.operator);
+        self.handle_logical_operator(expr.operator, expr.span);
 
         self.visit_expression(&expr.left);
 
@@ -412,7 +486,7 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
                 | AssignmentOperator::LogicalOr
                 | AssignmentOperator::LogicalNullish
         ) {
-            self.inc_cyclomatic();
+            self.inc_cyclomatic(expr.span, ComplexityContributionKind::LogicalAssignment);
         }
         walk::walk_assignment_expression(self, expr);
     }
@@ -421,22 +495,22 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
         match &expr.expression {
             ChainElement::CallExpression(call) => {
                 if call.optional {
-                    self.inc_cyclomatic();
+                    self.inc_cyclomatic(call.span, ComplexityContributionKind::OptionalChain);
                 }
             }
             ChainElement::StaticMemberExpression(member) => {
                 if member.optional {
-                    self.inc_cyclomatic();
+                    self.inc_cyclomatic(member.span, ComplexityContributionKind::OptionalChain);
                 }
             }
             ChainElement::ComputedMemberExpression(member) => {
                 if member.optional {
-                    self.inc_cyclomatic();
+                    self.inc_cyclomatic(member.span, ComplexityContributionKind::OptionalChain);
                 }
             }
             ChainElement::PrivateFieldExpression(field) => {
                 if field.optional {
-                    self.inc_cyclomatic();
+                    self.inc_cyclomatic(field.span, ComplexityContributionKind::OptionalChain);
                 }
             }
             ChainElement::TSNonNullExpression(_) => {}
@@ -446,14 +520,14 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
 
     fn visit_break_statement(&mut self, stmt: &BreakStatement<'ast>) {
         if stmt.label.is_some() {
-            self.inc_cognitive_flat();
+            self.inc_cognitive_flat(stmt.span, ComplexityContributionKind::LabeledBreak);
         }
         walk::walk_break_statement(self, stmt);
     }
 
     fn visit_continue_statement(&mut self, stmt: &ContinueStatement<'ast>) {
         if stmt.label.is_some() {
-            self.inc_cognitive_flat();
+            self.inc_cognitive_flat(stmt.span, ComplexityContributionKind::LabeledContinue);
         }
         walk::walk_continue_statement(self, stmt);
     }
@@ -1017,5 +1091,136 @@ mod tests {
     fn param_count_method_definition() {
         let results = analyze("class Foo { bar(a: number, b: string) {} }");
         assert_eq!(find_fn(&results, "bar").param_count, 2);
+    }
+
+    // --- Per-decision-point contribution breakdown ---
+
+    fn sum_weights(f: &FunctionComplexity, metric: ComplexityMetric) -> u16 {
+        f.contributions
+            .iter()
+            .filter(|c| c.metric == metric)
+            .map(|c| c.weight)
+            .sum()
+    }
+
+    /// The load-bearing invariant: the recorded breakdown must reconstruct the
+    /// aggregate metric exactly. `cyclomatic = 1 + sum(cyclomatic weights)`,
+    /// `cognitive = sum(cognitive weights)`. Asserted over an adversarial corpus
+    /// that stresses every kind, including nested `else if` inside loops and
+    /// `try` (the exact path whose arithmetic the else-if refactor rewrote).
+    #[test]
+    fn contributions_reconstruct_aggregate_metrics() {
+        let corpus = [
+            "function f(a,b){ if(a){} else if(b){} else {} }",
+            "function f(a){ for(let i=0;i<10;i++){ if(a){ while(a){} } } }",
+            "function f(a){ try { if(a){} } catch(e) { if(a){} else if(a){} } }",
+            "function f(a,b,c){ return a && b || c ?? a; }",
+            "function f(a){ switch(a){ case 1: break; case 2: return; default: return; } }",
+            "function f(a){ for(const x of a){ if(x){ if(x){ if(x){} } } } }",
+            "function f(a){ return a?.b?.c?.d; }",
+            "function f(a){ a ||= 1; a &&= 2; a ??= 3; }",
+            "function f(a){ outer: for(;;){ if(a){ break outer; } continue outer; } }",
+            "function f(a,b){ if(a){ if(b){} else if(a){} else {} } else if(b){ for(;;){} } }",
+            "const f = (a) => a ? (a ? 1 : 2) : 3;",
+            "function f(a){ do { if(a){} } while(a); }",
+        ];
+        for src in corpus {
+            for func in analyze(src) {
+                assert_eq!(
+                    func.cyclomatic,
+                    1 + sum_weights(&func, ComplexityMetric::Cyclomatic),
+                    "cyclomatic mismatch for `{src}`: {:?}",
+                    func.contributions
+                );
+                assert_eq!(
+                    func.cognitive,
+                    sum_weights(&func, ComplexityMetric::Cognitive),
+                    "cognitive mismatch for `{src}`: {:?}",
+                    func.contributions
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn else_if_contribution_is_flat_one() {
+        // `else if` adds a flat +1 cognitive (no nesting penalty) and is recorded
+        // as the ElseIf kind on the else-if line, not the leading `if` line.
+        let results = analyze("function f(a, b) {\n  if (a) {\n  } else if (b) {\n  }\n}");
+        let f = find_fn(&results, "f");
+        let else_if = f
+            .contributions
+            .iter()
+            .find(|c| {
+                c.kind == ComplexityContributionKind::ElseIf
+                    && c.metric == ComplexityMetric::Cognitive
+            })
+            .expect("else-if cognitive contribution");
+        assert_eq!(else_if.weight, 1, "else-if cognitive is flat +1");
+        assert_eq!(else_if.nesting, 0);
+        assert_eq!(else_if.line, 3, "anchored on the `else if` line");
+    }
+
+    #[test]
+    fn nested_if_carries_nesting_weight() {
+        // An `if` nested one level deep inside another `if` gets cognitive +2
+        // (+1 base, +1 nesting), recorded with nesting == 1.
+        let results = analyze("function f(a, b) { if (a) { if (b) {} } }");
+        let f = find_fn(&results, "f");
+        let nested = f
+            .contributions
+            .iter()
+            .filter(|c| {
+                c.kind == ComplexityContributionKind::If && c.metric == ComplexityMetric::Cognitive
+            })
+            .max_by_key(|c| c.nesting)
+            .expect("a nested if cognitive contribution");
+        assert_eq!(nested.nesting, 1);
+        assert_eq!(nested.weight, 2, "+1 base, +1 nesting");
+    }
+
+    #[test]
+    fn cyclomatic_and_cognitive_logical_share_a_line() {
+        // The cyclomatic and cognitive contributions for a `&&` are anchored to
+        // the same node span, so a consumer grouping by line sees both together.
+        let results = analyze("function f(a, b) { return a && b; }");
+        let f = find_fn(&results, "f");
+        let cyc = f
+            .contributions
+            .iter()
+            .find(|c| {
+                c.kind == ComplexityContributionKind::LogicalAnd
+                    && c.metric == ComplexityMetric::Cyclomatic
+            })
+            .expect("cyclomatic &&");
+        let cog = f
+            .contributions
+            .iter()
+            .find(|c| {
+                c.kind == ComplexityContributionKind::LogicalAnd
+                    && c.metric == ComplexityMetric::Cognitive
+            })
+            .expect("cognitive &&");
+        assert_eq!(cyc.line, cog.line);
+    }
+
+    #[test]
+    fn simple_function_has_no_contributions() {
+        let results = analyze("function f(a) { return a; }");
+        assert!(find_fn(&results, "f").contributions.is_empty());
+    }
+
+    #[test]
+    fn default_case_emits_no_contribution() {
+        // A bare `default:` carries no test, so it adds nothing to cyclomatic and
+        // produces no Case contribution; only the two real cases do.
+        let results = analyze("function f(a) { switch(a) { case 1: break; default: break; } }");
+        let f = find_fn(&results, "f");
+        let cases = f
+            .contributions
+            .iter()
+            .filter(|c| c.kind == ComplexityContributionKind::Case)
+            .count();
+        assert_eq!(cases, 1, "only the `case 1` test, not `default`");
     }
 }

@@ -326,6 +326,98 @@ pub struct FunctionComplexity {
     pub param_count: u8,
     /// Content digest of the function's full-span source slice.
     pub source_hash: Option<String>,
+    /// Per-decision-point breakdown explaining WHICH constructs drove the
+    /// cyclomatic and cognitive scores. One entry per increment event (an `if`
+    /// emits one cyclomatic and one cognitive entry at the same line, because
+    /// the two metrics accrue at different granularities). Always computed and
+    /// cached; surfaced in JSON only behind `health --complexity-breakdown`.
+    pub contributions: Vec<ComplexityContribution>,
+}
+
+/// Which complexity metric a [`ComplexityContribution`] adds to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum ComplexityMetric {
+    /// `McCabe` cyclomatic complexity (independent execution paths).
+    Cyclomatic,
+    /// `SonarSource` cognitive complexity (structural + nesting penalty).
+    Cognitive,
+}
+
+/// The syntactic construct that produced a single complexity increment.
+///
+/// Mirrors `SonarSource` cognitive-complexity vocabulary where it overlaps.
+/// `Case` means a `case` label carrying a test; a bare `default` adds nothing
+/// to cyclomatic complexity and so produces no contribution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum ComplexityContributionKind {
+    /// An `if` condition.
+    If,
+    /// A bare `else` branch (cognitive only).
+    Else,
+    /// An `else if` continuation (both metrics: cyclomatic +1, cognitive flat
+    /// +1 with no nesting penalty).
+    ElseIf,
+    /// A `?:` conditional (ternary) expression.
+    Ternary,
+    /// A logical `&&` operator.
+    LogicalAnd,
+    /// A logical `||` operator.
+    LogicalOr,
+    /// A `??` nullish-coalescing operator.
+    NullishCoalescing,
+    /// A logical assignment operator (`&&=`, `||=`, `??=`); cyclomatic only.
+    LogicalAssignment,
+    /// An optional-chaining link (`?.`); cyclomatic only.
+    OptionalChain,
+    /// A `for` loop.
+    For,
+    /// A `for...in` loop.
+    ForIn,
+    /// A `for...of` loop.
+    ForOf,
+    /// A `while` loop.
+    While,
+    /// A `do...while` loop.
+    DoWhile,
+    /// A `switch` statement (cognitive only; each `case` adds cyclomatic).
+    Switch,
+    /// A `case` label carrying a test (cyclomatic only).
+    Case,
+    /// A `catch` clause.
+    Catch,
+    /// A labeled `break` (cognitive only).
+    LabeledBreak,
+    /// A labeled `continue` (cognitive only).
+    LabeledContinue,
+}
+
+/// A single complexity increment, located at its source line/column.
+///
+/// `weight` is the amount this construct added to `metric`; for nested
+/// cognitive increments `weight == 1 + nesting`. Consumers that render inline
+/// (the VS Code editor breakdown) group contributions by `line` and sum the
+/// weights, deferring the per-kind list to a hover.
+#[derive(Debug, Clone, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ComplexityContribution {
+    /// 1-based line number where the construct begins.
+    pub line: u32,
+    /// 0-based byte column where the construct begins.
+    pub col: u32,
+    /// Which metric this increment contributes to.
+    pub metric: ComplexityMetric,
+    /// The syntactic construct responsible for the increment.
+    pub kind: ComplexityContributionKind,
+    /// The amount added to `metric` at this site (`1 + nesting` for nested
+    /// cognitive increments, otherwise `1`).
+    pub weight: u16,
+    /// The nesting depth at the increment site (`0` when not nested). Lets a
+    /// consumer explain a cognitive `+3` as "+1 base, +2 nesting".
+    pub nesting: u16,
 }
 
 /// The kind of feature flag pattern detected.
@@ -674,6 +766,12 @@ pub struct RequireCallInfo {
     pub source: String,
     /// Source span of the `require()` call.
     pub span: Span,
+    /// Source span of the specifier string-literal argument (including its
+    /// quotes), e.g. the `'./x'` in `require('./x')`. Used to anchor an
+    /// `unresolved-import` diagnostic squiggly under the specifier rather than
+    /// the `require` keyword. `Span::default()` when the argument is not a
+    /// plain string literal.
+    pub source_span: Span,
     /// Names destructured from the `require()` result.
     pub destructured_names: Vec<String>,
     /// The local variable name for `const x = require(...)`.
@@ -997,6 +1095,24 @@ mod tests {
             line_count: 80,
             param_count: 3,
             source_hash: Some("0123456789abcdef".to_string()),
+            contributions: vec![
+                ComplexityContribution {
+                    line: 43,
+                    col: 8,
+                    metric: ComplexityMetric::Cyclomatic,
+                    kind: ComplexityContributionKind::If,
+                    weight: 1,
+                    nesting: 0,
+                },
+                ComplexityContribution {
+                    line: 45,
+                    col: 12,
+                    metric: ComplexityMetric::Cognitive,
+                    kind: ComplexityContributionKind::ElseIf,
+                    weight: 3,
+                    nesting: 2,
+                },
+            ],
         };
         let bytes = bitcode::encode(&fc);
         let decoded: FunctionComplexity = bitcode::decode(&bytes).unwrap();
@@ -1007,5 +1123,13 @@ mod tests {
         assert_eq!(decoded.cognitive, 25);
         assert_eq!(decoded.line_count, 80);
         assert_eq!(decoded.source_hash.as_deref(), Some("0123456789abcdef"));
+        assert_eq!(decoded.contributions.len(), 2);
+        assert_eq!(
+            decoded.contributions[1].kind,
+            ComplexityContributionKind::ElseIf
+        );
+        assert_eq!(decoded.contributions[1].weight, 3);
+        assert_eq!(decoded.contributions[1].nesting, 2);
+        assert_eq!(decoded.contributions[1].metric, ComplexityMetric::Cognitive);
     }
 }

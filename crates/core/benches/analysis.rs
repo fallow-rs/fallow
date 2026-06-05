@@ -593,6 +593,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
             span: oxc_span::Span::new(950, 970),
             destructured_names: vec![],
             local_name: None,
+            source_span: oxc_span::Span::default(),
         }],
         package_path_references: vec![],
         member_accesses: vec![

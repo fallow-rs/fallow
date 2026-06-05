@@ -505,9 +505,12 @@ fn circular_import_does_not_crash() {
     )
     .unwrap();
 
+    // b.ts has a type-only import above the runtime import to the same target.
+    // The per-file anchor below must use the runtime import line, not the first
+    // symbol on the grouped graph edge.
     std::fs::write(
         temp_dir.join("src/b.ts"),
-        "import { a } from './a';\nexport const b = a + 1;\n",
+        "// b depends on a\nimport type { a as AValue } from './a';\nimport { a } from './a';\nexport const b = a + 1;\n",
     )
     .unwrap();
 
@@ -517,7 +520,42 @@ fn circular_import_does_not_crash() {
         !results.circular_dependencies.is_empty(),
         "should detect circular dependency between a.ts and b.ts"
     );
-    assert_eq!(results.circular_dependencies[0].cycle.length, 2);
+    let cycle = &results.circular_dependencies[0].cycle;
+    assert_eq!(cycle.length, 2);
+
+    // Per-file anchors: exactly one edge per hop, in lockstep with `files`,
+    // regardless of how the LSP later renders them. This invariant is what
+    // lets a consumer index `edges[i]` against `files[i]` without desync.
+    assert_eq!(
+        cycle.edges.len(),
+        cycle.files.len(),
+        "edges must carry one entry per file in the cycle"
+    );
+    for (edge, file) in cycle.edges.iter().zip(&cycle.files) {
+        assert_eq!(&edge.path, file, "edge[i].path must equal files[i]");
+    }
+
+    // Span lookup must resolve the runtime import line per file: a.ts imports
+    // on line 1, b.ts has a type-only import on line 2 and runtime import on
+    // line 3.
+    let edge_line = |needle: &str| {
+        cycle
+            .edges
+            .iter()
+            .find(|e| e.path.ends_with(needle))
+            .unwrap_or_else(|| panic!("no edge for {needle}"))
+            .line
+    };
+    assert_eq!(edge_line("a.ts"), 1, "a.ts import is on line 1");
+    assert_eq!(
+        edge_line("b.ts"),
+        3,
+        "b.ts runtime import is on line 3, below the type-only import"
+    );
+
+    // Top-level line/col mirror the first hop for backward compatibility.
+    assert_eq!(cycle.line, cycle.edges[0].line);
+    assert_eq!(cycle.col, cycle.edges[0].col);
 }
 
 #[test]

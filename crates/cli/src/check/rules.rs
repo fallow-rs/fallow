@@ -844,6 +844,7 @@ mod tests {
             length: files.len(),
             line: 1,
             col: 0,
+            edges: Vec::new(),
             is_cross_package: false,
         })
     }
@@ -1137,6 +1138,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));
@@ -1158,6 +1160,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ));

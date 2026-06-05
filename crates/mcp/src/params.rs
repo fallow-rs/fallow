@@ -332,6 +332,13 @@ pub struct HealthParams {
     /// Show only complexity findings. By default all sections are shown; use this to select only complexity.
     pub complexity: Option<bool>,
 
+    /// Include the per-decision-point complexity breakdown (`contributions[]`) on
+    /// each complexity finding. Each entry names the construct (if, else-if,
+    /// loop, boolean operator, ...) and its cyclomatic/cognitive weight, so the
+    /// agent can explain WHY a function scored high and which lines to refactor.
+    /// Forwards `--complexity-breakdown`. Off by default to keep output lean.
+    pub complexity_breakdown: Option<bool>,
+
     /// Show only per-file health scores, sorted by risk-aware triage concern:
     /// lower maintainability index and higher CRAP risk first.
     pub file_scores: Option<bool>,

@@ -564,6 +564,7 @@ fn module_to_cached_roundtrip_dynamic_imports() {
             span: Span::new(15, 25),
             destructured_names: Vec::new(),
             local_name: None,
+            source_span: oxc_span::Span::default(),
         }],
         package_path_references: vec![],
         member_accesses: vec![MemberAccess {
@@ -1871,6 +1872,7 @@ fn module_to_cached_roundtrip_complexity() {
                 line_count: 20,
                 param_count: 4,
                 source_hash: Some("0123456789abcdef".to_string()),
+                contributions: Vec::new(),
             },
             FunctionComplexity {
                 name: "simple".to_string(),
@@ -1881,6 +1883,7 @@ fn module_to_cached_roundtrip_complexity() {
                 line_count: 3,
                 param_count: 0,
                 source_hash: None,
+                contributions: Vec::new(),
             },
         ],
         flag_uses: Vec::new(),
@@ -1925,6 +1928,7 @@ fn module_to_cached_roundtrip_require_with_destructured() {
             span: Span::new(0, 30),
             destructured_names: vec!["readFile".to_string(), "writeFile".to_string()],
             local_name: None,
+            source_span: oxc_span::Span::default(),
         }],
         package_path_references: vec![],
         member_accesses: vec![],

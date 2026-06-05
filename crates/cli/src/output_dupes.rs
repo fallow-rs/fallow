@@ -127,6 +127,14 @@ pub struct CloneGroupFinding {
     /// the `trace_clone` MCP tool) to deep-dive this group; shown alongside
     /// each group in the human listing.
     pub fingerprint: String,
+    /// Best-effort human-readable name for the clone: the dominant repeated
+    /// identifier across the duplicated fragment (e.g. a shared `parseCsv`
+    /// function). `None` when the clone has no clear dominant name (generic or
+    /// tied identifiers); consumers then fall back to a file-based label. Lets
+    /// editors and agents label a clone by what it is rather than an opaque
+    /// ordinal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_name: Option<String>,
     /// Suggested next steps: an `extract-shared` primary and a
     /// `suppress-line` secondary. Always emitted (possibly empty for
     /// forward-compat).
@@ -154,6 +162,7 @@ impl CloneGroupFinding {
     /// Build the wrapper with a precomputed report-scoped fingerprint.
     #[must_use]
     pub fn with_fingerprint(group: CloneGroup, fingerprint: String) -> Self {
+        let suggested_name = fallow_core::duplicates::deepdive::dominant_identifier(&group);
         let line_count = group.line_count;
         let instance_count = group.instances.len();
         let actions = vec![
@@ -175,6 +184,7 @@ impl CloneGroupFinding {
         ];
         Self {
             fingerprint,
+            suggested_name,
             group,
             actions,
             introduced: None,
@@ -462,6 +472,43 @@ mod tests {
         );
         assert_eq!(finding.actions[1].kind, CloneGroupActionType::SuppressLine);
         assert!(finding.introduced.is_none());
+    }
+
+    #[test]
+    fn clone_group_finding_surfaces_dominant_identifier() {
+        let fragment = "function parseCsv() { parseCsv(); parseCsv(); return parseCsv; }";
+        let g = CloneGroup {
+            instances: vec![
+                CloneInstance {
+                    file: PathBuf::from("/root/a.ts"),
+                    start_line: 1,
+                    end_line: 3,
+                    start_col: 0,
+                    end_col: 0,
+                    fragment: fragment.to_string(),
+                },
+                CloneInstance {
+                    file: PathBuf::from("/root/b.ts"),
+                    start_line: 1,
+                    end_line: 3,
+                    start_col: 0,
+                    end_col: 0,
+                    fragment: fragment.to_string(),
+                },
+            ],
+            token_count: 100,
+            line_count: 3,
+        };
+        let finding = CloneGroupFinding::with_actions(g);
+        assert_eq!(finding.suggested_name.as_deref(), Some("parseCsv"));
+    }
+
+    #[test]
+    fn clone_group_finding_suggested_name_none_for_unnamed_fragment() {
+        // The shared `instance` helper uses an empty fragment, so there is no
+        // dominant identifier and the label falls back to a file-based name.
+        let finding = CloneGroupFinding::with_actions(group(2));
+        assert!(finding.suggested_name.is_none());
     }
 
     #[test]

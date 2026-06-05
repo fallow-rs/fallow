@@ -3235,6 +3235,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.require_calls.push(RequireCallInfo {
                 source: lit.value.to_string(),
                 span: expr.span,
+                source_span: lit.span,
                 destructured_names: Vec::new(),
                 local_name: None,
             });

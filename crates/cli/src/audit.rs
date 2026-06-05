@@ -2860,6 +2860,7 @@ fn run_audit_health<'a>(
         baseline: opts.health_baseline,
         save_baseline: None,
         complexity: true,
+        complexity_breakdown: false,
         file_scores: false,
         coverage_gaps: false,
         config_activates_coverage_gaps: false,

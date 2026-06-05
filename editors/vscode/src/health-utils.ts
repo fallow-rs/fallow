@@ -22,6 +22,11 @@ export interface HealthArgsOptions {
    * flag. Mirrors the workspace forwarding in `buildAnalysisArgs`.
    */
   readonly workspace?: string;
+  /**
+   * Request the per-decision-point complexity breakdown (`--complexity-breakdown`),
+   * forwarded when true. Drives the inline editor decorations.
+   */
+  readonly complexityBreakdown?: boolean;
 }
 
 /**
@@ -39,6 +44,10 @@ export const buildHealthArgs = (options: HealthArgsOptions): string[] => {
 
   if (options.hotspots) {
     args.push("--hotspots");
+  }
+
+  if (options.complexityBreakdown) {
+    args.push("--complexity-breakdown");
   }
 
   if (Number.isFinite(options.topFindings) && options.topFindings > 0) {
@@ -158,13 +167,16 @@ export const gradeThemeColor = (grade: string): string | null => {
 };
 
 /**
- * Codicon for a complexity-finding severity. Distinct icons for the three known
- * severities; unknown values fall back to a neutral circle.
+ * Codicon for a complexity-finding severity. Complexity findings are heuristic
+ * candidates, not errors, so `critical` uses the section's own `flame` glyph
+ * rather than the alarming error `X`. Distinct shapes across the three
+ * severities keep them legible without relying on color; unknown values fall
+ * back to a neutral circle.
  */
 export const severityIcon = (severity: FindingSeverity | string): string => {
   switch (severity) {
     case "critical":
-      return "error";
+      return "flame";
     case "high":
       return "warning";
     case "moderate":
@@ -172,6 +184,44 @@ export const severityIcon = (severity: FindingSeverity | string): string => {
     default:
       return "circle-outline";
   }
+};
+
+/**
+ * Theme color for a complexity-finding severity, paired with {@link severityIcon}
+ * so severity reads via both icon shape and color (never color alone). Uses the
+ * neutral chart palette rather than the error/warning foregrounds to avoid
+ * over-claiming that a heuristic finding is a broken-code error.
+ */
+export const severityThemeColor = (severity: FindingSeverity | string): string | null => {
+  switch (severity) {
+    case "critical":
+      return "charts.red";
+    case "high":
+      return "charts.orange";
+    case "moderate":
+      return "charts.blue";
+    default:
+      return null;
+  }
+};
+
+/**
+ * Compact offense summary for a complexity finding's row description, e.g.
+ * `parseArgs · 24 cyc · 18 cog · CRAP 31`. The row label is the file:line (for
+ * consistency with the other file-led Health sections), so this dimmed detail
+ * leads with the function name and abbreviates the metrics (cyc/cog) to fit
+ * beside it; the full-word metrics live in the row tooltip. CRAP is omitted when
+ * the finding carries no score.
+ */
+export const formatComplexityOffense = (finding: {
+  readonly name: string;
+  readonly cyclomatic: number;
+  readonly cognitive: number;
+  readonly crap?: number | null;
+}): string => {
+  const crapSegment =
+    typeof finding.crap === "number" ? ` · CRAP ${finding.crap.toFixed(0)}` : "";
+  return `${finding.name} · ${finding.cyclomatic} cyc · ${finding.cognitive} cog${crapSegment}`;
 };
 
 /** A single penalty contributor to the health score, for the score tooltip. */

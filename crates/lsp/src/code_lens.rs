@@ -43,11 +43,18 @@ pub fn build_code_lenses(
                 })
                 .collect();
 
+            // Delegate to a thin extension-side command rather than the built-in
+            // `editor.action.showReferences`: that built-in validates its args with
+            // `instanceof URI / Position / Location`, which the JSON sent over the
+            // wire (a string URI, a plain position, plain locations) fails with
+            // "argument does not match one of these constraints". The
+            // `fallow.showReferences` command in the VS Code extension converts
+            // these into real vscode types and then calls the built-in.
             let (command_name, arguments) = if ref_locations.is_empty() {
                 ("fallow.noop".to_string(), None)
             } else {
                 (
-                    "editor.action.showReferences".to_string(),
+                    "fallow.showReferences".to_string(),
                     Some(vec![
                         serde_json::json!(document_uri.as_str()),
                         serde_json::json!({
@@ -263,7 +270,7 @@ mod tests {
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
-        assert_eq!(cmd.command, "editor.action.showReferences");
+        assert_eq!(cmd.command, "fallow.showReferences");
 
         let args = cmd.arguments.as_ref().unwrap();
         assert_eq!(args.len(), 3);
@@ -373,7 +380,7 @@ mod tests {
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
-        assert_eq!(cmd.command, "editor.action.showReferences");
+        assert_eq!(cmd.command, "fallow.showReferences");
 
         let args = cmd.arguments.as_ref().unwrap();
         let ref_locs = args[2].as_array().unwrap();

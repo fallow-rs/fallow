@@ -685,6 +685,15 @@ enum Command {
         #[arg(long)]
         complexity: bool,
 
+        /// Include the per-decision-point complexity breakdown (`contributions[]`)
+        /// on each complexity finding in `--format json` output. Each entry names
+        /// the construct (if, else-if, loop, boolean operator, ...) and its
+        /// cyclomatic/cognitive weight, so a consumer can explain WHY a function
+        /// scored high. Used by the VS Code inline editor breakdown. Off by
+        /// default to keep CI/default output lean.
+        #[arg(long)]
+        complexity_breakdown: bool,
+
         /// Show only per-file health scores (fan-in, fan-out, dead code ratio, maintainability index).
         /// Requires full analysis pipeline (graph + dead code detection).
         /// Sorted by risk-aware triage concern: lower MI and higher CRAP risk first.
@@ -2761,6 +2770,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             top,
             sort,
             complexity,
+            complexity_breakdown,
             file_scores,
             coverage_gaps,
             hotspots,
@@ -2796,6 +2806,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     top,
                     sort,
                     complexity,
+                    complexity_breakdown,
                     file_scores,
                     coverage_gaps,
                     hotspots,
@@ -3480,6 +3491,7 @@ struct HealthDispatchArgs<'a> {
     top: Option<usize>,
     sort: health::SortBy,
     complexity: bool,
+    complexity_breakdown: bool,
     file_scores: bool,
     coverage_gaps: bool,
     hotspots: bool,
@@ -3515,6 +3527,7 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         top,
         sort,
         complexity,
+        complexity_breakdown,
         file_scores,
         coverage_gaps,
         hotspots,
@@ -3601,6 +3614,7 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         baseline: cli.baseline.as_deref(),
         save_baseline: cli.save_baseline.as_deref(),
         complexity: eff_complexity,
+        complexity_breakdown,
         file_scores: eff_file_scores,
         coverage_gaps: eff_coverage_gaps,
         config_activates_coverage_gaps: !any_section,

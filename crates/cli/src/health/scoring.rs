@@ -1853,6 +1853,7 @@ mod tests {
                 line_count: 5,
                 param_count: 0,
                 source_hash: None,
+                contributions: Vec::new(),
             }],
         };
 
@@ -1909,6 +1910,7 @@ mod tests {
                     line_count: 1,
                     param_count: 0,
                     source_hash: None,
+                    contributions: Vec::new(),
                 },
                 fallow_types::extract::FunctionComplexity {
                     name: "b".into(),
@@ -1919,6 +1921,7 @@ mod tests {
                     line_count: 2,
                     param_count: 0,
                     source_hash: None,
+                    contributions: Vec::new(),
                 },
             ],
         };
@@ -2382,6 +2385,7 @@ mod tests {
                 line_count: 10,
                 param_count: 0,
                 source_hash: None,
+                contributions: Vec::new(),
             }],
         )];
 
@@ -2515,6 +2519,7 @@ mod tests {
                     line_count: 10,
                     param_count: 0,
                     source_hash: None,
+                    contributions: Vec::new(),
                 }],
             ),
             make_module_info(
@@ -2529,6 +2534,7 @@ mod tests {
                     line_count: 10,
                     param_count: 0,
                     source_hash: None,
+                    contributions: Vec::new(),
                 }],
             ),
         ];
@@ -2612,6 +2618,7 @@ mod tests {
                     line_count: 10,
                     param_count: 0,
                     source_hash: None,
+                    contributions: Vec::new(),
                 }],
             ),
             make_module_info(
@@ -2626,6 +2633,7 @@ mod tests {
                     line_count: 100,
                     param_count: 0,
                     source_hash: None,
+                    contributions: Vec::new(),
                 }],
             ),
         ];
@@ -2700,6 +2708,7 @@ mod tests {
                 line_count: 10,
                 param_count: 0,
                 source_hash: None,
+                contributions: Vec::new(),
             }],
         )];
 
@@ -2775,6 +2784,7 @@ mod tests {
                     line_count: 10,
                     param_count: 0,
                     source_hash: None,
+                    contributions: Vec::new(),
                 },
                 fallow_types::extract::FunctionComplexity {
                     name: "medium".into(),
@@ -2785,6 +2795,7 @@ mod tests {
                     line_count: 10,
                     param_count: 0,
                     source_hash: None,
+                    contributions: Vec::new(),
                 },
                 fallow_types::extract::FunctionComplexity {
                     name: "low".into(),
@@ -2795,6 +2806,7 @@ mod tests {
                     line_count: 10,
                     param_count: 0,
                     source_hash: None,
+                    contributions: Vec::new(),
                 },
                 fallow_types::extract::FunctionComplexity {
                     name: "trivial".into(),
@@ -2805,6 +2817,7 @@ mod tests {
                     line_count: 10,
                     param_count: 0,
                     source_hash: None,
+                    contributions: Vec::new(),
                 },
             ],
         )];
@@ -2890,6 +2903,7 @@ mod tests {
                     line_count: 10,
                     param_count: 0,
                     source_hash: None,
+                    contributions: Vec::new(),
                 }],
             ),
             make_module_info(
@@ -2904,6 +2918,7 @@ mod tests {
                     line_count: 10,
                     param_count: 0,
                     source_hash: None,
+                    contributions: Vec::new(),
                 }],
             ),
         ];
@@ -2923,6 +2938,7 @@ mod tests {
                     length: 2,
                     line: 1,
                     col: 0,
+                    edges: Vec::new(),
                     is_cross_package: false,
                 },
             ),
@@ -3007,6 +3023,7 @@ mod tests {
                 line_count: 10,
                 param_count: 0,
                 source_hash: None,
+                contributions: Vec::new(),
             }],
         );
         module.exports = vec![
@@ -3164,6 +3181,7 @@ mod tests {
                 line_count: 10,
                 param_count: 0,
                 source_hash: None,
+                contributions: Vec::new(),
             }],
         );
         module.exports = vec![
@@ -3265,6 +3283,7 @@ mod tests {
                 line_count: 10,
                 param_count: 0,
                 source_hash: None,
+                contributions: Vec::new(),
             }],
         )];
 
@@ -3322,6 +3341,7 @@ mod tests {
                 line_count: 100,
                 param_count: 0,
                 source_hash: None,
+                contributions: Vec::new(),
             }],
         )];
 
@@ -3416,6 +3436,7 @@ mod tests {
                 line_count: 10,
                 param_count: 0,
                 source_hash: None,
+                contributions: Vec::new(),
             }],
         )];
 
@@ -3476,6 +3497,7 @@ mod tests {
                 line_count: 10,
                 param_count: 0,
                 source_hash: None,
+                contributions: Vec::new(),
             }],
         )];
 
@@ -3517,6 +3539,7 @@ mod tests {
             line_count: 10,
             param_count: 0,
             source_hash: None,
+            contributions: Vec::new(),
         }
     }
 

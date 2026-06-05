@@ -284,6 +284,82 @@ fn health_json_has_findings() {
 }
 
 #[test]
+fn health_complexity_breakdown_gates_and_reconstructs_contributions() {
+    // Without the flag, no `contributions` key is emitted on any finding.
+    let without = parse_json(&run_fallow(
+        "health",
+        "complexity-project",
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    ));
+    let findings = without
+        .get("findings")
+        .and_then(serde_json::Value::as_array)
+        .expect("findings array");
+    assert!(!findings.is_empty(), "fixture should produce findings");
+    for f in findings {
+        assert!(
+            f.get("contributions").is_none(),
+            "contributions must be omitted without --complexity-breakdown"
+        );
+    }
+
+    // With the flag, each finding carries a breakdown that reconstructs the
+    // aggregate metrics exactly (sum of weights, +1 for cyclomatic).
+    let with = parse_json(&run_fallow(
+        "health",
+        "complexity-project",
+        &[
+            "--complexity",
+            "--complexity-breakdown",
+            "--max-cyclomatic",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    ));
+    let findings = with
+        .get("findings")
+        .and_then(serde_json::Value::as_array)
+        .expect("findings array");
+    let mut saw_contributions = false;
+    for f in findings {
+        let Some(contribs) = f.get("contributions").and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        saw_contributions = true;
+        let sum = |metric: &str| -> u64 {
+            contribs
+                .iter()
+                .filter(|c| c["metric"] == metric)
+                .map(|c| c["weight"].as_u64().unwrap_or(0))
+                .sum()
+        };
+        assert_eq!(
+            sum("cyclomatic") + 1,
+            f["cyclomatic"].as_u64().unwrap(),
+            "cyclomatic contributions reconstruct the aggregate"
+        );
+        assert_eq!(
+            sum("cognitive"),
+            f["cognitive"].as_u64().unwrap(),
+            "cognitive contributions reconstruct the aggregate"
+        );
+    }
+    assert!(
+        saw_contributions,
+        "at least one finding should carry contributions with the flag"
+    );
+}
+
+#[test]
 fn health_reports_angular_template_complexity() {
     let output = run_fallow(
         "health",
