@@ -12,6 +12,7 @@ pub struct AngularComponentMetadata {
     pub template_url: Option<String>,
     pub style_urls: Vec<String>,
     pub inline_template: Option<String>,
+    pub inline_template_offset: Option<u32>,
     pub decorator_span: Span,
     pub host_member_refs: Vec<String>,
     pub input_output_members: Vec<String>,
@@ -46,6 +47,7 @@ pub fn extract_angular_component_metadata(class: &Class<'_>) -> Option<AngularCo
         let mut template_url = None;
         let mut style_urls = Vec::new();
         let mut inline_template = None;
+        let mut inline_template_offset = None;
         let mut host_member_refs = Vec::new();
         let mut input_output_members = Vec::new();
 
@@ -65,6 +67,7 @@ pub fn extract_angular_component_metadata(class: &Class<'_>) -> Option<AngularCo
                 "template" => {
                     if let Expression::StringLiteral(lit) = &p.value {
                         inline_template = Some(lit.value.to_string());
+                        inline_template_offset = Some(lit.span.start.saturating_add(1));
                     } else if let Expression::TemplateLiteral(tpl) = &p.value
                         && tpl.expressions.is_empty()
                         && let Some(quasi) = tpl.quasis.first()
@@ -76,6 +79,7 @@ pub fn extract_angular_component_metadata(class: &Class<'_>) -> Option<AngularCo
                             .map_or_else(|| quasi.value.raw.as_str(), |c| c.as_str())
                             .to_string();
                         inline_template = Some(source);
+                        inline_template_offset = Some(p.value.span().start.saturating_add(1));
                     }
                 }
                 "styleUrl" => {
@@ -118,6 +122,7 @@ pub fn extract_angular_component_metadata(class: &Class<'_>) -> Option<AngularCo
                 template_url,
                 style_urls,
                 inline_template,
+                inline_template_offset,
                 decorator_span: decorator.span(),
                 host_member_refs,
                 input_output_members,

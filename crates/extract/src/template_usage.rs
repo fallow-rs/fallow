@@ -1,4 +1,6 @@
+use fallow_types::extract::{SinkArgKind, SinkShape, SinkSite};
 use oxc_allocator::Allocator;
+use oxc_ast::ast::{BinaryOperator, Expression, ObjectPropertyKind, Statement};
 use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
@@ -15,12 +17,14 @@ pub struct TemplateUsage {
     pub(crate) whole_object_uses: Vec<String>,
     /// PascalCase tag names that matched no import or local binding.
     pub(crate) unresolved_tag_names: FxHashSet<String>,
+    pub(crate) security_sinks: Vec<SinkSite>,
 }
 
 impl TemplateUsage {
     pub(crate) fn merge(&mut self, other: Self) {
         self.used_bindings.extend(other.used_bindings);
         self.unresolved_tag_names.extend(other.unresolved_tag_names);
+        self.security_sinks.extend(other.security_sinks);
         for access in other.member_accesses {
             let key = (&access.object, &access.member);
             let already_present = self
@@ -48,6 +52,7 @@ impl TemplateUsage {
             && self.member_accesses.is_empty()
             && self.whole_object_uses.is_empty()
             && self.unresolved_tag_names.is_empty()
+            && self.security_sinks.is_empty()
     }
 }
 
@@ -162,6 +167,7 @@ pub fn analyze_template_snippet_with_bound_targets(
                 .collect(),
         ),
         unresolved_tag_names: FxHashSet::default(),
+        security_sinks: Vec::new(),
     }
 }
 
@@ -212,6 +218,162 @@ pub fn collect_unresolved_refs_and_accesses(
     );
 
     (unresolved_names, member_accesses)
+}
+
+pub fn template_html_sink(snippet: &str, span_start: usize, span_end: usize) -> Option<SinkSite> {
+    let snippet = snippet.trim();
+    if snippet.is_empty() {
+        return None;
+    }
+
+    let parsed = with_parsed_template_expression(snippet, |expr| {
+        if !is_non_literal_template_arg(expr) {
+            return None;
+        }
+        Some((
+            classify_template_arg_kind(expr),
+            collect_template_arg_idents(expr),
+        ))
+    });
+    let (arg_kind, arg_idents) = match parsed {
+        Some(Some(parsed)) => parsed,
+        Some(None) => return None,
+        None => (SinkArgKind::Other, Vec::new()),
+    };
+
+    Some(SinkSite {
+        sink_shape: SinkShape::MemberAssign,
+        callee_path: "template.innerHTML".to_string(),
+        arg_index: 0,
+        arg_is_non_literal: true,
+        arg_kind,
+        arg_idents,
+        span_start: u32::try_from(span_start).ok()?,
+        span_end: u32::try_from(span_end).ok()?,
+    })
+}
+
+fn with_parsed_template_expression<R>(
+    snippet: &str,
+    body: impl FnOnce(&Expression<'_>) -> R,
+) -> Option<R> {
+    let snippet = snippet.trim();
+    if snippet.is_empty() {
+        return None;
+    }
+    let wrapped = format!("const __fallow_template_sink = ({snippet});");
+    let allocator = Allocator::default();
+    let parser_return = Parser::new(&allocator, &wrapped, SourceType::ts()).parse();
+    let Statement::VariableDeclaration(decl) = parser_return.program.body.first()? else {
+        return None;
+    };
+    let expr = decl.declarations.first()?.init.as_ref()?;
+    Some(body(expr))
+}
+
+fn is_non_literal_template_arg(expr: &Expression<'_>) -> bool {
+    match unwrap_template_parens(expr) {
+        Expression::StringLiteral(_)
+        | Expression::NumericLiteral(_)
+        | Expression::BooleanLiteral(_)
+        | Expression::NullLiteral(_)
+        | Expression::BigIntLiteral(_)
+        | Expression::RegExpLiteral(_) => false,
+        Expression::TemplateLiteral(tpl) => !tpl.expressions.is_empty(),
+        _ => true,
+    }
+}
+
+fn classify_template_arg_kind(expr: &Expression<'_>) -> SinkArgKind {
+    match unwrap_template_parens(expr) {
+        Expression::TemplateLiteral(_) => SinkArgKind::TemplateWithSubst,
+        Expression::BinaryExpression(bin) if bin.operator == BinaryOperator::Addition => {
+            SinkArgKind::Concat
+        }
+        Expression::ObjectExpression(_) => SinkArgKind::Object,
+        Expression::CallExpression(_) => SinkArgKind::Call,
+        _ => SinkArgKind::Other,
+    }
+}
+
+fn collect_template_arg_idents(expr: &Expression<'_>) -> Vec<String> {
+    let mut out = Vec::new();
+    collect_template_idents_into(expr, &mut out);
+    out
+}
+
+fn push_template_ident(name: &str, out: &mut Vec<String>) {
+    if !out.iter().any(|existing| existing == name) {
+        out.push(name.to_string());
+    }
+}
+
+fn collect_template_idents_into(expr: &Expression<'_>, out: &mut Vec<String>) {
+    match expr {
+        Expression::Identifier(ident) => push_template_ident(&ident.name, out),
+        Expression::ParenthesizedExpression(paren) => {
+            collect_template_idents_into(&paren.expression, out);
+        }
+        Expression::StaticMemberExpression(member) => {
+            collect_template_idents_into(&member.object, out);
+        }
+        Expression::ComputedMemberExpression(member) => {
+            collect_template_idents_into(&member.object, out);
+            collect_template_idents_into(&member.expression, out);
+        }
+        Expression::BinaryExpression(bin) => {
+            collect_template_idents_into(&bin.left, out);
+            collect_template_idents_into(&bin.right, out);
+        }
+        Expression::LogicalExpression(logical) => {
+            collect_template_idents_into(&logical.left, out);
+            collect_template_idents_into(&logical.right, out);
+        }
+        Expression::ConditionalExpression(cond) => {
+            collect_template_idents_into(&cond.test, out);
+            collect_template_idents_into(&cond.consequent, out);
+            collect_template_idents_into(&cond.alternate, out);
+        }
+        Expression::SequenceExpression(seq) => {
+            for expr in &seq.expressions {
+                collect_template_idents_into(expr, out);
+            }
+        }
+        Expression::TemplateLiteral(tpl) => {
+            for expr in &tpl.expressions {
+                collect_template_idents_into(expr, out);
+            }
+        }
+        Expression::AwaitExpression(await_expr) => {
+            collect_template_idents_into(&await_expr.argument, out);
+        }
+        Expression::UnaryExpression(unary) => {
+            collect_template_idents_into(&unary.argument, out);
+        }
+        Expression::CallExpression(call) => {
+            collect_template_idents_into(&call.callee, out);
+            for arg in &call.arguments {
+                if let Some(arg_expr) = arg.as_expression() {
+                    collect_template_idents_into(arg_expr, out);
+                }
+            }
+        }
+        Expression::ObjectExpression(obj) => {
+            for prop in &obj.properties {
+                if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+                    collect_template_idents_into(&prop.value, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn unwrap_template_parens<'a>(mut expr: &'a Expression<'a>) -> &'a Expression<'a> {
+    while let Expression::ParenthesizedExpression(paren) = expr {
+        expr = &paren.expression;
+    }
+    expr
 }
 
 fn remap_object_name(

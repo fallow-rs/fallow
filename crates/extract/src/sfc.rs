@@ -560,6 +560,9 @@ fn apply_template_usage(
     combined
         .whole_object_uses
         .extend(template_usage.whole_object_uses);
+    combined
+        .security_sinks
+        .extend(template_usage.security_sinks);
     if !template_usage.unresolved_tag_names.is_empty() {
         let mut names: Vec<String> = template_usage.unresolved_tag_names.into_iter().collect();
         names.sort_unstable();

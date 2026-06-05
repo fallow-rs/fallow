@@ -48,8 +48,15 @@ pub(super) fn collect_template_usage_with_bound_targets(
         {
             continue;
         }
-        let body = cap.name("body").map_or("", |m| m.as_str());
-        usage.merge(scan_template_body(body, imported_bindings, bound_targets));
+        let Some(body_match) = cap.name("body") else {
+            continue;
+        };
+        usage.merge(scan_template_body(
+            body_match.as_str(),
+            body_match.start(),
+            imported_bindings,
+            bound_targets,
+        ));
     }
 
     usage
@@ -57,6 +64,7 @@ pub(super) fn collect_template_usage_with_bound_targets(
 
 fn scan_template_body(
     body: &str,
+    body_offset: usize,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
 ) -> TemplateUsage {
@@ -96,6 +104,8 @@ fn scan_template_body(
             };
             apply_tag(
                 tag,
+                body_offset + index,
+                body_offset + next_index,
                 imported_bindings,
                 bound_targets,
                 &mut scopes,
@@ -113,6 +123,8 @@ fn scan_template_body(
 
 fn apply_tag(
     tag: &str,
+    tag_start: usize,
+    tag_end: usize,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
     scopes: &mut Vec<Vec<String>>,
@@ -133,6 +145,15 @@ fn apply_tag(
     let current = current_locals(scopes);
     let parsed = parse_tag_attrs(trimmed, false);
     mark_tag_usage(&parsed.name, imported_bindings, &current, usage);
+    if let Some(value) = parsed
+        .attrs
+        .iter()
+        .find(|attr| attr.name == "v-html")
+        .and_then(|attr| attr.value.as_deref())
+        && let Some(sink) = crate::template_usage::template_html_sink(value, tag_start, tag_end)
+    {
+        usage.security_sinks.push(sink);
+    }
 
     let mut v_for_locals = Vec::new();
     let mut slot_locals = Vec::new();

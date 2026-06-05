@@ -110,6 +110,8 @@ mod security_client_server_leak;
 mod security_dangerous_html;
 #[path = "integration_test/security_framework_sinks.rs"]
 mod security_framework_sinks;
+#[path = "integration_test/security_template_xss_sinks.rs"]
+mod security_template_xss_sinks;
 #[path = "integration_test/stale_suppressions.rs"]
 mod stale_suppressions;
 #[path = "integration_test/suppression_comments.rs"]

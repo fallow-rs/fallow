@@ -191,7 +191,12 @@ use crate::MemberKind;
 /// `this` return type now count as self-returning for constructor-rooted
 /// fluent chains. Pre-120 entries can miss those self-returning flags and
 /// surface false `unused-class-member` findings until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 120;
+///
+/// Bumped to 121 for issue #883: framework template HTML injection sinks now
+/// flow into `ModuleInfo.security_sinks` for Svelte `{@html ...}`, Vue
+/// `v-html`, and Angular `[innerHTML]`. Pre-121 entries omit those sink sites
+/// until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 121;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -1,0 +1,10 @@
+{
+  "name": "security-template-xss-sinks-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@angular/core": "^20.0.0",
+    "svelte": "^5.0.0",
+    "vue": "^3.0.0"
+  }
+}

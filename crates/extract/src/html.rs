@@ -148,16 +148,19 @@ pub(crate) fn parse_html_to_module_with_complexity(
     imports.sort_unstable_by(|a, b| a.source.cmp(&b.source));
     imports.dedup_by(|a, b| a.source == b.source);
 
-    let template_refs = angular::collect_angular_template_refs(source);
-    let mut member_accesses: Vec<MemberAccess> = template_refs
-        .identifiers
+    let angular::AngularTemplateRefs {
+        identifiers,
+        member_accesses: template_member_accesses,
+        security_sinks,
+    } = angular::collect_angular_template_refs(source);
+    let mut member_accesses: Vec<MemberAccess> = identifiers
         .into_iter()
         .map(|name| MemberAccess {
             object: ANGULAR_TPL_SENTINEL.to_string(),
             member: name,
         })
         .collect();
-    member_accesses.extend(template_refs.member_accesses);
+    member_accesses.extend(template_member_accesses);
 
     let complexity = if need_complexity {
         crate::template_complexity::compute_angular_template_complexity(source)
@@ -198,7 +201,7 @@ pub(crate) fn parse_html_to_module_with_complexity(
         iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
         directives: Vec::new(),
-        security_sinks: Vec::new(),
+        security_sinks,
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),

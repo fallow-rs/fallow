@@ -231,7 +231,7 @@ fallow audit                 # Audit changed files (verdict: pass/warn/fail)
 fallow health                # Complexity + refactor targets
 fallow dupes                 # Repeated logic
 fallow dead-code             # Cleanup candidates
-fallow security              # Client/server secret-leak candidates (opt-in, for agent verification)
+fallow security              # Security candidates including secret leaks and dangerous sinks
 fallow explain unused-export # Explain a rule without analyzing
 fallow watch                 # Re-analyze on file changes
 fallow fix --dry-run         # Preview automatic cleanup

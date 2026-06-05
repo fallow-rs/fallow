@@ -73,10 +73,6 @@ pub(super) fn collect_template_usage_with_bound_targets(
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
 ) -> TemplateUsage {
-    if imported_bindings.is_empty() && bound_targets.is_empty() {
-        return TemplateUsage::default();
-    }
-
     let markup = strip_non_template_content(source);
     if markup.is_empty() {
         return TemplateUsage::default();
@@ -98,6 +94,8 @@ pub(super) fn collect_template_usage_with_bound_targets(
                 };
                 apply_tag(
                     tag.trim(),
+                    index,
+                    next_index,
                     imported_bindings,
                     bound_targets,
                     &mut scopes,
@@ -155,12 +153,13 @@ fn strip_non_template_content(source: &str) -> String {
         merged.push((start, end));
     }
 
-    let mut visible = String::new();
+    let mut visible = String::with_capacity(source.len());
     let mut cursor = 0;
     for (start, end) in merged {
         if cursor < start {
             visible.push_str(&source[cursor..start]);
         }
+        visible.extend(std::iter::repeat_n(' ', end - start));
         cursor = end;
     }
     if cursor < source.len() {
@@ -175,6 +174,8 @@ fn strip_non_template_content(source: &str) -> String {
 )]
 fn apply_tag(
     tag: &str,
+    tag_start: usize,
+    tag_end: usize,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
     scopes: &mut Vec<SvelteScopeFrame>,
@@ -316,6 +317,9 @@ fn apply_tag(
     }
 
     if let Some(expr) = tag.strip_prefix("@html") {
+        if let Some(sink) = crate::template_usage::template_html_sink(expr, tag_start, tag_end) {
+            usage.security_sinks.push(sink);
+        }
         merge_expression_usage_allow_dollar_refs_with_bound_targets(
             usage,
             expr.trim(),

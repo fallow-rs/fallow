@@ -3669,6 +3669,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     });
                 }
                 self.member_accesses.extend(refs.member_accesses);
+                let template_offset = meta
+                    .inline_template_offset
+                    .unwrap_or(meta.decorator_span.start);
+                self.security_sinks
+                    .extend(refs.security_sinks.into_iter().map(|mut sink| {
+                        sink.span_start = sink.span_start.saturating_add(template_offset);
+                        sink.span_end = sink.span_end.saturating_add(template_offset);
+                        sink
+                    }));
 
                 self.inline_template_findings
                     .push(super::InlineTemplateFinding {

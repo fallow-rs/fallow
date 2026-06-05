@@ -16,6 +16,8 @@ use std::sync::LazyLock;
 
 use rustc_hash::FxHashSet;
 
+use fallow_types::extract::SinkSite;
+
 use crate::MemberAccess;
 use crate::template_usage::{TemplateSnippetKind, collect_unresolved_refs_and_accesses};
 
@@ -39,6 +41,8 @@ pub struct AngularTemplateRefs {
     /// `dataService.getTotal()` through the component's typed instance
     /// bindings to credit the correct class's member as used.
     pub member_accesses: Vec<MemberAccess>,
+    /// Non-literal template HTML injection sinks captured with source spans.
+    pub security_sinks: Vec<SinkSite>,
 }
 
 impl AngularTemplateRefs {
@@ -93,8 +97,7 @@ static CONTROL_FOR_RE: LazyLock<regex::Regex> =
 /// `obj.member` chains where `obj` is an unresolved identifier. Together these
 /// represent potential component class member references.
 pub fn collect_angular_template_refs(source: &str) -> AngularTemplateRefs {
-    let stripped = HTML_COMMENT_RE.replace_all(source, "");
-    let source = stripped.as_ref();
+    let source = strip_html_comments_preserve_offsets(source);
     let bytes = source.as_bytes();
     let mut refs = AngularTemplateRefs::default();
     let mut scopes: Vec<Vec<String>> = vec![Vec::new()];
@@ -102,7 +105,7 @@ pub fn collect_angular_template_refs(source: &str) -> AngularTemplateRefs {
 
     while index < bytes.len() {
         if index + 1 < bytes.len() && bytes[index] == b'{' && bytes[index + 1] == b'{' {
-            let Some((expr, next_index)) = scan_curly_section(source, index, 2, 2) else {
+            let Some((expr, next_index)) = scan_curly_section(&source, index, 2, 2) else {
                 break;
             };
             collect_expression_refs(expr.trim(), &current_locals(&scopes), &mut refs);
@@ -111,7 +114,7 @@ pub fn collect_angular_template_refs(source: &str) -> AngularTemplateRefs {
         }
 
         if bytes[index] == b'@'
-            && let Some(next_index) = handle_control_flow(source, index, &mut scopes, &mut refs)
+            && let Some(next_index) = handle_control_flow(&source, index, &mut scopes, &mut refs)
         {
             index = next_index;
             continue;
@@ -126,8 +129,8 @@ pub fn collect_angular_template_refs(source: &str) -> AngularTemplateRefs {
         }
 
         if bytes[index] == b'<' {
-            if let Some((tag, next_index)) = scan_html_tag(source, index) {
-                process_tag(tag, &mut scopes, &mut refs);
+            if let Some((tag, next_index)) = scan_html_tag(&source, index) {
+                process_tag(tag, index, &mut scopes, &mut refs);
                 index = next_index;
                 continue;
             }
@@ -139,6 +142,18 @@ pub fn collect_angular_template_refs(source: &str) -> AngularTemplateRefs {
     }
 
     refs
+}
+
+fn strip_html_comments_preserve_offsets(source: &str) -> String {
+    let mut stripped = String::with_capacity(source.len());
+    let mut cursor = 0;
+    for range in HTML_COMMENT_RE.find_iter(source) {
+        stripped.push_str(&source[cursor..range.start()]);
+        stripped.extend(std::iter::repeat_n(' ', range.end() - range.start()));
+        cursor = range.end();
+    }
+    stripped.push_str(&source[cursor..]);
+    stripped
 }
 
 /// Handle Angular 17+ control flow blocks (`@if`, `@else if`, `@for`, `@switch`, `@case`, `@defer`, `@let`, etc.).
@@ -402,7 +417,12 @@ fn scan_parenthesized(source: &str, start: usize) -> Option<(&str, usize)> {
 
 /// Process an HTML tag, extracting Angular binding attributes.
 /// `*ngFor` bindings are added to the current scope so subsequent expressions see them.
-fn process_tag(tag: &str, scopes: &mut [Vec<String>], refs: &mut AngularTemplateRefs) {
+fn process_tag(
+    tag: &str,
+    tag_start: usize,
+    scopes: &mut [Vec<String>],
+    refs: &mut AngularTemplateRefs,
+) {
     let locals = current_locals(scopes);
 
     for caps in ATTR_RE.captures_iter(tag) {
@@ -411,6 +431,17 @@ fn process_tag(tag: &str, scopes: &mut [Vec<String>], refs: &mut AngularTemplate
 
         if attr_value.is_empty() {
             continue;
+        }
+
+        if attr_name == "[innerHTML]"
+            && let Some(attr) = caps.get(0)
+            && let Some(sink) = crate::template_usage::template_html_sink(
+                attr_value,
+                tag_start + attr.start(),
+                tag_start + attr.end(),
+            )
+        {
+            refs.security_sinks.push(sink);
         }
 
         if attr_name.starts_with('[') && !attr_name.starts_with("[(") {
