@@ -63,7 +63,7 @@ use unused_deps::{
     reason = "ADR-008 deprecates detector helpers for external callers; core orchestration still calls them internally"
 )]
 use unused_exports::{
-    collect_export_usages, find_duplicate_exports, find_private_type_leaks, find_unused_exports,
+    collect_export_usages, find_private_type_leaks, find_unused_exports,
     suppress_signature_backing_types,
 };
 #[expect(
@@ -728,16 +728,29 @@ pub fn find_dead_code_full(
                                 },
                                 || {
                                     if config.rules.duplicate_exports != Severity::Off {
-                                        find_duplicate_exports(
-                                            graph,
-                                            config,
-                                            &suppressions,
-                                            &line_offsets_by_file,
-                                            resolved_modules,
-                                        )
-                                        .into_iter()
-                                        .map(DuplicateExportFinding::with_actions)
-                                        .collect::<Vec<_>>()
+                                        let duplicate_exports =
+                                            if let Some(plugin_result) = plugin_result {
+                                                unused_exports::find_duplicate_exports_with_plugins(
+                                                    graph,
+                                                    config,
+                                                    &suppressions,
+                                                    &line_offsets_by_file,
+                                                    Some(plugin_result),
+                                                    resolved_modules,
+                                                )
+                                            } else {
+                                                unused_exports::find_duplicate_exports(
+                                                    graph,
+                                                    config,
+                                                    &suppressions,
+                                                    &line_offsets_by_file,
+                                                    resolved_modules,
+                                                )
+                                            };
+                                        duplicate_exports
+                                            .into_iter()
+                                            .map(DuplicateExportFinding::with_actions)
+                                            .collect::<Vec<_>>()
                                     } else {
                                         Vec::new()
                                     }

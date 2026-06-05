@@ -2,8 +2,9 @@ use std::{fs, path::Path};
 
 use super::common::{create_config, fixture_path};
 use super::framework_convention_coverage_common::{
-    collect_unused_exports, collect_unused_files, has_unused_export,
+    collect_unused_exports, collect_unused_files, has_unused_export, normalize_path,
 };
+use fallow_core::results::AnalysisResults;
 use tempfile::tempdir;
 
 fn write_project_file(root: &Path, relative_path: &str, source: &str) {
@@ -12,6 +13,25 @@ fn write_project_file(root: &Path, relative_path: &str, source: &str) {
         fs::create_dir_all(parent).expect("create parent directories");
     }
     fs::write(path, source).expect("write test file");
+}
+
+fn duplicate_export_locations(
+    root: &Path,
+    results: &AnalysisResults,
+    export_name: &str,
+) -> Vec<String> {
+    results
+        .duplicate_exports
+        .iter()
+        .filter(|duplicate| duplicate.export.export_name == export_name)
+        .flat_map(|duplicate| {
+            duplicate
+                .export
+                .locations
+                .iter()
+                .map(|location| normalize_path(root, &location.path))
+        })
+        .collect()
 }
 
 #[test]
@@ -126,6 +146,12 @@ fn tanstack_router_custom_route_dir_and_lazy_exports_are_covered() {
             "{path}:{export} should still be reported as unused, found: {unused_exports:?}"
         );
     }
+
+    let duplicate_route_locations = duplicate_export_locations(&root, &results, "Route");
+    assert!(
+        duplicate_route_locations.is_empty(),
+        "TanStack route files should not report duplicate Route exports, found: {duplicate_route_locations:?}"
+    );
 }
 
 #[test]
@@ -165,6 +191,72 @@ fn tanstack_router_prefix_and_ignore_patterns_stay_strict() {
     assert!(
         has_unused_export(&unused_exports, "src/routes/route-posts.lazy.tsx", "loader"),
         "lazy routes should not inherit non-lazy exports, found: {unused_exports:?}"
+    );
+
+    let duplicate_route_locations = duplicate_export_locations(&root, &results, "Route");
+    assert!(
+        duplicate_route_locations.is_empty(),
+        "configured TanStack route files should not report duplicate Route exports, found: {duplicate_route_locations:?}"
+    );
+}
+
+#[test]
+fn tanstack_router_generated_tree_route_exports_are_not_duplicate_exports() {
+    let temp = tempdir().expect("create temp dir");
+    let root = temp.path();
+
+    write_project_file(
+        root,
+        "package.json",
+        r#"{
+  "name": "tanstack-generated-tree-routes",
+  "main": "src/renderer/src/router.ts",
+  "dependencies": {
+    "@tanstack/react-router": "1.0.0"
+  }
+}"#,
+    );
+    write_project_file(
+        root,
+        "src/renderer/src/router.ts",
+        r#"import { routeTree } from "./routeTree.gen";
+
+export const router = routeTree;
+"#,
+    );
+    write_project_file(
+        root,
+        "src/renderer/src/routeTree.gen.ts",
+        r#"import { Route as rootRouteImport } from "./routes/__root";
+import { Route as homeRouteImport } from "./routes/home";
+
+export const routeTree = [rootRouteImport, homeRouteImport];
+"#,
+    );
+    write_project_file(
+        root,
+        "src/renderer/src/routes/__root.tsx",
+        r#"import { createRootRoute } from "@tanstack/react-router";
+
+export const Route = createRootRoute()({});
+"#,
+    );
+    write_project_file(
+        root,
+        "src/renderer/src/routes/home.tsx",
+        r#"import { createFileRoute } from "@tanstack/react-router";
+
+export const Route = createFileRoute("/")({});
+"#,
+    );
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let duplicate_route_locations = duplicate_export_locations(root, &results, "Route");
+
+    assert!(
+        duplicate_route_locations.is_empty(),
+        "Route exports referenced by TanStack generated route trees should not be duplicate exports, found: {duplicate_route_locations:?}"
     );
 }
 
@@ -365,6 +457,55 @@ fn tanstack_router_inline_virtual_route_config_is_covered() {
             "unusedHomeHelper"
         ),
         "ordinary helpers in virtual route files should still be reported, found: {unused_exports:?}"
+    );
+
+    let duplicate_route_locations = duplicate_export_locations(&root, &results, "Route");
+    assert!(
+        duplicate_route_locations.is_empty(),
+        "virtual TanStack route files should not report duplicate Route exports, found: {duplicate_route_locations:?}"
+    );
+}
+
+#[test]
+fn tanstack_router_non_route_duplicate_route_exports_are_still_reported() {
+    let temp = tempdir().expect("create temp dir");
+    let root = temp.path();
+
+    write_project_file(
+        root,
+        "package.json",
+        r#"{
+  "name": "tanstack-non-route-duplicates",
+  "main": "src/main.ts",
+  "dependencies": {
+    "@tanstack/react-router": "1.0.0"
+  }
+}"#,
+    );
+    write_project_file(
+        root,
+        "src/main.ts",
+        r#"import { Route as RouteA } from "./features/a";
+import { Route as RouteB } from "./features/b";
+
+export const routes = [RouteA, RouteB];
+"#,
+    );
+    write_project_file(root, "src/features/a.ts", "export const Route = 'a';\n");
+    write_project_file(root, "src/features/b.ts", "export const Route = 'b';\n");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let duplicate_route_locations = duplicate_export_locations(root, &results, "Route");
+
+    assert!(
+        duplicate_route_locations
+            .iter()
+            .any(|path| path == "src/features/a.ts")
+            && duplicate_route_locations
+                .iter()
+                .any(|path| path == "src/features/b.ts"),
+        "non-route duplicate Route exports should still be reported, found: {duplicate_route_locations:?}"
     );
 }
 

@@ -7,7 +7,7 @@ use fallow_config::{CompiledIgnoreExportRule, ResolvedConfig};
 use fallow_types::extract::{ExportInfo, ExportName, ModuleInfo};
 
 use crate::discover::FileId;
-use crate::graph::{ModuleGraph, ModuleNode};
+use crate::graph::{ExportSymbol, ModuleGraph, ModuleNode};
 use crate::results::{
     DuplicateExport, DuplicateLocation, ExportUsage, PrivateTypeLeak, ReferenceLocation,
     StaleSuppression, SuppressionOrigin, UnusedExport,
@@ -18,6 +18,8 @@ use super::{LineOffsetsMap, byte_offset_to_line_col, read_source};
 
 /// Pre-compiled glob matchers for plugin/framework used_exports rules.
 type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
+
+const TANSTACK_ROUTER_PLUGIN_NAME: &str = "tanstack-router";
 
 /// Compile plugin-discovered used_exports rules (includes framework preset rules).
 fn compile_plugin_matchers(
@@ -30,6 +32,30 @@ fn compile_plugin_matchers(
         .iter()
         .filter_map(compile_used_export_rule)
         .collect()
+}
+
+/// Compile TanStack route contract export rules for duplicate-export filtering.
+fn compile_tanstack_duplicate_export_matchers(
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
+) -> PluginMatchers<'_> {
+    let Some(pr) = plugin_result else {
+        return Vec::new();
+    };
+    pr.used_exports
+        .iter()
+        .filter(|rule| rule.plugin_name == TANSTACK_ROUTER_PLUGIN_NAME)
+        .filter_map(compile_used_export_rule)
+        .collect()
+}
+
+fn is_tanstack_router_active(
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
+) -> bool {
+    plugin_result.is_some_and(|pr| {
+        pr.active_plugins
+            .iter()
+            .any(|plugin| plugin == TANSTACK_ROUTER_PLUGIN_NAME)
+    })
 }
 
 struct CompiledUsedExportRule<'a> {
@@ -128,6 +154,38 @@ fn is_js_like_source(path: &std::path::Path) -> bool {
                 ext,
                 "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts"
             )
+        })
+}
+
+fn has_route_path_segment(module_path: &std::path::Path, config_root: &std::path::Path) -> bool {
+    let relative_path = module_path.strip_prefix(config_root).unwrap_or(module_path);
+    relative_path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .split('/')
+        .any(|segment| segment == "routes")
+}
+
+fn is_route_tree_generated_file(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("routeTree.gen."))
+}
+
+fn is_route_referenced_by_tanstack_generated_tree(
+    export_name: &str,
+    export: &ExportSymbol,
+    module: &ModuleNode,
+    graph: &ModuleGraph,
+    config_root: &std::path::Path,
+) -> bool {
+    export_name == "Route"
+        && has_route_path_segment(&module.path, config_root)
+        && export.references.iter().any(|reference| {
+            graph
+                .modules
+                .get(reference.from_file.0 as usize)
+                .is_some_and(|from| is_route_tree_generated_file(&from.path))
         })
 }
 
@@ -738,7 +796,27 @@ pub fn find_duplicate_exports(
     line_offsets_by_file: &LineOffsetsMap<'_>,
     resolved_modules: &[crate::resolve::ResolvedModule],
 ) -> Vec<DuplicateExport> {
+    find_duplicate_exports_with_plugins(
+        graph,
+        config,
+        suppressions,
+        line_offsets_by_file,
+        None,
+        resolved_modules,
+    )
+}
+
+pub(super) fn find_duplicate_exports_with_plugins(
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+    suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
+    resolved_modules: &[crate::resolve::ResolvedModule],
+) -> Vec<DuplicateExport> {
     let ignore_matchers = config.compiled_ignore_exports.as_slice();
+    let tanstack_duplicate_matchers = compile_tanstack_duplicate_export_matchers(plugin_result);
+    let has_tanstack_router = is_tanstack_router_active(plugin_result);
 
     let mut re_export_sources: FxHashMap<usize, FxHashSet<usize>> = FxHashMap::default();
     for (idx, module) in graph.modules.iter().enumerate() {
@@ -769,6 +847,12 @@ pub fn find_duplicate_exports(
 
         let matching_ignore =
             ignore_matchers_for_module(&module.path, &config.root, ignore_matchers);
+        let (_, matching_tanstack_contracts) = matchers_for_module(
+            &module.path,
+            &config.root,
+            &[],
+            &tanstack_duplicate_matchers,
+        );
 
         for export in &module.exports {
             if matches!(export.name, crate::extract::ExportName::Default) {
@@ -778,7 +862,18 @@ pub fn find_duplicate_exports(
                 continue;
             }
             let name = export.name.to_string();
-            if is_export_ignored(&name, &matching_ignore, &[]) {
+            if is_export_ignored(&name, &matching_ignore, &matching_tanstack_contracts) {
+                continue;
+            }
+            if has_tanstack_router
+                && is_route_referenced_by_tanstack_generated_tree(
+                    &name,
+                    export,
+                    module,
+                    graph,
+                    &config.root,
+                )
+            {
                 continue;
             }
             export_locations.entry(name).or_default().push(ExportEntry {
