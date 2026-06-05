@@ -1932,6 +1932,7 @@ mod tests {
             public_signature_type_references: vec![],
             namespace_object_aliases: vec![],
             iconify_prefixes: vec![],
+            iconify_icon_names: vec![],
             auto_import_candidates: Vec::new(),
             directives: Vec::new(),
             security_sinks: Vec::new(),

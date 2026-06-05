@@ -6,13 +6,13 @@
 //! supplies the `jam:` / `ic:` collection is invisible to import-graph analysis
 //! and gets flagged as an unused dependency.
 //!
-//! This module scans the raw markup of template/JSX file kinds for icon-prop
-//! string values shaped `<prefix>:<name>` and returns the deduped collection
-//! prefixes. The analysis layer maps each prefix to `@iconify-json/<prefix>` and
-//! credits it as a referenced dependency, gated on the project actually
-//! declaring an Iconify-ecosystem dependency. Crediting can only ever exempt a
-//! declared dependency from "unused"; it never produces a finding, so a stray
-//! non-icon `name="foo:bar"` is harmless.
+//! This module scans raw markup for icon-prop string values shaped
+//! `<prefix>:<name>` and scans Vue SFC script content for static object
+//! properties shaped `icon: 'i-<collection>-<name>'`. The analysis layer maps
+//! those values to declared `@iconify-json/<prefix>` packages, gated on the
+//! project actually declaring an Iconify-ecosystem dependency. Crediting can
+//! only ever exempt a declared dependency from "unused"; it never produces a
+//! finding.
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -32,6 +32,19 @@ static ICON_PROP: LazyLock<Regex> = LazyLock::new(|| {
     crate::static_regex(r#"[\s"'/](?:icon|name)\s*=\s*["']([a-z0-9]+(?:-[a-z0-9]+)*):[a-z0-9]"#)
 });
 
+/// Matches Vue SFC script-side object properties named `icon` whose static
+/// string value uses the Nuxt UI `i-<collection>-<icon>` shape. Capture group 1
+/// is the class suffix without `i-`, e.g. `simple-icons-github`.
+///
+/// The object-property anchor avoids crediting arbitrary strings. This is a raw
+/// source scanner rather than an AST visitor so it also sees `<script setup>`
+/// after SFC block extraction and stays cheap for the narrow Vue-only scope.
+static NUXT_UI_ICON_PROP: LazyLock<Regex> = LazyLock::new(|| {
+    crate::static_regex(
+        r#"(?m)(?:^|[,{]\s*)(?:icon|["']icon["'])\s*:\s*["']i-([a-z0-9]+(?:-[a-z0-9]+)+)["']"#,
+    )
+});
+
 /// Matches HTML markup comments so a commented-out icon usage does not credit
 /// its package. Mirrors the comment-strip-before-scan approach in `css.rs` /
 /// `html.rs`. JS/JSX comment forms (`//`, `/* */`, `{/* */}`) are not stripped:
@@ -45,15 +58,21 @@ static HTML_COMMENT: LazyLock<Regex> = LazyLock::new(|| crate::static_regex(r"(?
 /// `.js`-with-JSX is a documented limitation.
 const MARKUP_EXTENSIONS: &[&str] = &["astro", "jsx", "tsx", "svelte", "vue", "html", "htm", "mdx"];
 
+fn is_markup_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| MARKUP_EXTENSIONS.contains(&ext))
+}
+
+fn is_vue_path(path: &Path) -> bool {
+    path.extension().and_then(|ext| ext.to_str()) == Some("vue")
+}
+
 /// Extract deduped Iconify collection prefixes from static icon props in
 /// `source`. Returns an empty `Vec` for non-markup file kinds. See issue #608.
 #[must_use]
 pub fn extract_iconify_prefixes(path: &Path, source: &str) -> Vec<String> {
-    let is_markup = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| MARKUP_EXTENSIONS.contains(&ext));
-    if !is_markup {
+    if !is_markup_path(path) {
         return Vec::new();
     }
 
@@ -67,6 +86,24 @@ pub fn extract_iconify_prefixes(path: &Path, source: &str) -> Vec<String> {
     prefixes
 }
 
+/// Extract deduped Nuxt UI icon class suffixes from static Vue SFC script-side
+/// `icon` properties. Returned names omit the leading `i-`; core resolves them
+/// against declared `@iconify-json/*` packages using longest-prefix matching.
+#[must_use]
+pub fn extract_iconify_icon_names(path: &Path, source: &str) -> Vec<String> {
+    if !is_vue_path(path) {
+        return Vec::new();
+    }
+
+    let mut names: Vec<String> = NUXT_UI_ICON_PROP
+        .captures_iter(source)
+        .map(|caps| caps[1].to_string())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,6 +111,10 @@ mod tests {
 
     fn prefixes(source: &str) -> Vec<String> {
         extract_iconify_prefixes(Path::new("src/pages/index.astro"), source)
+    }
+
+    fn icon_names(source: &str) -> Vec<String> {
+        extract_iconify_icon_names(Path::new("app/layouts/default.vue"), source)
     }
 
     #[test]
@@ -139,5 +180,41 @@ mod tests {
             r#"const x = { name: "jam:github" };"#,
         );
         assert!(prefixes.is_empty());
+    }
+
+    #[test]
+    fn extracts_nuxt_ui_script_icon_property() {
+        let source = r#"
+            const links = [{
+                label: 'View page source',
+                icon: 'i-simple-icons-github'
+            }, {
+                "icon": "i-lucide-house"
+            }]
+        "#;
+        assert_eq!(
+            icon_names(source),
+            vec!["lucide-house", "simple-icons-github"]
+        );
+    }
+
+    #[test]
+    fn ignores_nuxt_ui_icon_strings_without_icon_property() {
+        let source = r"
+            const links = [{
+                label: 'i-simple-icons-github',
+                iconName: 'i-lucide-house'
+            }]
+        ";
+        assert!(icon_names(source).is_empty());
+    }
+
+    #[test]
+    fn ignores_nuxt_ui_icon_names_outside_vue_files() {
+        let names = extract_iconify_icon_names(
+            Path::new("app/navigation.ts"),
+            r"const link = { icon: 'i-simple-icons-github' }",
+        );
+        assert!(names.is_empty());
     }
 }

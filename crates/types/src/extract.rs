@@ -74,6 +74,9 @@ pub struct ModuleInfo {
     pub namespace_object_aliases: Vec<NamespaceObjectAlias>,
     /// Deduped Iconify collection prefixes found in static icon props.
     pub iconify_prefixes: Vec<String>,
+    /// Deduped Nuxt UI `i-<collection>-<icon>` icon class suffixes found in
+    /// static script-side icon properties.
+    pub iconify_icon_names: Vec<String>,
     /// Bare identifiers that may be resolved by framework auto-imports.
     pub auto_import_candidates: Vec<String>,
     /// File-level string directives in source order (e.g. `"use client"`,
@@ -627,7 +630,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 64);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 672);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 696);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]

@@ -846,6 +846,7 @@ impl ModuleInfoExtractor {
             public_signature_type_references: self.public_signature_type_references,
             namespace_object_aliases,
             iconify_prefixes: Vec::new(),
+            iconify_icon_names: Vec::new(),
             auto_import_candidates: Vec::new(),
             directives: self.directives,
             security_sinks: self.security_sinks,

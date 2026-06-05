@@ -194,6 +194,7 @@ pub(crate) fn parse_html_to_module_with_complexity(
         public_signature_type_references: Vec::new(),
         namespace_object_aliases: Vec::new(),
         iconify_prefixes: Vec::new(),
+        iconify_icon_names: Vec::new(),
         auto_import_candidates: Vec::new(),
         directives: Vec::new(),
         security_sinks: Vec::new(),

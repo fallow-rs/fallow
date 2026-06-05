@@ -819,6 +819,31 @@ fn iconify_static_icon_strings_credit_icon_set_packages() {
 }
 
 #[test]
+fn nuxt_ui_script_icon_strings_credit_icon_set_packages() {
+    let root = fixture_path("issue-955-nuxt-ui-iconify-script");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dep_names.contains(&"@iconify-json/simple-icons"),
+        "@iconify-json/simple-icons should be credited via the Nuxt UI icon string: {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"@iconify-json/simple"),
+        "shorter matching Iconify collections should not be credited by a longer icon string: {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"unused-dep"),
+        "an unrelated dependency should still be reported: {unused_dep_names:?}"
+    );
+}
+
+#[test]
 fn pandacss_config_is_not_flagged_unused() {
     let root = fixture_path("pandacss-config");
     let config = create_config(root);

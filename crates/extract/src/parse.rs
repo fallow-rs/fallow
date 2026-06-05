@@ -43,6 +43,7 @@ pub fn parse_source_to_module(
     let mut module =
         parse_source_to_module_inner(file_id, path, source, content_hash, need_complexity);
     module.iconify_prefixes = crate::iconify::extract_iconify_prefixes(path, source);
+    module.iconify_icon_names = crate::iconify::extract_iconify_icon_names(path, source);
     module
 }
 

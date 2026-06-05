@@ -168,7 +168,13 @@ use crate::MemberKind;
 /// identifier flows into a structurally typed parameter. Pre-115 entries can
 /// miss those synthetic `member_accesses` and surface false
 /// `unused-class-member` findings.
-pub(super) const CACHE_VERSION: u32 = 116;
+///
+/// Bumped to 117 for issue #955: Vue SFC script-side Nuxt UI icon strings now
+/// populate `iconify_icon_names`, allowing declared `@iconify-json/*`
+/// collections used through values like `icon: 'i-simple-icons-github'` to be
+/// credited. Pre-116 entries omit those names and can surface false
+/// `unused-dependency` findings until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 117;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -211,7 +217,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 688);
+assert_cached_type_size!(CachedModule, 712);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -299,6 +305,9 @@ pub struct CachedModule {
     pub namespace_object_aliases: Vec<CachedNamespaceObjectAlias>,
     /// Iconify collection prefixes found in static icon props (issue #608).
     pub iconify_prefixes: Vec<String>,
+    /// Nuxt UI icon class suffixes found in static script-side icon properties
+    /// (issue #955).
+    pub iconify_icon_names: Vec<String>,
     /// Bare identifier names that are candidates for convention auto-import
     /// resolution (issue #704). Content-local, so they round-trip through the
     /// cache; resolution against the plugin table happens at graph-build time.

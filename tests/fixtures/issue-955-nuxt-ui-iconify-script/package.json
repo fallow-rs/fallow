@@ -1,0 +1,11 @@
+{
+  "name": "issue-955-nuxt-ui-iconify-script",
+  "version": "1.0.0",
+  "dependencies": {
+    "nuxt": "^4.0.0",
+    "@nuxt/ui": "^4.0.0",
+    "@iconify-json/simple": "^1.0.0",
+    "@iconify-json/simple-icons": "^1.0.0",
+    "unused-dep": "^1.0.0"
+  }
+}

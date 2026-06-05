@@ -1,17 +1,18 @@
-//! Credit `@iconify-json/<prefix>` packages from static icon strings (issue #608).
+//! Credit `@iconify-json/<prefix>` packages from static icon strings (issues
+//! #608 and #955).
 //!
 //! Iconify icon components consume an icon set through a build-time string name
 //! (`<Icon name="jam:github" />`) rather than a JavaScript `import`, so the
 //! `@iconify-json/<prefix>` package supplying that collection is invisible to
 //! import-graph analysis and would be reported as an unused dependency.
 //!
-//! The extraction layer records the collection prefixes seen in markup on
-//! [`ModuleInfo::iconify_prefixes`]. This bridge maps each prefix to its
-//! `@iconify-json/<prefix>` package and returns the list of packages to credit
-//! as referenced dependencies, GATED on the project actually declaring an
-//! Iconify-ecosystem dependency. Crediting only exempts a declared dependency
-//! from "unused"; it never produces a finding, so a stray non-icon
-//! `name="foo:bar"` whose `@iconify-json/foo` is not declared is a no-op.
+//! The extraction layer records exact collection prefixes seen in markup on
+//! [`ModuleInfo::iconify_prefixes`] and Nuxt UI icon class suffixes seen in Vue
+//! script-side object data on [`ModuleInfo::iconify_icon_names`]. This bridge
+//! maps those values to declared `@iconify-json/<prefix>` packages and returns
+//! the list of packages to credit as referenced dependencies, GATED on the
+//! project actually declaring an Iconify-ecosystem dependency. Crediting only
+//! exempts a declared dependency from "unused"; it never produces a finding.
 
 use fallow_config::{PackageJson, WorkspaceInfo};
 use rustc_hash::FxHashSet;
@@ -50,14 +51,70 @@ fn iconify_ecosystem_present(pkg: Option<&PackageJson>, workspaces: &[WorkspaceI
     })
 }
 
-/// Map deduped Iconify collection prefixes to sorted `@iconify-json/<prefix>`
-/// package names.
-fn iconify_packages_for_prefixes<'a>(prefixes: impl Iterator<Item = &'a str>) -> Vec<String> {
-    let unique: FxHashSet<&str> = prefixes.collect();
-    let mut packages: Vec<String> = unique
-        .into_iter()
-        .map(|prefix| format!("@iconify-json/{prefix}"))
+fn collect_declared_iconify_json_packages(
+    pkg: Option<&PackageJson>,
+    workspaces: &[WorkspaceInfo],
+) -> FxHashSet<String> {
+    let mut packages = FxHashSet::default();
+    let mut collect = |pkg: &PackageJson| {
+        packages.extend(
+            pkg.all_dependency_names()
+                .into_iter()
+                .filter(|name| name.starts_with("@iconify-json/")),
+        );
+    };
+    if let Some(pkg) = pkg {
+        collect(pkg);
+    }
+    for ws in workspaces {
+        if let Ok(pkg) = PackageJson::load(&ws.root.join("package.json")) {
+            collect(&pkg);
+        }
+    }
+    packages
+}
+
+fn declared_iconify_collection_names(declared: &FxHashSet<String>) -> Vec<String> {
+    let mut collections: Vec<String> = declared
+        .iter()
+        .filter_map(|package| package.strip_prefix("@iconify-json/"))
+        .map(ToOwned::to_owned)
         .collect();
+    collections.sort_unstable_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+    collections
+}
+
+fn icon_name_matches_collection(icon_name: &str, collection: &str) -> bool {
+    icon_name
+        .strip_prefix(collection)
+        .is_some_and(|rest| rest.starts_with('-') && rest.len() > 1)
+}
+
+/// Map extracted Iconify strings to sorted declared `@iconify-json/<prefix>`
+/// package names.
+fn iconify_packages_for_modules(
+    modules: &[ModuleInfo],
+    declared: &FxHashSet<String>,
+) -> Vec<String> {
+    let collections = declared_iconify_collection_names(declared);
+    let mut packages = FxHashSet::default();
+    for module in modules {
+        for prefix in &module.iconify_prefixes {
+            let package = format!("@iconify-json/{prefix}");
+            if declared.contains(&package) {
+                packages.insert(package);
+            }
+        }
+        for icon_name in &module.iconify_icon_names {
+            if let Some(collection) = collections
+                .iter()
+                .find(|collection| icon_name_matches_collection(icon_name, collection))
+            {
+                packages.insert(format!("@iconify-json/{collection}"));
+            }
+        }
+    }
+    let mut packages: Vec<String> = packages.into_iter().collect();
     packages.sort_unstable();
     packages
 }
@@ -75,11 +132,8 @@ pub(super) fn collect_iconify_referenced_deps(
     if !iconify_ecosystem_present(pkg, workspaces) {
         return Vec::new();
     }
-    iconify_packages_for_prefixes(
-        modules
-            .iter()
-            .flat_map(|module| module.iconify_prefixes.iter().map(String::as_str)),
-    )
+    let declared = collect_declared_iconify_json_packages(pkg, workspaces);
+    iconify_packages_for_modules(modules, &declared)
 }
 
 #[cfg(test)]
@@ -105,8 +159,19 @@ mod tests {
 
     #[test]
     fn maps_prefixes_to_sorted_deduped_packages() {
-        let packages =
-            iconify_packages_for_prefixes(["jam", "ic", "jam", "simple-icons"].into_iter());
+        let module = ModuleInfo {
+            iconify_prefixes: vec!["jam".to_string(), "ic".to_string(), "jam".to_string()],
+            iconify_icon_names: vec!["simple-icons-github".to_string()],
+            ..empty_module()
+        };
+        let declared = [
+            "@iconify-json/jam".to_string(),
+            "@iconify-json/ic".to_string(),
+            "@iconify-json/simple-icons".to_string(),
+        ]
+        .into_iter()
+        .collect();
+        let packages = iconify_packages_for_modules(&[module], &declared);
         assert_eq!(
             packages,
             vec![
@@ -114,6 +179,25 @@ mod tests {
                 "@iconify-json/jam",
                 "@iconify-json/simple-icons",
             ]
+        );
+    }
+
+    #[test]
+    fn nuxt_icon_names_use_longest_declared_collection_match() {
+        let module = ModuleInfo {
+            iconify_icon_names: vec!["simple-icons-github".to_string()],
+            ..empty_module()
+        };
+        let declared = [
+            "@iconify-json/simple".to_string(),
+            "@iconify-json/simple-icons".to_string(),
+        ]
+        .into_iter()
+        .collect();
+
+        assert_eq!(
+            iconify_packages_for_modules(&[module], &declared),
+            vec!["@iconify-json/simple-icons"]
         );
     }
 
@@ -144,5 +228,43 @@ mod tests {
             ..Default::default()
         };
         assert!(!iconify_ecosystem_present(Some(&bare_pkg), &[]));
+    }
+
+    fn empty_module() -> ModuleInfo {
+        ModuleInfo {
+            file_id: fallow_types::discover::FileId(1),
+            exports: Vec::new(),
+            imports: Vec::new(),
+            re_exports: Vec::new(),
+            dynamic_imports: Vec::new(),
+            dynamic_import_patterns: Vec::new(),
+            require_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            whole_object_uses: Vec::new(),
+            has_cjs_exports: false,
+            has_angular_component_template_url: false,
+            content_hash: 0,
+            suppressions: Vec::new(),
+            unknown_suppression_kinds: Vec::new(),
+            unused_import_bindings: Vec::new(),
+            type_referenced_import_bindings: Vec::new(),
+            value_referenced_import_bindings: Vec::new(),
+            line_offsets: Vec::new(),
+            complexity: Vec::new(),
+            flag_uses: Vec::new(),
+            class_heritage: Vec::new(),
+            injection_tokens: Vec::new(),
+            local_type_declarations: Vec::new(),
+            public_signature_type_references: Vec::new(),
+            namespace_object_aliases: Vec::new(),
+            iconify_prefixes: Vec::new(),
+            iconify_icon_names: Vec::new(),
+            auto_import_candidates: Vec::new(),
+            directives: Vec::new(),
+            security_sinks: Vec::new(),
+            security_sinks_skipped: 0,
+            tainted_bindings: Vec::new(),
+            sanitized_sink_args: Vec::new(),
+        }
     }
 }
