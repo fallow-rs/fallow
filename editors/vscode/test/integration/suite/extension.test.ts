@@ -110,6 +110,10 @@ describe("Fallow VS Code extension", () => {
     api = (await extension.activate()) as ExtensionApi;
   });
 
+  beforeEach(() => {
+    windowApi.showInformationMessage = async () => undefined;
+  });
+
   afterEach(async () => {
     if (fs.existsSync(cliLogPath())) {
       fs.rmSync(cliLogPath(), { force: true });
@@ -172,11 +176,12 @@ describe("Fallow VS Code extension", () => {
     assert.equal(result.check.unused_optional_dependencies?.length, 1);
     assert.equal(result.dupes.clone_groups.length, 1);
 
-    const analysisCalls = readCliLog();
+    const cliCalls = readCliLog();
+    const analysisCalls = cliCalls.filter((entry) => entry.command !== "workspaces");
     assert.ok(analysisCalls.length >= 1, "expected at least one CLI analysis call");
     assert.ok(
       analysisCalls.every((entry) => entry.command === "combined"),
-      "analysis should use combined mode only",
+      `analysis should use combined mode only: ${JSON.stringify(cliCalls)}`,
     );
     // `.some`, not `.every`: a config change in a prior test's afterEach fires a
     // background `triggerCliAnalysis()` whose log entry can race into this test's

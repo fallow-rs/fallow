@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAnalysisArgs,
+  buildCleanAnalysisSummary,
   compareVersions,
+  countDuplicationGroups,
   parseUnexpectedArgument,
   planDegradation,
   stripArgument,
 } from "../src/analysis-utils.js";
+import type { FallowCheckResult, FallowDupesResult } from "../src/types.js";
 
 const baseOptions = {
   production: false,
@@ -22,6 +25,74 @@ const baseOptions = {
   dupesIgnoreImports: undefined,
   cliVersion: null,
 };
+
+const emptyCheck = (): FallowCheckResult => ({
+  schema_version: 7,
+  version: "0.0.0-test",
+  elapsed_ms: 0,
+  total_issues: 0,
+  unused_files: [],
+  unused_exports: [],
+  unused_types: [],
+  private_type_leaks: [],
+  unused_dependencies: [],
+  unused_dev_dependencies: [],
+  unused_optional_dependencies: [],
+  unused_enum_members: [],
+  unused_class_members: [],
+  unresolved_imports: [],
+  unlisted_dependencies: [],
+  duplicate_exports: [],
+  type_only_dependencies: [],
+  test_only_dependencies: [],
+  circular_dependencies: [],
+  boundary_violations: [],
+  stale_suppressions: [],
+  summary: {
+    total_issues: 0,
+    unused_files: 0,
+    unused_exports: 0,
+    unused_types: 0,
+    private_type_leaks: 0,
+    unused_dependencies: 0,
+    unused_enum_members: 0,
+    unused_class_members: 0,
+    unresolved_imports: 0,
+    unlisted_dependencies: 0,
+    duplicate_exports: 0,
+    type_only_dependencies: 0,
+    test_only_dependencies: 0,
+    circular_dependencies: 0,
+    boundary_violations: 0,
+    stale_suppressions: 0,
+    unused_catalog_entries: 0,
+    empty_catalog_groups: 0,
+    unresolved_catalog_references: 0,
+    unused_dependency_overrides: 0,
+    misconfigured_dependency_overrides: 0,
+  },
+});
+
+const dupesResult = (
+  cloneGroups: number,
+  totalFiles: number,
+  duplicationPercentage: number,
+): FallowDupesResult => ({
+  clone_groups: [],
+  clone_families: [],
+  stats: {
+    total_files: totalFiles,
+    files_with_clones: cloneGroups > 0 ? 1 : 0,
+    total_lines: 100,
+    duplicated_lines: duplicationPercentage > 0 ? 10 : 0,
+    total_tokens: 1000,
+    duplicated_tokens: duplicationPercentage > 0 ? 100 : 0,
+    clone_groups: cloneGroups,
+    clone_instances: cloneGroups * 2,
+    duplication_percentage: duplicationPercentage,
+    clone_groups_below_min_occurrences: 0,
+  },
+});
 
 describe("buildAnalysisArgs", () => {
   it("does not emit duplication overrides when VS Code settings are unconfigured", () => {
@@ -121,6 +192,46 @@ describe("buildAnalysisArgs", () => {
     expect(args).toContain("--production");
     expect(args[args.indexOf("--changed-since") + 1]).toBe("main");
     expect(args[args.indexOf("--config") + 1]).toBe("/abs/.fallowrc.json");
+  });
+});
+
+describe("buildCleanAnalysisSummary", () => {
+  it("summarizes a clean dead-code and duplication run without claiming non-JS languages", () => {
+    const summary = buildCleanAnalysisSummary(emptyCheck(), dupesResult(0, 63, 0));
+
+    expect(summary.notification).toBe(
+      "Fallow: no issues found in analyzed JS/TS files (63 analyzed JS/TS files).",
+    );
+    expect(summary.outputLines).toEqual([
+      "Fallow analysis summary:",
+      "- Dead code: no issues found in analyzed JS/TS files.",
+      "- Duplication: no duplicate-code groups found across 63 analyzed JS/TS files (0% duplicated lines).",
+    ]);
+  });
+
+  it("does not imply duplication passed when dupes output is unavailable", () => {
+    const summary = buildCleanAnalysisSummary(emptyCheck(), null);
+
+    expect(summary.notification).toBe(
+      "Fallow: no dead-code issues found in analyzed JS/TS files. Duplication summary unavailable.",
+    );
+    expect(summary.outputLines).toContain("- Duplication: summary unavailable.");
+  });
+
+  it("does not imply dead-code analysis passed when check output is unavailable", () => {
+    const summary = buildCleanAnalysisSummary(null, null);
+
+    expect(summary.notification).toBe(
+      "Fallow: analysis completed, but no dead-code summary was available.",
+    );
+    expect(summary.outputLines).toContain("- Dead code: summary unavailable.");
+  });
+});
+
+describe("countDuplicationGroups", () => {
+  it("uses duplication stats for duplicate-group notification routing", () => {
+    expect(countDuplicationGroups(dupesResult(2, 5, 12.5))).toBe(2);
+    expect(countDuplicationGroups(null)).toBe(0);
   });
 });
 

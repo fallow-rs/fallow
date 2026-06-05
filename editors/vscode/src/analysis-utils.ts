@@ -1,4 +1,4 @@
-import type { DuplicationMode, FallowCheckResult } from "./types.js";
+import type { DuplicationMode, FallowCheckResult, FallowDupesResult } from "./types.js";
 
 /**
  * Analysis flags that did not exist in every CLI release the extension may
@@ -278,4 +278,65 @@ export const countCheckIssues = (result: FallowCheckResult | null): number => {
     (result.unused_dependency_overrides?.length ?? 0) +
     (result.misconfigured_dependency_overrides?.length ?? 0)
   );
+};
+
+export const countDuplicationGroups = (result: FallowDupesResult | null): number => {
+  if (!result) {
+    return 0;
+  }
+  return result.stats.clone_groups;
+};
+
+export interface CleanAnalysisSummary {
+  readonly notification: string;
+  readonly outputLines: readonly string[];
+}
+
+const formatAnalyzedFiles = (count: number): string =>
+  `${count} analyzed JS/TS file${count === 1 ? "" : "s"}`;
+
+const formatDuplicationPercentage = (value: number): string => {
+  if (!Number.isFinite(value)) {
+    return "0%";
+  }
+  return `${value.toFixed(value === Math.trunc(value) ? 0 : 1)}%`;
+};
+
+export const buildCleanAnalysisSummary = (
+  check: FallowCheckResult | null,
+  dupes: FallowDupesResult | null,
+): CleanAnalysisSummary => {
+  if (!check) {
+    return {
+      notification: "Fallow: analysis completed, but no dead-code summary was available.",
+      outputLines: [
+        "Fallow analysis summary:",
+        "- Dead code: summary unavailable.",
+        "- Duplication: summary unavailable.",
+      ],
+    };
+  }
+
+  if (!dupes) {
+    return {
+      notification:
+        "Fallow: no dead-code issues found in analyzed JS/TS files. Duplication summary unavailable.",
+      outputLines: [
+        "Fallow analysis summary:",
+        "- Dead code: no issues found in analyzed JS/TS files.",
+        "- Duplication: summary unavailable.",
+      ],
+    };
+  }
+
+  const files = formatAnalyzedFiles(dupes.stats.total_files);
+  const pct = formatDuplicationPercentage(dupes.stats.duplication_percentage);
+  return {
+    notification: `Fallow: no issues found in analyzed JS/TS files (${files}).`,
+    outputLines: [
+      "Fallow analysis summary:",
+      "- Dead code: no issues found in analyzed JS/TS files.",
+      `- Duplication: no duplicate-code groups found across ${files} (${pct} duplicated lines).`,
+    ],
+  };
 };

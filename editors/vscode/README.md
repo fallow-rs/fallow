@@ -38,7 +38,7 @@ code --install-extension fallow-rs.fallow-vscode
 
 | Command | Description |
 |---------|-------------|
-| `Fallow: Run Analysis` | Run full codebase analysis and update tree views |
+| `Fallow: Run Analysis` | Run full codebase analysis and update tree views. Clean runs show a scoped JS/TS summary and link to the Fallow output channel. |
 | `Fallow: Audit Changed Files` | Audit the current change set for a pass/warn/fail verdict, shown in the audit verdict status-bar item (or an information message when that item is disabled). Findings are static candidates to verify. |
 | `Fallow: Reload Health` | Re-run the Health view analysis (score, complexity, hotspot and refactoring candidates) |
 | `Fallow: Scan for Security Candidates` | Scan for local security candidates (`client-server-leak`, tainted-sink CWE findings) and populate the Security Candidates view. Requires `fallow.security.enabled`. Results are UNVERIFIED candidates to verify, never confirmed vulnerabilities. |
@@ -60,9 +60,10 @@ code --install-extension fallow-rs.fallow-vscode
 
 ### Muting Fallow's editor squiggles
 
-Duplicate-code findings can span many lines and drown out TypeScript / ESLint diagnostics in the editor. Fallow ships three ways to mute them locally without disabling the underlying rule:
+Duplicate-code findings can span many lines and drown out TypeScript / ESLint diagnostics in the editor. Fallow ships four ways to mute them locally without disabling the underlying rule:
 
 - A right-click **Quick Fix** on any Fallow squiggle: "Mute Fallow `<category>` findings in this workspace."
+- The filter icon in the Fallow sidebar title bar opens the diagnostic mute manager.
 - The four commands above; bind a keyboard shortcut to `fallow.toggleMuteDuplicates` for one-keystroke noise control.
 - The Fallow language status item (right gutter of the status bar) appears with a yellow indicator whenever anything is muted; click it to open the manage picker.
 

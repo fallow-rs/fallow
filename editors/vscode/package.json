@@ -541,6 +541,11 @@
           "group": "navigation@9"
         },
         {
+          "command": "fallow.manageDiagnosticMutes",
+          "when": "view == fallow.deadCode || view == fallow.duplicates",
+          "group": "navigation@10"
+        },
+        {
           "command": "fallow.license.activate",
           "when": "view == fallow.deadCode",
           "group": "license@1"

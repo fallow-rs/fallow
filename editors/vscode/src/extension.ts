@@ -1,7 +1,11 @@
 // VS Code injects this module into the extension host at runtime.
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
-import { countCheckIssues } from "./analysis-utils.js";
+import {
+  buildCleanAnalysisSummary,
+  countCheckIssues,
+  countDuplicationGroups,
+} from "./analysis-utils.js";
 import { startClient, stopClient, restartClient } from "./client.js";
 import {
   getHealthEnabled,
@@ -242,6 +246,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
           void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
 
           const issueCount = countCheckIssues(check);
+          const duplicateGroupCount = countDuplicationGroups(dupes);
 
           if (issueCount > 0) {
             void vscode.window
@@ -255,8 +260,29 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
                 }
                 return undefined;
               });
+          } else if (duplicateGroupCount > 0) {
+            void vscode.window
+              .showInformationMessage(
+                `Fallow: found ${duplicateGroupCount} duplicate-code group${duplicateGroupCount === 1 ? "" : "s"}. Open the Fallow sidebar to explore.`,
+                "Open Sidebar",
+              )
+              .then((choice) => {
+                if (choice === "Open Sidebar") {
+                  void vscode.commands.executeCommand("fallow.duplicates.focus");
+                }
+                return undefined;
+              });
           } else {
-            void vscode.window.showInformationMessage("Fallow: no issues found.");
+            const summary = buildCleanAnalysisSummary(check, dupes);
+            outputChannel.appendLine(summary.outputLines.join("\n"));
+            void vscode.window
+              .showInformationMessage(summary.notification, "Open Output")
+              .then((choice) => {
+                if (choice === "Open Output") {
+                  outputChannel.show();
+                }
+                return undefined;
+              });
           }
           return true;
         } catch {

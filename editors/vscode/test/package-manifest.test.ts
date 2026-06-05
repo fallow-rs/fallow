@@ -105,6 +105,13 @@ describe("package.json view title menus", () => {
     });
     expect(commandPaletteEntry("fallow.analyze")).toBeUndefined();
   });
+
+  it("surfaces diagnostic mute management in the analysis view title bars", () => {
+    expect(viewTitleCommand("fallow.manageDiagnosticMutes")).toMatchObject({
+      when: "view == fallow.deadCode || view == fallow.duplicates",
+      group: "navigation@10",
+    });
+  });
 });
 
 describe("package.json binary download settings", () => {
