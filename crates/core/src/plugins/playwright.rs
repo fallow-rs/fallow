@@ -313,6 +313,26 @@ mod tests {
     }
 
     #[test]
+    fn web_server_array_template_command_credits_pnpm_exec_cli_dependency() {
+        let source = r"
+            const PORT = 3000;
+            export default {
+                webServer: [
+                    {
+                        command: `pnpm exec srvx --prod --port ${PORT}`,
+                    },
+                ],
+            };
+        ";
+        let result = resolve(source);
+        assert!(
+            result.referenced_dependencies.contains(&"srvx".to_string()),
+            "srvx CLI binary should be credited from array template command, got {:?}",
+            result.referenced_dependencies
+        );
+    }
+
+    #[test]
     fn web_server_array_node_runner_seeds_file_and_credits_runner() {
         let source = r#"
             export default {

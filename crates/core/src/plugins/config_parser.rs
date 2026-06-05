@@ -3463,6 +3463,74 @@ mod tests {
     }
 
     #[test]
+    fn template_literal_command_recovers_static_command_tokens() {
+        let source = r"
+            const PORT = 3000;
+            export default {
+                webServer: {
+                    command: `pnpm exec srvx --port ${PORT} --hostname 127.0.0.1`
+                }
+            };
+        ";
+        let val = extract_config_command(source, &ts_path(), &["webServer", "command"]);
+        assert_eq!(
+            val,
+            Some("pnpm exec srvx --port   --hostname 127.0.0.1".to_string())
+        );
+    }
+
+    #[test]
+    fn template_literal_command_skips_dynamic_prefix() {
+        let source = r"
+            export default {
+                webServer: { command: `${serverCommand} && pnpm exec srvx` }
+            };
+        ";
+        let val = extract_config_command(source, &ts_path(), &["webServer", "command"]);
+        assert!(val.is_none());
+    }
+
+    #[test]
+    fn template_literal_command_skips_split_static_token() {
+        let source = r"
+            export default {
+                webServer: { command: `pnpm exec sr${part}vx --port 3000` }
+            };
+        ";
+        let val = extract_config_command(source, &ts_path(), &["webServer", "command"]);
+        assert!(val.is_none());
+    }
+
+    #[test]
+    fn array_object_command_pairs_recover_template_command() {
+        let source = r"
+            const PORT = 3000;
+            export default {
+                webServer: [
+                    {
+                        command: `pnpm exec srvx --port ${PORT}`,
+                        cwd: 'apps/web'
+                    }
+                ]
+            };
+        ";
+        let pairs = extract_config_array_object_command_pairs(
+            source,
+            &ts_path(),
+            &["webServer"],
+            "command",
+            "cwd",
+        );
+        assert_eq!(
+            pairs,
+            vec![(
+                "pnpm exec srvx --port  ".to_string(),
+                Some("apps/web".to_string())
+            )]
+        );
+    }
+
+    #[test]
     fn nested_string_array_empty_path() {
         let source = r#"export default { items: ["a", "b"] };"#;
         let result = extract_config_string_array(source, &js_path(), &[]);
