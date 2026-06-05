@@ -516,7 +516,10 @@ pub(super) fn try_relative_package_root_source_fallback(
     let from_dir = from_file.parent()?;
     let candidate = from_dir.join(specifier);
     let normalized_candidate = normalize_path_lexically(&candidate);
+    #[cfg(not(miri))]
     let canonical_candidate = dunce::canonicalize(&candidate).ok();
+    #[cfg(miri)]
+    let canonical_candidate: Option<PathBuf> = None;
 
     ctx.package_manifests.iter().find_map(|manifest| {
         let matches_manifest = candidate == manifest.root
