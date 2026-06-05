@@ -174,7 +174,13 @@ use crate::MemberKind;
 /// collections used through values like `icon: 'i-simple-icons-github'` to be
 /// credited. Pre-116 entries omit those names and can surface false
 /// `unused-dependency` findings until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 117;
+///
+/// Bumped to 118 for issue #954: JS/TS extraction now records static
+/// `pino({ transport: { target: "pkg" } })` target packages as synthetic
+/// dynamic imports so runtime transport dependencies are credited. Pre-118
+/// entries can surface false `unused-dependency` findings until the file is
+/// re-extracted.
+pub(super) const CACHE_VERSION: u32 = 118;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

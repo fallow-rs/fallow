@@ -35,6 +35,12 @@ use super::{
     try_extract_import_then_callback, try_extract_property_callback_import, try_extract_require,
 };
 
+const PINO_PACKAGE: &str = "pino";
+const PINO_FACTORY_EXPORT: &str = "pino";
+const PINO_TRANSPORT_KEY: &str = "transport";
+const PINO_TARGET_KEY: &str = "target";
+const PINO_TARGETS_KEY: &str = "targets";
+
 #[derive(Default)]
 struct SignatureTypeCollector {
     refs: Vec<(String, Span)>,
@@ -207,6 +213,93 @@ fn vitest_auto_mock_source(source: &str) -> Option<String> {
     }
 
     Some(format!("{dir}/__mocks__/{file_name}"))
+}
+
+fn pino_factory_callee_name(callee: &Expression<'_>) -> Option<String> {
+    match unwrap_static_expr(callee) {
+        Expression::Identifier(ident) => Some(ident.name.to_string()),
+        _ => None,
+    }
+}
+
+fn collect_pino_config_targets(expr: &Expression<'_>, out: &mut Vec<String>) {
+    match unwrap_static_expr(expr) {
+        Expression::ObjectExpression(obj) => {
+            for prop in &obj.properties {
+                let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+                    continue;
+                };
+                if prop
+                    .key
+                    .static_name()
+                    .is_some_and(|name| name == PINO_TRANSPORT_KEY)
+                {
+                    collect_pino_transport_targets(&prop.value, out);
+                }
+            }
+        }
+        Expression::ConditionalExpression(cond) => {
+            collect_pino_config_targets(&cond.consequent, out);
+            collect_pino_config_targets(&cond.alternate, out);
+        }
+        _ => {}
+    }
+}
+
+fn collect_pino_transport_targets(expr: &Expression<'_>, out: &mut Vec<String>) {
+    match unwrap_static_expr(expr) {
+        Expression::ObjectExpression(obj) => collect_pino_transport_object_targets(obj, out),
+        Expression::ConditionalExpression(cond) => {
+            collect_pino_transport_targets(&cond.consequent, out);
+            collect_pino_transport_targets(&cond.alternate, out);
+        }
+        _ => {}
+    }
+}
+
+fn collect_pino_transport_object_targets(obj: &ObjectExpression<'_>, out: &mut Vec<String>) {
+    for prop in &obj.properties {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+            continue;
+        };
+        match prop.key.static_name().as_deref() {
+            Some(PINO_TARGET_KEY) => record_pino_target_value(&prop.value, out),
+            Some(PINO_TARGETS_KEY) => record_pino_targets_array(&prop.value, out),
+            _ => {}
+        }
+    }
+}
+
+fn record_pino_target_value(expr: &Expression<'_>, out: &mut Vec<String>) {
+    if let Expression::StringLiteral(lit) = unwrap_static_expr(expr) {
+        record_pino_target(lit.value.as_str(), out);
+    }
+}
+
+fn record_pino_targets_array(expr: &Expression<'_>, out: &mut Vec<String>) {
+    let Expression::ArrayExpression(array) = unwrap_static_expr(expr) else {
+        return;
+    };
+    for element in &array.elements {
+        match element {
+            ArrayExpressionElement::ObjectExpression(obj) => {
+                collect_pino_transport_object_targets(obj, out);
+            }
+            ArrayExpressionElement::ParenthesizedExpression(paren) => {
+                if let Expression::ObjectExpression(obj) = unwrap_static_expr(&paren.expression) {
+                    collect_pino_transport_object_targets(obj, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn record_pino_target(source: &str, out: &mut Vec<String>) {
+    if source.is_empty() || out.iter().any(|existing| existing == source) {
+        return;
+    }
+    out.push(source.to_string());
 }
 
 fn is_dompurify_source(source: &str) -> bool {
@@ -1391,6 +1484,50 @@ impl ModuleInfoExtractor {
                 && import.local_name == local_name
                 && matches!(&import.imported_name, ImportedName::Named(name) if name == imported_name)
         })
+    }
+
+    fn is_pino_factory_binding(&self, local_name: &str) -> bool {
+        let imported = self.imports.iter().any(|import| {
+            import.source == PINO_PACKAGE
+                && import.local_name == local_name
+                && !import.is_type_only
+                && match &import.imported_name {
+                    ImportedName::Default => true,
+                    ImportedName::Named(name) => name == PINO_FACTORY_EXPORT,
+                    ImportedName::Namespace | ImportedName::SideEffect => false,
+                }
+        });
+        let required = self.require_calls.iter().any(|require| {
+            require.source == PINO_PACKAGE
+                && require.local_name.as_deref() == Some(local_name)
+                && require.destructured_names.is_empty()
+        });
+        (imported || required) && !self.nested_scope_shadows(local_name)
+    }
+
+    fn try_record_pino_transport_targets(&mut self, expr: &CallExpression<'_>) {
+        let Some(local_name) = pino_factory_callee_name(&expr.callee) else {
+            return;
+        };
+        if !self.is_pino_factory_binding(&local_name) {
+            return;
+        }
+
+        let Some(config) = expr.arguments.first().and_then(Argument::as_expression) else {
+            return;
+        };
+
+        let mut targets = Vec::new();
+        collect_pino_config_targets(config, &mut targets);
+        for source in targets.into_iter().filter(|source| !source.is_empty()) {
+            self.dynamic_imports.push(DynamicImportInfo {
+                source,
+                span: expr.span,
+                destructured_names: Vec::new(),
+                local_name: None,
+                is_speculative: false,
+            });
+        }
     }
 
     /// Record `register('loader', ...)` from `node:module` as a dynamic import.
@@ -2888,6 +3025,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             }
         }
 
+        self.try_record_pino_transport_targets(expr);
         self.try_record_node_module_register(expr);
         self.try_record_child_process_fork(expr);
 
