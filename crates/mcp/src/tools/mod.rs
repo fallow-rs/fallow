@@ -185,7 +185,7 @@ pub async fn run_tool(
     spawn_fallow(binary, args, timeout_duration(), Some(tool)).await
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub async fn run_fallow_with_timeout(
     binary: &str,
     args: &[String],
@@ -288,7 +288,7 @@ async fn spawn_fallow(
 /// Execute fallow and ensure successful JSON responses have a top-level
 /// `warnings` array for agent-facing runtime context tools. Untagged variant
 /// retained for tests; production goes through `run_tool_with_top_level_warnings`.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub async fn run_fallow_with_top_level_warnings(
     binary: &str,
     args: &[String],
