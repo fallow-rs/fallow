@@ -186,7 +186,12 @@ use crate::MemberKind;
 /// `pkg/package.json` lookups are credited as dependency usage. Pre-119
 /// entries omit those references and can surface false `unused-dependency`
 /// findings until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 119;
+///
+/// Bumped to 120 for issue #953: instance methods annotated with TypeScript's
+/// `this` return type now count as self-returning for constructor-rooted
+/// fluent chains. Pre-120 entries can miss those self-returning flags and
+/// surface false `unused-class-member` findings until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 120;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

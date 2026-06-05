@@ -496,6 +496,9 @@ fn is_self_returning_instance_method(
     if returns_named_class_type(method.value.return_type.as_ref(), class_name) {
         return true;
     }
+    if returns_this_type(method.value.return_type.as_ref()) {
+        return true;
+    }
     let Some(body) = method.value.body.as_ref() else {
         return false;
     };
@@ -518,6 +521,28 @@ fn returns_named_class_type(
         return false;
     };
     extract_type_annotation_name(annotation).is_some_and(|ty| ty == name)
+}
+
+fn returns_this_type(
+    return_type: Option<&oxc_allocator::Box<'_, oxc_ast::ast::TSTypeAnnotation<'_>>>,
+) -> bool {
+    let Some(annotation) = return_type.map(|boxed| boxed.as_ref()) else {
+        return false;
+    };
+    is_this_type(&annotation.type_annotation)
+}
+
+fn is_this_type(ty: &TSType<'_>) -> bool {
+    match ty {
+        TSType::TSThisType(_) => true,
+        TSType::TSTypeReference(type_ref) => match &type_ref.type_name {
+            TSTypeName::ThisExpression(_) => true,
+            TSTypeName::IdentifierReference(ident) => ident.name == "this",
+            TSTypeName::QualifiedName(_) => false,
+        },
+        TSType::TSParenthesizedType(paren) => is_this_type(&paren.type_annotation),
+        _ => false,
+    }
 }
 
 fn statement_returns_class_instance(stmt: &Statement<'_>, class_name: Option<&str>) -> bool {

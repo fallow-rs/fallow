@@ -3458,6 +3458,9 @@ fn self_returning_instance_method_flagged() {
             setY(value: number) {
                 return this;
             }
+            setZ(value: number): this {
+                return this.setY(value);
+            }
             build(): { x: number } {
                 return { x: 1 };
             }
@@ -3487,6 +3490,14 @@ fn self_returning_instance_method_flagged() {
     assert!(
         set_y.is_self_returning,
         "setY returns `this` as the last statement, should be marked self-returning",
+    );
+    let set_z = builder_members
+        .iter()
+        .find(|m| m.name == "setZ")
+        .expect("setZ should be in members");
+    assert!(
+        set_z.is_self_returning,
+        "setZ declares return type `this`, should be marked self-returning",
     );
     let build = builder_members
         .iter()

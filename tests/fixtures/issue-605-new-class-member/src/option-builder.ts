@@ -3,23 +3,16 @@
 export class OptionBuilder<T> {
   private value: T | undefined;
 
-  addDefault(v: T, _key: string): OptionBuilder<T> {
-    this.value = v;
-    return this;
+  addDefault(v: T, _key: string): this {
+    return this.setIfProvided(v);
   }
 
-  addFromConfig(v: T | undefined, _key: string): OptionBuilder<T> {
-    if (v !== undefined) {
-      this.value = v;
-    }
-    return this;
+  addFromConfig(v: T | undefined, _key: string): this {
+    return this.setIfProvided(v);
   }
 
-  addFromCli(v: T | undefined, _key: string): OptionBuilder<T> {
-    if (v !== undefined) {
-      this.value = v;
-    }
-    return this;
+  addFromCli(v: T | undefined, _key: string): this {
+    return this.setIfProvided(v);
   }
 
   build(): T | undefined {
@@ -27,7 +20,11 @@ export class OptionBuilder<T> {
   }
 
   // Self-returning setter that is never called: must STILL be reported.
-  addUnused(v: T): OptionBuilder<T> {
+  addUnused(v: T): this {
+    return this.setIfProvided(v);
+  }
+
+  private setIfProvided(v: T | undefined): this {
     this.value = v;
     return this;
   }
