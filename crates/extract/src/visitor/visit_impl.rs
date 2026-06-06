@@ -4022,6 +4022,37 @@ fn object_literal_properties(expr: &Expression<'_>) -> Vec<SinkObjectProperty> {
         .collect()
 }
 
+struct ObjectKeyMetadata {
+    keys: Vec<String>,
+    complete: bool,
+}
+
+fn object_key_metadata(expr: &Expression<'_>) -> ObjectKeyMetadata {
+    let Expression::ObjectExpression(obj) = unwrap_parens(expr) else {
+        return ObjectKeyMetadata {
+            keys: Vec::new(),
+            complete: false,
+        };
+    };
+    let mut keys = Vec::new();
+    let mut complete = true;
+    for prop in &obj.properties {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+            complete = false;
+            continue;
+        };
+        let Some(key) = prop.key.static_name() else {
+            complete = false;
+            continue;
+        };
+        let key = key.to_string();
+        if !keys.iter().any(|existing| existing == &key) {
+            keys.push(key);
+        }
+    }
+    ObjectKeyMetadata { keys, complete }
+}
+
 fn should_capture_literal_sink_arg(
     callee_path: &str,
     sink_shape: SinkShape,
@@ -4090,6 +4121,16 @@ fn is_literal_metadata_url_callee(callee_path: &str) -> bool {
 
 fn is_metadata_service_literal(value: &str) -> bool {
     value.contains("169.254.169.254") || value.contains("metadata.google.internal")
+}
+
+fn should_capture_missing_jwt_verify_options(
+    callee_path: &str,
+    sink_shape: SinkShape,
+    arg_len: usize,
+) -> bool {
+    arg_len == 2
+        && matches!(sink_shape, SinkShape::Call | SinkShape::MemberCall)
+        && (callee_path == "verify" || callee_path.ends_with(".verify"))
 }
 
 fn is_token_like_security_name(name: &str) -> bool {
@@ -4741,6 +4782,7 @@ impl ModuleInfoExtractor {
             if arg_is_non_literal {
                 self.record_sanitized_sink_arg(expr.span.start, arg_index, arg_expr);
             }
+            let object_keys = object_key_metadata(arg_expr);
             self.security_sinks.push(SinkSite {
                 sink_shape,
                 callee_path: callee_path.clone(),
@@ -4753,6 +4795,8 @@ impl ModuleInfoExtractor {
                 },
                 arg_literal: sink_literal_value(arg_expr),
                 object_properties: object_literal_properties(arg_expr),
+                object_property_keys: object_keys.keys,
+                object_property_keys_complete: object_keys.complete,
                 arg_idents: if arg_is_non_literal {
                     collect_arg_idents(arg_expr)
                 } else {
@@ -4763,6 +4807,24 @@ impl ModuleInfoExtractor {
                 } else {
                     Vec::new()
                 },
+                span_start: expr.span.start,
+                span_end: expr.span.end,
+            });
+        }
+        if should_capture_missing_jwt_verify_options(&callee_path, sink_shape, expr.arguments.len())
+        {
+            self.security_sinks.push(SinkSite {
+                sink_shape,
+                callee_path,
+                arg_index: 2,
+                arg_is_non_literal: false,
+                arg_kind: SinkArgKind::Object,
+                arg_literal: None,
+                object_properties: Vec::new(),
+                object_property_keys: Vec::new(),
+                object_property_keys_complete: true,
+                arg_idents: Vec::new(),
+                arg_source_paths: Vec::new(),
                 span_start: expr.span.start,
                 span_end: expr.span.end,
             });
@@ -4794,6 +4856,7 @@ impl ModuleInfoExtractor {
             {
                 continue;
             }
+            let object_keys = object_key_metadata(arg_expr);
             self.security_sinks.push(SinkSite {
                 sink_shape: SinkShape::NewExpression,
                 callee_path: callee_path.clone(),
@@ -4806,6 +4869,8 @@ impl ModuleInfoExtractor {
                 },
                 arg_literal: sink_literal_value(arg_expr),
                 object_properties: object_literal_properties(arg_expr),
+                object_property_keys: object_keys.keys,
+                object_property_keys_complete: object_keys.complete,
                 arg_idents: if arg_is_non_literal {
                     collect_arg_idents(arg_expr)
                 } else {
@@ -4840,6 +4905,8 @@ impl ModuleInfoExtractor {
             arg_kind: SinkArgKind::NoArg,
             arg_literal: None,
             object_properties: Vec::new(),
+            object_property_keys: Vec::new(),
+            object_property_keys_complete: false,
             arg_idents: vec![context_name.to_string()],
             arg_source_paths: Vec::new(),
             span_start: span.start,
@@ -4862,6 +4929,7 @@ impl ModuleInfoExtractor {
             return;
         };
         self.record_sanitized_sink_arg(expr.span.start, 0, &expr.right);
+        let object_keys = object_key_metadata(&expr.right);
         self.security_sinks.push(SinkSite {
             sink_shape: SinkShape::MemberAssign,
             callee_path: format!("{}.{}", object_path, member.property.name),
@@ -4870,6 +4938,8 @@ impl ModuleInfoExtractor {
             arg_kind: classify_arg_kind(&expr.right),
             arg_literal: None,
             object_properties: object_literal_properties(&expr.right),
+            object_property_keys: object_keys.keys,
+            object_property_keys_complete: object_keys.complete,
             arg_idents: collect_arg_idents(&expr.right),
             arg_source_paths: collect_arg_source_paths(&expr.right),
             span_start: expr.span.start,
@@ -4902,6 +4972,8 @@ impl ModuleInfoExtractor {
             arg_kind: SinkArgKind::TemplateWithSubst,
             arg_literal: None,
             object_properties: Vec::new(),
+            object_property_keys: Vec::new(),
+            object_property_keys_complete: false,
             arg_idents,
             arg_source_paths,
             span_start: expr.span.start,
@@ -4927,6 +4999,7 @@ impl ModuleInfoExtractor {
             return;
         }
         self.record_sanitized_sink_arg(attr.span.start, 0, value_expr);
+        let object_keys = object_key_metadata(value_expr);
         self.security_sinks.push(SinkSite {
             sink_shape: SinkShape::JsxAttr,
             callee_path: name.name.to_string(),
@@ -4935,6 +5008,8 @@ impl ModuleInfoExtractor {
             arg_kind: classify_arg_kind(value_expr),
             arg_literal: None,
             object_properties: object_literal_properties(value_expr),
+            object_property_keys: object_keys.keys,
+            object_property_keys_complete: object_keys.complete,
             arg_idents: collect_arg_idents(value_expr),
             arg_source_paths: collect_arg_source_paths(value_expr),
             span_start: attr.span.start,

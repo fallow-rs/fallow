@@ -249,6 +249,8 @@ pub fn template_html_sink(snippet: &str, span_start: usize, span_end: usize) -> 
         arg_kind,
         arg_literal: None,
         object_properties: Vec::new(),
+        object_property_keys: Vec::new(),
+        object_property_keys_complete: false,
         arg_idents,
         arg_source_paths: Vec::new(),
         span_start: u32::try_from(span_start).ok()?,

@@ -232,6 +232,60 @@ fn security_zero_arg_member_call_capture_records_token_context() {
     assert_eq!(sink.arg_idents, vec!["sessionToken".to_string()]);
 }
 
+fn jwt_verify_options_sink(source: &str) -> fallow_types::extract::SinkSite {
+    let info = parse(source);
+    info.security_sinks
+        .into_iter()
+        .find(|sink| sink.callee_path == "jwt.verify" && sink.arg_index == 2)
+        .expect("jwt.verify options sink captured")
+}
+
+#[test]
+fn security_jwt_verify_missing_options_capture_records_empty_complete_keys() {
+    let sink = jwt_verify_options_sink("jwt.verify(token, key);");
+
+    assert_eq!(sink.sink_shape, SinkShape::MemberCall);
+    assert_eq!(sink.arg_index, 2);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Object);
+    assert!(sink.object_property_keys.is_empty());
+    assert!(sink.object_property_keys_complete);
+}
+
+#[test]
+fn security_jwt_verify_options_capture_records_array_key_presence() {
+    let sink = jwt_verify_options_sink(r#"jwt.verify(token, key, { algorithms: ["RS256"] });"#);
+
+    assert_eq!(sink.arg_kind, SinkArgKind::Object);
+    assert_eq!(sink.object_property_keys, vec!["algorithms".to_string()]);
+    assert!(sink.object_property_keys_complete);
+    assert!(sink.object_properties.is_empty());
+}
+
+#[test]
+fn security_jwt_verify_options_capture_records_missing_algorithm_key() {
+    let sink = jwt_verify_options_sink(r#"jwt.verify(token, key, { audience: "app" });"#);
+
+    assert_eq!(sink.object_property_keys, vec!["audience".to_string()]);
+    assert!(sink.object_property_keys_complete);
+}
+
+#[test]
+fn security_jwt_verify_options_with_spread_is_incomplete() {
+    let sink = jwt_verify_options_sink(r#"jwt.verify(token, key, { audience: "app", ...opts });"#);
+
+    assert_eq!(sink.object_property_keys, vec!["audience".to_string()]);
+    assert!(!sink.object_property_keys_complete);
+}
+
+#[test]
+fn security_jwt_verify_options_with_computed_key_is_incomplete() {
+    let sink = jwt_verify_options_sink(r#"jwt.verify(token, key, { [keyName]: ["RS256"] });"#);
+
+    assert!(sink.object_property_keys.is_empty());
+    assert!(!sink.object_property_keys_complete);
+}
+
 #[test]
 fn extracts_public_class_methods_and_properties() {
     let info = parse(

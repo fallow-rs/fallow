@@ -287,6 +287,13 @@ pub struct SinkSite {
     pub arg_literal: Option<SinkLiteralValue>,
     /// Static top-level object-literal properties for option-object rows.
     pub object_properties: Vec<SinkObjectProperty>,
+    /// Static top-level object-literal keys, including keys whose values are not
+    /// literal. Used by missing-option rows that only need key presence.
+    pub object_property_keys: Vec<String>,
+    /// Whether [`object_property_keys`](Self::object_property_keys) is complete.
+    /// False for non-object arguments and object literals with spread or
+    /// non-static keys, where a missing-key claim would be speculative.
+    pub object_property_keys_complete: bool,
     /// Identifier names referenced anywhere inside the captured non-literal sink
     /// argument, or contextual names for zero-argument captures such as a
     /// token-like `Math.random()` assignment target. Deduped in source order.
@@ -777,7 +784,7 @@ const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<SinkSite>() == 136);
+const _: () = assert!(std::mem::size_of::<SinkSite>() == 160);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 720);
 
@@ -900,6 +907,8 @@ mod tests {
                 key: "origin".to_string(),
                 value: SinkLiteralValue::String("*".to_string()),
             }],
+            object_property_keys: vec!["origin".to_string()],
+            object_property_keys_complete: true,
             arg_idents: vec!["userInput".to_string()],
             arg_source_paths: vec!["req.body.email".to_string(), "req.body".to_string()],
             span_start: 10,
@@ -914,6 +923,11 @@ mod tests {
         assert_eq!(decoded.arg_kind, site.arg_kind);
         assert_eq!(decoded.arg_literal, site.arg_literal);
         assert_eq!(decoded.object_properties, site.object_properties);
+        assert_eq!(decoded.object_property_keys, site.object_property_keys);
+        assert_eq!(
+            decoded.object_property_keys_complete,
+            site.object_property_keys_complete
+        );
         assert_eq!(decoded.arg_idents, site.arg_idents);
         assert_eq!(decoded.arg_source_paths, site.arg_source_paths);
         assert_eq!(decoded.span(), site.span());

@@ -98,7 +98,7 @@ fn provenance_satisfied(matcher: &Matcher, module: &ModuleInfo, callee_path: &st
     let leading_ident = callee_path.split('.').next().unwrap_or(callee_path);
     let want_binding_trace = matches!(
         matcher.id.as_str(),
-        "command-injection" | "permissive-cors" | "jwt-alg-none"
+        "command-injection" | "permissive-cors" | "jwt-alg-none" | "jwt-verify-missing-algorithms"
     ) || (matcher.id == "weak-crypto" && matcher.is_literal_aware());
     module.imports.iter().any(|imp| {
         let source_matches = import_source_matches(&imp.source, spec);
@@ -233,6 +233,10 @@ fn matcher_admits_sink(matcher: &Matcher, sink: &SinkSite, source_title: Option<
         && matcher.admits_arg_kind(sink.arg_kind)
         && matcher.literal_value_satisfied(sink.arg_literal.as_ref())
         && matcher.object_properties_satisfied(&sink.object_properties)
+        && matcher.object_missing_satisfied(
+            &sink.object_property_keys,
+            sink.object_property_keys_complete,
+        )
         && matcher.context_satisfied(&sink.arg_idents)
         && (!matcher.requires_source || source_title.is_some())
         && matcher.first_matching_pattern(&sink.callee_path).is_some()
@@ -442,6 +446,8 @@ mod tests {
             arg_kind: fallow_types::extract::SinkArgKind::Other,
             arg_literal: None,
             object_properties: Vec::new(),
+            object_property_keys: Vec::new(),
+            object_property_keys_complete: false,
             arg_idents: idents.iter().map(|s| (*s).to_string()).collect(),
             arg_source_paths: source_paths.iter().map(|s| (*s).to_string()).collect(),
             span_start: 0,

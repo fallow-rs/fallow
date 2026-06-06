@@ -79,6 +79,11 @@ struct RawMatcher {
     /// Optional object-literal flags that are unsafe when missing or `false`.
     #[serde(default)]
     object_missing_or_false: Option<Vec<String>>,
+    /// Optional object-literal keys that are unsafe when absent. Unlike
+    /// `object_missing_or_false`, this checks key presence only and refuses
+    /// incomplete object shapes.
+    #[serde(default)]
+    object_missing: Option<Vec<String>>,
     /// Optional context-name keywords for zero-arg sinks like `Math.random()`.
     #[serde(default)]
     context_keywords: Option<Vec<String>>,
@@ -220,6 +225,8 @@ pub struct Matcher {
     pub object_properties: Vec<ObjectPropertyPredicate>,
     /// Object properties whose absence or boolean `false` makes the row match.
     pub object_missing_or_false: Vec<String>,
+    /// Object keys whose absence makes the row match.
+    pub object_missing: Vec<String>,
     /// Context-name keywords admitted by this row.
     pub context_keywords: Vec<String>,
 }
@@ -278,6 +285,7 @@ impl Matcher {
             || !self.literal_contains.is_empty()
             || !self.object_properties.is_empty()
             || !self.object_missing_or_false.is_empty()
+            || !self.object_missing.is_empty()
             || !self.context_keywords.is_empty()
             || self.arg_kinds.as_ref().is_some_and(|kinds| {
                 kinds
@@ -332,6 +340,16 @@ impl Matcher {
                 .find(|p| p.key == *key)
                 .is_none_or(|property| matches!(property.value, SinkLiteralValue::Boolean(false)))
         })
+    }
+
+    /// Whether missing-key predicates are satisfied by complete static object
+    /// key metadata.
+    #[must_use]
+    pub fn object_missing_satisfied(&self, keys: &[String], keys_complete: bool) -> bool {
+        if self.object_missing.is_empty() {
+            return true;
+        }
+        keys_complete && self.object_missing.iter().any(|key| !keys.contains(key))
     }
 
     /// Whether captured context names satisfy this row's context keyword gate.
@@ -594,6 +612,7 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
             literal_contains: entry.literal_contains.unwrap_or_default(),
             object_properties,
             object_missing_or_false: entry.object_missing_or_false.unwrap_or_default(),
+            object_missing: entry.object_missing.unwrap_or_default(),
             context_keywords: entry.context_keywords.unwrap_or_default(),
         });
     }
@@ -696,12 +715,16 @@ mod tests {
                 .object_missing_or_false
                 .as_ref()
                 .map_or_else(String::new, |keys| keys.join("|"));
+            let object_missing = m
+                .object_missing
+                .as_ref()
+                .map_or_else(String::new, |keys| keys.join("|"));
             let context_keywords = m
                 .context_keywords
                 .as_ref()
                 .map_or_else(String::new, |keywords| keywords.join("|"));
             let key = format!(
-                "{}::{}::{pats}::{enabler}::{}::{arg_kinds}::{literal_values}::{literal_contains}::{object_properties}::{object_missing_or_false}::{context_keywords}",
+                "{}::{}::{pats}::{enabler}::{}::{arg_kinds}::{literal_values}::{literal_contains}::{object_properties}::{object_missing_or_false}::{object_missing}::{context_keywords}",
                 m.id, m.sink_shape, m.requires_source
             );
             assert!(seen.insert(key.clone()), "duplicate matcher row: {key}");
@@ -971,6 +994,24 @@ evidence_template = "   "
             mass_assignment.requires_source,
             "mass-assignment should only fire for source-backed arguments"
         );
+    }
+
+    #[test]
+    fn object_missing_requires_complete_key_metadata() {
+        let jwt_verify = catalogue()
+            .matchers()
+            .iter()
+            .find(|m| m.id == "jwt-verify-missing-algorithms")
+            .expect("jwt verify missing algorithms row present");
+
+        assert!(
+            jwt_verify.is_literal_aware(),
+            "object_missing rows opt into literal-aware matching"
+        );
+        assert!(jwt_verify.object_missing_satisfied(&[], true));
+        assert!(jwt_verify.object_missing_satisfied(&["audience".to_string()], true));
+        assert!(!jwt_verify.object_missing_satisfied(&["algorithms".to_string()], true));
+        assert!(!jwt_verify.object_missing_satisfied(&["audience".to_string()], false));
     }
 
     #[test]

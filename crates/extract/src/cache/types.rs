@@ -227,7 +227,12 @@ use crate::MemberKind;
 /// match direct expressions such as `process.env.SECRET` without requiring a
 /// temporary local binding. Pre-126 entries lack those paths until the file is
 /// re-extracted.
-pub(super) const CACHE_VERSION: u32 = 126;
+///
+/// Bumped to 127 for issue #898: `SinkSite` now carries complete top-level
+/// object-key metadata so missing-option security rows can distinguish absent
+/// keys from non-literal option values. Pre-127 entries lack that metadata until
+/// the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 127;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -284,7 +289,7 @@ assert_cached_type_size!(CachedReExport, 88);
 assert_cached_type_size!(CachedMember, 64);
 assert_cached_type_size!(CachedDynamicImportPattern, 56);
 assert_cached_type_size!(crate::MemberAccess, 48);
-assert_cached_type_size!(fallow_types::extract::SinkSite, 136);
+assert_cached_type_size!(fallow_types::extract::SinkSite, 160);
 assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);

@@ -22,6 +22,9 @@ export function safeForms(): void {
   setTimeout(() => refresh(), 1000);
   const previewNumber = Math.random();
   jwt.sign({ sub: "1" }, "ignored", { algorithm: "HS256" });
+  jwt.verify("token", "ignored", { algorithms: ["HS256"] });
+  jwt.verify("token", "ignored", { ["algorithms"]: ["HS256"] });
+  jwt.verify("token", "ignored", { ...{ algorithms: ["HS256"] } });
   void previewNumber;
   void fetch("https://example.com/status");
 }

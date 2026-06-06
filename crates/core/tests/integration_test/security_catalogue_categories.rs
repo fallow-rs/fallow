@@ -756,6 +756,12 @@ fn issue_875_literal_aware_sinks_fire() {
         95,
     );
     assert_candidate(&results, "src/jwt.ts", "jwt-alg-none", 347);
+    assert_candidate(
+        &results,
+        "src/jwt-verify.ts",
+        "jwt-verify-missing-algorithms",
+        347,
+    );
     assert_candidate(&results, "src/math-random.ts", "insecure-randomness", 338);
     assert_candidate(&results, "src/metadata-url.ts", "ssrf", 918);
 }
