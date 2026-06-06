@@ -204,7 +204,12 @@ use crate::MemberKind;
 /// keyword). Pre-122 entries lack the breakdown (empty under
 /// `health --complexity-breakdown`) and carry `Span::default()` for the
 /// require specifier until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 122;
+///
+/// Bumped to 123 for PR #1010: JSDoc import-type extraction now ignores prose
+/// examples, including examples that contain ordinary JavaScript brace groups.
+/// Pre-123 entries can carry stale type-only imports that surface as false
+/// `unresolved-imports` until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 123;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

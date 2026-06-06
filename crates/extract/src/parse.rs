@@ -430,7 +430,8 @@ const fn is_ident_char(b: u8) -> bool {
 ///
 /// All JSDoc tag contexts (`@param`, `@returns`, `@type`, `@typedef`,
 /// `@callback`, etc.) use the same `{type}` annotation syntax, so scanning
-/// the full comment body covers every call site in a single pass.
+/// type-bearing brace groups covers every call site without treating prose
+/// examples as imports.
 fn extract_jsdoc_import_types(imports: &mut Vec<ImportInfo>, comments: &[Comment], source: &str) {
     if comments.is_empty() {
         return;
@@ -462,15 +463,7 @@ fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
     let mut cursor = 0;
     while let Some(rel) = body[cursor..].find("import(") {
         let import_pos = cursor + rel;
-        // JSDoc type expressions live inside a `{...}` brace group — that is the
-        // shared syntax for every tag context (`@type`, `@param`, `@returns`,
-        // `@typedef`, `@callback`, ...). A bare `import('...')` in JSDoc prose
-        // (e.g. a header comment that documents which import forms a file
-        // handles) is *example documentation*, not a type annotation, so it
-        // must not be treated as a real import. Without this check, files whose
-        // JSDoc mentions `import('./x')` in prose surface as false-positive
-        // unresolved-import findings.
-        if !is_inside_jsdoc_brace_group(bytes, import_pos) {
+        if !is_inside_jsdoc_type_brace_group(bytes, import_pos) {
             cursor = import_pos + "import(".len();
             continue;
         }
@@ -547,21 +540,122 @@ fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
     }
 }
 
-/// Returns true iff byte index `pos` falls inside an open `{...}` brace group
-/// within `body`. Used to scope JSDoc `import('...')` matching to actual type
-/// expressions (which live in braces, e.g. `@type {import('./X').Y}`) and skip
-/// prose mentions of `import(...)` in JSDoc descriptions.
-fn is_inside_jsdoc_brace_group(body: &[u8], pos: usize) -> bool {
-    let mut depth: i32 = 0;
+/// Returns true when byte index `pos` falls inside a JSDoc type-expression
+/// brace group. Prose examples can contain ordinary JavaScript braces, so the
+/// enclosing brace must be tied to a JSDoc type tag.
+fn is_inside_jsdoc_type_brace_group(body: &[u8], pos: usize) -> bool {
+    let Some(open_brace) = enclosing_jsdoc_brace_start(body, pos) else {
+        return false;
+    };
+
+    let prefix = line_prefix_before(body, open_brace);
+    if jsdoc_line_prefix_has_type_tag(prefix) {
+        return true;
+    }
+
+    strip_jsdoc_line_prefix(prefix).is_empty()
+        && preceding_jsdoc_line_has_type_tag(body, open_brace)
+        && has_only_jsdoc_spacing_between(body, open_brace + 1, pos)
+}
+
+fn enclosing_jsdoc_brace_start(body: &[u8], pos: usize) -> Option<usize> {
+    let mut stack = Vec::new();
     let limit = pos.min(body.len());
-    for &b in &body[..limit] {
+    for (idx, &b) in body[..limit].iter().enumerate() {
         match b {
-            b'{' => depth += 1,
-            b'}' if depth > 0 => depth -= 1,
+            b'{' => stack.push(idx),
+            b'}' => {
+                stack.pop();
+            }
             _ => {}
         }
     }
-    depth > 0
+    stack.pop()
+}
+
+fn line_prefix_before(body: &[u8], pos: usize) -> &str {
+    let start = body[..pos]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |idx| idx + 1);
+    std::str::from_utf8(&body[start..pos]).unwrap_or_default()
+}
+
+fn strip_jsdoc_line_prefix(prefix: &str) -> &str {
+    let trimmed = prefix.trim_start();
+    trimmed
+        .strip_prefix('*')
+        .map_or(trimmed, |rest| rest.trim_start())
+}
+
+fn jsdoc_line_prefix_has_type_tag(prefix: &str) -> bool {
+    const TYPE_TAGS: [&str; 14] = [
+        "@arg",
+        "@argument",
+        "@augments",
+        "@callback",
+        "@extends",
+        "@implements",
+        "@param",
+        "@property",
+        "@prop",
+        "@return",
+        "@returns",
+        "@this",
+        "@type",
+        "@typedef",
+    ];
+
+    let prefix = strip_jsdoc_line_prefix(prefix);
+    TYPE_TAGS
+        .iter()
+        .any(|tag| contains_bare_jsdoc_tag(prefix, tag))
+}
+
+fn contains_bare_jsdoc_tag(text: &str, tag: &str) -> bool {
+    for (idx, _) in text.match_indices(tag) {
+        let after = idx + tag.len();
+        if after >= text.len() || !is_ident_char(text.as_bytes()[after]) {
+            return true;
+        }
+    }
+    false
+}
+
+fn preceding_jsdoc_line_has_type_tag(body: &[u8], pos: usize) -> bool {
+    let Some(line_end) = body[..pos].iter().rposition(|&b| b == b'\n') else {
+        return false;
+    };
+
+    let line_start = body[..line_end]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |idx| idx + 1);
+
+    std::str::from_utf8(&body[line_start..line_end]).is_ok_and(jsdoc_line_prefix_has_type_tag)
+}
+
+fn has_only_jsdoc_spacing_between(body: &[u8], start: usize, end: usize) -> bool {
+    let mut at_line_start = true;
+    let mut i = start.min(body.len());
+    let end = end.min(body.len());
+    while i < end {
+        match body[i] {
+            b'\n' => {
+                at_line_start = true;
+                i += 1;
+            }
+            b'\r' | b'\t' | b' ' => {
+                i += 1;
+            }
+            b'*' if at_line_start => {
+                at_line_start = false;
+                i += 1;
+            }
+            _ => return false,
+        }
+    }
+    true
 }
 
 /// Check if a JSDoc comment body contains a `@public` or `@api public` tag.
@@ -1023,16 +1117,69 @@ mod tests {
         assert!(
             imports.is_empty(),
             "prose import() should not be matched; got: {:?}",
-            imports.iter().map(|i| i.source.as_str()).collect::<Vec<_>>()
+            imports
+                .iter()
+                .map(|i| i.source.as_str())
+                .collect::<Vec<_>>()
         );
     }
 
+    #[test]
+    fn scan_jsdoc_prose_import_inside_example_object_is_skipped() {
+        let body = "\n * @example\n * const loaders = {\n *   admin: () => import('./prose')\n * }";
+        let imports = scan(body);
+        assert!(
+            imports.is_empty(),
+            "object-literal example import() should not be matched; got: {:?}",
+            imports
+                .iter()
+                .map(|i| i.source.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_prose_import_inside_inline_braces_is_skipped() {
+        let imports = scan(" * Use {import('./prose')} as an example string.");
+        assert!(imports.is_empty());
+    }
+
+    #[test]
+    fn scan_jsdoc_bare_example_brace_import_is_skipped() {
+        let imports = scan("\n * @example\n * { import('./prose') }\n");
+        assert!(imports.is_empty());
+    }
+
     /// A real `{@type ...}` annotation following a prose mention of `import()`
-    /// must still be matched — the fix narrows scope without breaking the
+    /// must still be matched. The fix narrows scope without breaking the
     /// intended JSDoc type-annotation behavior.
     #[test]
     fn scan_jsdoc_braced_import_after_prose_is_still_matched() {
         let body = " * Note: dynamic imports like import('./prose') are not types.\n * @type {import('./real').Foo}";
+        let imports = scan(body);
+        assert_eq!(imports.len(), 1, "got: {imports:?}");
+        assert_eq!(imports[0].source, "./real");
+        assert_eq!(
+            imports[0].imported_name,
+            ImportedName::Named("Foo".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_multiline_braced_type_tag_is_still_matched() {
+        let body = "\n * @returns {\n *   import('./real').Foo\n * }";
+        let imports = scan(body);
+        assert_eq!(imports.len(), 1, "got: {imports:?}");
+        assert_eq!(imports[0].source, "./real");
+        assert_eq!(
+            imports[0].imported_name,
+            ImportedName::Named("Foo".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_type_tag_before_brace_line_is_still_matched() {
+        let body = "\n * @type\n * { import('./real').Foo }\n";
         let imports = scan(body);
         assert_eq!(imports.len(), 1, "got: {imports:?}");
         assert_eq!(imports[0].source, "./real");
@@ -1053,7 +1200,7 @@ mod tests {
             span: oxc_span::Span::default(),
             source_span: oxc_span::Span::default(),
         }];
-        scan_jsdoc_imports_in(" * {import('./new').Foo}", &mut imports);
+        scan_jsdoc_imports_in(" * @type {import('./new').Foo}", &mut imports);
         assert_eq!(imports.len(), 2);
         assert_eq!(imports[0].source, "existing");
         assert_eq!(imports[1].source, "./new");
