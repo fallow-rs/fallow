@@ -4234,8 +4234,8 @@ fn push_source_path(path: String, out: &mut Vec<String>) {
     }
 }
 
-fn push_member_source_paths(path: String, out: &mut Vec<String>) {
-    push_source_path(path.clone(), out);
+fn push_member_source_paths(path: &str, out: &mut Vec<String>) {
+    push_source_path(path.to_string(), out);
     if let Some((object, _)) = path.rsplit_once('.') {
         push_source_path(object.to_string(), out);
     }
@@ -4248,7 +4248,7 @@ fn collect_source_paths_into(expr: &Expression<'_>, out: &mut Vec<String>) {
         }
         Expression::StaticMemberExpression(member) => {
             if let Some(path) = flatten_member_path(expr) {
-                push_member_source_paths(path, out);
+                push_member_source_paths(&path, out);
             }
             collect_source_paths_into(&member.object, out);
         }
