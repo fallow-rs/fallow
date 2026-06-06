@@ -2504,6 +2504,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     self.binding_target_names.insert(call_key, query.type_arg);
                 }
             }
+
+            if let Some(value) = prop.value.as_ref() {
+                self.capture_hardcoded_secret_literal_sink(name.as_ref(), value, prop.span);
+            }
         }
 
         walk::walk_property_definition(self, prop);
@@ -3058,6 +3062,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.record_initialized_declarator_bindings(decl, declarator, init);
             if let BindingPattern::BindingIdentifier(id) = &declarator.id {
                 self.capture_math_random_context_sink(id.name.as_str(), init, declarator.span);
+                self.capture_hardcoded_secret_literal_sink(id.name.as_str(), init, declarator.span);
             }
 
             if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id {
@@ -3181,6 +3186,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 is_speculative: false,
             });
             self.handled_import_spans.insert(import_expr.span);
+        }
+
+        if let Some(name) = prop.key.static_name() {
+            self.capture_hardcoded_secret_literal_sink(name.as_ref(), &prop.value, prop.span);
         }
 
         walk::walk_object_property(self, prop);
@@ -3428,6 +3437,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
         if let Some(name) = assignment_target_security_context_name(&expr.left) {
             self.capture_math_random_context_sink(name.as_str(), &expr.right, expr.span);
+            self.capture_hardcoded_secret_literal_sink(name.as_str(), &expr.right, expr.span);
         }
 
         if let Some(name) = assignment_target_identifier_name(&expr.left) {
@@ -4005,6 +4015,86 @@ fn sink_literal_value(expr: &Expression<'_>) -> Option<SinkLiteralValue> {
     }
 }
 
+fn static_string_literal_value(expr: &Expression<'_>) -> Option<String> {
+    match unwrap_static_expr(expr) {
+        Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+        Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() && tpl.quasis.len() == 1 => {
+            tpl.quasis
+                .first()
+                .and_then(|quasi| quasi.value.cooked.as_ref())
+                .map(ToString::to_string)
+        }
+        _ => None,
+    }
+}
+
+fn should_capture_hardcoded_secret_literal(context_name: &str, value: &str) -> bool {
+    is_secret_shaped_context_name(context_name) || has_provider_prefix_capture_hint(value)
+}
+
+fn is_secret_shaped_context_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    [
+        "apikey",
+        "api_key",
+        "accesskey",
+        "access_key",
+        "privatekey",
+        "private_key",
+        "clientsecret",
+        "client_secret",
+        "token",
+        "secret",
+        "password",
+        "passwd",
+        "credential",
+        "jwt",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn has_provider_prefix_capture_hint(value: &str) -> bool {
+    value.starts_with("AKIA")
+        || value.starts_with("ASIA")
+        || value.starts_with("ghp_")
+        || value.starts_with("gho_")
+        || value.starts_with("ghu_")
+        || value.starts_with("ghs_")
+        || value.starts_with("ghr_")
+        || value.starts_with("github_pat_")
+        || value.starts_with("glpat-")
+        || value.starts_with("xoxb-")
+        || value.starts_with("xoxp-")
+        || value.starts_with("xoxa-")
+        || value.starts_with("xoxr-")
+        || value.starts_with("xoxs-")
+        || value.starts_with("sk_live_")
+        || value.starts_with("rk_live_")
+        || value.starts_with("sk-ant-")
+        || value.starts_with("sk-proj-")
+        || value.starts_with("AIza")
+        || value.starts_with("SG.")
+        || value.starts_with("npm_")
+        || value.starts_with("pypi-")
+        || value.starts_with("sq0atp-")
+        || value.starts_with("shpat_")
+        || value.starts_with("shpss_")
+        || value.starts_with("shpca_")
+        || value.starts_with("shppa_")
+        || value.starts_with("dp.pt.")
+        || value.starts_with("doo_v1_")
+        || value.starts_with("dop_v1_")
+        || value.starts_with("dor_v1_")
+        || value.starts_with("dot_v1_")
+        || value.starts_with("dapi")
+        || value.starts_with("lin_api_")
+        || value.starts_with("PMAK-")
+        || value.starts_with("hf_")
+        || value.starts_with("AGE-SECRET-KEY-1")
+        || value.contains("-----BEGIN")
+}
+
 fn object_literal_properties(expr: &Expression<'_>) -> Vec<SinkObjectProperty> {
     let Expression::ObjectExpression(obj) = unwrap_static_expr(expr) else {
         return Vec::new();
@@ -4087,7 +4177,7 @@ fn should_capture_literal_sink_arg(
                 && callee_path == "process.env.NODE_TLS_REJECT_UNAUTHORIZED"
                 && value == "0"
         }
-        SinkShape::TaggedTemplate | SinkShape::JsxAttr => false,
+        SinkShape::TaggedTemplate | SinkShape::JsxAttr | SinkShape::SecretLiteral => false,
     }
 }
 
@@ -4942,6 +5032,35 @@ impl ModuleInfoExtractor {
             arg_is_non_literal: false,
             arg_kind: SinkArgKind::NoArg,
             arg_literal: None,
+            object_properties: Vec::new(),
+            object_property_keys: Vec::new(),
+            object_property_keys_complete: false,
+            arg_idents: vec![context_name.to_string()],
+            arg_source_paths: Vec::new(),
+            span_start: span.start,
+            span_end: span.end,
+        });
+    }
+
+    fn capture_hardcoded_secret_literal_sink(
+        &mut self,
+        context_name: &str,
+        expr: &Expression<'_>,
+        span: Span,
+    ) {
+        let Some(value) = static_string_literal_value(expr) else {
+            return;
+        };
+        if !should_capture_hardcoded_secret_literal(context_name, &value) {
+            return;
+        }
+        self.security_sinks.push(SinkSite {
+            sink_shape: SinkShape::SecretLiteral,
+            callee_path: context_name.to_string(),
+            arg_index: 0,
+            arg_is_non_literal: false,
+            arg_kind: SinkArgKind::Literal,
+            arg_literal: Some(SinkLiteralValue::String(value)),
             object_properties: Vec::new(),
             object_property_keys: Vec::new(),
             object_property_keys_complete: false,

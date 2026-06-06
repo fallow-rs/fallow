@@ -910,6 +910,16 @@ pub fn find_dead_code_full(
         );
         results.security_findings.extend(sink_findings);
         results.security_unresolved_callee_sites = sink_stats.sinks_skipped_dynamic_callee;
+        results
+            .security_findings
+            .extend(security::find_hardcoded_secret_candidates(
+                graph,
+                modules,
+                &suppressions,
+                &line_offsets_by_file,
+                &filter,
+                &config.root,
+            ));
     }
 
     // Reachability-weighted ranking (issue #860): order security candidates so

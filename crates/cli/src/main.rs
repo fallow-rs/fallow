@@ -962,7 +962,7 @@ enum Command {
 
     /// Surface local security candidates for downstream agent verification (opt-in).
     ///
-    /// Ships two complementary surfaces. (1) The graph-structural
+    /// Ships three complementary surfaces. (1) The graph-structural
     /// `client-server-leak` rule: a `"use client"` file that transitively imports
     /// a module reading a non-public env secret through `process.env` or
     /// `import.meta.env`. (2) The data-driven
@@ -973,8 +973,11 @@ enum Command {
     /// open-redirect, mass-assignment, weak-crypto, deprecated-cipher,
     /// insecure-randomness, unsafe-buffer-alloc, unsafe-deserialization,
     /// prototype-pollution, zip-slip, nosql-injection, ssti, xxe, xpath-injection,
-    /// and webview-injection. All findings are CANDIDATES for
-    /// verification, NOT verified vulnerabilities. This command is the only
+    /// and webview-injection. (3) `hardcoded-secret`, an include-required
+    /// category for provider-prefix literals and high-entropy literals assigned
+    /// to secret-shaped identifiers. It never runs from raw entropy alone. All
+    /// findings are CANDIDATES for verification, NOT verified vulnerabilities.
+    /// This command is the only
     /// surface for security findings; they never appear under bare `fallow` or
     /// the `audit` gate. Build-config and test files are excluded, and public
     /// env prefixes such as `NEXT_PUBLIC_` and `VITE_` are treated as public.

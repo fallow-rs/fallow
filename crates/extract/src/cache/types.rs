@@ -241,7 +241,12 @@ use crate::MemberKind;
 /// Bumped to 129 for issue #901: JS/TS extraction now captures cleartext
 /// request URL literals and `new WebSocket("ws://...")` as security sink sites.
 /// Pre-129 entries omit those sinks until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 129;
+///
+/// Bumped to 130 for issue #892: JS/TS extraction now captures static string
+/// literals assigned to secret-shaped identifiers or known provider credential
+/// prefixes as opt-in hardcoded-secret candidates.
+/// Pre-130 entries omit those candidates until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 130;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

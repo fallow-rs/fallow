@@ -1188,11 +1188,11 @@
       ]
     },
     "SecurityConfig": {
-      "description": "Scopes the data-driven security matcher catalogue used by `fallow security`.\nAn absent block (or both `include`/`exclude` unset) admits every category.",
+      "description": "Scopes the security categories used by `fallow security`. An absent block\nadmits every catalogue category. `hardcoded-secret` is include-required and\nonly runs when explicitly listed in `security.categories.include`.",
       "type": "object",
       "properties": {
         "categories": {
-          "description": "Include/exclude filter over catalogue category ids (e.g. `dangerous-html`).",
+          "description": "Include/exclude filter over category ids (e.g. `dangerous-html`).",
           "anyOf": [
             {
               "$ref": "#/$defs/SecurityCategories"
@@ -1206,7 +1206,7 @@
       "additionalProperties": false
     },
     "SecurityCategories": {
-      "description": "Include/exclude lists scoping the active security matcher categories. When\n`include` is set, only those categories are active; `exclude` removes\ncategories from the admitted set. Both unset admits every category.",
+      "description": "Include/exclude lists scoping the active security categories. When `include`\nis set, only those categories are active; `exclude` removes categories from\nthe admitted set. Both unset admits catalogue categories. `hardcoded-secret`\nstill requires explicit inclusion.",
       "type": "object",
       "properties": {
         "include": {

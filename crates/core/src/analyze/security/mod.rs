@@ -24,12 +24,22 @@ use crate::graph::ModuleGraph;
 use crate::suppress::SuppressionContext;
 
 mod catalogue;
+mod hardcoded_secret;
 mod rank;
 mod tainted_sink;
 
-pub use catalogue::catalogue_title;
+pub use hardcoded_secret::find_hardcoded_secret_candidates;
 pub use rank::{annotate_dead_code_cross_links, rank_security_findings};
 pub use tainted_sink::{CategoryFilter, find_tainted_sinks};
+
+#[must_use]
+pub fn catalogue_title(id: &str) -> Option<&'static str> {
+    if id == hardcoded_secret::CATEGORY_ID {
+        Some(hardcoded_secret::CATEGORY_TITLE)
+    } else {
+        catalogue::catalogue_title(id)
+    }
+}
 
 /// The inline suppression kind token for the client-server-leak rule.
 const SUPPRESS_KIND: &str = "security-client-server-leak";

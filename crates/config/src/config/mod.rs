@@ -218,19 +218,21 @@ pub struct FallowConfig {
     pub cache: CacheConfig,
 }
 
-/// Scopes the data-driven security matcher catalogue used by `fallow security`.
-/// An absent block (or both `include`/`exclude` unset) admits every category.
+/// Scopes the security categories used by `fallow security`. An absent block
+/// admits every catalogue category. `hardcoded-secret` is include-required and
+/// only runs when explicitly listed in `security.categories.include`.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct SecurityConfig {
-    /// Include/exclude filter over catalogue category ids (e.g. `dangerous-html`).
+    /// Include/exclude filter over category ids (e.g. `dangerous-html`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub categories: Option<SecurityCategories>,
 }
 
-/// Include/exclude lists scoping the active security matcher categories. When
-/// `include` is set, only those categories are active; `exclude` removes
-/// categories from the admitted set. Both unset admits every category.
+/// Include/exclude lists scoping the active security categories. When `include`
+/// is set, only those categories are active; `exclude` removes categories from
+/// the admitted set. Both unset admits catalogue categories. `hardcoded-secret`
+/// still requires explicit inclusion.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct SecurityCategories {

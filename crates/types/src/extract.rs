@@ -186,6 +186,9 @@ pub enum SinkShape {
     JsxAttr,
     /// A constructor call (e.g. `new Function("return x")`).
     NewExpression,
+    /// A static string literal assigned to a secret-shaped identifier or known
+    /// provider credential prefix.
+    SecretLiteral,
 }
 
 /// The shape of the argument captured at a sink site. Category-blind like
@@ -870,6 +873,7 @@ mod tests {
             SinkShape::TaggedTemplate,
             SinkShape::JsxAttr,
             SinkShape::NewExpression,
+            SinkShape::SecretLiteral,
         ] {
             let encoded = bitcode::encode(&shape);
             let decoded: SinkShape = bitcode::decode(&encoded).expect("decode sink shape");

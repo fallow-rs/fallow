@@ -29,7 +29,7 @@ use crate::suppress::SuppressionContext;
 
 /// The inline suppression kind token for the tainted-sink catalogue rule. ONE
 /// token covers every catalogue category.
-const SUPPRESS_KIND: &str = "security-sink";
+pub(super) const SUPPRESS_KIND: &str = "security-sink";
 
 /// Include/exclude scope over catalogue category ids. Built from
 /// `config.security.categories`; both unset admits every category.
@@ -62,6 +62,24 @@ impl CategoryFilter {
         }
         true
     }
+
+    /// Whether an include-required category is explicitly admitted. An absent
+    /// include list does not admit these categories.
+    #[must_use]
+    pub fn explicitly_admits(&self, id: &str) -> bool {
+        let Some(include) = &self.include else {
+            return false;
+        };
+        if !include.iter().any(|c| c == id) {
+            return false;
+        }
+        if let Some(exclude) = &self.exclude
+            && exclude.iter().any(|c| c == id)
+        {
+            return false;
+        }
+        true
+    }
 }
 
 /// In-band blind-spot accounting for the tainted-sink detector.
@@ -75,7 +93,7 @@ pub struct TaintedSinkStats {
 
 /// Build the machine-actionable file-level suppress hint emitted on every
 /// finding (`auto_fixable: false`: verifying the candidate is the agent's job).
-fn build_actions() -> Vec<IssueAction> {
+pub(super) fn build_actions() -> Vec<IssueAction> {
     vec![IssueAction::SuppressFile(SuppressFileAction {
         kind: SuppressFileKind::SuppressFile,
         auto_fixable: false,
@@ -153,7 +171,7 @@ fn production_exclude_globset() -> &'static globset::GlobSet {
 /// them. The match runs on the workspace-relative path (forward-slash
 /// normalized) so the `**/` globs anchor consistently across platforms; the
 /// config-file predicate is filename-only and is reused verbatim.
-fn is_low_value_anchor(path: &std::path::Path) -> bool {
+pub(super) fn is_low_value_anchor(path: &std::path::Path) -> bool {
     let normalized = path.to_string_lossy().replace('\\', "/");
     production_exclude_globset().is_match(&normalized)
         || crate::analyze::predicates::is_config_file(path)

@@ -309,6 +309,82 @@ fn security_zero_arg_member_call_capture_records_token_context() {
     assert_eq!(sink.arg_idents, vec!["sessionToken".to_string()]);
 }
 
+#[test]
+fn security_hardcoded_secret_capture_records_variable_literal() {
+    let info = parse(r#"const apiKey = "mF9a7Qp2Lx8Nz4Rv6Ts0";"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "apiKey")
+        .expect("secret literal sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::SecretLiteral);
+    assert_eq!(sink.arg_index, 0);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String("mF9a7Qp2Lx8Nz4Rv6Ts0".to_string()))
+    );
+    assert_eq!(sink.arg_idents, vec!["apiKey".to_string()]);
+}
+
+#[test]
+fn security_hardcoded_secret_capture_records_template_literal() {
+    let info = parse("const accessToken = `R8vK2mP9qL4xZ7nT1sB6`;");
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "accessToken")
+        .expect("template secret literal sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::SecretLiteral);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String("R8vK2mP9qL4xZ7nT1sB6".to_string()))
+    );
+}
+
+#[test]
+fn security_hardcoded_secret_capture_records_object_property_literal() {
+    let info = parse(r#"const config = { clientSecret: "n7Pq4Zx9Lm2Qa8Rt5Vb3" };"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "clientSecret")
+        .expect("object property secret literal sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::SecretLiteral);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String("n7Pq4Zx9Lm2Qa8Rt5Vb3".to_string()))
+    );
+}
+
+#[test]
+fn security_hardcoded_secret_capture_skips_entropy_only_context() {
+    let info = parse(r#"const cacheHash = "mF9a7Qp2Lx8Nz4Rv6Ts0";"#);
+
+    assert!(
+        !info
+            .security_sinks
+            .iter()
+            .any(|sink| sink.callee_path == "cacheHash")
+    );
+}
+
+#[test]
+fn security_hardcoded_secret_capture_skips_auth_header_context() {
+    let info = parse(r#"const headers = { "WWW-Authenticate": "mF9a7Qp2Lx8Nz4Rv6Ts0" };"#);
+
+    assert!(
+        !info
+            .security_sinks
+            .iter()
+            .any(|sink| sink.callee_path == "WWW-Authenticate")
+    );
+}
+
 fn jwt_verify_options_sink(source: &str) -> fallow_types::extract::SinkSite {
     let info = parse(source);
     info.security_sinks
