@@ -174,6 +174,27 @@ callee_patterns = ["Function"]
 arg_index = 0
 evidence_template = "Non-literal value passed to new {callee}(). Candidate for verification: confirm generated code cannot be influenced by attacker input."
 
+# Dynamic regex construction from a non-literal pattern can let untrusted input
+# select a pathological expression or alter matching semantics. Literal regex
+# complexity analysis is intentionally out of scope for this row.
+[[matcher]]
+id = "dynamic-regex"
+cwe = 1333
+title = "Dynamic regular expression sink"
+sink_shape = "call"
+callee_patterns = ["RegExp"]
+arg_index = 0
+evidence_template = "Non-literal pattern passed to {callee}(). Candidate for verification: confirm attacker input cannot control the regular expression."
+
+[[matcher]]
+id = "dynamic-regex"
+cwe = 1333
+title = "Dynamic regular expression sink"
+sink_shape = "new-expression"
+callee_patterns = ["RegExp"]
+arg_index = 0
+evidence_template = "Non-literal pattern passed to new {callee}(). Candidate for verification: confirm attacker input cannot control the regular expression."
+
 # Dynamic CommonJS module loading can execute attacker-selected code or load a
 # local file outside the intended module set. Static `require("pkg")` calls are
 # literals and never captured here.

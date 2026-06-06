@@ -147,6 +147,57 @@ fn code_injection_default_off_emits_nothing() {
     )));
 }
 
+// ── dynamic-regex (CWE-1333), ungated non-literal pattern construction ──────
+
+#[test]
+fn dynamic_regex_call_non_literal_fires() {
+    let results = analyze_with_security_sink("security-dynamic-regex");
+    assert_candidate(&results, "src/call.ts", "dynamic-regex", 1333);
+}
+
+#[test]
+fn dynamic_regex_new_expression_non_literal_fires() {
+    let results = analyze_with_security_sink("security-dynamic-regex");
+    assert_candidate(&results, "src/constructor.ts", "dynamic-regex", 1333);
+}
+
+#[test]
+fn dynamic_regex_literal_patterns_do_not_fire() {
+    let results = analyze_with_security_sink("security-dynamic-regex");
+    assert!(
+        !anchored_on(&results, "src/safe.ts"),
+        "literal regex patterns must not be flagged"
+    );
+}
+
+#[test]
+fn dynamic_regex_source_backed_candidate_is_marked() {
+    let results = analyze_with_security_sink("security-dynamic-regex");
+    let finding = results
+        .security_findings
+        .iter()
+        .find(|f| {
+            f.path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with("src/source-backed.ts")
+        })
+        .expect("source-backed dynamic regex candidate");
+
+    assert_eq!(finding.category.as_deref(), Some("dynamic-regex"));
+    assert!(
+        finding.source_backed,
+        "request-sourced regex pattern should carry the ranking signal"
+    );
+}
+
+#[test]
+fn dynamic_regex_default_off_emits_nothing() {
+    assert!(no_tainted_sinks(&analyze_default_off(
+        "security-dynamic-regex"
+    )));
+}
+
 // ── sql-injection (CWE-89), ungated (broad tier) ─────────────────────────────
 
 #[test]

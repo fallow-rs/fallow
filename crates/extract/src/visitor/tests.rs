@@ -185,6 +185,38 @@ fn security_object_sink_capture_unwraps_ts_satisfies() {
 }
 
 #[test]
+fn security_call_capture_records_dynamic_regex_argument() {
+    let info = parse("const compiled = RegExp(pattern);");
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "RegExp")
+        .expect("RegExp call sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::Call);
+    assert_eq!(sink.arg_index, 0);
+    assert!(sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Other);
+    assert_eq!(sink.arg_idents, vec!["pattern".to_string()]);
+}
+
+#[test]
+fn security_new_expression_capture_records_dynamic_regex_argument() {
+    let info = parse("const compiled = new RegExp(pattern);");
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "RegExp")
+        .expect("RegExp constructor sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::NewExpression);
+    assert_eq!(sink.arg_index, 0);
+    assert!(sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Other);
+    assert_eq!(sink.arg_idents, vec!["pattern".to_string()]);
+}
+
+#[test]
 fn security_zero_arg_member_call_capture_records_token_context() {
     let info = parse("const sessionToken = Math.random().toString(36);");
     let sink = info
