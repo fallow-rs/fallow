@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **`fallow security` now detects Vite `import.meta.env` secret reads in client bundles.** Static `import.meta.env.SECRET` member reads now feed the same opt-in client/server leak candidate rule as `process.env.SECRET`, while public Vite-prefixed reads such as `import.meta.env.VITE_API_URL` stay excluded. Package import-condition fixtures cover the server-only export path so browser imports do not inherit a node-only secret source. (Closes [#877](https://github.com/fallow-rs/fallow/issues/877).)
+- **The VS Code Security Candidates view now groups candidates and shows blind-spot counts.** Security candidates now appear under collapsible kind / CWE category groups with per-group counts, so large scans are easier to scan. Non-zero unresolved import-edge and sink-site counters now render as an informational row in the populated view, preserving the unverified-candidate framing instead of implying a clean result. (Closes [#993](https://github.com/fallow-rs/fallow/issues/993).)
 
 ### Changed
 

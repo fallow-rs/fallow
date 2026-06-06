@@ -82,11 +82,14 @@ interface FakeBadge {
 
 const makeView = (): { badge: FakeBadge | undefined } => ({ badge: undefined });
 
-const result = (findings: ReadonlyArray<SecurityFinding>): SecurityOutput => ({
+const result = (
+  findings: ReadonlyArray<SecurityFinding>,
+  overrides: Partial<Pick<SecurityOutput, "unresolved_edge_files" | "unresolved_callee_sites">> = {},
+): SecurityOutput => ({
   schema_version: "1",
   security_findings: [...findings],
-  unresolved_edge_files: 0,
-  unresolved_callee_sites: 0,
+  unresolved_edge_files: overrides.unresolved_edge_files ?? 0,
+  unresolved_callee_sites: overrides.unresolved_callee_sites ?? 0,
 });
 
 const selectionOf = (item: TestTreeItem): TestRange => {
@@ -127,9 +130,18 @@ describe("SecurityTreeProvider", () => {
       ])
     );
 
-    const items = provider.getChildren() as TestTreeItem[];
-    expect(items).toHaveLength(1);
-    const item = items[0]!;
+    const groups = provider.getChildren() as TestTreeItem[];
+    expect(groups).toHaveLength(1);
+    const group = groups[0]!;
+    expect(group.label).toBe("dangerous-html (CWE-79) (1)");
+    expect(group.description).toBe("security candidates to verify");
+    expect(group.tooltip).toContain("UNVERIFIED CANDIDATE");
+    expect(group.iconPath?.id).toBe("shield");
+    expect(group.collapsibleState).toBe(1);
+
+    const findings = provider.getChildren(group as never) as TestTreeItem[];
+    expect(findings).toHaveLength(1);
+    const item = findings[0]!;
 
     expect(item.label).toBe("dangerous-html (CWE-79)");
     expect(item.description).toBe("src/app.tsx:12");
@@ -162,9 +174,13 @@ describe("SecurityTreeProvider", () => {
       ])
     );
 
-    const items = provider.getChildren() as TestTreeItem[];
-    expect(items).toHaveLength(1);
-    const finding = items[0]!;
+    const groups = provider.getChildren() as TestTreeItem[];
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.label).toBe("client-server-leak (1)");
+
+    const findings = provider.getChildren(groups[0] as never) as TestTreeItem[];
+    expect(findings).toHaveLength(1);
+    const finding = findings[0]!;
     expect(finding.label).toBe("client-server-leak");
     expect(finding.collapsibleState).toBe(1);
 
@@ -181,6 +197,67 @@ describe("SecurityTreeProvider", () => {
       "secret source",
     ]);
     expect(selectionOf(hops[2]!)).toMatchObject({ startLine: 7, startCharacter: 0 });
+    expect(provider.getChildren(hops[2] as never)).toEqual([]);
+  });
+
+  it("groups findings by kind and CWE category", () => {
+    const provider = new SecurityTreeProvider();
+    provider.update(
+      result([
+        {
+          kind: "tainted-sink",
+          category: "dangerous-html",
+          cwe: 79,
+          path: "a.ts",
+          line: 1,
+          col: 0,
+          evidence: "x",
+          trace: [],
+          actions: [],
+        },
+        {
+          kind: "tainted-sink",
+          category: "dangerous-html",
+          cwe: 79,
+          path: "b.ts",
+          line: 2,
+          col: 0,
+          evidence: "y",
+          trace: [],
+          actions: [],
+        },
+        {
+          kind: "tainted-sink",
+          category: "command-injection",
+          cwe: 78,
+          path: "c.ts",
+          line: 3,
+          col: 0,
+          evidence: "z",
+          trace: [],
+          actions: [],
+        },
+        {
+          kind: "client-server-leak",
+          path: "d.ts",
+          line: 4,
+          col: 0,
+          evidence: "secret",
+          trace: [],
+          actions: [],
+        },
+      ]),
+    );
+
+    const groups = provider.getChildren() as TestTreeItem[];
+    expect(groups.map((group) => group.label)).toEqual([
+      "dangerous-html (CWE-79) (2)",
+      "command-injection (CWE-78) (1)",
+      "client-server-leak (1)",
+    ]);
+
+    const htmlFindings = provider.getChildren(groups[0] as never) as TestTreeItem[];
+    expect(htmlFindings.map((finding) => finding.description)).toEqual(["a.ts:1", "b.ts:2"]);
   });
 
   it("sets the badge to the finding count", () => {
@@ -211,5 +288,49 @@ describe("SecurityTreeProvider", () => {
     );
 
     expect(view.badge).toMatchObject({ value: 2 });
+  });
+
+  it("renders non-zero blind-spot counts as a non-actionable info node", () => {
+    const provider = new SecurityTreeProvider();
+    const view = makeView();
+    provider.setView(view as never);
+    provider.update(
+      result(
+        [
+          {
+            kind: "tainted-sink",
+            path: "a.ts",
+            line: 1,
+            col: 0,
+            evidence: "x",
+            trace: [],
+            actions: [],
+          },
+        ],
+        { unresolved_edge_files: 2, unresolved_callee_sites: 1 },
+      ),
+    );
+
+    const items = provider.getChildren() as TestTreeItem[];
+    expect(items.map((item) => item.label)).toEqual([
+      "tainted-sink (1)",
+      "Blind spots: 2 unresolved import edges, 1 unresolved sink site",
+    ]);
+    const blindSpot = items[1]!;
+    expect(blindSpot.description).toBe("not a clean bill of health");
+    expect(blindSpot.tooltip).toContain("UNVERIFIED CANDIDATE");
+    expect(blindSpot.tooltip).toContain("2 unresolved import edges not analyzed");
+    expect(blindSpot.tooltip).toContain("1 unresolved sink site not analyzed");
+    expect(blindSpot.iconPath?.id).toBe("info");
+    expect(blindSpot.command).toBeUndefined();
+    expect(provider.getChildren(blindSpot as never)).toEqual([]);
+    expect(view.badge).toMatchObject({ value: 1 });
+  });
+
+  it("omits the blind-spot node when both counters are zero", () => {
+    const provider = new SecurityTreeProvider();
+    provider.update(result([]));
+
+    expect(provider.getChildren()).toEqual([]);
   });
 });

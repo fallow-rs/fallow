@@ -40,7 +40,30 @@ const reachabilityLine = (finding: SecurityFinding): string | null => {
   return `reach: ${entry} (blast radius ${reach.blast_radius})${boundary}`;
 };
 
-type SecurityItem = SecurityFindingItem | SecurityHopItem;
+const pluralize = (count: number, singular: string, plural: string): string =>
+  `${count} ${count === 1 ? singular : plural}`;
+
+type SecurityItem =
+  | SecurityGroupItem
+  | SecurityFindingItem
+  | SecurityHopItem
+  | SecurityBlindSpotItem;
+
+class SecurityGroupItem extends vscode.TreeItem {
+  readonly findings: ReadonlyArray<SecurityFindingItem>;
+
+  constructor(
+    readonly groupLabel: string,
+    findings: ReadonlyArray<SecurityFindingItem>,
+  ) {
+    super(`${groupLabel} (${findings.length})`, vscode.TreeItemCollapsibleState.Collapsed);
+    this.findings = findings;
+    this.description = "security candidates to verify";
+    this.tooltip = [CANDIDATE_TOOLTIP_PREFIX, "", `${groupLabel}: ${findings.length}`].join("\n");
+    this.contextValue = "securityCandidateGroup";
+    this.iconPath = new vscode.ThemeIcon("shield");
+  }
+}
 
 class SecurityHopItem extends vscode.TreeItem {
   constructor(hop: TraceHop) {
@@ -48,10 +71,35 @@ class SecurityHopItem extends vscode.TreeItem {
     super(`${middleElidePath(relative)}:${hop.line}`, vscode.TreeItemCollapsibleState.None);
 
     this.description = hopRoleLabel(hop.role);
-    this.tooltip = `${hopRoleLabel(hop.role)}\n${absolute}:${hop.line}`;
+    this.tooltip = [
+      CANDIDATE_TOOLTIP_PREFIX,
+      "",
+      hopRoleLabel(hop.role),
+      `${absolute}:${hop.line}`,
+    ].join("\n");
     this.contextValue = "securityHop";
     this.iconPath = new vscode.ThemeIcon("arrow-small-right");
     this.command = openCommand(absolute, hop.line, hop.col);
+  }
+}
+
+class SecurityBlindSpotItem extends vscode.TreeItem {
+  constructor(result: SecurityOutput) {
+    const edgeFiles = result.unresolved_edge_files;
+    const calleeSites = result.unresolved_callee_sites;
+    const label = `Blind spots: ${pluralize(edgeFiles, "unresolved import edge", "unresolved import edges")}, ${pluralize(calleeSites, "unresolved sink site", "unresolved sink sites")}`;
+    super(label, vscode.TreeItemCollapsibleState.None);
+
+    this.description = "not a clean bill of health";
+    this.tooltip = [
+      CANDIDATE_TOOLTIP_PREFIX,
+      "",
+      `${pluralize(edgeFiles, "unresolved import edge", "unresolved import edges")} not analyzed`,
+      `${pluralize(calleeSites, "unresolved sink site", "unresolved sink sites")} not analyzed`,
+      "An empty result is not a clean bill of health.",
+    ].join("\n");
+    this.contextValue = "securityBlindSpot";
+    this.iconPath = new vscode.ThemeIcon("info");
   }
 }
 
@@ -93,8 +141,8 @@ class SecurityFindingItem extends vscode.TreeItem {
 
 /**
  * Renders local security CANDIDATES from `fallow security` into the Security
- * Candidates view. Structured like `DuplicatesTreeProvider`: a flat list of
- * findings, each with collapsible trace hops. Every node frames the finding as
+ * Candidates view. Findings are grouped by kind and CWE/category, then each
+ * finding can expand into trace hops. Every node frames the finding as
  * unverified (#903): the view name, the tooltip prefix, and the toast wording
  * make clear these are candidates to verify, not confirmed vulnerabilities.
  */
@@ -136,15 +184,42 @@ export class SecurityTreeProvider implements vscode.TreeDataProvider<SecurityIte
   }
 
   getChildren(element?: SecurityItem): SecurityItem[] {
+    if (element instanceof SecurityGroupItem) {
+      return [...element.findings];
+    }
+
     if (element instanceof SecurityFindingItem) {
       return [...element.hops];
+    }
+
+    if (element) {
+      return [];
     }
 
     if (!this.result) {
       return [];
     }
 
-    return this.result.security_findings.map((finding) => new SecurityFindingItem(finding));
+    const groups = new Map<string, SecurityFindingItem[]>();
+    for (const finding of this.result.security_findings) {
+      const label = securityFindingLabel(finding);
+      const existing = groups.get(label);
+      if (existing) {
+        existing.push(new SecurityFindingItem(finding));
+      } else {
+        groups.set(label, [new SecurityFindingItem(finding)]);
+      }
+    }
+
+    const items: SecurityItem[] = [...groups.entries()].map(
+      ([label, findings]) => new SecurityGroupItem(label, findings),
+    );
+
+    if (this.result.unresolved_edge_files > 0 || this.result.unresolved_callee_sites > 0) {
+      items.push(new SecurityBlindSpotItem(this.result));
+    }
+
+    return items;
   }
 
   dispose(): void {
