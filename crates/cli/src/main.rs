@@ -979,10 +979,16 @@ enum Command {
     /// the `audit` gate. Build-config and test files are excluded, and public
     /// env prefixes such as `NEXT_PUBLIC_` and `VITE_` are treated as public.
     /// Honors
-    /// `--root`, `--format {human,json,sarif}`, `--changed-since`, `--diff-file`,
+    /// `--root`, `--format {human,json,sarif}`, `--changed-since`, `--file`, `--diff-file`,
     /// `--diff-stdin`, `--workspace`, `--changed-workspaces`, `--ci`,
     /// `--fail-on-issues`, `--sarif-file`, and `--summary`.
-    Security,
+    Security {
+        /// Only report security candidates in or reachable from the specified files.
+        /// The full project graph is still built, but output is scoped to matching
+        /// finding anchors or trace hops. Accepts multiple values.
+        #[arg(long, value_name = "PATH")]
+        file: Vec<std::path::PathBuf>,
+    },
 
     /// Dump the CLI interface as machine-readable JSON for agent introspection
     Schema,
@@ -1832,7 +1838,7 @@ fn validate_inputs(
     cli: &Cli,
     output: fallow_config::OutputFormat,
 ) -> Result<(PathBuf, usize), ExitCode> {
-    if matches!(&cli.command, Some(Command::Security))
+    if matches!(&cli.command, Some(Command::Security { .. }))
         && let Some(flag) = unsupported_security_global(cli)
     {
         return Err(emit_error(
@@ -3010,7 +3016,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 ExitCode::SUCCESS
             }
         },
-        Command::Security => {
+        Command::Security { file } => {
             let (output, quiet, fail_on_issues) = dispatch.ci_defaults();
             security::run(&security::SecurityOptions {
                 root,
@@ -3026,6 +3032,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 use_shared_diff_index: true,
                 workspace: cli.workspace.as_deref(),
                 changed_workspaces: cli.changed_workspaces.as_deref(),
+                file: file.as_slice(),
             })
         }
         Command::Schema => unreachable!("handled above"),
@@ -3088,7 +3095,7 @@ fn telemetry_workflow_for_command(
         },
         Some(Command::Coverage { .. }) => telemetry::Workflow::RuntimeCoverageSetup,
         Some(Command::Impact { .. }) => telemetry::Workflow::Impact,
-        Some(Command::Security) => telemetry::Workflow::Security,
+        Some(Command::Security { .. }) => telemetry::Workflow::Security,
         Some(Command::Fix { .. }) => telemetry::Workflow::Fix,
         Some(Command::Explain { .. }) => telemetry::Workflow::Explain,
         Some(

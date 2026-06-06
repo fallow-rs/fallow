@@ -112,6 +112,11 @@ pub struct SecurityCandidatesParams {
     /// Git ref to compare against when limiting candidates to changed files.
     pub changed_since: Option<String>,
 
+    /// Scope candidates to just-edited files for the agent edit loop. Each path
+    /// is passed to `fallow security --file` and matches finding anchors or
+    /// trace hops.
+    pub paths: Option<Vec<String>>,
+
     /// Scope candidates to workspaces touched since this git ref. Mutually
     /// exclusive with `workspace`.
     pub changed_workspaces: Option<String>,

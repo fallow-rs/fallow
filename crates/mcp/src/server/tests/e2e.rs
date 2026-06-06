@@ -153,6 +153,31 @@ async fn e2e_security_candidates_returns_security_json() {
 }
 
 #[tokio::test]
+async fn e2e_security_candidates_paths_scope_real_cli_output() {
+    let bin = fallow_binary();
+    let root = fixture_path("security-client-server-leak");
+    let params = crate::params::SecurityCandidatesParams {
+        root: Some(root.to_string_lossy().to_string()),
+        paths: Some(vec!["src/export-browser.ts".to_string()]),
+        ..Default::default()
+    };
+    let args = build_security_candidates_args(&params).unwrap();
+    let result = run_fallow(&bin, &args).await.unwrap();
+
+    assert_eq!(result.is_error, Some(false));
+
+    let text = extract_text(&result);
+    let json: serde_json::Value = serde_json::from_str(text)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}"));
+    assert_eq!(json["kind"].as_str(), Some("security"));
+    assert_eq!(
+        json["security_findings"].as_array().map(Vec::len),
+        Some(0),
+        "unrelated path scope should filter the fixture candidate"
+    );
+}
+
+#[tokio::test]
 async fn e2e_trace_export_returns_json() {
     let bin = fallow_binary();
     let root = fixture_path("basic-project");

@@ -36,6 +36,14 @@ pub fn build_security_candidates_args(
         "--changed-since",
         params.changed_since.as_deref(),
     );
+    if let Some(paths) = params.paths.as_ref() {
+        for path in paths {
+            if path.trim().is_empty() {
+                return Err(validation_error_body("paths entries must not be empty"));
+            }
+            args.extend(["--file".to_string(), path.clone()]);
+        }
+    }
     push_str_flag(
         &mut args,
         "--changed-workspaces",

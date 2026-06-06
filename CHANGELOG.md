@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Security candidates can now be scoped to just-edited paths through MCP.** The existing `security_candidates` tool accepts a `paths` parameter for agent edit loops, forwarding to `fallow security --file` and returning only candidates whose anchor or trace touches those files. Whole-project security scans stay unchanged when `paths` is omitted. (Closes [#889](https://github.com/fallow-rs/fallow/issues/889).)
 - **VS Code can now show opt-in LSP complexity code lenses.** Set `fallow.health.inlineComplexity` to `true` to show per-function code lenses for functions that exceed Fallow Health cyclomatic or cognitive thresholds. The setting defaults to `false`, so existing diagnostics and editor chrome stay unchanged unless you opt in. (Refs [#992](https://github.com/fallow-rs/fallow/issues/992).)
 
 ### Fixed

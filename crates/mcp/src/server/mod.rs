@@ -92,7 +92,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Returns unverified security candidates, not confirmed vulnerabilities. Runs `fallow security --format json` and returns `kind: \"security\"`, `security_findings`, category, CWE, evidence, structural trace, and blind-spot counters for agent verification. Verify trace and evidence before editing code or presenting a finding as a vulnerability. Supports root, config, workspace, changed_since, changed_workspaces, no_cache, and threads. The CLI also honors `FALLOW_DIFF_FILE` from the MCP server environment for line-level diff scoping. Security analysis can exceed the default 120s subprocess timeout on large repos; raise `FALLOW_TIMEOUT_SECS` accordingly.",
+        description = "Returns unverified security candidates, not confirmed vulnerabilities. Runs `fallow security --format json` and returns `kind: \"security\"`, `security_findings`, category, CWE, evidence, structural trace, and blind-spot counters for agent verification. Verify trace and evidence before editing code or presenting a finding as a vulnerability. Supports root, config, workspace, changed_since, paths, changed_workspaces, no_cache, and threads. Use paths for the agent edit loop: it forwards to `fallow security --file` and scopes returned candidates to matching finding anchors or trace hops while cached analysis keeps reruns fast. The CLI also honors `FALLOW_DIFF_FILE` from the MCP server environment for line-level diff scoping. Security analysis can exceed the default 120s subprocess timeout on large repos; raise `FALLOW_TIMEOUT_SECS` accordingly.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn security_candidates(

@@ -347,6 +347,7 @@ fn security_candidates_args_with_scope_and_performance_options() {
         config: Some("fallow.toml".to_string()),
         workspace: Some("apps/web".to_string()),
         changed_since: Some("origin/main".to_string()),
+        paths: None,
         changed_workspaces: None,
         no_cache: Some(true),
         threads: Some(4),
@@ -372,6 +373,42 @@ fn security_candidates_args_with_scope_and_performance_options() {
             "origin/main",
         ]
     );
+}
+
+#[test]
+fn security_candidates_args_support_paths() {
+    let params = SecurityCandidatesParams {
+        paths: Some(vec![
+            "src/app.tsx".to_string(),
+            "src/lib/secret.ts".to_string(),
+        ]),
+        ..Default::default()
+    };
+    let args = build_security_candidates_args(&params).unwrap();
+    assert_eq!(
+        args,
+        [
+            "security",
+            "--format",
+            "json",
+            "--quiet",
+            "--file",
+            "src/app.tsx",
+            "--file",
+            "src/lib/secret.ts",
+        ]
+    );
+}
+
+#[test]
+fn security_candidates_args_reject_blank_paths() {
+    let params = SecurityCandidatesParams {
+        paths: Some(vec!["src/app.tsx".to_string(), "  ".to_string()]),
+        ..Default::default()
+    };
+    let err = build_security_candidates_args(&params).unwrap_err();
+    let msg = parse_validation_message(&err);
+    assert!(msg.contains("paths entries must not be empty"));
 }
 
 #[test]

@@ -66,6 +66,7 @@ fn security_candidates_params_minimal() {
     assert!(params.config.is_none());
     assert!(params.workspace.is_none());
     assert!(params.changed_since.is_none());
+    assert!(params.paths.is_none());
     assert!(params.changed_workspaces.is_none());
     assert!(params.no_cache.is_none());
     assert!(params.threads.is_none());
@@ -78,6 +79,7 @@ fn security_candidates_params_all_fields_deserialize() {
         "config": "fallow.toml",
         "workspace": "apps/web",
         "changed_since": "HEAD~3",
+        "paths": ["src/app.tsx", "src/lib/secret.ts"],
         "changed_workspaces": "origin/main",
         "no_cache": true,
         "threads": 4
@@ -87,6 +89,10 @@ fn security_candidates_params_all_fields_deserialize() {
     assert_eq!(params.config.as_deref(), Some("fallow.toml"));
     assert_eq!(params.workspace.as_deref(), Some("apps/web"));
     assert_eq!(params.changed_since.as_deref(), Some("HEAD~3"));
+    assert_eq!(
+        params.paths.as_deref(),
+        Some(&["src/app.tsx".to_string(), "src/lib/secret.ts".to_string()][..])
+    );
     assert_eq!(params.changed_workspaces.as_deref(), Some("origin/main"));
     assert_eq!(params.no_cache, Some(true));
     assert_eq!(params.threads, Some(4));

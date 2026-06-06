@@ -77,6 +77,8 @@ pub struct SecurityOptions<'a> {
     pub workspace: Option<&'a [String]>,
     /// `--changed-workspaces <ref>`: scope to workspaces with changed files.
     pub changed_workspaces: Option<&'a str>,
+    /// `--file <PATH>`: scope findings to selected files or trace hops.
+    pub file: &'a [PathBuf],
 }
 
 /// Run `fallow security`. Always exits 0 unless the user explicitly raised the
@@ -156,6 +158,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     {
         crate::check::filtering::filter_results_by_diff(&mut results, diff_index, opts.root);
     }
+    filter_to_files(&mut results, opts.root, opts.file, opts.quiet);
 
     let unresolved_edge_files = results.security_unresolved_edge_files;
     let unresolved_callee_sites = results.security_unresolved_callee_sites;
@@ -195,6 +198,43 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+fn filter_to_files(
+    results: &mut fallow_core::results::AnalysisResults,
+    root: &Path,
+    files: &[PathBuf],
+    quiet: bool,
+) {
+    if files.is_empty() {
+        return;
+    }
+
+    let resolved_files: Vec<PathBuf> = files
+        .iter()
+        .map(|path| {
+            if crate::path_util::is_absolute_path_any_platform(path) {
+                path.clone()
+            } else {
+                root.join(path)
+            }
+        })
+        .collect();
+
+    if !quiet {
+        for (original, resolved) in files.iter().zip(&resolved_files) {
+            if !resolved.exists() {
+                eprintln!(
+                    "Warning: --file '{}' (resolved to '{}') was not found in the project",
+                    original.display(),
+                    resolved.display()
+                );
+            }
+        }
+    }
+
+    let file_set: rustc_hash::FxHashSet<PathBuf> = resolved_files.into_iter().collect();
+    fallow_core::changed_files::filter_results_by_changed_files(results, &file_set);
 }
 
 /// Rewrite a finding's anchor + every trace hop path to be project-root-relative
@@ -792,7 +832,46 @@ mod tests {
             use_shared_diff_index: false,
             workspace: None,
             changed_workspaces: None,
+            file: &[],
         }
+    }
+
+    #[test]
+    fn file_scope_keeps_security_finding_when_anchor_matches() {
+        let root = Path::new("/proj/root");
+        let mut results = fallow_core::results::AnalysisResults::default();
+        results.security_findings.push(sample_finding(root));
+
+        filter_to_files(&mut results, root, &[PathBuf::from("src/app.tsx")], true);
+
+        assert_eq!(results.security_findings.len(), 1);
+    }
+
+    #[test]
+    fn file_scope_keeps_security_finding_when_trace_hop_matches() {
+        let root = Path::new("/proj/root");
+        let mut results = fallow_core::results::AnalysisResults::default();
+        results.security_findings.push(sample_finding(root));
+
+        filter_to_files(
+            &mut results,
+            root,
+            &[PathBuf::from("src/lib/secret.ts")],
+            true,
+        );
+
+        assert_eq!(results.security_findings.len(), 1);
+    }
+
+    #[test]
+    fn file_scope_drops_unrelated_security_finding() {
+        let root = Path::new("/proj/root");
+        let mut results = fallow_core::results::AnalysisResults::default();
+        results.security_findings.push(sample_finding(root));
+
+        filter_to_files(&mut results, root, &[PathBuf::from("src/other.ts")], true);
+
+        assert!(results.security_findings.is_empty());
     }
 
     #[test]
