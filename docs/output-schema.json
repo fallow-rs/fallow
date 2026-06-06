@@ -4101,7 +4101,7 @@
         "path",
         "line"
       ],
-      "description": "A workspace package.json reference (`catalog:` or `catalog:<name>`) that points\nat a catalog which does not declare the consumed package.\n\n`pnpm install` errors at install time with `ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL`\nwhen this happens. fallow surfaces it statically so the failure is caught at\n`fallow check` time, before any install.\n\nThe default catalog (bare `catalog:` references the top-level `catalog:` map)\nuses `catalog_name: \"default\"`. Named catalogs (`catalog:react17`) use the\ndeclared catalog name."
+      "description": "A workspace package.json reference (`catalog:` or `catalog:<name>`) that points\nat a catalog which does not declare the consumed package.\n\n`pnpm install` errors at install time with `ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL`\nwhen this happens. fallow surfaces it statically so the failure is caught at\n`fallow dead-code` time, before any install.\n\nThe default catalog (bare `catalog:` references the top-level `catalog:` map)\nuses `catalog_name: \"default\"`. Named catalogs (`catalog:react17`) use the\ndeclared catalog name."
     },
     "UnusedDependencyOverride": {
       "type": "object",
@@ -7180,6 +7180,26 @@
           ]
         },
         {
+          "description": "`fallow workspaces --format json`. Required `workspace_count`,\n`workspaces`, and `workspace_diagnostics`; no `schema_version`.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/WorkspacesOutput"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "list-workspaces"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
           "description": "`fallow health --format json`.",
           "allOf": [
             {
@@ -10192,6 +10212,59 @@
         "col"
       ],
       "description": "One import hop in a circular dependency: the file containing the import\nand where that import statement sits.\n\n`edges[i]` is the import IN `path` (the hop SOURCE, equal to the cycle's\n`files[i]`) that points to the NEXT file in the cycle\n(`files[(i + 1) % files.len()]`); the target is not repeated here to keep\nthe wire compact. Enables a per-file diagnostic squiggly anchored under\nthe offending import rather than a single squiggly on the first file.\n\n`col` is a 0-based BYTE column, matching the cycle's top-level `col`;\nconverting it to a UTF-16 code-unit column for LSP clients is a tracked\nfollow-up shared with the existing field."
+    },
+    "WorkspaceInfo": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Package name from the workspace package.json. This is the value accepted\nby `--workspace <name>`."
+        },
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative path to the workspace directory, normalized to\nforward slashes for cross-platform JSON consumers."
+        },
+        "is_internal_dependency": {
+          "type": "boolean",
+          "description": "Whether the package is a generated or platform-specific dependency\npackage rather than a hand-authored workspace."
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "is_internal_dependency"
+      ],
+      "description": "One workspace package emitted by `fallow workspaces --format json`."
+    },
+    "WorkspacesOutput": {
+      "type": "object",
+      "properties": {
+        "workspace_count": {
+          "type": "integer",
+          "description": "Number of workspace package entries in `workspaces`."
+        },
+        "workspaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceInfo"
+          },
+          "description": "Workspace packages discovered from package manager and tsconfig workspace\ndeclarations. Paths are project-root-relative and use forward slashes."
+        },
+        "workspace_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceDiagnostic"
+          },
+          "description": "Workspace discovery diagnostics produced while reading workspace\ndeclarations. Present for compatibility with the current wire contract,\neven when empty."
+        }
+      },
+      "required": [
+        "workspace_count",
+        "workspaces",
+        "workspace_diagnostics"
+      ],
+      "title": "fallow workspaces --format json",
+      "description": "`fallow workspaces --format json` envelope."
     }
   }
 }

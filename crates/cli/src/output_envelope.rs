@@ -794,6 +794,40 @@ pub struct ListBoundariesOutput {
     pub boundaries: BoundariesListing,
 }
 
+/// `fallow workspaces --format json` envelope.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(title = "fallow workspaces --format json")
+)]
+pub struct WorkspacesOutput {
+    /// Number of workspace package entries in `workspaces`.
+    pub workspace_count: usize,
+    /// Workspace packages discovered from package manager and tsconfig workspace
+    /// declarations. Paths are project-root-relative and use forward slashes.
+    pub workspaces: Vec<WorkspaceInfo>,
+    /// Workspace discovery diagnostics produced while reading workspace
+    /// declarations. Present for compatibility with the current wire contract,
+    /// even when empty.
+    pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+}
+
+/// One workspace package emitted by `fallow workspaces --format json`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct WorkspaceInfo {
+    /// Package name from the workspace package.json. This is the value accepted
+    /// by `--workspace <name>`.
+    pub name: String,
+    /// Project-root-relative path to the workspace directory, normalized to
+    /// forward slashes for cross-platform JSON consumers.
+    pub path: String,
+    /// Whether the package is a generated or platform-specific dependency
+    /// package rather than a hand-authored workspace.
+    pub is_internal_dependency: bool,
+}
+
 /// `boundaries` block carried by [`ListBoundariesOutput`].
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -928,6 +962,10 @@ pub enum FallowOutput {
     /// sub-object; no `schema_version`.
     #[serde(rename = "list-boundaries")]
     ListBoundaries(ListBoundariesOutput),
+    /// `fallow workspaces --format json`. Required `workspace_count`,
+    /// `workspaces`, and `workspace_diagnostics`.
+    #[serde(rename = "list-workspaces")]
+    Workspaces(WorkspacesOutput),
     /// `fallow health --format json`. Required `report: HealthReport`.
     #[serde(rename = "health")]
     Health(HealthOutput),

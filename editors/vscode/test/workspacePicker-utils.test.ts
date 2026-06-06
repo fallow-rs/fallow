@@ -14,11 +14,11 @@ import {
 import { buildAnalysisArgs } from "../src/analysis-utils.js";
 import type { WorkspaceInfo, WorkspacesOutput } from "../src/workspace-types.js";
 
-const ws = (
-  name: string,
-  path: string,
-  is_internal_dependency = false,
-): WorkspaceInfo => ({ name, path, is_internal_dependency });
+const ws = (name: string, path: string, is_internal_dependency = false): WorkspaceInfo => ({
+  name,
+  path,
+  is_internal_dependency,
+});
 
 const baseArgsOptions = {
   production: false,
@@ -44,6 +44,7 @@ describe("parseWorkspacesOutput", () => {
         { name: "app", path: "apps/app", is_internal_dependency: false },
         { name: "ui", path: "packages/ui", is_internal_dependency: false },
       ],
+      workspace_diagnostics: [],
     });
     const result = parseWorkspacesOutput(json);
     expect(result).not.toBeNull();
@@ -54,6 +55,7 @@ describe("parseWorkspacesOutput", () => {
       path: "apps/app",
       is_internal_dependency: false,
     });
+    expect(result?.workspace_diagnostics).toEqual([]);
   });
 
   it("returns null on empty input", () => {
@@ -96,7 +98,10 @@ describe("parseWorkspacesOutput", () => {
 
   it("falls back workspace_count to the parsed length when absent", () => {
     const json = JSON.stringify({
-      workspaces: [{ name: "a", path: "a" }, { name: "b", path: "b" }],
+      workspaces: [
+        { name: "a", path: "a" },
+        { name: "b", path: "b" },
+      ],
     });
     expect(parseWorkspacesOutput(json)?.workspace_count).toBe(2);
   });
@@ -225,6 +230,7 @@ describe("shouldShowWorkspacePicker", () => {
       path: `/repo/pkg-${i}`,
       is_internal_dependency: false,
     })),
+    workspace_diagnostics: [],
   });
 
   it("hides the picker on a single-package repo (#906 n2)", () => {

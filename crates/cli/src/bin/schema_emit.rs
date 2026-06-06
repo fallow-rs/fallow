@@ -54,6 +54,7 @@ use fallow_cli::output_envelope::{
     GroupByMode, HealthOutput, ListBoundariesOutput, ReviewCheckConclusion, ReviewComment,
     ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema,
     ReviewEnvelopeSummary, ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema,
+    WorkspaceInfo, WorkspacesOutput,
 };
 use fallow_cli::report::dupes_grouping::{
     AttributedCloneGroup, AttributedInstance, DuplicationGroup,
@@ -280,6 +281,8 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "BoundariesListZone",
         "BoundariesListing",
         "ListBoundariesOutput",
+        "WorkspaceInfo",
+        "WorkspacesOutput",
         "AuthoredRule",
         "LogicalGroup",
         "LogicalGroupStatus",
@@ -570,6 +573,8 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
 /// Register the `fallow list --boundaries --format json` envelope.
 fn register_list_boundaries_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<ListBoundariesOutput>();
+    let _ = generator.subschema_for::<WorkspacesOutput>();
+    let _ = generator.subschema_for::<WorkspaceInfo>();
     let _ = generator.subschema_for::<BoundariesListing>();
     let _ = generator.subschema_for::<BoundariesListZone>();
     let _ = generator.subschema_for::<BoundariesListRule>();
@@ -669,6 +674,11 @@ fn rewrite_fallow_output_definition(definitions: &mut Map<String, Value>) -> Res
             "list-boundaries",
             "ListBoundariesOutput",
             "`fallow list --boundaries --format json`. Required `boundaries`\nsub-object; no `schema_version`.",
+        ),
+        (
+            "list-workspaces",
+            "WorkspacesOutput",
+            "`fallow workspaces --format json`. Required `workspace_count`,\n`workspaces`, and `workspace_diagnostics`; no `schema_version`.",
         ),
         ("health", "HealthOutput", "`fallow health --format json`."),
         ("dupes", "DupesOutput", "`fallow dupes --format json`."),
@@ -996,6 +1006,7 @@ mod drift_tests {
             ("CoverageSetup", "CoverageSetupOutput"),
             ("CoverageAnalyze", "CoverageAnalyzeOutput"),
             ("ListBoundaries", "ListBoundariesOutput"),
+            ("Workspaces", "WorkspacesOutput"),
             ("Health", "HealthOutput"),
             ("Dupes", "DupesOutput"),
             ("CheckGrouped", "CheckGroupedOutput"),
@@ -1018,6 +1029,7 @@ mod drift_tests {
                 FallowOutput::CoverageSetup(_) => "CoverageSetup",
                 FallowOutput::CoverageAnalyze(_) => "CoverageAnalyze",
                 FallowOutput::ListBoundaries(_) => "ListBoundaries",
+                FallowOutput::Workspaces(_) => "Workspaces",
                 FallowOutput::Health(_) => "Health",
                 FallowOutput::Dupes(_) => "Dupes",
                 FallowOutput::CheckGrouped(_) => "CheckGrouped",

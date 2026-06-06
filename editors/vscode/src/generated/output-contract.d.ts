@@ -61,6 +61,8 @@ kind: "coverage-setup"
 kind: "coverage-analyze"
 }) | (ListBoundariesOutput & {
 kind: "list-boundaries"
+}) | (WorkspacesOutput & {
+kind: "list-workspaces"
 }) | (HealthOutput & {
 kind: "health"
 }) | (DupesOutput & {
@@ -4167,6 +4169,46 @@ allow: string[]
  * Authored `allowTypeOnly` list.
  */
 allow_type_only?: string[]
+}
+/**
+ * `fallow workspaces --format json` envelope.
+ */
+export interface WorkspacesOutput {
+/**
+ * Number of workspace package entries in `workspaces`.
+ */
+workspace_count: number
+/**
+ * Workspace packages discovered from package manager and tsconfig workspace
+ * declarations. Paths are project-root-relative and use forward slashes.
+ */
+workspaces: WorkspaceInfo[]
+/**
+ * Workspace discovery diagnostics produced while reading workspace
+ * declarations. Present for compatibility with the current wire contract,
+ * even when empty.
+ */
+workspace_diagnostics: WorkspaceDiagnostic[]
+}
+/**
+ * One workspace package emitted by `fallow workspaces --format json`.
+ */
+export interface WorkspaceInfo {
+/**
+ * Package name from the workspace package.json. This is the value accepted
+ * by `--workspace <name>`.
+ */
+name: string
+/**
+ * Project-root-relative path to the workspace directory, normalized to
+ * forward slashes for cross-platform JSON consumers.
+ */
+path: string
+/**
+ * Whether the package is a generated or platform-specific dependency
+ * package rather than a hand-authored workspace.
+ */
+is_internal_dependency: boolean
 }
 /**
  * Envelope emitted by `fallow health --format json` (plus the `health` block

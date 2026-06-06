@@ -2,6 +2,7 @@ use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
 
+use crate::output_envelope::{WorkspaceInfo, WorkspacesOutput};
 use crate::report::format_display_path;
 use crate::runtime_support::load_config;
 
@@ -235,43 +236,23 @@ fn print_list_json(
         result.insert("boundaries".to_string(), boundary_data_to_json(bd));
     }
 
+    let workspace_only =
+        opts.workspaces && !opts.plugins && !opts.files && !opts.entry_points && !opts.boundaries;
     if let Some(ws) = workspace_data {
-        let ws_json: Vec<serde_json::Value> = ws
-            .workspaces
-            .iter()
-            .map(|w| {
-                let relative = w.root.strip_prefix(opts.root).unwrap_or(&w.root);
-                serde_json::json!({
-                    "name": w.name,
-                    "path": relative.display().to_string().replace('\\', "/"),
-                    "is_internal_dependency": w.is_internal_dependency,
-                })
-            })
-            .collect();
+        let mut workspace_value = serde_json::to_value(workspace_data_to_output(opts.root, ws))
+            .unwrap_or(serde_json::Value::Null);
         let root_prefix = format!("{}/", opts.root.display());
-        let diag_json: Vec<serde_json::Value> = ws
-            .diagnostics
-            .iter()
-            .map(|d| {
-                let mut value = serde_json::to_value(d).unwrap_or(serde_json::Value::Null);
-                crate::report::strip_root_prefix(&mut value, &root_prefix);
-                value
-            })
-            .collect();
-        result.insert(
-            "workspace_count".to_string(),
-            serde_json::json!(ws_json.len()),
-        );
-        result.insert("workspaces".to_string(), serde_json::json!(ws_json));
-        result.insert(
-            "workspace_diagnostics".to_string(),
-            serde_json::json!(diag_json),
-        );
+        crate::report::strip_root_prefix(&mut workspace_value, &root_prefix);
+        if let serde_json::Value::Object(map) = workspace_value {
+            result.extend(map);
+        }
     }
 
     let mut output = serde_json::Value::Object(result);
     if has_boundaries {
         crate::output_envelope::apply_root_kind(&mut output, "list-boundaries");
+    } else if workspace_only {
+        crate::output_envelope::apply_root_kind(&mut output, "list-workspaces");
     }
 
     match serde_json::to_string_pretty(&output) {
@@ -283,6 +264,26 @@ fn print_list_json(
             eprintln!("Error: failed to serialize list output: {e}");
             ExitCode::from(2)
         }
+    }
+}
+
+fn workspace_data_to_output(root: &std::path::Path, ws: &WorkspaceData) -> WorkspacesOutput {
+    let workspaces = ws
+        .workspaces
+        .iter()
+        .map(|w| {
+            let relative = w.root.strip_prefix(root).unwrap_or(&w.root);
+            WorkspaceInfo {
+                name: w.name.clone(),
+                path: relative.display().to_string().replace('\\', "/"),
+                is_internal_dependency: w.is_internal_dependency,
+            }
+        })
+        .collect::<Vec<_>>();
+    WorkspacesOutput {
+        workspace_count: workspaces.len(),
+        workspaces,
+        workspace_diagnostics: ws.diagnostics.clone(),
     }
 }
 

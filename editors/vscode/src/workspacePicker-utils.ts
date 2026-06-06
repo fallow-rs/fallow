@@ -41,7 +41,11 @@ export const parseWorkspacesOutput = (stdout: string): WorkspacesOutput | null =
     return null;
   }
 
-  const candidate = parsed as { workspaces?: unknown; workspace_count?: unknown };
+  const candidate = parsed as {
+    workspaces?: unknown;
+    workspace_count?: unknown;
+    workspace_diagnostics?: unknown;
+  };
   if (!Array.isArray(candidate.workspaces)) {
     return null;
   }
@@ -66,6 +70,9 @@ export const parseWorkspacesOutput = (stdout: string): WorkspacesOutput | null =
     workspace_count:
       typeof candidate.workspace_count === "number" ? candidate.workspace_count : workspaces.length,
     workspaces,
+    workspace_diagnostics: Array.isArray(candidate.workspace_diagnostics)
+      ? (candidate.workspace_diagnostics as WorkspacesOutput["workspace_diagnostics"])
+      : [],
   };
 };
 
