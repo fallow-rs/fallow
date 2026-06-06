@@ -247,6 +247,8 @@ pub fn template_html_sink(snippet: &str, span_start: usize, span_end: usize) -> 
         arg_index: 0,
         arg_is_non_literal: true,
         arg_kind,
+        arg_literal: None,
+        object_properties: Vec::new(),
         arg_idents,
         span_start: u32::try_from(span_start).ok()?,
         span_end: u32::try_from(span_end).ok()?,

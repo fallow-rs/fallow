@@ -184,6 +184,8 @@ pub enum SinkShape {
     TaggedTemplate,
     /// A JSX attribute value (e.g. `dangerouslySetInnerHTML={x}`).
     JsxAttr,
+    /// A constructor call (e.g. `new Function("return x")`).
+    NewExpression,
 }
 
 /// The shape of the non-literal argument captured at a sink site. Category-blind
@@ -214,36 +216,83 @@ pub enum SinkArgKind {
     Object,
     /// A call expression argument (e.g. `query(buildSql())`).
     Call,
+    /// A literal argument admitted by a literal-aware security matcher.
+    Literal,
+    /// A zero-argument sink captured because the callee itself is the signal.
+    NoArg,
     /// Any other non-literal expression (bare identifier, member access, etc.).
     Other,
 }
 
-/// A captured non-literal sink site. The visitor records EVERY call /
-/// member-assign / member-call / tagged-template / jsx-attr whose relevant
-/// argument is non-literal; it knows nothing about CWE categories. A
-/// fully-literal argument is never captured (conservative trigger).
+/// Literal values attached to literal-aware security sink captures.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub enum SinkLiteralValue {
+    /// A string literal value.
+    String(String),
+    /// A boolean literal value.
+    Boolean(bool),
+    /// A null literal value.
+    Null,
+}
+
+/// Top-level object-literal property metadata attached to a captured sink
+/// argument. Nested options are deliberately out of scope for #875.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub struct SinkObjectProperty {
+    /// Static top-level property name.
+    pub key: String,
+    /// Literal property value when statically knowable.
+    pub value: SinkLiteralValue,
+}
+
+/// A captured sink site. The visitor records every existing non-literal call /
+/// member-assign / member-call / tagged-template / jsx-attr sink site, and a
+/// small allowlist of literal-aware sites where the literal value is the signal.
+/// It knows nothing about CWE categories.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, bitcode::Encode, bitcode::Decode)]
 pub struct SinkSite {
     /// The syntactic shape of the sink site.
     pub sink_shape: SinkShape,
     /// The flattened dotted/bare callee or member path.
     pub callee_path: String,
-    /// The positional index of the non-literal argument.
+    /// The positional argument index. For zero-argument captures this is 0.
     pub arg_index: u32,
-    /// Whether the relevant argument is non-literal (always true when captured).
+    /// Whether the relevant argument is non-literal. Existing non-literal
+    /// catalogue rows require this to remain true.
     pub arg_is_non_literal: bool,
     /// The finer-grained shape of the captured non-literal argument. Lets the
     /// catalogue require unsafe shapes (concat / template-with-substitution) and
     /// exclude safe ones (object literal, the parameterized form). See
     /// [`SinkArgKind`].
     pub arg_kind: SinkArgKind,
+    /// Literal argument value for literal-aware rows.
+    pub arg_literal: Option<SinkLiteralValue>,
+    /// Static top-level object-literal properties for option-object rows.
+    pub object_properties: Vec<SinkObjectProperty>,
     /// Identifier names referenced anywhere inside the captured non-literal sink
-    /// argument (deduped, source order). Used by the analyze layer to back-trace
-    /// the sink argument to a known untrusted source: a sink is "source-backed"
-    /// when one of these names was bound from a source-shaped expression (see
-    /// `ModuleInfo::tainted_bindings`). Intra-module, name-based, conservative;
-    /// it is never a taint proof. Empty when the argument references no bare
-    /// identifiers (e.g. a pure member-call result).
+    /// argument, or contextual names for zero-argument captures such as a
+    /// token-like `Math.random()` assignment target. Deduped in source order.
+    /// Used by the analyze layer to back-trace the sink argument to a known
+    /// untrusted source or to apply narrow context gates. Intra-module,
+    /// name-based, conservative; it is never a taint proof.
     pub arg_idents: Vec<String>,
     /// Byte offset of the sink span start. Stored as `u32` (not `Span`) so the
     /// struct is bitcode-encodable and can be persisted directly in the cache.
@@ -722,7 +771,7 @@ const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<SinkSite>() == 64);
+const _: () = assert!(std::mem::size_of::<SinkSite>() == 112);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 720);
 
@@ -807,6 +856,7 @@ mod tests {
             SinkShape::MemberAssign,
             SinkShape::TaggedTemplate,
             SinkShape::JsxAttr,
+            SinkShape::NewExpression,
         ] {
             let encoded = bitcode::encode(&shape);
             let decoded: SinkShape = bitcode::decode(&encoded).expect("decode sink shape");
@@ -821,6 +871,8 @@ mod tests {
             SinkArgKind::Concat,
             SinkArgKind::Object,
             SinkArgKind::Call,
+            SinkArgKind::Literal,
+            SinkArgKind::NoArg,
             SinkArgKind::Other,
         ] {
             let encoded = bitcode::encode(&kind);
@@ -837,6 +889,11 @@ mod tests {
             arg_index: 0,
             arg_is_non_literal: true,
             arg_kind: SinkArgKind::Other,
+            arg_literal: Some(SinkLiteralValue::String("payload".to_string())),
+            object_properties: vec![SinkObjectProperty {
+                key: "origin".to_string(),
+                value: SinkLiteralValue::String("*".to_string()),
+            }],
             arg_idents: vec!["userInput".to_string()],
             span_start: 10,
             span_end: 20,
@@ -848,6 +905,8 @@ mod tests {
         assert_eq!(decoded.arg_index, site.arg_index);
         assert_eq!(decoded.arg_is_non_literal, site.arg_is_non_literal);
         assert_eq!(decoded.arg_kind, site.arg_kind);
+        assert_eq!(decoded.arg_literal, site.arg_literal);
+        assert_eq!(decoded.object_properties, site.object_properties);
         assert_eq!(decoded.arg_idents, site.arg_idents);
         assert_eq!(decoded.span(), site.span());
     }

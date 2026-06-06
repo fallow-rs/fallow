@@ -1,0 +1,10 @@
+{
+  "name": "security-literal-sinks-875-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "cors": "0.0.0",
+    "express": "0.0.0",
+    "jsonwebtoken": "0.0.0"
+  }
+}

@@ -214,7 +214,14 @@ use crate::MemberKind;
 /// populate `member_accesses` as `import.meta.env` source reads for the
 /// opt-in client/server security candidate detector. Pre-124 entries omit the
 /// source and would miss Vite env reads until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 124;
+///
+/// Bumped to 125 for issue #875: `SinkSite` now carries literal argument and
+/// object-literal option metadata, allowing security catalogue rows to match
+/// deterministic literal sinks such as wildcard postMessage origins,
+/// permissive CORS, insecure cookie options, weak crypto algorithms, and
+/// alg:none JWT options. Pre-125 entries lack that metadata until the file is
+/// re-extracted.
+pub(super) const CACHE_VERSION: u32 = 125;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -271,7 +278,7 @@ assert_cached_type_size!(CachedReExport, 88);
 assert_cached_type_size!(CachedMember, 64);
 assert_cached_type_size!(CachedDynamicImportPattern, 56);
 assert_cached_type_size!(crate::MemberAccess, 48);
-assert_cached_type_size!(fallow_types::extract::SinkSite, 64);
+assert_cached_type_size!(fallow_types::extract::SinkSite, 112);
 assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);

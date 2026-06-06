@@ -15,7 +15,8 @@ use crate::{
 };
 use fallow_types::extract::{
     ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference, SanitizedSinkArg,
-    SanitizerScope, SinkArgKind, SinkShape, SinkSite, TaintedBinding,
+    SanitizerScope, SinkArgKind, SinkLiteralValue, SinkObjectProperty, SinkShape, SinkSite,
+    TaintedBinding,
 };
 
 use crate::asset_url::normalize_asset_url;
@@ -3055,6 +3056,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
             self.record_local_structural_function_from_variable_declarator(declarator, init);
             self.record_initialized_declarator_bindings(decl, declarator, init);
+            if let BindingPattern::BindingIdentifier(id) = &declarator.id {
+                self.capture_math_random_context_sink(id.name.as_str(), init, declarator.span);
+            }
 
             if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id {
                 self.record_tainted_destructure_bindings(obj_pat, init);
@@ -3382,6 +3386,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             });
         }
 
+        self.capture_new_expression_sink(expr);
+
         walk::walk_new_expression(self, expr);
     }
 
@@ -3420,6 +3426,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         reason = "CJS export pattern matching requires deep nesting"
     )]
     fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
+        if let Some(name) = assignment_target_security_context_name(&expr.left) {
+            self.capture_math_random_context_sink(name.as_str(), &expr.right, expr.span);
+        }
+
         if let Some(name) = assignment_target_identifier_name(&expr.left) {
             self.record_sanitizer_binding(name, None);
             self.record_literal_allowlist_binding(name, false);
@@ -3986,6 +3996,213 @@ fn classify_arg_kind(expr: &Expression<'_>) -> SinkArgKind {
     }
 }
 
+fn sink_literal_value(expr: &Expression<'_>) -> Option<SinkLiteralValue> {
+    match unwrap_parens(expr) {
+        Expression::StringLiteral(lit) => Some(SinkLiteralValue::String(lit.value.to_string())),
+        Expression::BooleanLiteral(lit) => Some(SinkLiteralValue::Boolean(lit.value)),
+        Expression::NullLiteral(_) => Some(SinkLiteralValue::Null),
+        _ => None,
+    }
+}
+
+fn object_literal_properties(expr: &Expression<'_>) -> Vec<SinkObjectProperty> {
+    let Expression::ObjectExpression(obj) = unwrap_parens(expr) else {
+        return Vec::new();
+    };
+    obj.properties
+        .iter()
+        .filter_map(|prop| {
+            let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+                return None;
+            };
+            let key = prop.key.static_name()?.to_string();
+            let value = sink_literal_value(&prop.value)?;
+            Some(SinkObjectProperty { key, value })
+        })
+        .collect()
+}
+
+fn should_capture_literal_sink_arg(
+    callee_path: &str,
+    sink_shape: SinkShape,
+    arg_index: u32,
+    expr: &Expression<'_>,
+) -> bool {
+    let Some(literal) = sink_literal_value(expr) else {
+        return false;
+    };
+    let SinkLiteralValue::String(value) = literal else {
+        return false;
+    };
+    match sink_shape {
+        SinkShape::Call | SinkShape::MemberCall => {
+            (arg_index == 1 && is_post_message_callee(callee_path) && value == "*")
+                || (arg_index == 0 && is_weak_crypto_literal_callee(callee_path))
+                || (arg_index == 0 && is_string_code_callee(callee_path))
+                || (arg_index == 0
+                    && is_literal_metadata_url_callee(callee_path)
+                    && is_metadata_service_literal(&value))
+        }
+        SinkShape::NewExpression => arg_index == 0 && callee_path == "Function",
+        SinkShape::MemberAssign | SinkShape::TaggedTemplate | SinkShape::JsxAttr => false,
+    }
+}
+
+fn is_post_message_callee(callee_path: &str) -> bool {
+    callee_path == "postMessage" || callee_path.ends_with(".postMessage")
+}
+
+fn is_weak_crypto_literal_callee(callee_path: &str) -> bool {
+    matches!(
+        callee_path,
+        "createHash"
+            | "createCipher"
+            | "createDecipher"
+            | "createCipheriv"
+            | "createDecipheriv"
+            | "crypto.createHash"
+            | "crypto.createCipher"
+            | "crypto.createDecipher"
+            | "crypto.createCipheriv"
+            | "crypto.createDecipheriv"
+    )
+}
+
+fn is_string_code_callee(callee_path: &str) -> bool {
+    matches!(callee_path, "setTimeout" | "setInterval")
+}
+
+fn is_literal_metadata_url_callee(callee_path: &str) -> bool {
+    matches!(
+        callee_path,
+        "fetch"
+            | "axios.get"
+            | "axios.post"
+            | "got"
+            | "ky"
+            | "needle"
+            | "request"
+            | "http.request"
+            | "https.request"
+            | "undici.request"
+    )
+}
+
+fn is_metadata_service_literal(value: &str) -> bool {
+    value.contains("169.254.169.254") || value.contains("metadata.google.internal")
+}
+
+fn is_token_like_security_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    [
+        "token",
+        "secret",
+        "session",
+        "jwt",
+        "auth",
+        "csrf",
+        "nonce",
+        "salt",
+        "password",
+        "credential",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn expression_contains_math_random_call(expr: &Expression<'_>) -> bool {
+    match unwrap_parens(expr) {
+        Expression::CallExpression(call) => {
+            if call.arguments.is_empty()
+                && flatten_callee_path(&call.callee).as_deref() == Some("Math.random")
+            {
+                return true;
+            }
+            expression_callee_contains_math_random(&call.callee)
+                || call
+                    .arguments
+                    .iter()
+                    .filter_map(Argument::as_expression)
+                    .any(expression_contains_math_random_call)
+        }
+        Expression::BinaryExpression(bin) => {
+            expression_contains_math_random_call(&bin.left)
+                || expression_contains_math_random_call(&bin.right)
+        }
+        Expression::LogicalExpression(logical) => {
+            expression_contains_math_random_call(&logical.left)
+                || expression_contains_math_random_call(&logical.right)
+        }
+        Expression::ConditionalExpression(cond) => {
+            expression_contains_math_random_call(&cond.test)
+                || expression_contains_math_random_call(&cond.consequent)
+                || expression_contains_math_random_call(&cond.alternate)
+        }
+        Expression::TemplateLiteral(tpl) => tpl
+            .expressions
+            .iter()
+            .any(expression_contains_math_random_call),
+        Expression::ArrayExpression(array) => array.elements.iter().any(|element| {
+            element
+                .as_expression()
+                .is_some_and(expression_contains_math_random_call)
+        }),
+        Expression::ObjectExpression(obj) => obj.properties.iter().any(|prop| {
+            let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+                return false;
+            };
+            expression_contains_math_random_call(&prop.value)
+        }),
+        Expression::ParenthesizedExpression(paren) => {
+            expression_contains_math_random_call(&paren.expression)
+        }
+        Expression::StaticMemberExpression(member) => {
+            expression_contains_math_random_call(&member.object)
+        }
+        Expression::ChainExpression(chain) => match &chain.expression {
+            ChainElement::CallExpression(call) => {
+                if call.arguments.is_empty()
+                    && flatten_callee_path(&call.callee).as_deref() == Some("Math.random")
+                {
+                    return true;
+                }
+                expression_callee_contains_math_random(&call.callee)
+            }
+            ChainElement::StaticMemberExpression(member) => {
+                expression_contains_math_random_call(&member.object)
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn expression_callee_contains_math_random(callee: &Expression<'_>) -> bool {
+    match callee {
+        Expression::StaticMemberExpression(member) => {
+            expression_contains_math_random_call(&member.object)
+        }
+        Expression::ChainExpression(chain) => match &chain.expression {
+            ChainElement::StaticMemberExpression(member) => {
+                expression_contains_math_random_call(&member.object)
+            }
+            ChainElement::CallExpression(call) => {
+                expression_callee_contains_math_random(&call.callee)
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn assignment_target_security_context_name(target: &AssignmentTarget<'_>) -> Option<String> {
+    match target {
+        AssignmentTarget::AssignmentTargetIdentifier(id) => Some(id.name.to_string()),
+        AssignmentTarget::StaticMemberExpression(member) => Some(member.property.name.to_string()),
+        _ => None,
+    }
+}
+
 /// Collect the bare identifier names referenced anywhere inside a sink argument
 /// expression, deduped in source order. Used by the analyze layer to back-trace
 /// the argument to a source-tainted local binding. This is a bounded, shallow
@@ -4425,24 +4642,111 @@ impl ModuleInfoExtractor {
             let Some(arg_expr) = arg.as_expression() else {
                 continue;
             };
-            if !is_non_literal_arg(arg_expr) {
-                continue;
-            }
             let Ok(arg_index) = u32::try_from(index) else {
                 continue;
             };
-            self.record_sanitized_sink_arg(expr.span.start, arg_index, arg_expr);
+            let arg_is_non_literal = is_non_literal_arg(arg_expr);
+            if !arg_is_non_literal
+                && !should_capture_literal_sink_arg(&callee_path, sink_shape, arg_index, arg_expr)
+            {
+                continue;
+            }
+            if arg_is_non_literal {
+                self.record_sanitized_sink_arg(expr.span.start, arg_index, arg_expr);
+            }
             self.security_sinks.push(SinkSite {
                 sink_shape,
                 callee_path: callee_path.clone(),
                 arg_index,
-                arg_is_non_literal: true,
-                arg_kind: classify_arg_kind(arg_expr),
-                arg_idents: collect_arg_idents(arg_expr),
+                arg_is_non_literal,
+                arg_kind: if arg_is_non_literal {
+                    classify_arg_kind(arg_expr)
+                } else {
+                    SinkArgKind::Literal
+                },
+                arg_literal: sink_literal_value(arg_expr),
+                object_properties: object_literal_properties(arg_expr),
+                arg_idents: if arg_is_non_literal {
+                    collect_arg_idents(arg_expr)
+                } else {
+                    Vec::new()
+                },
                 span_start: expr.span.start,
                 span_end: expr.span.end,
             });
         }
+    }
+
+    /// Capture constructor-call sink sites. This is intentionally separate from
+    /// call capture because oxc represents `new Function("...")` as a
+    /// `NewExpression`, not a `CallExpression`.
+    fn capture_new_expression_sink(&mut self, expr: &oxc_ast::ast::NewExpression<'_>) {
+        let Some(callee_path) = flatten_callee_path(&expr.callee) else {
+            return;
+        };
+        for (index, arg) in expr.arguments.iter().enumerate() {
+            let Some(arg_expr) = arg.as_expression() else {
+                continue;
+            };
+            let Ok(arg_index) = u32::try_from(index) else {
+                continue;
+            };
+            let arg_is_non_literal = is_non_literal_arg(arg_expr);
+            if !arg_is_non_literal
+                && !should_capture_literal_sink_arg(
+                    &callee_path,
+                    SinkShape::NewExpression,
+                    arg_index,
+                    arg_expr,
+                )
+            {
+                continue;
+            }
+            self.security_sinks.push(SinkSite {
+                sink_shape: SinkShape::NewExpression,
+                callee_path: callee_path.clone(),
+                arg_index,
+                arg_is_non_literal,
+                arg_kind: if arg_is_non_literal {
+                    classify_arg_kind(arg_expr)
+                } else {
+                    SinkArgKind::Literal
+                },
+                arg_literal: sink_literal_value(arg_expr),
+                object_properties: object_literal_properties(arg_expr),
+                arg_idents: if arg_is_non_literal {
+                    collect_arg_idents(arg_expr)
+                } else {
+                    Vec::new()
+                },
+                span_start: expr.span.start,
+                span_end: expr.span.end,
+            });
+        }
+    }
+
+    fn capture_math_random_context_sink(
+        &mut self,
+        context_name: &str,
+        expr: &Expression<'_>,
+        span: Span,
+    ) {
+        if !is_token_like_security_name(context_name) || !expression_contains_math_random_call(expr)
+        {
+            return;
+        }
+        self.security_sinks.push(SinkSite {
+            sink_shape: SinkShape::MemberCall,
+            callee_path: "Math.random".to_string(),
+            arg_index: 0,
+            arg_is_non_literal: false,
+            arg_kind: SinkArgKind::NoArg,
+            arg_literal: None,
+            object_properties: Vec::new(),
+            arg_idents: vec![context_name.to_string()],
+            span_start: span.start,
+            span_end: span.end,
+        });
     }
 
     /// Capture a member-assignment sink site (e.g. `el.innerHTML = userInput`).
@@ -4466,6 +4770,8 @@ impl ModuleInfoExtractor {
             arg_index: 0,
             arg_is_non_literal: true,
             arg_kind: classify_arg_kind(&expr.right),
+            arg_literal: None,
+            object_properties: object_literal_properties(&expr.right),
             arg_idents: collect_arg_idents(&expr.right),
             span_start: expr.span.start,
             span_end: expr.span.end,
@@ -4493,6 +4799,8 @@ impl ModuleInfoExtractor {
             // A tagged template is captured only with substitutions, so the
             // argument is always a template-with-substitution.
             arg_kind: SinkArgKind::TemplateWithSubst,
+            arg_literal: None,
+            object_properties: Vec::new(),
             arg_idents,
             span_start: expr.span.start,
             span_end: expr.span.end,
@@ -4523,6 +4831,8 @@ impl ModuleInfoExtractor {
             arg_index: 0,
             arg_is_non_literal: true,
             arg_kind: classify_arg_kind(value_expr),
+            arg_literal: None,
+            object_properties: object_literal_properties(value_expr),
             arg_idents: collect_arg_idents(value_expr),
             span_start: attr.span.start,
             span_end: attr.span.end,

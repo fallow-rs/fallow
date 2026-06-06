@@ -1,11 +1,12 @@
 # Data-driven catalogue of syntactic security-sink CANDIDATES.
 #
-# Each [[matcher]] maps a captured non-literal SinkSite (see
+# Each [[matcher]] maps a captured SinkSite (see
 # crates/types/src/extract.rs::SinkSite) to a CWE candidate class. Findings are
 # CANDIDATES for downstream agent verification, NOT verified vulnerabilities:
 # fallow is deterministic and syntactic, never taint-proof. We prefer
-# false-negatives over false-positives, so every matcher fires only on a
-# non-literal argument and documents its blind spots.
+# false-negatives over false-positives, so matchers default to non-literal
+# arguments. Literal-aware rows must opt into narrow literal or context
+# predicates.
 #
 # This file is the single source of truth: embedded via include_str! and parsed
 # once behind a OnceLock (see crates/core/src/analyze/security/catalogue.rs).
@@ -15,7 +16,8 @@
 # callee_patterns are segment-aware (not substring): `fetch` matches `fetch`,
 # not `myfetch`. A leading `*.` segment matches any object: `*.innerHTML`
 # matches `el.innerHTML` and `this.node.innerHTML`. sink_shape is one of:
-# call | member-call | member-assign | tagged-template | jsx-attr.
+# call | member-call | member-assign | tagged-template | jsx-attr |
+# new-expression.
 # Optional import_provenance narrows a matcher to bindings traceable to a
 # specific import source (trades one FN for fewer FPs on same-named locals).
 # When import_provenance is set and the module has no matching import, the
@@ -32,8 +34,9 @@
 # WITHOUT a new enum variant. Unset = a global row (the default).
 #
 # Optional arg_kinds is an allowlist of captured argument shapes (kebab-case:
-# template-with-subst | concat | object | call | other). When set, the matcher
-# fires ONLY when the captured non-literal argument is one of the listed shapes.
+# template-with-subst | concat | object | call | literal | no-arg | other).
+# When set, the matcher fires ONLY when the captured argument is one of the
+# listed shapes.
 # This is how sql-injection requires the UNSAFE shapes (concat / interpolated
 # template) and excludes the safely-parameterized object form
 # (`.execute({ sql, args })`); a bare parameterized `sql`${x}`` tagged template
@@ -44,6 +47,13 @@
 # source model: at least one captured argument identifier must reference a local
 # binding sourced from a [[source]] path. Use this for broad sinks like
 # Object.assign, where source-free non-literal values are too noisy.
+#
+# Optional literal_values / literal_contains match captured string literals.
+# Optional object_properties matches exact literal object keys. Optional
+# object_missing_or_false fires when any listed object option is missing or
+# boolean false. Optional context_keywords matches zero-arg sinks that were
+# captured only because the surrounding variable or property name is security
+# sensitive.
 #
 # Multiple [[matcher]] rows may share an `id` (e.g. dangerous-html spans three
 # shapes). Uniqueness is keyed on the full row (id + sink_shape +
@@ -116,11 +126,6 @@ import_provenance = "node:child_process"
 evidence_template = "Non-literal command passed to {callee}(). Candidate for verification: confirm the command/args are not attacker-controlled."
 
 # ── CWE-94/95: Code injection ───────────────────────────────────────────────
-# `eval` only. setTimeout/setInterval string-code forms pass a literal (never
-# captured) and otherwise FP on the function-callback form; `Function` is a
-# NewExpression, not a CallExpression, so it never matches the `call` shape.
-# Both DROPPED until a NewExpression capture hook and literal-aware refinement
-# land (see plan Open question 1).
 [[matcher]]
 id = "code-injection"
 cwe = 94
@@ -139,6 +144,35 @@ callee_patterns = ["vm.runInNewContext", "vm.runInThisContext", "vm.runInContext
 arg_index = 0
 import_provenance = "node:vm"
 evidence_template = "Non-literal code passed to {callee}(). Candidate for verification: confirm the script source is trusted."
+
+[[matcher]]
+id = "code-injection"
+cwe = 95
+title = "String-code timer sink"
+sink_shape = "call"
+callee_patterns = ["setTimeout", "setInterval"]
+arg_index = 0
+arg_kinds = ["literal"]
+evidence_template = "String code passed to {callee}(). Candidate for verification: prefer a function callback over evaluating a string."
+
+[[matcher]]
+id = "code-injection"
+cwe = 95
+title = "Function constructor sink"
+sink_shape = "new-expression"
+callee_patterns = ["Function"]
+arg_index = 0
+arg_kinds = ["literal"]
+evidence_template = "String body passed to new {callee}(). Candidate for verification: confirm generated code cannot be influenced by attacker input."
+
+[[matcher]]
+id = "code-injection"
+cwe = 95
+title = "Function constructor sink"
+sink_shape = "new-expression"
+callee_patterns = ["Function"]
+arg_index = 0
+evidence_template = "Non-literal value passed to new {callee}(). Candidate for verification: confirm generated code cannot be influenced by attacker input."
 
 # Dynamic CommonJS module loading can execute attacker-selected code or load a
 # local file outside the intended module set. Static `require("pkg")` calls are
@@ -209,6 +243,28 @@ sink_shape = "member-call"
 callee_patterns = ["axios.get", "axios.post", "http.request", "https.request", "superagent.get", "undici.request"]
 arg_index = 0
 evidence_template = "Non-literal URL passed to {callee}(). Candidate for verification: confirm the destination is not attacker-controlled."
+
+[[matcher]]
+id = "ssrf"
+cwe = 918
+title = "Cloud metadata request sink"
+sink_shape = "call"
+callee_patterns = ["fetch", "got", "ky", "needle", "request"]
+arg_index = 0
+arg_kinds = ["literal"]
+literal_contains = ["169.254.169.254", "metadata.google.internal"]
+evidence_template = "Literal cloud metadata URL passed to {callee}(). Candidate for verification: confirm this request cannot expose instance credentials or metadata."
+
+[[matcher]]
+id = "ssrf"
+cwe = 918
+title = "Cloud metadata request sink"
+sink_shape = "member-call"
+callee_patterns = ["axios.get", "axios.post", "http.request", "https.request", "undici.request"]
+arg_index = 0
+arg_kinds = ["literal"]
+literal_contains = ["169.254.169.254", "metadata.google.internal"]
+evidence_template = "Literal cloud metadata URL passed to {callee}(). Candidate for verification: confirm this request cannot expose instance credentials or metadata."
 
 # ── CWE-22: Path traversal ──────────────────────────────────────────────────
 [[matcher]]
@@ -288,6 +344,55 @@ callee_patterns = ["location.assign", "location.replace", "*.location.assign", "
 arg_index = 0
 evidence_template = "Non-literal navigation target passed to {callee}(). Candidate for verification: confirm the target is a relative path or allowlisted host and cannot be a javascript URL."
 
+# ── CWE-346: Wildcard postMessage target origin ─────────────────────────────
+[[matcher]]
+id = "postmessage-wildcard-origin"
+cwe = 346
+title = "Wildcard postMessage target origin"
+sink_shape = "call"
+callee_patterns = ["postMessage"]
+arg_index = 1
+arg_kinds = ["literal"]
+literal_values = ["*"]
+evidence_template = "Wildcard target origin passed to {callee}(). Candidate for verification: use a specific trusted origin instead of `*`."
+
+[[matcher]]
+id = "postmessage-wildcard-origin"
+cwe = 346
+title = "Wildcard postMessage target origin"
+sink_shape = "member-call"
+callee_patterns = ["*.postMessage"]
+arg_index = 1
+arg_kinds = ["literal"]
+literal_values = ["*"]
+evidence_template = "Wildcard target origin passed to {callee}(). Candidate for verification: use a specific trusted origin instead of `*`."
+
+# ── CWE-942: Permissive CORS with credentials ──────────────────────────────
+[[matcher]]
+id = "permissive-cors"
+cwe = 942
+title = "Permissive CORS policy"
+sink_shape = "call"
+callee_patterns = ["cors"]
+arg_index = 0
+arg_kinds = ["object"]
+import_provenance = "cors"
+object_properties = [{ key = "origin", string = "*" }, { key = "credentials", boolean = true }]
+evidence_template = "CORS configured with wildcard origin and credentials. Candidate for verification: credentials require a specific trusted origin."
+
+# ── CWE-614/1004: Insecure cookie options ──────────────────────────────────
+[[matcher]]
+id = "insecure-cookie"
+cwe = 614
+title = "Insecure cookie options"
+sink_shape = "member-call"
+callee_patterns = ["*.cookie"]
+arg_index = 2
+arg_kinds = ["object"]
+enabler = "express"
+object_missing_or_false = ["httpOnly", "secure"]
+evidence_template = "Cookie options omit or disable httpOnly/secure. Candidate for verification: set both flags unless this cookie is intentionally readable or non-secure."
+
 # ── CWE-915: Mass assignment ────────────────────────────────────────────────
 [[matcher]]
 id = "mass-assignment"
@@ -302,9 +407,9 @@ evidence_template = "Source-backed object passed to {callee}(). Candidate for ve
 
 # ── CWE-327: Runtime-selectable crypto algorithm (opt-in tier) ──────────────
 # RE-TITLED from "weak crypto" so it does not over-claim CWE-327: the high-signal
-# case (`createHash('md5')`) is a literal arg and is NEVER captured, while safe
-# non-literal algorithms FP. Gate behind `security.categories` opt-in. A
-# literal-aware exception is a deferred extract-layer follow-up (Open question 1).
+# weak algorithm case is covered by literal-aware rows below, while safe
+# non-literal algorithms can still FP. Keep the runtime-selectable row opt-in
+# through `security.categories`.
 [[matcher]]
 id = "weak-crypto"
 cwe = 327
@@ -315,10 +420,33 @@ arg_index = 0
 import_provenance = "node:crypto"
 evidence_template = "Runtime-selectable algorithm passed to {callee}(). Candidate for verification: confirm a weak algorithm (md5/sha1/des/rc4) cannot be selected at runtime."
 
+[[matcher]]
+id = "weak-crypto"
+cwe = 327
+title = "Weak crypto algorithm"
+sink_shape = "member-call"
+callee_patterns = ["crypto.createHash", "crypto.createCipher", "crypto.createDecipher", "crypto.createCipheriv", "crypto.createDecipheriv"]
+arg_index = 0
+arg_kinds = ["literal"]
+literal_values = ["md5", "sha1", "des", "rc4", "des-ede3-cbc"]
+import_provenance = "node:crypto"
+evidence_template = "Weak literal algorithm passed to {callee}(). Candidate for verification: use a modern hash or cipher such as SHA-256 or AES-GCM."
+
+[[matcher]]
+id = "weak-crypto"
+cwe = 327
+title = "Weak crypto algorithm"
+sink_shape = "call"
+callee_patterns = ["createHash", "createCipher", "createDecipher", "createCipheriv", "createDecipheriv"]
+arg_index = 0
+arg_kinds = ["literal"]
+literal_values = ["md5", "sha1", "des", "rc4", "des-ede3-cbc"]
+import_provenance = "node:crypto"
+evidence_template = "Weak literal algorithm passed to {callee}(). Candidate for verification: use a modern hash or cipher such as SHA-256 or AES-GCM."
+
 # ── CWE-338: Insecure randomness (issue #897) ───────────────────────────────
-# `Math.random()` remains DROPPED: it is called with zero args, so the
-# non-literal-arg trigger can never be satisfied (structurally dead). Re-add it
-# when the extract layer records zero-arg member-calls (Open question 1).
+# `Math.random()` is captured only when it feeds a token-like variable or
+# property name, which avoids flagging UI or sampling randomness.
 # `crypto.pseudoRandomBytes(size)` DOES take an argument, so it is captured when
 # the size is non-literal: it is not cryptographically secure.
 [[matcher]]
@@ -330,6 +458,42 @@ callee_patterns = ["crypto.pseudoRandomBytes"]
 arg_index = 0
 import_provenance = "node:crypto"
 evidence_template = "Non-literal length passed to {callee}(). Candidate for verification: pseudoRandomBytes is NOT cryptographically secure; use crypto.randomBytes for tokens, salts, or keys."
+
+[[matcher]]
+id = "insecure-randomness"
+cwe = 338
+title = "Insecure randomness sink"
+sink_shape = "member-call"
+callee_patterns = ["Math.random"]
+arg_index = 0
+arg_kinds = ["no-arg"]
+context_keywords = ["token", "secret", "session", "jwt", "auth", "csrf", "nonce", "salt", "password", "credential"]
+evidence_template = "Math.random() feeds a security-sensitive context. Candidate for verification: use cryptographic randomness for tokens, salts, secrets, and credentials."
+
+# ── CWE-347: JWT alg none ───────────────────────────────────────────────────
+[[matcher]]
+id = "jwt-alg-none"
+cwe = 347
+title = "JWT alg none"
+sink_shape = "member-call"
+callee_patterns = ["*.sign"]
+arg_index = 2
+arg_kinds = ["object"]
+import_provenance = "jsonwebtoken"
+object_properties = [{ key = "algorithm", string = "none" }]
+evidence_template = "JWT signed with algorithm `none`. Candidate for verification: require a real signing algorithm and reject unsigned tokens."
+
+[[matcher]]
+id = "jwt-alg-none"
+cwe = 347
+title = "JWT alg none"
+sink_shape = "call"
+callee_patterns = ["sign"]
+arg_index = 2
+arg_kinds = ["object"]
+import_provenance = "jsonwebtoken"
+object_properties = [{ key = "algorithm", string = "none" }]
+evidence_template = "JWT signed with algorithm `none`. Candidate for verification: require a real signing algorithm and reject unsigned tokens."
 
 # ── CWE-327: Deprecated cipher constructors (issue #897) ─────────────────────
 # `crypto.createCipher` / `createDecipher` derive the key from a password with a
@@ -715,17 +879,11 @@ callee_patterns = ["xpath.select", "xpath.select1"]
 arg_index = 0
 evidence_template = "Non-literal XPath expression passed to {callee}(). Candidate for verification: confirm user input cannot alter the query (bind variables / validate the expression)."
 
-# DEFERRED (source-model-free but signal is a LITERAL value, or needs a new
-# structural-capture path; out of scope for this TOML-only pass, see
-# .plans/issue-862-cwe-categories.md):
+# DEFERRED (needs structural capture or a tighter predicate):
 #   - ReDoS: risky regex LITERAL structure (nested quantifiers); RegExpLiteral is
 #     a literal and never captured. Needs a regex-structural capture hook.
-#   - insecure cookies: signal is a missing / `false` `httpOnly`/`secure` option.
-#   - permissive CORS: signal is a literal `origin: '*'`.
-#   - postMessage without origin: signal is a literal `'*'` target.
-#   - JWT alg:none / hardcoded signing secret: signals are literals.
-# insecure-randomness (Math.random) and hardcoded-secrets-entropy are separately
-# deferred to #859 (they require its source model), not re-added here.
+#   - hardcoded signing secret: literal secret gating belongs with the dedicated
+#     hardcoded-secret work in issue #892.
 #
 # DEFERRED from the #897 batch (need a gate the non-literal-arg model lacks):
 #   - sensitive client storage: `localStorage/sessionStorage.setItem(secretKey, x)`

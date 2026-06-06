@@ -9,10 +9,10 @@
 //!
 //! Findings are CANDIDATES for downstream agent verification, NOT verified
 //! vulnerabilities: fallow is deterministic and syntactic, never taint-proof.
-//! Every matcher fires only on a non-literal argument (false-negatives over
-//! false-positives).
+//! Matchers default to non-literal arguments. A row can opt into narrowly
+//! captured literal or context predicates when the literal itself is the signal.
 
-use fallow_types::extract::{SinkArgKind, SinkShape};
+use fallow_types::extract::{SinkArgKind, SinkLiteralValue, SinkObjectProperty, SinkShape};
 
 /// Embedded catalogue source. Because it is `include_str!`-embedded at compile
 /// time, a green `security_catalogue_parses` test guarantees the released
@@ -67,10 +67,49 @@ struct RawMatcher {
     /// any non-literal argument shape matches (the prior behavior).
     #[serde(default)]
     arg_kinds: Option<Vec<String>>,
+    /// Optional string-literal equality predicates for literal-aware rows.
+    #[serde(default)]
+    literal_values: Option<Vec<String>>,
+    /// Optional string-literal substring predicates for literal-aware rows.
+    #[serde(default)]
+    literal_contains: Option<Vec<String>>,
+    /// Optional object-literal property equality predicates.
+    #[serde(default)]
+    object_properties: Option<Vec<RawObjectPropertyPredicate>>,
+    /// Optional object-literal flags that are unsafe when missing or `false`.
+    #[serde(default)]
+    object_missing_or_false: Option<Vec<String>>,
+    /// Optional context-name keywords for zero-arg sinks like `Math.random()`.
+    #[serde(default)]
+    context_keywords: Option<Vec<String>>,
     /// Optional precision gate: require the captured sink argument to reference
     /// a local binding that came from a configured untrusted source.
     #[serde(default)]
     requires_source: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct RawObjectPropertyPredicate {
+    key: String,
+    #[serde(default)]
+    string: Option<String>,
+    #[serde(default)]
+    boolean: Option<bool>,
+    #[serde(default)]
+    null: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LiteralPredicate {
+    String(String),
+    Boolean(bool),
+    Null,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectPropertyPredicate {
+    key: String,
+    value: LiteralPredicate,
 }
 
 /// A pre-segmented callee pattern. Matching is segment-aware (NOT substring):
@@ -173,6 +212,16 @@ pub struct Matcher {
     /// Whether this matcher only fires when the sink argument traces to a
     /// configured untrusted source binding.
     pub requires_source: bool,
+    /// String-literal values admitted by this row.
+    pub literal_values: Vec<String>,
+    /// String fragments admitted by this row.
+    pub literal_contains: Vec<String>,
+    /// Required literal object properties.
+    pub object_properties: Vec<ObjectPropertyPredicate>,
+    /// Object properties whose absence or boolean `false` makes the row match.
+    pub object_missing_or_false: Vec<String>,
+    /// Context-name keywords admitted by this row.
+    pub context_keywords: Vec<String>,
 }
 
 /// A parsed, validated untrusted-source matcher (issue #859). Its
@@ -221,6 +270,84 @@ impl Matcher {
             .is_none_or(|kinds| kinds.contains(&arg_kind))
     }
 
+    /// Whether this row has opted into matching a literal, object-property, or
+    /// context-only sink that is not covered by the default non-literal model.
+    #[must_use]
+    pub fn is_literal_aware(&self) -> bool {
+        !self.literal_values.is_empty()
+            || !self.literal_contains.is_empty()
+            || !self.object_properties.is_empty()
+            || !self.object_missing_or_false.is_empty()
+            || !self.context_keywords.is_empty()
+            || self.arg_kinds.as_ref().is_some_and(|kinds| {
+                kinds
+                    .iter()
+                    .any(|kind| matches!(kind, SinkArgKind::Literal | SinkArgKind::NoArg))
+            })
+    }
+
+    /// Whether captured literal metadata satisfies this row's literal gates.
+    #[must_use]
+    pub fn literal_value_satisfied(&self, literal: Option<&SinkLiteralValue>) -> bool {
+        if self.literal_values.is_empty() && self.literal_contains.is_empty() {
+            return true;
+        }
+        let Some(SinkLiteralValue::String(value)) = literal else {
+            return false;
+        };
+        let lower = value.to_ascii_lowercase();
+        (self.literal_values.is_empty()
+            || self
+                .literal_values
+                .iter()
+                .any(|expected| lower == expected.to_ascii_lowercase()))
+            && (self.literal_contains.is_empty()
+                || self
+                    .literal_contains
+                    .iter()
+                    .any(|needle| lower.contains(&needle.to_ascii_lowercase())))
+    }
+
+    /// Whether captured object-literal metadata satisfies this row's object
+    /// property gates.
+    #[must_use]
+    pub fn object_properties_satisfied(&self, properties: &[SinkObjectProperty]) -> bool {
+        if self.object_properties.is_empty() && self.object_missing_or_false.is_empty() {
+            return true;
+        }
+        for predicate in &self.object_properties {
+            let Some(property) = properties.iter().find(|p| p.key == predicate.key) else {
+                return false;
+            };
+            if !predicate.value.matches(&property.value) {
+                return false;
+            }
+        }
+        if self.object_missing_or_false.is_empty() {
+            return true;
+        }
+        self.object_missing_or_false.iter().any(|key| {
+            properties
+                .iter()
+                .find(|p| p.key == *key)
+                .is_none_or(|property| matches!(property.value, SinkLiteralValue::Boolean(false)))
+        })
+    }
+
+    /// Whether captured context names satisfy this row's context keyword gate.
+    #[must_use]
+    pub fn context_satisfied(&self, context_names: &[String]) -> bool {
+        if self.context_keywords.is_empty() {
+            return true;
+        }
+        context_names.iter().any(|name| {
+            let lower = name.to_ascii_lowercase();
+            self.context_keywords
+                .iter()
+                .any(|keyword| lower.contains(&keyword.to_ascii_lowercase()))
+        })
+    }
+
     /// Whether this matcher's framework enabler is satisfied by the project's
     /// declared dependency set (issue #861). `None` enabler is always satisfied
     /// (a global row). A `Some` enabler matches by exact package name, or, when
@@ -240,6 +367,19 @@ impl Matcher {
                 .any(|d| d == prefix || d.starts_with(enabler))
         } else {
             declared_deps.contains(enabler)
+        }
+    }
+}
+
+impl LiteralPredicate {
+    fn matches(&self, value: &SinkLiteralValue) -> bool {
+        match (self, value) {
+            (Self::String(expected), SinkLiteralValue::String(actual)) => {
+                expected.eq_ignore_ascii_case(actual)
+            }
+            (Self::Boolean(expected), SinkLiteralValue::Boolean(actual)) => expected == actual,
+            (Self::Null, SinkLiteralValue::Null) => true,
+            _ => false,
         }
     }
 }
@@ -300,6 +440,7 @@ fn parse_sink_shape(s: &str) -> Option<SinkShape> {
         "member-assign" => Some(SinkShape::MemberAssign),
         "tagged-template" => Some(SinkShape::TaggedTemplate),
         "jsx-attr" => Some(SinkShape::JsxAttr),
+        "new-expression" => Some(SinkShape::NewExpression),
         _ => None,
     }
 }
@@ -311,9 +452,49 @@ fn parse_arg_kind(s: &str) -> Option<SinkArgKind> {
         "concat" => Some(SinkArgKind::Concat),
         "object" => Some(SinkArgKind::Object),
         "call" => Some(SinkArgKind::Call),
+        "literal" => Some(SinkArgKind::Literal),
+        "no-arg" => Some(SinkArgKind::NoArg),
         "other" => Some(SinkArgKind::Other),
         _ => None,
     }
+}
+
+fn parse_object_property_predicates(
+    id: &str,
+    raw: Option<Vec<RawObjectPropertyPredicate>>,
+) -> Result<Vec<ObjectPropertyPredicate>, String> {
+    let Some(raw_predicates) = raw else {
+        return Ok(Vec::new());
+    };
+    let mut predicates = Vec::with_capacity(raw_predicates.len());
+    for predicate in raw_predicates {
+        if predicate.key.trim().is_empty() {
+            return Err(format!(
+                "matcher {id:?} has an object_properties predicate with an empty key"
+            ));
+        }
+        let value_count = usize::from(predicate.string.is_some())
+            + usize::from(predicate.boolean.is_some())
+            + usize::from(predicate.null);
+        if value_count != 1 {
+            return Err(format!(
+                "matcher {id:?} object_properties predicate for {:?} must set exactly one of string | boolean | null",
+                predicate.key
+            ));
+        }
+        let value = if let Some(string) = predicate.string {
+            LiteralPredicate::String(string)
+        } else if let Some(boolean) = predicate.boolean {
+            LiteralPredicate::Boolean(boolean)
+        } else {
+            LiteralPredicate::Null
+        };
+        predicates.push(ObjectPropertyPredicate {
+            key: predicate.key,
+            value,
+        });
+    }
+    Ok(predicates)
 }
 
 /// Parse + validate the catalogue source. Returns a `Result` (NOT a panic) so
@@ -337,7 +518,7 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
         let sink_shape = parse_sink_shape(&entry.sink_shape).ok_or_else(|| {
             format!(
                 "matcher {:?} has unknown sink_shape {:?}; expected one of \
-                 call | member-call | member-assign | tagged-template | jsx-attr",
+                 call | member-call | member-assign | tagged-template | jsx-attr | new-expression",
                 entry.id, entry.sink_shape
             )
         })?;
@@ -377,7 +558,7 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
                     let kind = parse_arg_kind(raw).ok_or_else(|| {
                         format!(
                             "matcher {:?} has unknown arg_kind {raw:?}; expected one of \
-                             template-with-subst | concat | object | call | other",
+                             template-with-subst | concat | object | call | literal | no-arg | other",
                             entry.id
                         )
                     })?;
@@ -395,6 +576,8 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
             }
             other => other,
         };
+        let object_properties =
+            parse_object_property_predicates(&entry.id, entry.object_properties)?;
         matchers.push(Matcher {
             id: entry.id,
             cwe: entry.cwe,
@@ -407,6 +590,11 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
             enabler,
             arg_kinds,
             requires_source: entry.requires_source,
+            literal_values: entry.literal_values.unwrap_or_default(),
+            literal_contains: entry.literal_contains.unwrap_or_default(),
+            object_properties,
+            object_missing_or_false: entry.object_missing_or_false.unwrap_or_default(),
+            context_keywords: entry.context_keywords.unwrap_or_default(),
         });
     }
 
@@ -481,8 +669,8 @@ mod tests {
     fn catalogue_rows_are_unique() {
         // Multiple rows legitimately share an `id` (dangerous-html spans three
         // shapes), so uniqueness is keyed on the FULL row: id + sink_shape +
-        // callee_patterns. No two identical matcher rows. Keyed off the raw
-        // source so the test does not require `SinkShape: Hash`.
+        // callee_patterns + gates. No two identical matcher rows. Keyed off the
+        // raw source so the test does not require `SinkShape: Hash`.
         let raw: RawCatalogue = toml::from_str(CATALOGUE_TOML).unwrap();
         let mut seen = FxHashSet::default();
         for m in &raw.matcher {
@@ -491,8 +679,29 @@ mod tests {
             // legitimately share id + shape + patterns and differ only by their
             // framework gate (e.g. one `route-send-file` row per framework).
             let enabler = m.enabler.as_deref().unwrap_or("");
+            let arg_kinds = m
+                .arg_kinds
+                .as_ref()
+                .map_or_else(String::new, |kinds| kinds.join("|"));
+            let literal_values = m
+                .literal_values
+                .as_ref()
+                .map_or_else(String::new, |values| values.join("|"));
+            let literal_contains = m
+                .literal_contains
+                .as_ref()
+                .map_or_else(String::new, |values| values.join("|"));
+            let object_properties = format!("{:?}", m.object_properties);
+            let object_missing_or_false = m
+                .object_missing_or_false
+                .as_ref()
+                .map_or_else(String::new, |keys| keys.join("|"));
+            let context_keywords = m
+                .context_keywords
+                .as_ref()
+                .map_or_else(String::new, |keywords| keywords.join("|"));
             let key = format!(
-                "{}::{}::{pats}::{enabler}::{}",
+                "{}::{}::{pats}::{enabler}::{}::{arg_kinds}::{literal_values}::{literal_contains}::{object_properties}::{object_missing_or_false}::{context_keywords}",
                 m.id, m.sink_shape, m.requires_source
             );
             assert!(seen.insert(key.clone()), "duplicate matcher row: {key}");
@@ -703,6 +912,8 @@ evidence_template = "   "
             SinkArgKind::Concat,
             SinkArgKind::Object,
             SinkArgKind::Call,
+            SinkArgKind::Literal,
+            SinkArgKind::NoArg,
             SinkArgKind::Other,
         ] {
             assert!(html.admits_arg_kind(kind), "html admits {kind:?}");

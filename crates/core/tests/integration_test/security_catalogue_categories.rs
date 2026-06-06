@@ -126,6 +126,12 @@ fn code_injection_vm_non_literal_fires() {
 }
 
 #[test]
+fn code_injection_new_function_non_literal_fires() {
+    let results = analyze_with_security_sink("security-code-injection");
+    assert_candidate(&results, "src/new-function.ts", "code-injection", 95);
+}
+
+#[test]
 fn code_injection_literal_does_not_fire() {
     let results = analyze_with_security_sink("security-code-injection");
     assert!(
@@ -344,11 +350,11 @@ fn weak_crypto_non_literal_fires() {
 }
 
 #[test]
-fn weak_crypto_literal_does_not_fire() {
+fn weak_crypto_strong_literal_does_not_fire() {
     let results = analyze_with_security_sink("security-weak-crypto");
     assert!(
         !anchored_on(&results, "src/safe.ts"),
-        "a literal crypto algorithm must not be flagged"
+        "a strong literal crypto algorithm must not be flagged"
     );
 }
 
@@ -628,5 +634,50 @@ fn issue_897_deferred_and_excluded_patterns_do_not_fire() {
 fn issue_897_default_off_emits_nothing() {
     assert!(no_tainted_sinks(&analyze_default_off(
         "security-catalogue-sinks-897"
+    )));
+}
+
+#[test]
+fn issue_875_literal_aware_sinks_fire() {
+    let results = analyze_with_security_sink("security-literal-sinks-875");
+    assert_candidate(
+        &results,
+        "src/post-message.ts",
+        "postmessage-wildcard-origin",
+        346,
+    );
+    assert_candidate(&results, "src/cors.ts", "permissive-cors", 942);
+    assert_candidate(&results, "src/cookie.ts", "insecure-cookie", 614);
+    assert_candidate(&results, "src/weak-crypto.ts", "weak-crypto", 327);
+    assert_candidate(&results, "src/weak-crypto-named.ts", "weak-crypto", 327);
+    assert_candidate(&results, "src/string-code.ts", "code-injection", 95);
+    assert_candidate(
+        &results,
+        "src/function-constructor.ts",
+        "code-injection",
+        95,
+    );
+    assert_candidate(&results, "src/jwt.ts", "jwt-alg-none", 347);
+    assert_candidate(&results, "src/math-random.ts", "insecure-randomness", 338);
+    assert_candidate(&results, "src/metadata-url.ts", "ssrf", 918);
+}
+
+#[test]
+fn issue_875_literal_safe_and_unprovenanced_forms_do_not_fire() {
+    let results = analyze_with_security_sink("security-literal-sinks-875");
+    assert!(
+        !anchored_on(&results, "src/safe.ts"),
+        "safe literal forms and UI randomness must not be flagged"
+    );
+    assert!(
+        !anchored_on(&results, "src/no-provenance.ts"),
+        "same-named local cors and jwt helpers must not satisfy provenance-gated rows"
+    );
+}
+
+#[test]
+fn issue_875_default_off_emits_nothing() {
+    assert!(no_tainted_sinks(&analyze_default_off(
+        "security-literal-sinks-875"
     )));
 }

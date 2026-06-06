@@ -88,15 +88,18 @@ fn build_actions() -> Vec<IssueAction> {
 ///
 /// `None` provenance is always satisfied. Otherwise the module must import a
 /// source matching the spec (tolerant of the `node:` prefix on either side).
-/// For `command-injection`, the binding's `local_name` must also be the leading
-/// identifier of the callee path (the binding-trace narrowing from the plan's
-/// Open question 3), matching the `child_process.fork()` provenance precedent.
+/// For binding-sensitive rows, the binding's `local_name` must also be the
+/// leading identifier of the callee path, matching the `child_process.fork()`
+/// provenance precedent.
 fn provenance_satisfied(matcher: &Matcher, module: &ModuleInfo, callee_path: &str) -> bool {
     let Some(spec) = &matcher.import_provenance else {
         return true;
     };
     let leading_ident = callee_path.split('.').next().unwrap_or(callee_path);
-    let want_binding_trace = matcher.id == "command-injection";
+    let want_binding_trace = matches!(
+        matcher.id.as_str(),
+        "command-injection" | "permissive-cors" | "jwt-alg-none"
+    ) || (matcher.id == "weak-crypto" && matcher.is_literal_aware());
     module.imports.iter().any(|imp| {
         let source_matches = import_source_matches(&imp.source, spec);
         if !source_matches {
@@ -216,6 +219,18 @@ fn sink_source_title<'t>(sink: &SinkSite, tainted: &FxHashMap<&str, &'t str>) ->
         .find_map(|name| tainted.get(name.as_str()).copied())
 }
 
+fn matcher_admits_sink(matcher: &Matcher, sink: &SinkSite, source_title: Option<&str>) -> bool {
+    matcher.sink_shape == sink.sink_shape
+        && matcher.arg_index == sink.arg_index
+        && (sink.arg_is_non_literal || matcher.is_literal_aware())
+        && matcher.admits_arg_kind(sink.arg_kind)
+        && matcher.literal_value_satisfied(sink.arg_literal.as_ref())
+        && matcher.object_properties_satisfied(&sink.object_properties)
+        && matcher.context_satisfied(&sink.arg_idents)
+        && (!matcher.requires_source || source_title.is_some())
+        && matcher.first_matching_pattern(&sink.callee_path).is_some()
+}
+
 /// Run the catalogue-driven tainted-sink detector. Returns the findings plus the
 /// in-band blind-spot stats. Callers gate this on the `security_sink` rule
 /// severity; it never runs under bare `fallow` or the `audit` gate.
@@ -284,12 +299,7 @@ pub fn find_tainted_sinks(
         for sink in &module.security_sinks {
             let source_title = sink_source_title(sink, &tainted_locals);
             let Some(matcher) = active.iter().copied().find(|m| {
-                m.sink_shape == sink.sink_shape
-                    && m.arg_index == sink.arg_index
-                    && sink.arg_is_non_literal
-                    && m.admits_arg_kind(sink.arg_kind)
-                    && (!m.requires_source || source_title.is_some())
-                    && m.first_matching_pattern(&sink.callee_path).is_some()
+                matcher_admits_sink(m, sink, source_title)
                     && provenance_satisfied(m, module, &sink.callee_path)
             }) else {
                 continue;
@@ -423,6 +433,8 @@ mod tests {
             arg_index: 0,
             arg_is_non_literal: true,
             arg_kind: fallow_types::extract::SinkArgKind::Other,
+            arg_literal: None,
+            object_properties: Vec::new(),
             arg_idents: idents.iter().map(|s| (*s).to_string()).collect(),
             span_start: 0,
             span_end: 1,
