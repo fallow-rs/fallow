@@ -589,11 +589,12 @@ fn strip_jsdoc_line_prefix(prefix: &str) -> &str {
 }
 
 fn jsdoc_line_prefix_has_type_tag(prefix: &str) -> bool {
-    const TYPE_TAGS: [&str; 14] = [
+    const TYPE_TAGS: [&str; 17] = [
         "@arg",
         "@argument",
         "@augments",
         "@callback",
+        "@enum",
         "@extends",
         "@implements",
         "@param",
@@ -601,6 +602,8 @@ fn jsdoc_line_prefix_has_type_tag(prefix: &str) -> bool {
         "@prop",
         "@return",
         "@returns",
+        "@satisfies",
+        "@template",
         "@this",
         "@type",
         "@typedef",
@@ -1181,6 +1184,39 @@ mod tests {
     fn scan_jsdoc_type_tag_before_brace_line_is_still_matched() {
         let body = "\n * @type\n * { import('./real').Foo }\n";
         let imports = scan(body);
+        assert_eq!(imports.len(), 1, "got: {imports:?}");
+        assert_eq!(imports[0].source, "./real");
+        assert_eq!(
+            imports[0].imported_name,
+            ImportedName::Named("Foo".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_satisfies_type_tag_is_still_matched() {
+        let imports = scan(" * @satisfies {import('./real').Foo}");
+        assert_eq!(imports.len(), 1, "got: {imports:?}");
+        assert_eq!(imports[0].source, "./real");
+        assert_eq!(
+            imports[0].imported_name,
+            ImportedName::Named("Foo".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_template_constraint_type_tag_is_still_matched() {
+        let imports = scan(" * @template {import('./real').Foo} T");
+        assert_eq!(imports.len(), 1, "got: {imports:?}");
+        assert_eq!(imports[0].source, "./real");
+        assert_eq!(
+            imports[0].imported_name,
+            ImportedName::Named("Foo".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_enum_type_tag_is_still_matched() {
+        let imports = scan(" * @enum {import('./real').Foo}");
         assert_eq!(imports.len(), 1, "got: {imports:?}");
         assert_eq!(imports[0].source, "./real");
         assert_eq!(
