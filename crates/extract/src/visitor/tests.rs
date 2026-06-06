@@ -136,6 +136,64 @@ fn security_literal_sink_capture_unwraps_ts_assertions() {
 }
 
 #[test]
+fn security_cleartext_call_capture_records_literal_argument() {
+    let info = parse(r#"fetch("http://api.example.com/status");"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "fetch" && sink.arg_index == 0)
+        .expect("cleartext fetch sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::Call);
+    assert_eq!(sink.arg_index, 0);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String(
+            "http://api.example.com/status".to_string()
+        ))
+    );
+}
+
+#[test]
+fn security_cleartext_websocket_capture_records_constructor_argument() {
+    let info = parse(r#"const socket = new WebSocket("ws://socket.example.com/events");"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "WebSocket" && sink.arg_index == 0)
+        .expect("cleartext WebSocket sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::NewExpression);
+    assert_eq!(sink.arg_index, 0);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String(
+            "ws://socket.example.com/events".to_string()
+        ))
+    );
+}
+
+#[test]
+fn security_cleartext_literal_capture_rejects_encrypted_schemes() {
+    let info = parse(
+        r#"
+            fetch("https://api.example.com/status");
+            fetch("sftp://files.example.com/report.csv");
+            new WebSocket("wss://socket.example.com/events");
+        "#,
+    );
+
+    assert!(
+        info.security_sinks.is_empty(),
+        "encrypted URL literals must not be captured as cleartext security sinks"
+    );
+}
+
+#[test]
 fn security_tls_env_assignment_capture_records_literal_argument() {
     let info = parse(r#"process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";"#);
     let sink = info

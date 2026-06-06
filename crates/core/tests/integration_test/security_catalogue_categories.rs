@@ -805,6 +805,39 @@ fn issue_875_default_off_emits_nothing() {
 }
 
 #[test]
+fn issue_901_literal_tier_rows_fire() {
+    let results = analyze_with_security_sink("security-literal-sinks-901");
+    assert_candidate(&results, "src/weak-ecb.ts", "weak-crypto", 327);
+    assert_eq!(
+        anchored_count(&results, "src/weak-ecb.ts"),
+        2,
+        "weak ECB fixture should cover namespace and named crypto imports"
+    );
+    assert_candidate(&results, "src/cleartext.ts", "cleartext-transport", 319);
+    assert_eq!(
+        anchored_count(&results, "src/cleartext.ts"),
+        3,
+        "cleartext fixture should cover fetch, axios, and WebSocket literal URLs"
+    );
+}
+
+#[test]
+fn issue_901_safe_literals_do_not_fire() {
+    let results = analyze_with_security_sink("security-literal-sinks-901");
+    assert!(
+        !anchored_on(&results, "src/safe.ts"),
+        "encrypted transports and authenticated cipher modes must not be flagged"
+    );
+}
+
+#[test]
+fn issue_901_default_off_emits_nothing() {
+    assert!(no_tainted_sinks(&analyze_default_off(
+        "security-literal-sinks-901"
+    )));
+}
+
+#[test]
 fn issue_895_tls_validation_disabled_forms_fire() {
     let results = analyze_with_security_sink("security-tls-validation-disabled-895");
     assert_candidate(

@@ -237,7 +237,11 @@ use crate::MemberKind;
 /// `process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"` literal assignment as a
 /// security sink site. Pre-128 entries omit that sink until the file is
 /// re-extracted.
-pub(super) const CACHE_VERSION: u32 = 128;
+///
+/// Bumped to 129 for issue #901: JS/TS extraction now captures cleartext
+/// request URL literals and `new WebSocket("ws://...")` as security sink sites.
+/// Pre-129 entries omit those sinks until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 129;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

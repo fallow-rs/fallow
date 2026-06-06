@@ -4071,10 +4071,17 @@ fn should_capture_literal_sink_arg(
                 || (arg_index == 0 && is_weak_crypto_literal_callee(callee_path))
                 || (arg_index == 0 && is_string_code_callee(callee_path))
                 || (arg_index == 0
+                    && is_cleartext_transport_literal_callee(callee_path)
+                    && is_cleartext_transport_literal(&value))
+                || (arg_index == 0
                     && is_literal_metadata_url_callee(callee_path)
                     && is_metadata_service_literal(&value))
         }
-        SinkShape::NewExpression => arg_index == 0 && callee_path == "Function",
+        SinkShape::NewExpression => {
+            arg_index == 0
+                && (callee_path == "Function"
+                    || (callee_path == "WebSocket" && is_cleartext_websocket_literal(&value)))
+        }
         SinkShape::MemberAssign => {
             arg_index == 0
                 && callee_path == "process.env.NODE_TLS_REJECT_UNAUTHORIZED"
@@ -4106,6 +4113,32 @@ fn is_weak_crypto_literal_callee(callee_path: &str) -> bool {
 
 fn is_string_code_callee(callee_path: &str) -> bool {
     matches!(callee_path, "setTimeout" | "setInterval")
+}
+
+fn is_cleartext_transport_literal_callee(callee_path: &str) -> bool {
+    matches!(
+        callee_path,
+        "fetch"
+            | "axios.get"
+            | "axios.post"
+            | "got"
+            | "ky"
+            | "needle"
+            | "request"
+            | "http.request"
+            | "http.get"
+            | "superagent.get"
+            | "undici.request"
+    )
+}
+
+fn is_cleartext_transport_literal(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower.starts_with("http://") || lower.starts_with("ftp://")
+}
+
+fn is_cleartext_websocket_literal(value: &str) -> bool {
+    value.to_ascii_lowercase().starts_with("ws://")
 }
 
 fn is_literal_metadata_url_callee(callee_path: &str) -> bool {

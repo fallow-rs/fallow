@@ -461,6 +461,40 @@ arg_kinds = ["literal"]
 literal_values = ["0"]
 evidence_template = "NODE_TLS_REJECT_UNAUTHORIZED is set to `0`, disabling TLS certificate validation for Node HTTPS clients. Candidate for verification: remove the assignment or set it to `1`."
 
+# -- CWE-319: Cleartext transport literals (issue #901)
+[[matcher]]
+id = "cleartext-transport"
+cwe = 319
+title = "Cleartext transport URL"
+sink_shape = "new-expression"
+callee_patterns = ["WebSocket"]
+arg_index = 0
+arg_kinds = ["literal"]
+literal_contains = ["ws://"]
+evidence_template = "Cleartext WebSocket URL passed to new {callee}(). Candidate for verification: use `wss://` unless this is intentionally confined to a trusted local network."
+
+[[matcher]]
+id = "cleartext-transport"
+cwe = 319
+title = "Cleartext transport URL"
+sink_shape = "call"
+callee_patterns = ["fetch", "got", "ky", "needle", "request"]
+arg_index = 0
+arg_kinds = ["literal"]
+literal_contains = ["http://", "ftp://"]
+evidence_template = "Cleartext URL passed to {callee}(). Candidate for verification: use HTTPS or another encrypted transport unless this is intentionally confined to a trusted local network."
+
+[[matcher]]
+id = "cleartext-transport"
+cwe = 319
+title = "Cleartext transport URL"
+sink_shape = "member-call"
+callee_patterns = ["axios.get", "axios.post", "http.request", "http.get", "superagent.get", "undici.request"]
+arg_index = 0
+arg_kinds = ["literal"]
+literal_contains = ["http://", "ftp://"]
+evidence_template = "Cleartext URL passed to {callee}(). Candidate for verification: use HTTPS or another encrypted transport unless this is intentionally confined to a trusted local network."
+
 # ── CWE-942: Permissive CORS with credentials ──────────────────────────────
 [[matcher]]
 id = "permissive-cors"
@@ -530,6 +564,18 @@ evidence_template = "Weak literal algorithm passed to {callee}(). Candidate for 
 id = "weak-crypto"
 cwe = 327
 title = "Weak crypto algorithm"
+sink_shape = "member-call"
+callee_patterns = ["crypto.createCipher", "crypto.createDecipher", "crypto.createCipheriv", "crypto.createDecipheriv"]
+arg_index = 0
+arg_kinds = ["literal"]
+literal_contains = ["-ecb"]
+import_provenance = "node:crypto"
+evidence_template = "ECB-mode cipher algorithm passed to {callee}(). Candidate for verification: use an authenticated mode such as AES-GCM or ChaCha20-Poly1305."
+
+[[matcher]]
+id = "weak-crypto"
+cwe = 327
+title = "Weak crypto algorithm"
 sink_shape = "call"
 callee_patterns = ["createHash", "createCipher", "createDecipher", "createCipheriv", "createDecipheriv"]
 arg_index = 0
@@ -537,6 +583,18 @@ arg_kinds = ["literal"]
 literal_values = ["md5", "sha1", "des", "rc4", "des-ede3-cbc"]
 import_provenance = "node:crypto"
 evidence_template = "Weak literal algorithm passed to {callee}(). Candidate for verification: use a modern hash or cipher such as SHA-256 or AES-GCM."
+
+[[matcher]]
+id = "weak-crypto"
+cwe = 327
+title = "Weak crypto algorithm"
+sink_shape = "call"
+callee_patterns = ["createCipher", "createDecipher", "createCipheriv", "createDecipheriv"]
+arg_index = 0
+arg_kinds = ["literal"]
+literal_contains = ["-ecb"]
+import_provenance = "node:crypto"
+evidence_template = "ECB-mode cipher algorithm passed to {callee}(). Candidate for verification: use an authenticated mode such as AES-GCM or ChaCha20-Poly1305."
 
 # ── CWE-338: Insecure randomness (issue #897) ───────────────────────────────
 # `Math.random()` is captured only when it feeds a token-like variable or
