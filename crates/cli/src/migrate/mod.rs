@@ -168,7 +168,7 @@ pub fn run_migrate(
     if should_emit_glob_caveat(&result) {
         eprintln!();
         eprintln!(
-            "Note: knip and fallow use different glob engines; verify migrated entry / ignorePatterns with `fallow check` before relying on CI. See https://docs.fallow.tools/migration/from-knip"
+            "Note: knip and fallow use different glob engines; verify migrated entry / ignorePatterns with `fallow dead-code` before relying on CI. See https://docs.fallow.tools/migration/from-knip"
         );
     }
 

@@ -117,7 +117,7 @@ pub(super) fn apply_catalog_entry_fixes(
                 fixes.push(skip_record(
                     entry,
                     "line_out_of_range",
-                    "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since fallow check ran",
+                    "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since fallow dead-code ran",
                     output,
                     relative_path,
                 ));
@@ -266,7 +266,7 @@ pub(super) fn apply_empty_catalog_group_fixes(
                 fixes.push(skip_group_record(
                     group,
                     "line_out_of_range",
-                    "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since fallow check ran",
+                    "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since fallow dead-code ran",
                     output,
                     relative_path,
                 ));

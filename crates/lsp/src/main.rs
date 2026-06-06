@@ -1124,7 +1124,7 @@ async fn main() {
 /// workspace root.
 ///
 /// The LSP analyzes the workspace root ONCE over the whole tree, matching the
-/// CLI (`fallow check` loads one config via `find_and_load(root)` and runs one
+/// CLI (`fallow dead-code` loads one config via `find_and_load(root)` and runs one
 /// `analyze_full` pass). `analyze_full` is already workspace-aware: it discovers
 /// every workspace package and runs `run_workspace_fast` per package for plugin
 /// and script detection, so a single root pass covers all sub-package source

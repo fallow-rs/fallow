@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **User-facing messages now name the canonical `fallow dead-code` command instead of the deprecated `check` alias.** The `fallow fix` content-changed and low-confidence skip notes, the `fallow migrate` glob-engine caveat, the regression-baseline regenerate hint, and the `fix_preview` / `fix_apply` MCP tool descriptions previously told you to run `fallow check`, which already prints a deprecation warning. They now consistently reference `fallow dead-code`. The `check` alias keeps working unchanged.
+
 ## [2.89.0] - 2026-06-05
 
 ### Fixed

@@ -48,7 +48,7 @@ impl SkipReason {
     pub(super) fn human_message(self, path: &Path) -> String {
         match self {
             Self::ContentChanged => format!(
-                "Skipping {}: file content changed since `fallow check` ran. Re-run `fallow fix` to refresh the analysis first.",
+                "Skipping {}: file content changed since `fallow dead-code` ran. Re-run `fallow fix` to refresh the analysis first.",
                 path.display(),
             ),
             Self::MixedLineEndings => format!(

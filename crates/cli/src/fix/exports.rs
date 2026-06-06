@@ -187,7 +187,7 @@ fn push_export_fix_json(
 /// consumer directory, has its export removals withheld as low confidence
 /// (issue #602): the rewrite would risk breaking a consumer fallow's graph
 /// cannot see. The skip is recorded on `plan` so the orchestrator surfaces
-/// it; the export stays reported by `fallow check`.
+/// it; the export stays reported by `fallow dead-code`.
 #[expect(
     clippy::too_many_arguments,
     reason = "per-file fixer threads root + grouped findings + the confidence-gate set + the shared plan + output mode + sink; bundling into a context struct would not reduce the irreducible inputs and hurts locality with the sibling fixers"

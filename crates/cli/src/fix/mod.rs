@@ -457,7 +457,7 @@ fn emit_human_summary(
             "files"
         };
         eprintln!(
-            "Skipped {content_changed_count} {files_word} that changed since `fallow check` ran. Re-run `fallow fix` to refresh the analysis."
+            "Skipped {content_changed_count} {files_word} that changed since `fallow dead-code` ran. Re-run `fallow fix` to refresh the analysis."
         );
     }
     if mixed_line_endings_count > 0 {
@@ -477,7 +477,7 @@ fn emit_human_summary(
             "files"
         };
         eprintln!(
-            "Kept unused exports in {low_confidence_count} {files_word} where consumers may be invisible to fallow (test, mock, and fixture directories, or files with unresolved imports). Still listed by `fallow check`; remove by hand if you have confirmed they are unused.",
+            "Kept unused exports in {low_confidence_count} {files_word} where consumers may be invisible to fallow (test, mock, and fixture directories, or files with unresolved imports). Still listed by `fallow dead-code`; remove by hand if you have confirmed they are unused.",
         );
     }
 }

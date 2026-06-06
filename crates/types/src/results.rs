@@ -994,7 +994,7 @@ pub struct EmptyCatalogGroup {
 ///
 /// `pnpm install` errors at install time with `ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL`
 /// when this happens. fallow surfaces it statically so the failure is caught at
-/// `fallow check` time, before any install.
+/// `fallow dead-code` time, before any install.
 ///
 /// The default catalog (bare `catalog:` references the top-level `catalog:` map)
 /// uses `catalog_name: "default"`. Named catalogs (`catalog:react17`) use the

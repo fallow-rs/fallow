@@ -441,7 +441,7 @@ pub fn capture_workspace_warnings<F: FnOnce() -> R, R>(body: F) -> (R, Vec<Works
 /// [`super::discover_workspaces_with_diagnostics`] and (after config load
 /// completes) by the analysis pipeline's `find_undeclared_workspaces_*`
 /// pass. Consumers (`fallow list --workspaces`, the JSON envelope on
-/// `fallow check / dupes / health`) read via [`workspace_diagnostics_for`].
+/// `fallow dead-code / dupes / health`) read via [`workspace_diagnostics_for`].
 ///
 /// Canonicalisation matches the dedupe-key canonicalisation in
 /// [`plan_warnings`]: two callers on the same physical root coalesce, and

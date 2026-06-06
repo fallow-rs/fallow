@@ -45,7 +45,7 @@ pub fn cached_to_module(
 
 /// Reconstruct a [`ModuleInfo`](crate::ModuleInfo) from a [`CachedModule`], skipping
 /// the per-function complexity vec when `need_complexity` is `false`. Avoids the
-/// `Vec<FunctionComplexity>` clone on warm runs of commands (e.g. `fallow check`)
+/// `Vec<FunctionComplexity>` clone on warm runs of commands (e.g. `fallow dead-code`)
 /// that don't consume complexity, which adds up across tens of thousands of files.
 #[must_use]
 #[expect(

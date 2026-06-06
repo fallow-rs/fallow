@@ -384,13 +384,13 @@ fn format_schema_mismatch_error(
             "regression baseline '{path_display}' appears to predate schema versioning \
              (schema_version is 0; this fallow build expects {expected}).\n\
              The baseline was written by fallow {writer_version}.\n\
-             Regenerate it by running: fallow check --save-regression-baseline {path_display}"
+             Regenerate it by running: fallow dead-code --save-regression-baseline {path_display}"
         )
     } else {
         format!(
             "regression baseline '{path_display}' has schema_version {actual} but this fallow build expects {expected}.\n\
              The baseline was written by fallow {writer_version}.\n\
-             Regenerate it by running: fallow check --save-regression-baseline {path_display}"
+             Regenerate it by running: fallow dead-code --save-regression-baseline {path_display}"
         )
     }
 }
@@ -405,7 +405,7 @@ fn format_missing_schema_version_error(path: &Path) -> String {
         "regression baseline '{path_display}' is missing the schema_version field; \
          this fallow build expects schema_version {expected}.\n\
          The baseline likely predates schema versioning or was hand-edited.\n\
-         Regenerate it by running: fallow check --save-regression-baseline {path_display}"
+         Regenerate it by running: fallow dead-code --save-regression-baseline {path_display}"
     )
 }
 
@@ -1264,7 +1264,7 @@ mod tests {
         assert!(msg.contains("expects 1"));
         assert!(msg.contains("fallow 3.0.0"));
         assert!(
-            msg.contains("fallow check --save-regression-baseline /repo/.fallow-baseline.json")
+            msg.contains("fallow dead-code --save-regression-baseline /repo/.fallow-baseline.json")
         );
         assert!(!msg.to_lowercase().contains("refresh"));
         assert!(msg.contains("schema_version"));
@@ -1277,7 +1277,7 @@ mod tests {
         assert!(msg.contains("predate"));
         assert!(msg.contains("fallow 2.0.0"));
         assert!(
-            msg.contains("fallow check --save-regression-baseline /repo/.fallow-baseline.json")
+            msg.contains("fallow dead-code --save-regression-baseline /repo/.fallow-baseline.json")
         );
     }
 
@@ -1285,7 +1285,7 @@ mod tests {
     fn format_missing_schema_version_error_includes_regenerate_command() {
         let msg = format_missing_schema_version_error(Path::new("/repo/baseline.json"));
         assert!(msg.contains("missing the schema_version field"));
-        assert!(msg.contains("fallow check --save-regression-baseline /repo/baseline.json"));
+        assert!(msg.contains("fallow dead-code --save-regression-baseline /repo/baseline.json"));
     }
 
     #[test]

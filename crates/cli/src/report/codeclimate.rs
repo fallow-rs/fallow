@@ -1776,7 +1776,7 @@ mod tests {
     /// rule short-circuit clears the vec, but the generic-iterator helpers
     /// in `codeclimate.rs` previously called `severity_to_codeclimate`
     /// before checking emptiness and panicked at `Severity::Off`).
-    /// `fallow check --format codeclimate --production` on any project
+    /// `fallow dead-code --format codeclimate --production` on any project
     /// with a `--production`-suppressed dep / export / member rule used to
     /// exit 101 with `entered unreachable code` at `ci/severity.rs:28`.
     /// This test exercises all three previously-vulnerable helpers

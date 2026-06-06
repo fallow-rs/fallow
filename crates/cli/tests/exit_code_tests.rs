@@ -942,7 +942,7 @@ fn regression_baseline_schema_mismatch_json_format_emits_structured_error_envelo
     assert!(msg.contains("expects 1"), "msg: {msg}");
     assert!(msg.contains("fallow 9.9.9"), "msg: {msg}");
     assert!(
-        msg.contains("fallow check --save-regression-baseline"),
+        msg.contains("fallow dead-code --save-regression-baseline"),
         "msg should include regenerate command, msg: {msg}"
     );
 }
