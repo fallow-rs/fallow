@@ -389,6 +389,78 @@ arg_kinds = ["literal"]
 literal_values = ["*"]
 evidence_template = "Wildcard target origin passed to {callee}(). Candidate for verification: use a specific trusted origin instead of `*`."
 
+# CWE-295: TLS certificate validation disabled
+[[matcher]]
+id = "tls-validation-disabled"
+cwe = 295
+title = "TLS validation disabled"
+sink_shape = "member-call"
+callee_patterns = ["https.request", "https.get"]
+arg_index = 1
+arg_kinds = ["object"]
+import_provenance = "node:https"
+object_properties = [{ key = "rejectUnauthorized", boolean = false }]
+evidence_template = "TLS options passed to {callee}() disable certificate validation. Candidate for verification: remove `rejectUnauthorized: false` so certificate validation remains enabled."
+
+[[matcher]]
+id = "tls-validation-disabled"
+cwe = 295
+title = "TLS validation disabled"
+sink_shape = "call"
+callee_patterns = ["request", "get"]
+arg_index = 1
+arg_kinds = ["object"]
+import_provenance = "node:https"
+object_properties = [{ key = "rejectUnauthorized", boolean = false }]
+evidence_template = "TLS options passed to {callee}() disable certificate validation. Candidate for verification: remove `rejectUnauthorized: false` so certificate validation remains enabled."
+
+[[matcher]]
+id = "tls-validation-disabled"
+cwe = 295
+title = "TLS validation disabled"
+sink_shape = "member-call"
+callee_patterns = ["tls.connect"]
+arg_index = 0
+arg_kinds = ["object"]
+import_provenance = "node:tls"
+object_properties = [{ key = "rejectUnauthorized", boolean = false }]
+evidence_template = "TLS options passed to {callee}() disable certificate validation. Candidate for verification: remove `rejectUnauthorized: false` so certificate validation remains enabled."
+
+[[matcher]]
+id = "tls-validation-disabled"
+cwe = 295
+title = "TLS validation disabled"
+sink_shape = "call"
+callee_patterns = ["connect"]
+arg_index = 0
+arg_kinds = ["object"]
+import_provenance = "node:tls"
+object_properties = [{ key = "rejectUnauthorized", boolean = false }]
+evidence_template = "TLS options passed to {callee}() disable certificate validation. Candidate for verification: remove `rejectUnauthorized: false` so certificate validation remains enabled."
+
+[[matcher]]
+id = "tls-validation-disabled"
+cwe = 295
+title = "TLS validation disabled"
+sink_shape = "new-expression"
+callee_patterns = ["https.Agent", "Agent"]
+arg_index = 0
+arg_kinds = ["object"]
+import_provenance = "node:https"
+object_properties = [{ key = "rejectUnauthorized", boolean = false }]
+evidence_template = "TLS agent options passed to new {callee}() disable certificate validation. Candidate for verification: remove `rejectUnauthorized: false` so certificate validation remains enabled."
+
+[[matcher]]
+id = "tls-validation-disabled"
+cwe = 295
+title = "TLS validation disabled"
+sink_shape = "member-assign"
+callee_patterns = ["process.env.NODE_TLS_REJECT_UNAUTHORIZED"]
+arg_index = 0
+arg_kinds = ["literal"]
+literal_values = ["0"]
+evidence_template = "NODE_TLS_REJECT_UNAUTHORIZED is set to `0`, disabling TLS certificate validation for Node HTTPS clients. Candidate for verification: remove the assignment or set it to `1`."
+
 # ── CWE-942: Permissive CORS with credentials ──────────────────────────────
 [[matcher]]
 id = "permissive-cors"

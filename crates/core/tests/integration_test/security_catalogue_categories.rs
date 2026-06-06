@@ -77,6 +77,19 @@ fn category_count(results: &AnalysisResults, category: &str) -> usize {
         .count()
 }
 
+fn anchored_count(results: &AnalysisResults, suffix: &str) -> usize {
+    results
+        .security_findings
+        .iter()
+        .filter(|f| {
+            f.path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with(suffix)
+        })
+        .count()
+}
+
 fn no_tainted_sinks(results: &AnalysisResults) -> bool {
     results
         .security_findings
@@ -783,5 +796,60 @@ fn issue_875_literal_safe_and_unprovenanced_forms_do_not_fire() {
 fn issue_875_default_off_emits_nothing() {
     assert!(no_tainted_sinks(&analyze_default_off(
         "security-literal-sinks-875"
+    )));
+}
+
+#[test]
+fn issue_895_tls_validation_disabled_forms_fire() {
+    let results = analyze_with_security_sink("security-tls-validation-disabled-895");
+    assert_candidate(
+        &results,
+        "src/https-request.ts",
+        "tls-validation-disabled",
+        295,
+    );
+    assert_candidate(
+        &results,
+        "src/https-agent.ts",
+        "tls-validation-disabled",
+        295,
+    );
+    assert_candidate(
+        &results,
+        "src/tls-connect.ts",
+        "tls-validation-disabled",
+        295,
+    );
+    assert_candidate(
+        &results,
+        "src/named-imports.ts",
+        "tls-validation-disabled",
+        295,
+    );
+    assert_eq!(
+        anchored_count(&results, "src/named-imports.ts"),
+        4,
+        "named-import fixture should cover named request, named get, namespace get, and named connect"
+    );
+    assert_candidate(&results, "src/env.ts", "tls-validation-disabled", 295);
+}
+
+#[test]
+fn issue_895_safe_and_unprovenanced_forms_do_not_fire() {
+    let results = analyze_with_security_sink("security-tls-validation-disabled-895");
+    assert!(
+        !anchored_on(&results, "src/safe.ts"),
+        "TLS validation kept enabled must not be flagged"
+    );
+    assert!(
+        !anchored_on(&results, "src/no-provenance.ts"),
+        "same-named local TLS helpers without Node provenance must not fire"
+    );
+}
+
+#[test]
+fn issue_895_default_off_emits_nothing() {
+    assert!(no_tainted_sinks(&analyze_default_off(
+        "security-tls-validation-disabled-895"
     )));
 }

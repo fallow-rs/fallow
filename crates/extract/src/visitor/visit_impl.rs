@@ -4075,7 +4075,12 @@ fn should_capture_literal_sink_arg(
                     && is_metadata_service_literal(&value))
         }
         SinkShape::NewExpression => arg_index == 0 && callee_path == "Function",
-        SinkShape::MemberAssign | SinkShape::TaggedTemplate | SinkShape::JsxAttr => false,
+        SinkShape::MemberAssign => {
+            arg_index == 0
+                && callee_path == "process.env.NODE_TLS_REJECT_UNAUTHORIZED"
+                && value == "0"
+        }
+        SinkShape::TaggedTemplate | SinkShape::JsxAttr => false,
     }
 }
 
@@ -4915,33 +4920,58 @@ impl ModuleInfoExtractor {
     }
 
     /// Capture a member-assignment sink site (e.g. `el.innerHTML = userInput`).
-    /// Only static-member targets with a non-literal RHS are captured; a target
-    /// whose object cannot be flattened increments the blind-spot counter.
+    /// Static-member targets with a non-literal RHS are captured; one exact
+    /// literal TLS-env assignment is admitted because the literal value is the
+    /// security signal. A target whose object cannot be flattened increments
+    /// the blind-spot counter.
     fn capture_member_assign_sink(&mut self, expr: &AssignmentExpression<'_>) {
         let AssignmentTarget::StaticMemberExpression(member) = &expr.left else {
             return;
         };
-        if !is_non_literal_arg(&expr.right) {
-            return;
-        }
         let Some(object_path) = flatten_callee_path(&member.object) else {
             self.security_sinks_skipped += 1;
             return;
         };
-        self.record_sanitized_sink_arg(expr.span.start, 0, &expr.right);
+        let callee_path = format!("{}.{}", object_path, member.property.name);
+        let arg_is_non_literal = is_non_literal_arg(&expr.right);
+        if !arg_is_non_literal
+            && !should_capture_literal_sink_arg(
+                &callee_path,
+                SinkShape::MemberAssign,
+                0,
+                &expr.right,
+            )
+        {
+            return;
+        }
+        if arg_is_non_literal {
+            self.record_sanitized_sink_arg(expr.span.start, 0, &expr.right);
+        }
         let object_keys = object_key_metadata(&expr.right);
         self.security_sinks.push(SinkSite {
             sink_shape: SinkShape::MemberAssign,
-            callee_path: format!("{}.{}", object_path, member.property.name),
+            callee_path,
             arg_index: 0,
-            arg_is_non_literal: true,
-            arg_kind: classify_arg_kind(&expr.right),
-            arg_literal: None,
+            arg_is_non_literal,
+            arg_kind: if arg_is_non_literal {
+                classify_arg_kind(&expr.right)
+            } else {
+                SinkArgKind::Literal
+            },
+            arg_literal: sink_literal_value(&expr.right),
             object_properties: object_literal_properties(&expr.right),
             object_property_keys: object_keys.keys,
             object_property_keys_complete: object_keys.complete,
-            arg_idents: collect_arg_idents(&expr.right),
-            arg_source_paths: collect_arg_source_paths(&expr.right),
+            arg_idents: if arg_is_non_literal {
+                collect_arg_idents(&expr.right)
+            } else {
+                Vec::new()
+            },
+            arg_source_paths: if arg_is_non_literal {
+                collect_arg_source_paths(&expr.right)
+            } else {
+                Vec::new()
+            },
             span_start: expr.span.start,
             span_end: expr.span.end,
         });

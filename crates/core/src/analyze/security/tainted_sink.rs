@@ -98,7 +98,11 @@ fn provenance_satisfied(matcher: &Matcher, module: &ModuleInfo, callee_path: &st
     let leading_ident = callee_path.split('.').next().unwrap_or(callee_path);
     let want_binding_trace = matches!(
         matcher.id.as_str(),
-        "command-injection" | "permissive-cors" | "jwt-alg-none" | "jwt-verify-missing-algorithms"
+        "command-injection"
+            | "permissive-cors"
+            | "jwt-alg-none"
+            | "jwt-verify-missing-algorithms"
+            | "tls-validation-disabled"
     ) || (matcher.id == "weak-crypto" && matcher.is_literal_aware());
     module.imports.iter().any(|imp| {
         let source_matches = import_source_matches(&imp.source, spec);

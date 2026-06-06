@@ -232,7 +232,12 @@ use crate::MemberKind;
 /// object-key metadata so missing-option security rows can distinguish absent
 /// keys from non-literal option values. Pre-127 entries lack that metadata until
 /// the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 127;
+///
+/// Bumped to 128 for issue #895: JS/TS extraction now captures the exact
+/// `process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"` literal assignment as a
+/// security sink site. Pre-128 entries omit that sink until the file is
+/// re-extracted.
+pub(super) const CACHE_VERSION: u32 = 128;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

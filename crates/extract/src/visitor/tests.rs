@@ -136,6 +136,25 @@ fn security_literal_sink_capture_unwraps_ts_assertions() {
 }
 
 #[test]
+fn security_tls_env_assignment_capture_records_literal_argument() {
+    let info = parse(r#"process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "process.env.NODE_TLS_REJECT_UNAUTHORIZED")
+        .expect("TLS env assignment sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::MemberAssign);
+    assert_eq!(sink.arg_index, 0);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String("0".to_string()))
+    );
+}
+
+#[test]
 fn security_new_expression_capture_records_constructor_argument() {
     let info = parse(r#"const compiled = new Function("return 1");"#);
     let sink = info
