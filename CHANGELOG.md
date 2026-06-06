@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fallow security` now detects literal-backed sink candidates for deterministic security smells.** The security catalogue can now opt into literal capture for high-signal rows, including wildcard `postMessage` origins, permissive CORS credentials, insecure cookie options, weak crypto algorithms, string-code execution, JWT `alg: "none"`, token-context `Math.random()`, and cloud metadata host literals. Existing non-literal sink rows keep their conservative default behavior, and findings remain opt-in candidates for agent verification. (Closes [#875](https://github.com/fallow-rs/fallow/issues/875).)
 - **`fallow security` now detects Vite `import.meta.env` secret reads in client bundles.** Static `import.meta.env.SECRET` member reads now feed the same opt-in client/server leak candidate rule as `process.env.SECRET`, while public Vite-prefixed reads such as `import.meta.env.VITE_API_URL` stay excluded. Package import-condition fixtures cover the server-only export path so browser imports do not inherit a node-only secret source. (Closes [#877](https://github.com/fallow-rs/fallow/issues/877).)
 
 ### Changed

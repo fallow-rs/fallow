@@ -6,6 +6,7 @@ use super::*;
 use crate::tests::parse_ts as parse;
 use crate::{ImportedName, MemberKind};
 use fallow_types::discover::FileId;
+use fallow_types::extract::{SinkArgKind, SinkLiteralValue, SinkShape};
 use helpers::regex_pattern_to_suffix;
 
 #[test]
@@ -96,6 +97,60 @@ fn merge_into_ors_cjs_flag() {
     extractor.merge_into(&mut base);
 
     assert!(base.has_cjs_exports, "merge_into should OR the cjs flag");
+}
+
+#[test]
+fn security_literal_sink_capture_records_literal_argument() {
+    let info = parse(r#"postMessage({ status: "ready" }, "*");"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "postMessage" && sink.arg_index == 1)
+        .expect("postMessage target-origin sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::Call);
+    assert_eq!(sink.arg_index, 1);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String("*".to_string()))
+    );
+}
+
+#[test]
+fn security_new_expression_capture_records_constructor_argument() {
+    let info = parse(r#"const compiled = new Function("return 1");"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "Function")
+        .expect("Function constructor sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::NewExpression);
+    assert_eq!(sink.arg_index, 0);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String("return 1".to_string()))
+    );
+}
+
+#[test]
+fn security_zero_arg_member_call_capture_records_token_context() {
+    let info = parse("const sessionToken = Math.random().toString(36);");
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "Math.random")
+        .expect("Math.random context sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::MemberCall);
+    assert_eq!(sink.arg_index, 0);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::NoArg);
+    assert_eq!(sink.arg_idents, vec!["sessionToken".to_string()]);
 }
 
 #[test]
