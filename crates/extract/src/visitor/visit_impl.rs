@@ -4028,7 +4028,7 @@ struct ObjectKeyMetadata {
 }
 
 fn object_key_metadata(expr: &Expression<'_>) -> ObjectKeyMetadata {
-    let Expression::ObjectExpression(obj) = unwrap_parens(expr) else {
+    let Expression::ObjectExpression(obj) = unwrap_static_expr(expr) else {
         return ObjectKeyMetadata {
             keys: Vec::new(),
             complete: false,

@@ -775,6 +775,11 @@ fn issue_875_literal_aware_sinks_fire() {
         "jwt-verify-missing-algorithms",
         347,
     );
+    assert_eq!(
+        anchored_count(&results, "src/jwt-verify.ts"),
+        3,
+        "jwt verify fixture should cover missing options, missing algorithms, and static-wrapped missing algorithms"
+    );
     assert_candidate(&results, "src/math-random.ts", "insecure-randomness", 338);
     assert_candidate(&results, "src/metadata-url.ts", "ssrf", 918);
 }

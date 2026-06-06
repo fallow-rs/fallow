@@ -23,6 +23,7 @@ export function safeForms(): void {
   const previewNumber = Math.random();
   jwt.sign({ sub: "1" }, "ignored", { algorithm: "HS256" });
   jwt.verify("token", "ignored", { algorithms: ["HS256"] });
+  jwt.verify("token", "ignored", { algorithms: ["HS256"] } as const);
   jwt.verify("token", "ignored", { ["algorithms"]: ["HS256"] });
   jwt.verify("token", "ignored", { ...{ algorithms: ["HS256"] } });
   void previewNumber;
