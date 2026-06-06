@@ -50,6 +50,31 @@ fn sink_captures_direct_arg_source_paths() {
 }
 
 #[test]
+fn sink_captures_typed_arg_idents_and_source_paths() {
+    let info = parse_ts(
+        "logger.error(secret as string);\nlogger.warn(process.env.API_TOKEN satisfies string);",
+    );
+    let error_sink = info
+        .security_sinks
+        .iter()
+        .find(|s| s.callee_path == "logger.error")
+        .expect("logger error sink captured");
+    assert!(error_sink.arg_idents.iter().any(|n| n == "secret"));
+
+    let warn_sink = info
+        .security_sinks
+        .iter()
+        .find(|s| s.callee_path == "logger.warn")
+        .expect("logger warn sink captured");
+    assert!(
+        warn_sink
+            .arg_source_paths
+            .iter()
+            .any(|path| path == "process.env")
+    );
+}
+
+#[test]
 fn sink_captures_arg_idents_in_call_argument() {
     // `db.query(buildSql(userId))` -> references both the callee `buildSql` and
     // the nested argument `userId`.

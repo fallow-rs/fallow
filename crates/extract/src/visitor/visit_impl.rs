@@ -4246,6 +4246,15 @@ fn collect_source_paths_into(expr: &Expression<'_>, out: &mut Vec<String>) {
         Expression::ParenthesizedExpression(paren) => {
             collect_source_paths_into(&paren.expression, out);
         }
+        Expression::TSAsExpression(ts_as) => {
+            collect_source_paths_into(&ts_as.expression, out);
+        }
+        Expression::TSSatisfiesExpression(ts_sat) => {
+            collect_source_paths_into(&ts_sat.expression, out);
+        }
+        Expression::TSNonNullExpression(ts_non_null) => {
+            collect_source_paths_into(&ts_non_null.expression, out);
+        }
         Expression::StaticMemberExpression(member) => {
             if let Some(path) = flatten_member_path(expr) {
                 push_member_source_paths(&path, out);
@@ -4299,6 +4308,11 @@ fn collect_idents_into(expr: &Expression<'_>, out: &mut Vec<String>) {
     match expr {
         Expression::Identifier(ident) => push_ident(&ident.name, out),
         Expression::ParenthesizedExpression(paren) => collect_idents_into(&paren.expression, out),
+        Expression::TSAsExpression(ts_as) => collect_idents_into(&ts_as.expression, out),
+        Expression::TSSatisfiesExpression(ts_sat) => collect_idents_into(&ts_sat.expression, out),
+        Expression::TSNonNullExpression(ts_non_null) => {
+            collect_idents_into(&ts_non_null.expression, out);
+        }
         Expression::StaticMemberExpression(member) => {
             // The leading object root carries the taint (`id` in `id.value`,
             // `req` in `req.query.id`); the property name is a static key.
