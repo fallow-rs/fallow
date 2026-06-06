@@ -1036,6 +1036,9 @@ fn try_style_condition_package_resolution(
         {
             return Some(ResolveResult::NpmPackage(pkg_name));
         }
+        if let Some(pkg_name) = package_usage_name_for_external_bare_specifier(specifier) {
+            return Some(ResolveResult::NpmPackage(pkg_name));
+        }
         return Some(ResolveResult::ExternalFile(canonical));
     }
 
@@ -1065,6 +1068,22 @@ pub(super) fn package_usage_name_for_resolved_package(
     } else {
         Some(resolved_package)
     }
+}
+
+/// Package-usage key for a valid bare package specifier whose resolved file
+/// canonicalized outside the analyzed root before a `node_modules` segment could
+/// be observed. This preserves dependency accounting for pnpm workspace symlinks
+/// when users analyze a workspace package directly.
+pub(super) fn package_usage_name_for_external_bare_specifier(specifier: &str) -> Option<String> {
+    if !is_bare_specifier(specifier) || is_path_alias(specifier) {
+        return None;
+    }
+    if specifier.starts_with('@') && specifier.split('/').nth(1).is_none_or(str::is_empty) {
+        return None;
+    }
+
+    let package_name = extract_package_name(specifier);
+    is_valid_package_name(&package_name).then_some(package_name)
 }
 
 /// Resolve a single import specifier to a target.
@@ -1268,6 +1287,10 @@ pub(super) fn resolve_specifier(
                         } else {
                             ResolveResult::NpmPackage(pkg_name)
                         }
+                    } else if let Some(pkg_name) =
+                        package_usage_name_for_external_bare_specifier(specifier)
+                    {
+                        ResolveResult::NpmPackage(pkg_name)
                     } else {
                         ResolveResult::ExternalFile(canonical)
                     }

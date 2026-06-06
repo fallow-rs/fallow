@@ -534,6 +534,97 @@ fn package_imports_external_targets_credit_dependency_usage() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn issue_1008_pnpm_workspace_dependency_imported_from_subpackage_root() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let monorepo = tmp.path();
+    let consumer = monorepo.join("packages/consumer");
+    let shared = monorepo.join("packages/shared");
+
+    std::fs::create_dir_all(consumer.join("src")).expect("create consumer src");
+    std::fs::create_dir_all(consumer.join("node_modules/@mre")).expect("create consumer scope");
+    std::fs::create_dir_all(shared.join("src")).expect("create shared src");
+
+    std::fs::write(
+        monorepo.join("package.json"),
+        r#"{
+  "name": "issue-1008-root",
+  "private": true,
+  "workspaces": ["packages/*"]
+}"#,
+    )
+    .expect("write root package.json");
+    std::fs::write(
+        monorepo.join("pnpm-workspace.yaml"),
+        "packages:\n  - packages/*\n",
+    )
+    .expect("write pnpm workspace");
+    std::fs::write(
+        consumer.join("package.json"),
+        r#"{
+  "name": "@mre/consumer",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@mre/shared": "workspace:*",
+    "left-pad": "1.3.0"
+  }
+}"#,
+    )
+    .expect("write consumer package.json");
+    std::fs::write(
+        shared.join("package.json"),
+        r#"{
+  "name": "@mre/shared",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}"#,
+    )
+    .expect("write shared package.json");
+    std::fs::write(
+        consumer.join("src/index.ts"),
+        "import { formatPayload } from '@mre/shared';\nexport const value = formatPayload('ok');\n",
+    )
+    .expect("write consumer source");
+    std::fs::write(
+        shared.join("src/index.ts"),
+        "export const formatPayload = (value: string): string => value;\n",
+    )
+    .expect("write shared source");
+    std::os::unix::fs::symlink("../../../shared", consumer.join("node_modules/@mre/shared"))
+        .expect("symlink workspace package");
+
+    let config = create_config(consumer);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dep_names.contains(&"@mre/shared"),
+        "imported workspace dependency should be credited through pnpm symlink: {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"left-pad"),
+        "unrelated dependency should still be reported unused: {unused_dep_names:?}"
+    );
+
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specifiers.contains(&"@mre/shared"),
+        "workspace dependency import should not become unresolved: {unresolved_specifiers:?}"
+    );
+}
+
 #[test]
 fn package_imports_array_fallback_resolves_reachable_target() {
     let tmp = tempfile::tempdir().expect("create temp dir");

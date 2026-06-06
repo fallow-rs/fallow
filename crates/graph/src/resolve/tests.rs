@@ -1491,6 +1491,30 @@ fn package_usage_name_prefers_declared_name_for_bare_specifiers() {
 }
 
 #[test]
+fn external_bare_specifier_package_usage_credits_declared_package() {
+    assert_eq!(
+        specifier::package_usage_name_for_external_bare_specifier("@mre/shared"),
+        Some("@mre/shared".to_string()),
+    );
+    assert_eq!(
+        specifier::package_usage_name_for_external_bare_specifier("@mre/shared/subpath"),
+        Some("@mre/shared".to_string()),
+    );
+    assert_eq!(
+        specifier::package_usage_name_for_external_bare_specifier("@mre"),
+        None,
+    );
+    assert_eq!(
+        specifier::package_usage_name_for_external_bare_specifier("#polyfill"),
+        None,
+    );
+    assert_eq!(
+        specifier::package_usage_name_for_external_bare_specifier("@/shared"),
+        None,
+    );
+}
+
+#[test]
 fn specifier_html_root_relative_unresolvable() {
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/public/index.html");
