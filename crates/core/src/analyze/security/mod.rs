@@ -28,7 +28,7 @@ mod rank;
 mod tainted_sink;
 
 pub use catalogue::catalogue_title;
-pub use rank::rank_security_findings;
+pub use rank::{annotate_dead_code_cross_links, rank_security_findings};
 pub use tainted_sink::{CategoryFilter, find_tainted_sinks};
 
 /// The inline suppression kind token for the client-server-leak rule.
@@ -327,6 +327,7 @@ fn build_leak_finding(
         source_backed: false,
         trace,
         actions: build_actions(),
+        dead_code: None,
         reachability: None,
     }
 }
@@ -365,6 +366,7 @@ fn build_direct_finding(
             role: TraceHopRole::SecretSource,
         }],
         actions: build_actions(),
+        dead_code: None,
         reachability: None,
     }
 }

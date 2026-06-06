@@ -891,6 +891,34 @@ pub struct SecurityReachability {
     pub crosses_boundary: bool,
 }
 
+/// Dead-code cross-link attached to a security candidate when fallow's dead-code
+/// pass reports the same anchor as removable code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityDeadCodeContext {
+    /// Dead-code issue kind that matched the security candidate.
+    pub kind: SecurityDeadCodeKind,
+    /// Unused export name when `kind` is `unused-export`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_name: Option<String>,
+    /// Dead-code finding line when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// Agent-facing guidance for deciding between deletion and hardening.
+    pub guidance: String,
+}
+
+/// Dead-code issue kind linked to a security candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SecurityDeadCodeKind {
+    /// The candidate's anchor file is also reported as an unused file.
+    UnusedFile,
+    /// The candidate's anchor sits on an unused export declaration.
+    UnusedExport,
+}
+
 /// A local security CANDIDATE for downstream agent verification, NOT a verified
 /// vulnerability. Emitted only by `fallow security`, never under bare `fallow`
 /// or the `audit` gate. There is deliberately no `confidence` or
@@ -938,6 +966,11 @@ pub struct SecurityFinding {
     /// suppress hint (`auto_fixable: false`); there is no auto-fix because
     /// verification is the agent's job, not fallow's.
     pub actions: Vec<IssueAction>,
+    /// Dead-code cross-link when the same sink candidate sits in code fallow also
+    /// reports as removable. Agents should verify the dead-code finding and delete
+    /// the code instead of hardening the sink when deletion is safe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dead_code: Option<SecurityDeadCodeContext>,
     /// Graph-derived reachability ranking signal (issue #860). `None` until the
     /// post-detection ranking pass fills it; additive on the wire (skipped when
     /// absent). Drives the order findings are emitted in: candidates reachable

@@ -611,6 +611,10 @@ export type SecurityFindingKind = ("client-server-leak" | "tainted-sink")
  */
 export type TraceHopRole = ("client-boundary" | "intermediate" | "secret-source" | "sink")
 /**
+ * Dead-code issue kind linked to a security candidate.
+ */
+export type SecurityDeadCodeKind = ("unused-file" | "unused-export")
+/**
  * Discriminator value for [`CodeClimateIssue::kind`].
  */
 export type CodeClimateIssueKind = "issue"
@@ -4918,6 +4922,12 @@ trace: TraceHop[]
  */
 actions: IssueAction[]
 /**
+ * Dead-code cross-link when the same sink candidate sits in code fallow also
+ * reports as removable. Agents should verify the dead-code finding and delete
+ * the code instead of hardening the sink when deletion is safe.
+ */
+dead_code?: (SecurityDeadCodeContext | null)
+/**
  * Graph-derived reachability ranking signal (issue #860). `None` until the
  * post-detection ranking pass fills it; additive on the wire (skipped when
  * absent). Drives the order findings are emitted in: candidates reachable
@@ -4946,6 +4956,25 @@ line: number
  */
 col: number
 role: TraceHopRole
+}
+/**
+ * Dead-code cross-link attached to a security candidate when fallow's dead-code
+ * pass reports the same anchor as removable code.
+ */
+export interface SecurityDeadCodeContext {
+kind: SecurityDeadCodeKind
+/**
+ * Unused export name when `kind` is `unused-export`.
+ */
+export_name?: (string | null)
+/**
+ * Dead-code finding line when available.
+ */
+line?: (number | null)
+/**
+ * Agent-facing guidance for deciding between deletion and hardening.
+ */
+guidance: string
 }
 /**
  * Graph-derived reachability ranking signal for a security candidate. Computed

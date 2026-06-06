@@ -760,6 +760,7 @@ mod tests {
                 },
             ],
             actions: Vec::new(),
+            dead_code: None,
             reachability: None,
         });
 

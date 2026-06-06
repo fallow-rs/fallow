@@ -9923,6 +9923,17 @@
           },
           "description": "Machine-actionable next steps. Always emitted (possibly empty for\nforward-compat). For security candidates this is a single file-level\nsuppress hint (`auto_fixable: false`); there is no auto-fix because\nverification is the agent's job, not fallow's."
         },
+        "dead_code": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityDeadCodeContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Dead-code cross-link when the same sink candidate sits in code fallow also\nreports as removable. Agents should verify the dead-code finding and delete\nthe code instead of hardening the sink when deletion is safe."
+        },
         "reachability": {
           "anyOf": [
             {
@@ -10265,6 +10276,53 @@
       ],
       "title": "fallow workspaces --format json",
       "description": "`fallow workspaces --format json` envelope."
+    },
+    "SecurityDeadCodeContext": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "Dead-code issue kind that matched the security candidate.",
+          "$ref": "#/definitions/SecurityDeadCodeKind"
+        },
+        "export_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Unused export name when `kind` is `unused-export`."
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Dead-code finding line when available."
+        },
+        "guidance": {
+          "type": "string",
+          "description": "Agent-facing guidance for deciding between deletion and hardening."
+        }
+      },
+      "required": [
+        "kind",
+        "guidance"
+      ],
+      "description": "Dead-code cross-link attached to a security candidate when fallow's dead-code\npass reports the same anchor as removable code."
+    },
+    "SecurityDeadCodeKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "unused-file",
+          "description": "The candidate's anchor file is also reported as an unused file."
+        },
+        {
+          "type": "string",
+          "const": "unused-export",
+          "description": "The candidate's anchor sits on an unused export declaration."
+        }
+      ],
+      "description": "Dead-code issue kind linked to a security candidate."
     }
   }
 }

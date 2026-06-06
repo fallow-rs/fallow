@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use fallow_config::{OutputFormat, ProductionAnalysis, Severity};
-use fallow_core::results::{SecurityFinding, SecurityFindingKind, TraceHopRole};
+use fallow_core::results::{
+    SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind, TraceHopRole,
+};
 use serde::Serialize;
 
 use crate::error::emit_error;
@@ -292,6 +294,9 @@ pub fn render_human(output: &SecurityOutput) -> String {
                 finding.line,
             ));
             out.push_str(&format!("    {}\n", finding.evidence));
+            if let Some(hint) = dead_code_hint(finding) {
+                out.push_str(&format!("    dead-code: {hint}\n"));
+            }
             if let Some(reach) = finding.reachability {
                 let entry = if reach.reachable_from_entry {
                     "reachable from a runtime entry point"
@@ -324,6 +329,11 @@ pub fn render_human(output: &SecurityOutput) -> String {
                     "    Next: check whether the import is type-only, server-only, or behind a \
                      build-time guard; if the value never ships to the client bundle, this \
                      candidate is a false positive.\n",
+                );
+            } else if finding.dead_code.is_some() {
+                out.push_str(
+                    "    Next: verify the dead-code finding and delete the code if safe; \
+                     otherwise verify and harden the sink.\n",
                 );
             }
             out.push('\n');
@@ -379,6 +389,23 @@ fn security_finding_label(finding: &SecurityFinding) -> String {
                 None => title.to_string(),
             }
         }
+    }
+}
+
+fn dead_code_hint(finding: &SecurityFinding) -> Option<String> {
+    let context = finding.dead_code.as_ref()?;
+    match context.kind {
+        SecurityDeadCodeKind::UnusedFile => Some(
+            "also reported as unused-file; delete this file instead of hardening the sink"
+                .to_string(),
+        ),
+        SecurityDeadCodeKind::UnusedExport => Some(format!(
+            "also reported as unused-export{}; remove the export instead of hardening the sink",
+            context
+                .export_name
+                .as_ref()
+                .map_or(String::new(), |name| format!(" `{name}`"))
+        )),
     }
 }
 
@@ -463,6 +490,10 @@ fn render_sarif(output: &SecurityOutput) -> String {
         .iter()
         .map(|finding| {
             let rule_id = sarif_rule_id(finding);
+            let message = dead_code_hint(finding).map_or_else(
+                || finding.evidence.clone(),
+                |hint| format!("{} Dead-code cross-link: {hint}.", finding.evidence),
+            );
             let related: Vec<serde_json::Value> = finding
                 .trace
                 .iter()
@@ -478,7 +509,7 @@ fn render_sarif(output: &SecurityOutput) -> String {
             serde_json::json!({
                 "ruleId": rule_id,
                 "level": "note",
-                "message": { "text": finding.evidence },
+                "message": { "text": message },
                 "locations": [sarif_location(&finding.path, finding.line, finding.col)],
                 "relatedLocations": related,
                 "partialFingerprints": { "fallowSecurity/v1": fnv_hex(&fp) },
@@ -537,7 +568,10 @@ fn sarif_location(path: &Path, line: u32, col: u32) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::results::{SecurityFinding, SecurityFindingKind, TraceHop, TraceHopRole};
+    use fallow_core::results::{
+        SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind,
+        TraceHop, TraceHopRole,
+    };
 
     /// Build a finding anchored under `root` with a three-hop client -> secret trace.
     fn sample_finding(root: &Path) -> SecurityFinding {
@@ -571,6 +605,7 @@ mod tests {
             actions: vec![],
             category: None,
             cwe: None,
+            dead_code: None,
             reachability: None,
         }
     }
@@ -692,6 +727,26 @@ mod tests {
     }
 
     #[test]
+    fn human_render_shows_dead_code_hint_and_delete_next_step() {
+        colored::control::set_override(false);
+        let root = Path::new("/proj/root");
+        let mut finding = relativize_finding(sample_finding(root), root);
+        finding.kind = SecurityFindingKind::TaintedSink;
+        finding.dead_code = Some(SecurityDeadCodeContext {
+            kind: SecurityDeadCodeKind::UnusedFile,
+            export_name: None,
+            line: None,
+            guidance: "delete instead of harden".to_string(),
+        });
+        let out = render_human(&output_with(vec![finding], 0));
+        assert!(
+            out.contains("dead-code: also reported as unused-file"),
+            "got: {out}"
+        );
+        assert!(out.contains("delete the code if safe"), "got: {out}");
+    }
+
+    #[test]
     fn human_render_surfaces_unresolved_edge_blind_spot() {
         colored::control::set_override(false);
         let out = render_human(&output_with(vec![], 3));
@@ -714,6 +769,25 @@ mod tests {
     }
 
     #[test]
+    fn json_render_carries_dead_code_context() {
+        let root = Path::new("/proj/root");
+        let mut finding = relativize_finding(sample_finding(root), root);
+        finding.kind = SecurityFindingKind::TaintedSink;
+        finding.dead_code = Some(SecurityDeadCodeContext {
+            kind: SecurityDeadCodeKind::UnusedExport,
+            export_name: Some("handler".to_string()),
+            line: Some(12),
+            guidance: "remove export instead of harden".to_string(),
+        });
+        let rendered = render_json(&output_with(vec![finding], 0));
+        let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
+        let context = &value["security_findings"][0]["dead_code"];
+        assert_eq!(context["kind"], "unused-export");
+        assert_eq!(context["export_name"], "handler");
+        assert_eq!(context["line"], 12);
+    }
+
+    #[test]
     fn sarif_render_emits_note_level_with_fingerprint_and_related_locations() {
         let root = Path::new("/proj/root");
         let finding = relativize_finding(sample_finding(root), root);
@@ -731,6 +805,29 @@ mod tests {
         assert_eq!(result["relatedLocations"].as_array().unwrap().len(), 3);
         // Stable dedup fingerprint present for GHAS.
         assert!(result["partialFingerprints"]["fallowSecurity/v1"].is_string());
+    }
+
+    #[test]
+    fn sarif_render_includes_dead_code_hint_in_message() {
+        let root = Path::new("/proj/root");
+        let mut finding = relativize_finding(sample_finding(root), root);
+        finding.kind = SecurityFindingKind::TaintedSink;
+        finding.dead_code = Some(SecurityDeadCodeContext {
+            kind: SecurityDeadCodeKind::UnusedFile,
+            export_name: None,
+            line: None,
+            guidance: "delete instead of harden".to_string(),
+        });
+        let rendered = render_sarif(&output_with(vec![finding], 0));
+        let sarif: serde_json::Value = serde_json::from_str(&rendered).expect("valid SARIF JSON");
+        let message = sarif["runs"][0]["results"][0]["message"]["text"]
+            .as_str()
+            .expect("message text");
+        assert!(message.contains("Dead-code cross-link"), "got: {message}");
+        assert!(
+            message.contains("delete this file instead of hardening"),
+            "got: {message}"
+        );
     }
 
     #[test]

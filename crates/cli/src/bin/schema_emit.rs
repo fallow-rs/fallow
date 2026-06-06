@@ -93,11 +93,11 @@ use fallow_types::results::{
     DependencyOverrideMisconfigReason, DependencyOverrideSource, DuplicateExport,
     DuplicateLocation, EmptyCatalogGroup, EntryPointSummary, ExportUsage, FeatureFlag,
     FlagConfidence, FlagKind, ImportSite, MisconfiguredDependencyOverride, PrivateTypeLeak,
-    ReferenceLocation, SecurityFinding, SecurityFindingKind, SecurityReachability,
-    StaleSuppression, SuppressionOrigin, TestOnlyDependency, TraceHop, TraceHopRole,
-    TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport,
-    UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
-    UnusedMember,
+    ReferenceLocation, SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding,
+    SecurityFindingKind, SecurityReachability, StaleSuppression, SuppressionOrigin,
+    TestOnlyDependency, TraceHop, TraceHopRole, TypeOnlyDependency, UnlistedDependency,
+    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
+    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
 
 /// Workspace-relative path to the committed schema.
@@ -163,6 +163,10 @@ fn run() -> Result<(), String> {
 }
 
 /// Definitions owned by this binary; everything else is copied from the committed schema.
+#[expect(
+    clippy::too_many_lines,
+    reason = "schema definition registry is intentionally one explicit list"
+)]
 pub(crate) fn derived_definition_names() -> &'static [&'static str] {
     &[
         "BoundaryViolation",
@@ -310,6 +314,8 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "SecuritySchemaVersion",
         "SecurityFinding",
         "SecurityFindingKind",
+        "SecurityDeadCodeContext",
+        "SecurityDeadCodeKind",
         "SecurityReachability",
         "TraceHop",
         "TraceHopRole",
@@ -497,6 +503,8 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<ImpactReport>();
 
     let _ = generator.subschema_for::<SecurityFindingKind>();
+    let _ = generator.subschema_for::<SecurityDeadCodeKind>();
+    let _ = generator.subschema_for::<SecurityDeadCodeContext>();
     let _ = generator.subschema_for::<TraceHopRole>();
     let _ = generator.subschema_for::<TraceHop>();
     let _ = generator.subschema_for::<SecurityReachability>();

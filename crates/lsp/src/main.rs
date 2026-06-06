@@ -2246,6 +2246,7 @@ export function choose(value: number): string {
                 source_backed: false,
                 trace: vec![],
                 actions: vec![],
+                dead_code: None,
                 reachability: None,
             }],
             security_unresolved_edge_files: 2,

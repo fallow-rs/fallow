@@ -16,10 +16,155 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::results::{SecurityFinding, SecurityReachability};
+use fallow_types::extract::{ExportName, ModuleInfo};
+use fallow_types::output::{FixAction, FixActionType, IssueAction};
+use fallow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding};
+use fallow_types::results::{
+    SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind,
+    SecurityReachability,
+};
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
+
+use super::{LineOffsetsMap, byte_offset_to_line_col};
+
+const UNUSED_FILE_GUIDANCE: &str = "This sink sits in a file fallow also reports as unused. Verify the dead-code finding, then delete the file instead of hardening the sink.";
+const UNUSED_EXPORT_GUIDANCE: &str = "This sink sits on an export fallow also reports as unused. Verify the dead-code finding, then remove the export instead of hardening the sink.";
+
+/// Annotate tainted-sink candidates that overlap dead-code findings from the same
+/// analysis run. Client-server leak findings stay unchanged because #884 was
+/// narrowed to sink candidates.
+pub fn annotate_dead_code_cross_links(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    unused_files: &[UnusedFileFinding],
+    unused_exports: &[UnusedExportFinding],
+    findings: &mut [SecurityFinding],
+) {
+    if findings.is_empty() || (unused_files.is_empty() && unused_exports.is_empty()) {
+        return;
+    }
+
+    let unused_file_paths: FxHashSet<&Path> =
+        unused_files.iter().map(|f| f.file.path.as_path()).collect();
+    let modules_by_id: FxHashMap<FileId, &ModuleInfo> = modules
+        .iter()
+        .map(|module| (module.file_id, module))
+        .collect();
+    let module_by_path: FxHashMap<&Path, &ModuleInfo> = graph
+        .modules
+        .iter()
+        .filter_map(|node| {
+            modules_by_id
+                .get(&node.file_id)
+                .map(|module| (node.path.as_path(), *module))
+        })
+        .collect();
+
+    for finding in findings {
+        if !matches!(finding.kind, SecurityFindingKind::TaintedSink) {
+            continue;
+        }
+        if unused_file_paths.contains(finding.path.as_path()) {
+            finding.dead_code = Some(SecurityDeadCodeContext {
+                kind: SecurityDeadCodeKind::UnusedFile,
+                export_name: None,
+                line: None,
+                guidance: UNUSED_FILE_GUIDANCE.to_string(),
+            });
+            prepend_dead_code_action(finding);
+            continue;
+        }
+
+        if let Some(export) = matching_unused_export(
+            module_by_path.get(finding.path.as_path()).copied(),
+            line_offsets_by_file,
+            unused_exports,
+            finding,
+        ) {
+            finding.dead_code = Some(SecurityDeadCodeContext {
+                kind: SecurityDeadCodeKind::UnusedExport,
+                export_name: Some(export.export.export_name.clone()),
+                line: Some(export.export.line),
+                guidance: UNUSED_EXPORT_GUIDANCE.to_string(),
+            });
+            prepend_dead_code_action(finding);
+        }
+    }
+}
+
+fn matching_unused_export<'a>(
+    module: Option<&ModuleInfo>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    unused_exports: &'a [UnusedExportFinding],
+    finding: &SecurityFinding,
+) -> Option<&'a UnusedExportFinding> {
+    let same_file = unused_exports
+        .iter()
+        .filter(|export| export.export.path == finding.path);
+
+    if let Some(module) = module {
+        for export in same_file.clone() {
+            let Some(info) = module
+                .exports
+                .iter()
+                .find(|info| export_name_matches(&info.name, &export.export.export_name))
+            else {
+                continue;
+            };
+            let (start_line, _) =
+                byte_offset_to_line_col(line_offsets_by_file, module.file_id, info.span.start);
+            let (end_line, _) =
+                byte_offset_to_line_col(line_offsets_by_file, module.file_id, info.span.end);
+            if start_line <= finding.line && finding.line <= end_line.max(start_line) {
+                return Some(export);
+            }
+        }
+    }
+
+    same_file
+        .into_iter()
+        .find(|export| export.export.line == finding.line)
+}
+
+fn export_name_matches(name: &ExportName, candidate: &str) -> bool {
+    match name {
+        ExportName::Named(name) => name == candidate,
+        ExportName::Default => candidate == "default",
+    }
+}
+
+fn prepend_dead_code_action(finding: &mut SecurityFinding) {
+    let Some(context) = &finding.dead_code else {
+        return;
+    };
+    let action = match context.kind {
+        SecurityDeadCodeKind::UnusedFile => IssueAction::Fix(FixAction {
+            kind: FixActionType::DeleteFile,
+            auto_fixable: false,
+            description: "Delete this unused file instead of hardening the sink".to_string(),
+            note: Some(
+                "Verify the unused-file finding before deleting production code".to_string(),
+            ),
+            available_in_catalogs: None,
+            suggested_target: None,
+        }),
+        SecurityDeadCodeKind::UnusedExport => IssueAction::Fix(FixAction {
+            kind: FixActionType::RemoveExport,
+            auto_fixable: false,
+            description: "Remove the unused export instead of hardening the sink".to_string(),
+            note: context
+                .export_name
+                .as_ref()
+                .map(|name| format!("Verify that export `{name}` is unused before removing it")),
+            available_in_catalogs: None,
+            suggested_target: None,
+        }),
+    };
+    finding.actions.insert(0, action);
+}
 
 /// Rank security findings in place: fill each finding's [`SecurityReachability`]
 /// from the graph, then re-sort so the highest-priority candidates sort first.
@@ -73,6 +218,8 @@ pub fn rank_security_findings(
                 let cb = rb.is_some_and(|r| r.crosses_boundary);
                 cb.cmp(&ca)
             })
+            // Then active-code candidates before dead-code candidates.
+            .then_with(|| a.dead_code.is_some().cmp(&b.dead_code.is_some()))
             // Deterministic tiebreak (matches the detectors' own ordering).
             .then_with(|| a.path.cmp(&b.path))
             .then_with(|| a.line.cmp(&b.line))
@@ -129,8 +276,11 @@ mod tests {
     use super::*;
 
     use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
-    use fallow_types::output::IssueAction;
-    use fallow_types::results::{SecurityFindingKind, TraceHop, TraceHopRole};
+    use fallow_types::output::{FixActionType, IssueAction};
+    use fallow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding};
+    use fallow_types::results::{
+        SecurityDeadCodeKind, SecurityFindingKind, TraceHop, TraceHopRole, UnusedExport, UnusedFile,
+    };
 
     use crate::graph::ModuleGraph;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
@@ -217,6 +367,7 @@ mod tests {
                 role: TraceHopRole::Sink,
             }],
             actions: Vec::<IssueAction>::new(),
+            dead_code: None,
             reachability: None,
             source_backed: false,
         }
@@ -295,6 +446,115 @@ mod tests {
         rank_security_findings(&graph, &empty, &mut findings);
         assert!(findings[0].path.ends_with("a.ts"));
         assert!(findings[1].path.ends_with("b.ts"));
+    }
+
+    #[test]
+    fn dead_code_cross_link_marks_unused_file_sink() {
+        let graph = build_graph(&["dead.ts"], &[], &[]);
+        let mut findings = vec![finding("dead.ts")];
+        let unused_files = vec![UnusedFileFinding::with_actions(UnusedFile {
+            path: PathBuf::from(ROOT).join("dead.ts"),
+        })];
+        let line_offsets = FxHashMap::default();
+
+        annotate_dead_code_cross_links(
+            &graph,
+            &[],
+            &line_offsets,
+            &unused_files,
+            &[],
+            &mut findings,
+        );
+
+        let context = findings[0].dead_code.as_ref().expect("dead-code context");
+        assert_eq!(context.kind, SecurityDeadCodeKind::UnusedFile);
+        assert_eq!(context.export_name, None);
+        match &findings[0].actions[0] {
+            IssueAction::Fix(action) => assert_eq!(action.kind, FixActionType::DeleteFile),
+            other => panic!("expected delete-file action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dead_code_cross_link_marks_same_line_unused_export_sink() {
+        let graph = build_graph(&["sink.ts"], &[], &[]);
+        let mut findings = vec![finding("sink.ts")];
+        let unused_exports = vec![UnusedExportFinding::with_actions(UnusedExport {
+            path: PathBuf::from(ROOT).join("sink.ts"),
+            export_name: "dangerous".to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        })];
+        let line_offsets = FxHashMap::default();
+
+        annotate_dead_code_cross_links(
+            &graph,
+            &[],
+            &line_offsets,
+            &[],
+            &unused_exports,
+            &mut findings,
+        );
+
+        let context = findings[0].dead_code.as_ref().expect("dead-code context");
+        assert_eq!(context.kind, SecurityDeadCodeKind::UnusedExport);
+        assert_eq!(context.export_name.as_deref(), Some("dangerous"));
+        assert_eq!(context.line, Some(1));
+        match &findings[0].actions[0] {
+            IssueAction::Fix(action) => assert_eq!(action.kind, FixActionType::RemoveExport),
+            other => panic!("expected remove-export action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dead_code_cross_link_skips_client_server_leak_findings() {
+        let graph = build_graph(&["dead.ts"], &[], &[]);
+        let mut findings = vec![finding("dead.ts")];
+        findings[0].kind = SecurityFindingKind::ClientServerLeak;
+        let unused_files = vec![UnusedFileFinding::with_actions(UnusedFile {
+            path: PathBuf::from(ROOT).join("dead.ts"),
+        })];
+        let line_offsets = FxHashMap::default();
+
+        annotate_dead_code_cross_links(
+            &graph,
+            &[],
+            &line_offsets,
+            &unused_files,
+            &[],
+            &mut findings,
+        );
+
+        assert!(findings[0].dead_code.is_none());
+        assert!(findings[0].actions.is_empty());
+    }
+
+    #[test]
+    fn active_code_sorts_ahead_of_dead_code_when_rank_signals_tie() {
+        let graph = build_graph(
+            &["entry.ts", "active.ts", "dead.ts"],
+            &[(0, 1), (0, 2)],
+            &[0],
+        );
+        let empty = FxHashSet::default();
+        let mut dead = finding("dead.ts");
+        dead.dead_code = Some(SecurityDeadCodeContext {
+            kind: SecurityDeadCodeKind::UnusedFile,
+            export_name: None,
+            line: None,
+            guidance: UNUSED_FILE_GUIDANCE.to_string(),
+        });
+        let mut findings = vec![dead, finding("active.ts")];
+
+        rank_security_findings(&graph, &empty, &mut findings);
+
+        assert!(findings[0].path.ends_with("active.ts"));
+        assert!(findings[0].dead_code.is_none());
+        assert!(findings[1].path.ends_with("dead.ts"));
+        assert!(findings[1].dead_code.is_some());
     }
 
     #[test]

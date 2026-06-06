@@ -916,8 +916,17 @@ pub fn find_dead_code_full(
     // those reachable from a runtime/application entry point with a wider
     // blast radius surface above isolated helpers/scripts. Reuses the existing
     // graph reachability + reverse-dep fan-in; pairs optionally with boundary
-    // crossings already computed this run. Pure graph-side glue + output order.
+    // crossings already computed this run. Issue #884 adds a dead-code cross-link
+    // before ranking so removable sink candidates sort below active-code peers.
     if !results.security_findings.is_empty() {
+        security::annotate_dead_code_cross_links(
+            graph,
+            modules,
+            &line_offsets_by_file,
+            &results.unused_files,
+            &results.unused_exports,
+            &mut results.security_findings,
+        );
         let boundary_anchor_paths: rustc_hash::FxHashSet<std::path::PathBuf> = results
             .boundary_violations
             .iter()

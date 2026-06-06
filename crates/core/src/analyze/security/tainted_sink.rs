@@ -383,6 +383,7 @@ pub fn find_tainted_sinks(
                     role: TraceHopRole::Sink,
                 }],
                 actions: build_actions(),
+                dead_code: None,
                 reachability: None,
             });
         }
