@@ -3,13 +3,12 @@
 //! These are CANDIDATES for downstream agent verification, NOT verified
 //! vulnerabilities. The MVP ships one graph-structural rule, `client-server-leak`:
 //! a `"use client"` file that transitively imports a module reading a non-public
-//! `process.env` secret. fallow emits the structural import-hop trace; it does not
-//! prove the path is exploitable.
+//! env secret. fallow emits the structural import-hop trace; it does not prove
+//! the path is exploitable.
 //!
 //! Blind spots (surfaced in-band via [`UnresolvedEdgeStats`], not silently
 //! dropped): the BFS follows only resolved static import edges, so dynamic
-//! `import()` and unresolved specifiers can hide a real leak. `import.meta.env`
-//! reads (the Vite secret convention) are not modeled as secret sources.
+//! `import()` and unresolved specifiers can hide a real leak.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
@@ -55,9 +54,9 @@ const fn secret_word(count: usize) -> &'static str {
     if count == 1 { "secret" } else { "secrets" }
 }
 
-/// `process.env` var-name prefixes that frameworks inline into the client bundle
-/// by convention. A read of one of these from a client file is normal and safe,
-/// so it does NOT mark a module as a secret source.
+/// Env var-name prefixes that frameworks inline into the client bundle by
+/// convention. A read of one of these from a client file is normal and safe, so
+/// it does NOT mark a module as a secret source.
 const PUBLIC_ENV_PREFIXES: &[&str] = &[
     "NEXT_PUBLIC_",
     "VITE_",
@@ -69,14 +68,18 @@ const PUBLIC_ENV_PREFIXES: &[&str] = &[
     "STORYBOOK_",
 ];
 
-/// Exact `process.env` var names that are public by convention (no prefix).
+/// Exact env var names that are public by convention (no prefix).
 const PUBLIC_ENV_EXACT: &[&str] = &["NODE_ENV"];
 
 /// The `member_accesses` object string for a `process.env.X` read.
 const PROCESS_ENV_OBJECT: &str = "process.env";
+/// The `member_accesses` object string for an `import.meta.env.X` read.
+const IMPORT_META_ENV_OBJECT: &str = "import.meta.env";
+/// Static env source objects that feed the client/server leak candidate rule.
+const ENV_SOURCE_OBJECTS: &[&str] = &[PROCESS_ENV_OBJECT, IMPORT_META_ENV_OBJECT];
 
-/// Whether a `process.env` var name is public-by-convention (build-inlined into
-/// the client bundle), and therefore not a secret.
+/// Whether an env var name is public-by-convention (build-inlined into the
+/// client bundle), and therefore not a secret.
 fn is_public_env_var(name: &str) -> bool {
     PUBLIC_ENV_EXACT.contains(&name) || PUBLIC_ENV_PREFIXES.iter().any(|p| name.starts_with(p))
 }
@@ -115,10 +118,9 @@ pub fn find_security_findings(
     )
 }
 
-/// Map each module that reads a non-public `process.env` secret to the var names
-/// it reads. `process.env.X` reads surface as `MemberAccess { object:
-/// "process.env", member: "X" }` (a side effect of static-member capture), so no
-/// new extraction is needed. `import.meta.env` is not captured (documented gap).
+/// Map each module that reads a non-public env secret to the source names it
+/// reads. `process.env.X` and `import.meta.env.X` reads both surface as
+/// `MemberAccess` rows from static-member capture.
 fn compute_secret_source_set(
     modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
 ) -> FxHashMap<FileId, Vec<String>> {
@@ -127,8 +129,10 @@ fn compute_secret_source_set(
         let mut vars: Vec<String> = module
             .member_accesses
             .iter()
-            .filter(|ma| ma.object == PROCESS_ENV_OBJECT && !is_public_env_var(&ma.member))
-            .map(|ma| ma.member.clone())
+            .filter(|ma| {
+                ENV_SOURCE_OBJECTS.contains(&ma.object.as_str()) && !is_public_env_var(&ma.member)
+            })
+            .map(|ma| format!("{}.{}", ma.object, ma.member))
             .collect();
         if vars.is_empty() {
             continue;
@@ -306,7 +310,7 @@ fn build_leak_finding(
     // make output environment-dependent.
     let evidence = format!(
         "This \"use client\" file transitively imports a module that reads non-public \
-         process.env {word}: {vars} (see the secret-source hop in the trace). Candidate for \
+         env {word}: {vars} (see the secret-source hop in the trace). Candidate for \
          verification: confirm the secret value actually reaches client-bundled code."
     );
 
@@ -341,7 +345,7 @@ fn build_direct_finding(
     let vars = var_list.join(", ");
     let word = secret_word(var_list.len());
     let evidence = format!(
-        "This \"use client\" file directly reads non-public process.env {word}: {vars}. \
+        "This \"use client\" file directly reads non-public env {word}: {vars}. \
          Candidate for verification: confirm the secret value actually reaches client-bundled \
          code (it may be guarded, server-only, or build-time-stripped)."
     );

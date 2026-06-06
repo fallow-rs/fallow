@@ -2,8 +2,9 @@
 //!
 //! Fixture `tests/fixtures/security-client-server-leak/` models a Next.js App
 //! Router shape: `"use client"` boundary files, server modules reading
-//! `process.env`, a public-prefix env read, a multi-hop barrel chain, a
-//! no-directive control, and a dynamic-import blind-spot file.
+//! `process.env` and `import.meta.env`, public-prefix env reads, a multi-hop
+//! barrel chain, a no-directive control, package self-reference exports, and a
+//! dynamic-import blind-spot file.
 
 use fallow_config::Severity;
 use fallow_core::results::{AnalysisResults, SecurityFindingKind, TraceHopRole};
@@ -76,12 +77,16 @@ fn no_use_client_directive_is_not_scanned() {
 
 #[test]
 fn public_prefix_env_read_is_not_a_secret() {
-    // Criterion 3: NEXT_PUBLIC_* reads are public-by-convention and must not
-    // mark a module as a secret source, so public-client.tsx is not flagged.
+    // Criterion 3: public-prefix reads are public-by-convention and must not
+    // mark a module as a secret source, so public clients are not flagged.
     let results = analyze_with_security();
     assert!(
         !anchored_on(&results, "src/public-client.tsx"),
         "a client file reaching only a NEXT_PUBLIC_ read must not be flagged"
+    );
+    assert!(
+        !anchored_on(&results, "src/vite-public-client.tsx"),
+        "a client file reaching only a VITE_ read must not be flagged"
     );
 }
 
@@ -156,6 +161,73 @@ fn direct_secret_read_in_client_file_is_reported() {
 }
 
 #[test]
+fn direct_import_meta_env_secret_read_in_client_file_is_reported() {
+    let results = analyze_with_security();
+    let finding = results
+        .security_findings
+        .iter()
+        .find(|f| {
+            f.path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with("src/vite-direct-client.tsx")
+        })
+        .expect("vite-direct-client.tsx should be flagged");
+    assert!(
+        finding
+            .evidence
+            .contains("import.meta.env.DIRECT_SECRET_KEY")
+    );
+    assert_eq!(finding.trace.len(), 1);
+    assert!(matches!(finding.trace[0].role, TraceHopRole::SecretSource));
+}
+
+#[test]
+fn transitive_import_meta_env_secret_read_is_reported() {
+    let results = analyze_with_security();
+    let finding = results
+        .security_findings
+        .iter()
+        .find(|f| {
+            f.path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with("src/vite-client.tsx")
+        })
+        .expect("vite-client.tsx should be flagged");
+    assert!(finding.evidence.contains("import.meta.env.SECRET_KEY"));
+    let last = finding.trace.last().expect("trace must have hops");
+    assert!(matches!(last.role, TraceHopRole::SecretSource));
+    assert!(
+        last.path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("src/vite-config.ts")
+    );
+}
+
+#[test]
+fn package_self_reference_import_condition_does_not_visit_server_entry() {
+    let results = analyze_with_security();
+    assert!(
+        !anchored_on(&results, "src/conditional-client.tsx"),
+        "client import through the package import condition must not report the node entry"
+    );
+    for finding in &results.security_findings {
+        assert!(
+            finding.trace.iter().all(|hop| {
+                !hop.path
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .ends_with("src/export-server.ts")
+            }),
+            "server-only export entry must not appear in client trace: {:?}",
+            finding.trace
+        );
+    }
+}
+
+#[test]
 fn file_level_suppression_opts_out() {
     // suppressed-client.tsx leaks but carries a file-level
     // `// fallow-ignore-file security-client-server-leak`, so it is not flagged.
@@ -182,15 +254,17 @@ fn every_finding_carries_a_suppress_action() {
 }
 
 #[test]
-fn exactly_three_leaks_reported() {
+fn exactly_five_leaks_reported() {
     // Genuine leaks: client.tsx (single-hop), client2.tsx (multi-hop),
-    // direct-client.tsx (direct read). public-client / plain / dyn-client /
-    // suppressed-client must NOT produce findings.
+    // direct-client.tsx (direct read), vite-client.tsx (transitive
+    // import.meta.env), and vite-direct-client.tsx (direct import.meta.env).
+    // public-client / vite-public-client / plain / dyn-client /
+    // conditional-client / suppressed-client must NOT produce findings.
     let results = analyze_with_security();
     assert_eq!(
         results.security_findings.len(),
-        3,
-        "expected exactly three client-server-leak findings, got: {:?}",
+        5,
+        "expected exactly five client-server-leak findings, got: {:?}",
         results
             .security_findings
             .iter()

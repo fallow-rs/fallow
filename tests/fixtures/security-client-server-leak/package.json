@@ -2,6 +2,13 @@
   "name": "security-client-server-leak-fixture",
   "version": "0.0.0",
   "private": true,
+  "exports": {
+    ".": {
+      "import": "./src/export-browser.ts",
+      "node": "./src/export-server.ts",
+      "default": "./src/export-browser.ts"
+    }
+  },
   "dependencies": {
     "next": "15.0.0",
     "react": "19.0.0"

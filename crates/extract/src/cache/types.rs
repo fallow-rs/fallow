@@ -209,7 +209,12 @@ use crate::MemberKind;
 /// examples, including examples that contain ordinary JavaScript brace groups.
 /// Pre-123 entries can carry stale type-only imports that surface as false
 /// `unresolved-imports` until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 123;
+///
+/// Bumped to 124 for issue #877: static `import.meta.env.SECRET` reads now
+/// populate `member_accesses` as `import.meta.env` source reads for the
+/// opt-in client/server security candidate detector. Pre-124 entries omit the
+/// source and would miss Vite env reads until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 124;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`fallow security` now detects Vite `import.meta.env` secret reads in client bundles.** Static `import.meta.env.SECRET` member reads now feed the same opt-in client/server leak candidate rule as `process.env.SECRET`, while public Vite-prefixed reads such as `import.meta.env.VITE_API_URL` stay excluded. Package import-condition fixtures cover the server-only export path so browser imports do not inherit a node-only secret source. (Closes [#877](https://github.com/fallow-rs/fallow/issues/877).)
+
 ### Changed
 
 - **User-facing messages now name the canonical `fallow dead-code` command instead of the deprecated `check` alias.** The `fallow fix` content-changed and low-confidence skip notes, the `fallow migrate` glob-engine caveat, the regression-baseline regenerate hint, and the `fix_preview` / `fix_apply` MCP tool descriptions previously told you to run `fallow check`, which already prints a deprecation warning. They now consistently reference `fallow dead-code`. The `check` alias keeps working unchanged.

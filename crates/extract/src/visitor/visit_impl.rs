@@ -3517,6 +3517,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_static_member_expression(&mut self, expr: &StaticMemberExpression<'a>) {
+        if is_import_meta_env_object(&expr.object) {
+            self.member_accesses.push(MemberAccess {
+                object: "import.meta.env".to_string(),
+                member: expr.property.name.to_string(),
+            });
+        }
         if let Some(object_name) = static_member_object_name(&expr.object) {
             self.member_accesses.push(MemberAccess {
                 object: object_name,
@@ -4087,6 +4093,19 @@ fn static_member_object_name(expr: &Expression<'_>) -> Option<String> {
         },
         _ => None,
     }
+}
+
+fn is_import_meta_env_object(expr: &Expression<'_>) -> bool {
+    matches!(
+        expr,
+        Expression::StaticMemberExpression(member)
+            if member.property.name == "env"
+                && matches!(
+                    &member.object,
+                    Expression::MetaProperty(meta)
+                        if meta.meta.name == "import" && meta.property.name == "meta"
+                )
+    )
 }
 
 fn is_require_resolve_callee(expr: &Expression<'_>) -> bool {

@@ -2737,6 +2737,41 @@ fn member_access_computed_dynamic_marks_whole() {
 }
 
 #[test]
+fn import_meta_env_static_member_access_tracked() {
+    let info = parse("const secret = import.meta.env.SECRET_KEY;");
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| { a.object == "import.meta.env" && a.member == "SECRET_KEY" }),
+        "static import.meta.env.SECRET_KEY should be tracked"
+    );
+}
+
+#[test]
+fn import_meta_env_computed_member_access_not_tracked() {
+    let info = parse("const key = 'SECRET_KEY'; const secret = import.meta.env[key];");
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "import.meta.env"),
+        "computed import.meta.env access should stay out of the static source set"
+    );
+}
+
+#[test]
+fn new_target_env_static_member_access_not_tracked_as_import_meta() {
+    let info = parse("function Factory() { return new.target.env.SECRET_KEY; }");
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "import.meta.env"),
+        "new.target.env.SECRET_KEY must not be labeled as import.meta.env"
+    );
+}
+
+#[test]
 fn member_access_this_read() {
     let info = parse(
         r"

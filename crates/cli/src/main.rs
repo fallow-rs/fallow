@@ -964,7 +964,8 @@ enum Command {
     ///
     /// Ships two complementary surfaces. (1) The graph-structural
     /// `client-server-leak` rule: a `"use client"` file that transitively imports
-    /// a module reading a non-public `process.env` secret. (2) The data-driven
+    /// a module reading a non-public env secret through `process.env` or
+    /// `import.meta.env`. (2) The data-driven
     /// `tainted-sink` catalogue: syntactic sink sites matched against a CWE
     /// catalogue (`security_matchers.toml`) spanning categories such as
     /// dangerous-html, template-escape-bypass, command-injection, code-injection,
@@ -975,8 +976,9 @@ enum Command {
     /// and webview-injection. All findings are CANDIDATES for
     /// verification, NOT verified vulnerabilities. This command is the only
     /// surface for security findings; they never appear under bare `fallow` or
-    /// the `audit` gate. Build-config and test files are excluded, and the Vite
-    /// `import.meta.env` secret convention is out of scope (blind spot). Honors
+    /// the `audit` gate. Build-config and test files are excluded, and public
+    /// env prefixes such as `NEXT_PUBLIC_` and `VITE_` are treated as public.
+    /// Honors
     /// `--root`, `--format {human,json,sarif}`, `--changed-since`, `--diff-file`,
     /// `--diff-stdin`, `--workspace`, `--changed-workspaces`, `--ci`,
     /// `--fail-on-issues`, `--sarif-file`, and `--summary`.
