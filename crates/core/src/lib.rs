@@ -336,6 +336,26 @@ pub fn analyze_with_usages(config: &ResolvedConfig) -> Result<AnalysisResults, F
     Ok(output.results)
 }
 
+/// Run the full analysis pipeline with export usage collection and retained
+/// per-function complexity modules.
+///
+/// Used by the LSP when opt-in inline complexity code lenses are enabled so
+/// the editor keeps existing export reference lenses while also reading
+/// complexity data from the same parse.
+///
+/// # Errors
+///
+/// Returns an error if file discovery, parsing, or analysis fails.
+#[deprecated(
+    since = "2.90.0",
+    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code and `compute_complexity` instead. NOTE: this combined LSP-only typed surface is not exposed externally. See docs/fallow-core-migration.md and ADR-008."
+)]
+pub fn analyze_with_usages_and_complexity(
+    config: &ResolvedConfig,
+) -> Result<AnalysisOutput, FallowError> {
+    analyze_full(config, false, true, true, true)
+}
+
 /// Run the full analysis pipeline with optional performance timings and graph retention.
 ///
 /// # Errors

@@ -1047,6 +1047,7 @@ dependencies = [
  "fallow-config",
  "fallow-core",
  "futures",
+ "globset",
  "rustc-hash 2.1.2",
  "serde",
  "serde_json",

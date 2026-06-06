@@ -25,6 +25,7 @@ import {
   getDuplicationModeOverride,
   getDuplicationSkipLocalOverride,
   getDuplicationThresholdOverride,
+  getHealthInlineComplexity,
 } from "./config.js";
 import { showBinarySkewToastOnce } from "./binary-skew.js";
 import { findBinaryInPath, findLocalBinary } from "./binary-utils.js";
@@ -43,6 +44,9 @@ export interface LspInitializationOptions {
   readonly issueTypes: IssueTypeConfig;
   readonly changedSince: string;
   readonly configPath: string;
+  readonly health: {
+    readonly inlineComplexity: boolean;
+  };
   readonly duplication: {
     readonly mode: DuplicationMode | undefined;
     readonly threshold: number | undefined;
@@ -59,6 +63,9 @@ export const createInitializationOptions = (): LspInitializationOptions => ({
   issueTypes: getIssueTypes(),
   changedSince: getChangedSince(),
   configPath: getResolvedConfigPath(),
+  health: {
+    inlineComplexity: getHealthInlineComplexity(),
+  },
   duplication: {
     mode: getDuplicationModeOverride(),
     threshold: getDuplicationThresholdOverride(),

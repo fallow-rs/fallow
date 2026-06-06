@@ -147,6 +147,9 @@ export const getHealthTopFindings = (): number => {
 
 export const getHealthStatusBar = (): boolean => getConfig().get<boolean>("health.statusBar", true);
 
+export const getHealthInlineComplexity = (): boolean =>
+  getConfig().get<boolean>("health.inlineComplexity", false);
+
 /** Whether the inline complexity breakdown (per-line markers + hover) is shown. */
 export const getComplexityBreakdownEnabled = (): boolean =>
   getConfig().get<boolean>("complexity.breakdownEnabled", true);

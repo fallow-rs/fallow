@@ -11,6 +11,7 @@ let mockDuplicationMinOccurrences = 2;
 let mockDuplicationSkipLocal = false;
 let mockDuplicationCrossLanguage = false;
 let mockDuplicationIgnoreImports = false;
+let mockHealthInlineComplexity = false;
 
 const mockBinaryResolution = vi.hoisted(() => ({
   localBinary: "/mock/fallow-lsp" as string | null,
@@ -104,6 +105,7 @@ vi.mock("../src/config.js", () => ({
   getDuplicationSkipLocalOverride: () => mockDuplicationSkipLocal,
   getDuplicationCrossLanguageOverride: () => mockDuplicationCrossLanguage,
   getDuplicationIgnoreImportsOverride: () => mockDuplicationIgnoreImports,
+  getHealthInlineComplexity: () => mockHealthInlineComplexity,
 }));
 
 import {
@@ -136,6 +138,7 @@ beforeEach(() => {
   mockDuplicationSkipLocal = true;
   mockDuplicationCrossLanguage = true;
   mockDuplicationIgnoreImports = true;
+  mockHealthInlineComplexity = false;
   mockBinaryResolution.localBinary = "/mock/fallow-lsp";
   mockBinaryResolution.pathBinary = null;
   mockBinaryResolution.installedBinary = null;
@@ -155,6 +158,9 @@ describe("createInitializationOptions", () => {
       issueTypes: { "code-duplication": true },
       changedSince: "origin/main",
       configPath: "/workspace/.fallowrc.jsonc",
+      health: {
+        inlineComplexity: false,
+      },
       duplication: {
         mode: "semantic",
         threshold: 8,
@@ -165,6 +171,14 @@ describe("createInitializationOptions", () => {
         crossLanguage: true,
         ignoreImports: true,
       },
+    });
+  });
+
+  it("forwards inline complexity opt-in to fallow-lsp", () => {
+    mockHealthInlineComplexity = true;
+
+    expect(createInitializationOptions().health).toEqual({
+      inlineComplexity: true,
     });
   });
 });

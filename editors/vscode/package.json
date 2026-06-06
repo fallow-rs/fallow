@@ -404,6 +404,11 @@
           "default": true,
           "description": "Show the project health score and grade in the Fallow status bar item."
         },
+        "fallow.health.inlineComplexity": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show opt-in LSP code lenses on functions that exceed Fallow Health complexity thresholds. Default off to keep editor chrome quiet."
+        },
         "fallow.complexity.breakdownEnabled": {
           "type": "boolean",
           "default": true,

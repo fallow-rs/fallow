@@ -1,16 +1,47 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::{CodeLens, Command, Position, Range, Url};
 
 use fallow_core::results::AnalysisResults;
 
+/// LSP-local inline complexity signal rendered as a code lens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineComplexityFinding {
+    pub path: PathBuf,
+    pub name: String,
+    pub line: u32,
+    pub col: u32,
+    pub cyclomatic: u16,
+    pub cognitive: u16,
+    pub exceeded: InlineComplexityExceeded,
+}
+
+/// Which health complexity threshold(s) a function exceeded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InlineComplexityExceeded {
+    Cyclomatic,
+    Cognitive,
+    CyclomaticAndCognitive,
+}
+
+impl InlineComplexityExceeded {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Cyclomatic => "cyclomatic",
+            Self::Cognitive => "cognitive",
+            Self::CyclomaticAndCognitive => "cyclomatic, cognitive",
+        }
+    }
+}
+
 /// Build Code Lens items for a file showing reference counts above each export declaration.
 pub fn build_code_lenses(
     results: &AnalysisResults,
+    complexity: &[InlineComplexityFinding],
     file_path: &Path,
     document_uri: &Url,
 ) -> Vec<CodeLens> {
-    results
+    let mut lenses: Vec<CodeLens> = results
         .export_usages
         .iter()
         .filter(|usage| usage.path == file_path)
@@ -79,7 +110,39 @@ pub fn build_code_lenses(
                 data: None,
             }
         })
-        .collect()
+        .collect();
+
+    lenses.extend(
+        complexity
+            .iter()
+            .filter(|finding| finding.path == file_path)
+            .map(|finding| {
+                let position = Position {
+                    line: finding.line.saturating_sub(1),
+                    character: finding.col,
+                };
+                CodeLens {
+                    range: Range {
+                        start: position,
+                        end: position,
+                    },
+                    command: Some(Command {
+                        title: format!(
+                            "{} complexity: {} cyc, {} cog ({})",
+                            finding.name,
+                            finding.cyclomatic,
+                            finding.cognitive,
+                            finding.exceeded.label()
+                        ),
+                        command: "fallow.noop".to_string(),
+                        arguments: None,
+                    }),
+                    data: None,
+                }
+            }),
+    );
+
+    lenses
 }
 
 #[cfg(test)]
@@ -104,7 +167,7 @@ mod tests {
         let results = AnalysisResults::default();
         let uri = Url::from_file_path(&mod_path).unwrap();
 
-        let lenses = build_code_lenses(&results, &mod_path, &uri);
+        let lenses = build_code_lenses(&results, &[], &mod_path, &uri);
         assert!(lenses.is_empty());
     }
 
@@ -123,7 +186,7 @@ mod tests {
         });
 
         let uri = Url::from_file_path(&mod_path).unwrap();
-        let lenses = build_code_lenses(&results, &mod_path, &uri);
+        let lenses = build_code_lenses(&results, &[], &mod_path, &uri);
         assert!(lenses.is_empty());
     }
 
@@ -142,7 +205,7 @@ mod tests {
         });
 
         let uri = Url::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -164,7 +227,7 @@ mod tests {
         });
 
         let uri = Url::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -186,7 +249,7 @@ mod tests {
         });
 
         let uri = Url::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -208,7 +271,7 @@ mod tests {
         });
 
         let uri = Url::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         assert_eq!(lenses[0].range.start.line, 14);
@@ -232,7 +295,7 @@ mod tests {
         });
 
         let uri = Url::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -266,7 +329,7 @@ mod tests {
         });
 
         let uri = Url::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -317,7 +380,7 @@ mod tests {
         });
 
         let uri = Url::from_file_path(&path).unwrap();
-        let lenses = build_code_lenses(&results, &path, &uri);
+        let lenses = build_code_lenses(&results, &[], &path, &uri);
         assert_eq!(lenses.len(), 3);
 
         let titles: Vec<&str> = lenses
@@ -345,7 +408,7 @@ mod tests {
         });
 
         let uri = Url::from_file_path(&edge_path).unwrap();
-        let lenses = build_code_lenses(&results, &edge_path, &uri);
+        let lenses = build_code_lenses(&results, &[], &edge_path, &uri);
         assert_eq!(lenses.len(), 1);
         assert_eq!(lenses[0].range.start.line, 0);
     }
@@ -376,7 +439,7 @@ mod tests {
         });
 
         let uri = Url::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -402,7 +465,7 @@ mod tests {
         });
 
         let uri = Url::from_file_path(&path).unwrap();
-        let lenses = build_code_lenses(&results, &path, &uri);
+        let lenses = build_code_lenses(&results, &[], &path, &uri);
         assert_eq!(lenses.len(), 1);
 
         assert_eq!(lenses[0].range.start, lenses[0].range.end);
@@ -423,7 +486,7 @@ mod tests {
         });
 
         let uri = Url::from_file_path(&path).unwrap();
-        let lenses = build_code_lenses(&results, &path, &uri);
+        let lenses = build_code_lenses(&results, &[], &path, &uri);
         assert!(
             lenses[0].data.is_none(),
             "Code lens data should be None since resolve_provider is false"
@@ -449,7 +512,7 @@ mod tests {
         });
 
         let uri = Url::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
 
         let cmd = lenses[0].command.as_ref().unwrap();
         let args = cmd.arguments.as_ref().unwrap();
@@ -457,5 +520,56 @@ mod tests {
 
         assert_eq!(ref_locs[0]["range"]["start"]["line"], 41);
         assert_eq!(ref_locs[0]["range"]["start"]["character"], 5);
+    }
+
+    #[test]
+    fn complexity_lens_is_anchored_to_function_start() {
+        let root = test_root();
+        let utils_path = root.join("src/utils.ts");
+        let results = AnalysisResults::default();
+        let complexity = vec![InlineComplexityFinding {
+            path: utils_path.clone(),
+            name: "parseConfig".to_string(),
+            line: 12,
+            col: 2,
+            cyclomatic: 31,
+            cognitive: 26,
+            exceeded: InlineComplexityExceeded::CyclomaticAndCognitive,
+        }];
+
+        let uri = Url::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &complexity, &utils_path, &uri);
+
+        assert_eq!(lenses.len(), 1);
+        assert_eq!(lenses[0].range.start.line, 11);
+        assert_eq!(lenses[0].range.start.character, 2);
+        let command = lenses[0].command.as_ref().expect("complexity lens command");
+        assert_eq!(command.command, "fallow.noop");
+        assert_eq!(
+            command.title,
+            "parseConfig complexity: 31 cyc, 26 cog (cyclomatic, cognitive)"
+        );
+    }
+
+    #[test]
+    fn complexity_lens_ignores_unrelated_file() {
+        let root = test_root();
+        let utils_path = root.join("src/utils.ts");
+        let other_path = root.join("src/other.ts");
+        let results = AnalysisResults::default();
+        let complexity = vec![InlineComplexityFinding {
+            path: other_path,
+            name: "parseConfig".to_string(),
+            line: 12,
+            col: 2,
+            cyclomatic: 31,
+            cognitive: 26,
+            exceeded: InlineComplexityExceeded::CyclomaticAndCognitive,
+        }];
+
+        let uri = Url::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &complexity, &utils_path, &uri);
+
+        assert!(lenses.is_empty());
     }
 }

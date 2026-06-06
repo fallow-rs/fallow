@@ -35,6 +35,8 @@ use fallow_core::changed_files::{
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 
+use crate::code_lens::{InlineComplexityExceeded, InlineComplexityFinding};
+
 /// Custom notification sent to the client after every analysis completes.
 /// Carries summary stats so the extension can update the status bar, context
 /// keys, and other UI without running a separate CLI process.
@@ -245,12 +247,18 @@ fn config_load_error_detail(
 /// findings to the merged accumulators and a status message to
 /// `config_messages`. Extracted out of `run_analysis` to keep that method
 /// under the 150-line clippy ceiling.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "LSP analysis merges dead-code, duplication, inline complexity, and config messages"
+)]
 fn analyze_project_root(
     project_root: &Path,
     config_path: Option<&Path>,
     duplication_options: Option<&LspDuplicationOptions>,
+    inline_complexity_enabled: bool,
     merged_results: &mut AnalysisResults,
     merged_duplication: &mut DuplicationReport,
+    merged_inline_complexity: &mut Vec<InlineComplexityFinding>,
     config_messages: &mut Vec<(MessageType, String)>,
 ) {
     let (config, message) = match fallow_core::config_for_project(project_root, config_path) {
@@ -293,12 +301,23 @@ fn analyze_project_root(
     };
     config_messages.push(message);
 
-    #[expect(
-        deprecated,
-        reason = "ADR-008 deprecates fallow_core::analyze_with_usages externally; the LSP still uses the workspace path dependency"
-    )]
-    if let Ok(results) = fallow_core::analyze_with_usages(&config) {
-        merge_results(merged_results, results);
+    if inline_complexity_enabled {
+        #[expect(
+            deprecated,
+            reason = "ADR-008 deprecates fallow_core typed analysis externally; the LSP still uses the workspace path dependency"
+        )]
+        if let Ok(output) = fallow_core::analyze_with_usages_and_complexity(&config) {
+            merged_inline_complexity.extend(collect_inline_complexity(&config, &output));
+            merge_results(merged_results, output.results);
+        }
+    } else {
+        #[expect(
+            deprecated,
+            reason = "ADR-008 deprecates fallow_core::analyze_with_usages externally; the LSP still uses the workspace path dependency"
+        )]
+        if let Ok(results) = fallow_core::analyze_with_usages(&config) {
+            merge_results(merged_results, results);
+        }
     }
 
     let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
@@ -388,11 +407,101 @@ fn initialization_duplication_options(opts: &serde_json::Value) -> Option<LspDup
     serde_json::from_value(opts.get("duplication")?.clone()).ok()
 }
 
+fn initialization_inline_complexity_enabled(opts: &serde_json::Value) -> bool {
+    opts.get("health")
+        .and_then(|health| health.get("inlineComplexity"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn build_health_ignore_set(patterns: &[String]) -> Option<globset::GlobSet> {
+    if patterns.is_empty() {
+        return None;
+    }
+
+    let mut builder = globset::GlobSetBuilder::new();
+    for pattern in patterns {
+        let Ok(glob) = globset::Glob::new(pattern) else {
+            continue;
+        };
+        builder.add(glob);
+    }
+    builder.build().ok()
+}
+
+fn collect_inline_complexity(
+    config: &fallow_config::ResolvedConfig,
+    output: &fallow_core::AnalysisOutput,
+) -> Vec<InlineComplexityFinding> {
+    let Some(modules) = output.modules.as_ref() else {
+        return Vec::new();
+    };
+    let Some(files) = output.files.as_ref() else {
+        return Vec::new();
+    };
+
+    let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
+    let ignore_set = build_health_ignore_set(&config.health.ignore);
+    let mut findings = Vec::new();
+
+    for module in modules {
+        let Some(path) = file_paths.get(&module.file_id) else {
+            continue;
+        };
+        let relative = path.strip_prefix(&config.root).unwrap_or(path);
+        if ignore_set
+            .as_ref()
+            .is_some_and(|set| set.is_match(relative))
+        {
+            continue;
+        }
+
+        for function in &module.complexity {
+            if fallow_core::suppress::is_suppressed(
+                &module.suppressions,
+                function.line,
+                fallow_core::suppress::IssueKind::Complexity,
+            ) {
+                continue;
+            }
+
+            let exceeds_cyclomatic = function.cyclomatic > config.health.max_cyclomatic;
+            let exceeds_cognitive = function.cognitive > config.health.max_cognitive;
+            let exceeded = match (exceeds_cyclomatic, exceeds_cognitive) {
+                (true, true) => InlineComplexityExceeded::CyclomaticAndCognitive,
+                (true, false) => InlineComplexityExceeded::Cyclomatic,
+                (false, true) => InlineComplexityExceeded::Cognitive,
+                (false, false) => continue,
+            };
+
+            findings.push(InlineComplexityFinding {
+                path: (*path).clone(),
+                name: function.name.clone(),
+                line: function.line,
+                col: function.col,
+                cyclomatic: function.cyclomatic,
+                cognitive: function.cognitive,
+                exceeded,
+            });
+        }
+    }
+
+    findings
+}
+
+fn filter_inline_complexity_by_changed_files(
+    findings: &mut Vec<InlineComplexityFinding>,
+    changed_files: &FxHashSet<PathBuf>,
+) {
+    findings.retain(|finding| changed_files.contains(&finding.path));
+}
+
 struct FallowLspServer {
     client: Client,
     root: Arc<RwLock<Option<PathBuf>>>,
     results: Arc<RwLock<Option<AnalysisResults>>>,
     duplication: Arc<RwLock<Option<DuplicationReport>>>,
+    inline_complexity: Arc<RwLock<Vec<InlineComplexityFinding>>>,
     previous_diagnostic_uris: Arc<RwLock<FxHashSet<Url>>>,
     last_analysis: Arc<Mutex<Instant>>,
     analysis_guard: Arc<tokio::sync::Mutex<()>>,
@@ -414,6 +523,8 @@ struct FallowLspServer {
     /// Optional duplication overrides from `initializationOptions.duplication`.
     /// VS Code sends these so live diagnostics match the sidebar CLI run.
     duplication_options: Arc<RwLock<Option<LspDuplicationOptions>>>,
+    /// Whether the client opted in to heuristic complexity code lenses.
+    inline_complexity_enabled: Arc<RwLock<bool>>,
     /// Canonical git toplevel for the workspace `root`, resolved on first
     /// analysis run and reused thereafter. Cached so we do not pay for an
     /// extra `git rev-parse --show-toplevel` subprocess on every save.
@@ -519,6 +630,8 @@ impl LanguageServer for FallowLspServer {
             *self.config_path.write().await =
                 initialization_config_path(opts, canonical_root.as_deref());
             *self.duplication_options.write().await = initialization_duplication_options(opts);
+            *self.inline_complexity_enabled.write().await =
+                initialization_inline_complexity_enabled(opts);
         }
 
         Ok(InitializeResult {
@@ -696,7 +809,13 @@ impl LanguageServer for FallowLspServer {
             return Ok(None);
         };
 
-        let lenses = code_lens::build_code_lenses(results, &file_path, &params.text_document.uri);
+        let inline_complexity = self.inline_complexity.read().await;
+        let lenses = code_lens::build_code_lenses(
+            results,
+            &inline_complexity,
+            &file_path,
+            &params.text_document.uri,
+        );
 
         if lenses.is_empty() {
             Ok(None)
@@ -742,6 +861,7 @@ impl FallowLspServer {
             root: Arc::new(RwLock::new(None)),
             results: Arc::new(RwLock::new(None)),
             duplication: Arc::new(RwLock::new(None)),
+            inline_complexity: Arc::new(RwLock::new(Vec::new())),
             previous_diagnostic_uris: Arc::new(RwLock::new(FxHashSet::default())),
             last_analysis: Arc::new(Mutex::new(
                 Instant::now()
@@ -754,6 +874,7 @@ impl FallowLspServer {
             changed_since: Arc::new(RwLock::new(None)),
             config_path: Arc::new(RwLock::new(None)),
             duplication_options: Arc::new(RwLock::new(None)),
+            inline_complexity_enabled: Arc::new(RwLock::new(false)),
             git_toplevel: Arc::new(RwLock::new(None)),
             cached_diagnostics: Arc::new(RwLock::new(FxHashMap::default())),
             cancellation: Arc::new(AtomicBool::new(false)),
@@ -807,6 +928,10 @@ impl FallowLspServer {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "LSP analysis orchestration keeps snapshot, blocking work, diagnostics, and notifications in one auditable flow"
+    )]
     async fn run_analysis(&self) {
         if self.cancellation.load(Ordering::SeqCst) {
             return;
@@ -841,6 +966,7 @@ impl FallowLspServer {
         let changed_since_for_data = changed_since.clone();
         let config_path = self.config_path.read().await.clone();
         let duplication_options = self.duplication_options.read().await.clone();
+        let inline_complexity_enabled = *self.inline_complexity_enabled.read().await;
 
         let resolved_toplevel = self.resolved_git_toplevel(&root).await;
 
@@ -850,6 +976,7 @@ impl FallowLspServer {
         let join_result = tokio::task::spawn_blocking(move || {
             let mut merged_results = AnalysisResults::default();
             let mut merged_duplication = DuplicationReport::default();
+            let mut merged_inline_complexity = Vec::new();
             let mut config_messages: Vec<(MessageType, String)> =
                 Vec::with_capacity(project_roots.len());
             for project_root in &project_roots {
@@ -857,8 +984,10 @@ impl FallowLspServer {
                     project_root,
                     config_path.as_deref(),
                     duplication_options.as_ref(),
+                    inline_complexity_enabled,
                     &mut merged_results,
                     &mut merged_duplication,
+                    &mut merged_inline_complexity,
                     &mut config_messages,
                 );
             }
@@ -874,6 +1003,10 @@ impl FallowLspServer {
                             &mut merged_duplication,
                             &changed,
                             &blocking_root,
+                        );
+                        filter_inline_complexity_by_changed_files(
+                            &mut merged_inline_complexity,
+                            &changed,
                         );
                         Some((
                             MessageType::INFO,
@@ -898,6 +1031,7 @@ impl FallowLspServer {
             (
                 merged_results,
                 merged_duplication,
+                merged_inline_complexity,
                 config_messages,
                 changed_message,
             )
@@ -905,7 +1039,7 @@ impl FallowLspServer {
         .await;
 
         match join_result {
-            Ok((results, duplication, config_messages, changed_message)) => {
+            Ok((results, duplication, inline_complexity, config_messages, changed_message)) => {
                 if self.cancellation.load(Ordering::SeqCst) {
                     return;
                 }
@@ -959,6 +1093,7 @@ impl FallowLspServer {
 
                 *self.results.write().await = Some(results);
                 *self.duplication.write().await = Some(duplication);
+                *self.inline_complexity.write().await = inline_complexity;
 
                 let _ = self.client.code_lens_refresh().await;
 
@@ -1547,6 +1682,24 @@ mod tests {
     }
 
     #[test]
+    fn initialization_inline_complexity_defaults_off() {
+        let opts = serde_json::json!({});
+
+        assert!(!initialization_inline_complexity_enabled(&opts));
+    }
+
+    #[test]
+    fn initialization_inline_complexity_reads_health_option() {
+        let opts = serde_json::json!({
+            "health": {
+                "inlineComplexity": true
+            }
+        });
+
+        assert!(initialization_inline_complexity_enabled(&opts));
+    }
+
+    #[test]
     fn analyze_project_root_applies_lsp_duplication_options() {
         let dir = tempfile::tempdir().expect("temp dir");
         let root = dir.path();
@@ -1573,13 +1726,16 @@ mod tests {
 
         let mut baseline_results = AnalysisResults::default();
         let mut baseline_duplication = DuplicationReport::default();
+        let mut baseline_inline_complexity = Vec::new();
         let mut baseline_messages = Vec::new();
         analyze_project_root(
             root,
             None,
             None,
+            false,
             &mut baseline_results,
             &mut baseline_duplication,
+            &mut baseline_inline_complexity,
             &mut baseline_messages,
         );
 
@@ -1590,6 +1746,7 @@ mod tests {
 
         let mut filtered_results = AnalysisResults::default();
         let mut filtered_duplication = DuplicationReport::default();
+        let mut filtered_inline_complexity = Vec::new();
         let mut filtered_messages = Vec::new();
         let options = LspDuplicationOptions {
             min_occurrences: Some(3),
@@ -1599,12 +1756,104 @@ mod tests {
             root,
             None,
             Some(&options),
+            false,
             &mut filtered_results,
             &mut filtered_duplication,
+            &mut filtered_inline_complexity,
             &mut filtered_messages,
         );
 
         assert_eq!(filtered_duplication.stats.clone_groups, 0);
+    }
+
+    fn write_inline_complexity_fixture(root: &Path) {
+        std::fs::create_dir_all(root.join("src")).expect("create src dir");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"lsp-inline-complexity","private":true,"main":"src/index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(
+            root.join(".fallowrc.jsonc"),
+            r#"{"health":{"maxCyclomatic":2,"maxCognitive":2}}"#,
+        )
+        .expect("write config");
+        std::fs::write(
+            root.join("src/index.ts"),
+            r#"
+export function choose(value: number): string {
+  if (value > 10) {
+    return "large";
+  }
+  if (value > 5) {
+    return "medium";
+  }
+  return "small";
+}
+"#,
+        )
+        .expect("write source");
+    }
+
+    #[test]
+    fn analyze_project_root_keeps_inline_complexity_off_by_default() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        write_inline_complexity_fixture(root);
+
+        let mut results = AnalysisResults::default();
+        let mut duplication = DuplicationReport::default();
+        let mut inline_complexity = Vec::new();
+        let mut messages = Vec::new();
+
+        analyze_project_root(
+            root,
+            None,
+            None,
+            false,
+            &mut results,
+            &mut duplication,
+            &mut inline_complexity,
+            &mut messages,
+        );
+
+        assert!(
+            inline_complexity.is_empty(),
+            "default LSP analysis must not emit inline complexity lenses"
+        );
+    }
+
+    #[test]
+    fn analyze_project_root_collects_opt_in_inline_complexity() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        write_inline_complexity_fixture(root);
+
+        let mut results = AnalysisResults::default();
+        let mut duplication = DuplicationReport::default();
+        let mut inline_complexity = Vec::new();
+        let mut messages = Vec::new();
+
+        analyze_project_root(
+            root,
+            None,
+            None,
+            true,
+            &mut results,
+            &mut duplication,
+            &mut inline_complexity,
+            &mut messages,
+        );
+
+        let finding = inline_complexity
+            .iter()
+            .find(|finding| finding.name == "choose")
+            .expect("complex function should produce an inline lens finding");
+        assert_eq!(finding.path, root.join("src/index.ts"));
+        assert_eq!(finding.line, 2);
+        assert_eq!(finding.col, 7);
+        assert_eq!(finding.exceeded, InlineComplexityExceeded::Cyclomatic);
+        assert!(finding.cyclomatic > 2);
     }
 
     #[test]

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **VS Code can now show opt-in LSP complexity code lenses.** Set `fallow.health.inlineComplexity` to `true` to show per-function code lenses for functions that exceed Fallow Health cyclomatic or cognitive thresholds. The setting defaults to `false`, so existing diagnostics and editor chrome stay unchanged unless you opt in. (Refs [#992](https://github.com/fallow-rs/fallow/issues/992).)
+
 ### Fixed
 
 - **`fallow security` now detects literal-backed sink candidates for deterministic security smells.** The security catalogue can now opt into literal capture for high-signal rows, including wildcard `postMessage` origins, permissive CORS credentials, insecure cookie options, weak crypto algorithms, string-code execution, JWT `alg: "none"`, token-context `Math.random()`, and cloud metadata host literals. Existing non-literal sink rows keep their conservative default behavior, and findings remain opt-in candidates for agent verification. (Closes [#875](https://github.com/fallow-rs/fallow/issues/875).)

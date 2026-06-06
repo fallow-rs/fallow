@@ -5,6 +5,7 @@ export const RESTART_CONFIG_KEYS = [
   "fallow.issueTypes",
   "fallow.changedSince",
   "fallow.duplication",
+  "fallow.health.inlineComplexity",
   "fallow.autoDownload",
 ] as const;
 
@@ -20,8 +21,10 @@ export const REANALYSIS_CONFIG_KEYS = [
   "fallow.workspace",
 ] as const;
 
-// Health is a separate, lazy spawn with its own latch, so its settings drive
-// only a health re-run, never an LSP restart or a combined-analysis re-run.
+// Most health settings drive the separate lazy health spawn, not the LSP.
+// `fallow.health.inlineComplexity` is the exception because it is forwarded to
+// fallow-lsp as an initialization option and therefore lives in
+// RESTART_CONFIG_KEYS.
 export const HEALTH_CONFIG_KEYS = [
   "fallow.health.enabled",
   "fallow.health.hotspots",

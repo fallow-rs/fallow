@@ -32,6 +32,7 @@ import {
   getDuplicationModeOverride,
   getDuplicationSkipLocalOverride,
   getDuplicationThresholdOverride,
+  getHealthInlineComplexity,
 } from "../src/config.js";
 
 describe("duplication setting overrides", () => {
@@ -91,5 +92,11 @@ describe("duplication setting overrides", () => {
 
     expect(getDuplicationMinLinesOverride()).toBe(1);
     expect(getDuplicationMinOccurrencesOverride()).toBe(2);
+  });
+});
+
+describe("health inline complexity setting", () => {
+  it("defaults off", () => {
+    expect(getHealthInlineComplexity()).toBe(false);
   });
 });

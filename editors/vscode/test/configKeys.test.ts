@@ -12,6 +12,11 @@ describe("config keys", () => {
     expect(REANALYSIS_CONFIG_KEYS).toContain("fallow.duplication");
   });
 
+  it("restarts the LSP when inline complexity changes", () => {
+    expect(RESTART_CONFIG_KEYS).toContain("fallow.health.inlineComplexity");
+    expect(REANALYSIS_CONFIG_KEYS).not.toContain("fallow.health.inlineComplexity");
+  });
+
   it("matches configuration changes by exact key list", () => {
     const event = {
       affectsConfiguration: (key: string): boolean => key === "fallow.duplication",
