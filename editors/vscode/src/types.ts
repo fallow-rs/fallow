@@ -110,6 +110,8 @@ export type {
   UnusedMember,
   UnusedOptionalDependencyFinding,
   UnusedTypeFinding,
+  WorkspaceInfo,
+  WorkspacesOutput,
 } from "./generated/output-contract.js";
 
 export type { CheckOutput as FallowCheckResult } from "./generated/output-contract.js";
@@ -139,4 +141,3 @@ export type {
   LicenseState,
   LicenseStatusJson,
 } from "./license-types.js";
-export type { WorkspaceInfo, WorkspacesOutput } from "./workspace-types.js";

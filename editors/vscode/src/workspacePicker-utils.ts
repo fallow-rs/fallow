@@ -3,7 +3,7 @@
  * parse / partition / argv / label rules can be unit-tested in isolation
  * (mirrors the `statusBar-utils.ts` / `analysis-utils.ts` split).
  */
-import type { WorkspaceInfo, WorkspacesOutput } from "./workspace-types.js";
+import type { WorkspaceInfo, WorkspacesOutput } from "./types.js";
 
 /**
  * The synthetic name persisted to `workspaceState` / read from the
@@ -17,6 +17,30 @@ export interface PartitionedWorkspaces {
   readonly real: ReadonlyArray<WorkspaceInfo>;
   readonly internal: ReadonlyArray<WorkspaceInfo>;
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const parseWorkspaceInfo = (entry: unknown): WorkspaceInfo | null => {
+  if (!isRecord(entry)) {
+    return null;
+  }
+  if (typeof entry.name !== "string" || entry.name.length === 0) {
+    return null;
+  }
+  return {
+    name: entry.name,
+    path: typeof entry.path === "string" ? entry.path : "",
+    is_internal_dependency: entry.is_internal_dependency === true,
+  };
+};
+
+const parseWorkspaceDiagnostics = (value: unknown): WorkspacesOutput["workspace_diagnostics"] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value as WorkspacesOutput["workspace_diagnostics"];
+};
 
 /**
  * Parse `fallow workspaces --format json` stdout into the typed envelope.
@@ -50,29 +74,16 @@ export const parseWorkspacesOutput = (stdout: string): WorkspacesOutput | null =
     return null;
   }
 
-  const workspaces: WorkspaceInfo[] = [];
-  for (const entry of candidate.workspaces) {
-    if (typeof entry !== "object" || entry === null) {
-      continue;
-    }
-    const record = entry as Record<string, unknown>;
-    if (typeof record.name !== "string" || record.name.length === 0) {
-      continue;
-    }
-    workspaces.push({
-      name: record.name,
-      path: typeof record.path === "string" ? record.path : "",
-      is_internal_dependency: record.is_internal_dependency === true,
-    });
-  }
+  const workspaces = candidate.workspaces.flatMap((entry): WorkspaceInfo[] => {
+    const workspace = parseWorkspaceInfo(entry);
+    return workspace === null ? [] : [workspace];
+  });
 
   return {
     workspace_count:
       typeof candidate.workspace_count === "number" ? candidate.workspace_count : workspaces.length,
     workspaces,
-    workspace_diagnostics: Array.isArray(candidate.workspace_diagnostics)
-      ? (candidate.workspace_diagnostics as WorkspacesOutput["workspace_diagnostics"])
-      : [],
+    workspace_diagnostics: parseWorkspaceDiagnostics(candidate.workspace_diagnostics),
   };
 };
 

@@ -14,7 +14,7 @@ import {
   shouldShowWorkspacePicker,
 } from "./workspacePicker-utils.js";
 import type { WorkspaceQuickPickItem } from "./workspacePicker-utils.js";
-import type { WorkspacesOutput } from "./workspace-types.js";
+import type { WorkspacesOutput } from "./types.js";
 
 export { parseWorkspacesOutput } from "./workspacePicker-utils.js";
 

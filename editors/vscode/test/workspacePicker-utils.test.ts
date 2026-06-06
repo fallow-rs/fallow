@@ -12,7 +12,7 @@ import {
   shouldShowWorkspacePicker,
 } from "../src/workspacePicker-utils.js";
 import { buildAnalysisArgs } from "../src/analysis-utils.js";
-import type { WorkspaceInfo, WorkspacesOutput } from "../src/workspace-types.js";
+import type { WorkspaceInfo, WorkspacesOutput } from "../src/types.js";
 
 const ws = (name: string, path: string, is_internal_dependency = false): WorkspaceInfo => ({
   name,
