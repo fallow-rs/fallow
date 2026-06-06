@@ -211,12 +211,19 @@ fn sink_has_html_sanitizer(module: &ModuleInfo, sink: &SinkSite) -> bool {
 /// trace to a source-tainted local binding, else `None`. The intra-module,
 /// name-based back-trace from issue #859.
 fn sink_source_title<'t>(sink: &SinkSite, tainted: &FxHashMap<&str, &'t str>) -> Option<&'t str> {
-    if tainted.is_empty() {
-        return None;
+    if !tainted.is_empty()
+        && let Some(title) = sink
+            .arg_idents
+            .iter()
+            .find_map(|name| tainted.get(name.as_str()).copied())
+    {
+        return Some(title);
     }
-    sink.arg_idents
+
+    let cat = catalogue();
+    sink.arg_source_paths
         .iter()
-        .find_map(|name| tainted.get(name.as_str()).copied())
+        .find_map(|path| cat.matching_source(path).map(|(_, title)| title))
 }
 
 fn matcher_admits_sink(matcher: &Matcher, sink: &SinkSite, source_title: Option<&str>) -> bool {
@@ -426,7 +433,7 @@ mod tests {
         }
     }
 
-    fn sink_with_idents(idents: &[&str]) -> SinkSite {
+    fn sink_with_idents_and_sources(idents: &[&str], source_paths: &[&str]) -> SinkSite {
         SinkSite {
             sink_shape: fallow_types::extract::SinkShape::Call,
             callee_path: "eval".to_string(),
@@ -436,9 +443,14 @@ mod tests {
             arg_literal: None,
             object_properties: Vec::new(),
             arg_idents: idents.iter().map(|s| (*s).to_string()).collect(),
+            arg_source_paths: source_paths.iter().map(|s| (*s).to_string()).collect(),
             span_start: 0,
             span_end: 1,
         }
+    }
+
+    fn sink_with_idents(idents: &[&str]) -> SinkSite {
+        sink_with_idents_and_sources(idents, &[])
     }
 
     #[test]
@@ -475,6 +487,18 @@ mod tests {
         assert_eq!(
             sink_source_title(&sink_with_idents(&["id"]), &tainted),
             None
+        );
+    }
+
+    #[test]
+    fn sink_is_source_backed_when_arg_source_path_matches_catalogue() {
+        let tainted = source_tainted_locals(&[]);
+        assert_eq!(
+            sink_source_title(
+                &sink_with_idents_and_sources(&["process"], &["process.env.SECRET", "process.env"]),
+                &tainted,
+            ),
+            Some("Environment secret")
         );
     }
 

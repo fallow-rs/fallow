@@ -735,6 +735,14 @@ title = "Process arguments"
 path_patterns = ["process.argv", "*.argv"]
 
 [[source]]
+id = "process-env"
+title = "Environment secret"
+# `process.env.SECRET` and destructured `process.env` locals carry deployment
+# secrets and tokens. Exact matching avoids treating arbitrary `.env` properties
+# as secret sources.
+path_patterns = ["process.env"]
+
+[[source]]
 id = "message-event-data"
 title = "Message-event data"
 # `postMessage` / WebSocket / worker `message` event payloads: `event.data`,
@@ -882,6 +890,46 @@ sink_shape = "member-call"
 callee_patterns = ["libxml.parseXml", "libxml.parseXmlString", "*.parseXmlString", "*.parseStringPromise"]
 arg_index = 0
 evidence_template = "Non-literal XML document passed to {callee}(). Candidate for verification: confirm the parser disables external-entity / DTD expansion (no `noent`), guarding against XXE and entity-expansion attacks."
+
+# ── CWE-532: Secret or PII in logs (issue #876) ─────────────────────────────
+# Logging calls are ubiquitous, so this row is source-backed only. It fires when
+# the logged argument traces to a known source such as `process.env` or request
+# body/query/params locals, but stays quiet for ordinary variables and literals.
+[[matcher]]
+id = "secret-pii-log"
+cwe = 532
+title = "Secret or PII logged"
+sink_shape = "member-call"
+callee_patterns = [
+  "console.log",
+  "console.error",
+  "console.warn",
+  "console.info",
+  "console.debug",
+  "logger.log",
+  "logger.error",
+  "logger.warn",
+  "logger.info",
+  "logger.debug",
+  "log.log",
+  "log.error",
+  "log.warn",
+  "log.info",
+  "log.debug",
+  "*.logger.log",
+  "*.logger.error",
+  "*.logger.warn",
+  "*.logger.info",
+  "*.logger.debug",
+  "*.log.log",
+  "*.log.error",
+  "*.log.warn",
+  "*.log.info",
+  "*.log.debug",
+]
+arg_index = 0
+requires_source = true
+evidence_template = "Source-backed value passed to {callee}(). Candidate for verification: confirm no secret or PII reaches logs, observability pipelines, or telemetry."
 
 # ── CWE-643: XPath injection (issue #897) ───────────────────────────────────
 # Building an XPath expression from non-literal input lets an attacker alter the

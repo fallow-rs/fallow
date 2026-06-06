@@ -294,6 +294,12 @@ pub struct SinkSite {
     /// untrusted source or to apply narrow context gates. Intra-module,
     /// name-based, conservative; it is never a taint proof.
     pub arg_idents: Vec<String>,
+    /// Flattened static member paths referenced inside the captured non-literal
+    /// sink argument. Includes both the full path and source-object path for
+    /// leaf reads (`process.env.SECRET` records `process.env.SECRET` and
+    /// `process.env`) so direct source expressions can be matched without an
+    /// intermediate local binding.
+    pub arg_source_paths: Vec<String>,
     /// Byte offset of the sink span start. Stored as `u32` (not `Span`) so the
     /// struct is bitcode-encodable and can be persisted directly in the cache.
     pub span_start: u32,
@@ -771,7 +777,7 @@ const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<SinkSite>() == 112);
+const _: () = assert!(std::mem::size_of::<SinkSite>() == 136);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 720);
 
@@ -895,6 +901,7 @@ mod tests {
                 value: SinkLiteralValue::String("*".to_string()),
             }],
             arg_idents: vec!["userInput".to_string()],
+            arg_source_paths: vec!["req.body.email".to_string(), "req.body".to_string()],
             span_start: 10,
             span_end: 20,
         };
@@ -908,6 +915,7 @@ mod tests {
         assert_eq!(decoded.arg_literal, site.arg_literal);
         assert_eq!(decoded.object_properties, site.object_properties);
         assert_eq!(decoded.arg_idents, site.arg_idents);
+        assert_eq!(decoded.arg_source_paths, site.arg_source_paths);
         assert_eq!(decoded.span(), site.span());
     }
 

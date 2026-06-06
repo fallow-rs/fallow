@@ -30,6 +30,26 @@ fn sink_captures_arg_idents_through_member_and_concat() {
 }
 
 #[test]
+fn sink_captures_direct_arg_source_paths() {
+    let info = parse_ts("logger.error(process.env.SECRET_KEY);");
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|s| s.callee_path == "logger.error")
+        .expect("logger sink captured");
+    assert!(
+        sink.arg_source_paths
+            .iter()
+            .any(|path| path == "process.env.SECRET_KEY")
+    );
+    assert!(
+        sink.arg_source_paths
+            .iter()
+            .any(|path| path == "process.env")
+    );
+}
+
+#[test]
 fn sink_captures_arg_idents_in_call_argument() {
     // `db.query(buildSql(userId))` -> references both the callee `buildSql` and
     // the nested argument `userId`.

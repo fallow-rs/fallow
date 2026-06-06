@@ -69,6 +69,14 @@ fn anchored_on(results: &AnalysisResults, suffix: &str) -> bool {
     })
 }
 
+fn category_count(results: &AnalysisResults, category: &str) -> usize {
+    results
+        .security_findings
+        .iter()
+        .filter(|finding| finding.category.as_deref() == Some(category))
+        .count()
+}
+
 fn no_tainted_sinks(results: &AnalysisResults) -> bool {
     results
         .security_findings
@@ -626,6 +634,43 @@ fn issue_882_literals_and_source_free_mass_assignment_do_not_fire() {
 fn issue_882_default_off_emits_nothing() {
     assert!(no_tainted_sinks(&analyze_default_off(
         "security-catalogue-sinks-882"
+    )));
+}
+
+// ── secret-pii-log (CWE-532), source-backed logging only ────────────────────
+
+#[test]
+fn secret_pii_log_source_backed_logs_fire() {
+    let results = analyze_with_security_sink("security-secret-pii-log");
+    assert_candidate(&results, "src/sink.ts", "secret-pii-log", 532);
+    assert_eq!(
+        category_count(&results, "secret-pii-log"),
+        4,
+        "request body locals, destructured body fields, env locals, and direct env expressions should all fire"
+    );
+    assert!(
+        results
+            .security_findings
+            .iter()
+            .filter(|finding| finding.category.as_deref() == Some("secret-pii-log"))
+            .all(|finding| finding.source_backed),
+        "logging candidates must be source-backed"
+    );
+}
+
+#[test]
+fn secret_pii_log_literals_and_source_free_logs_do_not_fire() {
+    let results = analyze_with_security_sink("security-secret-pii-log");
+    assert!(
+        !anchored_on(&results, "src/safe.ts"),
+        "literal logs and source-free logger calls must not be flagged"
+    );
+}
+
+#[test]
+fn secret_pii_log_default_off_emits_nothing() {
+    assert!(no_tainted_sinks(&analyze_default_off(
+        "security-secret-pii-log"
     )));
 }
 

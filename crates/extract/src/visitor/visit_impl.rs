@@ -4216,9 +4216,82 @@ fn collect_arg_idents(expr: &Expression<'_>) -> Vec<String> {
     out
 }
 
+fn collect_arg_source_paths(expr: &Expression<'_>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    collect_source_paths_into(expr, &mut out);
+    out
+}
+
 fn push_ident(name: &str, out: &mut Vec<String>) {
     if !out.iter().any(|n| n == name) {
         out.push(name.to_string());
+    }
+}
+
+fn push_source_path(path: String, out: &mut Vec<String>) {
+    if !out.iter().any(|existing| existing == &path) {
+        out.push(path);
+    }
+}
+
+fn push_member_source_paths(path: String, out: &mut Vec<String>) {
+    push_source_path(path.clone(), out);
+    if let Some((object, _)) = path.rsplit_once('.') {
+        push_source_path(object.to_string(), out);
+    }
+}
+
+fn collect_source_paths_into(expr: &Expression<'_>, out: &mut Vec<String>) {
+    match expr {
+        Expression::ParenthesizedExpression(paren) => {
+            collect_source_paths_into(&paren.expression, out);
+        }
+        Expression::StaticMemberExpression(member) => {
+            if let Some(path) = flatten_member_path(expr) {
+                push_member_source_paths(path, out);
+            }
+            collect_source_paths_into(&member.object, out);
+        }
+        Expression::ComputedMemberExpression(member) => {
+            collect_source_paths_into(&member.object, out);
+            collect_source_paths_into(&member.expression, out);
+        }
+        Expression::BinaryExpression(bin) => {
+            collect_source_paths_into(&bin.left, out);
+            collect_source_paths_into(&bin.right, out);
+        }
+        Expression::LogicalExpression(logical) => {
+            collect_source_paths_into(&logical.left, out);
+            collect_source_paths_into(&logical.right, out);
+        }
+        Expression::ConditionalExpression(cond) => {
+            collect_source_paths_into(&cond.test, out);
+            collect_source_paths_into(&cond.consequent, out);
+            collect_source_paths_into(&cond.alternate, out);
+        }
+        Expression::SequenceExpression(seq) => {
+            for e in &seq.expressions {
+                collect_source_paths_into(e, out);
+            }
+        }
+        Expression::TemplateLiteral(tpl) => {
+            for e in &tpl.expressions {
+                collect_source_paths_into(e, out);
+            }
+        }
+        Expression::AwaitExpression(await_expr) => {
+            collect_source_paths_into(&await_expr.argument, out);
+        }
+        Expression::UnaryExpression(unary) => collect_source_paths_into(&unary.argument, out),
+        Expression::CallExpression(call) => {
+            collect_source_paths_into(&call.callee, out);
+            for arg in &call.arguments {
+                if let Some(arg_expr) = arg.as_expression() {
+                    collect_source_paths_into(arg_expr, out);
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -4671,6 +4744,11 @@ impl ModuleInfoExtractor {
                 } else {
                     Vec::new()
                 },
+                arg_source_paths: if arg_is_non_literal {
+                    collect_arg_source_paths(arg_expr)
+                } else {
+                    Vec::new()
+                },
                 span_start: expr.span.start,
                 span_end: expr.span.end,
             });
@@ -4719,6 +4797,11 @@ impl ModuleInfoExtractor {
                 } else {
                     Vec::new()
                 },
+                arg_source_paths: if arg_is_non_literal {
+                    collect_arg_source_paths(arg_expr)
+                } else {
+                    Vec::new()
+                },
                 span_start: expr.span.start,
                 span_end: expr.span.end,
             });
@@ -4744,6 +4827,7 @@ impl ModuleInfoExtractor {
             arg_literal: None,
             object_properties: Vec::new(),
             arg_idents: vec![context_name.to_string()],
+            arg_source_paths: Vec::new(),
             span_start: span.start,
             span_end: span.end,
         });
@@ -4773,6 +4857,7 @@ impl ModuleInfoExtractor {
             arg_literal: None,
             object_properties: object_literal_properties(&expr.right),
             arg_idents: collect_arg_idents(&expr.right),
+            arg_source_paths: collect_arg_source_paths(&expr.right),
             span_start: expr.span.start,
             span_end: expr.span.end,
         });
@@ -4788,8 +4873,10 @@ impl ModuleInfoExtractor {
             return;
         };
         let mut arg_idents: Vec<String> = Vec::new();
+        let mut arg_source_paths: Vec<String> = Vec::new();
         for substitution in &expr.quasi.expressions {
             collect_idents_into(substitution, &mut arg_idents);
+            collect_source_paths_into(substitution, &mut arg_source_paths);
         }
         self.security_sinks.push(SinkSite {
             sink_shape: SinkShape::TaggedTemplate,
@@ -4802,6 +4889,7 @@ impl ModuleInfoExtractor {
             arg_literal: None,
             object_properties: Vec::new(),
             arg_idents,
+            arg_source_paths,
             span_start: expr.span.start,
             span_end: expr.span.end,
         });
@@ -4834,6 +4922,7 @@ impl ModuleInfoExtractor {
             arg_literal: None,
             object_properties: object_literal_properties(value_expr),
             arg_idents: collect_arg_idents(value_expr),
+            arg_source_paths: collect_arg_source_paths(value_expr),
             span_start: attr.span.start,
             span_end: attr.span.end,
         });

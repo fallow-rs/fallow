@@ -221,7 +221,13 @@ use crate::MemberKind;
 /// permissive CORS, insecure cookie options, weak crypto algorithms, and
 /// alg:none JWT options. Pre-125 entries lack that metadata until the file is
 /// re-extracted.
-pub(super) const CACHE_VERSION: u32 = 125;
+///
+/// Bumped to 126 for issue #876: `SinkSite` now carries flattened source paths
+/// referenced inside sink arguments, so source-backed logging candidates can
+/// match direct expressions such as `process.env.SECRET` without requiring a
+/// temporary local binding. Pre-126 entries lack those paths until the file is
+/// re-extracted.
+pub(super) const CACHE_VERSION: u32 = 126;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -278,7 +284,7 @@ assert_cached_type_size!(CachedReExport, 88);
 assert_cached_type_size!(CachedMember, 64);
 assert_cached_type_size!(CachedDynamicImportPattern, 56);
 assert_cached_type_size!(crate::MemberAccess, 48);
-assert_cached_type_size!(fallow_types::extract::SinkSite, 112);
+assert_cached_type_size!(fallow_types::extract::SinkSite, 136);
 assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
