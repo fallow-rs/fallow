@@ -283,8 +283,7 @@ where
 
 pub(super) fn build_grouped_by_file<'out, 'items, T, P, F>(
     input: GroupedByFileInput<'out, 'items, T, P, F>,
-)
-where
+) where
     P: Fn(&'items T) -> &'items Path,
     F: Fn(&T) -> String,
 {

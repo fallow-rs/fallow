@@ -81,7 +81,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 fixedbitset = "0.5"
 
 # LSP
-tower-lsp = "0.20"
+ls-types = "0.0.6"
+tower-lsp-server = "0.23"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-std", "process", "signal", "time"] }
 
 # File watching

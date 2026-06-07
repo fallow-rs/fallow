@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 #[allow(clippy::wildcard_imports, reason = "many LSP types used")]
-use tower_lsp::lsp_types::*;
+use ls_types::*;
 
 use fallow_core::results::AnalysisResults;
 
@@ -125,7 +125,7 @@ fn declares_export_name(line_content: &str, prefix: &str, expected_name: &str) -
 pub fn build_remove_export_actions(
     results: &AnalysisResults,
     file_path: &Path,
-    uri: &Url,
+    uri: &Uri,
     cursor_range: &Range,
     file_lines: &[&str],
 ) -> Vec<CodeActionOrCommand> {
@@ -242,7 +242,7 @@ pub fn build_remove_export_actions(
 /// `react:\n    specifier: ^18.2.0`).
 ///
 /// The `root` parameter is required because `UnusedCatalogEntry.path` is
-/// stored project-root-relative; `Url::from_file_path` would silently
+/// stored project-root-relative; `Uri::from_file_path` would silently
 /// reject the relative path and the action would never appear.
 ///
 /// `file_lines` is the caller-supplied content of `pnpm-workspace.yaml`
@@ -253,12 +253,12 @@ pub fn build_remove_export_actions(
 /// Empty `file_lines` short-circuits the function with no actions.
 #[expect(
     clippy::disallowed_types,
-    reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by tower-lsp"
+    reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by ls-types"
 )]
 pub fn build_remove_catalog_entry_actions(
     results: &AnalysisResults,
     root: &Path,
-    uri: &Url,
+    uri: &Uri,
     cursor_range: &Range,
     file_lines: &[&str],
 ) -> Vec<CodeActionOrCommand> {
@@ -274,7 +274,7 @@ pub fn build_remove_catalog_entry_actions(
             continue;
         }
 
-        let Ok(entry_uri) = Url::from_file_path(root.join(&entry.path)) else {
+        let Some(entry_uri) = Uri::from_file_path(root.join(&entry.path)) else {
             continue;
         };
         if entry_uri != *uri {
@@ -394,12 +394,12 @@ pub fn build_remove_catalog_entry_actions(
 /// edits.
 #[expect(
     clippy::disallowed_types,
-    reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by tower-lsp"
+    reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by ls-types"
 )]
 pub fn build_remove_empty_catalog_group_actions(
     results: &AnalysisResults,
     root: &Path,
-    uri: &Url,
+    uri: &Uri,
     cursor_range: &Range,
     file_lines: &[&str],
 ) -> Vec<CodeActionOrCommand> {
@@ -411,7 +411,7 @@ pub fn build_remove_empty_catalog_group_actions(
 
     for group in &results.empty_catalog_groups {
         let group = &group.group;
-        let Ok(group_uri) = Url::from_file_path(root.join(&group.path)) else {
+        let Some(group_uri) = Uri::from_file_path(root.join(&group.path)) else {
             continue;
         };
         if group_uri != *uri {
@@ -652,7 +652,7 @@ fn parent_has_other_children(
 pub fn build_delete_file_actions(
     results: &AnalysisResults,
     file_path: &Path,
-    uri: &Url,
+    uri: &Uri,
     cursor_range: &Range,
 ) -> Vec<CodeActionOrCommand> {
     let mut actions = Vec::new();
@@ -673,8 +673,8 @@ pub fn build_delete_file_actions(
             options: Some(DeleteFileOptions {
                 recursive: Some(false),
                 ignore_if_not_exists: Some(true),
-                annotation_id: None,
             }),
+            annotation_id: None,
         }));
 
         actions.push(CodeActionOrCommand::CodeAction(CodeAction {
@@ -756,7 +756,7 @@ mod tests {
     fn no_export_actions_when_results_empty() {
         let root = test_root();
         let file = root.join("utils.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
         let results = AnalysisResults::default();
         let lines = vec!["export const foo = 1;"];
 
@@ -769,7 +769,7 @@ mod tests {
         let root = test_root();
         let file_a = root.join("a.ts");
         let file_b = root.join("b.ts");
-        let uri_b = Url::from_file_path(&file_b).unwrap();
+        let uri_b = Uri::from_file_path(&file_b).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -786,7 +786,7 @@ mod tests {
     fn no_export_actions_when_cursor_outside_export_line() {
         let root = test_root();
         let file = root.join("utils.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -802,7 +802,7 @@ mod tests {
     fn generates_action_for_unused_export_const() {
         let root = test_root();
         let file = root.join("utils.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -830,7 +830,7 @@ mod tests {
     fn generates_action_for_export_default() {
         let root = test_root();
         let file = root.join("component.tsx");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -855,7 +855,7 @@ mod tests {
     fn preserves_indentation_in_edit_range() {
         let root = test_root();
         let file = root.join("nested.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -884,7 +884,7 @@ mod tests {
     fn handles_type_exports() {
         let root = test_root();
         let file = root.join("types.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -917,7 +917,7 @@ mod tests {
     fn combines_unused_exports_and_unused_types() {
         let root = test_root();
         let file = root.join("mixed.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -956,7 +956,7 @@ mod tests {
     fn skips_line_without_export_prefix() {
         let root = test_root();
         let file = root.join("odd.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -975,7 +975,7 @@ mod tests {
     fn handles_export_on_line_0_saturating_sub() {
         let root = test_root();
         let file = root.join("edge.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -992,7 +992,7 @@ mod tests {
     fn multiple_exports_same_file_all_in_range() {
         let root = test_root();
         let file = root.join("multi.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -1023,7 +1023,7 @@ mod tests {
     fn cursor_range_filters_subset_of_exports() {
         let root = test_root();
         let file = root.join("filter.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -1054,7 +1054,7 @@ mod tests {
     fn diagnostic_range_matches_export_name_span() {
         let root = test_root();
         let file = root.join("span.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -1078,7 +1078,7 @@ mod tests {
     fn handles_empty_file_lines() {
         let root = test_root();
         let file = root.join("empty.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -1094,7 +1094,7 @@ mod tests {
     fn handles_tab_indentation() {
         let root = test_root();
         let file = root.join("tabs.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -1116,7 +1116,7 @@ mod tests {
     fn no_delete_actions_when_no_unused_files() {
         let root = test_root();
         let file = root.join("used.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
         let results = AnalysisResults::default();
 
         let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 10));
@@ -1128,7 +1128,7 @@ mod tests {
         let root = test_root();
         let file_a = root.join("a.ts");
         let file_b = root.join("b.ts");
-        let uri_b = Url::from_file_path(&file_b).unwrap();
+        let uri_b = Uri::from_file_path(&file_b).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -1143,7 +1143,7 @@ mod tests {
     fn no_delete_action_when_cursor_not_at_line_0() {
         let root = test_root();
         let file = root.join("unused.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -1160,7 +1160,7 @@ mod tests {
     fn generates_delete_action_when_cursor_at_line_0() {
         let root = test_root();
         let file = root.join("unused.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -1182,7 +1182,7 @@ mod tests {
     fn delete_action_uses_document_changes_with_delete_op() {
         let root = test_root();
         let file = root.join("unused.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -1217,7 +1217,7 @@ mod tests {
     fn delete_action_diagnostic_has_correct_properties() {
         let root = test_root();
         let file = root.join("unused.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -1248,7 +1248,7 @@ mod tests {
     fn delete_action_with_cursor_spanning_line_0() {
         let root = test_root();
         let file = root.join("unused.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -1265,7 +1265,7 @@ mod tests {
     fn multiple_unused_files_same_path_produces_multiple_actions() {
         let root = test_root();
         let file = root.join("unused.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -1287,7 +1287,7 @@ mod tests {
     fn unused_file_and_unused_export_in_same_file() {
         let root = test_root();
         let file = root.join("orphan.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -1331,8 +1331,8 @@ mod tests {
         })
     }
 
-    fn workspace_yaml_uri(dir: &tempfile::TempDir) -> Url {
-        Url::from_file_path(dir.path().join("pnpm-workspace.yaml")).unwrap()
+    fn workspace_yaml_uri(dir: &tempfile::TempDir) -> Uri {
+        Uri::from_file_path(dir.path().join("pnpm-workspace.yaml")).unwrap()
     }
 
     #[test]
@@ -1748,7 +1748,7 @@ mod tests {
     #[test]
     fn empty_catalog_group_action_skips_when_uri_mismatch() {
         let dir = tempfile::tempdir().unwrap();
-        let other_uri = Url::from_file_path(dir.path().join("not-the-workspace.yaml")).unwrap();
+        let other_uri = Uri::from_file_path(dir.path().join("not-the-workspace.yaml")).unwrap();
 
         let mut results = AnalysisResults::default();
         results
@@ -1891,7 +1891,7 @@ mod tests {
     fn build_remove_export_actions_skips_stale_line() {
         let root = test_root();
         let file = root.join("src/utils.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
         let mut results = AnalysisResults::default();
         results.unused_exports.push(make_unused_export(
             &file, "foo", 1, // 1-based
@@ -1909,7 +1909,7 @@ mod tests {
     fn build_remove_export_actions_skips_substring_collision() {
         let root = test_root();
         let file = root.join("src/utils.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
         let mut results = AnalysisResults::default();
         results.unused_exports.push(make_unused_export(
             &file, "foo", 1, // 1-based
@@ -1927,7 +1927,7 @@ mod tests {
     fn build_remove_export_actions_skips_value_reference_collision() {
         let root = test_root();
         let file = root.join("src/utils.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
         let mut results = AnalysisResults::default();
         results.unused_exports.push(make_unused_export(
             &file, "foo", 1, // 1-based
@@ -1945,7 +1945,7 @@ mod tests {
     fn build_remove_export_actions_skips_reexport_block() {
         let root = test_root();
         let file = root.join("src/utils.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
         let mut results = AnalysisResults::default();
         results.unused_exports.push(make_unused_export(
             &file, "foo", 1, // 1-based
@@ -1963,7 +1963,7 @@ mod tests {
     fn build_remove_export_actions_accepts_matching_live_line() {
         let root = test_root();
         let file = root.join("src/utils.ts");
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
         let mut results = AnalysisResults::default();
         results.unused_exports.push(make_unused_export(
             &file, "foo", 1, // 1-based

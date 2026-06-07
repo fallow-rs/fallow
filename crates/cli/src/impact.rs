@@ -252,11 +252,7 @@ pub struct AuditRunRecord<'a> {
     pub attribution: Option<&'a AttributionInput<'a>>,
 }
 
-pub fn record_audit_run(
-    root: &Path,
-    summary: &AuditSummary,
-    record: &AuditRunRecord<'_>,
-) {
+pub fn record_audit_run(root: &Path, summary: &AuditSummary, record: &AuditRunRecord<'_>) {
     let AuditRunRecord {
         verdict,
         gate,

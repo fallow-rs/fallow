@@ -1,7 +1,7 @@
 use std::fmt::Write;
 use std::path::Path;
 
-use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
+use ls_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
 
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;

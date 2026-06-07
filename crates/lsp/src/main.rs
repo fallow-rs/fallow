@@ -19,11 +19,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use tokio::sync::{Mutex, RwLock};
-use tower_lsp::jsonrpc::Result;
 #[allow(clippy::wildcard_imports, reason = "many LSP types used")]
-use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer, LspService, Server};
+use ls_types::*;
+use tokio::sync::{Mutex, RwLock};
+use tower_lsp_server::jsonrpc::Result;
+use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
 use serde::{Deserialize, Serialize};
 
@@ -346,7 +346,7 @@ struct DocumentState {
 /// document has been edited during the analysis run. A type alias so future
 /// readers can grep for the snapshot's identity (it is also a stable seam
 /// for tests).
-type VersionSnapshot = FxHashMap<Url, i32>;
+type VersionSnapshot = FxHashMap<Uri, i32>;
 
 fn initialization_config_path(opts: &serde_json::Value, root: Option<&Path>) -> Option<PathBuf> {
     let raw = opts.get("configPath").and_then(|v| v.as_str())?.trim();
@@ -502,7 +502,7 @@ struct FallowLspServer {
     results: Arc<RwLock<Option<AnalysisResults>>>,
     duplication: Arc<RwLock<Option<DuplicationReport>>>,
     inline_complexity: Arc<RwLock<Vec<InlineComplexityFinding>>>,
-    previous_diagnostic_uris: Arc<RwLock<FxHashSet<Url>>>,
+    previous_diagnostic_uris: Arc<RwLock<FxHashSet<Uri>>>,
     last_analysis: Arc<Mutex<Instant>>,
     analysis_guard: Arc<tokio::sync::Mutex<()>>,
     /// Per-URI document state tracked from `did_open` / `did_change` /
@@ -510,7 +510,7 @@ struct FallowLspServer {
     /// `run_analysis` to snapshot the document state at analysis start and
     /// by `publish_collected_diagnostics` to skip stale publishes; see
     /// `.claude/rules/lsp-server.md` for the staleness invariant.
-    documents: Arc<RwLock<FxHashMap<Url, DocumentState>>>,
+    documents: Arc<RwLock<FxHashMap<Uri, DocumentState>>>,
     /// Diagnostic codes to suppress (parsed from initializationOptions.issueTypes)
     disabled_diagnostic_codes: Arc<RwLock<FxHashSet<String>>>,
     /// Optional git ref from `initializationOptions.changedSince`. When set,
@@ -541,7 +541,7 @@ struct FallowLspServer {
     /// this cache (and `self.root`) to avoid stale path joins.
     git_toplevel: Arc<RwLock<Option<PathBuf>>>,
     /// Cached diagnostics for pull-model support (textDocument/diagnostic)
-    cached_diagnostics: Arc<RwLock<FxHashMap<Url, Vec<Diagnostic>>>>,
+    cached_diagnostics: Arc<RwLock<FxHashMap<Uri, Vec<Diagnostic>>>>,
     /// Set by `shutdown()`. `run_analysis` checks this at the top and
     /// before publishing diagnostics so a closing client does not receive
     /// spurious post-shutdown publishes. The 250ms grace on the
@@ -582,18 +582,21 @@ fn build_server_capabilities() -> ServerCapabilities {
     }
 }
 
-#[tower_lsp::async_trait]
 impl LanguageServer for FallowLspServer {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         let root = params
-            .root_uri
-            .and_then(|u| u.to_file_path().ok())
+            .workspace_folders
+            .as_deref()
+            .and_then(|fs| fs.first())
+            .and_then(|f| f.uri.to_file_path().map(|path| path.into_owned()))
             .or_else(|| {
+                #[expect(
+                    deprecated,
+                    reason = "root_uri remains a fallback for legacy LSP clients"
+                )]
                 params
-                    .workspace_folders
-                    .as_deref()
-                    .and_then(|fs| fs.first())
-                    .and_then(|f| f.uri.to_file_path().ok())
+                    .root_uri
+                    .and_then(|u| u.to_file_path().map(|path| path.into_owned()))
             });
         let canonical_root = root.map(|path| path.canonicalize().unwrap_or(path));
         if let Some(path) = &canonical_root {
@@ -741,7 +744,7 @@ impl LanguageServer for FallowLspServer {
         };
 
         let uri = &params.text_document.uri;
-        let Ok(file_path) = uri.to_file_path() else {
+        let Some(file_path) = uri.to_file_path() else {
             return Ok(None);
         };
 
@@ -805,7 +808,7 @@ impl LanguageServer for FallowLspServer {
             return Ok(None);
         };
 
-        let Ok(file_path) = params.text_document.uri.to_file_path() else {
+        let Some(file_path) = params.text_document.uri.to_file_path() else {
             return Ok(None);
         };
 
@@ -835,7 +838,7 @@ impl LanguageServer for FallowLspServer {
         };
 
         let uri = &params.text_document_position_params.text_document.uri;
-        let Ok(file_path) = uri.to_file_path() else {
+        let Some(file_path) = uri.to_file_path() else {
             return Ok(None);
         };
 
@@ -883,7 +886,7 @@ impl FallowLspServer {
 
     #[expect(
         clippy::unused_async,
-        reason = "tower-lsp custom_method handlers are async methods"
+        reason = "tower-lsp-server custom_method handlers are async methods"
     )]
     async fn issue_types(&self) -> Result<Vec<IssueTypeInfo>> {
         Ok(diagnostic_issue_types())
@@ -1133,9 +1136,9 @@ impl FallowLspServer {
     /// dependencies, `pnpm-workspace.yaml` for catalog references). No
     /// version race exists for them.
     fn uri_is_stale(
-        uri: &Url,
+        uri: &Uri,
         snapshot: &VersionSnapshot,
-        live_versions: &FxHashMap<Url, i32>,
+        live_versions: &FxHashMap<Uri, i32>,
     ) -> bool {
         match (snapshot.get(uri), live_versions.get(uri)) {
             (Some(&snapshot_version), Some(&live_version)) => live_version > snapshot_version,
@@ -1150,12 +1153,12 @@ impl FallowLspServer {
     )]
     async fn publish_collected_diagnostics(
         &self,
-        diagnostics_by_file: FxHashMap<Url, Vec<Diagnostic>>,
+        diagnostics_by_file: FxHashMap<Uri, Vec<Diagnostic>>,
         snapshot: &VersionSnapshot,
     ) {
         let disabled = self.disabled_diagnostic_codes.read().await;
 
-        let live_versions: FxHashMap<Url, i32> = self
+        let live_versions: FxHashMap<Uri, i32> = self
             .documents
             .read()
             .await
@@ -1163,7 +1166,7 @@ impl FallowLspServer {
             .map(|(uri, state)| (uri.clone(), state.version))
             .collect();
 
-        let mut new_uris: FxHashSet<Url> = FxHashSet::default();
+        let mut new_uris: FxHashSet<Uri> = FxHashSet::default();
 
         for (uri, diags) in &diagnostics_by_file {
             new_uris.insert(uri.clone());
@@ -1304,7 +1307,7 @@ fn find_project_roots(workspace_root: &std::path::Path) -> Vec<std::path::PathBu
 /// not used by `build_diagnostics` today and is logged via the structured
 /// fact that `data` for any fallow diagnostic should be an object.
 fn attach_changed_since_data(
-    diagnostics_by_file: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    diagnostics_by_file: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     changed_since: Option<&str>,
 ) {
     let Some(git_ref) = changed_since else {
@@ -1376,7 +1379,7 @@ mod tests {
     };
     use serde_json::json;
     use tower::{Service, ServiceExt};
-    use tower_lsp::jsonrpc::Request;
+    use tower_lsp_server::jsonrpc::Request;
 
     #[test]
     fn server_capabilities_advertise_pull_diagnostics() {
@@ -2329,8 +2332,8 @@ export function choose(value: number): string {
 
     #[test]
     fn attach_changed_since_data_sets_payload_when_active() {
-        let mut map: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
-        let uri = Url::parse("file:///a.ts").unwrap();
+        let mut map: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        let uri = "file:///a.ts".parse::<Uri>().unwrap();
         map.insert(uri.clone(), vec![make_diagnostic(), make_diagnostic()]);
 
         attach_changed_since_data(&mut map, Some("fallow-baseline"));
@@ -2347,8 +2350,8 @@ export function choose(value: number): string {
 
     #[test]
     fn attach_changed_since_data_noop_when_filter_absent() {
-        let mut map: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
-        let uri = Url::parse("file:///a.ts").unwrap();
+        let mut map: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        let uri = "file:///a.ts".parse::<Uri>().unwrap();
         map.insert(uri.clone(), vec![make_diagnostic()]);
 
         attach_changed_since_data(&mut map, None);
@@ -2361,15 +2364,15 @@ export function choose(value: number): string {
 
     #[test]
     fn attach_changed_since_data_handles_empty_map() {
-        let mut map: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut map: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         attach_changed_since_data(&mut map, Some("origin/main"));
         assert!(map.is_empty());
     }
 
     #[test]
     fn attach_changed_since_data_merges_into_existing_object_data() {
-        let mut map: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
-        let uri = Url::parse("file:///a.ts").unwrap();
+        let mut map: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        let uri = "file:///a.ts".parse::<Uri>().unwrap();
         let mut d = make_diagnostic();
         d.data = Some(serde_json::json!({ "resolveToken": "abc-123" }));
         map.insert(uri.clone(), vec![d]);
@@ -2383,8 +2386,8 @@ export function choose(value: number): string {
 
     #[test]
     fn attach_changed_since_data_leaves_non_object_data_intact() {
-        let mut map: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
-        let uri = Url::parse("file:///a.ts").unwrap();
+        let mut map: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        let uri = "file:///a.ts".parse::<Uri>().unwrap();
         let mut d = make_diagnostic();
         d.data = Some(serde_json::Value::String("custom-token".to_string()));
         map.insert(uri.clone(), vec![d]);
@@ -2572,7 +2575,7 @@ export function choose(value: number): string {
         }
     }
 
-    async fn install_document(backend: &FallowLspServer, uri: &Url, version: i32, text: &str) {
+    async fn install_document(backend: &FallowLspServer, uri: &Uri, version: i32, text: &str) {
         backend.documents.write().await.insert(
             uri.clone(),
             DocumentState {
@@ -2587,13 +2590,13 @@ export function choose(value: number): string {
         let (service, _) = LspService::build(FallowLspServer::new).finish();
         let backend = service.inner();
 
-        let uri = Url::parse("file:///stale.ts").unwrap();
+        let uri = "file:///stale.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
         let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
 
         install_document(backend, &uri, 2, "v2").await;
 
-        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
         backend
             .publish_collected_diagnostics(diags_by_file, &snapshot)
@@ -2610,11 +2613,11 @@ export function choose(value: number): string {
         let (service, _) = LspService::build(FallowLspServer::new).finish();
         let backend = service.inner();
 
-        let uri = Url::parse("file:///fresh.ts").unwrap();
+        let uri = "file:///fresh.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
         let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
 
-        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
         backend
             .publish_collected_diagnostics(diags_by_file, &snapshot)
@@ -2638,10 +2641,10 @@ export function choose(value: number): string {
         let (service, _) = LspService::build(FallowLspServer::new).finish();
         let backend = service.inner();
 
-        let uri = Url::parse("file:///never-opened/package.json").unwrap();
+        let uri = "file:///never-opened/package.json".parse::<Uri>().unwrap();
         let snapshot: VersionSnapshot = FxHashMap::default();
 
-        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
         backend
             .publish_collected_diagnostics(diags_by_file, &snapshot)
@@ -2658,12 +2661,12 @@ export function choose(value: number): string {
         let (service, _) = LspService::build(FallowLspServer::new).finish();
         let backend = service.inner();
 
-        let uri = Url::parse("file:///opened-mid-run.ts").unwrap();
+        let uri = "file:///opened-mid-run.ts".parse::<Uri>().unwrap();
         let snapshot: VersionSnapshot = FxHashMap::default();
 
         install_document(backend, &uri, 1, "v1").await;
 
-        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
         backend
             .publish_collected_diagnostics(diags_by_file, &snapshot)
@@ -2686,13 +2689,13 @@ export function choose(value: number): string {
         let (service, _) = LspService::build(FallowLspServer::new).finish();
         let backend = service.inner();
 
-        let uri = Url::parse("file:///closed.ts").unwrap();
+        let uri = "file:///closed.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
         let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
 
         backend.documents.write().await.remove(&uri);
 
-        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
         backend
             .publish_collected_diagnostics(diags_by_file, &snapshot)
@@ -2725,11 +2728,11 @@ export function choose(value: number): string {
 
         let backend = service.inner();
 
-        let uri = Url::parse("file:///versioned.ts").unwrap();
+        let uri = "file:///versioned.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 7, "v7").await;
         let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 7)).collect();
 
-        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
         backend
             .publish_collected_diagnostics(diags_by_file, &snapshot)
@@ -2761,11 +2764,11 @@ export function choose(value: number): string {
         let (service, _) = LspService::build(FallowLspServer::new).finish();
         let backend = service.inner();
 
-        let uri = Url::parse("file:///clearing.ts").unwrap();
+        let uri = "file:///clearing.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
         let snapshot_v1: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
 
-        let mut first_run: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut first_run: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         first_run.insert(uri.clone(), vec![make_diagnostic()]);
         backend
             .publish_collected_diagnostics(first_run, &snapshot_v1)
@@ -2777,7 +2780,7 @@ export function choose(value: number): string {
 
         install_document(backend, &uri, 2, "v2").await;
 
-        let empty: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let empty: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         backend
             .publish_collected_diagnostics(empty, &snapshot_v1)
             .await;
@@ -2798,12 +2801,12 @@ export function choose(value: number): string {
         let (service, _) = LspService::build(FallowLspServer::new).finish();
         let backend = service.inner();
 
-        let uri = Url::parse("file:///tracked.ts").unwrap();
+        let uri = "file:///tracked.ts".parse::<Uri>().unwrap();
         install_document(backend, &uri, 1, "v1").await;
         let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
         install_document(backend, &uri, 2, "v2").await;
 
-        let mut diags_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
         diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
         backend
             .publish_collected_diagnostics(diags_by_file, &snapshot)

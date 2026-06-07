@@ -5,7 +5,7 @@ mod unused;
 use rustc_hash::FxHashMap;
 use std::path::Path;
 
-use tower_lsp::lsp_types::{CodeDescription, Diagnostic, Position, Range, Url};
+use ls_types::{CodeDescription, Diagnostic, Position, Range, Uri};
 
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
@@ -16,7 +16,7 @@ const DOCS_BASE: &str = "https://docs.fallow.tools/explanations/dead-code#";
 /// Build a `CodeDescription` with a documentation URL for the given anchor.
 fn doc_link(anchor: &str) -> Option<CodeDescription> {
     let url = format!("{DOCS_BASE}{anchor}");
-    Url::parse(&url).ok().map(|href| CodeDescription { href })
+    url.parse::<Uri>().ok().map(|href| CodeDescription { href })
 }
 
 /// LSP range covering the entire first line — used for file-level and package.json diagnostics.
@@ -36,9 +36,9 @@ pub fn build_diagnostics(
     results: &AnalysisResults,
     duplication: &DuplicationReport,
     root: &Path,
-) -> FxHashMap<Url, Vec<Diagnostic>> {
-    let mut map: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
-    let package_json_uri = Url::from_file_path(root.join("package.json")).ok();
+) -> FxHashMap<Uri, Vec<Diagnostic>> {
+    let mut map: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+    let package_json_uri = Uri::from_file_path(root.join("package.json"));
 
     unused::push_export_diagnostics(&mut map, results);
     unused::push_file_diagnostics(&mut map, results);
@@ -144,7 +144,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&path).unwrap();
+        let uri = Uri::from_file_path(&path).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 3);
     }

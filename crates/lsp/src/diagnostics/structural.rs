@@ -1,8 +1,8 @@
 use rustc_hash::FxHashMap;
 
-use tower_lsp::lsp_types::{
+use ls_types::{
     Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString,
-    Position, Range, Url,
+    Position, Range, Uri,
 };
 
 use fallow_core::results::AnalysisResults;
@@ -44,14 +44,14 @@ fn cycle_fingerprint(files: &[std::path::PathBuf]) -> String {
 /// build `CircularDependency` without populating `edges`). One diagnostic on
 /// the first file, with the other members listed as related info at line 0.
 fn push_legacy_circular_diagnostic(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     cycle: &fallow_core::results::CircularDependency,
     names: &[String],
 ) {
     let Some(first_file) = cycle.files.first() else {
         return;
     };
-    let Ok(uri) = Url::from_file_path(first_file) else {
+    let Some(uri) = Uri::from_file_path(first_file) else {
         return;
     };
     let message = format!("Circular dependency: {}", names.join(" \u{2192} "));
@@ -63,7 +63,7 @@ fn push_legacy_circular_diagnostic(
         .skip(1)
         .enumerate()
         .filter_map(|(i, f)| {
-            let file_uri = Url::from_file_path(f).ok()?;
+            let file_uri = Uri::from_file_path(f)?;
             Some(DiagnosticRelatedInformation {
                 location: Location {
                     uri: file_uri,
@@ -100,7 +100,7 @@ fn push_legacy_circular_diagnostic(
 }
 
 pub fn push_circular_dep_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
     for cycle in &results.circular_dependencies {
@@ -131,7 +131,7 @@ pub fn push_circular_dep_diagnostics(
         let suffix = if n == 1 { "" } else { "s" };
 
         for (i, edge) in cycle.cycle.edges.iter().enumerate() {
-            let Ok(uri) = Url::from_file_path(&edge.path) else {
+            let Some(uri) = Uri::from_file_path(&edge.path) else {
                 // Render-only drop: an unopenable URL (e.g. a relative or
                 // malformed path) is skipped here, but the `edges` data still
                 // carries every hop. Never let this filter touch the data.
@@ -155,7 +155,7 @@ pub fn push_circular_dep_diagnostics(
                     .enumerate()
                     .filter(|(j, _)| *j != i)
                     .filter_map(|(j, other)| {
-                        let other_uri = Url::from_file_path(&other.path).ok()?;
+                        let other_uri = Uri::from_file_path(&other.path)?;
                         let other_line = other.line.saturating_sub(1);
                         Some(DiagnosticRelatedInformation {
                             location: Location {
@@ -214,7 +214,7 @@ pub fn push_circular_dep_diagnostics(
 }
 
 pub fn push_re_export_cycle_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
     for cycle in &results.re_export_cycles {
@@ -253,7 +253,7 @@ pub fn push_re_export_cycle_diagnostics(
         );
 
         for (idx, member_path) in cycle.cycle.files.iter().enumerate() {
-            let Ok(uri) = Url::from_file_path(member_path) else {
+            let Some(uri) = Uri::from_file_path(member_path) else {
                 continue;
             };
             let related_info: Vec<DiagnosticRelatedInformation> = cycle
@@ -263,7 +263,7 @@ pub fn push_re_export_cycle_diagnostics(
                 .enumerate()
                 .filter(|(i, _)| *i != idx)
                 .filter_map(|(_, other)| {
-                    let other_uri = Url::from_file_path(other).ok()?;
+                    let other_uri = Uri::from_file_path(other)?;
                     let name = other.file_name().map_or_else(
                         || other.display().to_string(),
                         |n| n.to_string_lossy().into_owned(),
@@ -297,11 +297,11 @@ pub fn push_re_export_cycle_diagnostics(
 }
 
 pub fn push_boundary_violation_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
     for v in &results.boundary_violations {
-        let Ok(uri) = Url::from_file_path(&v.violation.from_path) else {
+        let Some(uri) = Uri::from_file_path(&v.violation.from_path) else {
             continue;
         };
         let line = v.violation.line.saturating_sub(1);
@@ -314,17 +314,15 @@ pub fn push_boundary_violation_diagnostics(
             to_name, v.violation.to_zone, v.violation.from_zone,
         );
 
-        let related_info = Url::from_file_path(&v.violation.to_path)
-            .ok()
-            .map(|target_uri| {
-                vec![DiagnosticRelatedInformation {
-                    location: Location {
-                        uri: target_uri,
-                        range: FIRST_LINE_RANGE,
-                    },
-                    message: format!("Target file in zone '{}'", v.violation.to_zone),
-                }]
-            });
+        let related_info = Uri::from_file_path(&v.violation.to_path).map(|target_uri| {
+            vec![DiagnosticRelatedInformation {
+                location: Location {
+                    uri: target_uri,
+                    range: FIRST_LINE_RANGE,
+                },
+                message: format!("Target file in zone '{}'", v.violation.to_zone),
+            }]
+        });
 
         map.entry(uri).or_default().push(Diagnostic {
             range: Range {
@@ -357,7 +355,7 @@ mod tests {
         AnalysisResults, BoundaryViolation, BoundaryViolationFinding, CircularDependency,
         CircularDependencyEdge, CircularDependencyFinding,
     };
-    use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString, Url};
+    use ls_types::{DiagnosticSeverity, NumberOrString, Uri};
 
     use crate::diagnostics::build_diagnostics;
 
@@ -413,7 +411,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri_a = Url::from_file_path(&file_a).unwrap();
+        let uri_a = Uri::from_file_path(&file_a).unwrap();
         let file_diags = &diags[&uri_a];
         assert_eq!(file_diags.len(), 1);
 
@@ -438,8 +436,8 @@ mod tests {
         assert_eq!(related[0].message, "Step 2 in cycle: b.ts");
         assert_eq!(related[1].message, "Step 3 in cycle: c.ts");
 
-        let uri_b = Url::from_file_path(&file_b).unwrap();
-        let uri_c = Url::from_file_path(&file_c).unwrap();
+        let uri_b = Uri::from_file_path(&file_b).unwrap();
+        let uri_c = Uri::from_file_path(&file_c).unwrap();
         assert_eq!(related[0].location.uri, uri_b);
         assert_eq!(related[1].location.uri, uri_c);
     }
@@ -466,7 +464,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&file_a).unwrap();
+        let uri = Uri::from_file_path(&file_a).unwrap();
         let d = &diags[&uri][0];
         assert!(d.related_information.is_none());
     }
@@ -533,9 +531,9 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri_a = Url::from_file_path(&file_a).unwrap();
-        let uri_b = Url::from_file_path(&file_b).unwrap();
-        let uri_c = Url::from_file_path(&file_c).unwrap();
+        let uri_a = Uri::from_file_path(&file_a).unwrap();
+        let uri_b = Uri::from_file_path(&file_b).unwrap();
+        let uri_c = Uri::from_file_path(&file_c).unwrap();
 
         // One squiggly per file in the cycle, each anchored at that file's
         // outgoing import.
@@ -638,9 +636,9 @@ mod tests {
 
         // file_a (absolute) still renders; the relative hop is silently
         // skipped from rendering only.
-        let uri_a = Url::from_file_path(&file_a).unwrap();
+        let uri_a = Uri::from_file_path(&file_a).unwrap();
         assert_eq!(diags[&uri_a].len(), 1);
-        assert!(Url::from_file_path(&relative).is_err());
+        assert!(Uri::from_file_path(&relative).is_none());
     }
 
     #[test]
@@ -662,8 +660,8 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri_a = Url::from_file_path(&file_a).unwrap();
-        let uri_b = Url::from_file_path(&file_b).unwrap();
+        let uri_a = Uri::from_file_path(&file_a).unwrap();
+        let uri_b = Uri::from_file_path(&file_b).unwrap();
         assert_eq!(diags[&uri_a].len(), 1);
         assert_eq!(diags[&uri_b].len(), 1);
 
@@ -720,7 +718,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&file).unwrap();
+        let uri = Uri::from_file_path(&file).unwrap();
         let d = &diags[&uri][0];
         assert!(d.message.contains("Re-export self-loop"));
         assert!(d.message.contains("1 file"));
@@ -754,7 +752,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&from_file).unwrap();
+        let uri = Uri::from_file_path(&from_file).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -796,7 +794,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&from_file).unwrap();
+        let uri = Uri::from_file_path(&from_file).unwrap();
         let d = &diags[&uri][0];
         assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
         assert_eq!(d.source, Some("fallow".to_string()));
@@ -824,14 +822,14 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&from_file).unwrap();
+        let uri = Uri::from_file_path(&from_file).unwrap();
         let d = &diags[&uri][0];
 
         let related = d.related_information.as_ref().unwrap();
         assert_eq!(related.len(), 1);
         assert_eq!(related[0].message, "Target file in zone 'domain'");
 
-        let target_uri = Url::from_file_path(&to_file).unwrap();
+        let target_uri = Uri::from_file_path(&to_file).unwrap();
         assert_eq!(related[0].location.uri, target_uri);
     }
 
@@ -869,7 +867,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&from_file).unwrap();
+        let uri = Uri::from_file_path(&from_file).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 2);
 

@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
 
-use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Position, Range, Url,
+use ls_types::{
+    Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Position, Range, Uri,
 };
 
 use fallow_core::results::AnalysisResults;
@@ -13,7 +13,7 @@ use super::{FIRST_LINE_RANGE, doc_link};
     reason = "identifier lengths are bounded by source size"
 )]
 pub fn push_export_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
     let exports_iter = results.unused_exports.iter().map(|f| &f.export);
@@ -33,7 +33,7 @@ pub fn push_export_diagnostics(
         ),
     ] {
         for export in exports {
-            if let Ok(uri) = Url::from_file_path(&export.path) {
+            if let Some(uri) = Uri::from_file_path(&export.path) {
                 let line = export.line.saturating_sub(1);
                 map.entry(uri).or_default().push(Diagnostic {
                     range: Range {
@@ -59,7 +59,7 @@ pub fn push_export_diagnostics(
     }
 
     for leak in &results.private_type_leaks {
-        if let Ok(uri) = Url::from_file_path(&leak.leak.path) {
+        if let Some(uri) = Uri::from_file_path(&leak.leak.path) {
             let line = leak.leak.line.saturating_sub(1);
             map.entry(uri).or_default().push(Diagnostic {
                 range: Range {
@@ -86,9 +86,9 @@ pub fn push_export_diagnostics(
     }
 }
 
-pub fn push_file_diagnostics(map: &mut FxHashMap<Url, Vec<Diagnostic>>, results: &AnalysisResults) {
+pub fn push_file_diagnostics(map: &mut FxHashMap<Uri, Vec<Diagnostic>>, results: &AnalysisResults) {
     for file in &results.unused_files {
-        if let Ok(uri) = Url::from_file_path(&file.file.path) {
+        if let Some(uri) = Uri::from_file_path(&file.file.path) {
             map.entry(uri).or_default().push(Diagnostic {
                 range: FIRST_LINE_RANGE,
                 severity: Some(DiagnosticSeverity::WARNING),
@@ -108,11 +108,11 @@ pub fn push_file_diagnostics(map: &mut FxHashMap<Url, Vec<Diagnostic>>, results:
     reason = "specifier lengths are bounded by source size"
 )]
 pub fn push_import_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
     for import in &results.unresolved_imports {
-        if let Ok(uri) = Url::from_file_path(&import.import.path) {
+        if let Some(uri) = Uri::from_file_path(&import.import.path) {
             let line = import.import.line.saturating_sub(1);
             map.entry(uri).or_default().push(Diagnostic {
                 range: Range {
@@ -139,9 +139,9 @@ pub fn push_import_diagnostics(
 }
 
 pub fn push_dep_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
-    package_json_uri: Option<&Url>,
+    package_json_uri: Option<&Uri>,
     root: &std::path::Path,
 ) {
     type DepIter<'a> = Box<dyn Iterator<Item = &'a fallow_core::results::UnusedDependency> + 'a>;
@@ -167,7 +167,7 @@ pub fn push_dep_diagnostics(
     ];
     for (deps, code, anchor, msg_prefix) in groups {
         for dep in deps {
-            if let Ok(dep_uri) = Url::from_file_path(&dep.path) {
+            if let Some(dep_uri) = Uri::from_file_path(&dep.path) {
                 let line = dep.line.saturating_sub(1);
                 map.entry(dep_uri).or_default().push(Diagnostic {
                     range: Range {
@@ -206,7 +206,7 @@ pub fn push_dep_diagnostics(
     }
 
     for dep in &results.type_only_dependencies {
-        if let Ok(dep_uri) = Url::from_file_path(&dep.dep.path) {
+        if let Some(dep_uri) = Uri::from_file_path(&dep.dep.path) {
             let line = dep.dep.line.saturating_sub(1);
             map.entry(dep_uri).or_default().push(Diagnostic {
                 range: Range {
@@ -230,7 +230,7 @@ pub fn push_dep_diagnostics(
     }
 
     for dep in &results.test_only_dependencies {
-        if let Ok(dep_uri) = Url::from_file_path(&dep.dep.path) {
+        if let Some(dep_uri) = Uri::from_file_path(&dep.dep.path) {
             let line = dep.dep.line.saturating_sub(1);
             map.entry(dep_uri).or_default().push(Diagnostic {
                 range: Range {
@@ -255,7 +255,7 @@ pub fn push_dep_diagnostics(
 
     for entry in &results.unused_catalog_entries {
         let entry = &entry.entry;
-        if let Ok(entry_uri) = Url::from_file_path(root.join(&entry.path)) {
+        if let Some(entry_uri) = Uri::from_file_path(root.join(&entry.path)) {
             let line = entry.line.saturating_sub(1);
             let message = if entry.catalog_name == "default" {
                 format!(
@@ -293,13 +293,13 @@ pub fn push_dep_diagnostics(
 }
 
 fn push_empty_catalog_group_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
     root: &std::path::Path,
 ) {
     for group in &results.empty_catalog_groups {
         let group = &group.group;
-        let Ok(uri) = Url::from_file_path(root.join(&group.path)) else {
+        let Some(uri) = Uri::from_file_path(root.join(&group.path)) else {
             continue;
         };
         let line = group.line.saturating_sub(1);
@@ -327,15 +327,15 @@ fn push_empty_catalog_group_diagnostics(
 /// Emit one `ERROR`-severity diagnostic per unresolved-catalog-reference
 /// finding. The finding's `path` is stored as an absolute filesystem path
 /// (matching the existing convention for path-anchored findings), so
-/// `Url::from_file_path` can be called directly.
+/// `Uri::from_file_path` can be called directly.
 fn push_unresolved_catalog_reference_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
     use std::fmt::Write as _;
     for finding in &results.unresolved_catalog_references {
         let finding = &finding.reference;
-        let Ok(uri) = Url::from_file_path(&finding.path) else {
+        let Some(uri) = Uri::from_file_path(&finding.path) else {
             continue;
         };
         let line = finding.line.saturating_sub(1);
@@ -378,17 +378,17 @@ fn push_unresolved_catalog_reference_diagnostics(
 /// Emit diagnostics for unused and misconfigured pnpm dependency-override
 /// findings. Both finding types carry an absolute `path` (matching the
 /// `UnresolvedCatalogReference` convention so `--changed-since` and per-file
-/// overrides.rules can compare directly). `Url::from_file_path` accepts the
+/// overrides.rules can compare directly). `Uri::from_file_path` accepts the
 /// path as-is. Severity matches the default rule severity: unused =
 /// `WARNING`, misconfigured = `ERROR` (pnpm refuses to install).
 fn push_dependency_override_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
     use std::fmt::Write as _;
     for finding in &results.unused_dependency_overrides {
         let finding = &finding.entry;
-        let Ok(uri) = Url::from_file_path(&finding.path) else {
+        let Some(uri) = Uri::from_file_path(&finding.path) else {
             continue;
         };
         let line = finding.line.saturating_sub(1);
@@ -419,7 +419,7 @@ fn push_dependency_override_diagnostics(
     }
     for finding in &results.misconfigured_dependency_overrides {
         let finding = &finding.entry;
-        let Ok(uri) = Url::from_file_path(&finding.path) else {
+        let Some(uri) = Uri::from_file_path(&finding.path) else {
             continue;
         };
         let line = finding.line.saturating_sub(1);
@@ -454,7 +454,7 @@ fn push_dependency_override_diagnostics(
     reason = "member name lengths are bounded by source size"
 )]
 pub fn push_member_diagnostics(
-    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
     let enum_iter = results.unused_enum_members.iter().map(|f| &f.member);
@@ -474,7 +474,7 @@ pub fn push_member_diagnostics(
         ),
     ] {
         for member in members {
-            if let Ok(uri) = Url::from_file_path(&member.path) {
+            if let Some(uri) = Uri::from_file_path(&member.path) {
                 let line = member.line.saturating_sub(1);
                 map.entry(uri).or_default().push(Diagnostic {
                     range: Range {
@@ -520,7 +520,7 @@ mod tests {
         UnusedFile, UnusedFileFinding, UnusedMember, UnusedOptionalDependencyFinding,
         UnusedTypeFinding,
     };
-    use tower_lsp::lsp_types::{DiagnosticSeverity, DiagnosticTag, NumberOrString, Url};
+    use ls_types::{DiagnosticSeverity, DiagnosticTag, NumberOrString, Uri};
 
     use crate::diagnostics::{FIRST_LINE_RANGE, build_diagnostics};
 
@@ -575,7 +575,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("src/utils.ts")).unwrap();
+        let uri = Uri::from_file_path(root.join("src/utils.ts")).unwrap();
         let file_diags = diags.get(&uri).expect("should have diagnostics for file");
         assert_eq!(file_diags.len(), 1);
 
@@ -612,7 +612,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("src/types.ts")).unwrap();
+        let uri = Uri::from_file_path(root.join("src/types.ts")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -638,7 +638,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("src/dead.ts")).unwrap();
+        let uri = Uri::from_file_path(root.join("src/dead.ts")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -673,7 +673,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("src/app.ts")).unwrap();
+        let uri = Uri::from_file_path(root.join("src/app.ts")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -705,7 +705,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -732,7 +732,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -761,7 +761,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -793,7 +793,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("src/enums.ts")).unwrap();
+        let uri = Uri::from_file_path(root.join("src/enums.ts")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -827,7 +827,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("src/service.ts")).unwrap();
+        let uri = Uri::from_file_path(root.join("src/service.ts")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -859,7 +859,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -894,7 +894,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -929,7 +929,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
@@ -966,7 +966,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("src/edge.ts")).unwrap();
+        let uri = Uri::from_file_path(root.join("src/edge.ts")).unwrap();
         let d = &diags[&uri][0];
         assert_eq!(d.range.start.line, 0);
     }
@@ -990,7 +990,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
+        let uri = Uri::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
         let file_diags = diags
             .get(&uri)
             .expect("catalog diagnostic should be keyed by the absolute YAML URI");
@@ -1026,7 +1026,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
+        let uri = Uri::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
         let d = &diags[&uri][0];
         assert!(d.message.contains("react-dom"));
         assert!(
@@ -1051,7 +1051,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
+        let uri = Uri::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
         let file_diags = diags
             .get(&uri)
             .expect("empty catalog diagnostic should be keyed by the absolute YAML URI");
@@ -1087,7 +1087,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&abs_path).unwrap();
+        let uri = Uri::from_file_path(&abs_path).unwrap();
         let file_diags = diags
             .get(&uri)
             .expect("unresolved-catalog-reference diagnostic must be keyed by absolute URI");
@@ -1124,7 +1124,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&abs_path).unwrap();
+        let uri = Uri::from_file_path(&abs_path).unwrap();
         let d = &diags[&uri][0];
         assert!(
             d.message.contains("the default catalog"),
@@ -1165,7 +1165,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&yaml_path).unwrap();
+        let uri = Uri::from_file_path(&yaml_path).unwrap();
         let file_diags = diags
             .get(&uri)
             .expect("unused-dependency-override diagnostic must key by absolute URI");
@@ -1213,7 +1213,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path(&json_path).unwrap();
+        let uri = Uri::from_file_path(&json_path).unwrap();
         let d = &diags[&uri][0];
         assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
         assert_eq!(

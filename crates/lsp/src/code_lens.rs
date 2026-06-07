@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use tower_lsp::lsp_types::{CodeLens, Command, Position, Range, Url};
+use ls_types::{CodeLens, Command, Position, Range, Uri};
 
 use fallow_core::results::AnalysisResults;
 
@@ -39,7 +39,7 @@ pub fn build_code_lenses(
     results: &AnalysisResults,
     complexity: &[InlineComplexityFinding],
     file_path: &Path,
-    document_uri: &Url,
+    document_uri: &Uri,
 ) -> Vec<CodeLens> {
     let mut lenses: Vec<CodeLens> = results
         .export_usages
@@ -62,7 +62,7 @@ pub fn build_code_lenses(
                 .reference_locations
                 .iter()
                 .filter_map(|loc| {
-                    let uri = Url::from_file_path(&loc.path).ok()?;
+                    let uri = Uri::from_file_path(&loc.path)?;
                     let ref_line = loc.line.saturating_sub(1);
                     Some(serde_json::json!({
                         "uri": uri.as_str(),
@@ -165,7 +165,7 @@ mod tests {
         let root = test_root();
         let mod_path = root.join("src/mod.ts");
         let results = AnalysisResults::default();
-        let uri = Url::from_file_path(&mod_path).unwrap();
+        let uri = Uri::from_file_path(&mod_path).unwrap();
 
         let lenses = build_code_lenses(&results, &[], &mod_path, &uri);
         assert!(lenses.is_empty());
@@ -185,7 +185,7 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&mod_path).unwrap();
+        let uri = Uri::from_file_path(&mod_path).unwrap();
         let lenses = build_code_lenses(&results, &[], &mod_path, &uri);
         assert!(lenses.is_empty());
     }
@@ -204,7 +204,7 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
+        let uri = Uri::from_file_path(&utils_path).unwrap();
         let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
@@ -226,7 +226,7 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
+        let uri = Uri::from_file_path(&utils_path).unwrap();
         let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
@@ -248,7 +248,7 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
+        let uri = Uri::from_file_path(&utils_path).unwrap();
         let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
@@ -270,7 +270,7 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
+        let uri = Uri::from_file_path(&utils_path).unwrap();
         let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
@@ -294,7 +294,7 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
+        let uri = Uri::from_file_path(&utils_path).unwrap();
         let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
@@ -328,7 +328,7 @@ mod tests {
             ],
         });
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
+        let uri = Uri::from_file_path(&utils_path).unwrap();
         let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
@@ -343,7 +343,7 @@ mod tests {
         assert_eq!(args[1]["character"], 7);
         let ref_locs = args[2].as_array().unwrap();
         assert_eq!(ref_locs.len(), 2);
-        let app_uri = Url::from_file_path(root.join("src/app.ts")).unwrap();
+        let app_uri = Uri::from_file_path(root.join("src/app.ts")).unwrap();
         assert_eq!(ref_locs[0]["uri"], app_uri.as_str());
         assert_eq!(ref_locs[0]["range"]["start"]["line"], 2);
         assert_eq!(ref_locs[0]["range"]["start"]["character"], 10);
@@ -379,7 +379,7 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&path).unwrap();
+        let uri = Uri::from_file_path(&path).unwrap();
         let lenses = build_code_lenses(&results, &[], &path, &uri);
         assert_eq!(lenses.len(), 3);
 
@@ -407,7 +407,7 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&edge_path).unwrap();
+        let uri = Uri::from_file_path(&edge_path).unwrap();
         let lenses = build_code_lenses(&results, &[], &edge_path, &uri);
         assert_eq!(lenses.len(), 1);
         assert_eq!(lenses[0].range.start.line, 0);
@@ -438,7 +438,7 @@ mod tests {
             ],
         });
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
+        let uri = Uri::from_file_path(&utils_path).unwrap();
         let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
@@ -464,7 +464,7 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&path).unwrap();
+        let uri = Uri::from_file_path(&path).unwrap();
         let lenses = build_code_lenses(&results, &[], &path, &uri);
         assert_eq!(lenses.len(), 1);
 
@@ -485,7 +485,7 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path(&path).unwrap();
+        let uri = Uri::from_file_path(&path).unwrap();
         let lenses = build_code_lenses(&results, &[], &path, &uri);
         assert!(
             lenses[0].data.is_none(),
@@ -511,7 +511,7 @@ mod tests {
             }],
         });
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
+        let uri = Uri::from_file_path(&utils_path).unwrap();
         let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -537,7 +537,7 @@ mod tests {
             exceeded: InlineComplexityExceeded::CyclomaticAndCognitive,
         }];
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
+        let uri = Uri::from_file_path(&utils_path).unwrap();
         let lenses = build_code_lenses(&results, &complexity, &utils_path, &uri);
 
         assert_eq!(lenses.len(), 1);
@@ -567,7 +567,7 @@ mod tests {
             exceeded: InlineComplexityExceeded::CyclomaticAndCognitive,
         }];
 
-        let uri = Url::from_file_path(&utils_path).unwrap();
+        let uri = Uri::from_file_path(&utils_path).unwrap();
         let lenses = build_code_lenses(&results, &complexity, &utils_path, &uri);
 
         assert!(lenses.is_empty());

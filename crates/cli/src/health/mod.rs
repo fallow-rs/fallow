@@ -1817,8 +1817,7 @@ fn assemble_health_report(
 struct LargeFunctionInput<'a> {
     vital_signs: &'a crate::health_types::VitalSigns,
     modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths:
-        &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
     config_root: &'a std::path::Path,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
