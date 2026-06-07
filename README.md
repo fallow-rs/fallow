@@ -777,7 +777,7 @@ See the [full configuration reference](https://docs.fallow.tools/configuration/o
 
 Fallow is not an AI assistant. It is the deterministic codebase intelligence layer that your assistant, your editor, and your CI pipeline can call.
 
-- **VS Code extension** -- tree views, status bar, one-click fixes, auto-download LSP binary ([Marketplace](https://github.com/fallow-rs/fallow/tree/main/editors/vscode))
+- **Editor integrations** -- VS Code extension, Zed extension, and Neovim LSP setup ([editors](https://github.com/fallow-rs/fallow/tree/main/editors))
 - **LSP server** -- real-time diagnostics, hover info, code actions, Code Lens with reference counts
 - **Agent Skill + MCP server** -- version-matched AI agent guidance ships in the npm package, with MCP integration for Claude Code, Codex, Cursor, Windsurf, and other agents ([fallow-skills](https://github.com/fallow-rs/fallow-skills))
 - **JSON `actions` array** -- every issue in `--format json` output includes fix suggestions with `auto_fixable` flag, so agents can self-correct
