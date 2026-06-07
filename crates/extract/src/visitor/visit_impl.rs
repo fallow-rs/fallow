@@ -4341,6 +4341,18 @@ fn classify_arg_kind(expr: &Expression<'_>) -> SinkArgKind {
 fn sink_literal_value(expr: &Expression<'_>) -> Option<SinkLiteralValue> {
     match unwrap_static_expr(expr) {
         Expression::StringLiteral(lit) => Some(SinkLiteralValue::String(lit.value.to_string())),
+        Expression::NumericLiteral(lit) if lit.value.is_finite() && lit.value.fract() == 0.0 => {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "finite integer JS literals in the safe i64 range are the only admitted numeric sink metadata"
+            )]
+            let value = lit.value as i64;
+            if (value as f64 - lit.value).abs() < f64::EPSILON {
+                Some(SinkLiteralValue::Integer(value))
+            } else {
+                None
+            }
+        }
         Expression::BooleanLiteral(lit) => Some(SinkLiteralValue::Boolean(lit.value)),
         Expression::NullLiteral(_) => Some(SinkLiteralValue::Null),
         _ => None,
@@ -4428,20 +4440,37 @@ fn has_provider_prefix_capture_hint(value: &str) -> bool {
 }
 
 fn object_literal_properties(expr: &Expression<'_>) -> Vec<SinkObjectProperty> {
+    let mut properties = Vec::new();
+    collect_object_literal_properties(expr, "", &mut properties);
+    properties
+}
+
+fn collect_object_literal_properties(
+    expr: &Expression<'_>,
+    prefix: &str,
+    properties: &mut Vec<SinkObjectProperty>,
+) {
     let Expression::ObjectExpression(obj) = unwrap_static_expr(expr) else {
-        return Vec::new();
+        return;
     };
-    obj.properties
-        .iter()
-        .filter_map(|prop| {
-            let ObjectPropertyKind::ObjectProperty(prop) = prop else {
-                return None;
-            };
-            let key = prop.key.static_name()?.to_string();
-            let value = sink_literal_value(&prop.value)?;
-            Some(SinkObjectProperty { key, value })
-        })
-        .collect()
+    for prop in &obj.properties {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+            continue;
+        };
+        let Some(key) = prop.key.static_name() else {
+            continue;
+        };
+        let key = if prefix.is_empty() {
+            key.to_string()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        if let Some(value) = sink_literal_value(&prop.value) {
+            properties.push(SinkObjectProperty { key, value });
+        } else {
+            collect_object_literal_properties(&prop.value, &key, properties);
+        }
+    }
 }
 
 struct ObjectKeyMetadata {
@@ -4484,30 +4513,37 @@ fn should_capture_literal_sink_arg(
     let Some(literal) = sink_literal_value(expr) else {
         return false;
     };
-    let SinkLiteralValue::String(value) = literal else {
-        return false;
-    };
     match sink_shape {
-        SinkShape::Call | SinkShape::MemberCall => {
-            (arg_index == 1 && is_post_message_callee(callee_path) && value == "*")
-                || (arg_index == 0 && is_weak_crypto_literal_callee(callee_path))
-                || (arg_index == 0 && is_string_code_callee(callee_path))
-                || (arg_index == 0
-                    && is_cleartext_transport_literal_callee(callee_path)
-                    && is_cleartext_transport_literal(&value))
-                || (arg_index == 0
-                    && is_literal_metadata_url_callee(callee_path)
-                    && is_metadata_service_literal(&value))
-        }
-        SinkShape::NewExpression => {
-            arg_index == 0
-                && (callee_path == "Function"
-                    || (callee_path == "WebSocket" && is_cleartext_websocket_literal(&value)))
-        }
+        SinkShape::Call | SinkShape::MemberCall => match literal {
+            SinkLiteralValue::String(value) => {
+                (arg_index == 1 && is_post_message_callee(callee_path) && value == "*")
+                    || (arg_index == 0 && is_weak_crypto_literal_callee(callee_path))
+                    || (arg_index == 0 && is_string_code_callee(callee_path))
+                    || (arg_index == 0 && is_temp_file_literal_callee(callee_path))
+                    || (arg_index == 0
+                        && is_cleartext_transport_literal_callee(callee_path)
+                        && is_cleartext_transport_literal(&value))
+                    || (arg_index == 0
+                        && is_literal_metadata_url_callee(callee_path)
+                        && is_metadata_service_literal(&value))
+            }
+            SinkLiteralValue::Integer(_) => arg_index == 1 && is_chmod_literal_callee(callee_path),
+            SinkLiteralValue::Boolean(_) | SinkLiteralValue::Null => false,
+        },
+        SinkShape::NewExpression => match literal {
+            SinkLiteralValue::String(value) => {
+                arg_index == 0
+                    && (callee_path == "Function"
+                        || (callee_path == "WebSocket" && is_cleartext_websocket_literal(&value)))
+            }
+            SinkLiteralValue::Integer(_)
+            | SinkLiteralValue::Boolean(_)
+            | SinkLiteralValue::Null => false,
+        },
         SinkShape::MemberAssign => {
             arg_index == 0
                 && callee_path == "process.env.NODE_TLS_REJECT_UNAUTHORIZED"
-                && value == "0"
+                && matches!(literal, SinkLiteralValue::String(value) if value == "0")
         }
         SinkShape::TaggedTemplate | SinkShape::JsxAttr | SinkShape::SecretLiteral => false,
     }
@@ -4535,6 +4571,31 @@ fn is_weak_crypto_literal_callee(callee_path: &str) -> bool {
 
 fn is_string_code_callee(callee_path: &str) -> bool {
     matches!(callee_path, "setTimeout" | "setInterval")
+}
+
+fn is_chmod_literal_callee(callee_path: &str) -> bool {
+    matches!(
+        callee_path,
+        "fs.chmod" | "fs.chmodSync" | "fs.promises.chmod" | "chmod" | "chmodSync"
+    )
+}
+
+fn is_temp_file_literal_callee(callee_path: &str) -> bool {
+    matches!(
+        callee_path,
+        "fs.writeFile"
+            | "fs.writeFileSync"
+            | "fs.appendFile"
+            | "fs.appendFileSync"
+            | "fs.createWriteStream"
+            | "fs.promises.writeFile"
+            | "fs.promises.appendFile"
+            | "writeFile"
+            | "writeFileSync"
+            | "appendFile"
+            | "appendFileSync"
+            | "createWriteStream"
+    )
 }
 
 fn is_cleartext_transport_literal_callee(callee_path: &str) -> bool {

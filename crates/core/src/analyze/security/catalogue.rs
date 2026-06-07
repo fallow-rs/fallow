@@ -76,6 +76,9 @@ struct RawMatcher {
     /// Optional string-literal substring predicates for literal-aware rows.
     #[serde(default)]
     literal_contains: Option<Vec<String>>,
+    /// Optional integer-literal equality predicates for literal-aware rows.
+    #[serde(default)]
+    literal_integers: Option<Vec<i64>>,
     /// Optional object-literal property equality predicates.
     #[serde(default)]
     object_properties: Option<Vec<RawObjectPropertyPredicate>>,
@@ -104,12 +107,15 @@ struct RawObjectPropertyPredicate {
     #[serde(default)]
     boolean: Option<bool>,
     #[serde(default)]
+    integer: Option<i64>,
+    #[serde(default)]
     null: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LiteralPredicate {
     String(String),
+    Integer(i64),
     Boolean(bool),
     Null,
 }
@@ -224,6 +230,8 @@ pub struct Matcher {
     pub literal_values: Vec<String>,
     /// String fragments admitted by this row.
     pub literal_contains: Vec<String>,
+    /// Integer literal values admitted by this row.
+    pub literal_integers: Vec<i64>,
     /// Required literal object properties.
     pub object_properties: Vec<ObjectPropertyPredicate>,
     /// Object properties whose absence or boolean `false` makes the row match.
@@ -294,6 +302,7 @@ impl Matcher {
     pub fn is_literal_aware(&self) -> bool {
         !self.literal_values.is_empty()
             || !self.literal_contains.is_empty()
+            || !self.literal_integers.is_empty()
             || !self.object_properties.is_empty()
             || !self.object_missing_or_false.is_empty()
             || !self.object_missing.is_empty()
@@ -308,23 +317,35 @@ impl Matcher {
     /// Whether captured literal metadata satisfies this row's literal gates.
     #[must_use]
     pub fn literal_value_satisfied(&self, literal: Option<&SinkLiteralValue>) -> bool {
-        if self.literal_values.is_empty() && self.literal_contains.is_empty() {
+        if self.literal_values.is_empty()
+            && self.literal_contains.is_empty()
+            && self.literal_integers.is_empty()
+        {
             return true;
         }
-        let Some(SinkLiteralValue::String(value)) = literal else {
-            return false;
-        };
-        let lower = value.to_ascii_lowercase();
-        (self.literal_values.is_empty()
-            || self
-                .literal_values
-                .iter()
-                .any(|expected| lower == expected.to_ascii_lowercase()))
-            && (self.literal_contains.is_empty()
-                || self
-                    .literal_contains
-                    .iter()
-                    .any(|needle| lower.contains(&needle.to_ascii_lowercase())))
+        let string_satisfied = (self.literal_values.is_empty() && self.literal_contains.is_empty())
+            || match literal {
+                Some(SinkLiteralValue::String(value)) => {
+                    let lower = value.to_ascii_lowercase();
+                    (self.literal_values.is_empty()
+                        || self
+                            .literal_values
+                            .iter()
+                            .any(|expected| lower == expected.to_ascii_lowercase()))
+                        && (self.literal_contains.is_empty()
+                            || self
+                                .literal_contains
+                                .iter()
+                                .any(|needle| lower.contains(&needle.to_ascii_lowercase())))
+                }
+                _ => false,
+            };
+        let integer_satisfied = self.literal_integers.is_empty()
+            || match literal {
+                Some(SinkLiteralValue::Integer(value)) => self.literal_integers.contains(value),
+                _ => false,
+            };
+        string_satisfied && integer_satisfied
     }
 
     /// Whether captured object-literal metadata satisfies this row's object
@@ -410,6 +431,7 @@ impl LiteralPredicate {
             (Self::String(expected), SinkLiteralValue::String(actual)) => {
                 expected.eq_ignore_ascii_case(actual)
             }
+            (Self::Integer(expected), SinkLiteralValue::Integer(actual)) => expected == actual,
             (Self::Boolean(expected), SinkLiteralValue::Boolean(actual)) => expected == actual,
             (Self::Null, SinkLiteralValue::Null) => true,
             _ => false,
@@ -523,10 +545,11 @@ fn parse_object_property_predicates(
         }
         let value_count = usize::from(predicate.string.is_some())
             + usize::from(predicate.boolean.is_some())
+            + usize::from(predicate.integer.is_some())
             + usize::from(predicate.null);
         if value_count != 1 {
             return Err(format!(
-                "matcher {id:?} object_properties predicate for {:?} must set exactly one of string | boolean | null",
+                "matcher {id:?} object_properties predicate for {:?} must set exactly one of string | boolean | integer | null",
                 predicate.key
             ));
         }
@@ -534,6 +557,8 @@ fn parse_object_property_predicates(
             LiteralPredicate::String(string)
         } else if let Some(boolean) = predicate.boolean {
             LiteralPredicate::Boolean(boolean)
+        } else if let Some(integer) = predicate.integer {
+            LiteralPredicate::Integer(integer)
         } else {
             LiteralPredicate::Null
         };
@@ -640,6 +665,7 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
             requires_source: entry.requires_source,
             literal_values: entry.literal_values.unwrap_or_default(),
             literal_contains: entry.literal_contains.unwrap_or_default(),
+            literal_integers: entry.literal_integers.unwrap_or_default(),
             object_properties,
             object_missing_or_false: entry.object_missing_or_false.unwrap_or_default(),
             object_missing: entry.object_missing.unwrap_or_default(),
@@ -738,6 +764,7 @@ mod tests {
             // legitimately share id + shape + patterns and differ only by their
             // framework gate (e.g. one `route-send-file` row per framework).
             let enabler = m.enabler.as_deref().unwrap_or("");
+            let import_provenance = m.import_provenance.as_deref().unwrap_or("");
             let arg_kinds = m
                 .arg_kinds
                 .as_ref()
@@ -750,6 +777,16 @@ mod tests {
                 .literal_contains
                 .as_ref()
                 .map_or_else(String::new, |values| values.join("|"));
+            let literal_integers = m
+                .literal_integers
+                .as_ref()
+                .map_or_else(String::new, |values| {
+                    values
+                        .iter()
+                        .map(i64::to_string)
+                        .collect::<Vec<_>>()
+                        .join("|")
+                });
             let object_properties = format!("{:?}", m.object_properties);
             let object_missing_or_false = m
                 .object_missing_or_false
@@ -764,7 +801,7 @@ mod tests {
                 .as_ref()
                 .map_or_else(String::new, |keywords| keywords.join("|"));
             let key = format!(
-                "{}::{}::{pats}::{enabler}::{}::{arg_kinds}::{literal_values}::{literal_contains}::{object_properties}::{object_missing_or_false}::{object_missing}::{context_keywords}",
+                "{}::{}::{pats}::{enabler}::{import_provenance}::{}::{arg_kinds}::{literal_values}::{literal_contains}::{literal_integers}::{object_properties}::{object_missing_or_false}::{object_missing}::{context_keywords}",
                 m.id, m.sink_shape, m.requires_source
             );
             assert!(seen.insert(key.clone()), "duplicate matcher row: {key}");
@@ -1034,6 +1071,45 @@ evidence_template = "   "
             mass_assignment.requires_source,
             "mass-assignment should only fire for source-backed arguments"
         );
+    }
+
+    #[test]
+    fn literal_integer_predicate_matches_integer_literals() {
+        let chmod = catalogue()
+            .matchers()
+            .iter()
+            .find(|m| m.id == "world-writable-permission" && m.sink_shape == SinkShape::MemberCall)
+            .expect("world-writable permission row present");
+
+        assert!(chmod.literal_value_satisfied(Some(&SinkLiteralValue::Integer(511))));
+        assert!(!chmod.literal_value_satisfied(Some(&SinkLiteralValue::Integer(420))));
+        assert!(
+            !chmod.literal_value_satisfied(Some(&SinkLiteralValue::String("0o777".to_string())))
+        );
+    }
+
+    #[test]
+    fn object_property_predicate_matches_nested_integer_values() {
+        let toml = r#"
+[[matcher]]
+id = "x"
+cwe = 732
+title = "x"
+sink_shape = "member-call"
+callee_patterns = ["fs.chmod"]
+arg_index = 0
+arg_kinds = ["object"]
+object_properties = [{ key = "mode.value", integer = 511 }]
+evidence_template = "x"
+"#;
+        let cat = parse_catalogue(toml).expect("catalogue parses");
+        let matcher = cat.matchers().first().expect("matcher present");
+        let properties = vec![SinkObjectProperty {
+            key: "mode.value".to_string(),
+            value: SinkLiteralValue::Integer(511),
+        }];
+
+        assert!(matcher.object_properties_satisfied(&properties));
     }
 
     #[test]

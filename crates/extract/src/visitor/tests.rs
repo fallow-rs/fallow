@@ -262,6 +262,75 @@ fn security_object_sink_capture_unwraps_ts_satisfies() {
 }
 
 #[test]
+fn security_object_sink_capture_records_nested_literal_properties() {
+    let info = parse(
+        r#"
+            new BrowserWindow({
+                webPreferences: {
+                    nodeIntegration: true,
+                    webSecurity: false,
+                },
+            });
+        "#,
+    );
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "BrowserWindow" && sink.arg_index == 0)
+        .expect("BrowserWindow option object sink captured");
+
+    assert!(sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Object);
+    assert!(
+        sink.object_properties
+            .iter()
+            .any(|property| property.key == "webPreferences.nodeIntegration"
+                && property.value == SinkLiteralValue::Boolean(true))
+    );
+    assert!(
+        sink.object_properties
+            .iter()
+            .any(|property| property.key == "webPreferences.webSecurity"
+                && property.value == SinkLiteralValue::Boolean(false))
+    );
+}
+
+#[test]
+fn security_chmod_capture_records_integer_literal_argument() {
+    let info = parse(r#"fs.chmodSync(file, 0o777);"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "fs.chmodSync" && sink.arg_index == 1)
+        .expect("chmod integer mode sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::MemberCall);
+    assert_eq!(sink.arg_index, 1);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(sink.arg_literal, Some(SinkLiteralValue::Integer(511)));
+}
+
+#[test]
+fn security_temp_file_capture_records_literal_path_argument() {
+    let info = parse(r#"fs.writeFileSync("/tmp/fallow-token", token);"#);
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|sink| sink.callee_path == "fs.writeFileSync" && sink.arg_index == 0)
+        .expect("temp path literal sink captured");
+
+    assert_eq!(sink.sink_shape, SinkShape::MemberCall);
+    assert_eq!(sink.arg_index, 0);
+    assert!(!sink.arg_is_non_literal);
+    assert_eq!(sink.arg_kind, SinkArgKind::Literal);
+    assert_eq!(
+        sink.arg_literal,
+        Some(SinkLiteralValue::String("/tmp/fallow-token".to_string()))
+    );
+}
+
+#[test]
 fn security_call_capture_records_dynamic_regex_argument() {
     let info = parse("const compiled = RegExp(pattern);");
     let sink = info

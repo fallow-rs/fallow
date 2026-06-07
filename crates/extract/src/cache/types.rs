@@ -254,7 +254,12 @@ use crate::MemberKind;
 /// Bumped to 132 for issue #878: JS/TS extraction now records one-hop
 /// same-module helper calls that return source-backed expressions as tainted
 /// bindings. Pre-132 entries miss the ranking signal until re-extracted.
-pub(super) const CACHE_VERSION: u32 = 132;
+///
+/// Bumped to 133 for issue #901: `SinkSite` now carries integer literal
+/// values and nested static object property paths for additional literal-tier
+/// security rows. Pre-133 entries omit that metadata until the file is
+/// re-extracted.
+pub(super) const CACHE_VERSION: u32 = 133;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

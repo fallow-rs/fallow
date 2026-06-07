@@ -118,9 +118,13 @@ fn provenance_satisfied(matcher: &Matcher, module: &ModuleInfo, callee_path: &st
         matcher.id.as_str(),
         "command-injection"
             | "permissive-cors"
+            | "electron-unsafe-webpreferences"
+            | "insecure-temp-file"
             | "jwt-alg-none"
             | "jwt-verify-missing-algorithms"
             | "tls-validation-disabled"
+            | "mysql-multiple-statements"
+            | "world-writable-permission"
     ) || (matcher.id == "weak-crypto" && matcher.is_literal_aware());
     module.imports.iter().any(|imp| {
         let source_matches = import_source_matches(&imp.source, spec);

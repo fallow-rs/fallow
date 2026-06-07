@@ -241,14 +241,16 @@ pub enum SinkArgKind {
 pub enum SinkLiteralValue {
     /// A string literal value.
     String(String),
+    /// An integer numeric literal value.
+    Integer(i64),
     /// A boolean literal value.
     Boolean(bool),
     /// A null literal value.
     Null,
 }
 
-/// Top-level object-literal property metadata attached to a captured sink
-/// argument. Nested options are deliberately out of scope for #875.
+/// Static object-literal property metadata attached to a captured sink
+/// argument. Nested object paths are flattened with dot-separated keys.
 #[derive(
     Debug,
     Clone,
@@ -260,7 +262,7 @@ pub enum SinkLiteralValue {
     bitcode::Decode,
 )]
 pub struct SinkObjectProperty {
-    /// Static top-level property name.
+    /// Static property name. Nested object properties use dot-separated paths.
     pub key: String,
     /// Literal property value when statically knowable.
     pub value: SinkLiteralValue,
@@ -288,7 +290,7 @@ pub struct SinkSite {
     pub arg_kind: SinkArgKind,
     /// Literal argument value for literal-aware rows.
     pub arg_literal: Option<SinkLiteralValue>,
-    /// Static top-level object-literal properties for option-object rows.
+    /// Static object-literal properties for option-object rows.
     pub object_properties: Vec<SinkObjectProperty>,
     /// Static top-level object-literal keys, including keys whose values are not
     /// literal. Used by missing-option rows that only need key presence.
@@ -906,7 +908,7 @@ mod tests {
             arg_index: 0,
             arg_is_non_literal: true,
             arg_kind: SinkArgKind::Other,
-            arg_literal: Some(SinkLiteralValue::String("payload".to_string())),
+            arg_literal: Some(SinkLiteralValue::Integer(511)),
             object_properties: vec![SinkObjectProperty {
                 key: "origin".to_string(),
                 value: SinkLiteralValue::String("*".to_string()),

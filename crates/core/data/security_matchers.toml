@@ -495,6 +495,148 @@ arg_kinds = ["literal"]
 literal_contains = ["http://", "ftp://"]
 evidence_template = "Cleartext URL passed to {callee}(). Candidate for verification: use HTTPS or another encrypted transport unless this is intentionally confined to a trusted local network."
 
+# -- CWE-1188: Electron unsafe BrowserWindow webPreferences (issue #901)
+[[matcher]]
+id = "electron-unsafe-webpreferences"
+cwe = 1188
+title = "Unsafe Electron BrowserWindow preferences"
+sink_shape = "new-expression"
+callee_patterns = ["BrowserWindow", "electron.BrowserWindow"]
+arg_index = 0
+arg_kinds = ["object"]
+import_provenance = "electron"
+enabler = "electron"
+object_properties = [{ key = "webPreferences.nodeIntegration", boolean = true }]
+evidence_template = "Electron BrowserWindow enables nodeIntegration. Candidate for verification: keep Node integration disabled in renderer windows unless the window is fully trusted."
+
+[[matcher]]
+id = "electron-unsafe-webpreferences"
+cwe = 1188
+title = "Unsafe Electron BrowserWindow preferences"
+sink_shape = "new-expression"
+callee_patterns = ["BrowserWindow", "electron.BrowserWindow"]
+arg_index = 0
+arg_kinds = ["object"]
+import_provenance = "electron"
+enabler = "electron"
+object_properties = [{ key = "webPreferences.webSecurity", boolean = false }]
+evidence_template = "Electron BrowserWindow disables webSecurity. Candidate for verification: keep web security enabled unless the window is fully trusted and isolated."
+
+[[matcher]]
+id = "electron-unsafe-webpreferences"
+cwe = 1188
+title = "Unsafe Electron BrowserWindow preferences"
+sink_shape = "new-expression"
+callee_patterns = ["BrowserWindow", "electron.BrowserWindow"]
+arg_index = 0
+arg_kinds = ["object"]
+import_provenance = "electron"
+enabler = "electron"
+object_properties = [{ key = "webPreferences.contextIsolation", boolean = false }]
+evidence_template = "Electron BrowserWindow disables contextIsolation. Candidate for verification: keep context isolation enabled for renderer windows."
+
+# -- CWE-732 / CWE-377: literal file-permission and temp-file sinks (issue #901)
+[[matcher]]
+id = "world-writable-permission"
+cwe = 732
+title = "World-writable chmod mode"
+sink_shape = "member-call"
+callee_patterns = ["fs.chmod", "fs.chmodSync", "fs.promises.chmod"]
+arg_index = 1
+arg_kinds = ["literal"]
+literal_integers = [511]
+import_provenance = "node:fs"
+evidence_template = "World-writable mode passed to {callee}(). Candidate for verification: avoid granting write access to other users."
+
+[[matcher]]
+id = "world-writable-permission"
+cwe = 732
+title = "World-writable chmod mode"
+sink_shape = "call"
+callee_patterns = ["chmod", "chmodSync"]
+arg_index = 1
+arg_kinds = ["literal"]
+literal_integers = [511]
+import_provenance = "node:fs"
+evidence_template = "World-writable mode passed to {callee}(). Candidate for verification: avoid granting write access to other users."
+
+[[matcher]]
+id = "insecure-temp-file"
+cwe = 377
+title = "Predictable temporary file path"
+sink_shape = "member-call"
+callee_patterns = ["fs.writeFile", "fs.writeFileSync", "fs.appendFile", "fs.appendFileSync", "fs.createWriteStream", "fs.promises.writeFile", "fs.promises.appendFile"]
+arg_index = 0
+arg_kinds = ["literal"]
+literal_contains = ["/tmp/", "/var/tmp/"]
+import_provenance = "node:fs"
+evidence_template = "Literal temporary-file path passed to {callee}(). Candidate for verification: prefer an unpredictable path from `fs.mkdtemp` or `os.tmpdir()` plus a random suffix."
+
+[[matcher]]
+id = "insecure-temp-file"
+cwe = 377
+title = "Predictable temporary file path"
+sink_shape = "call"
+callee_patterns = ["writeFile", "writeFileSync", "appendFile", "appendFileSync", "createWriteStream"]
+arg_index = 0
+arg_kinds = ["literal"]
+literal_contains = ["/tmp/", "/var/tmp/"]
+import_provenance = "node:fs"
+evidence_template = "Literal temporary-file path passed to {callee}(). Candidate for verification: prefer an unpredictable path from `fs.mkdtemp` or `os.tmpdir()` plus a random suffix."
+
+# -- CWE-89: mysql multipleStatements option (issue #901)
+[[matcher]]
+id = "mysql-multiple-statements"
+cwe = 89
+title = "MySQL multiple statements enabled"
+sink_shape = "member-call"
+callee_patterns = ["mysql.createConnection", "mysql.createPool", "mysql2.createConnection", "mysql2.createPool"]
+arg_index = 0
+arg_kinds = ["object"]
+import_provenance = "mysql"
+enabler = "mysql"
+object_properties = [{ key = "multipleStatements", boolean = true }]
+evidence_template = "MySQL connection options enable multipleStatements. Candidate for verification: keep multiple statements disabled unless every query path is strictly parameterized."
+
+[[matcher]]
+id = "mysql-multiple-statements"
+cwe = 89
+title = "MySQL multiple statements enabled"
+sink_shape = "call"
+callee_patterns = ["createConnection", "createPool"]
+arg_index = 0
+arg_kinds = ["object"]
+import_provenance = "mysql"
+enabler = "mysql"
+object_properties = [{ key = "multipleStatements", boolean = true }]
+evidence_template = "MySQL connection options enable multipleStatements. Candidate for verification: keep multiple statements disabled unless every query path is strictly parameterized."
+
+[[matcher]]
+id = "mysql-multiple-statements"
+cwe = 89
+title = "MySQL multiple statements enabled"
+sink_shape = "member-call"
+callee_patterns = ["mysql.createConnection", "mysql.createPool", "mysql2.createConnection", "mysql2.createPool"]
+arg_index = 0
+arg_kinds = ["object"]
+import_provenance = "mysql2"
+enabler = "mysql2"
+object_properties = [{ key = "multipleStatements", boolean = true }]
+evidence_template = "MySQL connection options enable multipleStatements. Candidate for verification: keep multiple statements disabled unless every query path is strictly parameterized."
+
+[[matcher]]
+id = "mysql-multiple-statements"
+cwe = 89
+title = "MySQL multiple statements enabled"
+sink_shape = "call"
+callee_patterns = ["createConnection", "createPool"]
+arg_index = 0
+arg_kinds = ["object"]
+import_provenance = "mysql2"
+enabler = "mysql2"
+object_properties = [{ key = "multipleStatements", boolean = true }]
+evidence_template = "MySQL connection options enable multipleStatements. Candidate for verification: keep multiple statements disabled unless every query path is strictly parameterized."
+
 # ── CWE-942: Permissive CORS with credentials ──────────────────────────────
 [[matcher]]
 id = "permissive-cors"

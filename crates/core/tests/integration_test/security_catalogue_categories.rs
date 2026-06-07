@@ -895,6 +895,40 @@ fn issue_901_literal_tier_rows_fire() {
         3,
         "cleartext fixture should cover fetch, axios, and WebSocket literal URLs"
     );
+    assert_candidate(
+        &results,
+        "src/electron.ts",
+        "electron-unsafe-webpreferences",
+        1188,
+    );
+    assert_eq!(
+        anchored_count(&results, "src/electron.ts"),
+        3,
+        "Electron fixture should cover nodeIntegration, webSecurity, and contextIsolation"
+    );
+    assert_candidate(
+        &results,
+        "src/fs-literals.ts",
+        "world-writable-permission",
+        732,
+    );
+    assert_eq!(
+        category_count(&results, "world-writable-permission"),
+        2,
+        "chmod fixture should cover namespace and named fs imports"
+    );
+    assert_candidate(&results, "src/fs-literals.ts", "insecure-temp-file", 377);
+    assert_eq!(
+        category_count(&results, "insecure-temp-file"),
+        2,
+        "temp-file fixture should cover namespace and named fs writes"
+    );
+    assert_candidate(&results, "src/mysql.ts", "mysql-multiple-statements", 89);
+    assert_eq!(
+        anchored_count(&results, "src/mysql.ts"),
+        2,
+        "mysql fixture should cover mysql and mysql2 provenances"
+    );
 }
 
 #[test]
@@ -902,7 +936,11 @@ fn issue_901_safe_literals_do_not_fire() {
     let results = analyze_with_security_sink("security-literal-sinks-901");
     assert!(
         !anchored_on(&results, "src/safe.ts"),
-        "encrypted transports and authenticated cipher modes must not be flagged"
+        "encrypted transports, authenticated cipher modes, safe options, and safe chmod modes must not be flagged"
+    );
+    assert!(
+        !anchored_on(&results, "src/no-provenance.ts"),
+        "same-named local helpers without package or fs provenance must not fire"
     );
 }
 
