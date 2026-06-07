@@ -486,8 +486,7 @@ mod tests {
             let href = &d.code_description.as_ref().unwrap().href;
             assert!(
                 href.as_str().starts_with("https://docs.fallow.tools/"),
-                "Doc link should point to fallow docs: {:?}",
-                href
+                "Doc link should point to fallow docs: {href:?}"
             );
         }
     }

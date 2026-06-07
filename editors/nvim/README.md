@@ -35,25 +35,10 @@ vim.lsp.config("fallow", {
 	filetypes = { "javascript", "typescript", "javascriptreact", "typescriptreact" },
 	root_markers = { ".fallowrc.json", "package.json", ".git" },
 	init_options = {
-		editorInfo = {
-			name = "Neovim",
-			version = tostring(vim.version()),
-		},
+		-- Every issue type is enabled by default. List only the ones you
+		-- want to turn off; any key you omit stays enabled.
 		issueTypes = {
-			["unused-files"] = true,
-			["unused-exports"] = true,
-			["unused-types"] = true,
-			["unused-dependencies"] = true,
-			["unused-dev-dependencies"] = true,
-			["unused-optional-dependencies"] = true,
-			["unused-enum-members"] = true,
-			["unused-class-members"] = true,
-			["unresolved-imports"] = true,
-			["unlisted-dependencies"] = true,
-			["duplicate-exports"] = true,
-			["type-only-dependencies"] = true,
-			["circular-dependencies"] = true,
-			["stale-suppressions"] = true,
+			["circular-dependencies"] = false,
 		},
 	},
 })
@@ -61,7 +46,9 @@ vim.lsp.config("fallow", {
 vim.lsp.enable("fallow")
 ```
 
-Fallow reads issue toggles from LSP initialization options. Set an issue type to `false` to disable it in editor diagnostics without changing your project config.
+`init_options` is optional; `cmd`, `filetypes`, and `root_markers` alone are enough to attach. Fallow reads issue toggles from LSP initialization options: set an issue type to `false` to disable it in editor diagnostics without changing your project config. The full list of keys matches Fallow's issue types (kebab-case); a client can fetch the live catalog via the custom `fallow/issueTypes` request.
+
+Diagnostics are delivered through the LSP 3.17 pull model and refreshed on save. The first analysis runs when the server attaches, so a freshly opened buffer shows findings once the initial pass completes (or after the next save), not necessarily the instant the file opens.
 
 ## Binary resolution
 

@@ -25,6 +25,10 @@ rustc-hash = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# `io-util` (duplex pipes, BufReader, AsyncRead/WriteExt) is test-only: the
+# `Server::serve` integration test drives the LSP over framed duplex streams.
+# The production bin keeps the slimmer workspace tokio feature set.
+tokio = { workspace = true, features = ["io-util"] }
 tower = { version = "0.5", default-features = false, features = ["util"] }
 # Needed by stale-publish tests to drain tower-lsp-server's ClientSocket
 # (server-to-client notification stream) and inspect the version slot
