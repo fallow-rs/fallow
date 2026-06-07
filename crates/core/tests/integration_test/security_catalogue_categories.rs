@@ -908,7 +908,7 @@ fn issue_901_literal_tier_rows_fire() {
     );
     assert_candidate(
         &results,
-        "src/fs-literals.ts",
+        "src/fs-chmod.ts",
         "world-writable-permission",
         732,
     );
@@ -917,7 +917,7 @@ fn issue_901_literal_tier_rows_fire() {
         2,
         "chmod fixture should cover namespace and named fs imports"
     );
-    assert_candidate(&results, "src/fs-literals.ts", "insecure-temp-file", 377);
+    assert_candidate(&results, "src/fs-temp-file.ts", "insecure-temp-file", 377);
     assert_eq!(
         category_count(&results, "insecure-temp-file"),
         2,
