@@ -264,7 +264,12 @@ use crate::MemberKind;
 /// regex application sites in `security_sinks` so `fallow security` can report
 /// source-backed ReDoS candidates. Pre-134 entries omit those sink sites until
 /// the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 134;
+///
+/// Bumped to 135 for issue #929: JS/TS extraction now skips directly clamped
+/// resource-amplification size arguments before catalogue matching. Pre-135
+/// entries may retain stale clamped amplification sink candidates until the
+/// file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 135;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

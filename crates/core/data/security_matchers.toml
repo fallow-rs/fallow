@@ -207,6 +207,37 @@ arg_index = 0
 requires_source = true
 evidence_template = "Risky regex pattern fragment `{regex}` is applied to untrusted input. Candidate for verification: confirm the pattern cannot trigger catastrophic backtracking on attacker-controlled strings."
 
+# -- CWE-400: source-backed resource amplification (issue #929)
+[[matcher]]
+id = "resource-amplification"
+cwe = 400
+title = "Resource amplification sink"
+sink_shape = "call"
+callee_patterns = ["Array"]
+arg_index = 0
+requires_source = true
+evidence_template = "Untrusted size reaches {callee}(). Candidate for verification: clamp the size before allocating or expanding work."
+
+[[matcher]]
+id = "resource-amplification"
+cwe = 400
+title = "Resource amplification sink"
+sink_shape = "new-expression"
+callee_patterns = ["Array"]
+arg_index = 0
+requires_source = true
+evidence_template = "Untrusted size reaches new {callee}(). Candidate for verification: clamp the size before allocating or expanding work."
+
+[[matcher]]
+id = "resource-amplification"
+cwe = 400
+title = "Resource amplification sink"
+sink_shape = "member-call"
+callee_patterns = ["Buffer.alloc", "Buffer.allocUnsafe", "Buffer.allocUnsafeSlow", "*.repeat", "*.padStart", "*.padEnd"]
+arg_index = 0
+requires_source = true
+evidence_template = "Untrusted size reaches {callee}(). Candidate for verification: clamp the size before allocating or expanding work."
+
 # Dynamic CommonJS module loading can execute attacker-selected code or load a
 # local file outside the intended module set. Static `require("pkg")` calls are
 # literals and never captured here.

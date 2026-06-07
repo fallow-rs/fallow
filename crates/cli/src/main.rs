@@ -976,11 +976,12 @@ enum Command {
     /// `tainted-sink` catalogue: syntactic sink sites matched against a CWE
     /// catalogue (`security_matchers.toml`) spanning categories such as
     /// dangerous-html, template-escape-bypass, command-injection, code-injection,
-    /// dynamic-regex, redos-regex, dynamic-module-load, sql-injection, ssrf,
-    /// path-traversal, header-injection, open-redirect, cleartext-transport,
-    /// electron-unsafe-webpreferences, world-writable-permission,
-    /// insecure-temp-file, mysql-multiple-statements, mass-assignment,
-    /// weak-crypto, deprecated-cipher, insecure-randomness,
+    /// dynamic-regex, redos-regex, resource-amplification, dynamic-module-load,
+    /// sql-injection, ssrf, path-traversal, header-injection, open-redirect,
+    /// cleartext-transport, electron-unsafe-webpreferences,
+    /// world-writable-permission, insecure-temp-file,
+    /// mysql-multiple-statements, mass-assignment, weak-crypto,
+    /// deprecated-cipher, insecure-randomness,
     /// unsafe-buffer-alloc, unsafe-deserialization, prototype-pollution,
     /// zip-slip, nosql-injection, ssti, xxe, xpath-injection, and
     /// webview-injection. (3) `hardcoded-secret`,

@@ -340,6 +340,41 @@ fn redos_regex_default_off_emits_nothing() {
     )));
 }
 
+// ── resource-amplification (CWE-400), source-backed size/count amplification ──
+
+#[test]
+fn resource_amplification_source_backed_sinks_fire() {
+    let results = analyze_with_security_sink("security-resource-amplification-929");
+    assert_candidate(&results, "src/alloc.ts", "resource-amplification", 400);
+    assert_candidate(&results, "src/buffer.ts", "resource-amplification", 400);
+    assert_candidate(&results, "src/string.ts", "resource-amplification", 400);
+    assert_eq!(
+        category_count(&results, "resource-amplification"),
+        3,
+        "fixture should cover array, buffer, and string amplification"
+    );
+}
+
+#[test]
+fn resource_amplification_clamped_and_source_free_inputs_do_not_fire() {
+    let results = analyze_with_security_sink("security-resource-amplification-929");
+    assert!(
+        !anchored_on(&results, "src/clamped.ts"),
+        "direct Math.min clamps must not be flagged"
+    );
+    assert!(
+        !anchored_on(&results, "src/source-free.ts"),
+        "source-free sizes must not be flagged"
+    );
+}
+
+#[test]
+fn resource_amplification_default_off_emits_nothing() {
+    assert!(no_tainted_sinks(&analyze_default_off(
+        "security-resource-amplification-929"
+    )));
+}
+
 // ── sql-injection (CWE-89), ungated (broad tier) ─────────────────────────────
 
 #[test]

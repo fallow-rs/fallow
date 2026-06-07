@@ -1,0 +1,7 @@
+{
+  "name": "security-resource-amplification-929-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

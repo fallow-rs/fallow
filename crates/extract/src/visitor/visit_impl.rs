@@ -4185,6 +4185,64 @@ fn should_capture_literal_sink_arg(
     }
 }
 
+fn is_direct_numeric_clamp_expr(expr: &Expression<'_>) -> bool {
+    let Expression::CallExpression(call) = unwrap_static_expr(expr) else {
+        return false;
+    };
+    let Some(callee_path) = flatten_callee_path(&call.callee) else {
+        return false;
+    };
+    if callee_path == "Math.min" {
+        return call
+            .arguments
+            .iter()
+            .filter_map(Argument::as_expression)
+            .any(|arg| matches!(sink_literal_value(arg), Some(SinkLiteralValue::Integer(_))));
+    }
+    callee_path == "Math.max"
+        && call
+            .arguments
+            .iter()
+            .filter_map(Argument::as_expression)
+            .any(is_direct_numeric_clamp_expr)
+}
+
+fn is_resource_amplification_callee(
+    callee_path: &str,
+    sink_shape: SinkShape,
+    arg_index: u32,
+) -> bool {
+    if arg_index != 0 {
+        return false;
+    }
+    match sink_shape {
+        SinkShape::Call | SinkShape::NewExpression => callee_path == "Array",
+        SinkShape::MemberCall => {
+            matches!(
+                callee_path,
+                "Buffer.alloc" | "Buffer.allocUnsafe" | "Buffer.allocUnsafeSlow"
+            ) || matches!(
+                callee_path.rsplit('.').next(),
+                Some("repeat" | "padStart" | "padEnd")
+            )
+        }
+        SinkShape::MemberAssign
+        | SinkShape::TaggedTemplate
+        | SinkShape::JsxAttr
+        | SinkShape::SecretLiteral => false,
+    }
+}
+
+fn should_skip_clamped_resource_amplification_arg(
+    callee_path: &str,
+    sink_shape: SinkShape,
+    arg_index: u32,
+    expr: &Expression<'_>,
+) -> bool {
+    is_resource_amplification_callee(callee_path, sink_shape, arg_index)
+        && is_direct_numeric_clamp_expr(expr)
+}
+
 fn is_post_message_callee(callee_path: &str) -> bool {
     callee_path == "postMessage" || callee_path.ends_with(".postMessage")
 }
@@ -5028,6 +5086,16 @@ impl ModuleInfoExtractor {
                 continue;
             };
             let arg_is_non_literal = is_non_literal_arg(arg_expr);
+            if arg_is_non_literal
+                && should_skip_clamped_resource_amplification_arg(
+                    &callee_path,
+                    sink_shape,
+                    arg_index,
+                    arg_expr,
+                )
+            {
+                continue;
+            }
             if !arg_is_non_literal
                 && !should_capture_literal_sink_arg(&callee_path, sink_shape, arg_index, arg_expr)
             {
@@ -5102,6 +5170,16 @@ impl ModuleInfoExtractor {
                 continue;
             };
             let arg_is_non_literal = is_non_literal_arg(arg_expr);
+            if arg_is_non_literal
+                && should_skip_clamped_resource_amplification_arg(
+                    &callee_path,
+                    SinkShape::NewExpression,
+                    arg_index,
+                    arg_expr,
+                )
+            {
+                continue;
+            }
             if !arg_is_non_literal
                 && !should_capture_literal_sink_arg(
                     &callee_path,
