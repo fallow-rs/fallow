@@ -33,6 +33,14 @@ fn express_route_request_param_is_source_backed() {
         "evidence should name the matched framework source: {}",
         finding.evidence
     );
+
+    let accessor_finding = tainted_sink_at_line(&results, 6);
+    assert!(accessor_finding.source_backed);
+    assert!(
+        accessor_finding.evidence.contains("http request input"),
+        "evidence should prefer the specific request accessor source: {}",
+        accessor_finding.evidence
+    );
 }
 
 #[test]

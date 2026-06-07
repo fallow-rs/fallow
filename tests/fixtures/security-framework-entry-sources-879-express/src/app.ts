@@ -3,4 +3,5 @@ declare const app: {
 };
 app.post("/run", (req) => {
   eval(req);
+  eval(req.body);
 });

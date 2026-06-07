@@ -240,6 +240,14 @@ fn sink_source_title<'t>(
     tainted: &FxHashMap<&str, &'t str>,
     declared_deps: &rustc_hash::FxHashSet<String>,
 ) -> Option<&'t str> {
+    let cat = catalogue();
+    if let Some(title) = sink.arg_source_paths.iter().find_map(|path| {
+        cat.matching_source_for_deps(path, declared_deps)
+            .map(|(_, title)| title)
+    }) {
+        return Some(title);
+    }
+
     if !tainted.is_empty()
         && let Some(title) = sink
             .arg_idents
@@ -249,11 +257,7 @@ fn sink_source_title<'t>(
         return Some(title);
     }
 
-    let cat = catalogue();
-    sink.arg_source_paths.iter().find_map(|path| {
-        cat.matching_source_for_deps(path, declared_deps)
-            .map(|(_, title)| title)
-    })
+    None
 }
 
 fn matcher_admits_sink(matcher: &Matcher, sink: &SinkSite, source_title: Option<&str>) -> bool {
@@ -542,6 +546,23 @@ mod tests {
                 &FxHashSet::default(),
             ),
             Some("Environment secret")
+        );
+    }
+
+    #[test]
+    fn direct_source_path_precedes_broader_tainted_local_source() {
+        let bindings = vec![binding("req", "framework.request")];
+        let mut deps = FxHashSet::default();
+        deps.insert("express".to_string());
+        let tainted = source_tainted_locals(&bindings, &deps);
+
+        assert_eq!(
+            sink_source_title(
+                &sink_with_idents_and_sources(&["req"], &["req.body"]),
+                &tainted,
+                &deps,
+            ),
+            Some("HTTP request input")
         );
     }
 
