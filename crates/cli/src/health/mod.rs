@@ -1261,8 +1261,7 @@ type FileScoreResult = (Option<scoring::FileScoreOutput>, Option<usize>, Option<
 struct FileScoreInput<'a> {
     config: &'a ResolvedConfig,
     modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths:
-        &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
     ignore_set: &'a globset::GlobSet,
@@ -1298,10 +1297,7 @@ fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreRe
             }
             if !input.ignore_set.is_empty() {
                 output.scores.retain(|s| {
-                    let relative = s
-                        .path
-                        .strip_prefix(&input.config.root)
-                        .unwrap_or(&s.path);
+                    let relative = s.path.strip_prefix(&input.config.root).unwrap_or(&s.path);
                     !input.ignore_set.is_match(relative)
                 });
             }
@@ -1457,8 +1453,7 @@ impl SubsetFilter<'_> {
 struct VitalSignsAndCountsInput<'a> {
     score_output: Option<&'a scoring::FileScoreOutput>,
     modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths:
-        &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
     needs_file_scores: bool,
     file_scores_slice: &'a [FileHealthScore],
     needs_hotspots: bool,
@@ -1467,13 +1462,16 @@ struct VitalSignsAndCountsInput<'a> {
     subset: &'a SubsetFilter<'a>,
 }
 
-fn compute_vital_signs_and_counts(input: &VitalSignsAndCountsInput<'_>) -> (
+fn compute_vital_signs_and_counts(
+    input: &VitalSignsAndCountsInput<'_>,
+) -> (
     crate::health_types::VitalSigns,
     crate::health_types::VitalSignsCounts,
 ) {
-    let analysis_counts = input
-        .score_output
-        .map(|o| o.analysis_snapshot.counts_for(input.subset, &o.analysis_counts));
+    let analysis_counts = input.score_output.map(|o| {
+        o.analysis_snapshot
+            .counts_for(input.subset, &o.analysis_counts)
+    });
     let module_filter_set: Option<rustc_hash::FxHashSet<fallow_core::discover::FileId>> =
         if input.subset.is_full() {
             None

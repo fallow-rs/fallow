@@ -206,8 +206,8 @@ pub(in crate::report) fn print_human(input: &PrintHumanInput<'_>) {
                     "\u{2713} No issues found ({:.2}s)",
                     input.elapsed.as_secs_f64()
                 )
-                    .green()
-                    .bold()
+                .green()
+                .bold()
             );
         } else {
             let unused_file_set: FxHashSet<&std::path::Path> = input
@@ -228,14 +228,10 @@ pub(in crate::report) fn print_human(input: &PrintHumanInput<'_>) {
                 .iter()
                 .filter(|e| unused_file_set.contains(e.export.path.as_path()))
                 .count();
-            let summary =
-                build_summary_footer(input.results, suppressed_exports, suppressed_types);
+            let summary = build_summary_footer(input.results, suppressed_exports, suppressed_types);
             eprintln!(
                 "{}",
-                format!(
-                    "\u{2717} {summary} ({:.2}s)",
-                    input.elapsed.as_secs_f64()
-                )
+                format!("\u{2717} {summary} ({:.2}s)", input.elapsed.as_secs_f64())
                     .red()
                     .bold()
             );
