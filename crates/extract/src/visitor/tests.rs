@@ -264,14 +264,14 @@ fn security_object_sink_capture_unwraps_ts_satisfies() {
 #[test]
 fn security_object_sink_capture_records_nested_literal_properties() {
     let info = parse(
-        r#"
+        r"
             new BrowserWindow({
                 webPreferences: {
                     nodeIntegration: true,
                     webSecurity: false,
                 },
             });
-        "#,
+        ",
     );
     let sink = info
         .security_sinks
@@ -297,7 +297,7 @@ fn security_object_sink_capture_records_nested_literal_properties() {
 
 #[test]
 fn security_chmod_capture_records_integer_literal_argument() {
-    let info = parse(r#"fs.chmodSync(file, 0o777);"#);
+    let info = parse(r"fs.chmodSync(file, 0o777);");
     let sink = info
         .security_sinks
         .iter()
