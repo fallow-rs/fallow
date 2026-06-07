@@ -542,6 +542,9 @@ struct FallowLspServer {
     git_toplevel: Arc<RwLock<Option<PathBuf>>>,
     /// Cached diagnostics for pull-model support (textDocument/diagnostic)
     cached_diagnostics: Arc<RwLock<FxHashMap<Uri, Vec<Diagnostic>>>>,
+    /// Whether this client was advertised pull diagnostics and can refresh
+    /// cached pull diagnostics after analysis updates the cache.
+    pull_diagnostic_refresh_supported: Arc<AtomicBool>,
     /// Set by `shutdown()`. `run_analysis` checks this at the top and
     /// before publishing diagnostics so a closing client does not receive
     /// spurious post-shutdown publishes. The 250ms grace on the
@@ -554,14 +557,13 @@ struct FallowLspServer {
 
 /// Build the `ServerCapabilities` advertised by `initialize`.
 ///
-/// `diagnostic_provider` is required for strict LSP 3.17 clients
-/// (Helix, Zed, and other editors that gate the pull-model diagnostic
-/// request on the advertised capability). Without it, `textDocument/diagnostic`
-/// is dead code for those clients even though the handler is wired up.
+/// `diagnostic_provider` is advertised only for clients that can refresh pulled
+/// diagnostics. Clients without refresh support stay push-only so empty
+/// `publishDiagnostics` notifications can clear their diagnostics immediately.
 /// `inter_file_dependencies = true` because changing exports or imports in one
 /// file can flip diagnostics in another (unused exports, unused dependencies).
 /// `workspace_diagnostics = false` because we do not serve `workspace/diagnostic`.
-fn build_server_capabilities() -> ServerCapabilities {
+fn build_server_capabilities(advertise_pull_diagnostics: bool) -> ServerCapabilities {
     ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
@@ -572,14 +574,25 @@ fn build_server_capabilities() -> ServerCapabilities {
             resolve_provider: Some(false),
         }),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
-        diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
-            identifier: Some("fallow".to_string()),
-            inter_file_dependencies: true,
-            workspace_diagnostics: false,
-            work_done_progress_options: WorkDoneProgressOptions::default(),
-        })),
+        diagnostic_provider: advertise_pull_diagnostics.then(|| {
+            DiagnosticServerCapabilities::Options(DiagnosticOptions {
+                identifier: Some("fallow".to_string()),
+                inter_file_dependencies: true,
+                workspace_diagnostics: false,
+                work_done_progress_options: WorkDoneProgressOptions::default(),
+            })
+        }),
         ..Default::default()
     }
+}
+
+fn client_supports_workspace_diagnostic_refresh(capabilities: &ClientCapabilities) -> bool {
+    capabilities
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.diagnostics.as_ref())
+        .and_then(|diagnostics| diagnostics.refresh_support)
+        .unwrap_or(false)
 }
 
 impl LanguageServer for FallowLspServer {
@@ -637,8 +650,13 @@ impl LanguageServer for FallowLspServer {
                 initialization_inline_complexity_enabled(opts);
         }
 
+        let pull_diagnostic_refresh_supported =
+            client_supports_workspace_diagnostic_refresh(&params.capabilities);
+        self.pull_diagnostic_refresh_supported
+            .store(pull_diagnostic_refresh_supported, Ordering::SeqCst);
+
         Ok(InitializeResult {
-            capabilities: build_server_capabilities(),
+            capabilities: build_server_capabilities(pull_diagnostic_refresh_supported),
             ..Default::default()
         })
     }
@@ -880,6 +898,7 @@ impl FallowLspServer {
             inline_complexity_enabled: Arc::new(RwLock::new(false)),
             git_toplevel: Arc::new(RwLock::new(None)),
             cached_diagnostics: Arc::new(RwLock::new(FxHashMap::default())),
+            pull_diagnostic_refresh_supported: Arc::new(AtomicBool::new(false)),
             cancellation: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -1166,6 +1185,9 @@ impl FallowLspServer {
             .map(|(uri, state)| (uri.clone(), state.version))
             .collect();
 
+        let use_pull_diagnostics = self
+            .pull_diagnostic_refresh_supported
+            .load(Ordering::SeqCst);
         let mut new_uris: FxHashSet<Uri> = FxHashSet::default();
 
         for (uri, diags) in &diagnostics_by_file {
@@ -1190,9 +1212,11 @@ impl FallowLspServer {
                     .collect()
             };
 
-            self.client
-                .publish_diagnostics(uri.clone(), filtered.clone(), snapshot.get(uri).copied())
-                .await;
+            if !use_pull_diagnostics {
+                self.client
+                    .publish_diagnostics(uri.clone(), filtered.clone(), snapshot.get(uri).copied())
+                    .await;
+            }
 
             self.cached_diagnostics
                 .write()
@@ -1211,14 +1235,24 @@ impl FallowLspServer {
                     new_uris.insert(old_uri.clone());
                     continue;
                 }
-                self.client
-                    .publish_diagnostics(old_uri.clone(), vec![], snapshot.get(old_uri).copied())
-                    .await;
+                if !use_pull_diagnostics {
+                    self.client
+                        .publish_diagnostics(
+                            old_uri.clone(),
+                            vec![],
+                            snapshot.get(old_uri).copied(),
+                        )
+                        .await;
+                }
                 cache.remove(old_uri);
             }
         }
 
         *self.previous_diagnostic_uris.write().await = new_uris;
+
+        if use_pull_diagnostics {
+            let _ = self.client.workspace_diagnostic_refresh().await;
+        }
     }
 }
 
@@ -1383,10 +1417,10 @@ mod tests {
 
     #[test]
     fn server_capabilities_advertise_pull_diagnostics() {
-        let caps = build_server_capabilities();
+        let caps = build_server_capabilities(true);
         let provider = caps
             .diagnostic_provider
-            .expect("diagnostic_provider must be advertised so strict LSP 3.17 clients (Helix, Zed) call textDocument/diagnostic");
+            .expect("diagnostic_provider must be advertised for clients that can refresh pulled diagnostics");
         match provider {
             DiagnosticServerCapabilities::Options(opts) => {
                 assert_eq!(opts.identifier.as_deref(), Some("fallow"));
@@ -1406,12 +1440,43 @@ mod tests {
     }
 
     #[test]
-    fn server_capabilities_keep_existing_providers() {
-        let caps = build_server_capabilities();
+    fn server_capabilities_omit_pull_diagnostics_when_not_refreshable() {
+        let caps = build_server_capabilities(false);
+        assert!(caps.diagnostic_provider.is_none());
         assert!(caps.text_document_sync.is_some());
         assert!(caps.code_action_provider.is_some());
         assert!(caps.code_lens_provider.is_some());
         assert!(caps.hover_provider.is_some());
+    }
+
+    #[test]
+    fn server_capabilities_keep_existing_providers() {
+        let caps = build_server_capabilities(true);
+        assert!(caps.text_document_sync.is_some());
+        assert!(caps.code_action_provider.is_some());
+        assert!(caps.code_lens_provider.is_some());
+        assert!(caps.hover_provider.is_some());
+    }
+
+    #[test]
+    fn default_client_capabilities_do_not_support_workspace_diagnostic_refresh() {
+        assert!(!client_supports_workspace_diagnostic_refresh(
+            &ClientCapabilities::default()
+        ));
+    }
+
+    #[test]
+    fn client_capabilities_support_workspace_diagnostic_refresh() {
+        let capabilities: ClientCapabilities = serde_json::from_value(json!({
+            "workspace": {
+                "diagnostics": {
+                    "refreshSupport": true
+                }
+            }
+        }))
+        .expect("workspace.diagnostics.refreshSupport should deserialize");
+
+        assert!(client_supports_workspace_diagnostic_refresh(&capabilities));
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1482,6 +1547,8 @@ mod tests {
             .expect("initialize request should be handled")
             .expect("initialize request should return a response");
         assert!(response.is_ok());
+        let result = response.result().expect("initialize response should be ok");
+        assert_eq!(result["capabilities"].get("diagnosticProvider"), None);
 
         let diagnostics = Request::build("textDocument/diagnostic")
             .params(json!({
@@ -1508,6 +1575,38 @@ mod tests {
         let result = response.result().expect("diagnostic response should be ok");
         assert_eq!(result["kind"], json!("full"));
         assert_eq!(result["items"], json!([]));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn initialize_advertises_pull_diagnostics_for_refreshable_clients() {
+        let (mut service, _) = LspService::build(FallowLspServer::new).finish();
+
+        let initialize = Request::build("initialize")
+            .params(json!({
+                "capabilities": {
+                    "workspace": {
+                        "diagnostics": {
+                            "refreshSupport": true
+                        }
+                    }
+                }
+            }))
+            .id(1)
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .expect("service should be ready")
+            .call(initialize)
+            .await
+            .expect("initialize request should be handled")
+            .expect("initialize request should return a response");
+
+        let result = response.result().expect("initialize response should be ok");
+        assert_eq!(
+            result["capabilities"]["diagnosticProvider"]["identifier"],
+            json!("fallow")
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2757,6 +2856,73 @@ export function choose(value: number): string {
             serde_json::json!(7),
             "version slot must carry the snapshot version, not None",
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn publish_requests_workspace_diagnostic_refresh_when_pull_was_advertised() {
+        use futures::{SinkExt, StreamExt};
+        use tower_lsp_server::jsonrpc::Response;
+
+        let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+
+        let initialize = Request::build("initialize")
+            .params(json!({
+                "capabilities": {
+                    "workspace": {
+                        "diagnostics": {
+                            "refreshSupport": true
+                        }
+                    }
+                }
+            }))
+            .id(1)
+            .finish();
+        service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialize)
+            .await
+            .expect("initialize call")
+            .expect("initialize response");
+
+        let backend = service.inner();
+        let uri = "file:///refresh.ts".parse::<Uri>().unwrap();
+        install_document(backend, &uri, 1, "v1").await;
+        let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+
+        let mut socket = socket;
+        let publish = backend.publish_collected_diagnostics(diags_by_file, &snapshot);
+        let client = async {
+            loop {
+                let request = tokio::time::timeout(Duration::from_millis(500), socket.next())
+                    .await
+                    .expect("server-to-client request must arrive within timeout")
+                    .expect("ClientSocket stream ended before workspace diagnostic refresh");
+                assert_ne!(
+                    request.method(),
+                    "textDocument/publishDiagnostics",
+                    "refresh-capable clients use pull diagnostics only to avoid duplicate namespaces"
+                );
+                if request.method() != "workspace/diagnostic/refresh" {
+                    continue;
+                }
+
+                let id = request
+                    .id()
+                    .expect("workspace diagnostic refresh is a request")
+                    .clone();
+                socket
+                    .send(Response::from_ok(id, json!(null)))
+                    .await
+                    .expect("refresh response should send");
+                break;
+            }
+        };
+
+        tokio::join!(publish, client);
     }
 
     #[tokio::test(flavor = "current_thread")]
