@@ -12,7 +12,7 @@
 //! vulnerabilities.
 
 use fallow_config::Severity;
-use fallow_core::results::{AnalysisResults, SecurityFindingKind};
+use fallow_core::results::{AnalysisResults, SecurityFinding, SecurityFindingKind};
 
 use super::common::{create_config, create_config_with_rules, fixture_path};
 
@@ -88,6 +88,19 @@ fn anchored_count(results: &AnalysisResults, suffix: &str) -> usize {
                 .ends_with(suffix)
         })
         .count()
+}
+
+fn finding_on<'a>(results: &'a AnalysisResults, suffix: &str) -> &'a SecurityFinding {
+    results
+        .security_findings
+        .iter()
+        .find(|f| {
+            f.path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with(suffix)
+        })
+        .unwrap_or_else(|| panic!("{suffix} should produce a security finding"))
 }
 
 fn no_tainted_sinks(results: &AnalysisResults) -> bool {
@@ -194,21 +207,84 @@ fn dynamic_regex_literal_patterns_do_not_fire() {
 #[test]
 fn dynamic_regex_source_backed_candidate_is_marked() {
     let results = analyze_with_security_sink("security-dynamic-regex");
-    let finding = results
-        .security_findings
-        .iter()
-        .find(|f| {
-            f.path
-                .to_string_lossy()
-                .replace('\\', "/")
-                .ends_with("src/source-backed.ts")
-        })
-        .expect("source-backed dynamic regex candidate");
+    let finding = finding_on(&results, "src/source-backed.ts");
 
     assert_eq!(finding.category.as_deref(), Some("dynamic-regex"));
     assert!(
         finding.source_backed,
         "request-sourced regex pattern should carry the ranking signal"
+    );
+}
+
+#[test]
+fn dynamic_regex_one_hop_function_helper_source_backed_candidate_is_marked() {
+    let results = analyze_with_security_sink("security-dynamic-regex");
+    let finding = finding_on(&results, "src/source-helper.ts");
+
+    assert_eq!(finding.category.as_deref(), Some("dynamic-regex"));
+    assert!(
+        finding.source_backed,
+        "one-hop function helper result should carry the ranking signal"
+    );
+}
+
+#[test]
+fn dynamic_regex_hoisted_function_helper_source_backed_candidate_is_marked() {
+    let results = analyze_with_security_sink("security-dynamic-regex");
+    let finding = finding_on(&results, "src/source-helper-hoisted.ts");
+
+    assert_eq!(finding.category.as_deref(), Some("dynamic-regex"));
+    assert!(
+        finding.source_backed,
+        "hoisted function helper result should carry the ranking signal"
+    );
+}
+
+#[test]
+fn dynamic_regex_one_hop_arrow_helper_source_backed_candidate_is_marked() {
+    let results = analyze_with_security_sink("security-dynamic-regex");
+    let finding = finding_on(&results, "src/source-helper-arrow.ts");
+
+    assert_eq!(finding.category.as_deref(), Some("dynamic-regex"));
+    assert!(
+        finding.source_backed,
+        "one-hop arrow helper result should carry the ranking signal"
+    );
+}
+
+#[test]
+fn dynamic_regex_one_hop_function_expression_source_backed_candidate_is_marked() {
+    let results = analyze_with_security_sink("security-dynamic-regex");
+    let finding = finding_on(&results, "src/source-helper-function-expression.ts");
+
+    assert_eq!(finding.category.as_deref(), Some("dynamic-regex"));
+    assert!(
+        finding.source_backed,
+        "one-hop function expression helper result should carry the ranking signal"
+    );
+}
+
+#[test]
+fn dynamic_regex_shadowed_helper_name_keeps_candidate_unbacked() {
+    let results = analyze_with_security_sink("security-dynamic-regex");
+    let finding = finding_on(&results, "src/source-helper-shadowed.ts");
+
+    assert_eq!(finding.category.as_deref(), Some("dynamic-regex"));
+    assert!(
+        !finding.source_backed,
+        "a local parameter must shadow the same-named module helper"
+    );
+}
+
+#[test]
+fn dynamic_regex_second_hop_helper_keeps_candidate_unbacked() {
+    let results = analyze_with_security_sink("security-dynamic-regex");
+    let finding = finding_on(&results, "src/source-helper-multihop.ts");
+
+    assert_eq!(finding.category.as_deref(), Some("dynamic-regex"));
+    assert!(
+        !finding.source_backed,
+        "helper chains beyond one call are out of scope"
     );
 }
 

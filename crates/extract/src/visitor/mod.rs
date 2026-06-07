@@ -87,6 +87,17 @@ pub(crate) struct PendingPlaywrightFactory {
 }
 
 #[derive(Debug, Clone)]
+struct SourceReturnPath {
+    arg_index: usize,
+    suffixes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SourceReturningHelper {
+    paths: Vec<SourceReturnPath>,
+}
+
+#[derive(Debug, Clone)]
 enum SideEffectRegistrationTarget {
     LocalClass(String),
     AnonymousDefaultExport(usize),
@@ -164,6 +175,7 @@ pub(crate) struct ModuleInfoExtractor {
     pub(crate) class_type_param_constraints: Vec<FxHashMap<String, Option<String>>>,
     pub(crate) pending_playwright_factory_calls: Vec<PendingPlaywrightFactory>,
     pub(crate) pending_playwright_factory_aliases: Vec<(String, String)>,
+    source_returning_helpers: FxHashMap<String, SourceReturningHelper>,
     /// File-level string directives (`"use client"`, `"use server"`) captured
     /// from `Program::directives`. Consumed by the security `client-server-leak`
     /// detector to identify React Server Component client boundaries.

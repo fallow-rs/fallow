@@ -250,7 +250,11 @@ use crate::MemberKind;
 /// Bumped to 131 for issue #879: JS/TS extraction now records synthetic
 /// source bindings for recognizable framework handler parameters. Pre-131
 /// entries omit those bindings and cannot source-rank direct handler params.
-pub(super) const CACHE_VERSION: u32 = 131;
+///
+/// Bumped to 132 for issue #878: JS/TS extraction now records one-hop
+/// same-module helper calls that return source-backed expressions as tainted
+/// bindings. Pre-132 entries miss the ranking signal until re-extracted.
+pub(super) const CACHE_VERSION: u32 = 132;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

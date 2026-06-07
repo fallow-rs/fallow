@@ -124,6 +124,129 @@ fn direct_binding_records_object_path_as_source() {
 }
 
 #[test]
+fn helper_call_binding_records_returned_param_source() {
+    let info = parse_ts(
+        r"
+        function userId(req) {
+            return req.query.id;
+        }
+        const id = userId(request);
+        ",
+    );
+    assert!(
+        info.tainted_bindings
+            .iter()
+            .any(|b| b.local == "id" && b.source_path == "request.query")
+    );
+}
+
+#[test]
+fn helper_call_binding_records_hoisted_function_source() {
+    let info = parse_ts(
+        r"
+        const id = userId(request);
+        function userId(req) {
+            return req.query.id;
+        }
+        ",
+    );
+    assert!(
+        info.tainted_bindings
+            .iter()
+            .any(|b| b.local == "id" && b.source_path == "request.query")
+    );
+}
+
+#[test]
+fn helper_call_binding_records_arrow_helper_source() {
+    let info = parse_ts(
+        r"
+        const userId = (req) => req.query.id;
+        const id = userId(request);
+        ",
+    );
+    assert!(
+        info.tainted_bindings
+            .iter()
+            .any(|b| b.local == "id" && b.source_path == "request.query")
+    );
+}
+
+#[test]
+fn helper_call_binding_records_function_expression_source() {
+    let info = parse_ts(
+        r"
+        const userId = function (req) {
+            return req.query.id;
+        };
+        const id = userId(request);
+        ",
+    );
+    assert!(
+        info.tainted_bindings
+            .iter()
+            .any(|b| b.local == "id" && b.source_path == "request.query")
+    );
+}
+
+#[test]
+fn helper_call_binding_does_not_follow_shadowed_helper_name() {
+    let info = parse_ts(
+        r"
+        function userId(req) {
+            return req.query.id;
+        }
+        function route(userId, request) {
+            const id = userId(request);
+            new RegExp(id);
+        }
+        ",
+    );
+    assert!(
+        info.tainted_bindings.iter().all(|b| b.local != "id"),
+        "a local parameter named userId must shadow the module helper"
+    );
+}
+
+#[test]
+fn helper_call_binding_is_one_hop_only() {
+    let info = parse_ts(
+        r"
+        function userId(req) {
+            return req.query.id;
+        }
+        function wrapped(req) {
+            return userId(req);
+        }
+        const id = wrapped(request);
+        ",
+    );
+    assert!(
+        info.tainted_bindings.iter().all(|b| b.local != "id"),
+        "helper calls returning another helper call are out of scope"
+    );
+}
+
+#[test]
+fn helper_call_binding_does_not_keep_stale_overridden_function_summary() {
+    let info = parse_ts(
+        r#"
+        function userId(req) {
+            return req.query.id;
+        }
+        function userId(req) {
+            return "static";
+        }
+        const id = userId(request);
+        "#,
+    );
+    assert!(
+        info.tainted_bindings.iter().all(|b| b.local != "id"),
+        "a later same-module declaration must replace the helper summary"
+    );
+}
+
+#[test]
 fn destructure_binding_records_full_init_path_as_source() {
     // `const { id, name } = req.body` -> both locals map to source_path "req.body".
     let info = parse_ts("const { id, name } = req.body;");

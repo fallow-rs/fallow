@@ -583,19 +583,34 @@ fn playwright_test_callee_name(expr: &Expression<'_>) -> Option<String> {
 fn extract_function_body_final_return_call<'a, 'b>(
     body: &'b oxc_ast::ast::FunctionBody<'a>,
 ) -> Option<&'b CallExpression<'a>> {
-    let Statement::ReturnStatement(ret) = body.statements.last()? else {
-        return None;
-    };
-    let Expression::CallExpression(call) = ret.argument.as_ref()? else {
+    let Expression::CallExpression(call) = extract_function_body_final_return_expr(body)? else {
         return None;
     };
     Some(call.as_ref())
+}
+
+fn extract_function_body_final_return_expr<'a, 'b>(
+    body: &'b oxc_ast::ast::FunctionBody<'a>,
+) -> Option<&'b Expression<'a>> {
+    let Statement::ReturnStatement(ret) = body.statements.last()? else {
+        return None;
+    };
+    ret.argument.as_ref()
 }
 
 /// Find the call expression used as an arrow function body.
 fn extract_arrow_return_call<'a, 'b>(
     arrow: &'b oxc_ast::ast::ArrowFunctionExpression<'a>,
 ) -> Option<&'b CallExpression<'a>> {
+    let Expression::CallExpression(call) = extract_arrow_return_expr(arrow)? else {
+        return None;
+    };
+    Some(call.as_ref())
+}
+
+fn extract_arrow_return_expr<'a, 'b>(
+    arrow: &'b oxc_ast::ast::ArrowFunctionExpression<'a>,
+) -> Option<&'b Expression<'a>> {
     if arrow.expression {
         if arrow.body.statements.len() != 1 {
             return None;
@@ -603,12 +618,9 @@ fn extract_arrow_return_call<'a, 'b>(
         let Statement::ExpressionStatement(stmt) = arrow.body.statements.first()? else {
             return None;
         };
-        let Expression::CallExpression(call) = &stmt.expression else {
-            return None;
-        };
-        return Some(call.as_ref());
+        return Some(&stmt.expression);
     }
-    extract_function_body_final_return_call(&arrow.body)
+    extract_function_body_final_return_expr(&arrow.body)
 }
 
 fn collect_playwright_fixture_member_uses(
@@ -1809,6 +1821,107 @@ impl ModuleInfoExtractor {
         }
     }
 
+    fn record_tainted_helper_call_binding(&mut self, name: &str, expr: &Expression<'_>) {
+        let Expression::CallExpression(call) = unwrap_parens(expr) else {
+            return;
+        };
+        let Expression::Identifier(callee) = &call.callee else {
+            return;
+        };
+        if self.nested_scope_shadows(callee.name.as_str()) {
+            return;
+        }
+        let Some(helper) = self
+            .source_returning_helpers
+            .get(callee.name.as_str())
+            .cloned()
+        else {
+            return;
+        };
+
+        let mut source_paths = Vec::new();
+        for path in &helper.paths {
+            let Some(arg_expr) = call
+                .arguments
+                .get(path.arg_index)
+                .and_then(Argument::as_expression)
+            else {
+                continue;
+            };
+            source_paths.extend(apply_source_return_path(arg_expr, &path.suffixes));
+        }
+        source_paths.sort();
+        source_paths.dedup();
+        for source_path in source_paths {
+            self.tainted_bindings.push(TaintedBinding {
+                local: name.to_string(),
+                source_path,
+            });
+        }
+    }
+
+    fn record_source_returning_function_helper(
+        &mut self,
+        name: &str,
+        params: &FormalParameters<'_>,
+        body: &oxc_ast::ast::FunctionBody<'_>,
+    ) {
+        if !self.is_module_scope() {
+            return;
+        }
+        let Some(expr) = extract_function_body_final_return_expr(body) else {
+            self.source_returning_helpers.remove(name);
+            return;
+        };
+        if let Some(helper) = source_returning_helper(params, expr) {
+            self.source_returning_helpers
+                .insert(name.to_string(), helper);
+        } else {
+            self.source_returning_helpers.remove(name);
+        }
+    }
+
+    fn record_source_returning_function_declaration(&mut self, function: &Function<'_>) {
+        let (Some(id), Some(body)) = (function.id.as_ref(), function.body.as_deref()) else {
+            return;
+        };
+        self.record_source_returning_function_helper(id.name.as_str(), &function.params, body);
+    }
+
+    fn record_source_returning_helper_from_variable_declarator(
+        &mut self,
+        decl: &VariableDeclaration<'_>,
+        declarator: &VariableDeclarator<'_>,
+        init: &Expression<'_>,
+    ) {
+        if !self.is_module_scope() {
+            return;
+        }
+        let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+            return;
+        };
+        if decl.kind != VariableDeclarationKind::Const {
+            self.source_returning_helpers.remove(id.name.as_str());
+            return;
+        }
+        let helper = match init {
+            Expression::ArrowFunctionExpression(arrow) => extract_arrow_return_expr(arrow)
+                .and_then(|expr| source_returning_helper(&arrow.params, expr)),
+            Expression::FunctionExpression(function) => function
+                .body
+                .as_deref()
+                .and_then(extract_function_body_final_return_expr)
+                .and_then(|expr| source_returning_helper(&function.params, expr)),
+            _ => None,
+        };
+        if let Some(helper) = helper {
+            self.source_returning_helpers
+                .insert(id.name.to_string(), helper);
+        } else {
+            self.source_returning_helpers.remove(id.name.as_str());
+        }
+    }
+
     fn record_dompurify_import_binding(&mut self, source: &str, local: &str, is_type_only: bool) {
         if !is_type_only && self.is_module_scope() && is_dompurify_source(source) {
             self.dompurify_bindings.insert(local.to_string());
@@ -2438,6 +2551,7 @@ impl ModuleInfoExtractor {
             self.record_injection_token(id.name.as_str(), init);
             self.record_child_process_fork_target_binding(id.name.as_str(), init);
             self.record_tainted_source_binding(id.name.as_str(), init);
+            self.record_tainted_helper_call_binding(id.name.as_str(), init);
             let sanitizer_scope = self.sanitizer_scope_for_expr(init);
             self.record_sanitizer_binding(id.name.as_str(), sanitizer_scope);
             let allowlist = decl.kind == VariableDeclarationKind::Const
@@ -2549,6 +2663,26 @@ impl ModuleInfoExtractor {
 
 impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_program(&mut self, program: &Program<'a>) {
+        for statement in &program.body {
+            match statement {
+                Statement::FunctionDeclaration(function) => {
+                    self.record_source_returning_function_declaration(function);
+                }
+                Statement::ExportNamedDeclaration(export)
+                    if export.source.is_none()
+                        && matches!(
+                            export.declaration,
+                            Some(Declaration::FunctionDeclaration(_))
+                        ) =>
+                {
+                    if let Some(Declaration::FunctionDeclaration(function)) = &export.declaration {
+                        self.record_source_returning_function_declaration(function);
+                    }
+                }
+                _ => {}
+            }
+        }
+
         // Capture file-level string directives (`"use client"`, `"use server"`)
         // for the security client-server-leak detector. `directive.directive` is
         // the cooked directive text without surrounding quotes.
@@ -2701,6 +2835,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                             &function.params,
                             function.body.as_deref(),
                         );
+                        self.record_source_returning_function_declaration(function);
                         if let Some(body) = function.body.as_deref()
                             && let Some(arg_index) = package_resolution_arg_index(
                                 &function.params,
@@ -3173,6 +3308,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             };
 
             self.record_local_structural_function_from_variable_declarator(declarator, init);
+            self.record_source_returning_helper_from_variable_declarator(decl, declarator, init);
             self.record_initialized_declarator_bindings(decl, declarator, init);
             if let BindingPattern::BindingIdentifier(id) = &declarator.id {
                 self.capture_math_random_context_sink(id.name.as_str(), init, declarator.span);
@@ -4079,6 +4215,85 @@ fn tainted_source_path(expr: &Expression<'_>) -> Option<String> {
         Expression::StaticMemberExpression(member) => flatten_member_path(&member.object),
         _ => None,
     }
+}
+
+fn push_unique_string(out: &mut Vec<String>, value: String) {
+    if !out.iter().any(|existing| existing == &value) {
+        out.push(value);
+    }
+}
+
+fn source_path_candidates(expr: &Expression<'_>) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(path) = flatten_member_path(expr) {
+        push_unique_string(&mut out, path);
+    }
+    if let Some(path) = tainted_source_path(expr) {
+        push_unique_string(&mut out, path);
+    }
+    out
+}
+
+fn source_returning_helper(
+    params: &FormalParameters<'_>,
+    expr: &Expression<'_>,
+) -> Option<super::SourceReturningHelper> {
+    let param_names = params
+        .items
+        .iter()
+        .map(|param| match &param.pattern {
+            BindingPattern::BindingIdentifier(id) => Some(id.name.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut paths = Vec::new();
+    for source_path in source_path_candidates(expr) {
+        for (arg_index, param_name) in param_names.iter().enumerate() {
+            let Some(param_name) = param_name else {
+                continue;
+            };
+            if source_path == *param_name {
+                paths.push(super::SourceReturnPath {
+                    arg_index,
+                    suffixes: vec![String::new()],
+                });
+                break;
+            }
+            let Some(suffix) = source_path.strip_prefix(&format!("{param_name}.")) else {
+                continue;
+            };
+            paths.push(super::SourceReturnPath {
+                arg_index,
+                suffixes: vec![suffix.to_string()],
+            });
+            break;
+        }
+    }
+    if paths.is_empty() {
+        None
+    } else {
+        Some(super::SourceReturningHelper { paths })
+    }
+}
+
+fn apply_source_return_path(expr: &Expression<'_>, suffixes: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    if suffixes.iter().any(String::is_empty) {
+        for candidate in source_path_candidates(expr) {
+            push_unique_string(&mut out, candidate);
+        }
+    }
+    let Some(base) = flatten_member_path(expr) else {
+        return out;
+    };
+    for suffix in suffixes {
+        if suffix.is_empty() {
+            push_unique_string(&mut out, base.clone());
+        } else {
+            push_unique_string(&mut out, format!("{base}.{suffix}"));
+        }
+    }
+    out
 }
 
 /// The source path for a DESTRUCTURE binding (`const { id } = req.query`): the
