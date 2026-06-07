@@ -118,6 +118,72 @@ fn security_literal_sink_capture_records_literal_argument() {
     );
 }
 
+fn redos_regex_sink(source: &str) -> fallow_types::extract::SinkSite {
+    let info = parse(source);
+    info.security_sinks
+        .into_iter()
+        .find(|sink| sink.callee_path == "RegExp.redos")
+        .expect("ReDoS regex sink captured")
+}
+
+#[test]
+fn security_redos_regex_capture_records_literal_regex_application() {
+    let sink = redos_regex_sink("const value = req.query.name; /^(a+)+$/.test(value);");
+
+    assert_eq!(sink.sink_shape, SinkShape::MemberCall);
+    assert_eq!(sink.arg_kind, SinkArgKind::Other);
+    assert_eq!(sink.regex_pattern, Some("(a+)+".to_string()));
+    assert_eq!(sink.arg_idents, vec!["value".to_string()]);
+}
+
+#[test]
+fn security_redos_regex_capture_records_const_regexp_application() {
+    let sink = redos_regex_sink(r#"const re = new RegExp("^(a+)+$"); re.test(req.body.value);"#);
+
+    assert_eq!(sink.regex_pattern, Some("(a+)+".to_string()));
+    assert!(
+        sink.arg_source_paths
+            .iter()
+            .any(|path| path == "req.body.value")
+    );
+}
+
+#[test]
+fn security_redos_regex_capture_records_string_method_application() {
+    let sink = redos_regex_sink("req.params.slug.match(/^(a|aa)+$/);");
+
+    assert_eq!(sink.regex_pattern, Some("(a|aa)+".to_string()));
+    assert!(
+        sink.arg_source_paths
+            .iter()
+            .any(|path| path == "req.params.slug")
+    );
+}
+
+#[test]
+fn security_redos_regex_capture_skips_safe_literal_regex() {
+    let info = parse("const value = req.query.name; /^[a-z]+$/.test(value);");
+
+    assert!(
+        !info
+            .security_sinks
+            .iter()
+            .any(|sink| sink.callee_path == "RegExp.redos")
+    );
+}
+
+#[test]
+fn security_redos_regex_capture_skips_mutable_regex_binding() {
+    let info = parse("let re = /^(a+)+$/; re.test(req.query.name);");
+
+    assert!(
+        !info
+            .security_sinks
+            .iter()
+            .any(|sink| sink.callee_path == "RegExp.redos")
+    );
+}
+
 #[test]
 fn security_literal_sink_capture_unwraps_ts_assertions() {
     let info = parse(r#"postMessage({ status: "ready" }, "*" as const);"#);

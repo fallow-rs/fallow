@@ -812,6 +812,28 @@ impl ModuleInfoExtractor {
             .unwrap_or(false)
     }
 
+    fn record_risky_regex_binding(&mut self, name: &str, pattern: Option<String>) {
+        if self.is_module_scope() {
+            self.module_risky_regex_bindings
+                .insert(name.to_string(), pattern);
+            return;
+        }
+        if let Some(bindings) = self.risky_regex_binding_stack.last_mut() {
+            bindings.insert(name.to_string(), pattern);
+        }
+    }
+
+    fn risky_regex_binding(&self, name: &str) -> Option<&str> {
+        for bindings in self.risky_regex_binding_stack.iter().rev() {
+            if let Some(pattern) = bindings.get(name) {
+                return pattern.as_deref();
+            }
+        }
+        self.module_risky_regex_bindings
+            .get(name)
+            .and_then(Option::as_deref)
+    }
+
     fn record_path_sink_binding(&mut self, name: &str, binding: Option<SecurityPathSinkBinding>) {
         if self.is_module_scope() {
             self.module_path_sink_bindings
@@ -903,6 +925,10 @@ impl ModuleInfoExtractor {
             .iter()
             .map(|name| (name.clone(), false))
             .collect::<FxHashMap<_, _>>();
+        let risky_regex_scope = scope
+            .iter()
+            .map(|name| (name.clone(), None))
+            .collect::<FxHashMap<_, _>>();
         let path_sink_scope = scope
             .iter()
             .map(|name| (name.clone(), None))
@@ -914,6 +940,7 @@ impl ModuleInfoExtractor {
         self.nested_declaration_stack.push(scope);
         self.sanitizer_binding_stack.push(sanitizer_scope);
         self.literal_allowlist_binding_stack.push(allowlist_scope);
+        self.risky_regex_binding_stack.push(risky_regex_scope);
         self.path_sink_binding_stack.push(path_sink_scope);
         self.path_relative_binding_stack.push(path_relative_scope);
     }
@@ -923,6 +950,7 @@ impl ModuleInfoExtractor {
             self.nested_declaration_stack.pop();
             self.sanitizer_binding_stack.pop();
             self.literal_allowlist_binding_stack.pop();
+            self.risky_regex_binding_stack.pop();
             self.path_sink_binding_stack.pop();
             self.path_relative_binding_stack.pop();
         }
@@ -2766,6 +2794,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.sanitizer_binding_stack.push(FxHashMap::default());
             self.literal_allowlist_binding_stack
                 .push(FxHashMap::default());
+            self.risky_regex_binding_stack.push(FxHashMap::default());
             self.path_sink_binding_stack.push(FxHashMap::default());
             self.path_relative_binding_stack.push(FxHashMap::default());
         }
@@ -2779,6 +2808,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.nested_declaration_stack.pop();
             self.sanitizer_binding_stack.pop();
             self.literal_allowlist_binding_stack.pop();
+            self.risky_regex_binding_stack.pop();
             self.path_sink_binding_stack.pop();
             self.path_relative_binding_stack.pop();
         }
@@ -2800,6 +2830,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         self.record_local_declaration_name(&id.name);
                         self.record_sanitizer_binding(id.name.as_str(), None);
                         self.record_literal_allowlist_binding(id.name.as_str(), false);
+                        self.record_risky_regex_binding(id.name.as_str(), None);
                         self.record_path_sink_binding(id.name.as_str(), None);
                         self.record_path_relative_binding(id.name.as_str(), None);
                         self.record_local_type_declaration(&id.name, id.span);
@@ -2826,6 +2857,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         self.record_local_declaration_name(&id.name);
                         self.record_sanitizer_binding(id.name.as_str(), None);
                         self.record_literal_allowlist_binding(id.name.as_str(), false);
+                        self.record_risky_regex_binding(id.name.as_str(), None);
                         self.record_path_sink_binding(id.name.as_str(), None);
                         self.record_path_relative_binding(id.name.as_str(), None);
                         let refs = Self::collect_function_signature_refs(function);
@@ -2905,6 +2937,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         self.record_nested_declaration_names(std::iter::once(id));
                         self.record_sanitizer_binding(id.name.as_str(), None);
                         self.record_literal_allowlist_binding(id.name.as_str(), false);
+                        self.record_risky_regex_binding(id.name.as_str(), None);
                         self.record_path_sink_binding(id.name.as_str(), None);
                         self.record_path_relative_binding(id.name.as_str(), None);
                     }
@@ -2914,6 +2947,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         self.record_nested_declaration_names(std::iter::once(id));
                         self.record_sanitizer_binding(id.name.as_str(), None);
                         self.record_literal_allowlist_binding(id.name.as_str(), false);
+                        self.record_risky_regex_binding(id.name.as_str(), None);
                         self.record_path_sink_binding(id.name.as_str(), None);
                         self.record_path_relative_binding(id.name.as_str(), None);
                     }
@@ -3301,6 +3335,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 for id in declarator.id.get_binding_identifiers() {
                     self.record_sanitizer_binding(id.name.as_str(), None);
                     self.record_literal_allowlist_binding(id.name.as_str(), false);
+                    self.record_risky_regex_binding(id.name.as_str(), None);
                     self.record_path_sink_binding(id.name.as_str(), None);
                     self.record_path_relative_binding(id.name.as_str(), None);
                 }
@@ -3313,6 +3348,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             if let BindingPattern::BindingIdentifier(id) = &declarator.id {
                 self.capture_math_random_context_sink(id.name.as_str(), init, declarator.span);
                 self.capture_hardcoded_secret_literal_sink(id.name.as_str(), init, declarator.span);
+                let risky_pattern = if decl.kind == VariableDeclarationKind::Const {
+                    self.risky_regex_fragment_for_expr(init)
+                } else {
+                    None
+                };
+                self.record_risky_regex_binding(id.name.as_str(), risky_pattern);
             }
 
             if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id {
@@ -3607,6 +3648,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
         self.try_record_fluent_chain_access(expr);
 
+        self.capture_redos_regex_sink(expr);
         self.capture_call_sink(expr);
 
         walk::walk_call_expression(self, expr);
@@ -3696,6 +3738,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if let Some(name) = assignment_target_identifier_name(&expr.left) {
             self.record_sanitizer_binding(name, None);
             self.record_literal_allowlist_binding(name, false);
+            self.record_risky_regex_binding(name, None);
             self.record_path_sink_binding(name, None);
             self.record_path_relative_binding(name, None);
         } else if let Some(name) = assignment_target_member_object_name(&expr.left)
@@ -4370,6 +4413,226 @@ fn static_string_literal_value(expr: &Expression<'_>) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn risky_redos_fragment(pattern: &str) -> Option<String> {
+    let mut cursor = 0;
+    while let Some(relative) = pattern[cursor..].find('(') {
+        let start = cursor + relative;
+        let close = find_group_close(pattern, start)?;
+        let Some(outer_end) = unbounded_quantifier_end(pattern, close + 1) else {
+            cursor = close + 1;
+            continue;
+        };
+        let body_start = group_body_start(pattern, start + 1);
+        let body = &pattern[body_start..close];
+        if has_unbounded_quantifier(body) || has_ambiguous_alternation(body) {
+            return Some(pattern[start..outer_end].to_string());
+        }
+        cursor = close + 1;
+    }
+    None
+}
+
+fn find_group_close(pattern: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut in_class = false;
+    let mut escaped = false;
+    for (idx, ch) in pattern[open..].char_indices() {
+        let absolute = open + idx;
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if in_class {
+            if ch == ']' {
+                in_class = false;
+            }
+            continue;
+        }
+        match ch {
+            '[' => in_class = true,
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(absolute);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn group_body_start(pattern: &str, body_start: usize) -> usize {
+    let Some(rest) = pattern.get(body_start..) else {
+        return body_start;
+    };
+    if rest.starts_with("?:") || rest.starts_with("?=") || rest.starts_with("?!") {
+        return body_start + 2;
+    }
+    if rest.starts_with("?<=") || rest.starts_with("?<!") {
+        return body_start + 3;
+    }
+    if rest.starts_with("?<")
+        && let Some(end) = rest.find('>')
+    {
+        return body_start + end + 1;
+    }
+    body_start
+}
+
+fn unbounded_quantifier_end(pattern: &str, idx: usize) -> Option<usize> {
+    let rest = pattern.get(idx..)?;
+    if rest.starts_with('+') || rest.starts_with('*') {
+        return Some(idx + 1);
+    }
+    if !rest.starts_with('{') {
+        return None;
+    }
+    let close = rest.find('}')?;
+    let body = &rest[1..close];
+    let (min, max) = body.split_once(',')?;
+    if min.chars().all(|ch| ch.is_ascii_digit()) && max.is_empty() {
+        return Some(idx + close + 1);
+    }
+    None
+}
+
+fn has_unbounded_quantifier(pattern: &str) -> bool {
+    let mut in_class = false;
+    let mut escaped = false;
+    let mut idx = 0;
+    while idx < pattern.len() {
+        let Some(ch) = pattern[idx..].chars().next() else {
+            break;
+        };
+        if escaped {
+            escaped = false;
+            idx += ch.len_utf8();
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            idx += ch.len_utf8();
+            continue;
+        }
+        if in_class {
+            if ch == ']' {
+                in_class = false;
+            }
+            idx += ch.len_utf8();
+            continue;
+        }
+        if ch == '[' {
+            in_class = true;
+            idx += ch.len_utf8();
+            continue;
+        }
+        if unbounded_quantifier_end(pattern, idx).is_some() {
+            return true;
+        }
+        idx += ch.len_utf8();
+    }
+    false
+}
+
+fn has_ambiguous_alternation(pattern: &str) -> bool {
+    let branches = top_level_alternation_branches(pattern);
+    if branches.len() < 2 {
+        return false;
+    }
+    let tokens = branches
+        .iter()
+        .map(|branch| regex_branch_tokens(branch))
+        .collect::<Vec<_>>();
+    tokens.iter().enumerate().any(|(left_idx, left)| {
+        !left.is_empty()
+            && tokens
+                .iter()
+                .enumerate()
+                .any(|(right_idx, right)| left_idx != right_idx && is_prefix_tokens(left, right))
+    })
+}
+
+fn top_level_alternation_branches(pattern: &str) -> Vec<&str> {
+    let mut branches = Vec::new();
+    let mut start = 0;
+    let mut depth = 0usize;
+    let mut in_class = false;
+    let mut escaped = false;
+    for (idx, ch) in pattern.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if in_class {
+            if ch == ']' {
+                in_class = false;
+            }
+            continue;
+        }
+        match ch {
+            '[' => in_class = true,
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            '|' if depth == 0 => {
+                branches.push(&pattern[start..idx]);
+                start = idx + 1;
+            }
+            _ => {}
+        }
+    }
+    branches.push(&pattern[start..]);
+    branches
+}
+
+fn regex_branch_tokens(branch: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut chars = branch.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => {
+                let escaped = chars
+                    .next()
+                    .map_or_else(|| "\\".to_string(), |next| format!("\\{next}"));
+                tokens.push(escaped);
+            }
+            '[' => {
+                let mut token = String::from("[");
+                for next in chars.by_ref() {
+                    token.push(next);
+                    if next == ']' {
+                        break;
+                    }
+                }
+                tokens.push(token);
+            }
+            '^' | '$' | '+' | '*' | '?' => {}
+            '{' => {
+                for next in chars.by_ref() {
+                    if next == '}' {
+                        break;
+                    }
+                }
+            }
+            _ => tokens.push(ch.to_string()),
+        }
+    }
+    tokens
+}
+
+fn is_prefix_tokens(left: &[String], right: &[String]) -> bool {
+    left.len() < right.len() && right.starts_with(left)
 }
 
 fn should_capture_hardcoded_secret_literal(context_name: &str, value: &str) -> bool {
@@ -5322,11 +5585,108 @@ fn collect_instanceof_narrowings<'a>(expr: &'a Expression<'a>, out: &mut Vec<(St
 }
 
 impl ModuleInfoExtractor {
+    fn risky_regex_fragment_for_expr(&self, expr: &Expression<'_>) -> Option<String> {
+        match unwrap_static_expr(expr) {
+            Expression::RegExpLiteral(lit) => risky_redos_fragment(&lit.regex.pattern.text),
+            Expression::NewExpression(new_expr) => Self::risky_regex_fragment_for_new(new_expr),
+            Expression::CallExpression(call) => Self::risky_regex_fragment_for_call(call),
+            Expression::Identifier(ident) => self
+                .risky_regex_binding(ident.name.as_str())
+                .map(ToString::to_string),
+            _ => None,
+        }
+    }
+
+    fn risky_regex_fragment_for_new(expr: &oxc_ast::ast::NewExpression<'_>) -> Option<String> {
+        let Expression::Identifier(callee) = &expr.callee else {
+            return None;
+        };
+        if callee.name != "RegExp" {
+            return None;
+        }
+        let pattern = expr
+            .arguments
+            .first()
+            .and_then(Argument::as_expression)
+            .and_then(static_string_literal_value)?;
+        risky_redos_fragment(&pattern)
+    }
+
+    fn risky_regex_fragment_for_call(expr: &CallExpression<'_>) -> Option<String> {
+        let Expression::Identifier(callee) = &expr.callee else {
+            return None;
+        };
+        if callee.name != "RegExp" {
+            return None;
+        }
+        let pattern = expr
+            .arguments
+            .first()
+            .and_then(Argument::as_expression)
+            .and_then(static_string_literal_value)?;
+        risky_redos_fragment(&pattern)
+    }
+
+    fn redos_regex_application<'b, 'c>(
+        &self,
+        expr: &'b CallExpression<'c>,
+    ) -> Option<(&'b Expression<'c>, String)> {
+        let Expression::StaticMemberExpression(member) = &expr.callee else {
+            return None;
+        };
+        let method = member.property.name.as_str();
+        if matches!(method, "test" | "exec") {
+            let input = expr.arguments.first().and_then(Argument::as_expression)?;
+            let pattern = self.risky_regex_fragment_for_expr(&member.object)?;
+            return Some((input, pattern));
+        }
+        if matches!(
+            method,
+            "match" | "search" | "replace" | "replaceAll" | "split"
+        ) {
+            let pattern = expr
+                .arguments
+                .first()
+                .and_then(Argument::as_expression)
+                .and_then(|arg| self.risky_regex_fragment_for_expr(arg))?;
+            return Some((&member.object, pattern));
+        }
+        None
+    }
+
+    fn capture_redos_regex_sink(&mut self, expr: &CallExpression<'_>) {
+        let Some((input_expr, pattern)) = self.redos_regex_application(expr) else {
+            return;
+        };
+        if !is_non_literal_arg(input_expr) {
+            return;
+        }
+        self.security_sinks.push(SinkSite {
+            sink_shape: SinkShape::MemberCall,
+            callee_path: "RegExp.redos".to_string(),
+            arg_index: 0,
+            arg_is_non_literal: true,
+            arg_kind: classify_arg_kind(input_expr),
+            arg_literal: None,
+            regex_pattern: Some(pattern),
+            object_properties: Vec::new(),
+            object_property_keys: Vec::new(),
+            object_property_keys_complete: false,
+            arg_idents: collect_arg_idents(input_expr),
+            arg_source_paths: collect_arg_source_paths(input_expr),
+            span_start: expr.span.start,
+            span_end: expr.span.end,
+        });
+    }
+
     /// Capture a call/member-call sink site (category-blind). Pushes one
     /// `SinkSite` per admitted positional argument; a callee that cannot be
     /// flattened to a static path increments the blind-spot counter instead.
     fn capture_call_sink(&mut self, expr: &CallExpression<'_>) {
         let Some(callee_path) = flatten_callee_path(&expr.callee) else {
+            if self.redos_regex_application(expr).is_some() {
+                return;
+            }
             self.security_sinks_skipped += 1;
             return;
         };
@@ -5363,6 +5723,7 @@ impl ModuleInfoExtractor {
                     SinkArgKind::Literal
                 },
                 arg_literal: sink_literal_value(arg_expr),
+                regex_pattern: None,
                 object_properties: object_literal_properties(arg_expr),
                 object_property_keys: object_keys.keys,
                 object_property_keys_complete: object_keys.complete,
@@ -5389,6 +5750,7 @@ impl ModuleInfoExtractor {
                 arg_is_non_literal: false,
                 arg_kind: SinkArgKind::Object,
                 arg_literal: None,
+                regex_pattern: None,
                 object_properties: Vec::new(),
                 object_property_keys: Vec::new(),
                 object_property_keys_complete: true,
@@ -5437,6 +5799,7 @@ impl ModuleInfoExtractor {
                     SinkArgKind::Literal
                 },
                 arg_literal: sink_literal_value(arg_expr),
+                regex_pattern: None,
                 object_properties: object_literal_properties(arg_expr),
                 object_property_keys: object_keys.keys,
                 object_property_keys_complete: object_keys.complete,
@@ -5473,6 +5836,7 @@ impl ModuleInfoExtractor {
             arg_is_non_literal: false,
             arg_kind: SinkArgKind::NoArg,
             arg_literal: None,
+            regex_pattern: None,
             object_properties: Vec::new(),
             object_property_keys: Vec::new(),
             object_property_keys_complete: false,
@@ -5502,6 +5866,7 @@ impl ModuleInfoExtractor {
             arg_is_non_literal: false,
             arg_kind: SinkArgKind::Literal,
             arg_literal: Some(SinkLiteralValue::String(value)),
+            regex_pattern: None,
             object_properties: Vec::new(),
             object_property_keys: Vec::new(),
             object_property_keys_complete: false,
@@ -5552,6 +5917,7 @@ impl ModuleInfoExtractor {
                 SinkArgKind::Literal
             },
             arg_literal: sink_literal_value(&expr.right),
+            regex_pattern: None,
             object_properties: object_literal_properties(&expr.right),
             object_property_keys: object_keys.keys,
             object_property_keys_complete: object_keys.complete,
@@ -5594,6 +5960,7 @@ impl ModuleInfoExtractor {
             // argument is always a template-with-substitution.
             arg_kind: SinkArgKind::TemplateWithSubst,
             arg_literal: None,
+            regex_pattern: None,
             object_properties: Vec::new(),
             object_property_keys: Vec::new(),
             object_property_keys_complete: false,
@@ -5630,6 +5997,7 @@ impl ModuleInfoExtractor {
             arg_is_non_literal: true,
             arg_kind: classify_arg_kind(value_expr),
             arg_literal: None,
+            regex_pattern: None,
             object_properties: object_literal_properties(value_expr),
             object_property_keys: object_keys.keys,
             object_property_keys_complete: object_keys.complete,

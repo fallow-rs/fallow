@@ -205,6 +205,11 @@ pub(crate) struct ModuleInfoExtractor {
     pub(crate) module_literal_allowlist_bindings: FxHashMap<String, bool>,
     /// Nested lexical literal allowlist bindings.
     pub(crate) literal_allowlist_binding_stack: Vec<FxHashMap<String, bool>>,
+    /// Module-scope locals initialized from risky literal regex patterns.
+    /// `None` means the name shadows an outer risky regex but is not itself risky.
+    pub(crate) module_risky_regex_bindings: FxHashMap<String, Option<String>>,
+    /// Nested lexical risky regex bindings.
+    pub(crate) risky_regex_binding_stack: Vec<FxHashMap<String, Option<String>>>,
     /// Module-scope locals initialized from a path sink call.
     pub(crate) module_path_sink_bindings: FxHashMap<String, Option<SecurityPathSinkBinding>>,
     /// Nested lexical locals initialized from a path sink call.

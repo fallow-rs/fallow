@@ -248,6 +248,7 @@ pub fn template_html_sink(snippet: &str, span_start: usize, span_end: usize) -> 
         arg_is_non_literal: true,
         arg_kind,
         arg_literal: None,
+        regex_pattern: None,
         object_properties: Vec::new(),
         object_property_keys: Vec::new(),
         object_property_keys_complete: false,

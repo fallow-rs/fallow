@@ -251,7 +251,7 @@ Combined mode (`fallow`) and `fallow audit` support per-analysis production mode
 
 Use `--production-health`, `--production-dead-code`, or `--production-dupes` for one invocation, or `FALLOW_PRODUCTION_HEALTH=true` and related env vars in CI. The global `--production` flag still enables production mode for every analysis.
 
-`fallow security` remains opt-in and ranks reachable active-code candidates first. When a sink is also reported as dead code, JSON includes `dead_code` context and the command points agents toward deleting the unused file or removing the unused export before hardening that sink.
+`fallow security` remains opt-in and ranks reachable active-code candidates first. It includes source-backed ReDoS regex candidates for risky literal patterns applied to untrusted input, while safe literal patterns and source-free uses stay quiet. When a sink is also reported as dead code, JSON includes `dead_code` context and the command points agents toward deleting the unused file or removing the unused export before hardening that sink.
 
 Precedence (highest to lowest): CLI flags, per-analysis env var, global `FALLOW_PRODUCTION`, config. CLI flags only enable; env vars and config can also disable. Worked examples:
 

@@ -259,7 +259,12 @@ use crate::MemberKind;
 /// values and nested static object property paths for additional literal-tier
 /// security rows. Pre-133 entries omit that metadata until the file is
 /// re-extracted.
-pub(super) const CACHE_VERSION: u32 = 133;
+///
+/// Bumped to 134 for issue #928: JS/TS extraction now captures risky literal
+/// regex application sites in `security_sinks` so `fallow security` can report
+/// source-backed ReDoS candidates. Pre-134 entries omit those sink sites until
+/// the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 134;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -316,7 +321,7 @@ assert_cached_type_size!(CachedReExport, 88);
 assert_cached_type_size!(CachedMember, 64);
 assert_cached_type_size!(CachedDynamicImportPattern, 56);
 assert_cached_type_size!(crate::MemberAccess, 48);
-assert_cached_type_size!(fallow_types::extract::SinkSite, 160);
+assert_cached_type_size!(fallow_types::extract::SinkSite, 184);
 assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);

@@ -386,7 +386,11 @@ pub fn find_tainted_sinks(
             let base_evidence = matcher
                 .evidence_template
                 .replace("{callee}", &sink.callee_path)
-                .replace("{pattern}", pattern);
+                .replace("{pattern}", pattern)
+                .replace(
+                    "{regex}",
+                    sink.regex_pattern.as_deref().unwrap_or("unknown"),
+                );
 
             let source_backed = source_title.is_some();
             // Annotate the evidence when source-backed so the ranking signal is
@@ -485,6 +489,7 @@ mod tests {
             arg_is_non_literal: true,
             arg_kind: fallow_types::extract::SinkArgKind::Other,
             arg_literal: None,
+            regex_pattern: None,
             object_properties: Vec::new(),
             object_property_keys: Vec::new(),
             object_property_keys_complete: false,

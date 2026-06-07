@@ -197,6 +197,16 @@ callee_patterns = ["RegExp"]
 arg_index = 0
 evidence_template = "Non-literal pattern passed to new {callee}(). Candidate for verification: confirm attacker input cannot control the regular expression."
 
+[[matcher]]
+id = "redos-regex"
+cwe = 1333
+title = "ReDoS regex sink"
+sink_shape = "member-call"
+callee_patterns = ["RegExp.redos"]
+arg_index = 0
+requires_source = true
+evidence_template = "Risky regex pattern fragment `{regex}` is applied to untrusted input. Candidate for verification: confirm the pattern cannot trigger catastrophic backtracking on attacker-controlled strings."
+
 # Dynamic CommonJS module loading can execute attacker-selected code or load a
 # local file outside the intended module set. Static `require("pkg")` calls are
 # literals and never captured here.

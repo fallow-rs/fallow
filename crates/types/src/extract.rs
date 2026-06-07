@@ -290,6 +290,8 @@ pub struct SinkSite {
     pub arg_kind: SinkArgKind,
     /// Literal argument value for literal-aware rows.
     pub arg_literal: Option<SinkLiteralValue>,
+    /// Risky regex fragment for structural ReDoS candidates.
+    pub regex_pattern: Option<String>,
     /// Static object-literal properties for option-object rows.
     pub object_properties: Vec<SinkObjectProperty>,
     /// Static top-level object-literal keys, including keys whose values are not
@@ -789,7 +791,7 @@ const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<SinkSite>() == 160);
+const _: () = assert!(std::mem::size_of::<SinkSite>() == 184);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 720);
 
@@ -909,6 +911,7 @@ mod tests {
             arg_is_non_literal: true,
             arg_kind: SinkArgKind::Other,
             arg_literal: Some(SinkLiteralValue::Integer(511)),
+            regex_pattern: None,
             object_properties: vec![SinkObjectProperty {
                 key: "origin".to_string(),
                 value: SinkLiteralValue::String("*".to_string()),

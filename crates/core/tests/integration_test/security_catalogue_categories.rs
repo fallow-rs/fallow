@@ -295,6 +295,51 @@ fn dynamic_regex_default_off_emits_nothing() {
     )));
 }
 
+// ── redos-regex (CWE-1333), source-backed risky literal regex applications ──
+
+#[test]
+fn redos_regex_literal_source_backed_fires() {
+    let results = analyze_with_security_sink("security-redos-regex");
+    assert_candidate(&results, "src/literal.ts", "redos-regex", 1333);
+}
+
+#[test]
+fn redos_regex_const_regexp_source_backed_fires() {
+    let results = analyze_with_security_sink("security-redos-regex");
+    assert_candidate(&results, "src/constructor.ts", "redos-regex", 1333);
+}
+
+#[test]
+fn redos_regex_string_method_source_backed_fires() {
+    let results = analyze_with_security_sink("security-redos-regex");
+    assert_candidate(&results, "src/string-method.ts", "redos-regex", 1333);
+}
+
+#[test]
+fn redos_regex_safe_pattern_does_not_fire() {
+    let results = analyze_with_security_sink("security-redos-regex");
+    assert!(
+        !anchored_on(&results, "src/safe.ts"),
+        "linear literal regex pattern must not be flagged"
+    );
+}
+
+#[test]
+fn redos_regex_source_free_input_does_not_fire() {
+    let results = analyze_with_security_sink("security-redos-regex");
+    assert!(
+        !anchored_on(&results, "src/source-free.ts"),
+        "risky regex applied to source-free input must not be flagged"
+    );
+}
+
+#[test]
+fn redos_regex_default_off_emits_nothing() {
+    assert!(no_tainted_sinks(&analyze_default_off(
+        "security-redos-regex"
+    )));
+}
+
 // ── sql-injection (CWE-89), ungated (broad tier) ─────────────────────────────
 
 #[test]
