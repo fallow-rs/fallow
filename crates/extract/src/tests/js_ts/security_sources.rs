@@ -163,6 +163,17 @@ fn route_callback_param_records_framework_source() {
 }
 
 #[test]
+fn route_callback_destructured_param_records_framework_source() {
+    let info = parse_ts("app.post('/run', ({ body }) => { eval(body); });");
+    let binding = info
+        .tainted_bindings
+        .iter()
+        .find(|b| b.local == "body")
+        .expect("route callback destructured request param source");
+    assert_eq!(binding.source_path, "framework.request");
+}
+
+#[test]
 fn next_route_handler_param_records_next_request_source() {
     let info = parse_ts("export async function POST(request: Request) { eval(request); }");
     let binding = info
@@ -183,4 +194,37 @@ fn server_action_form_data_param_records_next_source() {
         .find(|b| b.local == "formData")
         .expect("server action FormData param source");
     assert_eq!(binding.source_path, "next.form-data");
+}
+
+#[test]
+fn queue_process_callback_param_records_job_source() {
+    let info = parse_ts("queue.process(async (job) => { eval(job); });");
+    let binding = info
+        .tainted_bindings
+        .iter()
+        .find(|b| b.local == "job")
+        .expect("queue process job param source");
+    assert_eq!(binding.source_path, "queue.job");
+}
+
+#[test]
+fn queue_worker_constructor_param_records_job_source() {
+    let info = parse_ts("new Worker('email', async ({ data }) => { eval(data); });");
+    let binding = info
+        .tainted_bindings
+        .iter()
+        .find(|b| b.local == "data")
+        .expect("BullMQ worker destructured job param source");
+    assert_eq!(binding.source_path, "queue.job");
+}
+
+#[test]
+fn mcp_tool_callback_param_records_input_source() {
+    let info = parse_ts("server.tool('lookup', schema, async ({ city }) => { eval(city); });");
+    let binding = info
+        .tainted_bindings
+        .iter()
+        .find(|b| b.local == "city")
+        .expect("MCP tool input param source");
+    assert_eq!(binding.source_path, "mcp.tool-input");
 }

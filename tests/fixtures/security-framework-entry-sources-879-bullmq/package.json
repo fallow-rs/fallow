@@ -1,0 +1,9 @@
+{
+  "name": "security-framework-entry-sources-879-bullmq",
+  "dependencies": {
+    "bullmq": "latest"
+  },
+  "devDependencies": {
+    "typescript": "latest"
+  }
+}

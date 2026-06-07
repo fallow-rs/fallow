@@ -1,0 +1,9 @@
+{
+  "name": "security-framework-entry-sources-879-mcp",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "latest"
+  },
+  "devDependencies": {
+    "typescript": "latest"
+  }
+}

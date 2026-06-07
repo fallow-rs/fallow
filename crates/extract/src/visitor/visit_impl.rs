@@ -1724,8 +1724,16 @@ impl ModuleInfoExtractor {
         let Some(param) = params.items.first() else {
             return;
         };
-        if let BindingPattern::BindingIdentifier(id) = &param.pattern {
-            self.record_tainted_param_binding(id.name.as_str(), source_path);
+        match &param.pattern {
+            BindingPattern::BindingIdentifier(id) => {
+                self.record_tainted_param_binding(id.name.as_str(), source_path);
+            }
+            BindingPattern::ObjectPattern(obj_pat) => {
+                for local in super::extract_destructured_names(obj_pat) {
+                    self.record_tainted_param_binding(&local, source_path);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1786,6 +1794,18 @@ impl ModuleInfoExtractor {
             && let Some(params) = last_callback_params(&call.arguments)
         {
             self.record_first_param_source(params, MCP_TOOL_INPUT_SOURCE);
+        }
+    }
+
+    fn record_queue_worker_constructor_param_sources(&mut self, expr: &NewExpression<'_>) {
+        let Some(callee_path) = flatten_callee_path(&expr.callee) else {
+            return;
+        };
+        if callee_path.rsplit('.').next() != Some("Worker") {
+            return;
+        }
+        if let Some(params) = expr.arguments.iter().skip(1).find_map(callback_params) {
+            self.record_first_param_source(params, QUEUE_JOB_SOURCE);
         }
     }
 
@@ -3470,6 +3490,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_new_expression(&mut self, expr: &oxc_ast::ast::NewExpression<'a>) {
+        self.record_queue_worker_constructor_param_sources(expr);
+
         if let Some(source) = new_url_import_source(expr) {
             // A `new URL(specifier, import.meta.url)` whose specifier has no file
             // extension may refer to a directory rather than a module (e.g.

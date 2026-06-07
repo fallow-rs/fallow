@@ -41,3 +41,27 @@ fn generic_route_callback_param_is_not_source_backed_without_enabler() {
     let finding = tainted_sink_at_line(&results, 5);
     assert!(!finding.source_backed);
 }
+
+#[test]
+fn bullmq_worker_job_param_is_source_backed() {
+    let results = analyze_fixture("security-framework-entry-sources-879-bullmq");
+    let finding = tainted_sink_at_line(&results, 4);
+    assert!(finding.source_backed);
+    assert!(
+        finding.evidence.contains("queue job input"),
+        "evidence should name the matched queue source: {}",
+        finding.evidence
+    );
+}
+
+#[test]
+fn mcp_tool_input_param_is_source_backed() {
+    let results = analyze_fixture("security-framework-entry-sources-879-mcp");
+    let finding = tainted_sink_at_line(&results, 6);
+    assert!(finding.source_backed);
+    assert!(
+        finding.evidence.contains("mcp tool input"),
+        "evidence should name the matched MCP source: {}",
+        finding.evidence
+    );
+}
