@@ -182,13 +182,16 @@ pub(super) fn is_low_value_anchor(path: &std::path::Path) -> bool {
 /// captured `tainted_binding.source_path` against the catalogue's `[[source]]`
 /// patterns. A sink whose argument references one of these names is
 /// "source-backed", and the matched source title names the input class.
-fn source_tainted_locals(bindings: &[TaintedBinding]) -> FxHashMap<&str, &'static str> {
+fn source_tainted_locals<'b>(
+    bindings: &'b [TaintedBinding],
+    declared_deps: &rustc_hash::FxHashSet<String>,
+) -> FxHashMap<&'b str, &'static str> {
     let cat = catalogue();
-    let mut out: FxHashMap<&str, &'static str> = FxHashMap::default();
+    let mut out: FxHashMap<&'b str, &'static str> = FxHashMap::default();
     for b in bindings {
-        // `matching_source` borrows from the `'static` catalogue, so the title
-        // outlives the per-module computation.
-        if let Some((_, title)) = cat.matching_source(&b.source_path) {
+        // `matching_source_for_deps` borrows from the `'static` catalogue, so
+        // the title outlives the per-module computation.
+        if let Some((_, title)) = cat.matching_source_for_deps(&b.source_path, declared_deps) {
             out.entry(b.local.as_str()).or_insert(title);
         }
     }
@@ -232,7 +235,11 @@ fn sink_has_html_sanitizer(module: &ModuleInfo, sink: &SinkSite) -> bool {
 /// The matched source title if any of a sink's captured argument identifiers
 /// trace to a source-tainted local binding, else `None`. The intra-module,
 /// name-based back-trace from issue #859.
-fn sink_source_title<'t>(sink: &SinkSite, tainted: &FxHashMap<&str, &'t str>) -> Option<&'t str> {
+fn sink_source_title<'t>(
+    sink: &SinkSite,
+    tainted: &FxHashMap<&str, &'t str>,
+    declared_deps: &rustc_hash::FxHashSet<String>,
+) -> Option<&'t str> {
     if !tainted.is_empty()
         && let Some(title) = sink
             .arg_idents
@@ -243,9 +250,10 @@ fn sink_source_title<'t>(sink: &SinkSite, tainted: &FxHashMap<&str, &'t str>) ->
     }
 
     let cat = catalogue();
-    sink.arg_source_paths
-        .iter()
-        .find_map(|path| cat.matching_source(path).map(|(_, title)| title))
+    sink.arg_source_paths.iter().find_map(|path| {
+        cat.matching_source_for_deps(path, declared_deps)
+            .map(|(_, title)| title)
+    })
 }
 
 fn matcher_admits_sink(matcher: &Matcher, sink: &SinkSite, source_title: Option<&str>) -> bool {
@@ -327,10 +335,10 @@ pub fn find_tainted_sinks(
 
         // Source-tainted local names for this module (issue #859). Computed once
         // per module; empty for modules with no source-shaped bindings.
-        let tainted_locals = source_tainted_locals(&module.tainted_bindings);
+        let tainted_locals = source_tainted_locals(&module.tainted_bindings, declared_deps);
 
         for sink in &module.security_sinks {
-            let source_title = sink_source_title(sink, &tainted_locals);
+            let source_title = sink_source_title(sink, &tainted_locals, declared_deps);
             let Some(matcher) = active.iter().copied().find(|m| {
                 matcher_admits_sink(m, sink, source_title)
                     && provenance_satisfied(m, module, &sink.callee_path)
@@ -424,6 +432,7 @@ pub fn find_tainted_sinks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rustc_hash::FxHashSet;
 
     #[test]
     fn category_filter_default_admits_all() {
@@ -487,7 +496,7 @@ mod tests {
         // `const id = req.query.id` is source-tainted; `const cfg = config.value`
         // is not (config.value is not an untrusted-source path).
         let bindings = vec![binding("id", "req.query"), binding("cfg", "config.value")];
-        let tainted = source_tainted_locals(&bindings);
+        let tainted = source_tainted_locals(&bindings, &FxHashSet::default());
         assert!(tainted.contains_key("id"));
         assert!(!tainted.contains_key("cfg"));
         // The matched local carries the source's human title.
@@ -497,35 +506,40 @@ mod tests {
     #[test]
     fn sink_is_source_backed_when_arg_traces_to_source() {
         let bindings = vec![binding("id", "req.query")];
-        let tainted = source_tainted_locals(&bindings);
+        let tainted = source_tainted_locals(&bindings, &FxHashSet::default());
         // `eval(id)` traces to the source-tainted `id`.
         assert_eq!(
-            sink_source_title(&sink_with_idents(&["id"]), &tainted),
+            sink_source_title(&sink_with_idents(&["id"]), &tainted, &FxHashSet::default()),
             Some("HTTP request input")
         );
         // `eval(other)` does not.
         assert_eq!(
-            sink_source_title(&sink_with_idents(&["other"]), &tainted),
+            sink_source_title(
+                &sink_with_idents(&["other"]),
+                &tainted,
+                &FxHashSet::default(),
+            ),
             None
         );
     }
 
     #[test]
     fn sink_not_source_backed_with_no_tainted_locals() {
-        let tainted = source_tainted_locals(&[]);
+        let tainted = source_tainted_locals(&[], &FxHashSet::default());
         assert_eq!(
-            sink_source_title(&sink_with_idents(&["id"]), &tainted),
+            sink_source_title(&sink_with_idents(&["id"]), &tainted, &FxHashSet::default()),
             None
         );
     }
 
     #[test]
     fn sink_is_source_backed_when_arg_source_path_matches_catalogue() {
-        let tainted = source_tainted_locals(&[]);
+        let tainted = source_tainted_locals(&[], &FxHashSet::default());
         assert_eq!(
             sink_source_title(
                 &sink_with_idents_and_sources(&["process"], &["process.env.SECRET", "process.env"]),
                 &tainted,
+                &FxHashSet::default(),
             ),
             Some("Environment secret")
         );

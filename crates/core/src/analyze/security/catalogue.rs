@@ -34,6 +34,9 @@ struct RawCatalogue {
 struct RawSource {
     id: String,
     title: String,
+    /// Optional framework enabler, same semantics as matcher enablers.
+    #[serde(default)]
+    enabler: Option<String>,
     path_patterns: Vec<String>,
 }
 
@@ -239,6 +242,7 @@ pub struct Matcher {
 pub struct SourceMatcher {
     pub id: String,
     pub title: String,
+    pub enabler: Option<String>,
     pub path_patterns: Vec<CalleePattern>,
 }
 
@@ -248,6 +252,13 @@ impl SourceMatcher {
     #[must_use]
     pub fn matches(&self, source_path: &str) -> bool {
         self.path_patterns.iter().any(|p| p.matches(source_path))
+    }
+
+    /// Whether this source row's framework enabler is satisfied by the
+    /// project's declared dependency set. Unset means global.
+    #[must_use]
+    pub fn enabler_satisfied(&self, declared_deps: &rustc_hash::FxHashSet<String>) -> bool {
+        enabler_satisfied(self.enabler.as_deref(), declared_deps)
     }
 }
 
@@ -374,18 +385,22 @@ impl Matcher {
     /// activate on exactly the dependency universe the plugins do.
     #[must_use]
     pub fn enabler_satisfied(&self, declared_deps: &rustc_hash::FxHashSet<String>) -> bool {
-        let Some(enabler) = &self.enabler else {
-            return true;
-        };
-        if let Some(prefix) = enabler.strip_suffix('/') {
-            // Trailing-slash prefix match, e.g. `@fastify/` -> `@fastify/static`.
-            // Also admit the bare scope name itself (`@fastify`).
-            declared_deps
-                .iter()
-                .any(|d| d == prefix || d.starts_with(enabler))
-        } else {
-            declared_deps.contains(enabler)
-        }
+        enabler_satisfied(self.enabler.as_deref(), declared_deps)
+    }
+}
+
+fn enabler_satisfied(enabler: Option<&str>, declared_deps: &rustc_hash::FxHashSet<String>) -> bool {
+    let Some(enabler) = enabler else {
+        return true;
+    };
+    if let Some(prefix) = enabler.strip_suffix('/') {
+        // Trailing-slash prefix match, e.g. `@fastify/` -> `@fastify/static`.
+        // Also admit the bare scope name itself (`@fastify`).
+        declared_deps
+            .iter()
+            .any(|d| d == prefix || d.starts_with(enabler))
+    } else {
+        declared_deps.contains(enabler)
     }
 }
 
@@ -418,11 +433,26 @@ impl Catalogue {
 
     /// The id + human title of the first untrusted-source matcher whose pattern
     /// matches the given flattened member-access path, if any (issue #859).
+    #[cfg(test)]
     #[must_use]
     pub fn matching_source(&self, source_path: &str) -> Option<(&str, &str)> {
         self.sources
             .iter()
             .find(|s| s.matches(source_path))
+            .map(|s| (s.id.as_str(), s.title.as_str()))
+    }
+
+    /// The id + human title of the first untrusted-source matcher whose pattern
+    /// and optional framework enabler match the given source path.
+    #[must_use]
+    pub fn matching_source_for_deps(
+        &self,
+        source_path: &str,
+        declared_deps: &rustc_hash::FxHashSet<String>,
+    ) -> Option<(&str, &str)> {
+        self.sources
+            .iter()
+            .find(|s| s.enabler_satisfied(declared_deps) && s.matches(source_path))
             .map(|s| (s.id.as_str(), s.title.as_str()))
     }
 
@@ -642,9 +672,19 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
             })?;
             path_patterns.push(parsed);
         }
+        let enabler = match entry.enabler {
+            Some(e) if e.trim().is_empty() => {
+                return Err(format!(
+                    "source {:?} has an empty / whitespace enabler; omit the key for a global row",
+                    entry.id
+                ));
+            }
+            other => other,
+        };
         sources.push(SourceMatcher {
             id: entry.id,
             title: entry.title,
+            enabler,
             path_patterns,
         });
     }
@@ -1163,6 +1203,33 @@ evidence_template = "x"
             .expect("http-request-input source present");
         assert!(http.matches("req.query"));
         assert!(!http.matches("process.argv"));
+    }
+
+    #[test]
+    fn source_enabler_gates_framework_param_sources() {
+        let cat = catalogue();
+        let source = cat
+            .sources()
+            .iter()
+            .find(|s| s.id == "framework-handler-input" && s.enabler.as_deref() == Some("express"))
+            .expect("express handler source present");
+        assert!(source.matches("framework.request"));
+
+        let empty = FxHashSet::default();
+        assert!(!source.enabler_satisfied(&empty));
+        assert!(
+            cat.matching_source_for_deps("framework.request", &empty)
+                .is_none(),
+            "framework handler params require an enabler"
+        );
+
+        let mut deps = FxHashSet::default();
+        deps.insert("express".to_string());
+        assert!(source.enabler_satisfied(&deps));
+        assert_eq!(
+            cat.matching_source_for_deps("framework.request", &deps),
+            Some(("framework-handler-input", "Framework handler input"))
+        );
     }
 
     #[test]

@@ -110,6 +110,8 @@ mod security_client_server_leak;
 mod security_dangerous_html;
 #[path = "integration_test/security_dead_code_cross_link.rs"]
 mod security_dead_code_cross_link;
+#[path = "integration_test/security_framework_entry_sources.rs"]
+mod security_framework_entry_sources;
 #[path = "integration_test/security_framework_sinks.rs"]
 mod security_framework_sinks;
 #[path = "integration_test/security_hardcoded_secret.rs"]

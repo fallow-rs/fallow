@@ -246,7 +246,11 @@ use crate::MemberKind;
 /// literals assigned to secret-shaped identifiers or known provider credential
 /// prefixes as opt-in hardcoded-secret candidates.
 /// Pre-130 entries omit those candidates until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 130;
+///
+/// Bumped to 131 for issue #879: JS/TS extraction now records synthetic
+/// source bindings for recognizable framework handler parameters. Pre-131
+/// entries omit those bindings and cannot source-rank direct handler params.
+pub(super) const CACHE_VERSION: u32 = 131;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

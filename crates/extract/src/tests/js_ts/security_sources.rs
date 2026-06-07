@@ -150,3 +150,37 @@ fn literal_init_records_no_source_binding() {
     let info = parse_ts("const x = 1;\nconst y = \"hello\";");
     assert!(info.tainted_bindings.is_empty());
 }
+
+#[test]
+fn route_callback_param_records_framework_source() {
+    let info = parse_ts("app.post('/run', (req) => { eval(req); });");
+    let binding = info
+        .tainted_bindings
+        .iter()
+        .find(|b| b.local == "req")
+        .expect("route callback request param source");
+    assert_eq!(binding.source_path, "framework.request");
+}
+
+#[test]
+fn next_route_handler_param_records_next_request_source() {
+    let info = parse_ts("export async function POST(request: Request) { eval(request); }");
+    let binding = info
+        .tainted_bindings
+        .iter()
+        .find(|b| b.local == "request")
+        .expect("Next route request param source");
+    assert_eq!(binding.source_path, "next.request");
+}
+
+#[test]
+fn server_action_form_data_param_records_next_source() {
+    let info =
+        parse_ts("const action = async (formData: FormData) => { 'use server'; eval(formData); };");
+    let binding = info
+        .tainted_bindings
+        .iter()
+        .find(|b| b.local == "formData")
+        .expect("server action FormData param source");
+    assert_eq!(binding.source_path, "next.form-data");
+}

@@ -41,6 +41,11 @@ const PINO_FACTORY_EXPORT: &str = "pino";
 const PINO_TRANSPORT_KEY: &str = "transport";
 const PINO_TARGET_KEY: &str = "target";
 const PINO_TARGETS_KEY: &str = "targets";
+const FRAMEWORK_REQUEST_SOURCE: &str = "framework.request";
+const NEXT_REQUEST_SOURCE: &str = "next.request";
+const NEXT_FORM_DATA_SOURCE: &str = "next.form-data";
+const QUEUE_JOB_SOURCE: &str = "queue.job";
+const MCP_TOOL_INPUT_SOURCE: &str = "mcp.tool-input";
 
 type StaticPackageStringBindings = FxHashMap<String, Vec<String>>;
 type StaticPackageObjectBindings = FxHashMap<String, FxHashMap<String, Vec<String>>>;
@@ -1697,6 +1702,93 @@ impl ModuleInfoExtractor {
         }
     }
 
+    fn record_tainted_param_binding(&mut self, name: &str, source_path: &'static str) {
+        if self
+            .tainted_bindings
+            .iter()
+            .any(|b| b.local == name && b.source_path == source_path)
+        {
+            return;
+        }
+        self.tainted_bindings.push(TaintedBinding {
+            local: name.to_string(),
+            source_path: source_path.to_string(),
+        });
+    }
+
+    fn record_first_param_source(
+        &mut self,
+        params: &FormalParameters<'_>,
+        source_path: &'static str,
+    ) {
+        let Some(param) = params.items.first() else {
+            return;
+        };
+        if let BindingPattern::BindingIdentifier(id) = &param.pattern {
+            self.record_tainted_param_binding(id.name.as_str(), source_path);
+        }
+    }
+
+    fn record_named_param_source(
+        &mut self,
+        params: &FormalParameters<'_>,
+        names: &[&str],
+        source_path: &'static str,
+    ) {
+        for param in &params.items {
+            if let BindingPattern::BindingIdentifier(id) = &param.pattern
+                && names.iter().any(|name| *name == id.name.as_str())
+            {
+                self.record_tainted_param_binding(id.name.as_str(), source_path);
+            }
+        }
+    }
+
+    fn record_next_function_param_sources(&mut self, func: &Function<'_>) {
+        if func
+            .id
+            .as_ref()
+            .is_some_and(|id| is_http_route_handler_name(id.name.as_str()))
+        {
+            self.record_first_param_source(&func.params, NEXT_REQUEST_SOURCE);
+        }
+        if function_body_has_use_server(func.body.as_deref()) {
+            self.record_named_param_source(&func.params, &["formData"], NEXT_FORM_DATA_SOURCE);
+        }
+    }
+
+    fn record_next_arrow_param_sources(&mut self, expr: &ArrowFunctionExpression<'_>) {
+        if function_body_has_use_server(Some(&expr.body)) {
+            self.record_named_param_source(&expr.params, &["formData"], NEXT_FORM_DATA_SOURCE);
+        }
+    }
+
+    fn record_framework_callback_param_sources(&mut self, call: &CallExpression<'_>) {
+        let Some(callee_path) = flatten_callee_path(&call.callee) else {
+            return;
+        };
+        let Some((_, method)) = callee_path.rsplit_once('.') else {
+            return;
+        };
+        if is_route_registration_method(method) {
+            if let Some(params) = route_callback_params(&call.arguments, method) {
+                self.record_first_param_source(params, FRAMEWORK_REQUEST_SOURCE);
+            }
+            return;
+        }
+        if method == "process"
+            && let Some(params) = last_callback_params(&call.arguments)
+        {
+            self.record_first_param_source(params, QUEUE_JOB_SOURCE);
+            return;
+        }
+        if method == "tool"
+            && let Some(params) = last_callback_params(&call.arguments)
+        {
+            self.record_first_param_source(params, MCP_TOOL_INPUT_SOURCE);
+        }
+    }
+
     fn record_dompurify_import_binding(&mut self, source: &str, local: &str, is_type_only: bool) {
         if !is_type_only && self.is_module_scope() && is_dompurify_source(source) {
             self.dompurify_bindings.insert(local.to_string());
@@ -2679,6 +2771,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
+        self.record_next_function_param_sources(func);
         self.push_function_declaration_scope(&func.params);
         self.function_depth += 1;
         walk::walk_function(self, func, flags);
@@ -2687,6 +2780,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_arrow_function_expression(&mut self, expr: &ArrowFunctionExpression<'a>) {
+        self.record_next_arrow_param_sources(expr);
         self.push_function_declaration_scope(&expr.params);
         self.function_depth += 1;
         walk::walk_arrow_function_expression(self, expr);
@@ -3198,6 +3292,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_call_expression(&mut self, expr: &CallExpression<'a>) {
         self.record_structural_class_call_candidate(expr);
         self.clear_literal_allowlist_on_mutating_member_call(expr);
+        self.record_framework_callback_param_sources(expr);
 
         if let Some(test_name) = playwright_test_callee_name(&expr.callee) {
             self.member_accesses
@@ -4471,6 +4566,54 @@ fn collect_source_paths_into(expr: &Expression<'_>, out: &mut Vec<String>) {
         }
         _ => {}
     }
+}
+
+fn is_http_route_handler_name(name: &str) -> bool {
+    matches!(
+        name,
+        "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD"
+    )
+}
+
+fn is_route_registration_method(method: &str) -> bool {
+    matches!(
+        method,
+        "all" | "delete" | "get" | "head" | "options" | "patch" | "post" | "put" | "use"
+    )
+}
+
+fn function_body_has_use_server(body: Option<&FunctionBody<'_>>) -> bool {
+    body.is_some_and(|body| {
+        body.directives
+            .iter()
+            .any(|directive| directive.directive.as_str() == "use server")
+    })
+}
+
+fn callback_params<'a>(arg: &'a Argument<'a>) -> Option<&'a FormalParameters<'a>> {
+    match arg {
+        Argument::ArrowFunctionExpression(expr) => Some(&expr.params),
+        Argument::FunctionExpression(expr) => Some(&expr.params),
+        _ => arg.as_expression().and_then(|expr| match expr {
+            Expression::ArrowFunctionExpression(expr) => Some(&*expr.params),
+            Expression::FunctionExpression(expr) => Some(&*expr.params),
+            _ => None,
+        }),
+    }
+}
+
+fn last_callback_params<'a>(args: &'a [Argument<'a>]) -> Option<&'a FormalParameters<'a>> {
+    args.iter().rev().find_map(callback_params)
+}
+
+fn route_callback_params<'a>(
+    args: &'a [Argument<'a>],
+    method: &str,
+) -> Option<&'a FormalParameters<'a>> {
+    if method == "use" {
+        return last_callback_params(args);
+    }
+    args.iter().skip(1).find_map(callback_params)
 }
 
 fn collect_idents_into(expr: &Expression<'_>, out: &mut Vec<String>) {

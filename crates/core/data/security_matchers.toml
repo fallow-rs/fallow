@@ -872,8 +872,11 @@ evidence_template = "Non-literal script bound to {callee} (runs in the embedded 
 # path_patterns are segment-aware (the same engine as callee_patterns): a
 # leading `*.` matches any object prefix, so `*.query` matches `req.query`,
 # `ctx.req.query` (Hono), and `request.query` (Fastify). Bare paths match
-# exactly. This is OUT of scope: inter-procedural flow, fetch()/response-body
-# call results (a call result is not a member-access binding), and aliasing.
+# exactly. Synthetic handler-parameter paths are emitted by the extract layer
+# for recognizable framework callback positions and are dependency-gated below.
+# This is OUT of scope: inter-procedural flow, fetch()/response-body call
+# results (a call result is not a member-access binding), decorator-injected
+# params such as NestJS `@Body()`, and aliasing.
 
 [[source]]
 id = "http-request-input"
@@ -882,6 +885,54 @@ title = "HTTP request input"
 # `*.params`, `*.body` cover `req.query`, `ctx.req.query`, `request.body`, etc.
 # `*.searchParams` covers `new URL(...).searchParams`-style bindings.
 path_patterns = ["*.query", "*.params", "*.body", "*.searchParams"]
+
+[[source]]
+id = "framework-handler-input"
+title = "Framework handler input"
+enabler = "express"
+path_patterns = ["framework.request"]
+
+[[source]]
+id = "framework-handler-input"
+title = "Framework handler input"
+enabler = "fastify"
+path_patterns = ["framework.request"]
+
+[[source]]
+id = "framework-handler-input"
+title = "Framework handler input"
+enabler = "koa"
+path_patterns = ["framework.request"]
+
+[[source]]
+id = "framework-handler-input"
+title = "Framework handler input"
+enabler = "hono"
+path_patterns = ["framework.request"]
+
+[[source]]
+id = "next-handler-input"
+title = "Next.js handler input"
+enabler = "next"
+path_patterns = ["next.request", "next.form-data"]
+
+[[source]]
+id = "queue-job-input"
+title = "Queue job input"
+enabler = "bullmq"
+path_patterns = ["queue.job"]
+
+[[source]]
+id = "queue-job-input"
+title = "Queue job input"
+enabler = "bull"
+path_patterns = ["queue.job"]
+
+[[source]]
+id = "mcp-tool-input"
+title = "MCP tool input"
+enabler = "@modelcontextprotocol/sdk"
+path_patterns = ["mcp.tool-input"]
 
 [[source]]
 id = "process-argv"

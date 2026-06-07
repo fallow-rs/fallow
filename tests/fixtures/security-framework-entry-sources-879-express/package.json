@@ -1,0 +1,9 @@
+{
+  "name": "security-framework-entry-sources-879-express",
+  "dependencies": {
+    "express": "latest"
+  },
+  "devDependencies": {
+    "typescript": "latest"
+  }
+}
