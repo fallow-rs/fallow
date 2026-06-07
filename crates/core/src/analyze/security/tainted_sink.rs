@@ -140,10 +140,19 @@ fn provenance_satisfied(matcher: &Matcher, module: &ModuleInfo, callee_path: &st
 }
 
 /// Compare an import source against a provenance spec, tolerant of the `node:`
-/// prefix on either side (`node:child_process` matches `child_process`).
+/// prefix on either side (`node:child_process` matches `child_process`) and
+/// package subpath imports (`mysql2/promise` matches `mysql2`).
 fn import_source_matches(source: &str, spec: &str) -> bool {
-    let strip = |s: &str| s.strip_prefix("node:").unwrap_or(s).to_string();
-    strip(source) == strip(spec)
+    fn strip_node_prefix(value: &str) -> &str {
+        value.strip_prefix("node:").unwrap_or(value)
+    }
+
+    let source = strip_node_prefix(source);
+    let spec = strip_node_prefix(spec);
+    source == spec
+        || source
+            .strip_prefix(spec)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 /// Compiled glob set over [`PRODUCTION_EXCLUDE_PATTERNS`](crate::discover::PRODUCTION_EXCLUDE_PATTERNS),
@@ -472,6 +481,13 @@ mod tests {
         assert!(import_source_matches("node:child_process", "child_process"));
         assert!(import_source_matches("child_process", "node:child_process"));
         assert!(!import_source_matches("child_process", "node:vm"));
+    }
+
+    #[test]
+    fn import_source_matches_package_subpath() {
+        assert!(import_source_matches("mysql2/promise", "mysql2"));
+        assert!(import_source_matches("@scope/pkg/subpath", "@scope/pkg"));
+        assert!(!import_source_matches("mysql2-promise", "mysql2"));
     }
 
     fn binding(local: &str, source_path: &str) -> TaintedBinding {

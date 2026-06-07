@@ -971,8 +971,8 @@ fn issue_901_literal_tier_rows_fire() {
     assert_candidate(&results, "src/mysql.ts", "mysql-multiple-statements", 89);
     assert_eq!(
         anchored_count(&results, "src/mysql.ts"),
-        2,
-        "mysql fixture should cover mysql and mysql2 provenances"
+        4,
+        "mysql fixture should cover mysql, mysql2, and mysql2 subpath provenances"
     );
 }
 

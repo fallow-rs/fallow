@@ -1819,6 +1819,9 @@ impl ModuleInfoExtractor {
             return;
         };
         if is_route_registration_method(method) {
+            if !is_framework_route_receiver_path(&callee_path, method) {
+                return;
+            }
             if let Some(params) = route_callback_params(&call.arguments, method) {
                 self.record_first_param_source(params, FRAMEWORK_REQUEST_SOURCE);
             }
@@ -5141,6 +5144,23 @@ fn is_route_registration_method(method: &str) -> bool {
         method,
         "all" | "delete" | "get" | "head" | "options" | "patch" | "post" | "put" | "use"
     )
+}
+
+fn is_framework_route_receiver_path(callee_path: &str, method: &str) -> bool {
+    let Some(receiver_path) = callee_path.strip_suffix(&format!(".{method}")) else {
+        return false;
+    };
+    let Some(receiver) = receiver_path.rsplit('.').next() else {
+        return false;
+    };
+    let receiver = receiver.to_ascii_lowercase();
+    matches!(
+        receiver.as_str(),
+        "app" | "router" | "route" | "routes" | "server" | "fastify"
+    ) || receiver.ends_with("app")
+        || receiver.ends_with("router")
+        || receiver.ends_with("routes")
+        || receiver.ends_with("server")
 }
 
 fn function_body_has_use_server(body: Option<&FunctionBody<'_>>) -> bool {

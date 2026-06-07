@@ -970,10 +970,13 @@ enum Command {
     /// catalogue (`security_matchers.toml`) spanning categories such as
     /// dangerous-html, template-escape-bypass, command-injection, code-injection,
     /// dynamic-regex, redos-regex, dynamic-module-load, sql-injection, ssrf,
-    /// path-traversal, header-injection, open-redirect, mass-assignment,
-    /// weak-crypto, deprecated-cipher, insecure-randomness, unsafe-buffer-alloc,
-    /// unsafe-deserialization, prototype-pollution, zip-slip, nosql-injection,
-    /// ssti, xxe, xpath-injection, and webview-injection. (3) `hardcoded-secret`,
+    /// path-traversal, header-injection, open-redirect, cleartext-transport,
+    /// electron-unsafe-webpreferences, world-writable-permission,
+    /// insecure-temp-file, mysql-multiple-statements, mass-assignment,
+    /// weak-crypto, deprecated-cipher, insecure-randomness,
+    /// unsafe-buffer-alloc, unsafe-deserialization, prototype-pollution,
+    /// zip-slip, nosql-injection, ssti, xxe, xpath-injection, and
+    /// webview-injection. (3) `hardcoded-secret`,
     /// an include-required
     /// category for provider-prefix literals and high-entropy literals assigned
     /// to secret-shaped identifiers. It never runs from raw entropy alone. All

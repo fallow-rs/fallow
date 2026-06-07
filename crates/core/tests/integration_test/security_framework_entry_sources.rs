@@ -26,7 +26,7 @@ fn tainted_sink_at_line(results: &AnalysisResults, line: u32) -> &SecurityFindin
 #[test]
 fn express_route_request_param_is_source_backed() {
     let results = analyze_fixture("security-framework-entry-sources-879-express");
-    let finding = tainted_sink_at_line(&results, 5);
+    let finding = tainted_sink_at_line(&results, 8);
     assert!(finding.source_backed);
     assert!(
         finding.evidence.contains("framework handler input"),
@@ -34,12 +34,24 @@ fn express_route_request_param_is_source_backed() {
         finding.evidence
     );
 
-    let accessor_finding = tainted_sink_at_line(&results, 6);
+    let accessor_finding = tainted_sink_at_line(&results, 9);
     assert!(accessor_finding.source_backed);
     assert!(
         accessor_finding.evidence.contains("http request input"),
         "evidence should prefer the specific request accessor source: {}",
         accessor_finding.evidence
+    );
+}
+
+#[test]
+fn express_enabled_non_route_get_callback_is_not_source_backed() {
+    let results = analyze_fixture("security-framework-entry-sources-879-express");
+    assert!(
+        results
+            .security_findings
+            .iter()
+            .all(|finding| finding.line != 12),
+        "ordinary cache.get callbacks must not be treated as framework request sources"
     );
 }
 
