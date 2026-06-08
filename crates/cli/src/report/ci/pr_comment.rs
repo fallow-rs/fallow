@@ -1,3 +1,4 @@
+use crate::report::sink::outln;
 use std::fmt::Write as _;
 use std::process::ExitCode;
 use std::sync::OnceLock;
@@ -398,7 +399,7 @@ fn print_pr_comment_from_ci_issues(
     provider: Provider,
     issues: &[CiIssue],
 ) -> ExitCode {
-    println!("{}", render_pr_comment(command, provider, issues));
+    outln!("{}", render_pr_comment(command, provider, issues));
     ExitCode::SUCCESS
 }
 

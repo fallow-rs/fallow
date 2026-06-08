@@ -1,3 +1,4 @@
+use crate::report::sink::outln;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
@@ -85,7 +86,7 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
 
     let lines = build_health_human_lines_with_explain(report, root, explain, skip_score_and_trend);
     for line in lines {
-        println!("{line}");
+        outln!("{line}");
     }
 
     if !quiet {
@@ -1243,11 +1244,11 @@ pub(in crate::report) fn print_health_summary(
     let s = &report.summary;
 
     if heading {
-        println!("{}", "Health Summary".bold());
-        println!();
+        outln!("{}", "Health Summary".bold());
+        outln!();
     }
-    println!("  {:>6}  Functions analyzed", s.functions_analyzed);
-    println!("  {:>6}  Above threshold", s.functions_above_threshold);
+    outln!("  {:>6}  Functions analyzed", s.functions_analyzed);
+    outln!("  {:>6}  Above threshold", s.functions_above_threshold);
     if let Some(mi) = s.average_maintainability {
         let label = if mi >= 85.0 {
             "good"
@@ -1256,13 +1257,13 @@ pub(in crate::report) fn print_health_summary(
         } else {
             "low"
         };
-        println!("  {mi:>5.1}   Average maintainability ({label})");
+        outln!("  {mi:>5.1}   Average maintainability ({label})");
     }
     if let Some(ref score) = report.health_score {
-        println!("  {:>5.0} {}  Health score", score.score, score.grade);
+        outln!("  {:>5.0} {}  Health score", score.score, score.grade);
     }
     if let Some(ref gaps) = report.coverage_gaps {
-        println!(
+        outln!(
             "  {:>6}  Untested {} ({:.1}% file coverage)",
             gaps.summary.untested_files,
             if gaps.summary.untested_files == 1 {
@@ -1272,7 +1273,7 @@ pub(in crate::report) fn print_health_summary(
             },
             gaps.summary.file_coverage_pct,
         );
-        println!(
+        outln!(
             "  {:>6}  Untested {}",
             gaps.summary.untested_exports,
             if gaps.summary.untested_exports == 1 {
@@ -1283,11 +1284,11 @@ pub(in crate::report) fn print_health_summary(
         );
     }
     if let Some(ref production) = report.runtime_coverage {
-        println!(
+        outln!(
             "  {:>6}  Unhit in production",
             production.summary.functions_unhit,
         );
-        println!(
+        outln!(
             "  {:>6}  Untracked by V8 (lazy-parsed / worker / dynamic)",
             production.summary.functions_untracked,
         );
@@ -1338,7 +1339,7 @@ pub(in crate::report) fn print_health_grouping(
     if !quiet {
         eprintln!();
     }
-    println!(
+    outln!(
         "{} {}",
         "\u{25cf}".cyan(),
         format!("Per-{} health", grouping.mode).cyan().bold()
@@ -1373,7 +1374,7 @@ pub(in crate::report) fn print_health_grouping(
     if any_vitals {
         let _ = write!(header, "  {:>3}", "p90");
     }
-    println!("{}", header.dimmed());
+    outln!("{}", header.dimmed());
 
     let mut has_root_bucket = false;
     for group in ordered {
@@ -1398,7 +1399,7 @@ pub(in crate::report) fn print_health_grouping(
                 row.push_str("     ");
             }
         }
-        println!("{row}");
+        outln!("{row}");
     }
     if !quiet {
         if has_root_bucket {

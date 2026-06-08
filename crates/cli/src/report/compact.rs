@@ -1,3 +1,4 @@
+use crate::report::sink::outln;
 use std::path::Path;
 
 use fallow_core::duplicates::DuplicationReport;
@@ -8,7 +9,7 @@ use super::{normalize_uri, relative_path};
 
 pub(super) fn print_compact(results: &AnalysisResults, root: &Path) {
     for line in build_compact_lines(results, root) {
-        println!("{line}");
+        outln!("{line}");
     }
 }
 
@@ -213,7 +214,7 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
 pub(super) fn print_grouped_compact(groups: &[ResultGroup], root: &Path) {
     for group in groups {
         for line in build_compact_lines(&group.results, root) {
-            println!("{}\t{line}", group.key);
+            outln!("{}\t{line}", group.key);
         }
     }
 }
@@ -224,7 +225,7 @@ pub(super) fn print_grouped_compact(groups: &[ResultGroup], root: &Path) {
 )]
 pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, root: &Path) {
     if let Some(ref hs) = report.health_score {
-        println!("health-score:{:.1}:{}", hs.score, hs.grade);
+        outln!("health-score:{:.1}:{}", hs.score, hs.grade);
     }
     if let Some(ref vs) = report.vital_signs {
         let mut parts = Vec::new();
@@ -251,7 +252,7 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
         if let Some(v) = vs.unused_dep_count {
             parts.push(format!("unused_dep_count={v}"));
         }
-        println!("vital-signs:{}", parts.join(","));
+        outln!("vital-signs:{}", parts.join(","));
     }
     for finding in &report.findings {
         let relative = normalize_uri(&relative_path(&finding.path, root).display().to_string());
@@ -270,7 +271,7 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
             }
             None => String::new(),
         };
-        println!(
+        outln!(
             "high-complexity:{}:{}:{}:cyclomatic={},cognitive={},severity={}{}",
             relative,
             finding.line,
@@ -283,7 +284,7 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
     }
     for score in &report.file_scores {
         let relative = normalize_uri(&relative_path(&score.path, root).display().to_string());
-        println!(
+        outln!(
             "file-score:{}:mi={:.1},fan_in={},fan_out={},dead={:.2},density={:.2},crap_max={:.1},crap_above={}",
             relative,
             score.maintainability_index,
@@ -296,7 +297,7 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
         );
     }
     if let Some(ref gaps) = report.coverage_gaps {
-        println!(
+        outln!(
             "coverage-gap-summary:runtime_files={},covered_files={},file_coverage_pct={:.1},untested_files={},untested_exports={}",
             gaps.summary.runtime_files,
             gaps.summary.covered_files,
@@ -307,28 +308,31 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
         for item in &gaps.files {
             let relative =
                 normalize_uri(&relative_path(&item.file.path, root).display().to_string());
-            println!(
+            outln!(
                 "untested-file:{}:value_exports={}",
-                relative, item.file.value_export_count,
+                relative,
+                item.file.value_export_count,
             );
         }
         for item in &gaps.exports {
             let relative =
                 normalize_uri(&relative_path(&item.export.path, root).display().to_string());
-            println!(
+            outln!(
                 "untested-export:{}:{}:{}",
-                relative, item.export.line, item.export.export_name,
+                relative,
+                item.export.line,
+                item.export.export_name,
             );
         }
     }
     if let Some(ref production) = report.runtime_coverage {
         for line in build_runtime_coverage_compact_lines(production, root) {
-            println!("{line}");
+            outln!("{line}");
         }
     }
     if let Some(ref intelligence) = report.coverage_intelligence {
         for line in build_coverage_intelligence_compact_lines(intelligence, root) {
-            println!("{line}");
+            outln!("{line}");
         }
     }
     for entry in &report.hotspots {
@@ -362,7 +366,7 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
                 format!(",{}", parts.join(","))
             })
             .unwrap_or_default();
-        println!(
+        outln!(
             "hotspot:{}:score={:.1},commits={},churn={},density={:.2},fan_in={},trend={}{}",
             relative,
             entry.score,
@@ -375,12 +379,12 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
         );
     }
     if let Some(ref trend) = report.health_trend {
-        println!(
+        outln!(
             "trend:overall:direction={}",
             trend.overall_direction.label()
         );
         for m in &trend.metrics {
-            println!(
+            outln!(
                 "trend:{}:previous={:.1},current={:.1},delta={:+.1},direction={}",
                 m.name,
                 m.previous,
@@ -395,7 +399,7 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
         let category = target.category.compact_label();
         let effort = target.effort.label();
         let confidence = target.confidence.label();
-        println!(
+        outln!(
             "refactoring-target:{}:priority={:.1},efficiency={:.1},category={},effort={},confidence={}:{}",
             relative,
             target.priority,
@@ -492,7 +496,7 @@ pub(super) fn print_duplication_compact(report: &DuplicationReport, root: &Path)
         for instance in &group.instances {
             let relative =
                 normalize_uri(&relative_path(&instance.file, root).display().to_string());
-            println!(
+            outln!(
                 "clone-group-{}:{}:{}-{}:{}tokens",
                 i + 1,
                 relative,

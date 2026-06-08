@@ -45,7 +45,11 @@ pub(super) fn thousands(n: usize) -> String {
 }
 
 pub(super) fn print_explain_tip_if_tty(has_findings: bool, quiet: bool) {
-    if has_findings && !quiet && std::io::stdout().is_terminal() {
+    if has_findings
+        && !quiet
+        && std::io::stdout().is_terminal()
+        && !crate::report::sink::is_redirected()
+    {
         println!(
             "{}",
             "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."

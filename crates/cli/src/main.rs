@@ -271,6 +271,12 @@ struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
     sarif_file: Option<PathBuf>,
 
+    /// Write the report to a file instead of stdout, for any --format (no ANSI
+    /// codes). Useful on large projects where the terminal scrollback truncates
+    /// the top. Progress and the confirmation stay on stderr.
+    #[arg(short = 'o', long, global = true, value_name = "PATH")]
+    output_file: Option<PathBuf>,
+
     /// Fail if issue count increased beyond tolerance compared to a regression baseline.
     #[arg(long, global = true)]
     fail_on_regression: bool,
@@ -2284,6 +2290,68 @@ fn warn_legacy_check_alias_if_needed(used_legacy_check_alias: bool, quiet: bool)
     }
 }
 
+/// Open `path` (creating parent dirs, truncating) and redirect report output
+/// there via the ambient sink, forcing color off so the file carries no ANSI
+/// codes even when attached to a TTY. Returns the error exit code if the file
+/// cannot be created. Backs `--output-file`.
+fn redirect_report_to_file(
+    path: &std::path::Path,
+    output: fallow_config::OutputFormat,
+) -> Result<(), ExitCode> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        return Err(emit_error(
+            &format!(
+                "failed to create {} for --output-file: {e}",
+                parent.display()
+            ),
+            2,
+            output,
+        ));
+    }
+    match std::fs::File::create(path) {
+        Ok(file) => {
+            report::sink::set_file_sink(file);
+            colored::control::set_override(false);
+            Ok(())
+        }
+        Err(e) => Err(emit_error(
+            &format!("failed to open {} for --output-file: {e}", path.display()),
+            2,
+            output,
+        )),
+    }
+}
+
+/// Flush the report file after rendering and print the stderr confirmation
+/// (suppressed by `--quiet`). Returns the error exit code on a write failure.
+fn finalize_report_file(
+    path: &std::path::Path,
+    quiet: bool,
+    output: fallow_config::OutputFormat,
+) -> Result<(), ExitCode> {
+    if let Err(e) = report::sink::flush() {
+        return Err(emit_error(
+            &format!("failed to write {}: {e}", path.display()),
+            2,
+            output,
+        ));
+    }
+    // Suppress the confirmation when nothing was rendered to the file (a command
+    // that errored before producing output sends its error to stdout, not the
+    // file), so we never claim "Report written" over an empty file.
+    if !quiet && report::sink::wrote() {
+        eprintln!("Report written to {}", path.display());
+    }
+    Ok(())
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "top-level CLI orchestration: parse, validate, set up output redirection, dispatch, record telemetry"
+)]
 fn main() -> ExitCode {
     install_signal_handlers();
     install_spawn_hooks();
@@ -2355,7 +2423,7 @@ fn main() -> ExitCode {
         );
     let _ = report::ci::diff_filter::init_shared_diff(diff_source.as_ref(), suppress_warnings);
 
-    if (cli.ci || cli.fail_on_issues || cli.sarif_file.is_some())
+    if (cli.ci || cli.fail_on_issues || cli.sarif_file.is_some() || cli.output_file.is_some())
         && matches!(
             cli.command,
             Some(
@@ -2378,7 +2446,7 @@ fn main() -> ExitCode {
         )
     {
         return emit_error(
-            "--ci, --fail-on-issues, and --sarif-file are only valid with dead-code, dupes, health, security, or bare invocation",
+            "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, dupes, health, security, or bare invocation",
             2,
             output,
         );
@@ -2417,6 +2485,15 @@ fn main() -> ExitCode {
         });
     let save_to_config = cli.save_regression_baseline.is_some() && save_regression_file.is_none();
 
+    // Redirect the rendered report to a file (ambient sink read by the report
+    // layer's `outln!`). Set up before dispatch so rendering lands in the file;
+    // progress and the confirmation stay on stderr.
+    if let Some(path) = cli.output_file.as_deref()
+        && let Err(code) = redirect_report_to_file(path, output)
+    {
+        return code;
+    }
+
     let command = cli.command.take();
     let telemetry_workflow = telemetry_workflow_for_command(command.as_ref(), output);
     let telemetry_start = std::time::Instant::now();
@@ -2435,6 +2512,11 @@ fn main() -> ExitCode {
         None => dispatch_bare_command(&dispatch),
         Some(cmd) => dispatch_subcommand(cmd, &dispatch),
     };
+    if let Some(path) = cli.output_file.as_deref()
+        && let Err(code) = finalize_report_file(path, quiet, output)
+    {
+        return code;
+    }
     telemetry::record_workflow(&telemetry::WorkflowRecord {
         workflow: telemetry_workflow,
         output,

@@ -1,3 +1,4 @@
+use crate::report::sink::outln;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
@@ -670,7 +671,7 @@ pub(super) fn print_grouped_duplication_json(
 
 pub(super) fn print_trace_json<T: serde::Serialize>(value: &T) {
     match serde_json::to_string_pretty(value) {
-        Ok(json) => println!("{json}"),
+        Ok(json) => outln!("{json}"),
         Err(e) => {
             eprintln!("Error: failed to serialize trace output: {e}");
             #[expect(

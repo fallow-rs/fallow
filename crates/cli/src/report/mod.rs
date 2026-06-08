@@ -9,6 +9,7 @@ mod json;
 mod markdown;
 mod sarif;
 mod shared;
+pub mod sink;
 #[cfg(test)]
 pub mod test_helpers;
 
@@ -20,6 +21,8 @@ use fallow_config::{OutputFormat, RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 use fallow_core::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
+
+use crate::report::sink::outln;
 
 pub use grouping::OwnershipResolver;
 pub use human::health::{render_health_score, render_health_trend};
@@ -110,7 +113,7 @@ pub const fn plural(n: usize) -> &'static str {
 pub fn emit_json(value: &serde_json::Value, kind: &str) -> ExitCode {
     match serde_json::to_string_pretty(value) {
         Ok(json) => {
-            println!("{json}");
+            outln!("{json}");
             ExitCode::SUCCESS
         }
         Err(e) => {

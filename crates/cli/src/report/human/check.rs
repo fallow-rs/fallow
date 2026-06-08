@@ -1,3 +1,4 @@
+use crate::report::sink::outln;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -195,7 +196,7 @@ pub(in crate::report) fn print_human(input: &PrintHumanInput<'_>) {
         input.top,
         input.explain,
     ) {
-        println!("{line}");
+        outln!("{line}");
     }
 
     if !input.quiet {
@@ -1814,8 +1815,8 @@ pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>)
             plural(group_counts.len()),
             summary_parts.join(" \u{00b7} ")
         );
-        println!("{}", summary.dimmed());
-        println!();
+        outln!("{}", summary.dimmed());
+        outln!();
     }
 
     let mut grand_total: usize = 0;
@@ -1848,12 +1849,12 @@ pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>)
             _ => header_text,
         };
 
-        println!("{}", header_text.cyan().bold());
+        outln!("{}", header_text.cyan().bold());
 
         if let Some(ref owners) = group.owners
             && !owners.is_empty()
         {
-            println!("  {} {}", "owners:".dimmed(), owners.join(" ").dimmed());
+            outln!("  {} {}", "owners:".dimmed(), owners.join(" ").dimmed());
         }
 
         let lines = build_human_lines_with_explain(&group.results, root, rules, None, explain);
@@ -1861,7 +1862,7 @@ pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>)
             if line.contains("docs.fallow.tools") && !seen_footers.insert(line.clone()) {
                 continue;
             }
-            println!("{line}");
+            outln!("{line}");
         }
 
         if group.key == crate::codeowners::UNOWNED_LABEL {
@@ -2053,8 +2054,8 @@ pub(in crate::report) fn print_check_summary(
     }
 
     if heading {
-        println!("{}", "Dead Code Summary".bold());
-        println!();
+        outln!("{}", "Dead Code Summary".bold());
+        outln!();
     }
 
     let categories: &[(&str, usize, Level)] = &[
@@ -2160,12 +2161,12 @@ pub(in crate::report) fn print_check_summary(
             Level::Warn => count_str.yellow().to_string(),
             Level::Info => count_str.dimmed().to_string(),
         };
-        println!("  {colored}  {name}");
+        outln!("  {colored}  {name}");
     }
 
-    println!();
+    outln!();
     let total_str = format!("{total:>6}");
-    println!("  {}  {}", total_str.bold(), "Total".bold());
+    outln!("  {}  {}", total_str.bold(), "Total".bold());
 
     if !quiet {
         eprintln!(

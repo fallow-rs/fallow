@@ -1,3 +1,4 @@
+use crate::report::sink::outln;
 use std::io::IsTerminal;
 use std::process::ExitCode;
 use std::time::Instant;
@@ -432,7 +433,11 @@ fn print_human_sections(
     let has_any_findings = check_result.is_some_and(|result| result.results.total_issues() > 0)
         || dupes_result.is_some_and(|result| !result.report.clone_groups.is_empty())
         || health_result.is_some_and(|result| !result.report.findings.is_empty());
-    if show_headers && has_any_findings && std::io::stdout().is_terminal() {
+    if show_headers
+        && has_any_findings
+        && std::io::stdout().is_terminal()
+        && !crate::report::sink::is_redirected()
+    {
         println!(
             "{}",
             "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."
@@ -715,7 +720,7 @@ fn print_combined_json(
 
     match serde_json::to_string_pretty(&output) {
         Ok(json) => {
-            println!("{json}");
+            outln!("{json}");
             ExitCode::SUCCESS
         }
         Err(e) => emit_error(
@@ -777,7 +782,7 @@ fn print_combined_sarif(
 
     match serde_json::to_string_pretty(&combined) {
         Ok(json) => {
-            println!("{json}");
+            outln!("{json}");
             ExitCode::SUCCESS
         }
         Err(e) => emit_error(
@@ -797,7 +802,7 @@ fn print_combined_codeclimate(
     let value = build_combined_codeclimate(check, dupes, health);
     match serde_json::to_string_pretty(&value) {
         Ok(json) => {
-            println!("{json}");
+            outln!("{json}");
             ExitCode::SUCCESS
         }
         Err(e) => emit_error(

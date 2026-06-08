@@ -2,6 +2,7 @@
 ///
 /// Generates self-contained SVG badges with embedded Verdana 11px character
 /// width data for accurate text measurement. No external dependencies required.
+use crate::report::sink::outln;
 use std::process::ExitCode;
 
 use crate::health_types::HealthReport;
@@ -220,7 +221,7 @@ pub fn print_health_badge(report: &HealthReport) -> ExitCode {
     let color = grade_color(score.grade);
     let svg = render_badge("fallow", &message, color);
 
-    println!("{svg}");
+    outln!("{svg}");
     ExitCode::SUCCESS
 }
 

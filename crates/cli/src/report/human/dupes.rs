@@ -1,3 +1,4 @@
+use crate::report::sink::outln;
 use std::path::Path;
 use std::time::Duration;
 
@@ -50,7 +51,7 @@ pub(in crate::report) fn print_duplication_human(
         build_duplication_human_lines(report, root)
     };
     for line in lines {
-        println!("{line}");
+        outln!("{line}");
     }
 
     let stats = &report.stats;
@@ -409,16 +410,16 @@ pub(in crate::report) fn print_duplication_summary(
     let stats = &report.stats;
 
     if heading {
-        println!("{}", "Duplication Summary".bold());
-        println!();
+        outln!("{}", "Duplication Summary".bold());
+        outln!();
     }
-    println!("  {:>6}  Clone families", report.clone_families.len());
-    println!("  {:>6}  Clone groups", report.clone_groups.len());
-    println!(
+    outln!("  {:>6}  Clone families", report.clone_families.len());
+    outln!("  {:>6}  Clone groups", report.clone_groups.len());
+    outln!(
         "  {:>6}  Duplicated lines",
         thousands(stats.duplicated_lines)
     );
-    println!("  {:>5.1}%  Duplication rate", stats.duplication_percentage);
+    outln!("  {:>5.1}%  Duplication rate", stats.duplication_percentage);
 
     if !quiet {
         eprintln!(
@@ -467,17 +468,17 @@ pub(in crate::report) fn print_grouped_duplication_human(
         return;
     }
 
-    println!(
+    outln!(
         "{} {}",
         "\u{25cf}".cyan(),
         format!("Per-{} duplication", grouping.mode).cyan().bold()
     );
-    println!();
+    outln!();
 
     for bucket in &grouping.groups {
         let total_groups = bucket.clone_groups.len();
         let dup_lines = bucket.stats.duplicated_lines;
-        println!(
+        outln!(
             "{} {} ({} clone group{}, {} LOC duplicated)",
             "\u{25cf}".cyan(),
             bucket.key.clone().cyan().bold(),
@@ -485,7 +486,7 @@ pub(in crate::report) fn print_grouped_duplication_human(
             plural(total_groups),
             thousands(dup_lines),
         );
-        println!();
+        outln!();
 
         let shown = total_groups.min(MAX_CLONE_GROUPS);
         let mut sorted: Vec<_> = bucket.clone_groups.iter().collect();
@@ -502,7 +503,7 @@ pub(in crate::report) fn print_grouped_duplication_human(
             } else {
                 lc_str.dimmed().to_string()
             };
-            println!(
+            outln!(
                 "  {} lines  {} instance{}",
                 lc_colored,
                 cg.instances.len(),
@@ -516,7 +517,7 @@ pub(in crate::report) fn print_grouped_duplication_human(
                 } else {
                     format!("  [{}]", inst.owner).dimmed().to_string()
                 };
-                println!(
+                outln!(
                     "    {}{}:{}-{}{}",
                     dir.dimmed(),
                     format_path(filename),
@@ -525,10 +526,10 @@ pub(in crate::report) fn print_grouped_duplication_human(
                     owner_tag,
                 );
             }
-            println!();
+            outln!();
         }
         if total_groups > MAX_CLONE_GROUPS {
-            println!(
+            outln!(
                 "  {}",
                 format!(
                     "... and {} more clone groups",
@@ -537,7 +538,7 @@ pub(in crate::report) fn print_grouped_duplication_human(
                 .dimmed()
             );
         }
-        println!(
+        outln!(
             "  {}",
             format!(
                 "{} duplicated lines ({:.1}%) across {} file{}",
@@ -548,7 +549,7 @@ pub(in crate::report) fn print_grouped_duplication_human(
             )
             .dimmed()
         );
-        println!();
+        outln!();
     }
 
     let stats = &report.stats;

@@ -1,3 +1,4 @@
+use crate::report::sink::{out, outln};
 use std::fmt::Write;
 use std::path::Path;
 
@@ -17,7 +18,7 @@ fn escape_backticks(s: &str) -> String {
 }
 
 pub(super) fn print_markdown(results: &AnalysisResults, root: &Path) {
-    println!("{}", build_markdown(results, root));
+    outln!("{}", build_markdown(results, root));
 }
 
 /// Build markdown output for analysis results.
@@ -408,11 +409,11 @@ pub(super) fn print_grouped_markdown(groups: &[ResultGroup], root: &Path) {
     let total: usize = groups.iter().map(|g| g.results.total_issues()).sum();
 
     if total == 0 {
-        println!("## Fallow: no issues found");
+        outln!("## Fallow: no issues found");
         return;
     }
 
-    println!(
+    outln!(
         "## Fallow: {total} issue{} found (grouped)\n",
         plural(total)
     );
@@ -422,7 +423,7 @@ pub(super) fn print_grouped_markdown(groups: &[ResultGroup], root: &Path) {
         if count == 0 {
             continue;
         }
-        println!(
+        outln!(
             "## {} ({count} issue{})\n",
             escape_backticks(&group.key),
             plural(count)
@@ -435,14 +436,14 @@ pub(super) fn print_grouped_markdown(groups: &[ResultGroup], root: &Path) {
                 .map(|o| escape_backticks(o))
                 .collect::<Vec<_>>()
                 .join(" ");
-            println!("Owners: {joined}\n");
+            outln!("Owners: {joined}\n");
         }
         let body = build_markdown(&group.results, root);
         let sections = body
             .strip_prefix("## Fallow: no issues found\n")
             .or_else(|| body.find("\n\n").map(|pos| &body[pos + 2..]))
             .unwrap_or(&body);
-        print!("{sections}");
+        out!("{sections}");
     }
 }
 
@@ -554,7 +555,7 @@ fn markdown_grouped_section<'a, T>(
 }
 
 pub(super) fn print_duplication_markdown(report: &DuplicationReport, root: &Path) {
-    println!("{}", build_duplication_markdown(report, root));
+    outln!("{}", build_duplication_markdown(report, root));
 }
 
 /// Build markdown output for duplication results.
@@ -641,7 +642,7 @@ pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> St
 }
 
 pub(super) fn print_health_markdown(report: &crate::health_types::HealthReport, root: &Path) {
-    println!("{}", build_health_markdown(report, root));
+    outln!("{}", build_health_markdown(report, root));
 }
 
 /// Build markdown output for health (complexity) results.

@@ -8,6 +8,7 @@
 //! under bare `fallow` or the `audit` gate. There is no `confidence` or
 //! `signal_strength` field; the structural trace is the only honest signal.
 
+use crate::report::sink::outln;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -193,7 +194,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         _ if opts.summary => render_human_summary(&output),
         _ => render_human(&output),
     };
-    println!("{rendered}");
+    outln!("{rendered}");
 
     if fail {
         ExitCode::from(1)

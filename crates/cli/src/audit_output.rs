@@ -7,6 +7,7 @@ use fallow_config::{AuditGate, OutputFormat};
 use crate::error::emit_error;
 use crate::report;
 use crate::report::plural;
+use crate::report::sink::outln;
 
 use super::keys::{annotate_dead_code_json, annotate_dupes_json, annotate_health_json};
 use super::{AuditResult, AuditSummary, AuditVerdict};
@@ -87,7 +88,8 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
     let has_any_findings = has_check_issues || has_health_findings || has_dupe_groups;
 
     if has_any_findings {
-        if show_headers && std::io::stdout().is_terminal() {
+        if show_headers && std::io::stdout().is_terminal() && !crate::report::sink::is_redirected()
+        {
             println!(
                 "{}",
                 "Tip: run `fallow explain <issue label>`; spaces and hyphens both work, e.g. `fallow explain unused files`."
@@ -193,7 +195,7 @@ fn print_audit_vital_signs(result: &AuditResult) {
     ));
 
     let line = parts.join(" \u{00b7} ");
-    println!(
+    outln!(
         "{} {} {}",
         "\u{25a0}".dimmed(),
         "Metrics:".dimmed(),
