@@ -71,8 +71,9 @@ pub struct SecurityGate {
     pub new_count: usize,
 }
 
-/// The `fallow security --format json` envelope. `security_findings` is the
-/// unique required field used for untagged narrowing in `FallowOutput`.
+/// The `fallow security --format json` envelope. `FallowOutput` discriminates it
+/// by the `kind: "security"` tag; the optional `gate` block is additive and is
+/// not part of that discrimination.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityOutput {
@@ -890,6 +891,19 @@ mod tests {
         assert!(header.contains("2 new security candidate"));
         assert!(header.contains("not confirmed vulnerabilities"));
         assert!(!header.to_uppercase().contains("GATE: FAIL"));
+    }
+
+    #[test]
+    fn gate_human_header_fail_singular_for_one_candidate() {
+        // The gate makes new_count == 1 the common case (one PR adds one sink).
+        let gate = SecurityGate {
+            mode: SecurityGateMode::New,
+            verdict: SecurityGateVerdict::Fail,
+            new_count: 1,
+        };
+        let header = gate_human_header(&gate);
+        assert!(header.contains("1 new security candidate in changed lines"));
+        assert!(!header.contains("1 new security candidates"));
     }
 
     #[test]

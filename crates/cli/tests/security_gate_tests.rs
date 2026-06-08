@@ -98,3 +98,20 @@ fn gate_exits_2_without_a_diff_source() {
         "a gate with no diff source must hard-error (exit 2), never a green gate"
     );
 }
+
+#[test]
+fn gate_supersedes_fail_on_issues_when_no_new_sink() {
+    // `--fail-on-issues` alone would exit 1 (the fixture has pre-existing
+    // candidates). In gate mode the gate is authoritative: no NEW sink in the
+    // changed lines exits 0, NOT 1 (the gate must not re-gate the backlog).
+    let root = fixture_path("security-dangerous-html");
+    let (code, stdout) = run_security_gate(
+        &root,
+        &["--diff-stdin", "--fail-on-issues"],
+        Some(NON_SINK_DIFF),
+    );
+    assert_eq!(
+        code, 0,
+        "gate must supersede --fail-on-issues when no new sink; stdout: {stdout}"
+    );
+}

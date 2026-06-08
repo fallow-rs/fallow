@@ -275,11 +275,14 @@ pub fn try_get_changed_files_with_toplevel(
 /// returns `Err` when the git invocation itself fails (missing/unfetched ref,
 /// shallow clone, not a repo). The security gate hard-errors on `Err` rather than
 /// emitting a green gate: a diff it could not compute must NEVER read as "no new
-/// sinks". `--relative` emits `root`-relative paths so they match the keys
-/// `DiffIndex` is queried with (`relative_to_diff_path(finding, root)`); it also
-/// scopes the diff to files under `root`, which is the correct gate scope when
-/// fallow is invoked on a monorepo subpackage. An empty diff (no changes /
-/// docs-only) is `Ok("")`, a clean pass, not an error.
+/// sinks". `--relative` emits paths relative to `root` (rewriting the prefix to
+/// match the keys `DiffIndex` is queried with, `relative_to_diff_path(finding,
+/// root)`) and, when fallow runs in a monorepo subpackage, omits changes outside
+/// `root` from the output entirely; a sibling-package edit `git diff --relative`
+/// did emit would carry a `../...` path that `relative_to_diff_path` cannot strip
+/// (returns `None`), which is harmless because no findings exist for files
+/// outside the analyzed `root`. An empty diff (no changes / docs-only) is
+/// `Ok("")`, a clean pass, not an error.
 pub fn try_get_changed_diff(root: &Path, git_ref: &str) -> Result<String, ChangedFilesError> {
     validate_git_ref(git_ref).map_err(ChangedFilesError::InvalidRef)?;
     let output = spawn_output(&mut git_command(
