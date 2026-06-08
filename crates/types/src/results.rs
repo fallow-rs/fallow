@@ -868,9 +868,10 @@ pub struct TraceHop {
 }
 
 /// Graph-derived reachability ranking signal for a security candidate. Computed
-/// from the EXISTING module graph (runtime reachability + reverse-dep fan-in)
-/// after detection, never proven exploitable. Used to surface candidates that
-/// sit on a request/runtime-reachable surface above isolated helpers or scripts.
+/// from the existing module graph after detection, never proven exploitable.
+/// Used to surface candidates that sit on a request/runtime-reachable surface,
+/// receive same-module source evidence, or are import-reachable from an
+/// untrusted-source module above isolated helpers or scripts.
 ///
 /// This is a relative-ordering signal, NOT a `confidence` or `signal_strength`
 /// score: fallow does not prove the path is exploitable.
@@ -987,10 +988,11 @@ pub struct SecurityFinding {
     /// the code instead of hardening the sink when deletion is safe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dead_code: Option<SecurityDeadCodeContext>,
-    /// Graph-derived reachability ranking signal (issue #860). `None` until the
-    /// post-detection ranking pass fills it; additive on the wire (skipped when
-    /// absent). Drives the order findings are emitted in: candidates reachable
-    /// from a runtime entry point with a wider blast radius sort first.
+    /// Graph-derived reachability ranking signal (issues #860 and #885). `None`
+    /// until the post-detection ranking pass fills it; additive on the wire
+    /// (skipped when absent). Drives the order findings are emitted in:
+    /// runtime-reachable candidates sort first, followed by source-backed and
+    /// source-reachable candidates, then wider blast radius.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reachability: Option<SecurityReachability>,
 }

@@ -160,9 +160,10 @@ class SecurityFindingItem extends vscode.TreeItem {
 /**
  * Renders local security CANDIDATES from `fallow security` into the Security
  * Candidates view. Findings are grouped by kind and CWE/category, then each
- * finding can expand into trace hops. Every node frames the finding as
- * unverified (#903): the view name, the tooltip prefix, and the toast wording
- * make clear these are candidates to verify, not confirmed vulnerabilities.
+ * finding can expand into detector trace hops, while source-reachability traces
+ * appear in the finding tooltip. Every node frames the finding as unverified
+ * (#903): the view name, the tooltip prefix, and the toast wording make clear
+ * these are candidates to verify, not confirmed vulnerabilities.
  */
 export class SecurityTreeProvider implements vscode.TreeDataProvider<SecurityItem> {
   private result: SecurityOutput | null = null;

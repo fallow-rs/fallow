@@ -1,12 +1,10 @@
-//! Reachability-weighted ranking of security candidates (issue #860).
+//! Reachability-weighted ranking of security candidates (issues #860 and #885).
 //!
-//! Reuses the EXISTING module graph (runtime reachability + reverse-dependency
-//! fan-in) to rank `fallow security` candidates so a candidate reachable from a
-//! runtime/application entry point (route handlers, server entry, framework
-//! runtime roots) surfaces above an isolated helper or script. This is graph-side
-//! glue plus output ordering only: it touches neither the extract cache nor the
-//! finding enum, and adds no new BFS infrastructure beyond a bounded fan-in walk
-//! over the graph's reverse-dependency index.
+//! Reuses the existing module graph to rank `fallow security` candidates by
+//! runtime reachability, source-backed evidence, module-level untrusted-source
+//! reachability, reverse-dependency fan-in, boundary crossings, and dead-code
+//! context. This is graph-side glue plus output ordering only: it touches
+//! neither the extract cache nor detector semantics.
 //!
 //! The ranking is a relative-ordering signal, NOT proof of exploitability:
 //! candidates remain CANDIDATES for downstream agent verification.
@@ -173,9 +171,11 @@ fn prepend_dead_code_action(finding: &mut SecurityFinding) {
 /// architecture-boundary violation found in the same run (importing or imported
 /// side); a finding whose anchor is in that set is flagged `crosses_boundary`.
 ///
-/// Sort order (descending priority): reachable-from-entry first, then larger
-/// blast radius, then crosses-boundary, then the existing deterministic
-/// `(path, line, col, category)` tiebreak so output stays stable across runs.
+/// Sort order (descending priority): reachable-from-entry first, same-module
+/// source-backed sinks, module-level source-reachable sinks, larger blast
+/// radius, crosses-boundary, active-code over dead-code candidates, then the
+/// existing deterministic `(path, line, col, category)` tiebreak so output stays
+/// stable across runs.
 pub fn rank_security_findings(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],

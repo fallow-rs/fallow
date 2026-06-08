@@ -358,6 +358,12 @@ pub fn filter_results_by_diff(
                     || (matches!(hop.role, fallow_core::results::TraceHopRole::SecretSource)
                         && touches_file(&hop.path))
             })
+            || f.reachability.as_ref().is_some_and(|reachability| {
+                reachability
+                    .untrusted_source_trace
+                    .iter()
+                    .any(|hop| line_in_diff(&hop.path, hop.line))
+            })
     });
 
     for unlisted in &mut results.unlisted_dependencies {
@@ -486,6 +492,7 @@ mod tests {
     use super::*;
     use fallow_core::extract::MemberKind;
     use fallow_core::results::*;
+    use fallow_types::results::SecurityReachability;
     use std::path::PathBuf;
 
     /// Test shim: single-workspace variant on top of `filter_to_workspaces`.
@@ -1860,6 +1867,57 @@ mod tests {
             actions: Vec::new(),
             dead_code: None,
             reachability: None,
+        });
+
+        filter_results_by_diff(&mut results, &diff, root);
+
+        assert_eq!(results.security_findings.len(), 1);
+    }
+
+    #[test]
+    fn filter_by_diff_keeps_security_finding_when_untrusted_source_trace_changed() {
+        let diff = build_diff(
+            "diff --git a/src/route.ts b/src/route.ts\n\
+             --- a/src/route.ts\n\
+             +++ b/src/route.ts\n\
+             @@ -3,0 +3,1 @@\n\
+             +import { run } from './runner';\n",
+        );
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(SecurityFinding {
+            kind: SecurityFindingKind::TaintedSink,
+            category: Some("command-injection".into()),
+            cwe: Some(78),
+            path: PathBuf::from("/project/src/runner.ts"),
+            line: 10,
+            col: 0,
+            evidence: "candidate".into(),
+            source_backed: false,
+            trace: vec![],
+            actions: Vec::new(),
+            dead_code: None,
+            reachability: Some(SecurityReachability {
+                reachable_from_entry: false,
+                reachable_from_untrusted_source: true,
+                untrusted_source_hop_count: Some(1),
+                untrusted_source_trace: vec![
+                    TraceHop {
+                        path: PathBuf::from("/project/src/route.ts"),
+                        line: 3,
+                        col: 0,
+                        role: TraceHopRole::UntrustedSource,
+                    },
+                    TraceHop {
+                        path: PathBuf::from("/project/src/runner.ts"),
+                        line: 10,
+                        col: 0,
+                        role: TraceHopRole::Sink,
+                    },
+                ],
+                blast_radius: 0,
+                crosses_boundary: false,
+            }),
         });
 
         filter_results_by_diff(&mut results, &diff, root);

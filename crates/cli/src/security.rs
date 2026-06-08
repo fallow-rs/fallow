@@ -6,7 +6,8 @@
 //! verification, NOT verified vulnerabilities.
 //! This command is the ONLY surface for security findings: they never appear
 //! under bare `fallow` or the `audit` gate. There is no `confidence` or
-//! `signal_strength` field; the structural trace is the only honest signal.
+//! `signal_strength` field; structural traces and reachability context are the
+//! only honest signals.
 
 use crate::report::sink::outln;
 use std::path::{Path, PathBuf};
@@ -557,8 +558,8 @@ fn sarif_rule_def(rule_id: &str, finding: &SecurityFinding) -> serde_json::Value
 /// framing survives into the GitHub Security tab. Each finding's ruleId is
 /// per-category (`security/<category>` for tainted-sink, `security/client-server-leak`
 /// for the graph rule); the `rules` array carries one definition per distinct
-/// ruleId present, with the CWE tag for tainted-sink categories. Trace hops
-/// become `relatedLocations` of the result.
+/// ruleId present, with the CWE tag for tainted-sink categories. Detector trace
+/// hops and source-reachability hops become `relatedLocations` of the result.
 #[must_use]
 fn render_sarif(output: &SecurityOutput) -> String {
     let results: Vec<serde_json::Value> = output
