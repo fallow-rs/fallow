@@ -602,6 +602,17 @@ export type ImpactTrendDirection = ("improving" | "declining" | "stable")
  */
 export type SecuritySchemaVersion = "1"
 /**
+ * Gate mode for `fallow security --gate <mode>` (issue #886). Tier 2 reserves
+ * the value `newly-reachable`.
+ */
+export type SecurityGateMode = "new"
+/**
+ * Gate verdict on the wire. `fail` is the CI-state token; human output renders
+ * it as "REVIEW REQUIRED" because these stay unverified candidates, never
+ * confirmed vulnerabilities.
+ */
+export type SecurityGateVerdict = ("pass" | "fail")
+/**
  * The kind of security candidate. Findings are CANDIDATES for downstream agent
  * verification, NOT verified vulnerabilities.
  */
@@ -4843,6 +4854,12 @@ timestamp: string
 export interface SecurityOutput {
 schema_version: SecuritySchemaVersion
 /**
+ * Gate verdict, present only when `--gate <mode>` was set (issue #886).
+ * Emitted on pass too (`verdict: "pass"`, `new_count: 0`) so consumers
+ * distinguish "gate ran and passed" from "gate did not run" (absent).
+ */
+gate?: (SecurityGate | null)
+/**
  * Security candidates. Paths are project-root-relative, forward-slash.
  */
 security_findings: SecurityFinding[]
@@ -4860,6 +4877,18 @@ unresolved_edge_files: number
  * here is NOT a clean bill.
  */
 unresolved_callee_sites: number
+}
+/**
+ * The `gate` block on `SecurityOutput`, present only when `--gate <mode>` ran.
+ * Invariant: `verdict == Fail  IFF  exit code 8  IFF  new_count > 0`.
+ */
+export interface SecurityGate {
+mode: SecurityGateMode
+verdict: SecurityGateVerdict
+/**
+ * Number of candidates introduced in the changed lines.
+ */
+new_count: number
 }
 /**
  * A local security CANDIDATE for downstream agent verification, NOT a verified
@@ -4928,10 +4957,11 @@ actions: IssueAction[]
  */
 dead_code?: (SecurityDeadCodeContext | null)
 /**
- * Graph-derived reachability ranking signal (issue #860). `None` until the
- * post-detection ranking pass fills it; additive on the wire (skipped when
- * absent). Drives the order findings are emitted in: candidates reachable
- * from a runtime entry point with a wider blast radius sort first.
+ * Graph-derived reachability ranking signal (issues #860 and #885). `None`
+ * until the post-detection ranking pass fills it; additive on the wire
+ * (skipped when absent). Drives the order findings are emitted in:
+ * runtime-reachable candidates sort first, followed by source-backed and
+ * source-reachable candidates, then wider blast radius.
  */
 reachability?: (SecurityReachability | null)
 }
@@ -4978,9 +5008,10 @@ guidance: string
 }
 /**
  * Graph-derived reachability ranking signal for a security candidate. Computed
- * from the EXISTING module graph (runtime reachability + reverse-dep fan-in)
- * after detection, never proven exploitable. Used to surface candidates that
- * sit on a request/runtime-reachable surface above isolated helpers or scripts.
+ * from the existing module graph after detection, never proven exploitable.
+ * Used to surface candidates that sit on a request/runtime-reachable surface,
+ * receive same-module source evidence, or are import-reachable from an
+ * untrusted-source module above isolated helpers or scripts.
  *
  * This is a relative-ordering signal, NOT a `confidence` or `signal_strength`
  * score: fallow does not prove the path is exploitable.

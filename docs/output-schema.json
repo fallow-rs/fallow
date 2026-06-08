@@ -9834,6 +9834,17 @@
           "description": "Schema version of this envelope.",
           "$ref": "#/definitions/SecuritySchemaVersion"
         },
+        "gate": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityGate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate verdict, present only when `--gate <mode>` was set (issue #886).\nEmitted on pass too (`verdict: \"pass\"`, `new_count: 0`) so consumers\ndistinguish \"gate ran and passed\" from \"gate did not run\" (absent)."
+        },
         "security_findings": {
           "type": "array",
           "items": {
@@ -9943,7 +9954,7 @@
               "type": "null"
             }
           ],
-          "description": "Graph-derived reachability ranking signal (issue #860). `None` until the\npost-detection ranking pass fills it; additive on the wire (skipped when\nabsent). Drives the order findings are emitted in: candidates reachable\nfrom a runtime entry point with a wider blast radius sort first."
+          "description": "Graph-derived reachability ranking signal (issues #860 and #885). `None`\nuntil the post-detection ranking pass fills it; additive on the wire\n(skipped when absent). Drives the order findings are emitted in:\nruntime-reachable candidates sort first, followed by source-backed and\nsource-reachable candidates, then wider blast radius."
         }
       },
       "required": [
@@ -10069,7 +10080,7 @@
         "blast_radius",
         "crosses_boundary"
       ],
-      "description": "Graph-derived reachability ranking signal for a security candidate. Computed\nfrom the EXISTING module graph (runtime reachability + reverse-dep fan-in)\nafter detection, never proven exploitable. Used to surface candidates that\nsit on a request/runtime-reachable surface above isolated helpers or scripts.\n\nThis is a relative-ordering signal, NOT a `confidence` or `signal_strength`\nscore: fallow does not prove the path is exploitable."
+      "description": "Graph-derived reachability ranking signal for a security candidate. Computed\nfrom the existing module graph after detection, never proven exploitable.\nUsed to surface candidates that sit on a request/runtime-reachable surface,\nreceive same-module source evidence, or are import-reachable from an\nuntrusted-source module above isolated helpers or scripts.\n\nThis is a relative-ordering signal, NOT a `confidence` or `signal_strength`\nscore: fallow does not prove the path is exploitable."
     },
     "ComplexityContribution": {
       "type": "object",
@@ -10346,6 +10357,54 @@
         }
       ],
       "description": "Dead-code issue kind linked to a security candidate."
+    },
+    "SecurityGate": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "description": "Which delta the gate checked.",
+          "$ref": "#/definitions/SecurityGateMode"
+        },
+        "verdict": {
+          "description": "`pass` or `fail`.",
+          "$ref": "#/definitions/SecurityGateVerdict"
+        },
+        "new_count": {
+          "type": "integer",
+          "description": "Number of candidates introduced in the changed lines."
+        }
+      },
+      "required": [
+        "mode",
+        "verdict",
+        "new_count"
+      ],
+      "description": "The `gate` block on `SecurityOutput`, present only when `--gate <mode>` ran.\nInvariant: `verdict == Fail  IFF  exit code 8  IFF  new_count > 0`."
+    },
+    "SecurityGateMode": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "new",
+          "description": "Fail when the change introduces a NEW security-sink candidate on a changed\nline (not merely a sink in a changed file). There is deliberately no `all`\nmode: gating on the whole candidate backlog is the anti-feature this gate\nexists to avoid."
+        }
+      ],
+      "description": "Gate mode for `fallow security --gate <mode>` (issue #886). Tier 2 reserves\nthe value `newly-reachable`."
+    },
+    "SecurityGateVerdict": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "pass",
+          "description": "No new candidate in the changed lines."
+        },
+        {
+          "type": "string",
+          "const": "fail",
+          "description": "At least one new candidate in the changed lines; review required."
+        }
+      ],
+      "description": "Gate verdict on the wire. `fail` is the CI-state token; human output renders\nit as \"REVIEW REQUIRED\" because these stay unverified candidates, never\nconfirmed vulnerabilities."
     }
   }
 }

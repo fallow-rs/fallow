@@ -268,6 +268,44 @@ pub fn try_get_changed_files_with_toplevel(
     Ok(files)
 }
 
+/// Get the zero-context unified diff of the merge-base range `git_ref...HEAD`,
+/// with paths relative to `root`, for the line-level security gate (issue #886).
+///
+/// Unlike [`get_changed_files`] (which falls back to full scope on failure), this
+/// returns `Err` when the git invocation itself fails (missing/unfetched ref,
+/// shallow clone, not a repo). The security gate hard-errors on `Err` rather than
+/// emitting a green gate: a diff it could not compute must NEVER read as "no new
+/// sinks". `--relative` emits `root`-relative paths so they match the keys
+/// `DiffIndex` is queried with (`relative_to_diff_path(finding, root)`); it also
+/// scopes the diff to files under `root`, which is the correct gate scope when
+/// fallow is invoked on a monorepo subpackage. An empty diff (no changes /
+/// docs-only) is `Ok("")`, a clean pass, not an error.
+pub fn try_get_changed_diff(root: &Path, git_ref: &str) -> Result<String, ChangedFilesError> {
+    validate_git_ref(git_ref).map_err(ChangedFilesError::InvalidRef)?;
+    let output = spawn_output(&mut git_command(
+        root,
+        &[
+            "diff",
+            "--relative",
+            "--unified=0",
+            "--end-of-options",
+            &format!("{git_ref}...HEAD"),
+        ],
+    ))
+    .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(if stderr.contains("not a git repository") {
+            ChangedFilesError::NotARepository
+        } else {
+            ChangedFilesError::GitFailed(stderr.trim().to_owned())
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 /// Get files changed since a git ref. Returns `None` on git failure after
 /// printing a warning to stderr. Used by `--changed-since` and `--file`, where
 /// a failure falls back to full-scope analysis.

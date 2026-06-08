@@ -1003,6 +1003,13 @@ enum Command {
         /// finding anchors or trace hops. Accepts multiple values.
         #[arg(long, value_name = "PATH")]
         file: Vec<std::path::PathBuf>,
+        /// Opt-in regression gate: fail (exit 8) only when the change introduces a
+        /// NEW security-sink candidate in the changed lines, not on the whole
+        /// candidate backlog. Requires a diff source: `--changed-since <ref>`,
+        /// `--diff-file <path>`, or `--diff-stdin`. There is deliberately no `all`
+        /// mode (gating on the full backlog is the anti-feature this gate avoids).
+        #[arg(long, value_name = "MODE")]
+        gate: Option<security::SecurityGateMode>,
     },
 
     /// Dump the CLI interface as machine-readable JSON for agent introspection
@@ -2946,7 +2953,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             },
         ),
         Command::Impact { subcommand } => dispatch_impact(root, quiet, output, subcommand),
-        Command::Security { file } => {
+        Command::Security { file, gate } => {
             let (output, quiet, fail_on_issues) = dispatch.ci_defaults();
             security::run(&security::SecurityOptions {
                 root,
@@ -2963,6 +2970,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 workspace: cli.workspace.as_deref(),
                 changed_workspaces: cli.changed_workspaces.as_deref(),
                 file: file.as_slice(),
+                gate,
             })
         }
         Command::Schema => unreachable!("handled above"),

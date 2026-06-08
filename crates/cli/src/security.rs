@@ -32,6 +32,45 @@ pub enum SecuritySchemaVersion {
     V1,
 }
 
+/// Gate mode for `fallow security --gate <mode>` (issue #886). Tier 2 reserves
+/// the value `newly-reachable`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, clap::ValueEnum)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SecurityGateMode {
+    /// Fail when the change introduces a NEW security-sink candidate on a changed
+    /// line (not merely a sink in a changed file). There is deliberately no `all`
+    /// mode: gating on the whole candidate backlog is the anti-feature this gate
+    /// exists to avoid.
+    New,
+}
+
+/// Gate verdict on the wire. `fail` is the CI-state token; human output renders
+/// it as "REVIEW REQUIRED" because these stay unverified candidates, never
+/// confirmed vulnerabilities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SecurityGateVerdict {
+    /// No new candidate in the changed lines.
+    Pass,
+    /// At least one new candidate in the changed lines; review required.
+    Fail,
+}
+
+/// The `gate` block on `SecurityOutput`, present only when `--gate <mode>` ran.
+/// Invariant: `verdict == Fail  IFF  exit code 8  IFF  new_count > 0`.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityGate {
+    /// Which delta the gate checked.
+    pub mode: SecurityGateMode,
+    /// `pass` or `fail`.
+    pub verdict: SecurityGateVerdict,
+    /// Number of candidates introduced in the changed lines.
+    pub new_count: usize,
+}
+
 /// The `fallow security --format json` envelope. `security_findings` is the
 /// unique required field used for untagged narrowing in `FallowOutput`.
 #[derive(Debug, Clone, Serialize)]
@@ -39,6 +78,11 @@ pub enum SecuritySchemaVersion {
 pub struct SecurityOutput {
     /// Schema version of this envelope.
     pub schema_version: SecuritySchemaVersion,
+    /// Gate verdict, present only when `--gate <mode>` was set (issue #886).
+    /// Emitted on pass too (`verdict: "pass"`, `new_count: 0`) so consumers
+    /// distinguish "gate ran and passed" from "gate did not run" (absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate: Option<SecurityGate>,
     /// Security candidates. Paths are project-root-relative, forward-slash.
     pub security_findings: Vec<SecurityFinding>,
     /// In-band blind spot: number of `"use client"` files whose transitive
@@ -83,6 +127,10 @@ pub struct SecurityOptions<'a> {
     pub changed_workspaces: Option<&'a str>,
     /// `--file <PATH>`: scope findings to selected files or trace hops.
     pub file: &'a [PathBuf],
+    /// `--gate <mode>`: opt-in regression gate (issue #886). Requires a diff
+    /// source (`--changed-since`, `--diff-file`, or `--diff-stdin`); reports only
+    /// candidates introduced in the changed lines and exits 8 if any exist.
+    pub gate: Option<SecurityGateMode>,
 }
 
 /// Run `fallow security`. Always exits 0 unless the user explicitly raised the
@@ -164,6 +212,45 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     }
     filter_to_files(&mut results, opts.root, opts.file, opts.quiet);
 
+    // Security gate (issue #886): narrow to the STRICT "new in changed lines"
+    // predicate and drive a dedicated exit code. The gate requires a diff
+    // source; a diff it cannot compute is a LOUD error (exit 2), never a green
+    // gate (a silent miss defeats a security gate).
+    let mut owned_gate_diff: Option<crate::report::ci::diff_filter::DiffIndex> = None;
+    let gate_mode = if let Some(mode) = opts.gate {
+        let gate_diff: &crate::report::ci::diff_filter::DiffIndex = if let Some(shared) =
+            crate::report::ci::diff_filter::shared_diff_index()
+        {
+            shared
+        } else if let Some(git_ref) = opts.changed_since {
+            match fallow_core::changed_files::try_get_changed_diff(opts.root, git_ref) {
+                Ok(text) => owned_gate_diff
+                    .insert(crate::report::ci::diff_filter::DiffIndex::from_unified_diff(&text)),
+                Err(err) => {
+                    return emit_error(
+                        &format!(
+                            "fallow security --gate could not compute the diff for '{git_ref}': {}",
+                            err.describe()
+                        ),
+                        2,
+                        opts.output,
+                    );
+                }
+            }
+        } else {
+            return emit_error(
+                "fallow security --gate requires a diff source: --changed-since <ref>, \
+                     --diff-file <path>, or --diff-stdin.",
+                2,
+                opts.output,
+            );
+        };
+        crate::check::filtering::retain_gate_new(&mut results, gate_diff, opts.root);
+        Some(mode)
+    } else {
+        None
+    };
+
     let unresolved_edge_files = results.security_unresolved_edge_files;
     let unresolved_callee_sites = results.security_unresolved_callee_sites;
     let findings: Vec<SecurityFinding> = std::mem::take(&mut results.security_findings)
@@ -171,13 +258,31 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         .map(|f| relativize_finding(f, &config.root))
         .collect();
 
-    let fail = (opts.fail_on_issues
+    // In gate mode the displayed set IS the strict "new" set, so its length is
+    // the new-candidate count. The gate block is emitted unconditionally when a
+    // gate ran (present on pass with verdict Pass / new_count 0) so consumers
+    // distinguish "gate ran and passed" from "gate did not run".
+    let gate = gate_mode.map(|mode| {
+        let new_count = findings.len();
+        SecurityGate {
+            mode,
+            verdict: if new_count > 0 {
+                SecurityGateVerdict::Fail
+            } else {
+                SecurityGateVerdict::Pass
+            },
+            new_count,
+        }
+    });
+
+    let advisory_fail = (opts.fail_on_issues
         || effective_severity == Severity::Error
         || effective_sink_severity == Severity::Error)
         && !findings.is_empty();
 
     let output = SecurityOutput {
         schema_version: SecuritySchemaVersion::V1,
+        gate,
         security_findings: findings,
         unresolved_edge_files,
         unresolved_callee_sites,
@@ -197,7 +302,18 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     };
     outln!("{rendered}");
 
-    if fail {
+    // Exit-code contract (#886): in gate mode the gate is authoritative (8 when a
+    // new candidate exists, else 0) and SUPERSEDES the advisory --fail-on-issues
+    // path, because composing the two would re-gate on the pre-existing backlog
+    // this gate exists to avoid. Code 8 is PURE: it means ONLY "new candidate
+    // found", never "the gate could not run" (those are the exit-2 paths above).
+    if let Some(gate) = &output.gate {
+        if gate.verdict == SecurityGateVerdict::Fail {
+            ExitCode::from(8)
+        } else {
+            ExitCode::SUCCESS
+        }
+    } else if advisory_fail {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
@@ -288,14 +404,38 @@ fn write_sarif_file(output: &SecurityOutput, path: &Path) -> Result<(), String> 
         .map_err(|err| format!("Failed to write SARIF file {}: {err}", path.display()))
 }
 
+/// One-line gate verdict header. Leads with the ACTION ("REVIEW REQUIRED") and
+/// immediately qualifies with the candidate framing, so a human never reads the
+/// gate as "fallow confirmed a vulnerability". The wire `verdict` token stays
+/// `fail`; only this human prose says "REVIEW REQUIRED".
+fn gate_human_header(gate: &SecurityGate) -> String {
+    use crate::report::plural;
+    match gate.verdict {
+        SecurityGateVerdict::Fail => format!(
+            "Gate: REVIEW REQUIRED, {} new security candidate{} in changed lines (unverified; not confirmed vulnerabilities).",
+            gate.new_count,
+            plural(gate.new_count),
+        ),
+        SecurityGateVerdict::Pass => {
+            "Gate: PASS, no new security candidates in changed lines.".to_owned()
+        }
+    }
+}
+
 #[must_use]
 fn render_human_summary(output: &SecurityOutput) -> String {
     use crate::report::plural;
     use std::fmt::Write as _;
 
+    let mut out = String::new();
+    if let Some(gate) = &output.gate {
+        out.push_str(&gate_human_header(gate));
+        out.push('\n');
+    }
     let count = output.security_findings.len();
-    let mut out = format!(
-        "Security candidates: {count} candidate{} found. These are NOT verified vulnerabilities; verify each before acting.\n",
+    let _ = writeln!(
+        out,
+        "Security candidates: {count} candidate{} found. These are NOT verified vulnerabilities; verify each before acting.",
         plural(count),
     );
     if output.unresolved_edge_files > 0 {
@@ -325,6 +465,10 @@ pub fn render_human(output: &SecurityOutput) -> String {
     use colored::Colorize;
 
     let mut out = String::new();
+    if let Some(gate) = &output.gate {
+        out.push_str(&gate_human_header(gate));
+        out.push_str("\n\n");
+    }
     out.push_str("Security candidates (unverified; for agent or human verification)\n\n");
 
     if output.security_findings.is_empty() {
@@ -618,18 +762,28 @@ fn render_sarif(output: &SecurityOutput) -> String {
         rules.push(sarif_rule_def(&rule_id, finding));
     }
 
+    let mut run = serde_json::json!({
+        "tool": { "driver": {
+            "name": "fallow",
+            "version": env!("CARGO_PKG_VERSION"),
+            "informationUri": "https://github.com/fallow-rs/fallow",
+            "rules": rules,
+        }},
+        "results": results,
+    });
+    // Gate verdict rides as a RUN-level property, never on result severity:
+    // every result stays `level: note` so the candidate framing survives into
+    // GHAS (an `error`-level result reads as a confirmed problem).
+    if let Some(gate) = &output.gate
+        && let Ok(gate_value) = serde_json::to_value(gate)
+    {
+        run["properties"] = serde_json::json!({ "fallowGate": gate_value });
+    }
+
     let sarif = serde_json::json!({
         "version": "2.1.0",
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-        "runs": [{
-            "tool": { "driver": {
-                "name": "fallow",
-                "version": env!("CARGO_PKG_VERSION"),
-                "informationUri": "https://github.com/fallow-rs/fallow",
-                "rules": rules,
-            }},
-            "results": results,
-        }],
+        "runs": [run],
     });
     serde_json::to_string_pretty(&sarif)
         .unwrap_or_else(|_| "{\"error\":\"failed to serialize sarif\"}".to_owned())
@@ -703,10 +857,73 @@ mod tests {
     fn output_with(findings: Vec<SecurityFinding>, unresolved_edge_files: usize) -> SecurityOutput {
         SecurityOutput {
             schema_version: SecuritySchemaVersion::V1,
+            gate: None,
             security_findings: findings,
             unresolved_edge_files,
             unresolved_callee_sites: 0,
         }
+    }
+
+    fn output_with_gate(verdict: SecurityGateVerdict, new_count: usize) -> SecurityOutput {
+        SecurityOutput {
+            schema_version: SecuritySchemaVersion::V1,
+            gate: Some(SecurityGate {
+                mode: SecurityGateMode::New,
+                verdict,
+                new_count,
+            }),
+            security_findings: vec![],
+            unresolved_edge_files: 0,
+            unresolved_callee_sites: 0,
+        }
+    }
+
+    #[test]
+    fn gate_human_header_fail_says_review_required_not_fail() {
+        let gate = SecurityGate {
+            mode: SecurityGateMode::New,
+            verdict: SecurityGateVerdict::Fail,
+            new_count: 2,
+        };
+        let header = gate_human_header(&gate);
+        assert!(header.contains("REVIEW REQUIRED"));
+        assert!(header.contains("2 new security candidate"));
+        assert!(header.contains("not confirmed vulnerabilities"));
+        assert!(!header.to_uppercase().contains("GATE: FAIL"));
+    }
+
+    #[test]
+    fn gate_human_header_pass() {
+        let gate = SecurityGate {
+            mode: SecurityGateMode::New,
+            verdict: SecurityGateVerdict::Pass,
+            new_count: 0,
+        };
+        assert!(gate_human_header(&gate).contains("Gate: PASS"));
+    }
+
+    #[test]
+    fn gate_json_block_is_snake_case_and_present_on_pass() {
+        let json = render_json(&output_with_gate(SecurityGateVerdict::Pass, 0));
+        assert!(json.contains("\"gate\""));
+        assert!(json.contains("\"mode\": \"new\""));
+        assert!(json.contains("\"verdict\": \"pass\""));
+        assert!(json.contains("\"new_count\": 0"));
+    }
+
+    #[test]
+    fn gate_absent_from_json_when_no_gate_ran() {
+        let json = render_json(&output_with(vec![], 0));
+        assert!(!json.contains("\"gate\""));
+    }
+
+    #[test]
+    fn gate_sarif_is_a_run_property_not_result_severity() {
+        let sarif = render_sarif(&output_with_gate(SecurityGateVerdict::Fail, 1));
+        assert!(sarif.contains("fallowGate"));
+        // The gate verdict never bumps a result above `note`.
+        assert!(!sarif.contains("\"level\": \"error\""));
+        assert!(!sarif.contains("\"level\": \"warning\""));
     }
 
     fn add_untrusted_source_reachability(finding: &mut SecurityFinding, root: &Path) {
@@ -1070,6 +1287,7 @@ mod tests {
             workspace: None,
             changed_workspaces: None,
             file: &[],
+            gate: None,
         }
     }
 
