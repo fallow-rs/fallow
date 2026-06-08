@@ -332,7 +332,7 @@ export class DiagnosticFilter {
 
   /** Pull-mode middleware: intercepts `textDocument/diagnostic`. The LSP
    *  advertises `diagnostic_provider` in `build_server_capabilities()`, so
-   *  strict 3.17 clients (and a future VSCode pull flip) hit this path. */
+   *  VS Code and strict 3.17 clients can hit this path. */
   public async provideDiagnostics(
     document: vscode.TextDocument | vscode.Uri,
     previousResultId: string | undefined,
