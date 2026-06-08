@@ -26,6 +26,7 @@ import {
   getDuplicationSkipLocalOverride,
   getDuplicationThresholdOverride,
   getHealthInlineComplexity,
+  getMutedDiagnosticCategories,
 } from "./config.js";
 import { showBinarySkewToastOnce } from "./binary-skew.js";
 import { findBinaryInPath, findLocalBinary } from "./binary-utils.js";
@@ -247,6 +248,7 @@ export const startClient = async (
     }
     outputChannel.appendLine("Fallow language server started.");
     await loadDiagnosticCategories(nextClient, outputChannel);
+    diagnosticFilter?.updateBaselineMutedCategories(getMutedDiagnosticCategories());
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     outputChannel.appendLine(`Failed to start language server: ${message}`);

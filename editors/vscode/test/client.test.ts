@@ -12,6 +12,8 @@ let mockDuplicationSkipLocal = false;
 let mockDuplicationCrossLanguage = false;
 let mockDuplicationIgnoreImports = false;
 let mockHealthInlineComplexity = false;
+let mockMutedDiagnosticCategories = new Set<string>();
+let mockIssueTypesResponse: unknown = [];
 
 const mockBinaryResolution = vi.hoisted(() => ({
   localBinary: "/mock/fallow-lsp" as string | null,
@@ -48,7 +50,7 @@ vi.mock("vscode-languageclient/node.js", () => ({
     readonly start = vi.fn(async () => undefined);
     readonly stop = vi.fn(async () => undefined);
     readonly setTrace = vi.fn(async () => undefined);
-    readonly sendRequest = vi.fn(async () => []);
+    readonly sendRequest = vi.fn(async () => mockIssueTypesResponse);
     readonly onDidChangeState = vi.fn((listener: (event: { newState: number }) => void) => {
       this.stateListeners.push(listener);
       return {
@@ -106,6 +108,7 @@ vi.mock("../src/config.js", () => ({
   getDuplicationCrossLanguageOverride: () => mockDuplicationCrossLanguage,
   getDuplicationIgnoreImportsOverride: () => mockDuplicationIgnoreImports,
   getHealthInlineComplexity: () => mockHealthInlineComplexity,
+  getMutedDiagnosticCategories: () => mockMutedDiagnosticCategories,
 }));
 
 import {
@@ -139,6 +142,8 @@ beforeEach(() => {
   mockDuplicationCrossLanguage = true;
   mockDuplicationIgnoreImports = true;
   mockHealthInlineComplexity = false;
+  mockMutedDiagnosticCategories = new Set();
+  mockIssueTypesResponse = [];
   mockBinaryResolution.localBinary = "/mock/fallow-lsp";
   mockBinaryResolution.pathBinary = null;
   mockBinaryResolution.installedBinary = null;
@@ -195,6 +200,23 @@ describe("loadDiagnosticCategories", () => {
     expect(client.sendRequest).toHaveBeenCalledWith("fallow/issueTypes");
     expect(getDiagnosticCategories()).toEqual([{ code: "future-rule", label: "Future Rule" }]);
     expect(out.lines.at(-1)).toBe("Loaded 1 diagnostic categories from fallow-lsp.");
+  });
+
+  it("refreshes diagnostic mute baseline after loading live categories", async () => {
+    mockIssueTypesResponse = [{ code: "future-rule", label: "Future Rule" }];
+    mockMutedDiagnosticCategories = new Set(["future-rule"]);
+    const filter = {
+      attachClient: vi.fn(),
+      updateBaselineMutedCategories: vi.fn(),
+    };
+
+    const client = await startClient({} as never, outputChannel() as never, filter as never);
+
+    expect(client).not.toBeNull();
+    expect(filter.updateBaselineMutedCategories).toHaveBeenCalledWith(
+      new Set(["future-rule"]),
+    );
+    expect(filter.attachClient).toHaveBeenCalledWith(client);
   });
 
   it("falls back to bundled categories when the request fails", async () => {
