@@ -21,15 +21,19 @@ use std::path::Path;
 use ls_types::*;
 use rustc_hash::FxHashSet;
 
-use fallow_core::results::AnalysisResults;
+use fallow_core::results::{AnalysisResults, SecurityFindingKind};
 
 use crate::diagnostics::security::{security_diagnostic, security_label, security_token};
 
 /// Build suppress code actions for security candidates under the cursor.
 ///
-/// For each candidate on a line within `cursor_range`, offers a line-level
-/// `// fallow-ignore-next-line <token>` dismissal (the default). A file-level
-/// `// fallow-ignore-file <token>` dismissal is offered once per distinct kind.
+/// A file-level `// fallow-ignore-file <token>` dismissal is offered once per
+/// distinct kind (both kinds honor file-level suppression). A line-level
+/// `// fallow-ignore-next-line <token>` dismissal is offered ONLY for
+/// `TaintedSink`: the `ClientServerLeak` detector honors only file-level
+/// suppression (`analyze/security/mod.rs`), so a line-level marker would be a
+/// dead no-op for it (the squiggle would reappear on the next analysis pass).
+/// `TaintedSink` honors both (`analyze/security/tainted_sink.rs`).
 pub fn build_suppress_security_actions(
     results: &AnalysisResults,
     file_path: &Path,
@@ -61,23 +65,27 @@ pub fn build_suppress_security_actions(
         let label = security_label(finding);
         let linked = security_diagnostic(finding);
 
-        // Line-level: match the anchor's indentation so the inserted comment
-        // sits flush with the code it suppresses.
-        let indent: String = line_content
-            .chars()
-            .take_while(|c| c.is_whitespace())
-            .collect();
-        actions.push(suppress_action(
-            format!("Dismiss this security candidate on this line ({label})"),
-            uri,
-            insert_before(
-                finding_line,
-                format!("{indent}// fallow-ignore-next-line {token}\n"),
-            ),
-            linked.clone(),
-        ));
+        // Line-level: only for TaintedSink (the only kind whose detector honors
+        // line-level suppression). Match the anchor's indentation so the
+        // inserted comment sits flush with the code it suppresses.
+        if matches!(finding.kind, SecurityFindingKind::TaintedSink) {
+            let indent: String = line_content
+                .chars()
+                .take_while(|c| c.is_whitespace())
+                .collect();
+            actions.push(suppress_action(
+                format!("Dismiss this security candidate on this line ({label})"),
+                uri,
+                insert_before(
+                    finding_line,
+                    format!("{indent}// fallow-ignore-next-line {token}\n"),
+                ),
+                linked.clone(),
+            ));
+        }
 
         // File-level: one per distinct kind, inserted at the top of the file.
+        // Both kinds honor file-level suppression.
         if file_level_tokens.insert(token) {
             actions.push(suppress_action(
                 format!("Dismiss this security candidate type in this file ({label})"),
@@ -151,6 +159,23 @@ mod tests {
             line,
             col: 2,
             evidence: "sink".to_string(),
+            source_backed: false,
+            trace: vec![],
+            actions: vec![],
+            dead_code: None,
+            reachability: None,
+        }
+    }
+
+    fn leak(path: PathBuf, line: u32) -> SecurityFinding {
+        SecurityFinding {
+            kind: SecurityFindingKind::ClientServerLeak,
+            category: None,
+            cwe: None,
+            path,
+            line,
+            col: 0,
+            evidence: "leak".to_string(),
             source_backed: false,
             trace: vec![],
             actions: vec![],
@@ -244,6 +269,38 @@ mod tests {
             .count();
         assert_eq!(file_level, 1);
         assert_eq!(actions.len(), 3);
+    }
+
+    #[test]
+    fn client_server_leak_offers_only_file_level() {
+        // ClientServerLeak honors only file-level suppression, so a line-level
+        // dismiss would be a dead no-op. Only the file-level action is offered.
+        let root = test_root();
+        let path = root.join("src/leak.ts");
+        let uri = Uri::from_file_path(&path).unwrap();
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(leak(path.clone(), 1));
+        let file_lines = vec!["export { SECRET } from './server';", "b"];
+        let cursor = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 0,
+                character: 0,
+            },
+        };
+
+        let actions = build_suppress_security_actions(&results, &path, &uri, &cursor, &file_lines);
+        let titles = action_titles(&actions);
+        assert_eq!(titles.len(), 1);
+        assert!(titles[0].contains("type in this file"));
+        assert!(!titles.iter().any(|t| t.contains("on this line")));
+        assert_eq!(
+            first_edit_text(&actions[0]),
+            "// fallow-ignore-file security-client-server-leak\n"
+        );
     }
 
     #[test]
