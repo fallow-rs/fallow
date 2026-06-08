@@ -105,7 +105,7 @@ Field purposes:
 | `output_format` / `quiet` | Protect the output contracts that users and agents rely on most. |
 | `duration_bucket_ms` | Find slow workflow classes without collecting exact timings. |
 | `outcome` / `exit_code_bucket` | Measure clean runs, findings, and failures without uploading raw error text. |
-| `findings_present` | Whether the analysis surfaced any findings, decoupled from the exit-code gate (so informational analyses like default-config `dupes`, which never exit non-zero, are still measurable). On the combined and audit workflows it is an OR across the sub-analyses; per-analysis find-rate is answerable only on the standalone `dead_code`, `dupes`, and `health` workflows. |
+| `findings_present` | Whether the analysis surfaced any findings, decoupled from the exit-code gate (so informational analyses like default-config `dupes`, which never exit non-zero, are still measurable). On the combined and audit workflows it is an OR across the sub-analyses; per-analysis find-rate is answerable on the standalone `dead_code`, `dupes`, `health`, and `security` workflows. |
 | `mcp_tool` | Attribute MCP usage to a specific tool, from a fixed allowlist of tool names. |
 | `parent_run` | Link explicit agent follow-up runs using a short allowlisted token, never a path or free-form string. |
 

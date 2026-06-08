@@ -294,6 +294,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         unresolved_edge_files,
         unresolved_callee_sites,
     };
+    crate::telemetry::note_findings_present(!output.security_findings.is_empty());
 
     if let Some(path) = opts.sarif_file
         && let Err(message) = write_sarif_file(&output, path)

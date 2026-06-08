@@ -7,9 +7,42 @@
 #[path = "common/mod.rs"]
 mod common;
 
+use std::fs;
+use std::path::Path;
 use std::process::Command;
 
 use common::{fallow_bin, parse_json};
+
+fn git(dir: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@test.com")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@test.com")
+        .output()
+        .expect("git command failed");
+    assert!(
+        output.status.success(),
+        "git {:?} failed\nstdout: {}\nstderr: {}",
+        args,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn commit_all(dir: &Path, message: &str) {
+    git(dir, &["add", "."]);
+    git(
+        dir,
+        &["-c", "commit.gpgsign=false", "commit", "-m", message],
+    );
+}
 
 fn telemetry_command(args: &[&str]) -> common::CommandOutput {
     let home = tempfile::tempdir().expect("temp home");
@@ -128,11 +161,11 @@ fn invalid_explicit_agent_source_is_ignored() {
 
 /// Run a fallow command in telemetry inspect mode against `root`, applying
 /// `extra_env`, and return the parsed telemetry event emitted to stderr.
-fn inspect_event(
-    root: &std::path::Path,
+fn inspect_event_output(
+    root: &Path,
     args: &[&str],
     extra_env: &[(&str, &str)],
-) -> serde_json::Value {
+) -> (serde_json::Value, common::CommandOutput) {
     let home = tempfile::tempdir().expect("temp home");
     let mut cmd = Command::new(fallow_bin());
     cmd.env_remove("CI")
@@ -155,33 +188,94 @@ fn inspect_event(
         cmd.env(key, value);
     }
     let raw = cmd.output().expect("failed to run fallow binary");
-    let stderr = String::from_utf8_lossy(&raw.stderr).to_string();
-    let event_start = stderr.find('{').unwrap_or_else(|| {
-        panic!("inspect stderr should contain telemetry JSON; stderr was: {stderr}")
+    let output = common::CommandOutput {
+        stdout: String::from_utf8_lossy(&raw.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&raw.stderr).to_string(),
+        code: raw.status.code().unwrap_or(-1),
+    };
+    let event_start = output.stderr.find('{').unwrap_or_else(|| {
+        panic!(
+            "inspect stderr should contain telemetry JSON; stderr was: {}",
+            output.stderr
+        )
     });
-    serde_json::from_str(&stderr[event_start..])
-        .expect("inspect stderr should contain valid telemetry JSON")
+    let event = serde_json::from_str(&output.stderr[event_start..])
+        .expect("inspect stderr should contain valid telemetry JSON");
+    (event, output)
+}
+
+fn inspect_event(root: &Path, args: &[&str], extra_env: &[(&str, &str)]) -> serde_json::Value {
+    inspect_event_output(root, args, extra_env).0
 }
 
 /// Minimal project with a function duplicated across two files, sized to clear
 /// the default duplication thresholds (min_tokens 50, min_lines 5,
 /// min_occurrences 2).
-fn write_duplicated_project(dir: &std::path::Path) {
+fn write_duplicated_project(dir: &Path) {
     let src = dir.join("src");
-    std::fs::create_dir_all(&src).expect("create src");
-    std::fs::write(
+    fs::create_dir_all(&src).expect("create src");
+    fs::write(
         dir.join("package.json"),
         "{\n  \"name\": \"dup-fixture\"\n}\n",
     )
     .expect("write package.json");
     let block = "  let total = 0;\n  let count = 0;\n  for (const item of items) {\n    total = total + item * 2;\n    count = count + 1;\n  }\n  const average = total / Math.max(count, 1);\n  const doubled = average * 2;\n  const adjusted = doubled + count - 1;\n  return adjusted + total + count;\n";
     for name in ["a", "b"] {
-        std::fs::write(
+        fs::write(
             src.join(format!("{name}.ts")),
             format!("export function compute_{name}(items: number[]): number {{\n{block}}}\n"),
         )
         .expect("write source file");
     }
+}
+
+fn write_clean_project(dir: &Path) {
+    let src = dir.join("src");
+    fs::create_dir_all(&src).expect("create src");
+    fs::write(dir.join("package.json"), "{\n  \"name\": \"clean\"\n}\n")
+        .expect("write package.json");
+    fs::write(src.join("index.ts"), "export const value = 41 + 1;\n").expect("write source");
+}
+
+fn write_audit_base_project(dir: &Path) {
+    let src = dir.join("src");
+    fs::create_dir_all(&src).expect("create src");
+    fs::write(
+        dir.join("package.json"),
+        "{\n  \"name\": \"audit-fixture\",\n  \"main\": \"src/index.ts\"\n}\n",
+    )
+    .expect("write package.json");
+    fs::write(
+        src.join("index.ts"),
+        "import { used } from './used';\nconsole.log(used());\n",
+    )
+    .expect("write index");
+    fs::write(
+        src.join("used.ts"),
+        "export const used = (): number => 42;\n",
+    )
+    .expect("write used");
+}
+
+fn init_audit_repo(dir: &Path) {
+    git(dir, &["init", "-b", "main"]);
+    write_audit_base_project(dir);
+    commit_all(dir, "base");
+}
+
+fn write_security_project(dir: &Path) {
+    let src = dir.join("src");
+    fs::create_dir_all(&src).expect("create src");
+    fs::write(
+        dir.join("package.json"),
+        "{\n  \"name\": \"security-fixture\",\n  \"dependencies\": {\"express\": \"4.18.0\"}\n}\n",
+    )
+    .expect("write package.json");
+    fs::write(
+        src.join("app.ts"),
+        "import express from 'express';\nconst app = express();\napp.post('/run', (req, res) => {\n  eval(req.body.code);\n  res.send('ok');\n});\n",
+    )
+    .expect("write security source");
 }
 
 #[test]
@@ -204,14 +298,7 @@ fn dupes_with_duplication_sets_findings_present_despite_success_outcome() {
 #[test]
 fn dupes_on_clean_project_sets_findings_present_false() {
     let dir = tempfile::tempdir().expect("temp project");
-    let src = dir.path().join("src");
-    std::fs::create_dir_all(&src).expect("create src");
-    std::fs::write(
-        dir.path().join("package.json"),
-        "{\n  \"name\": \"clean\"\n}\n",
-    )
-    .expect("write package.json");
-    std::fs::write(src.join("only.ts"), "export const value = 41 + 1;\n").expect("write source");
+    write_clean_project(dir.path());
     let event = inspect_event(dir.path(), &["dupes", "--format", "json", "--quiet"], &[]);
     assert_eq!(event["workflow"].as_str(), Some("dupes"));
     assert_eq!(
@@ -219,6 +306,111 @@ fn dupes_on_clean_project_sets_findings_present_false() {
         Some(false),
         "a genuinely clean dupes run must report findings_present=false"
     );
+}
+
+#[test]
+fn audit_with_findings_sets_findings_present_true() {
+    let dir = tempfile::tempdir().expect("temp project");
+    init_audit_repo(dir.path());
+    fs::write(
+        dir.path().join("src/orphan.ts"),
+        "export const orphaned = 'nobody';\n",
+    )
+    .expect("write orphan");
+    commit_all(dir.path(), "add orphan");
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["audit", "--base", "HEAD~1", "--format", "json", "--quiet"],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 1,
+        "audit with findings should exit 1: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("audit"));
+    assert_eq!(event["outcome"].as_str(), Some("issues_found"));
+    assert_eq!(event["findings_present"].as_bool(), Some(true));
+}
+
+#[test]
+fn audit_on_clean_changed_files_sets_findings_present_false() {
+    let dir = tempfile::tempdir().expect("temp project");
+    init_audit_repo(dir.path());
+    fs::write(dir.path().join("README.md"), "# Audit fixture\n").expect("write readme");
+    commit_all(dir.path(), "docs only");
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["audit", "--base", "HEAD~1", "--format", "json", "--quiet"],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "clean audit should exit 0: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("audit"));
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert_eq!(event["findings_present"].as_bool(), Some(false));
+}
+
+#[test]
+fn audit_with_no_changed_files_sets_findings_present_false() {
+    let dir = tempfile::tempdir().expect("temp project");
+    init_audit_repo(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["audit", "--base", "HEAD", "--format", "json", "--quiet"],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "empty audit should exit 0: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("audit"));
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert_eq!(event["findings_present"].as_bool(), Some(false));
+}
+
+#[test]
+fn security_with_findings_sets_findings_present_true() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_security_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["security", "--format", "json", "--quiet"],
+        &[],
+    );
+
+    assert_eq!(output.code, 0, "security should exit 0: {}", output.stderr);
+    assert_eq!(event["workflow"].as_str(), Some("security"));
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert_eq!(event["findings_present"].as_bool(), Some(true));
+}
+
+#[test]
+fn security_on_clean_project_sets_findings_present_false() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["security", "--format", "json", "--quiet"],
+        &[],
+    );
+
+    assert_eq!(output.code, 0, "security should exit 0: {}", output.stderr);
+    assert_eq!(event["workflow"].as_str(), Some("security"));
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert_eq!(event["findings_present"].as_bool(), Some(false));
 }
 
 #[test]
