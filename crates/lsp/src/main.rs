@@ -545,13 +545,12 @@ struct FallowLspServer {
     /// Set to `true` the first time the client issues a `textDocument/diagnostic`
     /// request. This is the only reliable signal that a client genuinely
     /// consumes pull diagnostics. Advertising `workspace.diagnostics.refreshSupport`
-    /// is NOT sufficient: the VS Code extension advertises it (vscode-languageclient
-    /// sets it unconditionally) yet disables pull client-side
-    /// (`diagnosticPullOptions.match = () => false`), so it never pulls. Keying
-    /// push-suppression on the advertised capability silently blanked open-file
-    /// diagnostics in VS Code. Push-suppression, the `did_open` push clear, and
-    /// the `workspace/diagnostic/refresh` nudge therefore all key on THIS flag so
-    /// push-only clients keep receiving open-file diagnostics.
+    /// is NOT sufficient: refresh-capable clients can still choose not to pull
+    /// for a given document. Keying push-suppression on the advertised capability
+    /// silently blanked open-file diagnostics for such clients. Push-suppression,
+    /// the `did_open` push clear, and the `workspace/diagnostic/refresh` nudge
+    /// therefore all key on THIS flag so push-only clients keep receiving
+    /// open-file diagnostics.
     client_pulls: Arc<AtomicBool>,
     /// Set by `shutdown()`. `run_analysis` checks this at the top and
     /// before publishing diagnostics so a closing client does not receive
@@ -699,8 +698,7 @@ impl LanguageServer for FallowLspServer {
         let uri = params.text_document.uri;
 
         // The first pull request proves this client genuinely consumes pull
-        // diagnostics (unlike the VS Code extension, which advertises refresh
-        // support but disables pull). On that transition, clear any push-model
+        // diagnostics. On that transition, clear any push-model
         // diagnostics emitted for open documents during startup (before the
         // first pull) so they do not double with the pull namespace in clients
         // like Neovim that surface both. The client re-pulls each open buffer,
@@ -3089,11 +3087,10 @@ export function choose(value: number): string {
 
         let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
 
-        // The VS Code extension advertises `workspace.diagnostics.refreshSupport`
-        // (vscode-languageclient sets it unconditionally) but disables pull via
-        // `diagnosticPullOptions.match = () => false`, so it never issues a
-        // `textDocument/diagnostic`. Suppressing open-file pushes on the advertised
-        // capability blanked diagnostics for such clients; they must keep push.
+        // A refresh-capable client can advertise `workspace.diagnostics.refreshSupport`
+        // without issuing `textDocument/diagnostic`. Suppressing open-file pushes
+        // on the advertised capability blanked diagnostics for such clients; they
+        // must keep push until they actually pull.
         let initialize = Request::build("initialize")
             .params(json!({
                 "capabilities": {
