@@ -306,30 +306,35 @@
           }
         },
         "fallow.duplication.threshold": {
+          "scope": "resource",
           "type": "number",
           "default": 0,
           "minimum": 0,
           "description": "Maximum allowed duplication percentage before the analysis is marked as failing. Set to 0 (the default) for no limit."
         },
         "fallow.duplication.minTokens": {
+          "scope": "resource",
           "type": "integer",
           "default": 50,
           "minimum": 1,
           "description": "Minimum token count for a clone before it can be reported as duplicated code."
         },
         "fallow.duplication.minLines": {
+          "scope": "resource",
           "type": "integer",
           "default": 5,
           "minimum": 1,
           "description": "Minimum line count for a clone before it can be reported as duplicated code."
         },
         "fallow.duplication.minOccurrences": {
+          "scope": "resource",
           "type": "integer",
           "default": 2,
           "minimum": 2,
           "description": "Minimum number of occurrences (instances of the same clone) before a group is reported. Defaults to 2 (every duplicated pair is reported). Raise to 3 or more to focus on widespread copy-paste worth refactoring and skip context-sensitive pairs."
         },
         "fallow.duplication.mode": {
+          "scope": "resource",
           "type": "string",
           "default": "mild",
           "enum": [
@@ -347,24 +352,38 @@
           ]
         },
         "fallow.duplication.skipLocal": {
+          "scope": "resource",
           "type": "boolean",
           "default": false,
           "description": "Only report duplicate code that appears across different directories."
         },
         "fallow.duplication.crossLanguage": {
+          "scope": "resource",
           "type": "boolean",
           "default": false,
           "description": "Compare TypeScript and JavaScript files after stripping TypeScript type annotations."
         },
         "fallow.duplication.ignoreImports": {
+          "scope": "resource",
           "type": "boolean",
           "default": false,
           "description": "Exclude import declarations from duplicate-code detection."
         },
         "fallow.production": {
-          "type": "boolean",
-          "default": false,
-          "description": "Enable production mode (excludes test/dev files, only production scripts)."
+          "scope": "resource",
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "on",
+            "off"
+          ],
+          "description": "Production mode for the sidebar tree and the editor diagnostics (they stay in sync). Production mode excludes test/dev files and only counts production scripts. Editor-only: CI and `fallow check` always report every finding.",
+          "enumDescriptions": [
+            "Defer to the project config (.fallowrc.json); the editor does not override it (default)",
+            "Force production mode on",
+            "Force production mode off, even if the project config enables it"
+          ]
         },
         "fallow.coverage.capturePath": {
           "type": "string",

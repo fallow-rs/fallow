@@ -2,7 +2,13 @@ import { escapeMarkdownText } from "./markdown-utils.js";
 import type { AuditGate, AuditOutput, AuditVerdict } from "./types.js";
 
 interface AuditArgsOptions {
-  readonly production: boolean;
+  /**
+   * `true` forwards `--production`; `false`/`undefined` defer to the project
+   * config. Force-off (`--no-production`) is intentionally not wired into the
+   * standalone audit run: the editor-parity fix (#1055) scopes force-off to the
+   * sidebar + LSP diagnostics surfaces.
+   */
+  readonly production: boolean | undefined;
   readonly changedSince: string;
   readonly configPath: string;
   readonly gate: AuditGate;

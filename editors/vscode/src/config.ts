@@ -98,7 +98,25 @@ export const getDuplicationCrossLanguageOverride = (): boolean | undefined =>
 export const getDuplicationIgnoreImportsOverride = (): boolean | undefined =>
   getConfiguredValue<boolean>("duplication.ignoreImports");
 
-export const getProduction = (): boolean => getConfig().get<boolean>("production", false);
+/**
+ * Resolve `fallow.production` to a production-mode override forwarded to BOTH
+ * the CLI-driven sidebar AND the LSP so the two editor surfaces agree. `true`
+ * (`"on"`) forces production on, `false` (`"off"`) forces it off, `undefined`
+ * (`"auto"`, the default, or unset) defers to the project `.fallowrc.json`. Uses
+ * the inspect-based override pattern (like the `duplication.*` getters) so an
+ * unset editor value never overrides project config, and accepts a legacy
+ * stored boolean (the pre-enum setting shape) as on/off (issue #1055).
+ */
+export const getProductionOverride = (): boolean | undefined => {
+  const value = getConfiguredValue<string | boolean>("production");
+  if (value === "on" || value === true) {
+    return true;
+  }
+  if (value === "off" || value === false) {
+    return false;
+  }
+  return undefined;
+};
 
 const getCoverageCapturePath = (): string =>
   getConfig().get<string>("coverage.capturePath", "").trim();

@@ -5,6 +5,9 @@ export const RESTART_CONFIG_KEYS = [
   "fallow.issueTypes",
   "fallow.changedSince",
   "fallow.duplication",
+  // `fallow.production` is forwarded to the LSP via initializationOptions, which
+  // the server only reads at startup, so a change must restart it (issue #1055).
+  "fallow.production",
   "fallow.autoDownload",
 ] as const;
 

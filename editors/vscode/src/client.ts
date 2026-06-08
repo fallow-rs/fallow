@@ -17,6 +17,7 @@ import {
   getIssueTypes,
   getChangedSince,
   getResolvedConfigPath,
+  getProductionOverride,
   getDuplicationCrossLanguageOverride,
   getDuplicationIgnoreImportsOverride,
   getDuplicationMinLinesOverride,
@@ -44,6 +45,13 @@ export interface LspInitializationOptions {
   readonly issueTypes: IssueTypeConfig;
   readonly changedSince: string;
   readonly configPath: string;
+  /**
+   * Production-mode override forwarded so the LSP diagnostics match the
+   * CLI-driven sidebar. `true`/`false` force production on/off; `undefined`
+   * (the `"auto"` setting) is dropped by `JSON.stringify`, so the LSP sees no
+   * `production` key and defers to the project config (issue #1055).
+   */
+  readonly production: boolean | undefined;
   readonly duplication: {
     readonly mode: DuplicationMode | undefined;
     readonly threshold: number | undefined;
@@ -60,6 +68,7 @@ export const createInitializationOptions = (): LspInitializationOptions => ({
   issueTypes: getIssueTypes(),
   changedSince: getChangedSince(),
   configPath: getResolvedConfigPath(),
+  production: getProductionOverride(),
   // `fallow.health.inlineComplexity` is rendered by the extension's own
   // ComplexityLensProvider (so the lens can toggle the per-line breakdown), so
   // it is NOT forwarded to the LSP. The LSP complexity lens stays opt-in for

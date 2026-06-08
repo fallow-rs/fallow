@@ -213,6 +213,12 @@ struct Cli {
     #[arg(long, global = true)]
     production: bool,
 
+    /// Force production mode OFF for every analysis, overriding a project
+    /// config's `production: true` (and `FALLOW_PRODUCTION`). Conflicts with
+    /// `--production`.
+    #[arg(long = "no-production", global = true, conflicts_with = "production")]
+    no_production: bool,
+
     /// Run dead-code analysis in production mode when using bare combined mode.
     #[arg(long = "production-dead-code")]
     production_dead_code: bool,
@@ -1958,6 +1964,8 @@ fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
         Some("--save-baseline")
     } else if cli.production {
         Some("--production")
+    } else if cli.no_production {
+        Some("--no-production")
     } else if cli.group_by.is_some() {
         Some("--group-by")
     } else if cli.performance {
@@ -2135,6 +2143,8 @@ fn resolve_production_modes(
         |analysis: fallow_config::ProductionAnalysis, cli_specific: bool, env_name: &str| {
             if cli.production || cli_specific {
                 true
+            } else if cli.no_production {
+                false
             } else if let Some(value) = bool_from_env(env_name) {
                 value
             } else if let Some(value) = env_global {

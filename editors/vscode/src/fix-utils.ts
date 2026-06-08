@@ -17,7 +17,10 @@ interface FixPreviewApplyAllItem {
 
 type FixPreviewItem = FixPreviewNavigateItem | FixPreviewApplyAllItem;
 
-export const buildFixArgs = (dryRun: boolean, production: boolean): string[] => {
+export const buildFixArgs = (
+  dryRun: boolean,
+  production: boolean | undefined,
+): string[] => {
   const args = dryRun
     ? ["fix", "--dry-run", "--format", "json", "--quiet"]
     : ["fix", "--yes", "--format", "json", "--quiet"];

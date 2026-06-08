@@ -20,8 +20,12 @@ export const COVERAGE_ANALYZE_MIN_VERSION = "2.57.0";
 export interface CoverageArgsOptions {
   /** Absolute path to a local runtime-coverage capture (file or directory). */
   readonly capturePath: string;
-  /** Mirror `fallow.production`; appends `--production` when true. */
-  readonly production: boolean;
+  /**
+   * Mirror `fallow.production`; appends `--production` when `true`. `false` /
+   * `undefined` defer to the project config (force-off via `--no-production` is
+   * editor-diagnostics-only, see #1055).
+   */
+  readonly production: boolean | undefined;
   /** Cap on findings + hot paths (`--top`); `0` (or less) omits the flag. */
   readonly top: number;
   /** Resolved config path; appends `--config <path>` when non-empty. */

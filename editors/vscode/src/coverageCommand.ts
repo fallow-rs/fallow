@@ -3,7 +3,7 @@
 import * as vscode from "vscode";
 import { compareVersions } from "./analysis-utils.js";
 import { execFallow, FallowExecError, resolveCliForRun } from "./commands.js";
-import { getCoveragePath, getCoverageTop, getProduction, getResolvedConfigPath } from "./config.js";
+import { getCoveragePath, getCoverageTop, getProductionOverride, getResolvedConfigPath } from "./config.js";
 import {
   buildCoverageArgs,
   buildCoverageGateMessage,
@@ -92,7 +92,7 @@ export const runCoverageAnalysis = async (
 
     const args = buildCoverageArgs({
       capturePath,
-      production: getProduction(),
+      production: getProductionOverride(),
       top: getCoverageTop(),
       configPath: getResolvedConfigPath(),
     });

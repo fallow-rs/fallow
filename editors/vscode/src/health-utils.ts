@@ -13,8 +13,12 @@ export interface HealthArgsOptions {
   readonly configPath: string;
   /** Git ref for `--changed-since <ref>`, forwarded when non-empty. */
   readonly changedSince: string;
-  /** Production mode (`--production`), forwarded when true. */
-  readonly production: boolean;
+  /**
+   * Production mode (`--production`), forwarded when `true`. `false`/`undefined`
+   * defer to the project config (force-off via `--no-production` is
+   * editor-diagnostics-only, see #1055).
+   */
+  readonly production: boolean | undefined;
   /**
    * Monorepo workspace scope (a package name). When a non-empty string,
    * forwarded as `--workspace <name>` so the Health view honors the selected

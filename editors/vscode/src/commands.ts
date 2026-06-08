@@ -6,7 +6,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import {
   getLspPath,
-  getProduction,
+  getProductionOverride,
   getAuditGate,
   getDuplicationCrossLanguageOverride,
   getDuplicationIgnoreImportsOverride,
@@ -485,7 +485,7 @@ export const runAnalysis = async (
     );
 
     const { args: analysisArgs, skipped } = buildAnalysisArgs({
-      production: getProduction(),
+      production: getProductionOverride(),
       changedSince: getChangedSince(),
       workspace: resolveActiveWorkspaceScope(context),
       configPath: getResolvedConfigPath(),
@@ -639,7 +639,7 @@ export const runAudit = async (
   try {
     const { binary: cliBinary } = await resolveCliForRun(context, outputChannel);
     const auditArgs = buildAuditArgs({
-      production: getProduction(),
+      production: getProductionOverride(),
       changedSince: getChangedSince(),
       workspace: resolveActiveWorkspaceScope(context),
       configPath: getResolvedConfigPath(),
@@ -672,7 +672,7 @@ export const runFix = async (
   }
 
   try {
-    const fixArgs = buildFixArgs(dryRun, getProduction());
+    const fixArgs = buildFixArgs(dryRun, getProductionOverride());
     const configPath = getResolvedConfigPath();
     if (configPath) {
       fixArgs.push("--config", configPath);
@@ -760,7 +760,7 @@ export const runHealthAnalysis = async (
       topFindings,
       configPath: getResolvedConfigPath(),
       changedSince: getChangedSince(),
-      production: getProduction(),
+      production: getProductionOverride(),
       workspace: resolveActiveWorkspaceScope(context),
       complexityBreakdown: breakdownEnabled,
     });

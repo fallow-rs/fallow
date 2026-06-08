@@ -36,6 +36,7 @@ import {
   getDiagnosticSeverity,
   getMutedDiagnosticCategories,
   getHealthInlineComplexity,
+  getProductionOverride,
 } from "../src/config.js";
 
 describe("duplication setting overrides", () => {
@@ -102,6 +103,39 @@ describe("duplication setting overrides", () => {
 describe("health inline complexity setting", () => {
   it("defaults on (the extension renders the complexity lens)", () => {
     expect(getHealthInlineComplexity()).toBe(true);
+  });
+});
+
+describe("production override setting (#1055)", () => {
+  beforeEach(() => {
+    inspected = {};
+    configured = {};
+  });
+
+  it("defers to the project config when unset or auto", () => {
+    expect(getProductionOverride()).toBeUndefined();
+
+    inspected = { production: { defaultValue: "auto" } };
+    expect(getProductionOverride()).toBeUndefined();
+
+    inspected = { production: { workspaceValue: "auto" } };
+    expect(getProductionOverride()).toBeUndefined();
+  });
+
+  it("maps the on/off enum to a boolean override", () => {
+    inspected = { production: { workspaceValue: "on" } };
+    expect(getProductionOverride()).toBe(true);
+
+    inspected = { production: { workspaceValue: "off" } };
+    expect(getProductionOverride()).toBe(false);
+  });
+
+  it("accepts a legacy stored boolean as on/off", () => {
+    inspected = { production: { globalValue: true } };
+    expect(getProductionOverride()).toBe(true);
+
+    inspected = { production: { globalValue: false } };
+    expect(getProductionOverride()).toBe(false);
   });
 });
 

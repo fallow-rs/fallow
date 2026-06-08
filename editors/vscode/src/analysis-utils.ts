@@ -10,6 +10,11 @@ import type { DuplicationMode, FallowCheckResult, FallowDupesResult } from "./ty
  * after a spawn failure. Anything else that a binary rejects stays loud.
  */
 const VERSION_GATED_FLAGS: Readonly<Record<string, string>> = {
+  // `--no-production` (force production OFF, the `fallow.production: "off"`
+  // state) is new in 2.90.0; older CLIs only know `--production`. Gated so an
+  // old pinned CLI degrades to deferring to the project config instead of
+  // spawn-failing (issue #1055).
+  "--no-production": "2.90.0",
   "--dupes-min-occurrences": "2.88.0",
   "--dupes-min-tokens": "2.88.3",
   "--dupes-min-lines": "2.88.3",
@@ -19,7 +24,13 @@ const VERSION_GATED_FLAGS: Readonly<Record<string, string>> = {
 };
 
 interface AnalysisArgsOptions {
-  readonly production: boolean;
+  /**
+   * Production-mode override: `true` forwards `--production`, `false` forwards
+   * `--no-production` (force off, version-gated), `undefined` forwards neither
+   * so the run defers to the project config. Mirrors the LSP init option so the
+   * sidebar tree and editor squiggles agree (issue #1055).
+   */
+  readonly production: boolean | undefined;
   readonly changedSince: string;
   /**
    * Monorepo workspace scope (a package name). When non-empty, forwarded as
@@ -107,8 +118,10 @@ export const buildAnalysisArgs = (options: AnalysisArgsOptions): BuiltAnalysisAr
   const args = ["--format", "json", "--quiet", "--skip", "health"];
   const skipped: SkippedFlag[] = [];
 
-  if (options.production) {
+  if (options.production === true) {
     args.push("--production");
+  } else if (options.production === false) {
+    pushVersionGatedFlag(args, skipped, "--no-production", options.cliVersion);
   }
 
   if (options.changedSince) {

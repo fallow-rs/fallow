@@ -265,13 +265,14 @@ fn analyze_project_root(
     project_root: &Path,
     config_path: Option<&Path>,
     duplication_options: Option<&LspDuplicationOptions>,
+    production_override: Option<bool>,
     inline_complexity_enabled: bool,
     merged_results: &mut AnalysisResults,
     merged_duplication: &mut DuplicationReport,
     merged_inline_complexity: &mut Vec<InlineComplexityFinding>,
     config_messages: &mut Vec<(MessageType, String)>,
 ) {
-    let (config, message) = match fallow_core::config_for_project(project_root, config_path) {
+    let (mut config, message) = match fallow_core::config_for_project(project_root, config_path) {
         Ok((config, Some(path))) => (
             config,
             (
@@ -309,6 +310,15 @@ fn analyze_project_root(
             return;
         }
     };
+
+    // Override the project config's production resolution when the editor
+    // forwarded an explicit `fallow.production` (on/off). Mirrors the
+    // CLI-driven sidebar receiving `--production`/`--no-production`, so the two
+    // surfaces agree; `None` leaves the project config in force (issue #1055).
+    if let Some(production) = production_override {
+        config.production = production;
+    }
+
     config_messages.push(message);
 
     if inline_complexity_enabled {
@@ -415,6 +425,14 @@ impl LspDuplicationOptions {
 
 fn initialization_duplication_options(opts: &serde_json::Value) -> Option<LspDuplicationOptions> {
     serde_json::from_value(opts.get("duplication")?.clone()).ok()
+}
+
+/// Read the optional production-mode override from `initializationOptions`.
+/// `Some(true)`/`Some(false)` force production on/off; a missing or non-boolean
+/// `production` key yields `None`, deferring to the project config (issue
+/// #1055). VS Code omits the key for the `"auto"` setting state.
+fn initialization_production_override(opts: &serde_json::Value) -> Option<bool> {
+    opts.get("production").and_then(serde_json::Value::as_bool)
 }
 
 fn initialization_inline_complexity_enabled(opts: &serde_json::Value) -> bool {
@@ -533,6 +551,13 @@ struct FallowLspServer {
     /// Optional duplication overrides from `initializationOptions.duplication`.
     /// VS Code sends these so live diagnostics match the sidebar CLI run.
     duplication_options: Arc<RwLock<Option<LspDuplicationOptions>>>,
+    /// Optional production-mode override from `initializationOptions.production`.
+    /// `Some(true)`/`Some(false)` force production on/off so the editor's
+    /// diagnostics match the CLI-driven sidebar (which receives
+    /// `--production`/`--no-production`); `None` defers to the project config,
+    /// mirroring the CLI default. Without this the sidebar and editor squiggles
+    /// disagree whenever `fallow.production` is set (issue #1055).
+    production_override: Arc<RwLock<Option<bool>>>,
     /// Whether the client opted in to heuristic complexity code lenses.
     inline_complexity_enabled: Arc<RwLock<bool>>,
     /// Canonical git toplevel for the workspace `root`, resolved on first
@@ -663,6 +688,7 @@ impl LanguageServer for FallowLspServer {
             *self.config_path.write().await =
                 initialization_config_path(opts, canonical_root.as_deref());
             *self.duplication_options.write().await = initialization_duplication_options(opts);
+            *self.production_override.write().await = initialization_production_override(opts);
             *self.inline_complexity_enabled.write().await =
                 initialization_inline_complexity_enabled(opts);
         }
@@ -941,6 +967,7 @@ impl FallowLspServer {
             changed_since: Arc::new(RwLock::new(None)),
             config_path: Arc::new(RwLock::new(None)),
             duplication_options: Arc::new(RwLock::new(None)),
+            production_override: Arc::new(RwLock::new(None)),
             inline_complexity_enabled: Arc::new(RwLock::new(false)),
             git_toplevel: Arc::new(RwLock::new(None)),
             cached_diagnostics: Arc::new(RwLock::new(FxHashMap::default())),
@@ -1034,6 +1061,7 @@ impl FallowLspServer {
         let changed_since_for_data = changed_since.clone();
         let config_path = self.config_path.read().await.clone();
         let duplication_options = self.duplication_options.read().await.clone();
+        let production_override = *self.production_override.read().await;
         let inline_complexity_enabled = *self.inline_complexity_enabled.read().await;
 
         let resolved_toplevel = self.resolved_git_toplevel(&root).await;
@@ -1052,6 +1080,7 @@ impl FallowLspServer {
                     project_root,
                     config_path.as_deref(),
                     duplication_options.as_ref(),
+                    production_override,
                     inline_complexity_enabled,
                     &mut merged_results,
                     &mut merged_duplication,
@@ -1877,6 +1906,90 @@ mod tests {
     }
 
     #[test]
+    fn initialization_production_override_reads_boolean() {
+        assert_eq!(
+            initialization_production_override(&serde_json::json!({ "production": true })),
+            Some(true)
+        );
+        assert_eq!(
+            initialization_production_override(&serde_json::json!({ "production": false })),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn initialization_production_override_defers_when_absent_or_non_boolean() {
+        assert_eq!(
+            initialization_production_override(&serde_json::json!({})),
+            None
+        );
+        assert_eq!(
+            initialization_production_override(&serde_json::json!({ "production": "on" })),
+            None
+        );
+    }
+
+    #[test]
+    fn analyze_project_root_production_override_excludes_test_files() {
+        // The project config does NOT set production. Production mode excludes
+        // test files from discovery, so an unreferenced `*.test.ts` file is only
+        // reported as an unused file when production is OFF. This pins the editor
+        // `fallow.production` -> LSP parity contract: `"on"` (Some(true)) must
+        // drop the test file the sidebar's `--production` run also drops; `"off"`
+        // (Some(false)) and `"auto"` (None, project config defers to off) keep it
+        // (issue #1055).
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).expect("create src dir");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"lsp-production-override","private":true,"main":"src/index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(root.join("src/index.ts"), "export const used = 1;\n").expect("write index");
+        std::fs::write(
+            root.join("src/orphan.test.ts"),
+            "export const orphanedHelper = 2;\n",
+        )
+        .expect("write test file");
+
+        let test_file_reported = |production_override: Option<bool>| {
+            let mut results = AnalysisResults::default();
+            let mut duplication = DuplicationReport::default();
+            let mut inline_complexity = Vec::new();
+            let mut messages = Vec::new();
+            analyze_project_root(
+                root,
+                None,
+                None,
+                production_override,
+                false,
+                &mut results,
+                &mut duplication,
+                &mut inline_complexity,
+                &mut messages,
+            );
+            results
+                .unused_files
+                .iter()
+                .any(|finding| finding.file.path.ends_with("orphan.test.ts"))
+        };
+
+        assert!(
+            test_file_reported(None),
+            "deferring to the project config keeps the test file in analysis"
+        );
+        assert!(
+            !test_file_reported(Some(true)),
+            "forcing production on excludes the test file from analysis"
+        );
+        assert!(
+            test_file_reported(Some(false)),
+            "forcing production off keeps the test file in analysis"
+        );
+    }
+
+    #[test]
     fn analyze_project_root_applies_lsp_duplication_options() {
         let dir = tempfile::tempdir().expect("temp dir");
         let root = dir.path();
@@ -1909,6 +2022,7 @@ mod tests {
             root,
             None,
             None,
+            None,
             false,
             &mut baseline_results,
             &mut baseline_duplication,
@@ -1933,6 +2047,7 @@ mod tests {
             root,
             None,
             Some(&options),
+            None,
             false,
             &mut filtered_results,
             &mut filtered_duplication,
@@ -1987,6 +2102,7 @@ export function choose(value: number): string {
             root,
             None,
             None,
+            None,
             false,
             &mut results,
             &mut duplication,
@@ -2013,6 +2129,7 @@ export function choose(value: number): string {
 
         analyze_project_root(
             root,
+            None,
             None,
             None,
             true,

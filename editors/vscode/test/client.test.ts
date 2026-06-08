@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 let mockIssueTypes = {};
 let mockChangedSince = "";
 let mockConfigPath = "";
+let mockProductionOverride: boolean | undefined;
 let mockDuplicationMode = "mild";
 let mockDuplicationThreshold = 0;
 let mockDuplicationMinTokens = 50;
@@ -99,6 +100,7 @@ vi.mock("../src/config.js", () => ({
   getIssueTypes: () => mockIssueTypes,
   getChangedSince: () => mockChangedSince,
   getResolvedConfigPath: () => mockConfigPath,
+  getProductionOverride: () => mockProductionOverride,
   getDuplicationModeOverride: () => mockDuplicationMode,
   getDuplicationThresholdOverride: () => mockDuplicationThreshold,
   getDuplicationMinTokensOverride: () => mockDuplicationMinTokens,
@@ -133,6 +135,7 @@ beforeEach(() => {
   mockIssueTypes = { "code-duplication": true };
   mockChangedSince = "origin/main";
   mockConfigPath = "/workspace/.fallowrc.jsonc";
+  mockProductionOverride = undefined;
   mockDuplicationMode = "semantic";
   mockDuplicationThreshold = 8;
   mockDuplicationMinTokens = 80;
@@ -163,6 +166,7 @@ describe("createInitializationOptions", () => {
       issueTypes: { "code-duplication": true },
       changedSince: "origin/main",
       configPath: "/workspace/.fallowrc.jsonc",
+      production: undefined,
       duplication: {
         mode: "semantic",
         threshold: 8,
@@ -174,6 +178,23 @@ describe("createInitializationOptions", () => {
         ignoreImports: true,
       },
     });
+  });
+
+  it("forwards the production override so the LSP matches the sidebar (#1055)", () => {
+    mockProductionOverride = true;
+    expect(createInitializationOptions().production).toBe(true);
+
+    mockProductionOverride = false;
+    expect(createInitializationOptions().production).toBe(false);
+  });
+
+  it("omits production when deferring to the project config (auto)", () => {
+    mockProductionOverride = undefined;
+    const options = createInitializationOptions();
+    expect(options.production).toBeUndefined();
+    // JSON.stringify drops `undefined`, so the LSP sees no `production` key and
+    // reads the project config, matching the sidebar's no-flag behavior.
+    expect("production" in JSON.parse(JSON.stringify(options))).toBe(false);
   });
 
   it("does not forward inline complexity to fallow-lsp (extension owns the lens)", () => {

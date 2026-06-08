@@ -11,7 +11,8 @@ import {
 import type { FallowCheckResult, FallowDupesResult } from "../src/types.js";
 
 const baseOptions = {
-  production: false,
+  // `undefined` is the "auto"/defer state: no production flag is forwarded.
+  production: undefined as boolean | undefined,
   changedSince: "",
   workspace: "",
   configPath: "",
@@ -192,6 +193,44 @@ describe("buildAnalysisArgs", () => {
     expect(args).toContain("--production");
     expect(args[args.indexOf("--changed-since") + 1]).toBe("main");
     expect(args[args.indexOf("--config") + 1]).toBe("/abs/.fallowrc.json");
+  });
+
+  it("forwards neither production flag when deferring to the project config (#1055)", () => {
+    const { args } = buildAnalysisArgs({ ...baseOptions, production: undefined });
+    expect(args).not.toContain("--production");
+    expect(args).not.toContain("--no-production");
+  });
+
+  it("forwards --no-production to force production off (#1055)", () => {
+    const { args, skipped } = buildAnalysisArgs({
+      ...baseOptions,
+      production: false,
+      cliVersion: "2.90.0",
+    });
+    expect(args).toContain("--no-production");
+    expect(args).not.toContain("--production");
+    expect(skipped).toEqual([]);
+  });
+
+  it("omits --no-production and reports the skip when the resolved CLI is too old", () => {
+    const { args, skipped } = buildAnalysisArgs({
+      ...baseOptions,
+      production: false,
+      cliVersion: "2.89.0",
+    });
+    expect(args).not.toContain("--no-production");
+    expect(skipped).toEqual([
+      { flag: "--no-production", requires: "2.90.0", cliVersion: "2.89.0" },
+    ]);
+  });
+
+  it("forwards --no-production optimistically when the CLI version is unknown", () => {
+    const { args } = buildAnalysisArgs({
+      ...baseOptions,
+      production: false,
+      cliVersion: null,
+    });
+    expect(args).toContain("--no-production");
   });
 });
 
