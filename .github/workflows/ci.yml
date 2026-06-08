@@ -131,7 +131,15 @@ jobs:
           node-version: '22'
 
       - name: Run tests
+        if: matrix.os != 'windows-latest'
         run: cargo test --workspace --all-targets
+
+      - name: Run tests (Windows)
+        if: matrix.os == 'windows-latest'
+        # Windows push checks catch path and filesystem regressions, but bench
+        # target execution can exceed this job's timeout. Dedicated benchmark
+        # workflows cover benchmark execution separately.
+        run: cargo test --workspace --lib --bins --tests
 
       - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
         run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests
