@@ -3404,8 +3404,14 @@ export function choose(value: number): string {
         let dir = tempfile::tempdir().expect("temp dir");
         let root = dir.path().canonicalize().expect("canonical root");
         write_inline_complexity_fixture(&root);
-        let root_uri = format!("file://{}", root.display());
-        let file_uri = format!("file://{}", root.join("src/index.ts").display());
+        // Build file URIs the cross-platform way (Windows drive letters / encoding),
+        // matching how the server round-trips them via `to_file_path`.
+        let root_uri = Uri::from_file_path(&root)
+            .expect("root file uri")
+            .to_string();
+        let file_uri = Uri::from_file_path(root.join("src/index.ts"))
+            .expect("file uri")
+            .to_string();
 
         let (mut client_tx, server_rx) = tokio::io::duplex(64 * 1024);
         let (server_tx, client_rx) = tokio::io::duplex(64 * 1024);
