@@ -3,7 +3,12 @@
 import * as vscode from "vscode";
 import { compareVersions } from "./analysis-utils.js";
 import { execFallow, FallowExecError, resolveCliForRun } from "./commands.js";
-import { getCoveragePath, getCoverageTop, getProductionOverride, getResolvedConfigPath } from "./config.js";
+import {
+  getCoveragePath,
+  getCoverageTop,
+  getProductionOverride,
+  getResolvedConfigPath,
+} from "./config.js";
 import {
   buildCoverageArgs,
   buildCoverageGateMessage,

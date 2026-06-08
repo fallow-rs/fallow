@@ -114,6 +114,7 @@ describe("generated/output-contract.d.ts", () => {
 
   it("re-exports the SecurityOutput / SecurityFinding contract from ../src/types.js", () => {
     const finding: SecurityFinding = {
+      finding_id: "security:src/app.tsx:12",
       kind: "client-server-leak",
       path: "src/app.tsx",
       line: 12,
@@ -121,6 +122,17 @@ describe("generated/output-contract.d.ts", () => {
       evidence: "imports a server-only secret",
       trace: [{ path: "src/lib/secret.ts", line: 8, col: 0, role: "secret-source" }],
       actions: [],
+      candidate: {
+        sink: {
+          path: "src/app.tsx",
+          line: 12,
+          col: 0,
+        },
+        boundary: {
+          client_server: true,
+          cross_module: false,
+        },
+      },
     };
     const sample: SecurityOutput = {
       schema_version: "1",

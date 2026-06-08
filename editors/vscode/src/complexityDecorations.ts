@@ -179,7 +179,8 @@ const sameFile = (
 };
 
 /** Stable per-function key (project-relative finding path + 1-based line). */
-export const complexityKey = (path: string, line: number): string => `${path}:${line}`;
+export const complexityKey = (findingPath: string, line: number): string =>
+  `${findingPath}:${line}`;
 
 /**
  * The hover markdown for a 1-based source line: the function summary + CRAP
@@ -386,9 +387,7 @@ export class ComplexityDecorationController {
 
   /** Whether a finding's per-line detail should render (forced-on, pin, or selection). */
   private shouldRenderDetail(finding: HealthFinding): boolean {
-    return (
-      this.showAllAfterText() || this.isExpandedKey(complexityKey(finding.path, finding.line))
-    );
+    return this.showAllAfterText() || this.isExpandedKey(complexityKey(finding.path, finding.line));
   }
 
   /** Render (or clear) one editor's per-line detail from the cached findings. */
@@ -396,7 +395,11 @@ export class ComplexityDecorationController {
     if (!editor) {
       return;
     }
-    if (!this.isEnabled() || this.isStale(editor.document) || editor.document.uri.scheme !== "file") {
+    if (
+      !this.isEnabled() ||
+      this.isStale(editor.document) ||
+      editor.document.uri.scheme !== "file"
+    ) {
       this.clear(editor);
       return;
     }

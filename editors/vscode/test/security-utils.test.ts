@@ -9,6 +9,7 @@ import {
 import type { SecurityFinding, SecurityOutput, TraceHopRole } from "../src/types.js";
 
 const finding = (overrides: Partial<SecurityFinding>): SecurityFinding => ({
+  finding_id: "security:src/app.tsx:12",
   kind: "tainted-sink",
   path: "src/app.tsx",
   line: 12,
@@ -16,6 +17,19 @@ const finding = (overrides: Partial<SecurityFinding>): SecurityFinding => ({
   evidence: "reaches process.env.SECRET",
   trace: [],
   actions: [],
+  candidate: {
+    sink: {
+      path: overrides.path ?? "src/app.tsx",
+      line: overrides.line ?? 12,
+      col: overrides.col ?? 4,
+      category: overrides.category,
+      cwe: overrides.cwe,
+    },
+    boundary: {
+      client_server: false,
+      cross_module: false,
+    },
+  },
   ...overrides,
 });
 
