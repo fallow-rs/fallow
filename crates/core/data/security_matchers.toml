@@ -330,6 +330,35 @@ arg_kinds = ["literal"]
 literal_contains = ["169.254.169.254", "metadata.google.internal"]
 evidence_template = "Literal cloud metadata URL passed to {callee}(). Candidate for verification: confirm this request cannot expose instance credentials or metadata."
 
+# ── CWE-201: Secret-to-network exfil ─────────────────────────────────────────
+# Opt-in (include-required: only fires when listed in `security.categories.include`)
+# because legitimate auth IS secret-to-network. `requires_source_kinds` gates these
+# to a SECRET source (process.env / import.meta.env), so request-input-to-fetch
+# stays the ssrf category's job. The candidate carries a destination-host signal
+# (`candidate.network.destination`, the arg-0 URL literal or absent for dynamic)
+# so an agent triages exfil from intended auth. Issue #890.
+[[matcher]]
+id = "secret-to-network"
+cwe = 201
+title = "Secret reaches a network request"
+sink_shape = "call"
+callee_patterns = ["fetch", "got", "ky", "needle", "request"]
+arg_index = 1
+requires_source = true
+requires_source_kinds = ["process-env", "import-meta-env"]
+evidence_template = "A non-public env secret reaches the body/options of {callee}(). Candidate for verification: confirm this credential is intended for this destination (an auth header sent to the credential's own provider is normal); review only if the destination is untrusted, attacker-influenced, or not the credential's provider."
+
+[[matcher]]
+id = "secret-to-network"
+cwe = 201
+title = "Secret reaches a network request"
+sink_shape = "member-call"
+callee_patterns = ["axios.post", "axios.put", "axios.patch", "axios.request", "got.post", "http.request", "https.request", "undici.request"]
+arg_index = 1
+requires_source = true
+requires_source_kinds = ["process-env", "import-meta-env"]
+evidence_template = "A non-public env secret reaches the body/options of {callee}(). Candidate for verification: confirm this credential is intended for this destination (an auth header sent to the credential's own provider is normal); review only if the destination is untrusted or not the credential's provider."
+
 # ── CWE-22: Path traversal ──────────────────────────────────────────────────
 [[matcher]]
 id = "path-traversal"
@@ -1179,8 +1208,17 @@ id = "process-env"
 title = "Environment secret"
 # `process.env.SECRET` and destructured `process.env` locals carry deployment
 # secrets and tokens. Exact matching avoids treating arbitrary `.env` properties
-# as secret sources.
+# as secret sources. Public-by-convention vars (NEXT_PUBLIC_, VITE_, ...) are
+# excluded at extraction time (issue #890), so they never count as a secret.
 path_patterns = ["process.env"]
+
+[[source]]
+id = "import-meta-env"
+title = "Environment secret (Vite)"
+# `import.meta.env.SECRET` is Vite's env surface; the same deployment-secret
+# class as `process.env` for the secret-to-network category (issue #890).
+# Public-by-convention vars (VITE_, ...) are excluded at extraction time.
+path_patterns = ["import.meta.env"]
 
 [[source]]
 id = "message-event-data"

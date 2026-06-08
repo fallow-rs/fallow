@@ -10476,6 +10476,17 @@
         "boundary": {
           "description": "The structural boundary the flow crosses.",
           "$ref": "#/definitions/SecurityCandidateBoundary"
+        },
+        "network": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityNetworkContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Network-destination context, present only on `secret-to-network` (#890)\ncandidates: the host the secret-bearing call targets, so an agent can\ntriage exfil from intended auth. Absent for every other category."
         }
       },
       "required": [
@@ -10827,6 +10838,19 @@
         "defensive_boundary"
       ],
       "description": "One untrusted entry to reachable sink path for `fallow security --surface`."
+    },
+    "SecurityNetworkContext": {
+      "type": "object",
+      "properties": {
+        "destination": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The network call's destination as a static URL string literal, or absent\nwhen the destination is DYNAMIC (not a literal). A dynamic destination is\nthe higher-signal exfil case; a literal provider host is usually intended\nauth."
+        }
+      },
+      "description": "Network-destination context for a `secret-to-network` candidate (#890): where\nthe secret-bearing network call sends its data. Present only on\nnetwork-category candidates. A consuming agent uses it to triage exfil\n(dynamic / untrusted destination) from intended auth (a literal provider\nhost) without re-reading source."
     }
   }
 }

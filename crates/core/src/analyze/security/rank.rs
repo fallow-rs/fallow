@@ -863,6 +863,7 @@ mod tests {
                     callee: None,
                 },
                 boundary: SecurityCandidateBoundary::default(),
+                network: None,
             },
             taint_flow: None,
             runtime: None,

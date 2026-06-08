@@ -94,6 +94,7 @@ pub fn find_hardcoded_secret_candidates(
                     callee: Some(sink.callee_path.clone()),
                 },
                 boundary: SecurityCandidateBoundary::default(),
+                network: None,
             };
             let path = node.path.clone();
             findings.push(SecurityFinding {

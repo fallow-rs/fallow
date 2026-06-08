@@ -98,9 +98,9 @@ use fallow_types::results::{
     ReferenceLocation, SecurityAttackSurfaceEntry, SecurityCandidate, SecurityCandidateBoundary,
     SecurityCandidateSink, SecurityDeadCodeContext, SecurityDeadCodeKind,
     SecurityDefensiveBoundary, SecurityDefensiveControl, SecurityFinding, SecurityFindingKind,
-    SecurityReachability, SecurityRuntimeContext, SecurityRuntimeState, SecurityTaintFlow,
-    SecurityZoneCrossing, StaleSuppression, SuppressionOrigin, TaintEndpoint, TaintPath,
-    TestOnlyDependency, TraceHop, TraceHopRole, TypeOnlyDependency, UnlistedDependency,
+    SecurityNetworkContext, SecurityReachability, SecurityRuntimeContext, SecurityRuntimeState,
+    SecurityTaintFlow, SecurityZoneCrossing, StaleSuppression, SuppressionOrigin, TaintEndpoint,
+    TaintPath, TestOnlyDependency, TraceHop, TraceHopRole, TypeOnlyDependency, UnlistedDependency,
     UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
     UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
@@ -329,6 +329,7 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "SecurityCandidateSink",
         "SecurityCandidateBoundary",
         "SecurityZoneCrossing",
+        "SecurityNetworkContext",
         "SecurityTaintFlow",
         "SecurityControlKind",
         "SecurityDefensiveControl",
@@ -530,6 +531,7 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<SecurityCandidateSink>();
     let _ = generator.subschema_for::<SecurityZoneCrossing>();
     let _ = generator.subschema_for::<SecurityCandidateBoundary>();
+    let _ = generator.subschema_for::<SecurityNetworkContext>();
     let _ = generator.subschema_for::<SecurityCandidate>();
     let _ = generator.subschema_for::<TaintEndpoint>();
     let _ = generator.subschema_for::<TaintPath>();

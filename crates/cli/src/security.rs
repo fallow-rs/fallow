@@ -1345,6 +1345,7 @@ mod tests {
                     cross_module: false,
                     architecture_zone: None,
                 },
+                network: None,
             },
             taint_flow: None,
             runtime: None,

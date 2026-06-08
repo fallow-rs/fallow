@@ -278,7 +278,14 @@ use crate::MemberKind;
 /// Bumped to 137 for issue #888: JS/TS extraction now records defensive
 /// security control sites for the attack-surface inventory. Pre-137 entries
 /// omit those controls until the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 137;
+///
+/// Bumped to 138 for issue #890: `SinkSite` now carries the arg-0 URL literal
+/// (`url_arg_literal`) for the secret-to-network destination signal, `import.meta.env`
+/// reads are modeled as a source via the new `flatten_member_path` MetaProperty
+/// arm, and public-by-convention env vars (`NEXT_PUBLIC_`, `VITE_`, ...) are no
+/// longer recorded as secret sources. Pre-138 entries omit the URL signal and may
+/// retain stale public-env source bindings until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 138;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -335,7 +342,7 @@ assert_cached_type_size!(CachedReExport, 88);
 assert_cached_type_size!(CachedMember, 64);
 assert_cached_type_size!(CachedDynamicImportPattern, 56);
 assert_cached_type_size!(crate::MemberAccess, 48);
-assert_cached_type_size!(fallow_types::extract::SinkSite, 184);
+assert_cached_type_size!(fallow_types::extract::SinkSite, 208);
 assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);

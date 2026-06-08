@@ -1006,6 +1006,22 @@ pub struct SecurityCandidateBoundary {
     pub architecture_zone: Option<SecurityZoneCrossing>,
 }
 
+/// Network-destination context for a `secret-to-network` candidate (#890): where
+/// the secret-bearing network call sends its data. Present only on
+/// network-category candidates. A consuming agent uses it to triage exfil
+/// (dynamic / untrusted destination) from intended auth (a literal provider
+/// host) without re-reading source.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityNetworkContext {
+    /// The network call's destination as a static URL string literal, or absent
+    /// when the destination is DYNAMIC (not a literal). A dynamic destination is
+    /// the higher-signal exfil case; a literal provider host is usually intended
+    /// auth.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination: Option<String>,
+}
+
 /// An agent-actionable candidate record on a [`SecurityFinding`]. fallow fills
 /// `source_kind`, `sink`, and `boundary`. The exploitability IMPACT is
 /// deliberately NOT a field: deciding severity / exploitability is the consuming
@@ -1029,6 +1045,11 @@ pub struct SecurityCandidate {
     pub sink: SecurityCandidateSink,
     /// The structural boundary the flow crosses.
     pub boundary: SecurityCandidateBoundary,
+    /// Network-destination context, present only on `secret-to-network` (#890)
+    /// candidates: the host the secret-bearing call targets, so an agent can
+    /// triage exfil from intended auth. Absent for every other category.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<SecurityNetworkContext>,
 }
 
 /// One endpoint (source or sink node) of a [`SecurityTaintFlow`].

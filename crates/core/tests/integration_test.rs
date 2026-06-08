@@ -118,6 +118,8 @@ mod security_framework_entry_sources;
 mod security_framework_sinks;
 #[path = "integration_test/security_hardcoded_secret.rs"]
 mod security_hardcoded_secret;
+#[path = "integration_test/security_secret_to_network.rs"]
+mod security_secret_to_network;
 #[path = "integration_test/security_template_xss_sinks.rs"]
 mod security_template_xss_sinks;
 #[path = "integration_test/stale_suppressions.rs"]

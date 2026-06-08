@@ -363,6 +363,13 @@ pub struct SinkSite {
     pub span_start: u32,
     /// Byte offset of the sink span end.
     pub span_end: u32,
+    /// The arg-0 URL string literal of a network-shaped call (`fetch`, `axios.*`,
+    /// `got`, ...), captured so the `secret-to-network` category (#890) can carry
+    /// a destination-host signal on its candidate: `Some(literal)` when the
+    /// destination is a static string literal (almost always intended auth, e.g.
+    /// the credential's own provider), `None` when it is dynamic (the suspicious
+    /// case). `None` for non-call sinks and calls with no arg 0.
+    pub url_arg_literal: Option<String>,
 }
 
 impl SinkSite {
@@ -371,6 +378,44 @@ impl SinkSite {
     pub fn span(&self) -> Span {
         Span::new(self.span_start, self.span_end)
     }
+}
+
+/// Env var-name prefixes that frameworks inline into the client bundle by
+/// convention. A read of one of these is normal and safe, so it does NOT count
+/// as a secret source (issue #890). Shared by the extract layer (so public env
+/// vars never become source signals) and the bespoke `client-server-leak` rule.
+pub const PUBLIC_ENV_PREFIXES: &[&str] = &[
+    "NEXT_PUBLIC_",
+    "VITE_",
+    "NUXT_PUBLIC_",
+    "REACT_APP_",
+    "PUBLIC_",
+    "GATSBY_",
+    "EXPO_PUBLIC_",
+    "STORYBOOK_",
+];
+
+/// Exact env var names that are public by convention (no prefix).
+pub const PUBLIC_ENV_EXACT: &[&str] = &["NODE_ENV"];
+
+/// Whether an env var name is public-by-convention (build-inlined into the
+/// client bundle), and therefore not a secret.
+#[must_use]
+pub fn is_public_env_var(name: &str) -> bool {
+    PUBLIC_ENV_EXACT.contains(&name) || PUBLIC_ENV_PREFIXES.iter().any(|p| name.starts_with(p))
+}
+
+/// Whether a flattened member path is a PUBLIC env-secret read
+/// (`process.env.NEXT_PUBLIC_X`, `import.meta.env.VITE_Y`), which must not be
+/// recorded as a secret source. Non-env paths (`req.query.id`) are never public.
+#[must_use]
+pub fn is_public_env_path(path: &str) -> bool {
+    for object in ["process.env.", "import.meta.env."] {
+        if let Some(var) = path.strip_prefix(object) {
+            return is_public_env_var(var);
+        }
+    }
+    false
 }
 
 /// One alias entry tying an exported object's dotted property path to a namespace import.
@@ -835,7 +880,7 @@ const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<SinkSite>() == 184);
+const _: () = assert!(std::mem::size_of::<SinkSite>() == 208);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 744);
 
@@ -966,6 +1011,7 @@ mod tests {
             arg_source_paths: vec!["req.body.email".to_string(), "req.body".to_string()],
             span_start: 10,
             span_end: 20,
+            url_arg_literal: Some("https://api.example.com".to_string()),
         };
         let encoded = bitcode::encode(&site);
         let decoded: SinkSite = bitcode::decode(&encoded).expect("decode sink site");

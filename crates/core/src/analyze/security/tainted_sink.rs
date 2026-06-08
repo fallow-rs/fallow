@@ -20,7 +20,7 @@ use fallow_types::extract::{
 use fallow_types::output::{IssueAction, SuppressFileAction, SuppressFileKind};
 use fallow_types::results::{
     SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink, SecurityFinding,
-    SecurityFindingKind, TraceHop, TraceHopRole,
+    SecurityFindingKind, SecurityNetworkContext, TraceHop, TraceHopRole,
 };
 use fallow_types::suppress::IssueKind;
 
@@ -281,7 +281,7 @@ fn sink_source<'t>(
     None
 }
 
-fn matcher_admits_sink(matcher: &Matcher, sink: &SinkSite, source_title: Option<&str>) -> bool {
+fn matcher_admits_sink(matcher: &Matcher, sink: &SinkSite, source: Option<(&str, &str)>) -> bool {
     matcher.sink_shape == sink.sink_shape
         && matcher.arg_index == sink.arg_index
         && (sink.arg_is_non_literal || matcher.is_literal_aware())
@@ -293,8 +293,28 @@ fn matcher_admits_sink(matcher: &Matcher, sink: &SinkSite, source_title: Option<
             sink.object_property_keys_complete,
         )
         && matcher.context_satisfied(&sink.arg_idents)
-        && (!matcher.requires_source || source_title.is_some())
+        && (!matcher.requires_source || source.is_some())
+        // Source-KIND gate (#890): when set, the matched source's id must be one
+        // of the listed kinds. Lets `secret-to-network` fire only on a SECRET
+        // source, not request input.
+        && (matcher.requires_source_kinds.is_empty()
+            || source.is_some_and(|(id, _)| matcher.requires_source_kinds.iter().any(|k| k == id)))
         && matcher.first_matching_pattern(&sink.callee_path).is_some()
+}
+
+/// The catalogue id of the secret-to-network exfil category (issue #890). The
+/// only category that carries a [`SecurityNetworkContext`] destination signal.
+pub(super) const NETWORK_EXFIL_CATEGORY: &str = "secret-to-network";
+
+/// Catalogue categories admitted ONLY when explicitly listed in
+/// `security.categories.include` (issue #890). A `secret-to-network` candidate
+/// fires on intended auth as often as on exfil, so it must be opt-in; an absent
+/// include list never admits it.
+pub(super) const INCLUDE_REQUIRED_CATEGORIES: &[&str] = &[NETWORK_EXFIL_CATEGORY];
+
+/// Whether a catalogue category is include-required (opt-in only).
+fn is_include_required_category(id: &str) -> bool {
+    INCLUDE_REQUIRED_CATEGORIES.contains(&id)
 }
 
 /// Run the catalogue-driven tainted-sink detector. Returns the findings plus the
@@ -320,7 +340,17 @@ pub fn find_tainted_sinks(
     let active: Vec<&Matcher> = catalogue()
         .matchers()
         .iter()
-        .filter(|m| category_filter.admits(&m.id) && m.enabler_satisfied(declared_deps))
+        .filter(|m| {
+            // Include-required categories (#890) are admitted only when explicitly
+            // listed in `security.categories.include`; everything else uses the
+            // normal include/exclude scope.
+            let admitted = if is_include_required_category(&m.id) {
+                category_filter.explicitly_admits(&m.id)
+            } else {
+                category_filter.admits(&m.id)
+            };
+            admitted && m.enabler_satisfied(declared_deps)
+        })
         .collect();
     if active.is_empty() {
         return (Vec::new(), stats);
@@ -365,7 +395,7 @@ pub fn find_tainted_sinks(
         for sink in &module.security_sinks {
             let source = sink_source(sink, &tainted_locals, declared_deps);
             let Some(matcher) = active.iter().copied().find(|m| {
-                matcher_admits_sink(m, sink, source.map(|(_, title)| title))
+                matcher_admits_sink(m, sink, source)
                     && provenance_satisfied(m, module, &sink.callee_path)
             }) else {
                 continue;
@@ -421,6 +451,14 @@ pub fn find_tainted_sinks(
                 None => base_evidence,
             };
 
+            // The destination-host signal for the secret-to-network category
+            // (#890): the arg-0 URL literal, or `None` (dynamic) when not a
+            // literal. The agent triages exfil (dynamic / untrusted host) from
+            // intended auth (a literal provider host) with this.
+            let network = (matcher.id == NETWORK_EXFIL_CATEGORY).then(|| SecurityNetworkContext {
+                destination: sink.url_arg_literal.clone(),
+            });
+
             // Slot 1 (source kind) is the stable catalogue source id; slot 2
             // (sink) carries the callee path the evidence already names. The
             // boundary slot is filled by the post-detection ranking pass once
@@ -436,6 +474,7 @@ pub fn find_tainted_sinks(
                     callee: Some(sink.callee_path.clone()),
                 },
                 boundary: SecurityCandidateBoundary::default(),
+                network,
             };
 
             let path = node.path.clone();
@@ -543,6 +582,7 @@ mod tests {
             arg_source_paths: source_paths.iter().map(|s| (*s).to_string()).collect(),
             span_start: 0,
             span_end: 1,
+            url_arg_literal: None,
         }
     }
 

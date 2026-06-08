@@ -67,23 +67,6 @@ const fn secret_word(count: usize) -> &'static str {
     if count == 1 { "secret" } else { "secrets" }
 }
 
-/// Env var-name prefixes that frameworks inline into the client bundle by
-/// convention. A read of one of these from a client file is normal and safe, so
-/// it does NOT mark a module as a secret source.
-const PUBLIC_ENV_PREFIXES: &[&str] = &[
-    "NEXT_PUBLIC_",
-    "VITE_",
-    "NUXT_PUBLIC_",
-    "REACT_APP_",
-    "PUBLIC_",
-    "GATSBY_",
-    "EXPO_PUBLIC_",
-    "STORYBOOK_",
-];
-
-/// Exact env var names that are public by convention (no prefix).
-const PUBLIC_ENV_EXACT: &[&str] = &["NODE_ENV"];
-
 /// The `member_accesses` object string for a `process.env.X` read.
 const PROCESS_ENV_OBJECT: &str = "process.env";
 /// The `member_accesses` object string for an `import.meta.env.X` read.
@@ -91,11 +74,10 @@ const IMPORT_META_ENV_OBJECT: &str = "import.meta.env";
 /// Static env source objects that feed the client/server leak candidate rule.
 const ENV_SOURCE_OBJECTS: &[&str] = &[PROCESS_ENV_OBJECT, IMPORT_META_ENV_OBJECT];
 
-/// Whether an env var name is public-by-convention (build-inlined into the
-/// client bundle), and therefore not a secret.
-fn is_public_env_var(name: &str) -> bool {
-    PUBLIC_ENV_EXACT.contains(&name) || PUBLIC_ENV_PREFIXES.iter().any(|p| name.starts_with(p))
-}
+// The public-env predicate (`is_public_env_var`, `PUBLIC_ENV_PREFIXES`) is shared
+// with the extract layer in `fallow_types::extract` (issue #890), so public env
+// vars are excluded consistently here and at source-recording time.
+use fallow_types::extract::is_public_env_var;
 
 /// Blind-spot accounting surfaced in-band so the user is never told "clean" when
 /// the analysis could not see part of the import graph.
@@ -371,6 +353,7 @@ fn client_leak_candidate(path: std::path::PathBuf, line: u32, col: u32) -> Secur
             callee: None,
         },
         boundary: SecurityCandidateBoundary::default(),
+        network: None,
     }
 }
 

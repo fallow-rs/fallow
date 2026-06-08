@@ -97,6 +97,14 @@ struct RawMatcher {
     /// a local binding that came from a configured untrusted source.
     #[serde(default)]
     requires_source: bool,
+    /// Optional precision gate narrowing `requires_source` to SPECIFIC source
+    /// kinds by catalogue source id (issue #890). Empty (default) admits any
+    /// matched source (the prior behavior); when set, the matched source's id
+    /// must be one of these. Lets `secret-to-network` fire only when backed by a
+    /// SECRET source (`process-env` / `import-meta-env`), not request input
+    /// (which the `ssrf` rows already cover).
+    #[serde(default)]
+    requires_source_kinds: Vec<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -226,6 +234,10 @@ pub struct Matcher {
     /// Whether this matcher only fires when the sink argument traces to a
     /// configured untrusted source binding.
     pub requires_source: bool,
+    /// When non-empty, narrows `requires_source` to these catalogue source ids
+    /// (issue #890): the matched source's id must be one of these. Empty admits
+    /// any matched source.
+    pub requires_source_kinds: Vec<String>,
     /// String-literal values admitted by this row.
     pub literal_values: Vec<String>,
     /// String fragments admitted by this row.
@@ -663,6 +675,7 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
             enabler,
             arg_kinds,
             requires_source: entry.requires_source,
+            requires_source_kinds: entry.requires_source_kinds,
             literal_values: entry.literal_values.unwrap_or_default(),
             literal_contains: entry.literal_contains.unwrap_or_default(),
             literal_integers: entry.literal_integers.unwrap_or_default(),

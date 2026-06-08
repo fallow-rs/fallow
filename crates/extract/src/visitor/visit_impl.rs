@@ -3691,6 +3691,12 @@ fn flatten_member_path(expr: &Expression<'_>) -> Option<String> {
         Expression::ParenthesizedExpression(paren) => flatten_member_path(&paren.expression),
         Expression::AwaitExpression(await_expr) => flatten_member_path(&await_expr.argument),
         Expression::Identifier(ident) => Some(ident.name.to_string()),
+        // `import.meta` is a MetaProperty, not a member chain; flattening it as
+        // `import.meta` lets `import.meta.env.X` reads be modeled as a source the
+        // same way `process.env.X` is (issue #890, Vite secrets).
+        Expression::MetaProperty(meta) => {
+            Some(format!("{}.{}", meta.meta.name, meta.property.name))
+        }
         Expression::StaticMemberExpression(member) => Some(format!(
             "{}.{}",
             flatten_member_path(&member.object)?,
@@ -3703,12 +3709,21 @@ fn flatten_member_path(expr: &Expression<'_>) -> Option<String> {
 /// The source path for a DIRECT binding (`const id = req.query.id`): the OBJECT
 /// path of the member-access init, i.e. the chain with its final property
 /// dropped (`req.query`). A bare-identifier init (`const x = req`) has no object
-/// to drop and is not a source binding on its own (`None`).
+/// to drop and is not a source binding on its own (`None`). A PUBLIC env var
+/// (`process.env.NEXT_PUBLIC_X`, `import.meta.env.VITE_Y`) is build-inlined and
+/// is NOT a secret source, so it is dropped here (issue #890).
 fn tainted_source_path(expr: &Expression<'_>) -> Option<String> {
     match expr {
         Expression::ParenthesizedExpression(paren) => tainted_source_path(&paren.expression),
         Expression::AwaitExpression(await_expr) => tainted_source_path(&await_expr.argument),
-        Expression::StaticMemberExpression(member) => flatten_member_path(&member.object),
+        Expression::StaticMemberExpression(member) => {
+            if let Some(full) = flatten_member_path(expr)
+                && fallow_types::extract::is_public_env_path(&full)
+            {
+                return None;
+            }
+            flatten_member_path(&member.object)
+        }
         _ => None,
     }
 }
@@ -4585,6 +4600,21 @@ fn collect_arg_source_paths(expr: &Expression<'_>) -> Vec<String> {
     out
 }
 
+/// The arg-0 URL of a call as a static string literal, for the `secret-to-network`
+/// destination signal (#890). `Some(literal)` when the destination is a plain
+/// string literal or a no-substitution template (almost always intended auth);
+/// `None` when it is dynamic (an interpolated URL, an env-configured base, a
+/// variable) or absent. A dynamic destination is the higher-signal exfil case.
+fn call_url_arg_literal(expr: &CallExpression<'_>) -> Option<String> {
+    match expr.arguments.first()?.as_expression()? {
+        Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+        Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
+            tpl.quasis.first().map(|q| q.value.raw.to_string())
+        }
+        _ => None,
+    }
+}
+
 fn push_ident(name: &str, out: &mut Vec<String>) {
     if !out.iter().any(|n| n == name) {
         out.push(name.to_string());
@@ -4598,6 +4628,11 @@ fn push_source_path(path: String, out: &mut Vec<String>) {
 }
 
 fn push_member_source_paths(path: &str, out: &mut Vec<String>) {
+    // A public env var is build-inlined, not a secret source; record neither the
+    // full path nor the `process.env` / `import.meta.env` object prefix (#890).
+    if fallow_types::extract::is_public_env_path(path) {
+        return;
+    }
     push_source_path(path.to_string(), out);
     if let Some((object, _)) = path.rsplit_once('.') {
         push_source_path(object.to_string(), out);
@@ -4620,6 +4655,13 @@ fn collect_source_paths_into(expr: &Expression<'_>, out: &mut Vec<String>) {
         }
         Expression::StaticMemberExpression(member) => {
             if let Some(path) = flatten_member_path(expr) {
+                // #890: a public env read contributes no secret source. Return
+                // before recursing into the object, otherwise the bare
+                // `process.env` / `import.meta.env` object would be re-pushed as a
+                // source and defeat the exclusion.
+                if fallow_types::extract::is_public_env_path(&path) {
+                    return;
+                }
                 push_member_source_paths(&path, out);
             }
             collect_source_paths_into(&member.object, out);
@@ -5166,6 +5208,7 @@ impl ModuleInfoExtractor {
             arg_source_paths: collect_arg_source_paths(input_expr),
             span_start: expr.span.start,
             span_end: expr.span.end,
+            url_arg_literal: None,
         });
     }
 
@@ -5198,6 +5241,9 @@ impl ModuleInfoExtractor {
         } else {
             SinkShape::Call
         };
+        // The arg-0 URL literal, captured once per call so the secret-to-network
+        // category (#890) can carry a destination-host signal on the arg-1 sink.
+        let url_arg_literal = call_url_arg_literal(expr);
         for (index, arg) in expr.arguments.iter().enumerate() {
             let Some(arg_expr) = arg.as_expression() else {
                 continue;
@@ -5252,6 +5298,7 @@ impl ModuleInfoExtractor {
                 regex_pattern: None,
                 span_start: expr.span.start,
                 span_end: expr.span.end,
+                url_arg_literal: url_arg_literal.clone(),
             });
         }
         if should_capture_missing_jwt_verify_options(&callee_path, sink_shape, expr.arguments.len())
@@ -5271,6 +5318,7 @@ impl ModuleInfoExtractor {
                 regex_pattern: None,
                 span_start: expr.span.start,
                 span_end: expr.span.end,
+                url_arg_literal: None,
             });
         }
     }
@@ -5338,6 +5386,7 @@ impl ModuleInfoExtractor {
                 regex_pattern: None,
                 span_start: expr.span.start,
                 span_end: expr.span.end,
+                url_arg_literal: None,
             });
         }
     }
@@ -5367,6 +5416,7 @@ impl ModuleInfoExtractor {
             regex_pattern: None,
             span_start: span.start,
             span_end: span.end,
+            url_arg_literal: None,
         });
     }
 
@@ -5397,6 +5447,7 @@ impl ModuleInfoExtractor {
             arg_source_paths: Vec::new(),
             span_start: span.start,
             span_end: span.end,
+            url_arg_literal: None,
         });
     }
 
@@ -5456,6 +5507,7 @@ impl ModuleInfoExtractor {
             regex_pattern: None,
             span_start: expr.span.start,
             span_end: expr.span.end,
+            url_arg_literal: None,
         });
     }
 
@@ -5491,6 +5543,7 @@ impl ModuleInfoExtractor {
             regex_pattern: None,
             span_start: expr.span.start,
             span_end: expr.span.end,
+            url_arg_literal: None,
         });
     }
 
@@ -5528,6 +5581,7 @@ impl ModuleInfoExtractor {
             regex_pattern: None,
             span_start: attr.span.start,
             span_end: attr.span.end,
+            url_arg_literal: None,
         });
     }
 

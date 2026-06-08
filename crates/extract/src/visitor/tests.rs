@@ -118,6 +118,81 @@ fn security_literal_sink_capture_records_literal_argument() {
     );
 }
 
+#[test]
+fn network_sink_captures_literal_url_destination() {
+    // Issue #890: the arg-0 URL literal is captured on the arg-1 sink so the
+    // secret-to-network category can carry a destination-host signal.
+    let info = parse(
+        r#"const t = process.env.SECRET; fetch("https://api.stripe.com", { headers: { authorization: t } });"#,
+    );
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|s| s.callee_path == "fetch" && s.arg_index == 1)
+        .expect("fetch options sink captured");
+    assert_eq!(
+        sink.url_arg_literal.as_deref(),
+        Some("https://api.stripe.com")
+    );
+}
+
+#[test]
+fn network_sink_dynamic_url_has_no_literal_destination() {
+    let info = parse(r"const t = process.env.SECRET; fetch(buildUrl(), { headers: { x: t } });");
+    let sink = info
+        .security_sinks
+        .iter()
+        .find(|s| s.callee_path == "fetch" && s.arg_index == 1)
+        .expect("fetch options sink captured");
+    assert!(
+        sink.url_arg_literal.is_none(),
+        "a dynamic URL must not record a literal destination"
+    );
+}
+
+#[test]
+fn public_env_is_not_a_secret_source() {
+    // Issue #890 GAP A: public-by-convention env vars are not secret sources via
+    // a binding (`process.env.NEXT_PUBLIC_X`, `import.meta.env.VITE_Y`) or a
+    // direct argument path (`console.log(process.env.NEXT_PUBLIC_Z)`).
+    let info = parse(
+        r"const a = process.env.NEXT_PUBLIC_X; const b = import.meta.env.VITE_Y; console.log(process.env.NEXT_PUBLIC_Z);",
+    );
+    assert!(
+        info.tainted_bindings
+            .iter()
+            .all(|binding| binding.source_path != "process.env"
+                && binding.source_path != "import.meta.env"),
+        "public env reads must not create secret-source bindings"
+    );
+    if let Some(sink) = info
+        .security_sinks
+        .iter()
+        .find(|s| s.callee_path == "console.log")
+    {
+        assert!(
+            !sink
+                .arg_source_paths
+                .iter()
+                .any(|path| path == "process.env"),
+            "a public env argument must not record process.env as a source path"
+        );
+    }
+}
+
+#[test]
+fn import_meta_env_secret_binds_as_a_source() {
+    // Issue #890: a non-public `import.meta.env.X` (Vite) read is a secret source
+    // like `process.env`, via the new flatten_member_path MetaProperty arm.
+    let info = parse("const key = import.meta.env.SERVER_KEY; doThing(key);");
+    assert!(
+        info.tainted_bindings
+            .iter()
+            .any(|binding| binding.local == "key" && binding.source_path == "import.meta.env"),
+        "import.meta.env secret should bind as a source"
+    );
+}
+
 fn redos_regex_sink(source: &str) -> fallow_types::extract::SinkSite {
     let info = parse(source);
     info.security_sinks

@@ -5117,6 +5117,12 @@ export interface SecurityCandidate {
 source_kind?: (string | null)
 sink: SecurityCandidateSink
 boundary: SecurityCandidateBoundary
+/**
+ * Network-destination context, present only on `secret-to-network` (#890)
+ * candidates: the host the secret-bearing call targets, so an agent can
+ * triage exfil from intended auth. Absent for every other category.
+ */
+network?: (SecurityNetworkContext | null)
 }
 /**
  * The sink slot of a [`SecurityCandidate`]: a self-contained description of the
@@ -5201,6 +5207,22 @@ from: string
  * Zone the imported side belongs to.
  */
 to: string
+}
+/**
+ * Network-destination context for a `secret-to-network` candidate (#890): where
+ * the secret-bearing network call sends its data. Present only on
+ * network-category candidates. A consuming agent uses it to triage exfil
+ * (dynamic / untrusted destination) from intended auth (a literal provider
+ * host) without re-reading source.
+ */
+export interface SecurityNetworkContext {
+/**
+ * The network call's destination as a static URL string literal, or absent
+ * when the destination is DYNAMIC (not a literal). A dynamic destination is
+ * the higher-signal exfil case; a literal provider host is usually intended
+ * auth.
+ */
+destination?: (string | null)
 }
 /**
  * A source-to-sink taint-flow triple, emitted only when an untrusted source is
