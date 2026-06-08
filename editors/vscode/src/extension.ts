@@ -14,6 +14,7 @@ import {
   getCoveragePath,
   getAuditEnabled,
   getAuditRunOnSave,
+  getDiagnosticStatusBar,
   getComplexityBreakdownEnabled,
   getComplexityAfterText,
   onConfigChange,
@@ -46,6 +47,11 @@ import {
 } from "./license.js";
 import { DiagnosticFilter } from "./diagnosticFilter.js";
 import { registerDiagnosticMuteUi } from "./diagnosticMute.js";
+import {
+  createDiagnosticStatusBar,
+  disposeDiagnosticStatusBar,
+  hasDiagnosticStatusBar,
+} from "./diagnosticStatusBar.js";
 import { HealthTreeProvider } from "./healthTreeView.js";
 import {
   createStatusBar,
@@ -175,6 +181,26 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   const diagnosticFilter = new DiagnosticFilter(context.workspaceState);
   context.subscriptions.push({ dispose: () => diagnosticFilter.dispose() });
   registerDiagnosticMuteUi(context, diagnosticFilter);
+
+  // Always-visible diagnostics on/off toggle, just right of the audit item.
+  // Gated on `fallow.diagnostics.statusBar` (default on) and created/disposed
+  // LIVE when the setting toggles, mirroring the audit status-bar handling, so
+  // it never needs a window reload. Lifecycle goes through the module's
+  // create/dispose helpers (which own the singleton item + its filter
+  // subscription) rather than pushing the raw item to `subscriptions`, so a live
+  // dispose/recreate cannot leave a dangling listener. The teardown disposer
+  // below guarantees cleanup on deactivate.
+  const syncDiagnosticStatusBar = (): void => {
+    if (getDiagnosticStatusBar()) {
+      if (!hasDiagnosticStatusBar()) {
+        createDiagnosticStatusBar(diagnosticFilter);
+      }
+    } else {
+      disposeDiagnosticStatusBar();
+    }
+  };
+  syncDiagnosticStatusBar();
+  context.subscriptions.push({ dispose: () => disposeDiagnosticStatusBar() });
 
   const deadCodeProvider = new DeadCodeTreeProvider();
   const duplicatesProvider = new DuplicatesTreeProvider();
@@ -861,6 +887,12 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
         syncAuditStatusBar();
       }
 
+      if (e.affectsConfiguration("fallow.diagnostics.statusBar")) {
+        // Create/dispose the diagnostics toggle item live, same as the audit
+        // item, so flipping the setting never needs a window reload.
+        syncDiagnosticStatusBar();
+      }
+
       if (needsRestart) {
         outputChannel.appendLine("Configuration changed, restarting server...");
         await restartClient(context, outputChannel, diagnosticFilter);
@@ -981,5 +1013,6 @@ export const deactivate = async (): Promise<void> => {
   disposeLicenseStatusBar();
   disposeWorkspacePicker();
   disposeAuditStatusBar();
+  disposeDiagnosticStatusBar();
   await stopClient();
 };

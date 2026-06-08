@@ -128,6 +128,14 @@ export const getAuditEnabled = (): boolean =>
   getConfig().get<boolean>("audit.statusBar.enabled", true);
 
 /**
+ * Whether the diagnostics on/off toggle status-bar item is shown. Default on so
+ * a first-install user has a visible button to hide the squiggles; the item runs
+ * no analysis, so this only controls the surface, not cost.
+ */
+export const getDiagnosticStatusBar = (): boolean =>
+  getConfig().get<boolean>("diagnostics.statusBar", true);
+
+/**
  * Whether to re-run the audit on save of a JS/TS file. Default OFF so it cannot
  * regress idle latency; the command and status-bar item are the primary entry
  * points.

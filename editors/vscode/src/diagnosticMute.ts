@@ -72,7 +72,7 @@ const createLanguageStatus = (filter: DiagnosticFilter): vscode.LanguageStatusIt
   const item = vscode.languages.createLanguageStatusItem(STATUS_ITEM_ID, []);
   item.name = "Fallow Mute";
   item.accessibilityInformation = {
-    label: "Fallow diagnostic mute status",
+    label: "Fallow hidden findings status",
     role: "button",
   };
 
@@ -92,7 +92,7 @@ const createLanguageStatus = (filter: DiagnosticFilter): vscode.LanguageStatusIt
     item.command = {
       command: "fallow.manageDiagnosticMutes",
       title: "Manage",
-      tooltip: "Manage Fallow diagnostic mutes",
+      tooltip: "Manage Fallow hidden findings",
     };
   };
 
@@ -108,17 +108,17 @@ interface ManagePickItem extends vscode.QuickPickItem {
 const TITLE_BUTTONS = {
   toggleAll: {
     iconPath: new vscode.ThemeIcon("eye-closed"),
-    tooltip: "Toggle mute for ALL Fallow findings",
+    tooltip: "Hide or show all Fallow findings",
   },
   clearAll: {
     iconPath: new vscode.ThemeIcon("clear-all"),
-    tooltip: "Show all Fallow findings (clear all mutes)",
+    tooltip: "Show all Fallow findings (clear all)",
   },
 } as const;
 
 const showManageQuickPick = async (filter: DiagnosticFilter): Promise<void> => {
   const pick = vscode.window.createQuickPick<ManagePickItem>();
-  pick.title = "Fallow: manage diagnostic mutes (CI is unaffected)";
+  pick.title = "Fallow: manage hidden findings (CI is unaffected)";
   pick.placeholder = "Check categories to hide them in the editor. Press Enter to apply.";
   pick.canSelectMany = true;
   pick.matchOnDetail = true;
@@ -127,7 +127,7 @@ const showManageQuickPick = async (filter: DiagnosticFilter): Promise<void> => {
   const globalItem: ManagePickItem = {
     label: "$(eye-closed) All Fallow Findings",
     description: filter.isMutedAll() ? "currently hidden" : "currently visible",
-    detail: "Global editor-only mute. Use the title buttons to toggle or clear it.",
+    detail: "Hides all findings in the editor only. Use the title buttons to toggle or clear it.",
     code: null,
     picked: filter.isMutedAll(),
     alwaysShow: filter.isMutedAll(),
@@ -210,12 +210,12 @@ class FallowMuteCodeActions implements vscode.CodeActionProvider {
       seen.add(code);
       const label = labelFor(code);
       const action = new vscode.CodeAction(
-        `Mute Fallow ${label.toLowerCase()} findings in this workspace`,
+        `Hide Fallow ${label.toLowerCase()} findings in this workspace`,
         CODE_ACTION_KIND,
       );
       action.command = {
         command: "fallow.muteDiagnosticCategory",
-        title: "Mute Fallow category",
+        title: "Hide Fallow category",
         arguments: [code],
       };
       action.diagnostics = [diag];
@@ -246,7 +246,7 @@ export const registerDiagnosticMuteUi = (
       const nowMuted = filter.toggleCategory(DUPLICATE_CODE);
       void vscode.window.setStatusBarMessage(
         nowMuted
-          ? "Fallow: muted code-duplication findings (CI is unaffected)"
+          ? "Fallow: hiding code-duplication findings (CI is unaffected)"
           : "Fallow: showing code-duplication findings",
         4000,
       );
@@ -257,7 +257,9 @@ export const registerDiagnosticMuteUi = (
     vscode.commands.registerCommand("fallow.toggleAllDiagnostics", () => {
       const nowMuted = filter.toggleMutedAll();
       void vscode.window.setStatusBarMessage(
-        nowMuted ? "Fallow: muted all findings (CI is unaffected)" : "Fallow: showing all findings",
+        nowMuted
+          ? "Fallow: hiding all findings (CI is unaffected)"
+          : "Fallow: showing all findings",
         4000,
       );
     }),

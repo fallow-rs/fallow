@@ -147,26 +147,26 @@
       },
       {
         "command": "fallow.toggleMuteDuplicates",
-        "title": "Fallow: Toggle Mute Code-Duplication Findings",
+        "title": "Fallow: Toggle Hide Code-Duplication Findings",
         "icon": "$(eye-closed)"
       },
       {
         "command": "fallow.toggleAllDiagnostics",
-        "title": "Fallow: Toggle Mute All Findings",
+        "title": "Fallow: Toggle Hide All Findings",
         "icon": "$(eye-closed)"
       },
       {
         "command": "fallow.manageDiagnosticMutes",
-        "title": "Fallow: Manage Diagnostic Mutes...",
+        "title": "Fallow: Manage Hidden Findings...",
         "icon": "$(filter)"
       },
       {
         "command": "fallow.clearDiagnosticMutes",
-        "title": "Fallow: Show All Findings (Clear Mutes)"
+        "title": "Fallow: Show All Findings"
       },
       {
         "command": "fallow.muteDiagnosticCategory",
-        "title": "Fallow: Mute Diagnostic Category"
+        "title": "Fallow: Hide Diagnostic Category"
       },
       {
         "command": "fallow.license.activate",
@@ -453,6 +453,11 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Re-run the audit verdict automatically when a JS/TS file is saved. Off by default to avoid added latency; the **Fallow: Audit Changed Files** command and the status-bar item run it on demand."
+        },
+        "fallow.diagnostics.statusBar": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the **Fallow** eye button in the status bar to hide or show all Fallow squiggles in the editor with one click. Editor-only; CI and `fallow check` still report every finding. Turn this off to remove the button (the **Fallow: Toggle Hide All Findings** command still works and can be bound to a key)."
         },
         "fallow.trace.server": {
           "type": "string",
