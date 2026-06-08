@@ -349,6 +349,7 @@ fn security_candidates_args_with_scope_and_performance_options() {
         changed_since: Some("origin/main".to_string()),
         paths: None,
         changed_workspaces: None,
+        surface: None,
         no_cache: Some(true),
         threads: Some(4),
     };
@@ -372,6 +373,19 @@ fn security_candidates_args_with_scope_and_performance_options() {
             "--changed-since",
             "origin/main",
         ]
+    );
+}
+
+#[test]
+fn security_candidates_args_support_surface_inventory() {
+    let params = SecurityCandidatesParams {
+        surface: Some(true),
+        ..Default::default()
+    };
+    let args = build_security_candidates_args(&params).unwrap();
+    assert_eq!(
+        args,
+        ["security", "--format", "json", "--quiet", "--surface"]
     );
 }
 

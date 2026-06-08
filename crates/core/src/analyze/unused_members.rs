@@ -1970,6 +1970,7 @@ mod tests {
             security_sinks_skipped: 0,
             tainted_bindings: Vec::new(),
             sanitized_sink_args: Vec::new(),
+            security_control_sites: Vec::new(),
         }
     }
 

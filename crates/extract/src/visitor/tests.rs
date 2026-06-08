@@ -6,7 +6,7 @@ use super::*;
 use crate::tests::parse_ts as parse;
 use crate::{ImportedName, MemberKind};
 use fallow_types::discover::FileId;
-use fallow_types::extract::{SinkArgKind, SinkLiteralValue, SinkShape};
+use fallow_types::extract::{SecurityControlKind, SinkArgKind, SinkLiteralValue, SinkShape};
 use helpers::regex_pattern_to_suffix;
 
 #[test]
@@ -146,6 +146,28 @@ fn security_redos_regex_capture_records_const_regexp_application() {
             .iter()
             .any(|path| path == "req.body.value")
     );
+}
+
+#[test]
+fn security_control_capture_records_validation_and_auth_calls() {
+    let info = parse(
+        r#"
+        const parsed = schema.parse(req.body);
+        passport.authenticate("jwt");
+        authorize(user, "admin");
+        "#,
+    );
+
+    assert!(info.security_control_sites.iter().any(|control| {
+        control.kind == SecurityControlKind::Validation && control.callee_path == "schema.parse"
+    }));
+    assert!(info.security_control_sites.iter().any(|control| {
+        control.kind == SecurityControlKind::Authentication
+            && control.callee_path == "passport.authenticate"
+    }));
+    assert!(info.security_control_sites.iter().any(|control| {
+        control.kind == SecurityControlKind::Authorization && control.callee_path == "authorize"
+    }));
 }
 
 #[test]

@@ -1002,7 +1002,7 @@ enum Command {
     /// Honors
     /// `--root`, `--format {human,json,sarif}`, `--changed-since`, `--file`, `--diff-file`,
     /// `--diff-stdin`, `--workspace`, `--changed-workspaces`, `--ci`,
-    /// `--fail-on-issues`, `--sarif-file`, and `--summary`.
+    /// `--fail-on-issues`, `--sarif-file`, `--summary`, and `--surface`.
     Security {
         /// Paid runtime-coverage sidecar input. Accepts a V8 directory, a
         /// single V8 JSON file, or an Istanbul coverage map JSON. When set,
@@ -1026,6 +1026,9 @@ enum Command {
         /// mode (gating on the full backlog is the anti-feature this gate avoids).
         #[arg(long, value_name = "MODE")]
         gate: Option<security::SecurityGateMode>,
+        /// Include the agent-facing attack-surface inventory in JSON output.
+        #[arg(long)]
+        surface: bool,
     },
 
     /// Dump the CLI interface as machine-readable JSON for agent introspection
@@ -2978,6 +2981,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             min_invocations_hot,
             file,
             gate,
+            surface,
         } => {
             let (output, quiet, fail_on_issues) = dispatch.ci_defaults();
             security::run(&security::SecurityOptions {
@@ -2995,6 +2999,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 workspace: cli.workspace.as_deref(),
                 changed_workspaces: cli.changed_workspaces.as_deref(),
                 file: file.as_slice(),
+                surface,
                 gate,
                 runtime_coverage: runtime_coverage.as_deref(),
                 min_invocations_hot,

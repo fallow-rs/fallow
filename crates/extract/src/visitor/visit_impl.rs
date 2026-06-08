@@ -15,8 +15,8 @@ use crate::{
 };
 use fallow_types::extract::{
     ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference, SanitizedSinkArg,
-    SanitizerScope, SinkArgKind, SinkLiteralValue, SinkObjectProperty, SinkShape, SinkSite,
-    TaintedBinding,
+    SanitizerScope, SecurityControlKind, SecurityControlSite, SinkArgKind, SinkLiteralValue,
+    SinkObjectProperty, SinkShape, SinkSite, TaintedBinding,
 };
 
 use crate::asset_url::normalize_asset_url;
@@ -1354,6 +1354,12 @@ impl ModuleInfoExtractor {
             span_start,
             arg_index,
             scope,
+        });
+        self.security_control_sites.push(SecurityControlSite {
+            kind: SecurityControlKind::Sanitization,
+            callee_path: "sanitized-sink-argument".to_string(),
+            span_start,
+            span_end: span_start,
         });
     }
 
@@ -5163,6 +5169,18 @@ impl ModuleInfoExtractor {
         });
     }
 
+    fn capture_security_control_call(&mut self, callee_path: &str, span: Span) {
+        let Some(kind) = security_control_kind_for_callee(callee_path) else {
+            return;
+        };
+        self.security_control_sites.push(SecurityControlSite {
+            kind,
+            callee_path: callee_path.to_string(),
+            span_start: span.start,
+            span_end: span.end,
+        });
+    }
+
     /// Capture a call/member-call sink site (category-blind). Pushes one
     /// `SinkSite` per admitted positional argument; a callee that cannot be
     /// flattened to a static path increments the blind-spot counter instead.
@@ -5174,6 +5192,7 @@ impl ModuleInfoExtractor {
             self.security_sinks_skipped += 1;
             return;
         };
+        self.capture_security_control_call(&callee_path, expr.span);
         let sink_shape = if callee_path.contains('.') {
             SinkShape::MemberCall
         } else {
@@ -5529,4 +5548,72 @@ impl ModuleInfoExtractor {
             source_span: oxc_span::Span::default(),
         });
     }
+}
+
+fn security_control_kind_for_callee(callee_path: &str) -> Option<SecurityControlKind> {
+    let lower = callee_path.to_ascii_lowercase();
+    let leaf = lower.rsplit('.').next().unwrap_or(lower.as_str());
+    if is_validation_control(&lower, leaf) {
+        return Some(SecurityControlKind::Validation);
+    }
+    if is_authorization_control(leaf) {
+        return Some(SecurityControlKind::Authorization);
+    }
+    if is_authentication_control(leaf) {
+        return Some(SecurityControlKind::Authentication);
+    }
+    if is_sanitization_control(&lower, leaf) {
+        return Some(SecurityControlKind::Sanitization);
+    }
+    None
+}
+
+fn is_validation_control(callee_path: &str, leaf: &str) -> bool {
+    (matches!(
+        leaf,
+        "parse" | "safeparse" | "validate" | "validateasync" | "assert" | "check" | "is"
+    ) && matches!(
+        control_object(callee_path),
+        Some("z")
+            | Some("zod")
+            | Some("joi")
+            | Some("yup")
+            | Some("valibot")
+            | Some("v")
+            | Some("superstruct")
+            | Some("schema")
+    )) || matches!(leaf, "validatesync" | "parseasync" | "safeparseasync")
+}
+
+fn is_authentication_control(leaf: &str) -> bool {
+    leaf == "authenticate"
+        || leaf == "ensureauthenticated"
+        || leaf == "requireauth"
+        || leaf == "requireuser"
+        || leaf == "authguard"
+        || leaf == "verifytoken"
+        || leaf == "auth"
+}
+
+fn is_authorization_control(leaf: &str) -> bool {
+    leaf == "authorize"
+        || leaf == "requirepermission"
+        || leaf == "requirepermissions"
+        || leaf == "requirerole"
+        || leaf == "can"
+        || leaf == "permit"
+        || leaf == "enforce"
+}
+
+fn is_sanitization_control(callee_path: &str, leaf: &str) -> bool {
+    leaf == "sanitize"
+        || leaf == "escape"
+        || leaf == "escaperegexp"
+        || callee_path.ends_with(".sanitize")
+}
+
+fn control_object(callee_path: &str) -> Option<&str> {
+    callee_path
+        .rsplit_once('.')
+        .map(|(object, _)| object.rsplit('.').next().unwrap_or(object))
 }

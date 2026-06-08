@@ -9852,6 +9852,16 @@
           },
           "description": "Security candidates. Paths are project-root-relative, forward-slash."
         },
+        "attack_surface": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/SecurityAttackSurfaceEntry"
+          },
+          "description": "Opt-in attack-surface inventory from untrusted entry points to reachable\nsinks. Present only when `--surface` was requested."
+        },
         "unresolved_edge_files": {
           "type": "integer",
           "description": "In-band blind spot: number of `\"use client\"` files whose transitive\nimport cone contains a dynamic `import()` the reachability BFS could not\nfollow. A leak hidden behind such an edge would not be reported, so a\nzero finding count with a non-zero value here is NOT a clean bill."
@@ -9985,6 +9995,17 @@
             }
           ],
           "description": "Production runtime coverage context for the function enclosing this\nsecurity sink. Present only when `fallow security --runtime-coverage`\nruns and the candidate is a `tainted-sink`."
+        },
+        "attack_surface": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityAttackSurfaceEntry"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Internal projection used by `fallow security --surface`. The CLI strips\nthis from per-finding JSON and promotes it to the top-level\n`attack_surface` field only when requested."
         }
       },
       "required": [
@@ -10696,6 +10717,116 @@
         "line"
       ],
       "description": "Runtime coverage context attached to a security candidate when\n`fallow security --runtime-coverage` is supplied."
+    },
+    "SecurityControlKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "sanitization",
+          "description": "Sanitization or escaping before a sink."
+        },
+        {
+          "type": "string",
+          "const": "validation",
+          "description": "Input validation or schema parsing."
+        },
+        {
+          "type": "string",
+          "const": "authentication",
+          "description": "Authentication check or middleware."
+        },
+        {
+          "type": "string",
+          "const": "authorization",
+          "description": "Authorization or permission check."
+        }
+      ],
+      "description": "Defensive control family detected on a source to sink path."
+    },
+    "SecurityDefensiveControl": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "Control family.",
+          "$ref": "#/definitions/SecurityControlKind"
+        },
+        "path": {
+          "type": "string",
+          "description": "File of the control site. Absolute internally; JSON strips the project root."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the control site."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column of the control site."
+        },
+        "callee": {
+          "type": "string",
+          "description": "Flattened callee path or a stable synthetic guard name."
+        }
+      },
+      "required": [
+        "kind",
+        "path",
+        "line",
+        "col",
+        "callee"
+      ],
+      "description": "Defensive control found on an attack-surface path."
+    },
+    "SecurityDefensiveBoundary": {
+      "type": "object",
+      "properties": {
+        "controls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SecurityDefensiveControl"
+          },
+          "description": "Known controls detected along this path."
+        },
+        "verification_prompt": {
+          "type": "string",
+          "description": "Verification question for the consuming agent. It is a prompt, not a\nmissing-guard verdict."
+        }
+      },
+      "required": [
+        "controls",
+        "verification_prompt"
+      ],
+      "description": "Agent-facing defensive-boundary verification context for one surface path."
+    },
+    "SecurityAttackSurfaceEntry": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "The untrusted-source endpoint.",
+          "$ref": "#/definitions/TaintEndpoint"
+        },
+        "sink": {
+          "description": "The reachable sink endpoint and catalogue metadata.",
+          "$ref": "#/definitions/SecurityCandidateSink"
+        },
+        "path": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TraceHop"
+          },
+          "description": "Ordered source to sink path. Same shape as the reachability trace so\nconsumers can reuse existing path handling."
+        },
+        "defensive_boundary": {
+          "description": "Defensive-boundary context detected on this path.",
+          "$ref": "#/definitions/SecurityDefensiveBoundary"
+        }
+      },
+      "required": [
+        "source",
+        "sink",
+        "path",
+        "defensive_boundary"
+      ],
+      "description": "One untrusted entry to reachable sink path for `fallow security --surface`."
     }
   }
 }

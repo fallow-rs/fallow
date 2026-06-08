@@ -15,7 +15,8 @@ use std::process::ExitCode;
 
 use fallow_config::{OutputFormat, ProductionAnalysis, Severity};
 use fallow_core::results::{
-    AnalysisResults, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind, TraceHopRole,
+    AnalysisResults, SecurityAttackSurfaceEntry, SecurityDeadCodeKind, SecurityFinding,
+    SecurityFindingKind, TraceHopRole,
 };
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::ModuleInfo;
@@ -93,6 +94,10 @@ pub struct SecurityOutput {
     pub gate: Option<SecurityGate>,
     /// Security candidates. Paths are project-root-relative, forward-slash.
     pub security_findings: Vec<SecurityFinding>,
+    /// Opt-in attack-surface inventory from untrusted entry points to reachable
+    /// sinks. Present only when `--surface` was requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attack_surface: Option<Vec<SecurityAttackSurfaceEntry>>,
     /// In-band blind spot: number of `"use client"` files whose transitive
     /// import cone contains a dynamic `import()` the reachability BFS could not
     /// follow. A leak hidden behind such an edge would not be reported, so a
@@ -135,6 +140,8 @@ pub struct SecurityOptions<'a> {
     pub changed_workspaces: Option<&'a str>,
     /// `--file <PATH>`: scope findings to selected files or trace hops.
     pub file: &'a [PathBuf],
+    /// `--surface`: include the top-level attack-surface inventory in JSON.
+    pub surface: bool,
     /// `--gate <mode>`: opt-in regression gate (issue #886). Requires a diff
     /// source (`--changed-since`, `--diff-file`, or `--diff-stdin`); reports only
     /// candidates introduced in the changed lines and exits 8 if any exist.
@@ -255,6 +262,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         // the SARIF fingerprint.
         finding.finding_id = security_finding_id(finding);
     }
+    let (findings, attack_surface) = prepare_findings(findings, &config.root, opts.surface);
 
     // In gate mode the displayed set IS the strict "new" set, so its length is
     // the new-candidate count. The gate block is emitted unconditionally when a
@@ -282,6 +290,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
         schema_version: SecuritySchemaVersion::V1,
         gate,
         security_findings: findings,
+        attack_surface,
         unresolved_edge_files,
         unresolved_callee_sites,
     };
@@ -727,6 +736,34 @@ fn filter_to_files(
     fallow_core::changed_files::filter_results_by_changed_files(results, &file_set);
 }
 
+fn prepare_findings(
+    findings: Vec<SecurityFinding>,
+    root: &Path,
+    include_surface: bool,
+) -> (
+    Vec<SecurityFinding>,
+    Option<Vec<SecurityAttackSurfaceEntry>>,
+) {
+    let mut findings: Vec<SecurityFinding> = findings
+        .into_iter()
+        .map(|f| {
+            let mut f = relativize_finding(f, root);
+            f.finding_id = security_finding_id(&f);
+            f
+        })
+        .collect();
+    let attack_surface = include_surface.then(|| {
+        findings
+            .iter()
+            .filter_map(|finding| finding.attack_surface.clone())
+            .collect()
+    });
+    for finding in &mut findings {
+        finding.attack_surface = None;
+    }
+    (findings, attack_surface)
+}
+
 /// Rewrite a finding's anchor + every trace hop path to be project-root-relative
 /// (forward-slash normalization happens at serialize time via `serde_path`).
 fn relativize_finding(mut finding: SecurityFinding, root: &Path) -> SecurityFinding {
@@ -743,6 +780,16 @@ fn relativize_finding(mut finding: SecurityFinding, root: &Path) -> SecurityFind
     if let Some(flow) = &mut finding.taint_flow {
         flow.source.path = relativize(&flow.source.path, root);
         flow.sink.path = relativize(&flow.sink.path, root);
+    }
+    if let Some(surface) = &mut finding.attack_surface {
+        surface.source.path = relativize(&surface.source.path, root);
+        surface.sink.path = relativize(&surface.sink.path, root);
+        for hop in &mut surface.path {
+            hop.path = relativize(&hop.path, root);
+        }
+        for control in &mut surface.defensive_boundary.controls {
+            control.path = relativize(&control.path, root);
+        }
     }
     finding
 }
@@ -1301,6 +1348,7 @@ mod tests {
             },
             taint_flow: None,
             runtime: None,
+            attack_surface: None,
         }
     }
 
@@ -1309,6 +1357,7 @@ mod tests {
             schema_version: SecuritySchemaVersion::V1,
             gate: None,
             security_findings: findings,
+            attack_surface: None,
             unresolved_edge_files,
             unresolved_callee_sites: 0,
         }
@@ -1323,6 +1372,7 @@ mod tests {
                 new_count,
             }),
             security_findings: vec![],
+            attack_surface: None,
             unresolved_edge_files: 0,
             unresolved_callee_sites: 0,
         }
@@ -1884,6 +1934,7 @@ mod tests {
             workspace: None,
             changed_workspaces: None,
             file: &[],
+            surface: false,
             gate: None,
             runtime_coverage: None,
             min_invocations_hot: 100,

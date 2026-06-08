@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::extract::MemberKind;
+use crate::extract::{MemberKind, SecurityControlKind};
 use crate::output::IssueAction;
 use crate::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
@@ -1120,6 +1120,49 @@ pub struct SecurityRuntimeContext {
     pub evidence: Option<String>,
 }
 
+/// Defensive control found on an attack-surface path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityDefensiveControl {
+    /// Control family.
+    pub kind: SecurityControlKind,
+    /// File of the control site. Absolute internally; JSON strips the project root.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line of the control site.
+    pub line: u32,
+    /// 0-based byte column of the control site.
+    pub col: u32,
+    /// Flattened callee path or a stable synthetic guard name.
+    pub callee: String,
+}
+
+/// Agent-facing defensive-boundary verification context for one surface path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityDefensiveBoundary {
+    /// Known controls detected along this path.
+    pub controls: Vec<SecurityDefensiveControl>,
+    /// Verification question for the consuming agent. It is a prompt, not a
+    /// missing-guard verdict.
+    pub verification_prompt: String,
+}
+
+/// One untrusted entry to reachable sink path for `fallow security --surface`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityAttackSurfaceEntry {
+    /// The untrusted-source endpoint.
+    pub source: TaintEndpoint,
+    /// The reachable sink endpoint and catalogue metadata.
+    pub sink: SecurityCandidateSink,
+    /// Ordered source to sink path. Same shape as the reachability trace so
+    /// consumers can reuse existing path handling.
+    pub path: Vec<TraceHop>,
+    /// Defensive-boundary context detected on this path.
+    pub defensive_boundary: SecurityDefensiveBoundary,
+}
+
 /// A local security CANDIDATE for downstream agent verification, NOT a verified
 /// vulnerability. Emitted only by `fallow security`, never under bare `fallow`
 /// or the `audit` gate. There is deliberately no `confidence` or
@@ -1199,6 +1242,11 @@ pub struct SecurityFinding {
     /// runs and the candidate is a `tainted-sink`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<SecurityRuntimeContext>,
+    /// Internal projection used by `fallow security --surface`. The CLI strips
+    /// this from per-finding JSON and promotes it to the top-level
+    /// `attack_surface` field only when requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attack_surface: Option<SecurityAttackSurfaceEntry>,
 }
 
 /// A pnpm catalog entry declared in pnpm-workspace.yaml that no workspace package

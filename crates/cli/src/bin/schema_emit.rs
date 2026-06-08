@@ -72,7 +72,7 @@ use fallow_types::envelope::{
     EntryPoints, Meta, MetaMetric, MetaRule, RegressionResult, RegressionStatus,
     RegressionToleranceKind, SchemaVersion, ToolVersion,
 };
-use fallow_types::extract::MemberKind;
+use fallow_types::extract::{MemberKind, SecurityControlKind};
 use fallow_types::output::{
     AddToConfigAction, AddToConfigKind, AddToConfigValue, FixAction, FixActionType,
     IgnoreExportsRule, IssueAction, SuppressFileAction, SuppressFileKind, SuppressLineAction,
@@ -95,8 +95,9 @@ use fallow_types::results::{
     DependencyOverrideMisconfigReason, DependencyOverrideSource, DuplicateExport,
     DuplicateLocation, EmptyCatalogGroup, EntryPointSummary, ExportUsage, FeatureFlag,
     FlagConfidence, FlagKind, ImportSite, MisconfiguredDependencyOverride, PrivateTypeLeak,
-    ReferenceLocation, SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink,
-    SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind,
+    ReferenceLocation, SecurityAttackSurfaceEntry, SecurityCandidate, SecurityCandidateBoundary,
+    SecurityCandidateSink, SecurityDeadCodeContext, SecurityDeadCodeKind,
+    SecurityDefensiveBoundary, SecurityDefensiveControl, SecurityFinding, SecurityFindingKind,
     SecurityReachability, SecurityRuntimeContext, SecurityRuntimeState, SecurityTaintFlow,
     SecurityZoneCrossing, StaleSuppression, SuppressionOrigin, TaintEndpoint, TaintPath,
     TestOnlyDependency, TraceHop, TraceHopRole, TypeOnlyDependency, UnlistedDependency,
@@ -329,6 +330,10 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "SecurityCandidateBoundary",
         "SecurityZoneCrossing",
         "SecurityTaintFlow",
+        "SecurityControlKind",
+        "SecurityDefensiveControl",
+        "SecurityDefensiveBoundary",
+        "SecurityAttackSurfaceEntry",
         "TaintEndpoint",
         "TaintPath",
         "TraceHop",
@@ -531,6 +536,10 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<SecurityTaintFlow>();
     let _ = generator.subschema_for::<SecurityRuntimeState>();
     let _ = generator.subschema_for::<SecurityRuntimeContext>();
+    let _ = generator.subschema_for::<SecurityControlKind>();
+    let _ = generator.subschema_for::<SecurityDefensiveControl>();
+    let _ = generator.subschema_for::<SecurityDefensiveBoundary>();
+    let _ = generator.subschema_for::<SecurityAttackSurfaceEntry>();
     let _ = generator.subschema_for::<SecurityFinding>();
     let _ = generator.subschema_for::<SecurityGateMode>();
     let _ = generator.subschema_for::<SecurityGateVerdict>();

@@ -631,6 +631,10 @@ export type SecurityDeadCodeKind = ("unused-file" | "unused-export")
  */
 export type SecurityRuntimeState = ("runtime-hot" | "runtime-cold" | "never-executed" | "low-traffic" | "coverage-unavailable" | "runtime-unknown")
 /**
+ * Defensive control family detected on a source to sink path.
+ */
+export type SecurityControlKind = ("sanitization" | "validation" | "authentication" | "authorization")
+/**
  * Discriminator value for [`CodeClimateIssue::kind`].
  */
 export type CodeClimateIssueKind = "issue"
@@ -4870,6 +4874,11 @@ gate?: (SecurityGate | null)
  */
 security_findings: SecurityFinding[]
 /**
+ * Opt-in attack-surface inventory from untrusted entry points to reachable
+ * sinks. Present only when `--surface` was requested.
+ */
+attack_surface?: (SecurityAttackSurfaceEntry[] | null)
+/**
  * In-band blind spot: number of `"use client"` files whose transitive
  * import cone contains a dynamic `import()` the reachability BFS could not
  * follow. A leak hidden behind such an edge would not be reported, so a
@@ -4990,6 +4999,12 @@ taint_flow?: (SecurityTaintFlow | null)
  * runs and the candidate is a `tainted-sink`.
  */
 runtime?: (SecurityRuntimeContext | null)
+/**
+ * Internal projection used by `fallow security --surface`. The CLI strips
+ * this from per-finding JSON and promotes it to the top-level
+ * `attack_surface` field only when requested.
+ */
+attack_surface?: (SecurityAttackSurfaceEntry | null)
 }
 /**
  * One hop in a security finding's structural trace. Stored as an absolute path
@@ -5259,6 +5274,55 @@ stable_id?: (string | null)
  * Short candidate-framed explanation of the runtime evidence.
  */
 evidence?: (string | null)
+}
+/**
+ * One untrusted entry to reachable sink path for `fallow security --surface`.
+ */
+export interface SecurityAttackSurfaceEntry {
+source: TaintEndpoint
+sink: SecurityCandidateSink
+/**
+ * Ordered source to sink path. Same shape as the reachability trace so
+ * consumers can reuse existing path handling.
+ */
+path: TraceHop[]
+defensive_boundary: SecurityDefensiveBoundary
+}
+/**
+ * Agent-facing defensive-boundary verification context for one surface path.
+ */
+export interface SecurityDefensiveBoundary {
+/**
+ * Known controls detected along this path.
+ */
+controls: SecurityDefensiveControl[]
+/**
+ * Verification question for the consuming agent. It is a prompt, not a
+ * missing-guard verdict.
+ */
+verification_prompt: string
+}
+/**
+ * Defensive control found on an attack-surface path.
+ */
+export interface SecurityDefensiveControl {
+kind: SecurityControlKind
+/**
+ * File of the control site. Absolute internally; JSON strips the project root.
+ */
+path: string
+/**
+ * 1-based line of the control site.
+ */
+line: number
+/**
+ * 0-based byte column of the control site.
+ */
+col: number
+/**
+ * Flattened callee path or a stable synthetic guard name.
+ */
+callee: string
 }
 /**
  * Bare `fallow --format json` envelope.

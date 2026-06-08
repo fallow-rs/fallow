@@ -18,7 +18,8 @@ use fallow_types::extract::{ExportName, ModuleInfo};
 use fallow_types::output::{FixAction, FixActionType, IssueAction};
 use fallow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding};
 use fallow_types::results::{
-    SecurityCandidateBoundary, SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding,
+    SecurityAttackSurfaceEntry, SecurityCandidateBoundary, SecurityDeadCodeContext,
+    SecurityDeadCodeKind, SecurityDefensiveBoundary, SecurityDefensiveControl, SecurityFinding,
     SecurityFindingKind, SecurityReachability, SecurityTaintFlow, SecurityZoneCrossing,
     TaintEndpoint, TaintPath, TraceHop, TraceHopRole,
 };
@@ -30,6 +31,8 @@ use super::{LineOffsetsMap, byte_offset_to_line_col, catalogue::catalogue};
 
 const UNUSED_FILE_GUIDANCE: &str = "This sink sits in a file fallow also reports as unused. Verify the dead-code finding, then delete the file instead of hardening the sink.";
 const UNUSED_EXPORT_GUIDANCE: &str = "This sink sits on an export fallow also reports as unused. Verify the dead-code finding, then remove the export instead of hardening the sink.";
+const ZERO_CONTROL_PROMPT: &str = "No known control library was detected on this path. Should validation, sanitization, or auth be required before this sink?";
+const CONTROL_PRESENT_PROMPT: &str = "Known defensive controls were detected on this path. Are they sufficient for this sink and untrusted input?";
 
 /// Annotate tainted-sink candidates that overlap dead-code findings from the same
 /// analysis run. Client-server leak findings stay unchanged because #884 was
@@ -198,6 +201,19 @@ pub fn rank_security_findings(
         .map(|node| (node.path.as_path(), node.file_id))
         .collect();
     let source_index = UntrustedSourceIndex::build(graph, modules, declared_deps);
+    let modules_by_id: FxHashMap<FileId, &ModuleInfo> = modules
+        .iter()
+        .map(|module| (module.file_id, module))
+        .collect();
+    let modules_by_path: FxHashMap<&Path, &ModuleInfo> = graph
+        .modules
+        .iter()
+        .filter_map(|node| {
+            modules_by_id
+                .get(&node.file_id)
+                .map(|module| (node.path.as_path(), *module))
+        })
+        .collect();
 
     for finding in findings.iter_mut() {
         let reachability = path_to_id.get(finding.path.as_path()).map(|&file_id| {
@@ -215,6 +231,8 @@ pub fn rank_security_findings(
         // from the reachability + trace just computed. Pure re-projection: no new
         // analysis. The zone names come from the same boundary-crossing map.
         enrich_candidate(finding, boundary_crossings.get(&finding.path));
+        finding.attack_surface =
+            build_attack_surface(finding, &modules_by_path, line_offsets_by_file);
     }
 
     findings.sort_by(|a, b| {
@@ -332,6 +350,80 @@ fn build_taint_flow(finding: &SecurityFinding) -> Option<SecurityTaintFlow> {
             cross_module_hops: hop_count,
         },
     })
+}
+
+fn build_attack_surface(
+    finding: &SecurityFinding,
+    modules_by_path: &FxHashMap<&Path, &ModuleInfo>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> Option<SecurityAttackSurfaceEntry> {
+    let flow = finding.taint_flow.as_ref()?;
+    let reach = finding.reachability.as_ref()?;
+    let path = reach.untrusted_source_trace.clone();
+    if path.is_empty() {
+        return None;
+    }
+    let controls = defensive_controls_for_path(&path, modules_by_path, line_offsets_by_file);
+    let verification_prompt = if controls.is_empty() {
+        ZERO_CONTROL_PROMPT
+    } else {
+        CONTROL_PRESENT_PROMPT
+    }
+    .to_string();
+
+    Some(SecurityAttackSurfaceEntry {
+        source: flow.source.clone(),
+        sink: finding.candidate.sink.clone(),
+        path,
+        defensive_boundary: SecurityDefensiveBoundary {
+            controls,
+            verification_prompt,
+        },
+    })
+}
+
+fn defensive_controls_for_path(
+    path: &[TraceHop],
+    modules_by_path: &FxHashMap<&Path, &ModuleInfo>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> Vec<SecurityDefensiveControl> {
+    let mut controls = Vec::new();
+    let mut seen_files = FxHashSet::default();
+    for hop in path {
+        if !seen_files.insert(hop.path.as_path()) {
+            continue;
+        }
+        let Some(module) = modules_by_path.get(hop.path.as_path()).copied() else {
+            continue;
+        };
+        for control in &module.security_control_sites {
+            let (line, col) =
+                byte_offset_to_line_col(line_offsets_by_file, module.file_id, control.span_start);
+            controls.push(SecurityDefensiveControl {
+                kind: control.kind,
+                path: hop.path.clone(),
+                line,
+                col,
+                callee: control.callee_path.clone(),
+            });
+        }
+    }
+    controls.sort_by(|a, b| {
+        a.path
+            .cmp(&b.path)
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.col.cmp(&b.col))
+            .then_with(|| a.callee.cmp(&b.callee))
+            .then_with(|| a.kind.cmp(&b.kind))
+    });
+    controls.dedup_by(|a, b| {
+        a.path == b.path
+            && a.line == b.line
+            && a.col == b.col
+            && a.kind == b.kind
+            && a.callee == b.callee
+    });
+    controls
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -538,7 +630,9 @@ mod tests {
     use super::*;
 
     use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
-    use fallow_types::extract::{MemberAccess, TaintedBinding};
+    use fallow_types::extract::{
+        MemberAccess, SecurityControlKind, SecurityControlSite, TaintedBinding,
+    };
     use fallow_types::output::{FixActionType, IssueAction};
     use fallow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding};
     use fallow_types::results::{
@@ -703,6 +797,7 @@ mod tests {
             security_sinks_skipped: 0,
             tainted_bindings: vec![],
             sanitized_sink_args: vec![],
+            security_control_sites: vec![],
         }
     }
 
@@ -720,6 +815,17 @@ mod tests {
         module.tainted_bindings.push(TaintedBinding {
             local: "body".to_string(),
             source_path: "req.body".to_string(),
+        });
+        module
+    }
+
+    fn validation_control_module(file_id: u32) -> ModuleInfo {
+        let mut module = module(file_id);
+        module.security_control_sites.push(SecurityControlSite {
+            kind: SecurityControlKind::Validation,
+            callee_path: "schema.parse".to_string(),
+            span_start: 0,
+            span_end: 12,
         });
         module
     }
@@ -760,6 +866,7 @@ mod tests {
             },
             taint_flow: None,
             runtime: None,
+            attack_surface: None,
         }
     }
 
@@ -788,6 +895,51 @@ mod tests {
                 .expect("ranked")
                 .reachable_from_entry
         );
+    }
+
+    #[test]
+    fn attack_surface_records_detected_controls_on_source_to_sink_path() {
+        let graph = build_graph(&["source.ts", "sink.ts"], &[(0, 1)], &[0]);
+        let modules = vec![
+            tainted_binding_source_module(0),
+            validation_control_module(1),
+        ];
+        let mut findings = vec![finding("sink.ts")];
+
+        rank_with_modules(&graph, &modules, &mut findings);
+
+        let surface = findings[0].attack_surface.as_ref().expect("surface entry");
+        assert_eq!(surface.source.path, PathBuf::from(ROOT).join("source.ts"));
+        assert_eq!(surface.sink.path, PathBuf::from(ROOT).join("sink.ts"));
+        assert_eq!(surface.defensive_boundary.controls.len(), 1);
+        assert_eq!(
+            surface.defensive_boundary.controls[0].kind,
+            SecurityControlKind::Validation
+        );
+        assert!(
+            surface
+                .defensive_boundary
+                .verification_prompt
+                .contains("Are they sufficient")
+        );
+    }
+
+    #[test]
+    fn attack_surface_zero_control_prompt_is_a_question() {
+        let graph = build_graph(&["source.ts", "sink.ts"], &[(0, 1)], &[0]);
+        let modules = vec![tainted_binding_source_module(0), module(1)];
+        let mut findings = vec![finding("sink.ts")];
+
+        rank_with_modules(&graph, &modules, &mut findings);
+
+        let prompt = &findings[0]
+            .attack_surface
+            .as_ref()
+            .expect("surface entry")
+            .defensive_boundary
+            .verification_prompt;
+        assert!(prompt.ends_with('?'));
+        assert!(prompt.contains("No known control library"));
     }
 
     #[test]

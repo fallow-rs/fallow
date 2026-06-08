@@ -274,7 +274,11 @@ use crate::MemberKind;
 /// args, tRPC procedure input, and exact member source paths for local tainted
 /// bindings. Pre-136 entries may miss those source-backed ranking signals until
 /// the file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 136;
+///
+/// Bumped to 137 for issue #888: JS/TS extraction now records defensive
+/// security control sites for the attack-surface inventory. Pre-137 entries
+/// omit those controls until the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 137;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -317,7 +321,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 736);
+assert_cached_type_size!(CachedModule, 760);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -432,6 +436,8 @@ pub struct CachedModule {
     pub tainted_bindings: Vec<fallow_types::extract::TaintedBinding>,
     /// Direct sink arguments recognized as sanitizer calls.
     pub sanitized_sink_args: Vec<fallow_types::extract::SanitizedSinkArg>,
+    /// Defensive control call sites for security surface output.
+    pub security_control_sites: Vec<fallow_types::extract::SecurityControlSite>,
 }
 
 /// Cached namespace-object alias.

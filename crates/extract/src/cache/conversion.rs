@@ -252,6 +252,7 @@ pub fn cached_to_module_opts(
         security_sinks_skipped: cached.security_sinks_skipped,
         tainted_bindings: cached.tainted_bindings.clone(),
         sanitized_sink_args: cached.sanitized_sink_args.clone(),
+        security_control_sites: cached.security_control_sites.clone(),
     }
 }
 
@@ -447,5 +448,6 @@ pub fn module_to_cached(
         security_sinks_skipped: module.security_sinks_skipped,
         tainted_bindings: module.tainted_bindings.clone(),
         sanitized_sink_args: module.sanitized_sink_args.clone(),
+        security_control_sites: module.security_control_sites.clone(),
     }
 }

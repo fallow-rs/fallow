@@ -16,7 +16,7 @@ use crate::{
 };
 use fallow_types::extract::{
     ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference, SanitizedSinkArg,
-    SanitizerScope, SinkSite, TaintedBinding,
+    SanitizerScope, SecurityControlSite, SinkSite, TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
 
@@ -192,6 +192,8 @@ pub(crate) struct ModuleInfoExtractor {
     pub(crate) tainted_bindings: Vec<TaintedBinding>,
     /// Direct sink arguments recognized as sanitizer calls.
     pub(crate) sanitized_sink_args: Vec<SanitizedSinkArg>,
+    /// Defensive control call sites for security surface output.
+    pub(crate) security_control_sites: Vec<SecurityControlSite>,
     /// Module-scope default, namespace, or require bindings imported from
     /// DOMPurify-compatible packages.
     pub(crate) dompurify_bindings: FxHashSet<String>,
@@ -319,6 +321,11 @@ impl ModuleInfoExtractor {
         }
         for arg in &mut self.sanitized_sink_args {
             arg.span_start = remap(Span::new(arg.span_start, arg.span_start)).start;
+        }
+        for control in &mut self.security_control_sites {
+            let span = remap(Span::new(control.span_start, control.span_end));
+            control.span_start = span.start;
+            control.span_end = span.end;
         }
     }
 
@@ -878,6 +885,7 @@ impl ModuleInfoExtractor {
             security_sinks_skipped: self.security_sinks_skipped,
             tainted_bindings: self.tainted_bindings,
             sanitized_sink_args: self.sanitized_sink_args,
+            security_control_sites: self.security_control_sites,
         }
     }
 
@@ -927,6 +935,8 @@ impl ModuleInfoExtractor {
         info.security_sinks_skipped += self.security_sinks_skipped;
         info.tainted_bindings.extend(self.tainted_bindings);
         info.sanitized_sink_args.extend(self.sanitized_sink_args);
+        info.security_control_sites
+            .extend(self.security_control_sites);
     }
 }
 

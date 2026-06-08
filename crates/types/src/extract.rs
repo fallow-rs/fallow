@@ -107,6 +107,50 @@ pub struct ModuleInfo {
     /// time. Used for direct sink calls such as
     /// `el.innerHTML = DOMPurify.sanitize(input)`.
     pub sanitized_sink_args: Vec<SanitizedSinkArg>,
+    /// Known defensive control call sites found in this module. Consumed only by
+    /// the `fallow security --surface` agent JSON path.
+    pub security_control_sites: Vec<SecurityControlSite>,
+}
+
+/// Defensive control family detected on a source to sink path.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SecurityControlKind {
+    /// Sanitization or escaping before a sink.
+    Sanitization,
+    /// Input validation or schema parsing.
+    Validation,
+    /// Authentication check or middleware.
+    Authentication,
+    /// Authorization or permission check.
+    Authorization,
+}
+
+/// A known defensive control call site.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, bitcode::Encode, bitcode::Decode)]
+pub struct SecurityControlSite {
+    /// Control family.
+    pub kind: SecurityControlKind,
+    /// Flattened callee path or a stable synthetic name for guard-derived
+    /// controls.
+    pub callee_path: String,
+    /// Byte offset of the control span start.
+    pub span_start: u32,
+    /// Byte offset of the control span end.
+    pub span_end: u32,
 }
 
 /// Sanitizer output domain. Kept intentionally narrow so a sanitizer for one
@@ -793,7 +837,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 184);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 720);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 744);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]

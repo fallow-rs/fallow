@@ -202,6 +202,7 @@ mod tests {
                 finding_id: String::new(),
                 candidate: fallow_core::results::SecurityCandidate::default(),
                 taint_flow: None,
+                attack_surface: None,
                 kind: fallow_core::results::SecurityFindingKind::TaintedSink,
                 category: Some("dangerous-html".to_string()),
                 cwe: Some(79),

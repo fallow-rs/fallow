@@ -49,6 +49,9 @@ pub fn build_security_candidates_args(
         "--changed-workspaces",
         params.changed_workspaces.as_deref(),
     );
+    if params.surface == Some(true) {
+        args.push("--surface".to_string());
+    }
 
     Ok(args)
 }

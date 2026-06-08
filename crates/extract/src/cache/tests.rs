@@ -62,6 +62,7 @@ fn cache_store_insert_and_get() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
     assert_eq!(store.len(), 1);
@@ -109,6 +110,7 @@ fn cache_store_hash_mismatch_returns_none() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
     assert!(store.get(Path::new("test.ts"), 99).is_none());
@@ -160,6 +162,7 @@ fn cache_store_overwrite_entry() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
     let m2 = CachedModule {
         content_hash: 2,
@@ -198,6 +201,7 @@ fn cache_store_overwrite_entry() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
     store.insert(Path::new("test.ts"), m1);
     store.insert(Path::new("test.ts"), m2);
@@ -252,6 +256,7 @@ fn module_to_cached_roundtrip_named_export() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -326,6 +331,7 @@ fn module_to_cached_roundtrip_side_effect_used_export() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -385,6 +391,7 @@ fn module_to_cached_roundtrip_default_export() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -467,6 +474,7 @@ fn module_to_cached_roundtrip_imports() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -533,6 +541,7 @@ fn module_to_cached_roundtrip_re_exports() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -597,6 +606,7 @@ fn module_to_cached_roundtrip_dynamic_imports() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -690,6 +700,7 @@ fn module_to_cached_roundtrip_members() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -762,6 +773,7 @@ fn cache_save_and_load_roundtrip() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
     store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
@@ -820,6 +832,7 @@ fn cache_version_mismatch_returns_none() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
     store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
@@ -883,6 +896,7 @@ fn module_to_cached_roundtrip_type_only_import() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -933,6 +947,7 @@ fn get_by_path_only_returns_entry_regardless_of_hash() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -994,6 +1009,7 @@ fn retain_paths_removes_stale_entries() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     store.insert(Path::new("/project/a.ts"), m());
@@ -1061,6 +1077,7 @@ fn retain_paths_with_empty_files_clears_cache() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
     store.insert(Path::new("a.ts"), m);
     assert_eq!(store.len(), 1);
@@ -1109,6 +1126,7 @@ fn get_by_metadata_returns_entry_on_match() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1157,6 +1175,7 @@ fn get_by_metadata_returns_none_on_mtime_mismatch() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1207,6 +1226,7 @@ fn get_by_metadata_returns_none_on_size_mismatch() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1257,6 +1277,7 @@ fn get_by_metadata_returns_none_for_zero_mtime() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
     store.insert(Path::new("test.ts"), module);
 
@@ -1314,6 +1335,7 @@ fn module_to_cached_stores_mtime_and_size() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 12345, 6789);
@@ -1359,6 +1381,7 @@ fn module_to_cached_roundtrip_line_offsets() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
     let cached = module_to_cached(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
@@ -1420,6 +1443,7 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1484,6 +1508,7 @@ fn module_to_cached_roundtrip_unknown_suppression_kinds() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1547,6 +1572,7 @@ fn module_to_cached_roundtrip_visibility() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1601,6 +1627,7 @@ fn module_to_cached_roundtrip_visibility_internal() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1655,6 +1682,7 @@ fn module_to_cached_roundtrip_visibility_beta() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1709,6 +1737,7 @@ fn module_to_cached_roundtrip_visibility_alpha() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1765,6 +1794,7 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1819,6 +1849,7 @@ fn module_to_cached_roundtrip_unused_import_bindings() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1900,6 +1931,7 @@ fn module_to_cached_roundtrip_complexity() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -1958,6 +1990,7 @@ fn module_to_cached_roundtrip_require_with_destructured() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2015,6 +2048,7 @@ fn module_to_cached_roundtrip_dynamic_import_with_local() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2071,6 +2105,7 @@ fn module_to_cached_roundtrip_source_span() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2134,6 +2169,7 @@ fn module_to_cached_roundtrip_member_decorators() {
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     };
 
     let cached = module_to_cached(&module, 0, 0);
@@ -2186,6 +2222,7 @@ fn synthetic_module(content_hash: u64, last_access_secs: u64, payload_kb: usize)
         security_sinks_skipped: 0,
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
+        security_control_sites: Vec::new(),
     }
 }
 

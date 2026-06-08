@@ -351,6 +351,7 @@ fn build_leak_finding(
         candidate,
         taint_flow: None,
         runtime: None,
+        attack_surface: None,
     }
 }
 
@@ -414,6 +415,7 @@ fn build_direct_finding(
         candidate,
         taint_flow: None,
         runtime: None,
+        attack_surface: None,
     }
 }
 

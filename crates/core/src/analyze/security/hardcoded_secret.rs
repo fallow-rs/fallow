@@ -118,6 +118,7 @@ pub fn find_hardcoded_secret_candidates(
                 candidate,
                 taint_flow: None,
                 runtime: None,
+                attack_surface: None,
             });
         }
     }

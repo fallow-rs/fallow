@@ -121,6 +121,10 @@ pub struct SecurityCandidatesParams {
     /// exclusive with `workspace`.
     pub changed_workspaces: Option<String>,
 
+    /// Include the attack-surface inventory with defensive-boundary verification
+    /// prompts in the JSON response.
+    pub surface: Option<bool>,
+
     pub no_cache: Option<bool>,
 
     pub threads: Option<usize>,

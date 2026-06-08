@@ -461,6 +461,7 @@ pub fn find_tainted_sinks(
                 candidate,
                 taint_flow: None,
                 runtime: None,
+                attack_surface: None,
             });
         }
     }
