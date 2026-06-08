@@ -810,20 +810,31 @@ pub fn find_dead_code_full(
         // Map each boundary-violation file (importer or imported side) to the
         // (from_zone, to_zone) it crosses, so security ranking can flag
         // `crosses_boundary` AND fill the candidate's architecture-zone slot
-        // (issue #900). Duplicate paths keep the last (deterministic: the
-        // violations are path-sorted).
-        let boundary_crossings: rustc_hash::FxHashMap<std::path::PathBuf, (String, String)> =
-            results
-                .boundary_violations
-                .iter()
-                .flat_map(|b| {
-                    let zones = (b.violation.from_zone.clone(), b.violation.to_zone.clone());
-                    [
-                        (b.violation.from_path.clone(), zones.clone()),
-                        (b.violation.to_path.clone(), zones),
-                    ]
-                })
-                .collect();
+        // (issue #900). `boundary_violations` is not yet path-sorted here (the
+        // output sort runs later), so for a file participating in more than one
+        // zone crossing pick the lexicographically smallest pair, which is
+        // independent of insertion order and therefore stable across runs.
+        let mut boundary_crossings: rustc_hash::FxHashMap<std::path::PathBuf, (String, String)> =
+            rustc_hash::FxHashMap::default();
+        for violation in &results.boundary_violations {
+            let zones = (
+                violation.violation.from_zone.clone(),
+                violation.violation.to_zone.clone(),
+            );
+            for path in [
+                violation.violation.from_path.clone(),
+                violation.violation.to_path.clone(),
+            ] {
+                boundary_crossings
+                    .entry(path)
+                    .and_modify(|existing| {
+                        if zones < *existing {
+                            *existing = zones.clone();
+                        }
+                    })
+                    .or_insert_with(|| zones.clone());
+            }
+        }
         security::rank_security_findings(
             graph,
             modules,
