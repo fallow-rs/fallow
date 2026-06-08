@@ -4848,8 +4848,9 @@ git_sha?: (string | null)
 timestamp: string
 }
 /**
- * The `fallow security --format json` envelope. `security_findings` is the
- * unique required field used for untagged narrowing in `FallowOutput`.
+ * The `fallow security --format json` envelope. `FallowOutput` discriminates it
+ * by the `kind: "security"` tag; the optional `gate` block is additive and is
+ * not part of that discrimination.
  */
 export interface SecurityOutput {
 schema_version: SecuritySchemaVersion

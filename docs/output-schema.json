@@ -9867,7 +9867,7 @@
         "unresolved_edge_files",
         "unresolved_callee_sites"
       ],
-      "description": "The `fallow security --format json` envelope. `security_findings` is the\nunique required field used for untagged narrowing in `FallowOutput`."
+      "description": "The `fallow security --format json` envelope. `FallowOutput` discriminates it\nby the `kind: \"security\"` tag; the optional `gate` block is additive and is\nnot part of that discrimination."
     },
     "SecuritySchemaVersion": {
       "oneOf": [
