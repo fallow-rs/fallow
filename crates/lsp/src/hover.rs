@@ -101,6 +101,11 @@ fn check_security(
         let _ = write!(value, "\n\n{}", format_inline_code(&finding.evidence));
 
         if let Some(context) = finding.dead_code.as_ref() {
+            // `guidance` is a trusted static constant from the analyzer
+            // (`UNUSED_FILE_GUIDANCE` / `UNUSED_EXPORT_GUIDANCE` in
+            // `analyze/security/rank.rs`), never user-derived, so it is rendered
+            // as prose. If it ever becomes dynamic, route it through
+            // `format_inline_code` or split out the user-controlled part.
             let _ = write!(value, "\n\ndead-code: {}", context.guidance);
         }
 

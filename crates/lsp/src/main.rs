@@ -1594,6 +1594,8 @@ mod tests {
         assert!(codes.contains(&"test-only-dependency"));
         assert!(codes.contains(&"boundary-violation"));
         assert!(codes.contains(&"stale-suppression"));
+        assert!(codes.contains(&"security-sink"));
+        assert!(codes.contains(&"security-client-server-leak"));
         assert_eq!(
             issue_types
                 .iter()
@@ -2739,6 +2741,8 @@ export function choose(value: number): string {
         assert!(keys.contains(&"circular-dependencies"));
         assert!(keys.contains(&"boundary-violation"));
         assert!(keys.contains(&"stale-suppressions"));
+        assert!(keys.contains(&"security-sink"));
+        assert!(keys.contains(&"security-client-server-leak"));
     }
 
     #[test]
