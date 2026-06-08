@@ -112,6 +112,8 @@ export const getDiagnosticCategories = (): ReadonlyArray<DiagnosticCategory> =>
 interface PersistedState {
   readonly mutedAll?: boolean;
   readonly mutedCategories?: ReadonlyArray<string>;
+  readonly localMutedCategories?: ReadonlyArray<string>;
+  readonly localVisibleCategories?: ReadonlyArray<string>;
 }
 
 interface FilterClient {
@@ -175,7 +177,9 @@ interface DiagnosticFilterStateChange {
 
 export class DiagnosticFilter {
   private mutedAll = false;
-  private mutedCategories = new Set<string>();
+  private baselineMutedCategories = new Set<string>();
+  private localMutedCategories = new Set<string>();
+  private localVisibleCategories = new Set<string>();
   private readonly cache = new Map<string, vscode.Diagnostic[]>();
   private client: FilterClient | null = null;
   private persistQueue: Promise<void> = Promise.resolve();
@@ -186,12 +190,15 @@ export class DiagnosticFilter {
   public constructor(
     private readonly memento: vscode.Memento,
     private readonly getSeverity: DiagnosticSeverityGetter = () => "warning",
+    baselineMutedCategories: ReadonlySet<string> = new Set(),
   ) {
+    this.baselineMutedCategories = new Set(baselineMutedCategories);
     const persisted = memento.get<PersistedState>(STATE_KEY);
     if (persisted) {
       this.mutedAll = persisted.mutedAll === true;
-      const list = persisted.mutedCategories ?? [];
-      this.mutedCategories = new Set(list);
+      const localMuted = persisted.localMutedCategories ?? persisted.mutedCategories ?? [];
+      this.localMutedCategories = new Set(localMuted);
+      this.localVisibleCategories = new Set(persisted.localVisibleCategories ?? []);
     }
   }
 
@@ -214,15 +221,27 @@ export class DiagnosticFilter {
   }
 
   public isCategoryMuted(code: string): boolean {
-    return this.mutedCategories.has(code);
+    return this.effectiveMutedCategories().has(code);
   }
 
   public anythingMuted(): boolean {
-    return this.mutedAll || this.mutedCategories.size > 0;
+    return this.mutedAll || this.effectiveMutedCategories().size > 0;
   }
 
   public mutedCategoriesSnapshot(): ReadonlySet<string> {
-    return new Set(this.mutedCategories);
+    return this.effectiveMutedCategories();
+  }
+
+  public updateBaselineMutedCategories(codes: ReadonlySet<string>): void {
+    const next = new Set(codes);
+    if (setsEqual(this.baselineMutedCategories, next)) {
+      return;
+    }
+    this.baselineMutedCategories = next;
+    this.pruneVisibleOverrides();
+    this.persist();
+    this.refresh();
+    this.emitChange();
   }
 
   public setMutedAll(value: boolean): void {
@@ -241,14 +260,20 @@ export class DiagnosticFilter {
   }
 
   public setCategoryMuted(code: string, value: boolean): void {
-    const had = this.mutedCategories.has(code);
+    const had = this.isCategoryMuted(code);
     if (value === had) {
       return;
     }
     if (value) {
-      this.mutedCategories.add(code);
+      this.localVisibleCategories.delete(code);
+      if (!this.baselineMutedCategories.has(code)) {
+        this.localMutedCategories.add(code);
+      }
     } else {
-      this.mutedCategories.delete(code);
+      this.localMutedCategories.delete(code);
+      if (this.baselineMutedCategories.has(code)) {
+        this.localVisibleCategories.add(code);
+      }
     }
     this.persist();
     this.refresh();
@@ -256,27 +281,34 @@ export class DiagnosticFilter {
   }
 
   public setMutedCategories(codes: ReadonlySet<string>): void {
-    let changed = this.mutedCategories.size !== codes.size;
-    if (!changed) {
-      for (const code of codes) {
-        if (!this.mutedCategories.has(code)) {
-          changed = true;
-          break;
-        }
+    const nextLocalMuted = new Set<string>();
+    const nextLocalVisible = new Set<string>();
+    for (const code of codes) {
+      if (!this.baselineMutedCategories.has(code)) {
+        nextLocalMuted.add(code);
       }
     }
+    for (const code of this.baselineMutedCategories) {
+      if (!codes.has(code)) {
+        nextLocalVisible.add(code);
+      }
+    }
+    const changed =
+      !setsEqual(this.localMutedCategories, nextLocalMuted) ||
+      !setsEqual(this.localVisibleCategories, nextLocalVisible);
     if (!changed) {
       return;
     }
 
-    this.mutedCategories = new Set(codes);
+    this.localMutedCategories = nextLocalMuted;
+    this.localVisibleCategories = nextLocalVisible;
     this.persist();
     this.refresh();
     this.emitChange();
   }
 
   public toggleCategory(code: string): boolean {
-    const next = !this.mutedCategories.has(code);
+    const next = !this.isCategoryMuted(code);
     this.setCategoryMuted(code, next);
     return next;
   }
@@ -286,7 +318,8 @@ export class DiagnosticFilter {
       return;
     }
     this.mutedAll = false;
-    this.mutedCategories.clear();
+    this.localMutedCategories.clear();
+    this.localVisibleCategories = new Set(this.baselineMutedCategories);
     this.persist();
     this.refresh();
     this.emitChange();
@@ -312,7 +345,7 @@ export class DiagnosticFilter {
           if (code === null) {
             return true;
           }
-          return !this.mutedCategories.has(code);
+          return !this.isCategoryMuted(code);
         })
       : diagnostics;
     return filtered.map((d) => withRenderedSeverity(d, renderedSeverity));
@@ -388,9 +421,12 @@ export class DiagnosticFilter {
   }
 
   private persist(): void {
+    const effectiveMutedCategories = Array.from(this.effectiveMutedCategories());
     const payload: PersistedState = {
       mutedAll: this.mutedAll,
-      mutedCategories: Array.from(this.mutedCategories),
+      mutedCategories: effectiveMutedCategories,
+      localMutedCategories: Array.from(this.localMutedCategories),
+      localVisibleCategories: Array.from(this.localVisibleCategories),
     };
     this.persistQueue = this.persistQueue.then(
       () => Promise.resolve(this.memento.update(STATE_KEY, payload)),
@@ -404,4 +440,35 @@ export class DiagnosticFilter {
       mutedCategories: this.mutedCategoriesSnapshot(),
     });
   }
+
+  private effectiveMutedCategories(): Set<string> {
+    const result = new Set(this.baselineMutedCategories);
+    for (const code of this.localMutedCategories) {
+      result.add(code);
+    }
+    for (const code of this.localVisibleCategories) {
+      result.delete(code);
+    }
+    return result;
+  }
+
+  private pruneVisibleOverrides(): void {
+    for (const code of Array.from(this.localVisibleCategories)) {
+      if (!this.baselineMutedCategories.has(code)) {
+        this.localVisibleCategories.delete(code);
+      }
+    }
+  }
 }
+
+const setsEqual = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean => {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const value of left) {
+    if (!right.has(value)) {
+      return false;
+    }
+  }
+  return true;
+};

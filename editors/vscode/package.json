@@ -475,6 +475,15 @@
           ],
           "markdownDescription": "Render Fallow editor diagnostics at the selected VS Code severity. `hint` keeps findings available without squiggles. Editor-only; CI and `fallow check` still report every finding."
         },
+        "fallow.diagnostics.mutedCategories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "resource",
+          "markdownDescription": "Team-shareable baseline of Fallow diagnostic categories to hide in the editor, such as `code-duplication` or `stale-suppression`. Commit this in `.vscode/settings.json` to give everyone the same quiet starting point. Per-machine mutes can still hide more or show a baseline-hidden category locally. Editor-only; CI and `fallow check` still report every finding."
+        },
         "fallow.trace.server": {
           "type": "string",
           "default": "off",

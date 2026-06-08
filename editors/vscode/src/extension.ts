@@ -16,6 +16,7 @@ import {
   getAuditRunOnSave,
   getDiagnosticStatusBar,
   getDiagnosticSeverity,
+  getMutedDiagnosticCategories,
   getComplexityBreakdownEnabled,
   getComplexityAfterText,
   onConfigChange,
@@ -180,7 +181,11 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   syncAuditStatusBar();
   context.subscriptions.push({ dispose: () => disposeAuditStatusBar() });
 
-  const diagnosticFilter = new DiagnosticFilter(context.workspaceState, getDiagnosticSeverity);
+  const diagnosticFilter = new DiagnosticFilter(
+    context.workspaceState,
+    getDiagnosticSeverity,
+    getMutedDiagnosticCategories(),
+  );
   context.subscriptions.push({ dispose: () => diagnosticFilter.dispose() });
   registerDiagnosticMuteUi(context, diagnosticFilter);
 
@@ -894,6 +899,10 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
         // Create/dispose the diagnostics toggle item live, same as the audit
         // item, so flipping the setting never needs a window reload.
         syncDiagnosticStatusBar();
+      }
+
+      if (e.affectsConfiguration("fallow.diagnostics.mutedCategories")) {
+        diagnosticFilter.updateBaselineMutedCategories(getMutedDiagnosticCategories());
       }
 
       if (needsDiagnosticRefresh) {

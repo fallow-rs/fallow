@@ -34,6 +34,7 @@ import {
   getDuplicationSkipLocalOverride,
   getDuplicationThresholdOverride,
   getDiagnosticSeverity,
+  getMutedDiagnosticCategories,
   getHealthInlineComplexity,
 } from "../src/config.js";
 
@@ -123,5 +124,35 @@ describe("diagnostics severity setting", () => {
   it("falls back to warning for unknown values", () => {
     configured = { "diagnostics.severity": "quiet" };
     expect(getDiagnosticSeverity()).toBe("warning");
+  });
+});
+
+describe("diagnostic muted category setting", () => {
+  beforeEach(() => {
+    configured = {};
+  });
+
+  it("returns only known diagnostic category codes", () => {
+    configured = {
+      "diagnostics.mutedCategories": [
+        "code-duplication",
+        "future-unknown",
+        42,
+        "stale-suppression",
+      ],
+    };
+
+    expect(Array.from(getMutedDiagnosticCategories()).toSorted()).toEqual([
+      "code-duplication",
+      "stale-suppression",
+    ]);
+  });
+
+  it("ignores non-array values", () => {
+    configured = {
+      "diagnostics.mutedCategories": "code-duplication",
+    };
+
+    expect(getMutedDiagnosticCategories().size).toBe(0);
   });
 });

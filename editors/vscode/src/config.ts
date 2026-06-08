@@ -10,6 +10,7 @@ import type {
   IssueTypeConfig,
   TraceLevel,
 } from "./types.js";
+import { getDiagnosticCategories } from "./diagnosticFilter.js";
 
 const SECTION = "fallow";
 
@@ -144,6 +145,22 @@ export const getDiagnosticStatusBar = (): boolean =>
 export const getDiagnosticSeverity = (): DiagnosticSeveritySetting => {
   const value = getConfig().get<string>("diagnostics.severity", "warning");
   return value === "information" || value === "hint" ? value : "warning";
+};
+
+export const getMutedDiagnosticCategories = (): ReadonlySet<string> => {
+  const configured = getConfig().get<unknown>("diagnostics.mutedCategories", []);
+  if (!Array.isArray(configured)) {
+    return new Set();
+  }
+
+  const known = new Set(getDiagnosticCategories().map(({ code }) => code));
+  const muted = new Set<string>();
+  for (const value of configured) {
+    if (typeof value === "string" && known.has(value)) {
+      muted.add(value);
+    }
+  }
+  return muted;
 };
 
 /**

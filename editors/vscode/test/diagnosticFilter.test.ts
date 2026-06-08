@@ -183,6 +183,59 @@ describe("DiagnosticFilter.applyFilter", () => {
     expect(out[1]?.source).toBe("eslint");
   });
 
+  it("applies a team baseline on first open", () => {
+    const f = new DiagnosticFilter(
+      memento() as never,
+      () => "warning",
+      new Set(["code-duplication"])
+    );
+    const out = f.applyFilter(
+      [
+        diag({ code: "code-duplication" }),
+        diag({ code: "unused-export" }),
+      ] as never
+    );
+
+    expect(out.map((d) => d.code)).toEqual(["unused-export"]);
+  });
+
+  it("lets local mutes hide more than the team baseline", () => {
+    const f = new DiagnosticFilter(
+      memento() as never,
+      () => "warning",
+      new Set(["code-duplication"])
+    );
+    f.setCategoryMuted("unused-export", true);
+
+    const out = f.applyFilter(
+      [
+        diag({ code: "code-duplication" }),
+        diag({ code: "unused-export" }),
+        diag({ code: "stale-suppression" }),
+      ] as never
+    );
+
+    expect(out.map((d) => d.code)).toEqual(["stale-suppression"]);
+  });
+
+  it("lets a local override show a baseline-hidden category", () => {
+    const f = new DiagnosticFilter(
+      memento() as never,
+      () => "warning",
+      new Set(["code-duplication"])
+    );
+    f.setCategoryMuted("code-duplication", false);
+
+    const out = f.applyFilter(
+      [
+        diag({ code: "code-duplication" }),
+        diag({ code: "unused-export" }),
+      ] as never
+    );
+
+    expect(out.map((d) => d.code)).toEqual(["code-duplication", "unused-export"]);
+  });
+
   it("drops every fallow diagnostic when mutedAll is set, but never others", () => {
     const f = new DiagnosticFilter(memento() as never);
     f.setMutedAll(true);
@@ -219,6 +272,21 @@ describe("DiagnosticFilter persistence", () => {
     expect(f.isMutedAll()).toBe(false);
   });
 
+  it("treats legacy muted categories as local mutes", () => {
+    const m = memento({
+      mutedAll: false,
+      mutedCategories: ["unused-export"],
+    });
+    const f = new DiagnosticFilter(
+      m as never,
+      () => "warning",
+      new Set(["code-duplication"])
+    );
+
+    expect(f.isCategoryMuted("code-duplication")).toBe(true);
+    expect(f.isCategoryMuted("unused-export")).toBe(true);
+  });
+
   it("writes through to memento on every change", async () => {
     const m = memento();
     const f = new DiagnosticFilter(m as never);
@@ -233,6 +301,47 @@ describe("DiagnosticFilter persistence", () => {
     expect(m.update).toHaveBeenLastCalledWith(
       "fallow.diagnosticFilter.v1",
       expect.objectContaining({ mutedAll: true })
+    );
+  });
+
+  it("persists local visibility overrides for baseline categories", async () => {
+    const m = memento();
+    const f = new DiagnosticFilter(
+      m as never,
+      () => "warning",
+      new Set(["code-duplication"])
+    );
+
+    f.setCategoryMuted("code-duplication", false);
+    await flushPersistence();
+
+    expect(m.update).toHaveBeenLastCalledWith(
+      "fallow.diagnosticFilter.v1",
+      expect.objectContaining({
+        localVisibleCategories: ["code-duplication"],
+        mutedCategories: [],
+      })
+    );
+  });
+
+  it("clear all keeps baseline categories visible locally", async () => {
+    const m = memento();
+    const f = new DiagnosticFilter(
+      m as never,
+      () => "warning",
+      new Set(["code-duplication"])
+    );
+
+    f.clearAllMutes();
+    await flushPersistence();
+
+    expect(f.isCategoryMuted("code-duplication")).toBe(false);
+    expect(m.update).toHaveBeenLastCalledWith(
+      "fallow.diagnosticFilter.v1",
+      expect.objectContaining({
+        localVisibleCategories: ["code-duplication"],
+        mutedCategories: [],
+      })
     );
   });
 
@@ -307,6 +416,23 @@ describe("DiagnosticFilter.handleDiagnostics + refresh", () => {
     f.refresh();
     const warning = c.sets[c.sets.length - 1];
     expect(warning?.diags[0]?.severity).toBe(1);
+  });
+
+  it("refreshes cached diagnostics when the workspace baseline changes", () => {
+    const f = new DiagnosticFilter(memento() as never);
+    const c = collection();
+    f.attachClient({ diagnostics: c as never });
+    f.handleDiagnostics(
+      fakeUri("file:///a.ts") as never,
+      [diag({ code: "code-duplication" }), diag({ code: "unused-export" })] as never,
+      vi.fn()
+    );
+
+    c.sets.length = 0;
+    f.updateBaselineMutedCategories(new Set(["code-duplication"]));
+
+    const lastCall = c.sets[c.sets.length - 1];
+    expect(lastCall?.diags.map((d) => d.code)).toEqual(["unused-export"]);
   });
 
   it("caps the cache so a workspace-wide publish does not grow heap forever", () => {

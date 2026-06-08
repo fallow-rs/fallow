@@ -113,6 +113,17 @@ describe("package.json view title menus", () => {
       group: "navigation@10",
     });
   });
+
+  it("contributes team-shareable muted diagnostic categories as resource settings", () => {
+    const setting = pkg.contributes.configuration.properties[
+      "fallow.diagnostics.mutedCategories"
+    ];
+
+    expect(setting?.default).toEqual([]);
+    expect(setting?.scope).toBe("resource");
+    expect(setting?.markdownDescription).toContain(".vscode/settings.json");
+    expect(setting?.markdownDescription).toContain("CI and `fallow check` still report");
+  });
 });
 
 describe("package.json binary download settings", () => {
