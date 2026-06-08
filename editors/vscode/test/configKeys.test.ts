@@ -13,8 +13,11 @@ describe("config keys", () => {
     expect(REANALYSIS_CONFIG_KEYS).toContain("fallow.duplication");
   });
 
-  it("restarts the LSP when inline complexity changes", () => {
-    expect(RESTART_CONFIG_KEYS).toContain("fallow.health.inlineComplexity");
+  it("never restarts the LSP for inline complexity (extension renders the lens)", () => {
+    // The lens is rendered by the extension's ComplexityLensProvider and is no
+    // longer an LSP init option, so toggling it must not restart the server or
+    // re-run the sidebar; extension.ts refreshes the lens live instead.
+    expect(RESTART_CONFIG_KEYS).not.toContain("fallow.health.inlineComplexity");
     expect(REANALYSIS_CONFIG_KEYS).not.toContain("fallow.health.inlineComplexity");
   });
 

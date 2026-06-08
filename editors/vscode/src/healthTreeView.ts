@@ -48,6 +48,8 @@ class HealthSectionItem extends vscode.TreeItem {
  */
 class HealthLeafItem extends vscode.TreeItem {
   readonly children: ReadonlyArray<HealthLeafItem>;
+  /** Set on complexity rows so Health-view selection can expand the function. */
+  readonly complexityTarget?: { readonly path: string; readonly line: number };
 
   constructor(
     label: string,
@@ -56,6 +58,7 @@ class HealthLeafItem extends vscode.TreeItem {
       readonly tooltip?: string | vscode.MarkdownString;
       readonly iconColor?: string | null;
       readonly open?: { readonly path: string; readonly line: number; readonly col: number };
+      readonly complexityTarget?: { readonly path: string; readonly line: number };
       readonly children?: ReadonlyArray<HealthLeafItem>;
     } = {},
   ) {
@@ -68,6 +71,9 @@ class HealthLeafItem extends vscode.TreeItem {
     );
     this.children = children;
     this.contextValue = "healthItem";
+    if (options.complexityTarget) {
+      this.complexityTarget = options.complexityTarget;
+    }
 
     if (options.tooltip !== undefined) {
       this.tooltip = options.tooltip;
@@ -94,6 +100,16 @@ class HealthLeafItem extends vscode.TreeItem {
     }
   }
 }
+
+/**
+ * The complex function a Health-view item points at, if any, so the editor can
+ * expand that function's inline breakdown while the row is selected. Returns
+ * `undefined` for section headers, the Score row, hotspots, and targets.
+ */
+export const complexityTargetOf = (
+  item: vscode.TreeItem,
+): { readonly path: string; readonly line: number } | undefined =>
+  item instanceof HealthLeafItem ? item.complexityTarget : undefined;
 
 const buildScoreTooltip = (report: HealthReport): vscode.MarkdownString => {
   const score = report.health_score;
@@ -149,9 +165,11 @@ const buildComplexityLeaves = (report: HealthReport): HealthLeafItem[] =>
     const { relative } = resolveFilePath(finding.path);
     const crapNote = typeof finding.crap === "number" ? `, CRAP ${finding.crap.toFixed(0)}` : "";
     const tooltip = `${finding.name} (${finding.severity})\ncyclomatic ${finding.cyclomatic}, cognitive ${finding.cognitive}${crapNote}\n${relative}:${finding.line}`;
+    const complexityTarget = { path: finding.path, line: finding.line };
     const detail = new HealthLeafItem(formatComplexityOffense(finding), undefined, {
       tooltip,
       open: { path: finding.path, line: finding.line, col: finding.col },
+      complexityTarget,
     });
     return new HealthLeafItem(
       `${middleElidePath(relative)}:${finding.line}`,
@@ -159,6 +177,7 @@ const buildComplexityLeaves = (report: HealthReport): HealthLeafItem[] =>
       {
         iconColor: severityThemeColor(finding.severity),
         tooltip,
+        complexityTarget,
         children: [detail],
       },
     );

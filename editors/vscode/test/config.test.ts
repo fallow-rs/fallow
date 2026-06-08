@@ -100,8 +100,8 @@ describe("duplication setting overrides", () => {
 });
 
 describe("health inline complexity setting", () => {
-  it("defaults off", () => {
-    expect(getHealthInlineComplexity()).toBe(false);
+  it("defaults on (the extension renders the complexity lens)", () => {
+    expect(getHealthInlineComplexity()).toBe(true);
   });
 });
 

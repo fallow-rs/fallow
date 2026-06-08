@@ -5,7 +5,6 @@ export const RESTART_CONFIG_KEYS = [
   "fallow.issueTypes",
   "fallow.changedSince",
   "fallow.duplication",
-  "fallow.health.inlineComplexity",
   "fallow.autoDownload",
 ] as const;
 
@@ -21,10 +20,10 @@ export const REANALYSIS_CONFIG_KEYS = [
   "fallow.workspace",
 ] as const;
 
-// Most health settings drive the separate lazy health spawn, not the LSP.
-// `fallow.health.inlineComplexity` is the exception because it is forwarded to
-// fallow-lsp as an initialization option and therefore lives in
-// RESTART_CONFIG_KEYS.
+// Health settings drive the separate lazy health spawn, not the LSP, so none
+// of them restart it. `fallow.health.inlineComplexity` toggles the extension's
+// own complexity lens and is handled as a render-only refresh in extension.ts
+// (not here), so it is in neither RESTART_CONFIG_KEYS nor this list.
 export const HEALTH_CONFIG_KEYS = [
   "fallow.health.enabled",
   "fallow.health.hotspots",

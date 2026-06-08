@@ -4,15 +4,20 @@ import type { ComplexityContribution, ComplexityContributionKind, HealthFinding 
 import { resolveFilePath } from "./treeView-utils.js";
 
 /**
- * Inline "why is this complex" editor decorations.
+ * Inline "why is this complex" editor decorations (progressive disclosure).
+ *
+ * The compact summary (`N cyc, N cog`) lives in the lens above each complex
+ * function (see `complexityLens.ts`). The dense per-line `+N` breakdown is the
+ * DETAIL tier: it renders only for functions the user has expanded, either by
+ * pinning (clicking the lens) or selecting the finding in the Health view, or
+ * for every function when `fallow.complexity.afterText` is on. Hover always
+ * shows the breakdown in a popup regardless, via `provideHover`.
  *
  * The per-decision-point breakdown arrives on each complexity finding as a
  * `contributions[]` array (one entry per increment event, cyclomatic and
  * cognitive recorded separately). The wire shape is per-increment, but the
  * editor renders per-LINE: contributions are grouped by line and summed into a
- * single dim token, with the per-kind list deferred to a hover. This keeps a
- * dense `if` (one cyclomatic + one cognitive entry on the same line) from
- * stacking two markers.
+ * single dim token, with the per-kind list deferred to the hover.
  */
 
 /** Human label for each contribution kind, mirroring SonarSource vocabulary. */
@@ -173,95 +178,103 @@ const sameFile = (
   return path.normalize(absolute) === path.normalize(documentPath);
 };
 
+/** Stable per-function key (project-relative finding path + 1-based line). */
+export const complexityKey = (path: string, line: number): string => `${path}:${line}`;
+
 /**
- * A single decoration to place on a document, described by its target line and
- * the content to render. The controller turns this into a `vscode.DecorationOptions`
- * anchored at the END of the line (so the `afterText` never shifts the code) once
- * it has the document to read line lengths from.
+ * The hover markdown for a 1-based source line: the function summary + CRAP
+ * when the line is a complex function's signature, the per-kind contribution
+ * list when it is a decision-point line, `undefined` otherwise. Pure (the
+ * markdown type is the only VS Code dependency), so it is unit-testable
+ * independently of an open editor.
+ */
+export const hoverForLine = (
+  matched: readonly HealthFinding[],
+  line1Based: number,
+): vscode.MarkdownString | undefined => {
+  const fn = matched.find((f) => f.line === line1Based);
+  if (fn) {
+    return functionHover(fn);
+  }
+  const aggregate = aggregateByLine(matched).get(line1Based);
+  if (aggregate) {
+    return lineHover(aggregate);
+  }
+  return undefined;
+};
+
+/**
+ * A single DETAIL decoration to place on a document: the target line and the
+ * dim `+N kind` token. The controller anchors it at the END of the line (so the
+ * text never shifts the code) once it has the document to read line lengths.
  */
 export interface ComplexityDecorationSpec {
   /** 0-based line the decoration attaches to. */
   readonly line: number;
-  /** Dim end-of-line token (`+N kind`); omitted when the inline tier is off. */
-  readonly afterText?: string;
-  /** Hover detail. */
-  readonly hover: vscode.MarkdownString;
-}
-
-/** The two decoration layers produced for one editor. */
-export interface ComplexityDecorationGroups {
-  /** One per function signature line: aggregate metrics + CRAP explanation. */
-  readonly functions: ComplexityDecorationSpec[];
-  /** One per contributing line: a summed `+N kind` token + per-kind hover. */
-  readonly contributions: ComplexityDecorationSpec[];
+  /** Dim end-of-line token (`+N kind`). */
+  readonly afterText: string;
 }
 
 /**
- * Build the inline decoration specs for one open document from the cached health
- * findings. Pure: no VS Code editor I/O, so it is directly unit-testable. The
- * controller anchors each spec at end-of-line.
+ * Build the per-line DETAIL decoration specs for one open document from the
+ * cached health findings, limited to the functions the caller marks expanded.
+ * Pure: no VS Code editor I/O, so it is directly unit-testable. The controller
+ * anchors each spec at end-of-line.
  *
- * @param afterText when false, the inline `+N` token is omitted and only the
- *   hover is attached (lets a user keep the quiet hover tier without the dense
- *   per-line text).
+ * @param isExpanded returns true for findings whose per-line breakdown should
+ *   render (pinned, selected, or all when the global after-text tier is on).
  */
 export const buildComplexityDecorations = (
   findings: readonly HealthFinding[],
   documentPath: string,
   workspaceRoot: string | undefined,
-  options: { readonly afterText: boolean },
-): ComplexityDecorationGroups => {
-  const matched = findings.filter((f) => sameFile(f.path, documentPath, workspaceRoot));
-
-  const functions: ComplexityDecorationSpec[] = matched.map((finding) => {
-    const crap = finding.crap == null ? "" : ` · CRAP ${roundTo(finding.crap, 1)}`;
-    return {
-      line: Math.max(0, finding.line - 1),
-      hover: functionHover(finding),
-      afterText: options.afterText
-        ? `cyc ${finding.cyclomatic} · cog ${finding.cognitive}${crap}`
-        : undefined,
-    };
-  });
-
-  const contributions: ComplexityDecorationSpec[] = [];
-  for (const aggregate of aggregateByLine(matched).values()) {
-    contributions.push({
-      line: Math.max(0, aggregate.line - 1),
-      hover: lineHover(aggregate),
-      afterText: options.afterText ? inlineToken(aggregate) : undefined,
-    });
+  isExpanded: (finding: HealthFinding) => boolean,
+): ComplexityDecorationSpec[] => {
+  const expanded = findings.filter(
+    (f) => sameFile(f.path, documentPath, workspaceRoot) && isExpanded(f),
+  );
+  const specs: ComplexityDecorationSpec[] = [];
+  for (const aggregate of aggregateByLine(expanded).values()) {
+    specs.push({ line: Math.max(0, aggregate.line - 1), afterText: inlineToken(aggregate) });
   }
-
-  return { functions, contributions };
+  return specs;
 };
 
 /**
- * Owns the editor decoration type and drives rendering across the active-editor
- * and document-change lifecycle.
+ * Owns the per-line detail decorations and the per-function expansion state
+ * (pinned via the lens, selected via the Health view). Drives rendering across
+ * the active-editor and document-change lifecycle, and serves the lens provider
+ * (`findingsForDocument` + `isPinned` + `onDidChange`) and the hover provider
+ * (`provideHover`).
  *
  * Line-drift fail-safe: decorations are anchored to the line numbers from the
  * LAST health run. If the user edits a decorated document before the next run,
  * the markers would point at the wrong lines, so on the first edit the document
- * is marked stale and its decorations are cleared until fresh findings arrive
- * (never best-effort re-anchored: a marker on the wrong branch misleads).
+ * is marked stale and its decorations + lenses + hovers are suppressed until
+ * fresh findings arrive (never best-effort re-anchored: a marker on the wrong
+ * branch misleads).
  */
 export class ComplexityDecorationController {
-  // Two decoration types so a one-liner whose signature line is also a
-  // contribution line (e.g. `const f = (a) => a ? 1 : 2`) shows BOTH the
-  // function summary and the contribution token: VS Code renders only the last
-  // `after` attachment per line PER decoration type.
-  private readonly functionType: vscode.TextEditorDecorationType;
   private readonly contributionType: vscode.TextEditorDecorationType;
   private findings: readonly HealthFinding[] = [];
   private readonly staleDocuments = new Set<string>();
+  /** Functions pinned-open by clicking their lens (persistent, key = path:line). */
+  private readonly pinned = new Set<string>();
+  /** The function whose Health-view finding is currently selected (transient). */
+  private selected: string | undefined;
+  private readonly changeEmitter = new vscode.EventEmitter<void>();
+  /**
+   * Fires when the rendered/expanded set changes (new findings, pin toggle,
+   * selection, staleness). The lens provider subscribes via
+   * `onDidChangeCodeLenses` so titles flip and lenses clear in step.
+   */
+  readonly onDidChange = this.changeEmitter.event;
 
   constructor(
     private readonly isEnabled: () => boolean,
-    private readonly showAfterText: () => boolean,
+    private readonly showAllAfterText: () => boolean,
     private readonly workspaceRoot: () => string | undefined,
   ) {
-    this.functionType = vscode.window.createTextEditorDecorationType({});
     this.contributionType = vscode.window.createTextEditorDecorationType({});
   }
 
@@ -270,6 +283,16 @@ export class ComplexityDecorationController {
     this.findings = findings;
     this.staleDocuments.clear();
     this.renderVisibleEditors();
+    this.changeEmitter.fire();
+  }
+
+  /**
+   * Re-render decorations and refresh lenses after a relevant setting change
+   * (`fallow.health.inlineComplexity`), without respawning the health analysis.
+   */
+  refresh(): void {
+    this.renderVisibleEditors();
+    this.changeEmitter.fire();
   }
 
   /** A document edit may have shifted line numbers: clear + mark stale. */
@@ -284,26 +307,106 @@ export class ComplexityDecorationController {
         this.clear(editor);
       }
     }
+    // Suppress the lens too while the document is stale.
+    this.changeEmitter.fire();
   }
 
-  /** Render (or clear) one editor from the cached findings. */
+  /** True when a document was edited since the last health run (markers stale). */
+  isStale(document: vscode.TextDocument): boolean {
+    return this.staleDocuments.has(document.uri.toString());
+  }
+
+  /** Findings whose function lives in the given document (for lens + hover). */
+  findingsForDocument(documentPath: string): readonly HealthFinding[] {
+    return this.findings.filter((f) => sameFile(f.path, documentPath, this.workspaceRoot()));
+  }
+
+  /**
+   * Whether the function at `path:line` is currently expanded by EITHER a pin
+   * (lens click) or the Health-view selection. This is the single state the
+   * lens title reflects (`show` vs `hide breakdown`), so the sidebar selection
+   * and the lens toggle never disagree: selecting a finding makes its lens read
+   * `hide breakdown` because the breakdown is already showing.
+   */
+  isExpanded(filePath: string, line: number): boolean {
+    return this.isExpandedKey(complexityKey(filePath, line));
+  }
+
+  /**
+   * Toggle the unified expansion for one function (the lens click). If it is
+   * expanded by anything (pin OR selection), collapse it fully: drop the pin
+   * AND clear the selection contribution, so clicking `hide breakdown` on a
+   * selected function hides it (and it stays hidden until selected again).
+   * Otherwise pin it open.
+   */
+  toggleExpanded(filePath: string, line: number): void {
+    const key = complexityKey(filePath, line);
+    if (this.isExpandedKey(key)) {
+      this.pinned.delete(key);
+      if (this.selected === key) {
+        this.selected = undefined;
+      }
+    } else {
+      this.pinned.add(key);
+    }
+    this.renderVisibleEditors();
+    this.changeEmitter.fire();
+  }
+
+  private isExpandedKey(key: string): boolean {
+    return this.pinned.has(key) || this.selected === key;
+  }
+
+  /**
+   * Set (or clear) the transiently-expanded function driven by Health-view
+   * selection. Composes with pins: the rendered set is `pinned ∪ selected`.
+   */
+  setSelectedFunction(target: { readonly path: string; readonly line: number } | undefined): void {
+    const key = target ? complexityKey(target.path, target.line) : undefined;
+    if (this.selected === key) {
+      return;
+    }
+    this.selected = key;
+    this.renderVisibleEditors();
+    this.changeEmitter.fire();
+  }
+
+  /** Hover for a position: function summary or per-line breakdown popup. */
+  provideHover(document: vscode.TextDocument, position: vscode.Position): vscode.Hover | undefined {
+    if (!this.isEnabled() || document.uri.scheme !== "file" || this.isStale(document)) {
+      return undefined;
+    }
+    const matched = this.findingsForDocument(document.uri.fsPath);
+    if (matched.length === 0) {
+      return undefined;
+    }
+    const markdown = hoverForLine(matched, position.line + 1);
+    return markdown ? new vscode.Hover(markdown) : undefined;
+  }
+
+  /** Whether a finding's per-line detail should render (forced-on, pin, or selection). */
+  private shouldRenderDetail(finding: HealthFinding): boolean {
+    return (
+      this.showAllAfterText() || this.isExpandedKey(complexityKey(finding.path, finding.line))
+    );
+  }
+
+  /** Render (or clear) one editor's per-line detail from the cached findings. */
   renderEditor(editor: vscode.TextEditor | undefined): void {
     if (!editor) {
       return;
     }
-    const isStale = this.staleDocuments.has(editor.document.uri.toString());
-    if (!this.isEnabled() || isStale || editor.document.uri.scheme !== "file") {
+    if (!this.isEnabled() || this.isStale(editor.document) || editor.document.uri.scheme !== "file") {
       this.clear(editor);
       return;
     }
-    const { functions, contributions } = buildComplexityDecorations(
+    const specs = buildComplexityDecorations(
       this.findings,
       editor.document.uri.fsPath,
       this.workspaceRoot(),
-      { afterText: this.showAfterText() },
+      (finding) => this.shouldRenderDetail(finding),
     );
-    editor.setDecorations(this.functionType, this.toOptions(editor.document, functions));
-    editor.setDecorations(this.contributionType, this.toOptions(editor.document, contributions));
+    editor.setDecorations(this.contributionType, this.toOptions(editor.document, specs));
   }
 
   /**
@@ -321,12 +424,9 @@ export class ComplexityDecorationController {
         continue;
       }
       const end = document.lineAt(spec.line).range.end;
-      const decoration: vscode.DecorationOptions = {
+      options.push({
         range: new vscode.Range(end, end),
-        hoverMessage: spec.hover,
-      };
-      if (spec.afterText !== undefined) {
-        decoration.renderOptions = {
+        renderOptions: {
           after: {
             contentText: spec.afterText,
             // Inherit the user's theme so the dim text keeps a legible contrast
@@ -334,14 +434,13 @@ export class ComplexityDecorationController {
             color: new vscode.ThemeColor("editorCodeLens.foreground"),
             margin: "0 0 0 1.5rem",
           },
-        };
-      }
-      options.push(decoration);
+        },
+      });
     }
     return options;
   }
 
-  /** Re-render all visible editors (e.g. after a settings change). */
+  /** Re-render all visible editors (e.g. after a settings or state change). */
   renderVisibleEditors(): void {
     for (const editor of vscode.window.visibleTextEditors) {
       this.renderEditor(editor);
@@ -349,7 +448,6 @@ export class ComplexityDecorationController {
   }
 
   private clear(editor: vscode.TextEditor): void {
-    editor.setDecorations(this.functionType, []);
     editor.setDecorations(this.contributionType, []);
   }
 
@@ -359,7 +457,7 @@ export class ComplexityDecorationController {
   // than via an explicit `.dispose()` wrapper.
   // fallow-ignore-next-line unused-class-member
   dispose(): void {
-    this.functionType.dispose();
     this.contributionType.dispose();
+    this.changeEmitter.dispose();
   }
 }

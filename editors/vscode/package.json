@@ -406,8 +406,8 @@
         },
         "fallow.health.inlineComplexity": {
           "type": "boolean",
-          "default": false,
-          "description": "Show opt-in LSP code lenses on functions that exceed Fallow Health complexity thresholds. Default off to keep editor chrome quiet."
+          "default": true,
+          "markdownDescription": "Show a compact complexity lens (`N cyc, N cog`) above functions that exceed Fallow Health thresholds. Click the lens to expand or collapse the per-line `+N` breakdown for that function. On by default; the dense per-line text stays hidden until you expand it (or enable `#fallow.complexity.afterText#`)."
         },
         "fallow.complexity.breakdownEnabled": {
           "type": "boolean",
@@ -416,8 +416,8 @@
         },
         "fallow.complexity.afterText": {
           "type": "boolean",
-          "default": true,
-          "markdownDescription": "When the inline complexity breakdown is on, also show the dim `+N` token after each contributing line. Turn this off to keep only the hover (no inline text). Inert unless `#fallow.complexity.breakdownEnabled#` is enabled."
+          "default": false,
+          "markdownDescription": "Always show the dim per-line `+N` complexity breakdown for every complex function, instead of only the function you expand (via its lens) or select in the Health view. Off by default to keep the editor quiet; hovering a function or its decision-point lines always shows the breakdown in a popup regardless. Inert unless `#fallow.complexity.breakdownEnabled#` is enabled."
         },
         "fallow.complexity.decorationCap": {
           "type": "integer",

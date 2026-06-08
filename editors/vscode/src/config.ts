@@ -184,7 +184,7 @@ export const getHealthTopFindings = (): number => {
 export const getHealthStatusBar = (): boolean => getConfig().get<boolean>("health.statusBar", true);
 
 export const getHealthInlineComplexity = (): boolean =>
-  getConfig().get<boolean>("health.inlineComplexity", false);
+  getConfig().get<boolean>("health.inlineComplexity", true);
 
 /** Whether the inline complexity breakdown (per-line markers + hover) is shown. */
 export const getComplexityBreakdownEnabled = (): boolean =>
@@ -196,7 +196,7 @@ export const getComplexityBreakdownEnabled = (): boolean =>
  * text. Inert unless `complexity.breakdownEnabled` is on.
  */
 export const getComplexityAfterText = (): boolean =>
-  getConfig().get<boolean>("complexity.afterText", true);
+  getConfig().get<boolean>("complexity.afterText", false);
 
 /**
  * How many top complexity findings to fetch for inline decorations when the

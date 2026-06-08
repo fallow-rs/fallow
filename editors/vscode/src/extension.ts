@@ -23,6 +23,11 @@ import {
 } from "./config.js";
 import { ComplexityDecorationController } from "./complexityDecorations.js";
 import {
+  ComplexityLensProvider,
+  TOGGLE_COMPLEXITY_BREAKDOWN_COMMAND,
+  type ComplexityToggleTarget,
+} from "./complexityLens.js";
+import {
   runAnalysis,
   runAudit,
   runFix,
@@ -55,7 +60,7 @@ import {
   disposeDiagnosticStatusBar,
   hasDiagnosticStatusBar,
 } from "./diagnosticStatusBar.js";
-import { HealthTreeProvider } from "./healthTreeView.js";
+import { HealthTreeProvider, complexityTargetOf } from "./healthTreeView.js";
 import {
   createStatusBar,
   updateStatusBar,
@@ -347,6 +352,34 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     }),
   );
 
+  // The complexity lens (summary + show/hide-breakdown toggle), the hover that
+  // peeks the breakdown without expanding it, and the command the lens fires.
+  // Scoped to the JS/TS family + SFCs (complexity findings never target JSON).
+  const complexityLanguages: vscode.DocumentSelector = [
+    { scheme: "file", language: "javascript" },
+    { scheme: "file", language: "javascriptreact" },
+    { scheme: "file", language: "typescript" },
+    { scheme: "file", language: "typescriptreact" },
+    { scheme: "file", language: "vue" },
+    { scheme: "file", language: "svelte" },
+    { scheme: "file", language: "astro" },
+  ];
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider(
+      complexityLanguages,
+      new ComplexityLensProvider(complexityDecorations),
+    ),
+    vscode.languages.registerHoverProvider(complexityLanguages, {
+      provideHover: (document, position) => complexityDecorations.provideHover(document, position),
+    }),
+    vscode.commands.registerCommand(
+      TOGGLE_COMPLEXITY_BREAKDOWN_COMMAND,
+      (target: ComplexityToggleTarget) => {
+        complexityDecorations.toggleExpanded(target.path, target.line);
+      },
+    ),
+  );
+
   // Lazy, opt-out health spawn. Separate from the combined run so the
   // latency-critical sidebar is never coupled to complexity scoring or the
   // git-churn hotspot walk.
@@ -458,7 +491,16 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     healthView.onDidChangeVisibility((e) => {
       if (e.visible) {
         onHealthViewVisible();
+      } else {
+        // Hiding the Health view drops the transient selection highlight.
+        complexityDecorations.setSelectedFunction(undefined);
       }
+    }),
+    // Selecting a complexity finding expands that function's inline breakdown
+    // while it stays selected; any other selection (or none) clears it.
+    healthView.onDidChangeSelection((e) => {
+      const target = e.selection.length > 0 ? complexityTargetOf(e.selection[0]) : undefined;
+      complexityDecorations.setSelectedFunction(target);
     }),
   );
 
@@ -939,8 +981,9 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
           void triggerHealthAnalysis();
         } else {
           // The Health view has not run yet, so there is nothing to respawn, but
-          // toggling the breakdown off should still clear any stale decorations.
-          complexityDecorations.renderVisibleEditors();
+          // toggling the breakdown off should still clear any stale decorations
+          // AND lenses, so refresh() fires onDidChange to re-query code lenses.
+          complexityDecorations.refresh();
         }
       }
 
@@ -948,6 +991,12 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       // from the cached findings without respawning health.
       if (e.affectsConfiguration("fallow.complexity.afterText")) {
         complexityDecorations.renderVisibleEditors();
+      }
+
+      // `health.inlineComplexity` toggles the extension's complexity lens (no
+      // longer an LSP option), so refresh decorations + lenses live, no respawn.
+      if (e.affectsConfiguration("fallow.health.inlineComplexity")) {
+        complexityDecorations.refresh();
       }
 
       if (affectsSecurity) {

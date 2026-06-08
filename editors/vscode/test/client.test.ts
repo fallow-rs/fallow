@@ -163,9 +163,6 @@ describe("createInitializationOptions", () => {
       issueTypes: { "code-duplication": true },
       changedSince: "origin/main",
       configPath: "/workspace/.fallowrc.jsonc",
-      health: {
-        inlineComplexity: false,
-      },
       duplication: {
         mode: "semantic",
         threshold: 8,
@@ -179,12 +176,13 @@ describe("createInitializationOptions", () => {
     });
   });
 
-  it("forwards inline complexity opt-in to fallow-lsp", () => {
+  it("does not forward inline complexity to fallow-lsp (extension owns the lens)", () => {
+    // The extension renders its own complexity lens (ComplexityLensProvider) so
+    // it can toggle the per-line breakdown; forwarding the LSP option too would
+    // double-render. The LSP lens stays opt-in for other editors.
     mockHealthInlineComplexity = true;
 
-    expect(createInitializationOptions().health).toEqual({
-      inlineComplexity: true,
-    });
+    expect("health" in createInitializationOptions()).toBe(false);
   });
 });
 

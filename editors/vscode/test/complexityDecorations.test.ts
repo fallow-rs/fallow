@@ -26,7 +26,12 @@ vi.mock("vscode", () => {
   };
 });
 
-import { buildComplexityDecorations, crapExplanation } from "../src/complexityDecorations.js";
+import {
+  buildComplexityDecorations,
+  complexityKey,
+  crapExplanation,
+  hoverForLine,
+} from "../src/complexityDecorations.js";
 import type { ComplexityContribution, HealthFinding } from "../src/types.js";
 
 const contribution = (
@@ -55,33 +60,46 @@ const finding = (overrides: Partial<HealthFinding> = {}): HealthFinding =>
 
 const root = "/project";
 const docPath = "/project/src/index.ts";
+const all = (): boolean => true;
+const none = (): boolean => false;
 
 describe("buildComplexityDecorations", () => {
-  it("matches a finding to the open file by resolved path", () => {
-    const f = finding({
-      contributions: [contribution(5, "cyclomatic", "if", 1)],
-    });
-    const result = buildComplexityDecorations([f], docPath, root, { afterText: true });
-    expect(result.functions).toHaveLength(1);
-    expect(result.contributions).toHaveLength(1);
+  it("renders per-line detail for an expanded finding in the open file", () => {
+    const f = finding({ contributions: [contribution(5, "cyclomatic", "if", 1)] });
+    const result = buildComplexityDecorations([f], docPath, root, all);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.line).toBe(4); // 1-based contribution line 5 -> 0-based 4
+    expect(result[0]?.afterText).toContain("if");
   });
 
-  it("ignores findings for other files", () => {
+  it("renders nothing for a finding that is not expanded", () => {
+    const f = finding({ contributions: [contribution(5, "cyclomatic", "if", 1)] });
+    expect(buildComplexityDecorations([f], docPath, root, none)).toHaveLength(0);
+  });
+
+  it("expands only the functions the predicate selects", () => {
+    const a = finding({ name: "parseArgs", contributions: [contribution(5, "cyclomatic", "if", 1)] });
+    const b = finding({
+      name: "other",
+      line: 20,
+      contributions: [contribution(25, "cyclomatic", "if", 1)],
+    });
+    const result = buildComplexityDecorations(
+      [a, b],
+      docPath,
+      root,
+      (f) => f.name === "parseArgs",
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]?.line).toBe(4); // only parseArgs' contribution line
+  });
+
+  it("ignores findings for other files even when expanded", () => {
     const f = finding({
       path: "src/other.ts",
       contributions: [contribution(5, "cyclomatic", "if", 1)],
     });
-    const result = buildComplexityDecorations([f], docPath, root, { afterText: true });
-    expect(result.functions).toHaveLength(0);
-    expect(result.contributions).toHaveLength(0);
-  });
-
-  it("anchors the function spec on the 0-based signature line", () => {
-    const f = finding({ line: 10, contributions: [] });
-    const result = buildComplexityDecorations([f], docPath, root, { afterText: true });
-    // 1-based line 10 -> 0-based 9. The controller turns this into an
-    // end-of-line range; the spec only carries the line.
-    expect(result.functions[0]?.line).toBe(9);
+    expect(buildComplexityDecorations([f], docPath, root, all)).toHaveLength(0);
   });
 
   it("groups two contributions on the same line into one spec summed by metric", () => {
@@ -92,9 +110,9 @@ describe("buildComplexityDecorations", () => {
         contribution(6, "cognitive", "if", 2, 1),
       ],
     });
-    const result = buildComplexityDecorations([f], docPath, root, { afterText: true });
-    expect(result.contributions).toHaveLength(1);
-    const after = result.contributions[0]?.afterText ?? "";
+    const result = buildComplexityDecorations([f], docPath, root, all);
+    expect(result).toHaveLength(1);
+    const after = result[0]?.afterText ?? "";
     // Cognitive is the headline (2), with the dominant kind label.
     expect(after).toContain("+2");
     expect(after).toContain("if");
@@ -107,19 +125,37 @@ describe("buildComplexityDecorations", () => {
         contribution(8, "cognitive", "else-if", 1),
       ],
     });
-    const result = buildComplexityDecorations([f], docPath, root, { afterText: true });
-    const after = result.contributions[0]?.afterText ?? "";
+    const result = buildComplexityDecorations([f], docPath, root, all);
+    const after = result[0]?.afterText ?? "";
     expect(after).toContain("+1");
     expect(after).toContain("else if");
   });
+});
 
-  it("omits inline after-text but keeps the hover when afterText is off", () => {
-    const f = finding({
-      contributions: [contribution(5, "cognitive", "if", 1)],
-    });
-    const result = buildComplexityDecorations([f], docPath, root, { afterText: false });
-    expect(result.contributions[0]?.afterText).toBeUndefined();
-    expect(result.contributions[0]?.hover).toBeDefined();
+describe("hoverForLine", () => {
+  it("returns the function summary on the signature line", () => {
+    const f = finding({ line: 10, contributions: [contribution(12, "cyclomatic", "if", 1)] });
+    const md = hoverForLine([f], 10);
+    expect(md?.value).toContain("parseArgs");
+    expect(md?.value).toContain("cyclomatic 13");
+  });
+
+  it("returns the per-line breakdown on a contribution line", () => {
+    const f = finding({ line: 10, contributions: [contribution(12, "cognitive", "for", 2, 1)] });
+    const md = hoverForLine([f], 12);
+    expect(md?.value).toContain("Complexity contributions");
+    expect(md?.value).toContain("for loop");
+  });
+
+  it("returns undefined on a line with neither a function nor a contribution", () => {
+    const f = finding({ line: 10, contributions: [contribution(12, "cyclomatic", "if", 1)] });
+    expect(hoverForLine([f], 99)).toBeUndefined();
+  });
+});
+
+describe("complexityKey", () => {
+  it("composes the path and 1-based line so all surfaces agree", () => {
+    expect(complexityKey("src/index.ts", 10)).toBe("src/index.ts:10");
   });
 });
 

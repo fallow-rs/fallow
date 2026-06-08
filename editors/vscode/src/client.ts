@@ -25,7 +25,6 @@ import {
   getDuplicationModeOverride,
   getDuplicationSkipLocalOverride,
   getDuplicationThresholdOverride,
-  getHealthInlineComplexity,
   getMutedDiagnosticCategories,
 } from "./config.js";
 import { showBinarySkewToastOnce } from "./binary-skew.js";
@@ -45,9 +44,6 @@ export interface LspInitializationOptions {
   readonly issueTypes: IssueTypeConfig;
   readonly changedSince: string;
   readonly configPath: string;
-  readonly health: {
-    readonly inlineComplexity: boolean;
-  };
   readonly duplication: {
     readonly mode: DuplicationMode | undefined;
     readonly threshold: number | undefined;
@@ -64,9 +60,11 @@ export const createInitializationOptions = (): LspInitializationOptions => ({
   issueTypes: getIssueTypes(),
   changedSince: getChangedSince(),
   configPath: getResolvedConfigPath(),
-  health: {
-    inlineComplexity: getHealthInlineComplexity(),
-  },
+  // `fallow.health.inlineComplexity` is rendered by the extension's own
+  // ComplexityLensProvider (so the lens can toggle the per-line breakdown), so
+  // it is NOT forwarded to the LSP. The LSP complexity lens stays opt-in for
+  // other editors (Neovim/Zed/Helix) via their own initializationOptions; this
+  // avoids a double lens in VS Code without removing the editor-agnostic path.
   duplication: {
     mode: getDuplicationModeOverride(),
     threshold: getDuplicationThresholdOverride(),
