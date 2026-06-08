@@ -32,4 +32,6 @@ export interface IssueTypeConfig {
 
 export type DuplicationMode = "strict" | "mild" | "weak" | "semantic";
 
+export type DiagnosticSeveritySetting = "warning" | "information" | "hint";
+
 export type TraceLevel = "off" | "messages" | "verbose";

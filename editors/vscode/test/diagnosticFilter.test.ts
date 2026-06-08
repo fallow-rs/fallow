@@ -20,6 +20,12 @@ vi.mock("vscode", () => {
     }
   }
   return {
+    DiagnosticSeverity: {
+      Error: 0,
+      Warning: 1,
+      Information: 2,
+      Hint: 3,
+    },
     EventEmitter: FakeEventEmitter,
     Uri: {
       parse: (s: string) => ({ toString: () => s, scheme: "file" }),
@@ -35,6 +41,7 @@ import {
   isFallowDiagnostic,
   parseDiagnosticCategories,
   resetDiagnosticCategories,
+  severityToDiagnosticSeverity,
   setDiagnosticCategories,
 } from "../src/diagnosticFilter.js";
 
@@ -42,11 +49,13 @@ interface FakeDiag {
   source?: string;
   code?: string | number | { value: string | number };
   message: string;
+  severity: number;
 }
 
 const diag = (overrides: Partial<FakeDiag>): FakeDiag => ({
   source: "fallow",
   message: "test",
+  severity: 1,
   ...overrides,
 });
 
@@ -120,6 +129,12 @@ describe("isFallowDiagnostic", () => {
 });
 
 describe("DiagnosticFilter.applyFilter", () => {
+  it("maps diagnostic severity settings to VS Code severities", () => {
+    expect(severityToDiagnosticSeverity("warning")).toBe(1);
+    expect(severityToDiagnosticSeverity("information")).toBe(2);
+    expect(severityToDiagnosticSeverity("hint")).toBe(3);
+  });
+
   it("passes everything through when nothing is muted", () => {
     const f = new DiagnosticFilter(memento() as never);
     const input = [
@@ -128,6 +143,30 @@ describe("DiagnosticFilter.applyFilter", () => {
       diag({ source: "ts", code: "2304" }),
     ];
     expect(f.applyFilter(input as never)).toEqual(input);
+  });
+
+  it("renders only fallow diagnostics as information", () => {
+    const f = new DiagnosticFilter(memento() as never, () => "information");
+    const input = [
+      diag({ code: "code-duplication" }),
+      diag({ source: "ts", code: "2304", severity: 1 }),
+    ];
+    const out = f.applyFilter(input as never);
+    expect(out[0]?.severity).toBe(2);
+    expect(out[1]?.severity).toBe(1);
+  });
+
+  it("renders fallow diagnostics as hints after mute filtering", () => {
+    const f = new DiagnosticFilter(memento() as never, () => "hint");
+    f.setCategoryMuted("code-duplication", true);
+    const input = [
+      diag({ code: "code-duplication" }),
+      diag({ code: "unused-export" }),
+    ];
+    const out = f.applyFilter(input as never);
+    expect(out).toHaveLength(1);
+    expect(out[0]?.code).toBe("unused-export");
+    expect(out[0]?.severity).toBe(3);
   });
 
   it("drops only fallow diagnostics with the muted code", () => {
@@ -247,6 +286,27 @@ describe("DiagnosticFilter.handleDiagnostics + refresh", () => {
     f.clearAllMutes();
     const cleared = c.sets[c.sets.length - 1];
     expect(cleared?.diags).toHaveLength(2);
+  });
+
+  it("refresh re-applies a changed severity from cached diagnostics", () => {
+    let severity: "warning" | "hint" = "warning";
+    const f = new DiagnosticFilter(memento() as never, () => severity);
+    const c = collection();
+    f.attachClient({ diagnostics: c as never });
+    f.handleDiagnostics(
+      fakeUri("file:///a.ts") as never,
+      [diag({ code: "code-duplication", severity: 1 })] as never,
+      vi.fn()
+    );
+    c.sets.length = 0;
+    severity = "hint";
+    f.refresh();
+    const hinted = c.sets[c.sets.length - 1];
+    expect(hinted?.diags[0]?.severity).toBe(3);
+    severity = "warning";
+    f.refresh();
+    const warning = c.sets[c.sets.length - 1];
+    expect(warning?.diags[0]?.severity).toBe(1);
   });
 
   it("caps the cache so a workspace-wide publish does not grow heap forever", () => {

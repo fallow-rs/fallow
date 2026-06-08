@@ -459,6 +459,22 @@
           "default": true,
           "markdownDescription": "Show the **Fallow** eye button in the status bar to hide or show all Fallow squiggles in the editor with one click. Editor-only; CI and `fallow check` still report every finding. Turn this off to remove the button (the **Fallow: Toggle Hide All Findings** command still works and can be bound to a key)."
         },
+        "fallow.diagnostics.severity": {
+          "type": "string",
+          "default": "warning",
+          "scope": "application",
+          "enum": [
+            "warning",
+            "information",
+            "hint"
+          ],
+          "enumDescriptions": [
+            "Render Fallow diagnostics as warnings, matching the current default.",
+            "Render Fallow diagnostics as information.",
+            "Render Fallow diagnostics as hints, which VS Code shows without squiggles."
+          ],
+          "markdownDescription": "Render Fallow editor diagnostics at the selected VS Code severity. `hint` keeps findings available without squiggles. Editor-only; CI and `fallow check` still report every finding."
+        },
         "fallow.trace.server": {
           "type": "string",
           "default": "off",

@@ -15,6 +15,7 @@ import {
   getAuditEnabled,
   getAuditRunOnSave,
   getDiagnosticStatusBar,
+  getDiagnosticSeverity,
   getComplexityBreakdownEnabled,
   getComplexityAfterText,
   onConfigChange,
@@ -29,6 +30,7 @@ import {
   runWorkspaces,
 } from "./commands.js";
 import {
+  DIAGNOSTIC_RENDER_CONFIG_KEYS,
   HEALTH_CONFIG_KEYS,
   REANALYSIS_CONFIG_KEYS,
   RESTART_CONFIG_KEYS,
@@ -178,7 +180,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   syncAuditStatusBar();
   context.subscriptions.push({ dispose: () => disposeAuditStatusBar() });
 
-  const diagnosticFilter = new DiagnosticFilter(context.workspaceState);
+  const diagnosticFilter = new DiagnosticFilter(context.workspaceState, getDiagnosticSeverity);
   context.subscriptions.push({ dispose: () => diagnosticFilter.dispose() });
   registerDiagnosticMuteUi(context, diagnosticFilter);
 
@@ -868,6 +870,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       const needsRestart = affectsAnyConfiguration(e, RESTART_CONFIG_KEYS);
       const needsReanalysis = affectsAnyConfiguration(e, REANALYSIS_CONFIG_KEYS);
       const needsHealthReanalysis = affectsAnyConfiguration(e, HEALTH_CONFIG_KEYS);
+      const needsDiagnosticRefresh = affectsAnyConfiguration(e, DIAGNOSTIC_RENDER_CONFIG_KEYS);
       const affectsSecurity = affectsAnyConfiguration(e, SECURITY_CONFIG_KEYS);
 
       if (e.affectsConfiguration("fallow.workspace")) {
@@ -891,6 +894,10 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
         // Create/dispose the diagnostics toggle item live, same as the audit
         // item, so flipping the setting never needs a window reload.
         syncDiagnosticStatusBar();
+      }
+
+      if (needsDiagnosticRefresh) {
+        diagnosticFilter.refresh();
       }
 
       if (needsRestart) {

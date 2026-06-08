@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DIAGNOSTIC_RENDER_CONFIG_KEYS,
   REANALYSIS_CONFIG_KEYS,
   RESTART_CONFIG_KEYS,
   affectsAnyConfiguration,
@@ -31,5 +32,11 @@ describe("config keys", () => {
     // + status bar, but the LSP is not workspace-scoped so it must not restart.
     expect(REANALYSIS_CONFIG_KEYS).toContain("fallow.workspace");
     expect(RESTART_CONFIG_KEYS).not.toContain("fallow.workspace");
+  });
+
+  it("refreshes diagnostics rendering without restarting or re-analyzing", () => {
+    expect(DIAGNOSTIC_RENDER_CONFIG_KEYS).toContain("fallow.diagnostics.severity");
+    expect(RESTART_CONFIG_KEYS).not.toContain("fallow.diagnostics.severity");
+    expect(REANALYSIS_CONFIG_KEYS).not.toContain("fallow.diagnostics.severity");
   });
 });

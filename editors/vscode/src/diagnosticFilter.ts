@@ -6,6 +6,7 @@ import type {
   ProvideDiagnosticSignature,
   vsdiag,
 } from "vscode-languageclient/node.js";
+import type { DiagnosticSeveritySetting } from "./types.js";
 
 const STATE_KEY = "fallow.diagnosticFilter.v1";
 const FALLOW_SOURCE = "fallow";
@@ -117,6 +118,8 @@ interface FilterClient {
   readonly diagnostics?: vscode.DiagnosticCollection;
 }
 
+type DiagnosticSeverityGetter = () => DiagnosticSeveritySetting;
+
 /** LSP diagnostics get tagged with `source: "fallow"` (see
  *  `crates/lsp/src/diagnostics/*.rs`). Anything else flows through
  *  the filter untouched so we never affect TypeScript or ESLint. */
@@ -142,6 +145,29 @@ export const diagnosticCode = (d: vscode.Diagnostic): string | null => {
   return null;
 };
 
+export const severityToDiagnosticSeverity = (
+  severity: DiagnosticSeveritySetting,
+): vscode.DiagnosticSeverity => {
+  switch (severity) {
+    case "hint":
+      return vscode.DiagnosticSeverity.Hint;
+    case "information":
+      return vscode.DiagnosticSeverity.Information;
+    case "warning":
+      return vscode.DiagnosticSeverity.Warning;
+  }
+};
+
+const withRenderedSeverity = (
+  d: vscode.Diagnostic,
+  severity: vscode.DiagnosticSeverity,
+): vscode.Diagnostic => {
+  if (!isFallowDiagnostic(d) || d.severity === severity) {
+    return d;
+  }
+  return { ...d, severity };
+};
+
 interface DiagnosticFilterStateChange {
   readonly mutedAll: boolean;
   readonly mutedCategories: ReadonlySet<string>;
@@ -157,7 +183,10 @@ export class DiagnosticFilter {
 
   public readonly onDidChange = this.emitter.event;
 
-  public constructor(private readonly memento: vscode.Memento) {
+  public constructor(
+    private readonly memento: vscode.Memento,
+    private readonly getSeverity: DiagnosticSeverityGetter = () => "warning",
+  ) {
     const persisted = memento.get<PersistedState>(STATE_KEY);
     if (persisted) {
       this.mutedAll = persisted.mutedAll === true;
@@ -270,22 +299,23 @@ export class DiagnosticFilter {
   }
 
   public applyFilter(diagnostics: ReadonlyArray<vscode.Diagnostic>): vscode.Diagnostic[] {
-    if (!this.anythingMuted()) {
-      return diagnostics.slice();
-    }
-    return diagnostics.filter((d) => {
-      if (!isFallowDiagnostic(d)) {
-        return true;
-      }
-      if (this.mutedAll) {
-        return false;
-      }
-      const code = diagnosticCode(d);
-      if (code === null) {
-        return true;
-      }
-      return !this.mutedCategories.has(code);
-    });
+    const renderedSeverity = severityToDiagnosticSeverity(this.getSeverity());
+    const filtered = this.anythingMuted()
+      ? diagnostics.filter((d) => {
+          if (!isFallowDiagnostic(d)) {
+            return true;
+          }
+          if (this.mutedAll) {
+            return false;
+          }
+          const code = diagnosticCode(d);
+          if (code === null) {
+            return true;
+          }
+          return !this.mutedCategories.has(code);
+        })
+      : diagnostics;
+    return filtered.map((d) => withRenderedSeverity(d, renderedSeverity));
   }
 
   /** Push-mode middleware: intercepts `textDocument/publishDiagnostics`. */

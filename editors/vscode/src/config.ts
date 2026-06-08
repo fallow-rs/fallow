@@ -3,7 +3,13 @@ import * as path from "node:path";
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { clampMinLines, clampMinOccurrences } from "./duplication-utils.js";
-import type { AuditGate, DuplicationMode, IssueTypeConfig, TraceLevel } from "./types.js";
+import type {
+  AuditGate,
+  DiagnosticSeveritySetting,
+  DuplicationMode,
+  IssueTypeConfig,
+  TraceLevel,
+} from "./types.js";
 
 const SECTION = "fallow";
 
@@ -134,6 +140,11 @@ export const getAuditEnabled = (): boolean =>
  */
 export const getDiagnosticStatusBar = (): boolean =>
   getConfig().get<boolean>("diagnostics.statusBar", true);
+
+export const getDiagnosticSeverity = (): DiagnosticSeveritySetting => {
+  const value = getConfig().get<string>("diagnostics.severity", "warning");
+  return value === "information" || value === "hint" ? value : "warning";
+};
 
 /**
  * Whether to re-run the audit on save of a JS/TS file. Default OFF so it cannot

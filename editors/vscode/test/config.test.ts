@@ -11,12 +11,13 @@ type InspectValue<T> = {
 };
 
 let inspected: Record<string, InspectValue<unknown> | undefined> = {};
+let configured: Record<string, unknown> = {};
 
 vi.mock("vscode", () => ({
   workspace: {
     workspaceFolders: undefined,
     getConfiguration: () => ({
-      get: <T>(_key: string, fallback: T): T => fallback,
+      get: <T>(key: string, fallback: T): T => (configured[key] as T | undefined) ?? fallback,
       inspect: <T>(key: string): InspectValue<T> | undefined =>
         inspected[key] as InspectValue<T> | undefined,
     }),
@@ -32,12 +33,14 @@ import {
   getDuplicationModeOverride,
   getDuplicationSkipLocalOverride,
   getDuplicationThresholdOverride,
+  getDiagnosticSeverity,
   getHealthInlineComplexity,
 } from "../src/config.js";
 
 describe("duplication setting overrides", () => {
   beforeEach(() => {
     inspected = {};
+    configured = {};
   });
 
   it("ignores package defaults so project config can win", () => {
@@ -98,5 +101,27 @@ describe("duplication setting overrides", () => {
 describe("health inline complexity setting", () => {
   it("defaults off", () => {
     expect(getHealthInlineComplexity()).toBe(false);
+  });
+});
+
+describe("diagnostics severity setting", () => {
+  beforeEach(() => {
+    configured = {};
+  });
+
+  it("defaults to warning", () => {
+    expect(getDiagnosticSeverity()).toBe("warning");
+  });
+
+  it("accepts information and hint", () => {
+    configured = { "diagnostics.severity": "information" };
+    expect(getDiagnosticSeverity()).toBe("information");
+    configured = { "diagnostics.severity": "hint" };
+    expect(getDiagnosticSeverity()).toBe("hint");
+  });
+
+  it("falls back to warning for unknown values", () => {
+    configured = { "diagnostics.severity": "quiet" };
+    expect(getDiagnosticSeverity()).toBe("warning");
   });
 });

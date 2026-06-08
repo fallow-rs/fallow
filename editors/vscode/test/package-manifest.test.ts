@@ -29,6 +29,7 @@ interface ConfigProperty {
   readonly description?: string;
   readonly markdownDescription?: string;
   readonly scope?: string;
+  readonly enum?: readonly string[];
   readonly default?: unknown;
 }
 
@@ -435,6 +436,14 @@ describe("package.json license commands", () => {
     const properties = pkg.contributes.configuration.properties;
     expect(properties["fallow.license.showStatusBar"]?.description).toBeTruthy();
     expect(properties["fallow.license.refreshOnStartup"]?.description).toBeTruthy();
+  });
+
+  it("documents the global diagnostics severity posture setting", () => {
+    const setting = pkg.contributes.configuration.properties["fallow.diagnostics.severity"];
+    expect(setting?.default).toBe("warning");
+    expect(setting?.scope).toBe("application");
+    expect(setting?.enum).toEqual(["warning", "information", "hint"]);
+    expect(setting?.markdownDescription).toContain("Editor-only");
   });
 
   it("keeps the startup probe off by default (does not shell out on activation)", () => {

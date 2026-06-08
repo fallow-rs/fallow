@@ -129,7 +129,12 @@ export type { CheckOutput as FallowCheckResult } from "./generated/output-contra
 export type { DupesReportPayload as FallowDupesResult } from "./generated/output-contract.js";
 export type { CombinedOutput as FallowCombinedResult } from "./generated/output-contract.js";
 
-export type { DuplicationMode, IssueTypeConfig, TraceLevel } from "./settings.js";
+export type {
+  DiagnosticSeveritySetting,
+  DuplicationMode,
+  IssueTypeConfig,
+  TraceLevel,
+} from "./settings.js";
 export type { IssueCategory } from "./labels.js";
 export { ISSUE_CATEGORY_LABELS } from "./labels.js";
 export type { FallowFixResult, FixAction } from "./fix-types.js";
