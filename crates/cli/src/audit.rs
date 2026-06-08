@@ -3011,20 +3011,22 @@ mod tests {
 
     #[test]
     fn remap_cache_dir_moves_project_local_cache_to_base_worktree() {
-        let current_root = PathBuf::from("/repo");
-        let base_root = PathBuf::from("/tmp/fallow-base");
-        let cache_dir = PathBuf::from("/repo/.cache/fallow");
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let current_root = tmp.path().join("repo");
+        let base_root = tmp.path().join("fallow-base");
+        let cache_dir = current_root.join(".cache").join("fallow");
 
         let remapped = remap_cache_dir_for_base_worktree(&current_root, &base_root, &cache_dir);
 
-        assert_eq!(remapped, PathBuf::from("/tmp/fallow-base/.cache/fallow"));
+        assert_eq!(remapped, base_root.join(".cache").join("fallow"));
     }
 
     #[test]
     fn remap_cache_dir_keeps_external_absolute_cache_shared() {
-        let current_root = PathBuf::from("/repo");
-        let base_root = PathBuf::from("/tmp/fallow-base");
-        let cache_dir = PathBuf::from("/tmp/shared/fallow-cache");
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let current_root = tmp.path().join("repo");
+        let base_root = tmp.path().join("fallow-base");
+        let cache_dir = tmp.path().join("shared").join("fallow-cache");
 
         let remapped = remap_cache_dir_for_base_worktree(&current_root, &base_root, &cache_dir);
 
