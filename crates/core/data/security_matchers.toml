@@ -1119,6 +1119,55 @@ enabler = "@modelcontextprotocol/sdk"
 path_patterns = ["mcp.tool-input"]
 
 [[source]]
+id = "graphql-resolver-args"
+title = "GraphQL resolver args"
+enabler = "graphql"
+path_patterns = ["graphql.args"]
+
+[[source]]
+id = "graphql-resolver-args"
+title = "GraphQL resolver args"
+enabler = "@apollo/server"
+path_patterns = ["graphql.args"]
+
+[[source]]
+id = "graphql-resolver-args"
+title = "GraphQL resolver args"
+enabler = "apollo-server"
+path_patterns = ["graphql.args"]
+
+[[source]]
+id = "graphql-resolver-args"
+title = "GraphQL resolver args"
+enabler = "apollo-server-express"
+path_patterns = ["graphql.args"]
+
+[[source]]
+id = "graphql-resolver-args"
+title = "GraphQL resolver args"
+enabler = "graphql-yoga"
+path_patterns = ["graphql.args"]
+
+[[source]]
+id = "graphql-resolver-args"
+title = "GraphQL resolver args"
+enabler = "@graphql-yoga/node"
+path_patterns = ["graphql.args"]
+
+[[source]]
+id = "trpc-procedure-input"
+title = "tRPC procedure input"
+enabler = "@trpc/server"
+path_patterns = ["trpc.input"]
+
+[[source]]
+id = "webhook-raw-body"
+title = "Webhook raw body"
+# `*.body` is already covered by HTTP request input. Raw-body middleware and
+# signature verification handlers commonly expose the unparsed payload here.
+path_patterns = ["req.rawBody", "request.rawBody", "ctx.req.rawBody", "*.rawBody"]
+
+[[source]]
 id = "process-argv"
 title = "Process arguments"
 # `process.argv` and `process.env`-adjacent CLI input. Bare `process.argv`
@@ -1146,6 +1195,13 @@ title = "Browser location input"
 # `location.search`, `location.hash`, `window.location.href`,
 # `document.location.search`. Attacker-influenceable URL surface in the browser.
 path_patterns = ["*.search", "*.hash", "location.href", "*.location.href"]
+
+[[source]]
+id = "dom-xss-source"
+title = "Browser DOM input"
+# Browser-controlled or user-influenceable DOM reads. These are exact paths to
+# avoid treating arbitrary `.name`, `.cookie`, or `.referrer` fields as sources.
+path_patterns = ["document.referrer", "window.name", "document.cookie"]
 
 # ── CWE-1321: Prototype pollution ────────────────────────────────────────────
 # Two distinct shapes, both source-model-free. (1) A static `obj.__proto__ = x`

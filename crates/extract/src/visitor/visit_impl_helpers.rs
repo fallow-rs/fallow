@@ -21,6 +21,8 @@ pub(super) const NEXT_REQUEST_SOURCE: &str = "next.request";
 pub(super) const NEXT_FORM_DATA_SOURCE: &str = "next.form-data";
 pub(super) const QUEUE_JOB_SOURCE: &str = "queue.job";
 pub(super) const MCP_TOOL_INPUT_SOURCE: &str = "mcp.tool-input";
+pub(super) const GRAPHQL_ARGS_SOURCE: &str = "graphql.args";
+pub(super) const TRPC_INPUT_SOURCE: &str = "trpc.input";
 
 pub(super) type StaticPackageStringBindings = FxHashMap<String, Vec<String>>;
 pub(super) type StaticPackageObjectBindings = FxHashMap<String, FxHashMap<String, Vec<String>>>;

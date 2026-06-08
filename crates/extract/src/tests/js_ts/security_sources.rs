@@ -115,12 +115,26 @@ fn sink_captures_arg_idents_in_jsx_attr() {
 fn direct_binding_records_object_path_as_source() {
     // `const id = req.query.id` -> { local: "id", source_path: "req.query" }.
     let info = parse_ts("const id = req.query.id;");
-    let binding = info
-        .tainted_bindings
-        .iter()
-        .find(|b| b.local == "id")
-        .expect("tainted binding for id");
-    assert_eq!(binding.source_path, "req.query");
+    assert!(
+        info.tainted_bindings
+            .iter()
+            .any(|b| b.local == "id" && b.source_path == "req.query")
+    );
+}
+
+#[test]
+fn direct_binding_records_exact_dom_source_path() {
+    let info = parse_ts("const ref = document.referrer;\nconst name = window.name;");
+    assert!(
+        info.tainted_bindings
+            .iter()
+            .any(|b| b.local == "ref" && b.source_path == "document.referrer")
+    );
+    assert!(
+        info.tainted_bindings
+            .iter()
+            .any(|b| b.local == "name" && b.source_path == "window.name")
+    );
 }
 
 #[test]
@@ -350,4 +364,77 @@ fn mcp_tool_callback_param_records_input_source() {
         .find(|b| b.local == "city")
         .expect("MCP tool input param source");
     assert_eq!(binding.source_path, "mcp.tool-input");
+}
+
+#[test]
+fn graphql_resolver_second_args_param_records_source() {
+    let info = parse_ts(
+        r"
+        export const resolvers = {
+            Query: {
+                user(_parent, args) {
+                    eval(args.id);
+                },
+            },
+        };
+        ",
+    );
+    let binding = info
+        .tainted_bindings
+        .iter()
+        .find(|b| b.local == "args")
+        .expect("GraphQL resolver args param source");
+    assert_eq!(binding.source_path, "graphql.args");
+}
+
+#[test]
+fn graphql_resolver_destructured_args_param_records_source() {
+    let info = parse_ts(
+        r"
+        export const resolvers = {
+            Query: {
+                user(_parent, { id }) {
+                    eval(id);
+                },
+            },
+        };
+        ",
+    );
+    let binding = info
+        .tainted_bindings
+        .iter()
+        .find(|b| b.local == "id")
+        .expect("GraphQL resolver destructured args source");
+    assert_eq!(binding.source_path, "graphql.args");
+}
+
+#[test]
+fn trpc_procedure_destructured_input_records_source() {
+    let info = parse_ts(
+        r"
+        export const router = t.router({
+            user: t.procedure
+                .input(schema)
+                .query(({ input }) => {
+                    eval(input.id);
+                }),
+        });
+        ",
+    );
+    let binding = info
+        .tainted_bindings
+        .iter()
+        .find(|b| b.local == "input")
+        .expect("tRPC input source");
+    assert_eq!(binding.source_path, "trpc.input");
+}
+
+#[test]
+fn non_trpc_query_callback_does_not_record_input_source() {
+    let info = parse_ts("db.query(({ input }) => { eval(input.id); });");
+    assert!(
+        info.tainted_bindings
+            .iter()
+            .all(|b| b.source_path != "trpc.input")
+    );
 }

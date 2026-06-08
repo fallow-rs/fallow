@@ -1264,9 +1264,15 @@ evidence_template = "x"
         assert!(cat.is_source_path("req.params"));
         assert!(cat.is_source_path("process.argv"));
         assert!(cat.is_source_path("event.data"));
+        assert!(cat.is_source_path("request.rawBody"));
+        assert!(cat.is_source_path("document.referrer"));
+        assert!(cat.is_source_path("window.name"));
+        assert!(cat.is_source_path("document.cookie"));
         // A plain object path that is not an untrusted source does not match.
         assert!(!cat.is_source_path("config.value"));
         assert!(!cat.is_source_path("user.name"));
+        assert!(!cat.is_source_path("profile.name"));
+        assert!(!cat.is_source_path("jar.cookie"));
     }
 
     #[test]
@@ -1305,6 +1311,35 @@ evidence_template = "x"
         assert_eq!(
             cat.matching_source_for_deps("framework.request", &deps),
             Some(("framework-handler-input", "Framework handler input"))
+        );
+    }
+
+    #[test]
+    fn source_enabler_gates_graphql_and_trpc_param_sources() {
+        let cat = catalogue();
+        let empty = FxHashSet::default();
+        assert!(
+            cat.matching_source_for_deps("graphql.args", &empty)
+                .is_none(),
+            "GraphQL resolver args require a matching package"
+        );
+        assert!(
+            cat.matching_source_for_deps("trpc.input", &empty).is_none(),
+            "tRPC procedure input requires a matching package"
+        );
+
+        let mut graphql_deps = FxHashSet::default();
+        graphql_deps.insert("@apollo/server".to_string());
+        assert_eq!(
+            cat.matching_source_for_deps("graphql.args", &graphql_deps),
+            Some(("graphql-resolver-args", "GraphQL resolver args"))
+        );
+
+        let mut trpc_deps = FxHashSet::default();
+        trpc_deps.insert("@trpc/server".to_string());
+        assert_eq!(
+            cat.matching_source_for_deps("trpc.input", &trpc_deps),
+            Some(("trpc-procedure-input", "tRPC procedure input"))
         );
     }
 

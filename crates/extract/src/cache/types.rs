@@ -269,7 +269,12 @@ use crate::MemberKind;
 /// resource-amplification size arguments before catalogue matching. Pre-135
 /// entries may retain stale clamped amplification sink candidates until the
 /// file is re-extracted.
-pub(super) const CACHE_VERSION: u32 = 135;
+///
+/// Bumped to 136 for issue #899: JS/TS extraction now emits GraphQL resolver
+/// args, tRPC procedure input, and exact member source paths for local tainted
+/// bindings. Pre-136 entries may miss those source-backed ranking signals until
+/// the file is re-extracted.
+pub(super) const CACHE_VERSION: u32 = 136;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

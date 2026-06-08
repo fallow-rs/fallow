@@ -1002,18 +1002,22 @@ impl ModuleInfoExtractor {
         }
     }
 
-    /// Record a tainted-source binding for `const <name> = <object>.<prop>`,
-    /// where the initializer is a member-access chain. The recorded
-    /// `source_path` is the flattened OBJECT path (the chain with its final
-    /// property dropped), so `const id = req.query.id` records
-    /// `{ local: "id", source_path: "req.query" }` and the analyze layer can
-    /// match it against a `req.query` source pattern. The init may be wrapped in
-    /// `await` / parens (`const id = await req.json()`-style chains resolve to
-    /// the member object). A non-member init records nothing. Captured at any
-    /// scope (no `is_module_scope` gate): a sink inside a route handler reading a
-    /// function-local `const id = req.query.id` is exactly the target case.
+    /// Record tainted-source bindings for `const <name> = <object>.<prop>`,
+    /// where the initializer is a member-access chain. The recorded candidates
+    /// include the exact member path and the flattened object path, so
+    /// `const id = req.query.id` still records `req.query` while leaf sources
+    /// such as `const ref = document.referrer` can match exact source rows.
+    /// Captured at any scope (no `is_module_scope` gate): a sink inside a route
+    /// handler reading a function-local source is exactly the target case.
     fn record_tainted_source_binding(&mut self, name: &str, expr: &Expression<'_>) {
-        if let Some(source_path) = tainted_source_path(expr) {
+        for source_path in source_path_candidates(expr) {
+            if self
+                .tainted_bindings
+                .iter()
+                .any(|b| b.local == name && b.source_path == source_path)
+            {
+                continue;
+            }
             self.tainted_bindings.push(TaintedBinding {
                 local: name.to_string(),
                 source_path,
@@ -1040,7 +1044,16 @@ impl ModuleInfoExtractor {
         params: &FormalParameters<'_>,
         source_path: &'static str,
     ) {
-        let Some(param) = params.items.first() else {
+        self.record_param_source_at_index(params, 0, source_path);
+    }
+
+    fn record_param_source_at_index(
+        &mut self,
+        params: &FormalParameters<'_>,
+        index: usize,
+        source_path: &'static str,
+    ) {
+        let Some(param) = params.items.get(index) else {
             return;
         };
         match &param.pattern {
@@ -1063,11 +1076,42 @@ impl ModuleInfoExtractor {
         source_path: &'static str,
     ) {
         for param in &params.items {
-            if let BindingPattern::BindingIdentifier(id) = &param.pattern
-                && names.iter().any(|name| *name == id.name.as_str())
-            {
-                self.record_tainted_param_binding(id.name.as_str(), source_path);
+            match &param.pattern {
+                BindingPattern::BindingIdentifier(id)
+                    if names.iter().any(|name| *name == id.name.as_str()) =>
+                {
+                    self.record_tainted_param_binding(id.name.as_str(), source_path);
+                }
+                BindingPattern::ObjectPattern(obj_pat) => {
+                    for (local, key) in extract_object_pattern_bindings(obj_pat) {
+                        if names
+                            .iter()
+                            .any(|name| key == *name || key.starts_with(&format!("{name}.")))
+                        {
+                            self.record_tainted_param_binding(&local, source_path);
+                        }
+                    }
+                }
+                _ => {}
             }
+        }
+    }
+
+    fn record_graphql_resolver_args_source(&mut self, expr: &Expression<'_>) {
+        let Some(params) = function_like_params(expr) else {
+            return;
+        };
+        let Some(param) = params.items.get(1) else {
+            return;
+        };
+        match &param.pattern {
+            BindingPattern::BindingIdentifier(id) if id.name == "args" => {
+                self.record_param_source_at_index(params, 1, GRAPHQL_ARGS_SOURCE);
+            }
+            BindingPattern::ObjectPattern(_) => {
+                self.record_param_source_at_index(params, 1, GRAPHQL_ARGS_SOURCE);
+            }
+            _ => {}
         }
     }
 
@@ -1091,14 +1135,15 @@ impl ModuleInfoExtractor {
     }
 
     fn record_framework_callback_param_sources(&mut self, call: &CallExpression<'_>) {
-        let Some(callee_path) = flatten_callee_path(&call.callee) else {
-            return;
-        };
-        let Some((_, method)) = callee_path.rsplit_once('.') else {
+        let callee_path = flatten_callee_path(&call.callee);
+        let Some(method) = callee_method_name(&call.callee, callee_path.as_deref()) else {
             return;
         };
         if is_route_registration_method(method) {
-            if !is_framework_route_receiver_path(&callee_path, method) {
+            let Some(callee_path) = callee_path.as_deref() else {
+                return;
+            };
+            if !is_framework_route_receiver_path(callee_path, method) {
                 return;
             }
             if let Some(params) = route_callback_params(&call.arguments, method) {
@@ -1116,6 +1161,13 @@ impl ModuleInfoExtractor {
             && let Some(params) = last_callback_params(&call.arguments)
         {
             self.record_first_param_source(params, MCP_TOOL_INPUT_SOURCE);
+            return;
+        }
+        if is_trpc_procedure_method(method)
+            && is_trpc_procedure_callee(&call.callee, method)
+            && let Some(params) = last_callback_params(&call.arguments)
+        {
+            self.record_named_param_source(params, &["input"], TRPC_INPUT_SOURCE);
         }
     }
 
@@ -2749,6 +2801,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_object_property(&mut self, prop: &ObjectProperty<'a>) {
+        self.record_graphql_resolver_args_source(&prop.value);
+
         if let Some((import_expr, source)) = try_extract_property_callback_import(prop) {
             self.dynamic_imports.push(DynamicImportInfo {
                 source: source.to_string(),
@@ -3510,6 +3564,23 @@ fn flatten_callee_path(expr: &Expression<'_>) -> Option<String> {
     }
 }
 
+fn terminal_static_member_name<'a>(expr: &'a Expression<'_>) -> Option<&'a str> {
+    match unwrap_parens(expr) {
+        Expression::StaticMemberExpression(member) => Some(member.property.name.as_str()),
+        _ => None,
+    }
+}
+
+fn callee_method_name<'a>(
+    callee: &'a Expression<'_>,
+    callee_path: Option<&'a str>,
+) -> Option<&'a str> {
+    if let Some(callee_path) = callee_path {
+        return callee_path.rsplit_once('.').map(|(_, method)| method);
+    }
+    terminal_static_member_name(callee)
+}
+
 fn is_http_route_handler_name(name: &str) -> bool {
     matches!(
         name,
@@ -3522,6 +3593,28 @@ fn is_route_registration_method(method: &str) -> bool {
         method,
         "all" | "delete" | "get" | "head" | "options" | "patch" | "post" | "put" | "use"
     )
+}
+
+fn is_trpc_procedure_method(method: &str) -> bool {
+    matches!(method, "query" | "mutation" | "subscription")
+}
+
+fn is_trpc_procedure_callee(expr: &Expression<'_>, method: &str) -> bool {
+    let Expression::StaticMemberExpression(member) = unwrap_parens(expr) else {
+        return false;
+    };
+    member.property.name == method && trpc_chain_has_procedure(&member.object)
+}
+
+fn trpc_chain_has_procedure(expr: &Expression<'_>) -> bool {
+    match unwrap_parens(expr) {
+        Expression::Identifier(ident) => ident.name.to_ascii_lowercase().ends_with("procedure"),
+        Expression::StaticMemberExpression(member) => {
+            member.property.name == "procedure" || trpc_chain_has_procedure(&member.object)
+        }
+        Expression::CallExpression(call) => trpc_chain_has_procedure(&call.callee),
+        _ => false,
+    }
 }
 
 fn is_framework_route_receiver_path(callee_path: &str, method: &str) -> bool {
@@ -3558,6 +3651,14 @@ fn callback_params<'a>(arg: &'a Argument<'a>) -> Option<&'a FormalParameters<'a>
             Expression::FunctionExpression(expr) => Some(&*expr.params),
             _ => None,
         }),
+    }
+}
+
+fn function_like_params<'a>(expr: &'a Expression<'a>) -> Option<&'a FormalParameters<'a>> {
+    match unwrap_parens(expr) {
+        Expression::ArrowFunctionExpression(expr) => Some(&expr.params),
+        Expression::FunctionExpression(expr) => Some(&expr.params),
+        _ => None,
     }
 }
 

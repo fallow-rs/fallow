@@ -1,0 +1,6 @@
+{
+  "name": "security-framework-entry-sources-899-plain-graphql",
+  "devDependencies": {
+    "typescript": "latest"
+  }
+}

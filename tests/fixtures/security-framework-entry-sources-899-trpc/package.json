@@ -1,0 +1,9 @@
+{
+  "name": "security-framework-entry-sources-899-trpc",
+  "dependencies": {
+    "@trpc/server": "latest"
+  },
+  "devDependencies": {
+    "typescript": "latest"
+  }
+}

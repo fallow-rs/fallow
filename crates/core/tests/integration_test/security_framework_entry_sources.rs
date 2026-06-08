@@ -112,3 +112,34 @@ fn mcp_tool_input_param_is_source_backed() {
         finding.evidence
     );
 }
+
+#[test]
+fn graphql_resolver_args_param_is_source_backed() {
+    let results = analyze_fixture("security-framework-entry-sources-899-graphql");
+    let finding = tainted_sink_at_line(&results, 4);
+    assert!(finding.source_backed);
+    assert!(
+        finding.evidence.contains("graphql resolver args"),
+        "evidence should name the matched GraphQL source: {}",
+        finding.evidence
+    );
+}
+
+#[test]
+fn graphql_resolver_args_requires_enabler() {
+    let results = analyze_fixture("security-framework-entry-sources-899-plain-graphql");
+    let finding = tainted_sink_at_line(&results, 4);
+    assert!(!finding.source_backed);
+}
+
+#[test]
+fn trpc_procedure_input_is_source_backed() {
+    let results = analyze_fixture("security-framework-entry-sources-899-trpc");
+    let finding = tainted_sink_at_line(&results, 13);
+    assert!(finding.source_backed);
+    assert!(
+        finding.evidence.contains("trpc procedure input"),
+        "evidence should name the matched tRPC source: {}",
+        finding.evidence
+    );
+}
