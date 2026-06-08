@@ -807,17 +807,29 @@ pub fn find_dead_code_full(
             &results.unused_exports,
             &mut results.security_findings,
         );
-        let boundary_anchor_paths: rustc_hash::FxHashSet<std::path::PathBuf> = results
-            .boundary_violations
-            .iter()
-            .flat_map(|b| [b.violation.from_path.clone(), b.violation.to_path.clone()])
-            .collect();
+        // Map each boundary-violation file (importer or imported side) to the
+        // (from_zone, to_zone) it crosses, so security ranking can flag
+        // `crosses_boundary` AND fill the candidate's architecture-zone slot
+        // (issue #900). Duplicate paths keep the last (deterministic: the
+        // violations are path-sorted).
+        let boundary_crossings: rustc_hash::FxHashMap<std::path::PathBuf, (String, String)> =
+            results
+                .boundary_violations
+                .iter()
+                .flat_map(|b| {
+                    let zones = (b.violation.from_zone.clone(), b.violation.to_zone.clone());
+                    [
+                        (b.violation.from_path.clone(), zones.clone()),
+                        (b.violation.to_path.clone(), zones),
+                    ]
+                })
+                .collect();
         security::rank_security_findings(
             graph,
             modules,
             &line_offsets_by_file,
             &declared_deps,
-            &boundary_anchor_paths,
+            &boundary_crossings,
             &mut results.security_findings,
         );
     }

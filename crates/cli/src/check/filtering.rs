@@ -1897,6 +1897,9 @@ mod tests {
         let root = Path::new("/project");
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
+            finding_id: String::new(),
+            candidate: fallow_types::results::SecurityCandidate::default(),
+            taint_flow: None,
             kind: SecurityFindingKind::ClientServerLeak,
             category: None,
             cwe: None,
@@ -1941,6 +1944,9 @@ mod tests {
         let root = Path::new("/project");
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
+            finding_id: String::new(),
+            candidate: fallow_types::results::SecurityCandidate::default(),
+            taint_flow: None,
             kind: SecurityFindingKind::TaintedSink,
             category: Some("command-injection".into()),
             cwe: Some(78),
@@ -1992,6 +1998,9 @@ mod tests {
         let root = Path::new("/project");
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
+            finding_id: String::new(),
+            candidate: fallow_types::results::SecurityCandidate::default(),
+            taint_flow: None,
             kind: SecurityFindingKind::TaintedSink,
             category: Some("dangerous-html".into()),
             cwe: Some(79),
@@ -2028,6 +2037,9 @@ mod tests {
         let root = Path::new("/project");
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
+            finding_id: String::new(),
+            candidate: fallow_types::results::SecurityCandidate::default(),
+            taint_flow: None,
             kind: SecurityFindingKind::ClientServerLeak,
             category: None,
             cwe: None,
@@ -2078,6 +2090,9 @@ mod tests {
         let root = Path::new("/project");
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
+            finding_id: String::new(),
+            candidate: fallow_types::results::SecurityCandidate::default(),
+            taint_flow: None,
             kind: SecurityFindingKind::TaintedSink,
             category: Some("command-injection".into()),
             cwe: Some(78),
@@ -2124,6 +2139,9 @@ mod tests {
         let root = Path::new("/project");
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
+            finding_id: String::new(),
+            candidate: fallow_types::results::SecurityCandidate::default(),
+            taint_flow: None,
             kind: SecurityFindingKind::TaintedSink,
             category: Some("dangerous-html".into()),
             cwe: Some(79),

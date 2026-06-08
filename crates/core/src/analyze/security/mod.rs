@@ -15,7 +15,10 @@ use std::collections::VecDeque;
 
 use fallow_types::extract::ModuleInfo;
 use fallow_types::output::{IssueAction, SuppressFileAction, SuppressFileKind};
-use fallow_types::results::{SecurityFinding, SecurityFindingKind, TraceHop, TraceHopRole};
+use fallow_types::results::{
+    SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink, SecurityFinding,
+    SecurityFindingKind, TraceHop, TraceHopRole,
+};
 use fallow_types::suppress::IssueKind;
 
 use super::{LineOffsetsMap, byte_offset_to_line_col};
@@ -324,13 +327,19 @@ fn build_leak_finding(
          verification: confirm the secret value actually reaches client-bundled code."
     );
 
+    // The client-server-leak rule is graph-structural, not catalogue-driven:
+    // no source kind, no callee, no CWE. The candidate's sink slot anchors on
+    // the client boundary file; the boundary slot is filled by the ranking pass.
+    let candidate = client_leak_candidate(anchor.path.clone(), anchor.line, anchor.col);
+
     SecurityFinding {
+        finding_id: String::new(),
         kind: SecurityFindingKind::ClientServerLeak,
         category: None,
         cwe: None,
-        path: anchor.path.clone(),
-        line: anchor.line,
-        col: anchor.col,
+        path: candidate.sink.path.clone(),
+        line: candidate.sink.line,
+        col: candidate.sink.col,
         evidence,
         // The client-server-leak rule is graph-structural, not source-to-sink;
         // source-backing is a tainted-sink concept (issue #859).
@@ -339,6 +348,27 @@ fn build_leak_finding(
         actions: build_actions(),
         dead_code: None,
         reachability: None,
+        candidate,
+        taint_flow: None,
+    }
+}
+
+/// Build the candidate record for a `client-server-leak` finding. These findings
+/// carry no source kind (graph-structural, not source-to-sink) and no callee;
+/// the sink slot anchors on the client boundary file. The boundary slot starts
+/// at its default and is filled by the post-detection ranking pass.
+fn client_leak_candidate(path: std::path::PathBuf, line: u32, col: u32) -> SecurityCandidate {
+    SecurityCandidate {
+        source_kind: None,
+        sink: SecurityCandidateSink {
+            path,
+            line,
+            col,
+            category: None,
+            cwe: None,
+            callee: None,
+        },
+        boundary: SecurityCandidateBoundary::default(),
     }
 }
 
@@ -360,7 +390,9 @@ fn build_direct_finding(
          Candidate for verification: confirm the secret value actually reaches client-bundled \
          code (it may be guarded, server-only, or build-time-stripped)."
     );
+    let candidate = client_leak_candidate(path.clone(), 1, 0);
     SecurityFinding {
+        finding_id: String::new(),
         kind: SecurityFindingKind::ClientServerLeak,
         category: None,
         cwe: None,
@@ -378,6 +410,8 @@ fn build_direct_finding(
         actions: build_actions(),
         dead_code: None,
         reachability: None,
+        candidate,
+        taint_flow: None,
     }
 }
 

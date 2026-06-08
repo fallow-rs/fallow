@@ -95,11 +95,13 @@ use fallow_types::results::{
     DependencyOverrideMisconfigReason, DependencyOverrideSource, DuplicateExport,
     DuplicateLocation, EmptyCatalogGroup, EntryPointSummary, ExportUsage, FeatureFlag,
     FlagConfidence, FlagKind, ImportSite, MisconfiguredDependencyOverride, PrivateTypeLeak,
-    ReferenceLocation, SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding,
-    SecurityFindingKind, SecurityReachability, StaleSuppression, SuppressionOrigin,
-    TestOnlyDependency, TraceHop, TraceHopRole, TypeOnlyDependency, UnlistedDependency,
-    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
-    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
+    ReferenceLocation, SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink,
+    SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind,
+    SecurityReachability, SecurityTaintFlow, SecurityZoneCrossing, StaleSuppression,
+    SuppressionOrigin, TaintEndpoint, TaintPath, TestOnlyDependency, TraceHop, TraceHopRole,
+    TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport,
+    UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
+    UnusedMember,
 };
 
 /// Workspace-relative path to the committed schema.
@@ -322,6 +324,13 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "SecurityDeadCodeContext",
         "SecurityDeadCodeKind",
         "SecurityReachability",
+        "SecurityCandidate",
+        "SecurityCandidateSink",
+        "SecurityCandidateBoundary",
+        "SecurityZoneCrossing",
+        "SecurityTaintFlow",
+        "TaintEndpoint",
+        "TaintPath",
         "TraceHop",
         "TraceHopRole",
     ]
@@ -513,6 +522,13 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<TraceHopRole>();
     let _ = generator.subschema_for::<TraceHop>();
     let _ = generator.subschema_for::<SecurityReachability>();
+    let _ = generator.subschema_for::<SecurityCandidateSink>();
+    let _ = generator.subschema_for::<SecurityZoneCrossing>();
+    let _ = generator.subschema_for::<SecurityCandidateBoundary>();
+    let _ = generator.subschema_for::<SecurityCandidate>();
+    let _ = generator.subschema_for::<TaintEndpoint>();
+    let _ = generator.subschema_for::<TaintPath>();
+    let _ = generator.subschema_for::<SecurityTaintFlow>();
     let _ = generator.subschema_for::<SecurityFinding>();
     let _ = generator.subschema_for::<SecurityGateMode>();
     let _ = generator.subschema_for::<SecurityGateVerdict>();

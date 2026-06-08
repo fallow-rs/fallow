@@ -7,7 +7,10 @@
 use rustc_hash::FxHashMap;
 
 use fallow_types::extract::{ModuleInfo, SinkLiteralValue, SinkShape};
-use fallow_types::results::{SecurityFinding, SecurityFindingKind, TraceHop, TraceHopRole};
+use fallow_types::results::{
+    SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink, SecurityFinding,
+    SecurityFindingKind, TraceHop, TraceHopRole,
+};
 use fallow_types::suppress::IssueKind;
 
 use super::tainted_sink::{CategoryFilter, build_actions, is_low_value_anchor};
@@ -78,8 +81,23 @@ pub fn find_hardcoded_secret_candidates(
             }
 
             let evidence = redacted_evidence(signal, &sink.callee_path);
+            // No untrusted source: the secret is a hardcoded literal, so slot 1
+            // is null. The sink slot names the assignment target / callee.
+            let candidate = SecurityCandidate {
+                source_kind: None,
+                sink: SecurityCandidateSink {
+                    path: node.path.clone(),
+                    line,
+                    col,
+                    category: Some(CATEGORY_ID.to_string()),
+                    cwe: Some(CWE_ID),
+                    callee: Some(sink.callee_path.clone()),
+                },
+                boundary: SecurityCandidateBoundary::default(),
+            };
             let path = node.path.clone();
             findings.push(SecurityFinding {
+                finding_id: String::new(),
                 kind: SecurityFindingKind::TaintedSink,
                 category: Some(CATEGORY_ID.to_string()),
                 cwe: Some(CWE_ID),
@@ -97,6 +115,8 @@ pub fn find_hardcoded_secret_candidates(
                 actions: build_actions(),
                 reachability: None,
                 dead_code: None,
+                candidate,
+                taint_flow: None,
             });
         }
     }

@@ -2530,6 +2530,9 @@ export function choose(value: number): string {
                 by_source: vec![],
             }),
             security_findings: vec![fallow_core::results::SecurityFinding {
+                finding_id: String::new(),
+                candidate: fallow_core::results::SecurityCandidate::default(),
+                taint_flow: None,
                 kind: fallow_core::results::SecurityFindingKind::ClientServerLeak,
                 category: None,
                 cwe: None,
@@ -3339,6 +3342,9 @@ export function choose(value: number): string {
         let snapshot: VersionSnapshot = std::iter::once((uri.clone(), 1)).collect();
 
         let finding = fallow_core::results::SecurityFinding {
+            finding_id: String::new(),
+            candidate: fallow_core::results::SecurityCandidate::default(),
+            taint_flow: None,
             kind: fallow_core::results::SecurityFindingKind::TaintedSink,
             category: Some("dangerous-html".to_string()),
             cwe: Some(79),

@@ -18,8 +18,9 @@ use fallow_types::extract::{ExportName, ModuleInfo};
 use fallow_types::output::{FixAction, FixActionType, IssueAction};
 use fallow_types::output_dead_code::{UnusedExportFinding, UnusedFileFinding};
 use fallow_types::results::{
-    SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind,
-    SecurityReachability, TraceHop, TraceHopRole,
+    SecurityCandidateBoundary, SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding,
+    SecurityFindingKind, SecurityReachability, SecurityTaintFlow, SecurityZoneCrossing,
+    TaintEndpoint, TaintPath, TraceHop, TraceHopRole,
 };
 
 use crate::discover::FileId;
@@ -167,9 +168,11 @@ fn prepend_dead_code_action(finding: &mut SecurityFinding) {
 /// Rank security findings in place: fill each finding's [`SecurityReachability`]
 /// from the graph, then re-sort so the highest-priority candidates sort first.
 ///
-/// `boundary_anchor_paths` is the set of file paths that participate in an
+/// `boundary_crossings` maps each file path that participates in an
 /// architecture-boundary violation found in the same run (importing or imported
-/// side); a finding whose anchor is in that set is flagged `crosses_boundary`.
+/// side) to the `(from_zone, to_zone)` names of that crossing; a finding whose
+/// anchor is a key is flagged `crosses_boundary` and its candidate records the
+/// zone names (issue #900).
 ///
 /// Sort order (descending priority): reachable-from-entry first, same-module
 /// source-backed sinks, module-level source-reachable sinks, larger blast
@@ -181,7 +184,7 @@ pub fn rank_security_findings(
     modules: &[ModuleInfo],
     line_offsets_by_file: &LineOffsetsMap<'_>,
     declared_deps: &FxHashSet<String>,
-    boundary_anchor_paths: &FxHashSet<PathBuf>,
+    boundary_crossings: &FxHashMap<PathBuf, (String, String)>,
     findings: &mut [SecurityFinding],
 ) {
     if findings.is_empty() {
@@ -202,12 +205,16 @@ pub fn rank_security_findings(
                 graph,
                 file_id,
                 finding,
-                boundary_anchor_paths,
+                boundary_crossings,
                 &source_index,
                 line_offsets_by_file,
             )
         });
         finding.reachability = reachability;
+        // Issue #900: fill the candidate boundary slot and the taint-flow triple
+        // from the reachability + trace just computed. Pure re-projection: no new
+        // analysis. The zone names come from the same boundary-crossing map.
+        enrich_candidate(finding, boundary_crossings.get(&finding.path));
     }
 
     findings.sort_by(|a, b| {
@@ -252,7 +259,7 @@ fn compute_reachability(
     graph: &ModuleGraph,
     file_id: FileId,
     finding: &SecurityFinding,
-    boundary_anchor_paths: &FxHashSet<PathBuf>,
+    boundary_crossings: &FxHashMap<PathBuf, (String, String)>,
     source_index: &UntrustedSourceIndex,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> SecurityReachability {
@@ -268,8 +275,63 @@ fn compute_reachability(
         untrusted_source_hop_count: source_trace.as_ref().map(|source| source.hop_count),
         untrusted_source_trace: source_trace.map_or_else(Vec::new, |source| source.trace),
         blast_radius: transitive_dependent_count(graph, file_id),
-        crosses_boundary: boundary_anchor_paths.contains(&finding.path),
+        crosses_boundary: boundary_crossings.contains_key(&finding.path),
     }
+}
+
+/// Fill the candidate's boundary slot and the taint-flow triple from the
+/// finding's trace and the reachability just computed (issue #900). Re-projection
+/// only: client/server from a `ClientBoundary` trace hop, cross-module from the
+/// untrusted-source hop count, and the architecture zone from the run's
+/// boundary-crossing map. The `source_kind` and `sink` slots are set by the
+/// detectors and left untouched here.
+fn enrich_candidate(finding: &mut SecurityFinding, zone: Option<&(String, String)>) {
+    let client_server = finding
+        .trace
+        .iter()
+        .any(|hop| hop.role == TraceHopRole::ClientBoundary);
+    let hop_count = finding
+        .reachability
+        .as_ref()
+        .and_then(|reach| reach.untrusted_source_hop_count);
+    finding.candidate.boundary = SecurityCandidateBoundary {
+        client_server,
+        cross_module: hop_count.is_some_and(|count| count > 0),
+        architecture_zone: zone.map(|(from, to)| SecurityZoneCrossing {
+            from: from.clone(),
+            to: to.clone(),
+        }),
+    };
+    finding.taint_flow = build_taint_flow(finding);
+}
+
+/// Build the `{ source, sink, path }` taint-flow triple when an untrusted source
+/// is import-reachable to the sink. The full ordered hops are NOT duplicated:
+/// `path` is the compact shape, the hops stay on `reachability.untrusted_source_trace`.
+fn build_taint_flow(finding: &SecurityFinding) -> Option<SecurityTaintFlow> {
+    let reach = finding.reachability.as_ref()?;
+    if !reach.reachable_from_untrusted_source {
+        return None;
+    }
+    let first = reach.untrusted_source_trace.first()?;
+    let last = reach.untrusted_source_trace.last()?;
+    let hop_count = reach.untrusted_source_hop_count.unwrap_or(0);
+    Some(SecurityTaintFlow {
+        source: TaintEndpoint {
+            path: first.path.clone(),
+            line: first.line,
+            col: first.col,
+        },
+        sink: TaintEndpoint {
+            path: last.path.clone(),
+            line: last.line,
+            col: last.col,
+        },
+        path: TaintPath {
+            intra_module: hop_count == 0,
+            cross_module_hops: hop_count,
+        },
+    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -561,6 +623,10 @@ mod tests {
         ModuleGraph::build(&resolved, &entry_points, &files)
     }
 
+    /// Test wrapper: accepts the boundary-anchor path set (the pre-#900 shape)
+    /// and lifts each path into the `(from_zone, to_zone)` map the production
+    /// signature now takes, with placeholder zone names. Existing call sites that
+    /// only assert on `crosses_boundary` stay unchanged.
     fn rank(
         graph: &ModuleGraph,
         boundary_anchor_paths: &FxHashSet<PathBuf>,
@@ -569,12 +635,16 @@ mod tests {
         let modules = Vec::new();
         let line_offsets = FxHashMap::default();
         let declared_deps = FxHashSet::default();
+        let boundary_crossings: FxHashMap<PathBuf, (String, String)> = boundary_anchor_paths
+            .iter()
+            .map(|path| (path.clone(), ("from".to_string(), "to".to_string())))
+            .collect();
         rank_security_findings(
             graph,
             &modules,
             &line_offsets,
             &declared_deps,
-            boundary_anchor_paths,
+            &boundary_crossings,
             findings,
         );
     }
@@ -586,13 +656,13 @@ mod tests {
     ) {
         let line_offsets = FxHashMap::default();
         let declared_deps = FxHashSet::default();
-        let boundary_anchor_paths = FxHashSet::default();
+        let boundary_crossings = FxHashMap::default();
         rank_security_findings(
             graph,
             modules,
             &line_offsets,
             &declared_deps,
-            &boundary_anchor_paths,
+            &boundary_crossings,
             findings,
         );
     }
@@ -655,8 +725,10 @@ mod tests {
     }
 
     fn finding(name: &str) -> SecurityFinding {
+        use fallow_types::results::{SecurityCandidate, SecurityCandidateSink};
         let path = PathBuf::from(ROOT).join(name);
         SecurityFinding {
+            finding_id: String::new(),
             kind: SecurityFindingKind::TaintedSink,
             category: Some("dangerous-html".to_string()),
             cwe: Some(79),
@@ -665,7 +737,7 @@ mod tests {
             col: 0,
             evidence: "candidate".to_string(),
             trace: vec![TraceHop {
-                path,
+                path: path.clone(),
                 line: 1,
                 col: 0,
                 role: TraceHopRole::Sink,
@@ -674,6 +746,19 @@ mod tests {
             dead_code: None,
             reachability: None,
             source_backed: false,
+            candidate: SecurityCandidate {
+                source_kind: None,
+                sink: SecurityCandidateSink {
+                    path,
+                    line: 1,
+                    col: 0,
+                    category: Some("dangerous-html".to_string()),
+                    cwe: Some(79),
+                    callee: None,
+                },
+                boundary: SecurityCandidateBoundary::default(),
+            },
+            taint_flow: None,
         }
     }
 

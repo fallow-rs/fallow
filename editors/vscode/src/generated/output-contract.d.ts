@@ -4899,6 +4899,14 @@ new_count: number
  * (its hops and length) is the only honest signal.
  */
 export interface SecurityFinding {
+/**
+ * Stable per-finding correlation id, identical across runs for the same
+ * rule + anchor path + line. An autonomous agent that triaged this
+ * candidate on a prior run uses it to correlate the candidate after a
+ * rebase. Equal to the SARIF `partialFingerprints` value for the same
+ * finding (one shared helper computes both).
+ */
+finding_id: string
 kind: SecurityFindingKind
 /**
  * The catalogue category id (e.g. `"dangerous-html"`). `None` for
@@ -4965,6 +4973,12 @@ dead_code?: (SecurityDeadCodeContext | null)
  * source-reachable candidates, then wider blast radius.
  */
 reachability?: (SecurityReachability | null)
+candidate: SecurityCandidate
+/**
+ * Source-to-sink taint-flow triple, present only when an untrusted source
+ * is import-reachable to this sink. Absent (skipped) otherwise.
+ */
+taint_flow?: (SecurityTaintFlow | null)
 }
 /**
  * One hop in a security finding's structural trace. Stored as an absolute path
@@ -5055,6 +5069,158 @@ blast_radius: number
  * stronger review target.
  */
 crosses_boundary: boolean
+}
+/**
+ * An agent-actionable candidate record on a [`SecurityFinding`]. fallow fills
+ * `source_kind`, `sink`, and `boundary`. The exploitability IMPACT is
+ * deliberately NOT a field: deciding severity / exploitability is the consuming
+ * agent's job, not fallow's, and a perpetually-null `impact` key would only
+ * train consumers to ignore it. The agent reads this record, then writes its
+ * own impact verdict downstream.
+ */
+export interface SecurityCandidate {
+/**
+ * The kind of untrusted input that reaches the sink, as a stable catalogue
+ * source id (`"http-request-input"`, `"process-env"`, `"process-argv"`,
+ * `"message-event-data"`, `"location-input"`, ...). `None`/absent when no
+ * untrusted source was matched (always `None` for `client-server-leak`).
+ * This is an OPEN string set, driven by the data-driven source catalogue; a
+ * consumer should treat an unknown id as "untrusted source of unknown kind"
+ * and never drop the candidate on that basis.
+ */
+source_kind?: (string | null)
+sink: SecurityCandidateSink
+boundary: SecurityCandidateBoundary
+}
+/**
+ * The sink slot of a [`SecurityCandidate`]: a self-contained description of the
+ * matched sink site. Echoes the finding's own span (`path`/`line`/`col`) plus
+ * the catalogue `category`/`cwe` and the captured `callee`, so an agent can act
+ * on `candidate.sink` in isolation (e.g. after fanning a finding out to a
+ * sub-agent) without reading the parent finding.
+ */
+export interface SecurityCandidateSink {
+/**
+ * File of the sink site. Absolute internally; JSON strips the project root
+ * via `serde_path::serialize`.
+ */
+path: string
+/**
+ * 1-based line of the sink site.
+ */
+line: number
+/**
+ * 0-based byte column of the sink site.
+ */
+col: number
+/**
+ * Catalogue category id of the sink (e.g. `"dangerous-html"`). `None` for
+ * `client-server-leak`.
+ */
+category?: (string | null)
+/**
+ * CWE number declared by the catalogue entry. `None` for
+ * `client-server-leak`; never fabricated beyond the catalogue's value.
+ */
+cwe?: (number | null)
+/**
+ * The sink callee (the dangerous function or member path, e.g.
+ * `"el.innerHTML"`, `"child_process.exec"`) captured by the catalogue match.
+ * `None` for `client-server-leak` and matches that name no callee.
+ */
+callee?: (string | null)
+}
+/**
+ * The boundary slot of a [`SecurityCandidate`]: which structural boundaries the
+ * candidate's flow crosses. A flow that crosses a client/server or module
+ * boundary is a stronger review target than a self-contained one; the boundary
+ * is fallow's structural signal over a pure source-sink match.
+ *
+ * Two further boundary kinds are RESERVED for a follow-up and are deliberately
+ * absent here rather than emitted as always-false: `export_visibility` (is the
+ * sink on a publicly-exported symbol?) and a package boundary (does the flow
+ * cross an npm-package edge?). Both need new graph derivation that does not
+ * exist today; emitting them as `false` would misreport "we checked and it does
+ * not cross" when fallow has not checked at all.
+ */
+export interface SecurityCandidateBoundary {
+/**
+ * Whether the finding crosses a client/server boundary (a `"use client"`
+ * file appears in the trace). True only for `client-server-leak` today;
+ * `tainted-sink` candidates carry no client/server marker.
+ */
+client_server: boolean
+/**
+ * Whether an untrusted source reaches the sink across one or more
+ * value-import (module) hops. Derived from the reachability hop count.
+ */
+cross_module: boolean
+/**
+ * The architecture-zone crossing when the anchor participates in a declared
+ * boundary-rule violation in the same run. `None` when it crosses no
+ * declared zone boundary.
+ */
+architecture_zone?: (SecurityZoneCrossing | null)
+}
+/**
+ * A declared architecture-zone crossing, recovered by correlating a finding's
+ * anchor against the run's architecture-boundary violations.
+ */
+export interface SecurityZoneCrossing {
+/**
+ * Zone the importing side belongs to.
+ */
+from: string
+/**
+ * Zone the imported side belongs to.
+ */
+to: string
+}
+/**
+ * A source-to-sink taint-flow triple, emitted only when an untrusted source is
+ * import-reachable to the sink (`reachability.reachable_from_untrusted_source`).
+ * The `{ source, sink, path }` shape matches the model agent SAST tooling
+ * expects (cf. Semgrep `taint_source` / `taint_sink`, SARIF `threadFlows`).
+ */
+export interface SecurityTaintFlow {
+source: TaintEndpoint
+sink: TaintEndpoint
+path: TaintPath
+}
+/**
+ * One endpoint (source or sink node) of a [`SecurityTaintFlow`].
+ */
+export interface TaintEndpoint {
+/**
+ * File of the endpoint. Absolute internally; JSON strips the project root.
+ */
+path: string
+/**
+ * 1-based line of the endpoint.
+ */
+line: number
+/**
+ * 0-based byte column of the endpoint.
+ */
+col: number
+}
+/**
+ * Compact taint-flow path shape. The ordered per-hop trace is NOT duplicated
+ * here: it lives on [`SecurityReachability::untrusted_source_trace`]. This
+ * carries only the flow's structural summary (intra-module flow plus the
+ * cross-module hop count) so consumers do not parse two copies of the hops.
+ */
+export interface TaintPath {
+/**
+ * Whether the source and sink sit in the same module (no import hop between
+ * them); the source-to-sink association is intra-module.
+ */
+intra_module: boolean
+/**
+ * Number of value-import hops from the untrusted-source module to the sink
+ * module. Zero for an intra-module flow.
+ */
+cross_module_hops: number
 }
 /**
  * Bare `fallow --format json` envelope.

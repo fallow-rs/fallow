@@ -1506,6 +1506,9 @@ mod tests {
 
     fn tainted_sink_finding(path: PathBuf) -> fallow_core::results::SecurityFinding {
         fallow_core::results::SecurityFinding {
+            finding_id: String::new(),
+            candidate: fallow_core::results::SecurityCandidate::default(),
+            taint_flow: None,
             kind: fallow_core::results::SecurityFindingKind::TaintedSink,
             category: Some("dangerous-html".to_string()),
             cwe: Some(79),

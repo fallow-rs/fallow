@@ -9882,6 +9882,10 @@
     "SecurityFinding": {
       "type": "object",
       "properties": {
+        "finding_id": {
+          "type": "string",
+          "description": "Stable per-finding correlation id, identical across runs for the same\nrule + anchor path + line. An autonomous agent that triaged this\ncandidate on a prior run uses it to correlate the candidate after a\nrebase. Equal to the SARIF `partialFingerprints` value for the same\nfinding (one shared helper computes both)."
+        },
         "kind": {
           "description": "The rule that produced this candidate.",
           "$ref": "#/definitions/SecurityFindingKind"
@@ -9955,16 +9959,33 @@
             }
           ],
           "description": "Graph-derived reachability ranking signal (issues #860 and #885). `None`\nuntil the post-detection ranking pass fills it; additive on the wire\n(skipped when absent). Drives the order findings are emitted in:\nruntime-reachable candidates sort first, followed by source-backed and\nsource-reachable candidates, then wider blast radius."
+        },
+        "candidate": {
+          "description": "Agent-actionable candidate record: the untrusted input kind, the sink,\nand the boundary the flow crosses. fallow fills these three slots; the\nexploitability verdict is the agent's job and is not a field here. Always\npresent.",
+          "$ref": "#/definitions/SecurityCandidate"
+        },
+        "taint_flow": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityTaintFlow"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Source-to-sink taint-flow triple, present only when an untrusted source\nis import-reachable to this sink. Absent (skipped) otherwise."
         }
       },
       "required": [
+        "finding_id",
         "kind",
         "path",
         "line",
         "col",
         "evidence",
         "trace",
-        "actions"
+        "actions",
+        "candidate"
       ],
       "description": "A local security CANDIDATE for downstream agent verification, NOT a verified\nvulnerability. Emitted only by `fallow security`, never under bare `fallow`\nor the `audit` gate. There is deliberately no `confidence` or\n`signal_strength` field: fallow does not prove exploitability, so the trace\n(its hops and length) is the only honest signal."
     },
@@ -10405,6 +10426,186 @@
         }
       ],
       "description": "Gate verdict on the wire. `fail` is the CI-state token; human output renders\nit as \"REVIEW REQUIRED\" because these stay unverified candidates, never\nconfirmed vulnerabilities."
+    },
+    "SecurityCandidate": {
+      "type": "object",
+      "properties": {
+        "source_kind": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The kind of untrusted input that reaches the sink, as a stable catalogue\nsource id (`\"http-request-input\"`, `\"process-env\"`, `\"process-argv\"`,\n`\"message-event-data\"`, `\"location-input\"`, ...). `None`/absent when no\nuntrusted source was matched (always `None` for `client-server-leak`).\nThis is an OPEN string set, driven by the data-driven source catalogue; a\nconsumer should treat an unknown id as \"untrusted source of unknown kind\"\nand never drop the candidate on that basis."
+        },
+        "sink": {
+          "description": "The sink the candidate fires on, self-contained so the record is\nactionable without reading the parent finding.",
+          "$ref": "#/definitions/SecurityCandidateSink"
+        },
+        "boundary": {
+          "description": "The structural boundary the flow crosses.",
+          "$ref": "#/definitions/SecurityCandidateBoundary"
+        }
+      },
+      "required": [
+        "sink",
+        "boundary"
+      ],
+      "description": "An agent-actionable candidate record on a [`SecurityFinding`]. fallow fills\n`source_kind`, `sink`, and `boundary`. The exploitability IMPACT is\ndeliberately NOT a field: deciding severity / exploitability is the consuming\nagent's job, not fallow's, and a perpetually-null `impact` key would only\ntrain consumers to ignore it. The agent reads this record, then writes its\nown impact verdict downstream."
+    },
+    "SecurityCandidateSink": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File of the sink site. Absolute internally; JSON strips the project root\nvia `serde_path::serialize`."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the sink site."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column of the sink site."
+        },
+        "category": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Catalogue category id of the sink (e.g. `\"dangerous-html\"`). `None` for\n`client-server-leak`."
+        },
+        "cwe": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "CWE number declared by the catalogue entry. `None` for\n`client-server-leak`; never fabricated beyond the catalogue's value."
+        },
+        "callee": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The sink callee (the dangerous function or member path, e.g.\n`\"el.innerHTML\"`, `\"child_process.exec\"`) captured by the catalogue match.\n`None` for `client-server-leak` and matches that name no callee."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col"
+      ],
+      "description": "The sink slot of a [`SecurityCandidate`]: a self-contained description of the\nmatched sink site. Echoes the finding's own span (`path`/`line`/`col`) plus\nthe catalogue `category`/`cwe` and the captured `callee`, so an agent can act\non `candidate.sink` in isolation (e.g. after fanning a finding out to a\nsub-agent) without reading the parent finding."
+    },
+    "SecurityCandidateBoundary": {
+      "type": "object",
+      "properties": {
+        "client_server": {
+          "type": "boolean",
+          "description": "Whether the finding crosses a client/server boundary (a `\"use client\"`\nfile appears in the trace). True only for `client-server-leak` today;\n`tainted-sink` candidates carry no client/server marker."
+        },
+        "cross_module": {
+          "type": "boolean",
+          "description": "Whether an untrusted source reaches the sink across one or more\nvalue-import (module) hops. Derived from the reachability hop count."
+        },
+        "architecture_zone": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityZoneCrossing"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The architecture-zone crossing when the anchor participates in a declared\nboundary-rule violation in the same run. `None` when it crosses no\ndeclared zone boundary."
+        }
+      },
+      "required": [
+        "client_server",
+        "cross_module"
+      ],
+      "description": "The boundary slot of a [`SecurityCandidate`]: which structural boundaries the\ncandidate's flow crosses. A flow that crosses a client/server or module\nboundary is a stronger review target than a self-contained one; the boundary\nis fallow's structural signal over a pure source-sink match.\n\nTwo further boundary kinds are RESERVED for a follow-up and are deliberately\nabsent here rather than emitted as always-false: `export_visibility` (is the\nsink on a publicly-exported symbol?) and a package boundary (does the flow\ncross an npm-package edge?). Both need new graph derivation that does not\nexist today; emitting them as `false` would misreport \"we checked and it does\nnot cross\" when fallow has not checked at all."
+    },
+    "SecurityZoneCrossing": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string",
+          "description": "Zone the importing side belongs to."
+        },
+        "to": {
+          "type": "string",
+          "description": "Zone the imported side belongs to."
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "description": "A declared architecture-zone crossing, recovered by correlating a finding's\nanchor against the run's architecture-boundary violations."
+    },
+    "SecurityTaintFlow": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "The untrusted-source endpoint (first hop of the reachability trace).",
+          "$ref": "#/definitions/TaintEndpoint"
+        },
+        "sink": {
+          "description": "The sink endpoint (terminal hop of the reachability trace / the anchor).",
+          "$ref": "#/definitions/TaintEndpoint"
+        },
+        "path": {
+          "description": "Compact flow shape: same-module flag plus module hop count. The full\nordered path is `reachability.untrusted_source_trace`.",
+          "$ref": "#/definitions/TaintPath"
+        }
+      },
+      "required": [
+        "source",
+        "sink",
+        "path"
+      ],
+      "description": "A source-to-sink taint-flow triple, emitted only when an untrusted source is\nimport-reachable to the sink (`reachability.reachable_from_untrusted_source`).\nThe `{ source, sink, path }` shape matches the model agent SAST tooling\nexpects (cf. Semgrep `taint_source` / `taint_sink`, SARIF `threadFlows`)."
+    },
+    "TaintEndpoint": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File of the endpoint. Absolute internally; JSON strips the project root."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the endpoint."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column of the endpoint."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col"
+      ],
+      "description": "One endpoint (source or sink node) of a [`SecurityTaintFlow`]."
+    },
+    "TaintPath": {
+      "type": "object",
+      "properties": {
+        "intra_module": {
+          "type": "boolean",
+          "description": "Whether the source and sink sit in the same module (no import hop between\nthem); the source-to-sink association is intra-module."
+        },
+        "cross_module_hops": {
+          "type": "integer",
+          "description": "Number of value-import hops from the untrusted-source module to the sink\nmodule. Zero for an intra-module flow."
+        }
+      },
+      "required": [
+        "intra_module",
+        "cross_module_hops"
+      ],
+      "description": "Compact taint-flow path shape. The ordered per-hop trace is NOT duplicated\nhere: it lives on [`SecurityReachability::untrusted_source_trace`]. This\ncarries only the flow's structural summary (intra-module flow plus the\ncross-module hop count) so consumers do not parse two copies of the hops."
     }
   }
 }

@@ -44,6 +44,33 @@ fn express_route_request_param_is_source_backed() {
 }
 
 #[test]
+fn express_source_backed_finding_carries_candidate_source_kind() {
+    // Issue #900: slot 1 (source_kind) is the stable catalogue source id, and
+    // the sink slot carries the callee. The framework-handler param at line 8
+    // matches the framework source; the specific request accessor at line 9
+    // matches the http-request source.
+    let results = analyze_fixture("security-framework-entry-sources-879-express");
+
+    let handler = tainted_sink_at_line(&results, 8);
+    assert_eq!(
+        handler.candidate.source_kind.as_deref(),
+        Some("framework-handler-input"),
+        "slot 1 should be the stable catalogue source id, not the human title"
+    );
+    assert!(
+        handler.candidate.sink.callee.is_some(),
+        "the sink slot should carry the captured callee"
+    );
+    assert_eq!(handler.candidate.sink.category, handler.category);
+
+    let accessor = tainted_sink_at_line(&results, 9);
+    assert_eq!(
+        accessor.candidate.source_kind.as_deref(),
+        Some("http-request-input")
+    );
+}
+
+#[test]
 fn express_enabled_non_route_get_callback_is_not_source_backed() {
     let results = analyze_fixture("security-framework-entry-sources-879-express");
     assert!(

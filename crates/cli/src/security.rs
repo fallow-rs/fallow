@@ -256,7 +256,13 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     let unresolved_callee_sites = results.security_unresolved_callee_sites;
     let findings: Vec<SecurityFinding> = std::mem::take(&mut results.security_findings)
         .into_iter()
-        .map(|f| relativize_finding(f, &config.root))
+        .map(|f| {
+            // Relativize first, then stamp the correlation id on the
+            // project-relative path so it matches the SARIF fingerprint.
+            let mut f = relativize_finding(f, &config.root);
+            f.finding_id = security_finding_id(&f);
+            f
+        })
         .collect();
 
     // In gate mode the displayed set IS the strict "new" set, so its length is
@@ -369,6 +375,11 @@ fn relativize_finding(mut finding: SecurityFinding, root: &Path) -> SecurityFind
         for hop in &mut reachability.untrusted_source_trace {
             hop.path = relativize(&hop.path, root);
         }
+    }
+    finding.candidate.sink.path = relativize(&finding.candidate.sink.path, root);
+    if let Some(flow) = &mut finding.taint_flow {
+        flow.source.path = relativize(&flow.source.path, root);
+        flow.sink.path = relativize(&flow.sink.path, root);
     }
     finding
 }
@@ -735,18 +746,15 @@ fn render_sarif(output: &SecurityOutput) -> String {
             }
             // Stable dedup key for GHAS: rule + anchor path + line. Without
             // partialFingerprints, every run re-opens previously triaged alerts.
-            let fp = format!(
-                "{rule_id}:{}:{}",
-                finding.path.to_string_lossy().replace('\\', "/"),
-                finding.line,
-            );
+            // Same helper as the JSON `finding_id` field so the two never drift
+            // (issue #900).
             serde_json::json!({
                 "ruleId": rule_id,
                 "level": "note",
                 "message": { "text": message },
                 "locations": [sarif_location(&finding.path, finding.line, finding.col)],
                 "relatedLocations": related,
-                "partialFingerprints": { "fallowSecurity/v1": fnv_hex(&fp) },
+                "partialFingerprints": { "fallowSecurity/v1": security_finding_id(finding) },
             })
         })
         .collect();
@@ -800,6 +808,21 @@ fn fnv_hex(input: &str) -> String {
     format!("{hash:016x}")
 }
 
+/// Stable per-finding correlation id: FNV-1a hex of `rule:path:line`. The single
+/// source of truth for BOTH the JSON `finding_id` field and the SARIF
+/// `partialFingerprints` value, so an agent can join the two and they never
+/// drift. Computed on the project-relative path, so it must run after the
+/// finding is relativized (issue #900).
+fn security_finding_id(finding: &SecurityFinding) -> String {
+    let fp = format!(
+        "{}:{}:{}",
+        sarif_rule_id(finding),
+        finding.path.to_string_lossy().replace('\\', "/"),
+        finding.line,
+    );
+    fnv_hex(&fp)
+}
+
 fn sarif_location(path: &Path, line: u32, col: u32) -> serde_json::Value {
     serde_json::json!({
         "physicalLocation": {
@@ -813,6 +836,7 @@ fn sarif_location(path: &Path, line: u32, col: u32) -> serde_json::Value {
 mod tests {
     use super::*;
     use fallow_core::results::{
+        SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink,
         SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind,
         TraceHop, TraceHopRole,
     };
@@ -852,6 +876,24 @@ mod tests {
             cwe: None,
             dead_code: None,
             reachability: None,
+            finding_id: String::new(),
+            candidate: SecurityCandidate {
+                source_kind: None,
+                sink: SecurityCandidateSink {
+                    path: root.join("src/app.tsx"),
+                    line: 12,
+                    col: 3,
+                    category: None,
+                    cwe: None,
+                    callee: None,
+                },
+                boundary: SecurityCandidateBoundary {
+                    client_server: true,
+                    cross_module: false,
+                    architecture_zone: None,
+                },
+            },
+            taint_flow: None,
         }
     }
 
@@ -1156,6 +1198,62 @@ mod tests {
     }
 
     #[test]
+    fn json_render_carries_candidate_record_and_omits_impact() {
+        // Issue #900: every finding carries a 3-slot candidate record; there is
+        // NO `impact` key on the wire (agent-owned, documented in the schema). A
+        // client-server-leak has no source kind and no taint flow.
+        let root = Path::new("/proj/root");
+        let finding = relativize_finding(sample_finding(root), root);
+        let rendered = render_json(&output_with(vec![finding], 0));
+        let value: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
+        let finding = &value["security_findings"][0];
+
+        let candidate = &finding["candidate"];
+        assert!(candidate.is_object(), "candidate record present");
+        assert!(candidate["sink"].is_object(), "sink slot present");
+        assert_eq!(candidate["boundary"]["client_server"], true);
+        assert!(
+            candidate.get("impact").is_none(),
+            "impact must NOT be a wire field"
+        );
+        assert!(
+            candidate.get("source_kind").is_none(),
+            "client-server-leak has no source kind"
+        );
+        assert!(
+            finding.get("taint_flow").is_none(),
+            "no untrusted-source flow on a client-server-leak"
+        );
+        assert!(
+            finding.get("finding_id").is_some(),
+            "finding_id is on the wire"
+        );
+    }
+
+    #[test]
+    fn finding_id_is_stable_and_matches_sarif_fingerprint() {
+        // Issue #900: one helper computes both the JSON finding_id and the SARIF
+        // partialFingerprint, so an agent can join the two and they never drift.
+        let root = Path::new("/proj/root");
+        let finding = relativize_finding(sample_finding(root), root);
+        let id = security_finding_id(&finding);
+        assert!(!id.is_empty());
+        assert_eq!(
+            id,
+            security_finding_id(&finding),
+            "deterministic across calls"
+        );
+
+        let sarif: serde_json::Value =
+            serde_json::from_str(&render_sarif(&output_with(vec![finding], 0)))
+                .expect("valid SARIF");
+        assert_eq!(
+            sarif["runs"][0]["results"][0]["partialFingerprints"]["fallowSecurity/v1"],
+            serde_json::Value::String(id)
+        );
+    }
+
+    #[test]
     fn json_render_carries_dead_code_context() {
         let root = Path::new("/proj/root");
         let mut finding = relativize_finding(sample_finding(root), root);
@@ -1348,6 +1446,19 @@ mod tests {
                 .path
                 .ends_with("src/route.ts")
         );
+
+        // Issue #900: the candidate boundary slot records the cross-module hop,
+        // and the taint-flow triple re-projects the reachability endpoints + a
+        // compact path (not a duplicate hop array).
+        assert!(
+            finding.candidate.boundary.cross_module,
+            "a sink reached across a module hop crosses a module boundary"
+        );
+        let flow = finding.taint_flow.as_ref().expect("taint_flow present");
+        assert!(!flow.path.intra_module);
+        assert_eq!(flow.path.cross_module_hops, 1);
+        assert!(flow.source.path.ends_with("src/route.ts"));
+        assert!(flow.sink.path.ends_with("src/runner.ts"));
     }
 
     #[test]

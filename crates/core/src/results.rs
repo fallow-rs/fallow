@@ -13,11 +13,13 @@ pub use fallow_types::results::{
     DependencyOverrideSource, DuplicateExport, DuplicateLocation, EmptyCatalogGroup,
     EntryPointSummary, ExportUsage, FeatureFlag, FlagConfidence, FlagKind, ImportSite,
     MisconfiguredDependencyOverride, PrivateTypeLeak, ReExportCycle, ReExportCycleKind,
-    ReferenceLocation, SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding,
-    SecurityFindingKind, SecurityReachability, StaleSuppression, SuppressionOrigin,
-    TestOnlyDependency, TraceHop, TraceHopRole, TypeOnlyDependency, UnlistedDependency,
-    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
-    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
+    ReferenceLocation, SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink,
+    SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind,
+    SecurityReachability, SecurityTaintFlow, SecurityZoneCrossing, StaleSuppression,
+    SuppressionOrigin, TaintEndpoint, TaintPath, TestOnlyDependency, TraceHop, TraceHopRole,
+    TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport,
+    UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
+    UnusedMember,
 };
 
 #[cfg(test)]

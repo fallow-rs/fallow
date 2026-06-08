@@ -936,6 +936,145 @@ pub enum SecurityDeadCodeKind {
     UnusedExport,
 }
 
+/// The sink slot of a [`SecurityCandidate`]: a self-contained description of the
+/// matched sink site. Echoes the finding's own span (`path`/`line`/`col`) plus
+/// the catalogue `category`/`cwe` and the captured `callee`, so an agent can act
+/// on `candidate.sink` in isolation (e.g. after fanning a finding out to a
+/// sub-agent) without reading the parent finding.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityCandidateSink {
+    /// File of the sink site. Absolute internally; JSON strips the project root
+    /// via `serde_path::serialize`.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line of the sink site.
+    pub line: u32,
+    /// 0-based byte column of the sink site.
+    pub col: u32,
+    /// Catalogue category id of the sink (e.g. `"dangerous-html"`). `None` for
+    /// `client-server-leak`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// CWE number declared by the catalogue entry. `None` for
+    /// `client-server-leak`; never fabricated beyond the catalogue's value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwe: Option<u32>,
+    /// The sink callee (the dangerous function or member path, e.g.
+    /// `"el.innerHTML"`, `"child_process.exec"`) captured by the catalogue match.
+    /// `None` for `client-server-leak` and matches that name no callee.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callee: Option<String>,
+}
+
+/// A declared architecture-zone crossing, recovered by correlating a finding's
+/// anchor against the run's architecture-boundary violations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityZoneCrossing {
+    /// Zone the importing side belongs to.
+    pub from: String,
+    /// Zone the imported side belongs to.
+    pub to: String,
+}
+
+/// The boundary slot of a [`SecurityCandidate`]: which structural boundaries the
+/// candidate's flow crosses. A flow that crosses a client/server or module
+/// boundary is a stronger review target than a self-contained one; the boundary
+/// is fallow's structural signal over a pure source-sink match.
+///
+/// Two further boundary kinds are RESERVED for a follow-up and are deliberately
+/// absent here rather than emitted as always-false: `export_visibility` (is the
+/// sink on a publicly-exported symbol?) and a package boundary (does the flow
+/// cross an npm-package edge?). Both need new graph derivation that does not
+/// exist today; emitting them as `false` would misreport "we checked and it does
+/// not cross" when fallow has not checked at all.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityCandidateBoundary {
+    /// Whether the finding crosses a client/server boundary (a `"use client"`
+    /// file appears in the trace). True only for `client-server-leak` today;
+    /// `tainted-sink` candidates carry no client/server marker.
+    pub client_server: bool,
+    /// Whether an untrusted source reaches the sink across one or more
+    /// value-import (module) hops. Derived from the reachability hop count.
+    pub cross_module: bool,
+    /// The architecture-zone crossing when the anchor participates in a declared
+    /// boundary-rule violation in the same run. `None` when it crosses no
+    /// declared zone boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub architecture_zone: Option<SecurityZoneCrossing>,
+}
+
+/// An agent-actionable candidate record on a [`SecurityFinding`]. fallow fills
+/// `source_kind`, `sink`, and `boundary`. The exploitability IMPACT is
+/// deliberately NOT a field: deciding severity / exploitability is the consuming
+/// agent's job, not fallow's, and a perpetually-null `impact` key would only
+/// train consumers to ignore it. The agent reads this record, then writes its
+/// own impact verdict downstream.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityCandidate {
+    /// The kind of untrusted input that reaches the sink, as a stable catalogue
+    /// source id (`"http-request-input"`, `"process-env"`, `"process-argv"`,
+    /// `"message-event-data"`, `"location-input"`, ...). `None`/absent when no
+    /// untrusted source was matched (always `None` for `client-server-leak`).
+    /// This is an OPEN string set, driven by the data-driven source catalogue; a
+    /// consumer should treat an unknown id as "untrusted source of unknown kind"
+    /// and never drop the candidate on that basis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_kind: Option<String>,
+    /// The sink the candidate fires on, self-contained so the record is
+    /// actionable without reading the parent finding.
+    pub sink: SecurityCandidateSink,
+    /// The structural boundary the flow crosses.
+    pub boundary: SecurityCandidateBoundary,
+}
+
+/// One endpoint (source or sink node) of a [`SecurityTaintFlow`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TaintEndpoint {
+    /// File of the endpoint. Absolute internally; JSON strips the project root.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line of the endpoint.
+    pub line: u32,
+    /// 0-based byte column of the endpoint.
+    pub col: u32,
+}
+
+/// Compact taint-flow path shape. The ordered per-hop trace is NOT duplicated
+/// here: it lives on [`SecurityReachability::untrusted_source_trace`]. This
+/// carries only the flow's structural summary (intra-module flow plus the
+/// cross-module hop count) so consumers do not parse two copies of the hops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TaintPath {
+    /// Whether the source and sink sit in the same module (no import hop between
+    /// them); the source-to-sink association is intra-module.
+    pub intra_module: bool,
+    /// Number of value-import hops from the untrusted-source module to the sink
+    /// module. Zero for an intra-module flow.
+    pub cross_module_hops: u32,
+}
+
+/// A source-to-sink taint-flow triple, emitted only when an untrusted source is
+/// import-reachable to the sink (`reachability.reachable_from_untrusted_source`).
+/// The `{ source, sink, path }` shape matches the model agent SAST tooling
+/// expects (cf. Semgrep `taint_source` / `taint_sink`, SARIF `threadFlows`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SecurityTaintFlow {
+    /// The untrusted-source endpoint (first hop of the reachability trace).
+    pub source: TaintEndpoint,
+    /// The sink endpoint (terminal hop of the reachability trace / the anchor).
+    pub sink: TaintEndpoint,
+    /// Compact flow shape: same-module flag plus module hop count. The full
+    /// ordered path is `reachability.untrusted_source_trace`.
+    pub path: TaintPath,
+}
+
 /// A local security CANDIDATE for downstream agent verification, NOT a verified
 /// vulnerability. Emitted only by `fallow security`, never under bare `fallow`
 /// or the `audit` gate. There is deliberately no `confidence` or
@@ -944,6 +1083,12 @@ pub enum SecurityDeadCodeKind {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityFinding {
+    /// Stable per-finding correlation id, identical across runs for the same
+    /// rule + anchor path + line. An autonomous agent that triaged this
+    /// candidate on a prior run uses it to correlate the candidate after a
+    /// rebase. Equal to the SARIF `partialFingerprints` value for the same
+    /// finding (one shared helper computes both).
+    pub finding_id: String,
     /// The rule that produced this candidate.
     pub kind: SecurityFindingKind,
     /// The catalogue category id (e.g. `"dangerous-html"`). `None` for
@@ -995,6 +1140,15 @@ pub struct SecurityFinding {
     /// source-reachable candidates, then wider blast radius.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reachability: Option<SecurityReachability>,
+    /// Agent-actionable candidate record: the untrusted input kind, the sink,
+    /// and the boundary the flow crosses. fallow fills these three slots; the
+    /// exploitability verdict is the agent's job and is not a field here. Always
+    /// present.
+    pub candidate: SecurityCandidate,
+    /// Source-to-sink taint-flow triple, present only when an untrusted source
+    /// is import-reachable to this sink. Absent (skipped) otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taint_flow: Option<SecurityTaintFlow>,
 }
 
 /// A pnpm catalog entry declared in pnpm-workspace.yaml that no workspace package

@@ -151,6 +151,9 @@ mod tests {
 
     fn tainted_sink(path: PathBuf) -> SecurityFinding {
         SecurityFinding {
+            finding_id: String::new(),
+            candidate: fallow_core::results::SecurityCandidate::default(),
+            taint_flow: None,
             kind: SecurityFindingKind::TaintedSink,
             category: Some("dangerous-html".to_string()),
             cwe: Some(79),
@@ -175,6 +178,9 @@ mod tests {
 
     fn client_server_leak(path: PathBuf) -> SecurityFinding {
         SecurityFinding {
+            finding_id: String::new(),
+            candidate: fallow_core::results::SecurityCandidate::default(),
+            taint_flow: None,
             kind: SecurityFindingKind::ClientServerLeak,
             category: None,
             cwe: None,
